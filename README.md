@@ -2,7 +2,7 @@
 
 BOP-RMS is the Business Operating Platform and Restaurant Management System for configurable, multi-restaurant operations.
 
-This repository is implemented one reviewed Work Package at a time. WP-0001 contains the deterministic monorepo and governance baseline, WP-0002 materializes the workspace directory boundaries, and WP-0003 establishes shared TypeScript and quality tooling without creating applications, packages, or business code.
+This repository is implemented one reviewed Work Package at a time. WP-0001 through WP-0003 establish the deterministic monorepo and quality baseline. WP-0004 adds bounded application skeletons and a machine-checkable Screen Registry without starting business features or persistence.
 
 ## Prerequisites
 
@@ -32,7 +32,9 @@ pnpm install --frozen-lockfile
 pnpm format:check
 pnpm lint
 pnpm typecheck
+pnpm screen-registry:check
 pnpm test
+pnpm build
 pnpm exec turbo run build --dry=json
 git diff --check
 ```
@@ -45,13 +47,13 @@ The canonical task names are `build`, `dev`, `lint`, `typecheck`, `test`, `test:
 - `packages/`: reusable BOP/RMS modules, contracts, persistence infrastructure, and testing support
 - `tooling/`: shared engineering configuration and developer tooling
 
-At WP-0003, `apps/` and `packages/` remain boundary documentation only. Root configuration and the tooling-only Vitest smoke test establish the contracts that later packages extend. WP-0004 owns the first runtime application skeletons.
+At WP-0004, `apps/` contains only deployable runtime/shell composition roots. `packages/ui` contains semantic tokens and minimal accessibility wrappers; it is not a business component library.
 
 ## Roadmap
 
 - WP-0002: workspace directories (integrated)
-- WP-0003 (active): TypeScript and quality tooling
-- WP-0004: runtime application skeletons, after the Figma UI Readiness Gate
+- WP-0003: TypeScript and quality tooling (integrated)
+- WP-0004 (active): runtime application skeletons and Screen Registry
 - WP-0005: local PostgreSQL and Docker Compose
 - WP-0006: root environment validation
 - WP-0007: ADRs, module documentation, setup templates, and repository-scoped skills

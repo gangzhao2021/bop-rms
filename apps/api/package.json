@@ -1,0 +1,21 @@
+{
+  "name": "@bop-rms/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "format:check": "prettier --check . --ignore-path ../../.prettierignore",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "typecheck": "tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "express": "5.2.1",
+    "helmet": "8.3.0",
+    "pino": "10.3.1"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6"
+  }
+}

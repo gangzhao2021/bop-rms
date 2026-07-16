@@ -18,7 +18,8 @@
     "test": "vitest run && turbo run test",
     "test:integration": "turbo run test:integration",
     "typecheck": "tsc --project tsconfig.json && turbo run typecheck",
-    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm screen-registry:check && pnpm test && pnpm build",
+    "screen-registry:check": "node tooling/screen-registry/validate.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -29,6 +30,8 @@
     "turbo": "2.10.5",
     "typescript": "6.0.3",
     "typescript-eslint": "8.64.0",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "ajv": "8.20.0",
+    "yaml": "2.9.0"
   }
 }
