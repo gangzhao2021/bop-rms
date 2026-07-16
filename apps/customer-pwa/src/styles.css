@@ -1,0 +1,26 @@
+@import "tailwindcss";
+@import "@bop-rms/ui/tokens.css";
+.shell-intro {
+  margin-block: 0 var(--bop-space-6);
+}
+.shell-intro h2 {
+  margin-bottom: var(--bop-space-2);
+}
+.shell-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-3);
+  margin-top: var(--bop-space-6);
+}
+.shell-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--bop-space-3) var(--bop-space-4);
+  border: 0;
+  border-radius: var(--bop-radius-surface);
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-brand-primary);
+  font: inherit;
+  font-weight: 600;
+}

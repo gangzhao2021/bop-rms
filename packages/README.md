@@ -10,4 +10,4 @@ Future packages follow the accepted repository blueprint:
 - `database/` contains shared persistence infrastructure, not domain-owned tables or rules.
 - `testing/` contains test harnesses, fixture builders, and assertion helpers.
 
-WP-0002 establishes only the top-level boundary. Later Work Packages create a subdirectory when they have real owned content; empty module trees and placeholder package manifests are intentionally excluded.
+WP-0004 adds only `packages/ui`, justified as the minimal shared semantic-token and accessibility-wrapper foundation for two web shells. Business components and all other package families remain deferred to their owning Work Packages.

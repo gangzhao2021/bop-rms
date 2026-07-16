@@ -42,16 +42,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify workspace baseline
+      - name: Verify WP-0004 workspace baseline
         run: |
           test "$(pnpm exec turbo --version)" = "2.10.5"
-          test -f apps/README.md
-          test -f packages/README.md
-          test -f tooling/README.md
-          test -z "$(find apps packages tooling -mindepth 1 -name package.json -print -quit)"
+          for package in api worker merchant-web customer-pwa; do test -f "apps/$package/package.json"; done
+          test -f packages/ui/package.json
+          node -e 'const fs=require("node:fs"); for (const file of ["package.json","turbo.json","docs/product/screen-registry.schema.json","apps/customer-pwa/public/manifest.webmanifest"]) JSON.parse(fs.readFileSync(file))'
+          node --input-type=module -e 'import fs from "node:fs"; import { parse } from "yaml"; for (const file of ["pnpm-workspace.yaml",".github/workflows/bootstrap.yml","docs/product/screen-registry.yaml"]) parse(fs.readFileSync(file, "utf8"))'
+          pnpm screen-registry:check
           pnpm list --depth 0
           pnpm exec turbo run build --dry=json
-          node -e 'JSON.parse(require("node:fs").readFileSync("package.json")); JSON.parse(require("node:fs").readFileSync("turbo.json"))'
           git diff --check
 
       - name: Verify TypeScript and quality tooling
@@ -63,4 +63,13 @@ jobs:
           pnpm format:check
           pnpm lint
           pnpm typecheck
+          pnpm screen-registry:check
           pnpm test
+          pnpm build
+
+      - name: Verify frozen install idempotence
+        run: |
+          before="$(sha256sum pnpm-lock.yaml)"
+          pnpm install --frozen-lockfile
+          after="$(sha256sum pnpm-lock.yaml)"
+          test "$before" = "$after"

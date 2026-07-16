@@ -1,0 +1,375 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bop-rms.local/schemas/screen-registry.schema.json",
+  "title": "BOP-RMS Screen Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source", "catalogs", "screens"],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "document_id",
+        "document_version",
+        "architecture_baseline",
+        "handoff_section",
+        "figma_file_key",
+        "mapping_node"
+      ],
+      "properties": {
+        "document_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "document_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "architecture_baseline": {
+          "type": "string",
+          "minLength": 1
+        },
+        "handoff_section": {
+          "type": "string",
+          "minLength": 1
+        },
+        "figma_file_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mapping_node": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "catalogs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["families", "permissions", "projections", "work_packages"],
+      "properties": {
+        "families": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "projections": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "work_packages": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "screens": {
+      "type": "array",
+      "minItems": 210,
+      "maxItems": 210,
+      "items": {
+        "$ref": "#/definitions/screen"
+      }
+    }
+  },
+  "definitions": {
+    "screen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "screen_id",
+        "aliases",
+        "kind",
+        "surface",
+        "route_mode",
+        "family",
+        "capability",
+        "owning_domain",
+        "object_or_workflow",
+        "phase",
+        "feature_gate",
+        "roles",
+        "permission_ref",
+        "scope",
+        "mandatory_field_groups",
+        "search_filter_sort_export",
+        "query_ref",
+        "projection_ref",
+        "freshness",
+        "action_summary",
+        "command_refs",
+        "idempotency",
+        "states",
+        "responsive_accessibility",
+        "analytics_privacy",
+        "work_package_mode",
+        "work_packages",
+        "handoff_section",
+        "route_intent",
+        "navigation_targets"
+      ],
+      "properties": {
+        "screen_id": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+$"
+        },
+        "aliases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "kind": {
+          "enum": ["page", "embedded", "contextual", "alias"]
+        },
+        "surface": {
+          "enum": ["customer_pwa", "merchant_web", "operations_web", "platform_operations"]
+        },
+        "route_mode": {
+          "enum": ["standalone", "embedded", "contextual", "alias"]
+        },
+        "canonical_route": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "parent_screen_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "alias_of": {
+          "type": "string",
+          "minLength": 1
+        },
+        "family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capability": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owning_domain": {
+          "type": "string",
+          "minLength": 1
+        },
+        "object_or_workflow": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "type": "string",
+          "minLength": 1
+        },
+        "feature_gate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "permission_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mandatory_field_groups": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "search_filter_sort_export": {
+          "type": "string",
+          "minLength": 1
+        },
+        "projection_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "freshness": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action_summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "idempotency": {
+          "type": "string",
+          "minLength": 1
+        },
+        "states": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "responsive_accessibility": {
+          "type": "string",
+          "minLength": 1
+        },
+        "analytics_privacy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "work_packages": {
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^WP-[0-9]{4}$"
+          }
+        },
+        "handoff_section": {
+          "type": "string",
+          "pattern": "^88\\."
+        },
+        "route_intent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "query_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "navigation_level_1": {
+          "type": "string",
+          "minLength": 1
+        },
+        "navigation_level_2": {
+          "type": "string",
+          "minLength": 1
+        },
+        "work_package_mode": {
+          "enum": ["resolved", "inherited"]
+        },
+        "navigation_targets": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+$"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "route_mode": {
+                "const": "standalone"
+              }
+            }
+          },
+          "then": {
+            "required": ["canonical_route", "navigation_level_1", "navigation_level_2"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "route_mode": {
+                "enum": ["embedded", "contextual"]
+              }
+            }
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": ["parent_screen_ids"]
+              },
+              {
+                "required": ["allowed_family"]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "route_mode": {
+                "const": "alias"
+              }
+            }
+          },
+          "then": {
+            "required": ["alias_of"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "work_package_mode": {
+                "const": "resolved"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "work_packages": {
+                "minItems": 1,
+                "type": "array"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

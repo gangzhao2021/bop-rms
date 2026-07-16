@@ -1,0 +1,11 @@
+{
+  "name": "BOP Customer",
+  "short_name": "BOP",
+  "description": "BOP customer application shell",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F9F7",
+  "theme_color": "#0B5D4B",
+  "lang": "en-CA",
+  "icons": []
+}
