@@ -4,7 +4,8 @@
 
 ## Identity and responsibility
 
-- Package: `<@bop-rms/...>`
+- Module Name: `<unscoped-kebab-case>`
+- Package Name: `<@bop/unscoped-kebab-case or @rms/unscoped-kebab-case>`
 - Layer / Domain: `<BOP or RMS / owning Domain>`
 - Phase / owning Work Package: `<Phase / WP-xxxx>`
 - Owner role: `<role>`

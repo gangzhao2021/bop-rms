@@ -1,11 +1,20 @@
 export const boundaryManifest = {
-  moduleName: "@bop-rms/synthetic-boundary",
+  moduleName: "synthetic-boundary",
+  packageName: "@rms/synthetic-boundary",
   layer: "RMS",
   lifecycle: "Phase 1",
   publicExports: [".", "./contracts", "./events-v1"],
   allowedSynchronousDependencies: [
-    { moduleName: "@bop-rms/synthetic-platform-contract", layer: "BOP" },
-    { moduleName: "@bop-rms/synthetic-rms-contract", layer: "RMS" },
+    {
+      moduleName: "synthetic-platform-contract",
+      packageName: "@bop/synthetic-platform-contract",
+      layer: "BOP",
+    },
+    {
+      moduleName: "synthetic-rms-contract",
+      packageName: "@rms/synthetic-rms-contract",
+      layer: "RMS",
+    },
   ],
   consumedEvents: ["synthetic.platform.changed.v1"],
   publishedEvents: ["synthetic.boundary.changed.v1"],

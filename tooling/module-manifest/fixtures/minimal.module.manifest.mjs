@@ -1,5 +1,6 @@
 export const minimalManifest = {
-  moduleName: "@bop-rms/synthetic-minimal",
+  moduleName: "synthetic-minimal",
+  packageName: "@bop/synthetic-minimal",
   layer: "BOP",
   lifecycle: "Later",
   publicExports: ["."],

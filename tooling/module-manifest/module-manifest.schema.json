@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": [
     "moduleName",
+    "packageName",
     "layer",
     "lifecycle",
     "publicExports",
@@ -20,7 +21,8 @@
     "moduleOwner"
   ],
   "properties": {
-    "moduleName": { "type": "string", "pattern": "^@bop-rms/[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "moduleName": { "$ref": "#/$defs/moduleName" },
+    "packageName": { "$ref": "#/$defs/packageName" },
     "layer": { "enum": ["BOP", "RMS"] },
     "lifecycle": { "enum": ["Phase 0", "Phase 1", "Later"] },
     "publicExports": {
@@ -97,11 +99,20 @@
     "moduleDependency": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["moduleName", "layer"],
+      "required": ["moduleName", "packageName", "layer"],
       "properties": {
-        "moduleName": { "type": "string", "pattern": "^@bop-rms/[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "moduleName": { "$ref": "#/$defs/moduleName" },
+        "packageName": { "$ref": "#/$defs/packageName" },
         "layer": { "enum": ["BOP", "RMS"] }
       }
+    },
+    "moduleName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "packageName": {
+      "type": "string",
+      "pattern": "^@(bop|rms)/[a-z0-9]+(?:-[a-z0-9]+)*$"
     },
     "contractNameSet": {
       "type": "array",

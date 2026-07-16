@@ -1,5 +1,17 @@
 export const moduleLayers = ["BOP", "RMS"] as const;
 export type ModuleLayer = (typeof moduleLayers)[number];
+export type ModulePackageName = `@${Lowercase<ModuleLayer>}/${string}`;
+export type ModuleIdentity =
+  | {
+      readonly moduleName: string;
+      readonly packageName: `@bop/${string}`;
+      readonly layer: "BOP";
+    }
+  | {
+      readonly moduleName: string;
+      readonly packageName: `@rms/${string}`;
+      readonly layer: "RMS";
+    };
 
 export const moduleLifecycles = ["Phase 0", "Phase 1", "Later"] as const;
 export type ModuleLifecycle = (typeof moduleLifecycles)[number];
@@ -15,10 +27,7 @@ export const piiClasses = [
 ] as const;
 export type PiiClass = (typeof piiClasses)[number];
 
-export interface ModuleDependency {
-  readonly moduleName: string;
-  readonly layer: ModuleLayer;
-}
+export type ModuleDependency = ModuleIdentity;
 
 export interface OwnedDatabaseDeclaration {
   /** Future ownership metadata only. This contract creates no database object. */
@@ -36,9 +45,7 @@ export interface PiiClassification {
   };
 }
 
-export interface ModuleManifest {
-  readonly moduleName: string;
-  readonly layer: ModuleLayer;
+export type ModuleManifest = ModuleIdentity & {
   readonly lifecycle: ModuleLifecycle;
   readonly publicExports: readonly string[];
   readonly allowedSynchronousDependencies: readonly ModuleDependency[];
@@ -50,7 +57,7 @@ export interface ModuleManifest {
   readonly killSwitches: readonly string[];
   readonly piiClassification: PiiClassification;
   readonly moduleOwner: { readonly role: string };
-}
+};
 
 export function defineModuleManifest<const T extends ModuleManifest>(manifest: T): T {
   return manifest;
