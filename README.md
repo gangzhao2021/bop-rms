@@ -2,7 +2,7 @@
 
 BOP-RMS is the Business Operating Platform and Restaurant Management System for configurable, multi-restaurant operations.
 
-This repository is implemented one reviewed Work Package at a time. WP-0001 contains the deterministic monorepo and governance baseline. WP-0002 materializes the workspace directory boundaries without creating applications, packages, or business code.
+This repository is implemented one reviewed Work Package at a time. WP-0001 contains the deterministic monorepo and governance baseline, WP-0002 materializes the workspace directory boundaries, and WP-0003 establishes shared TypeScript and quality tooling without creating applications, packages, or business code.
 
 ## Prerequisites
 
@@ -19,6 +19,7 @@ On Windows, keep the checkout in the WSL Linux filesystem, normally `~/src/bop-r
 ```bash
 corepack install --global pnpm@11.13.0
 pnpm install --frozen-lockfile
+pnpm verify
 ```
 
 ## Bootstrap verification
@@ -28,6 +29,10 @@ node --version
 pnpm --version
 pnpm exec turbo --version
 pnpm install --frozen-lockfile
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
 pnpm exec turbo run build --dry=json
 git diff --check
 ```
@@ -40,12 +45,12 @@ The canonical task names are `build`, `dev`, `lint`, `typecheck`, `test`, `test:
 - `packages/`: reusable BOP/RMS modules, contracts, persistence infrastructure, and testing support
 - `tooling/`: shared engineering configuration and developer tooling
 
-At WP-0002 these directories contain boundary documentation only. WP-0003 adds quality tooling, and WP-0004 owns the first runtime application skeletons.
+At WP-0003, `apps/` and `packages/` remain boundary documentation only. Root configuration and the tooling-only Vitest smoke test establish the contracts that later packages extend. WP-0004 owns the first runtime application skeletons.
 
 ## Roadmap
 
-- WP-0002 (active): workspace directories
-- WP-0003: TypeScript and quality tooling
+- WP-0002: workspace directories (integrated)
+- WP-0003 (active): TypeScript and quality tooling
 - WP-0004: runtime application skeletons, after the Figma UI Readiness Gate
 - WP-0005: local PostgreSQL and Docker Compose
 - WP-0006: root environment validation

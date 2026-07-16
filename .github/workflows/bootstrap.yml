@@ -53,3 +53,14 @@ jobs:
           pnpm exec turbo run build --dry=json
           node -e 'JSON.parse(require("node:fs").readFileSync("package.json")); JSON.parse(require("node:fs").readFileSync("turbo.json"))'
           git diff --check
+
+      - name: Verify TypeScript and quality tooling
+        run: |
+          test "$(pnpm exec tsc --version)" = "Version 6.0.3"
+          test "$(pnpm exec eslint --version)" = "v10.7.0"
+          test "$(pnpm exec prettier --version)" = "3.9.5"
+          test "$(pnpm exec vitest --version | cut -d' ' -f1)" = "vitest/4.1.10"
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm test
