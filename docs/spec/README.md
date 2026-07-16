@@ -14,14 +14,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Active Work Package
 
-- [`WP-0002 — Establish Workspace Directory Baseline`](work-packages/WP-0002.md)
+- [`WP-0003 — Establish TypeScript and Quality Tooling`](work-packages/WP-0003.md)
 
-WP-0001 remains the dependency baseline and is integrated into `main` at `aa7a238`.
+WP-0001 and WP-0002 are integrated into `main`; WP-0003 is based on the accepted WP-0002 integration commit `0d8ce351675b58fd3c0e8d923b995d4633e9592d`.
 
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
 
-WP-0002 owns only the tracked `apps/`, `packages/`, and `tooling/` boundaries, their concise ownership contracts, and deterministic checks added to `bootstrap / verify`. It does not authorize package manifests, applications, TypeScript source, databases, infrastructure, providers, or business behavior. Commit, push, Pull Request mutation, and merge remain separately authorized external actions.
+WP-0003 owns the repository TypeScript base configuration, ESLint flat configuration, Prettier policy, Vitest foundation, exact quality-tool dependencies, and deterministic checks added to `bootstrap / verify`. It does not authorize application or reusable-package manifests, runtime skeletons, business code, databases, infrastructure, providers, deployment, or WP-0004 work.
 
-WP-0002 is based directly on the integrated WP-0001 `main` baseline. Do not duplicate, squash, or rewrite the WP-0001 evidence as part of this Work Package.
+WP-0003 is based directly on the integrated WP-0002 `main` baseline. Commit, push, and Draft Pull Request creation are authorized for this Work Package; merge, deployment, Provider changes, and WP-0004 remain unauthorized.
