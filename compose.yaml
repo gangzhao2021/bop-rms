@@ -1,0 +1,58 @@
+name: bop-rms-local
+
+services:
+  postgres:
+    image: postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
+    restart: unless-stopped
+    init: true
+    environment:
+      POSTGRES_DB: ${BOP_RMS_POSTGRES_DB:-bop_rms_local}
+      POSTGRES_USER: ${BOP_RMS_POSTGRES_USER:-bop_rms_local}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+      TZ: UTC
+    command:
+      - postgres
+      - -c
+      - timezone=UTC
+      - -c
+      - datestyle=ISO, YMD
+    ports:
+      - 127.0.0.1:${BOP_RMS_POSTGRES_PORT:-5432}:5432
+    secrets:
+      - source: postgres_password
+        target: postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    networks:
+      - postgres
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready --quiet --host=127.0.0.1 --port=5432 --username="$${POSTGRES_USER}" --dbname="$${POSTGRES_DB}"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    stop_grace_period: 30s
+    labels:
+      com.bop-rms.owner: wp-0005
+      com.bop-rms.environment: local
+      com.bop-rms.data-classification: synthetic-only
+
+secrets:
+  postgres_password:
+    file: ${BOP_RMS_POSTGRES_PASSWORD_FILE:?Set BOP_RMS_POSTGRES_PASSWORD_FILE to an ignored local file}
+
+volumes:
+  postgres-data:
+    labels:
+      com.bop-rms.owner: wp-0005
+      com.bop-rms.environment: local
+      com.bop-rms.data-classification: synthetic-only
+
+networks:
+  postgres:
+    labels:
+      com.bop-rms.owner: wp-0005
+      com.bop-rms.environment: local
