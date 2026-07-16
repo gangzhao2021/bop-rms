@@ -45,6 +45,9 @@ jobs:
       - name: Verify WP-0005 PostgreSQL local environment
         run: ./tooling/postgres/verify-local.sh
 
+      - name: Verify WP-0006 root environment and startup
+        run: pnpm environment:verify
+
       - name: Verify workspace baseline
         run: |
           test "$(pnpm exec turbo --version)" = "2.10.5"
