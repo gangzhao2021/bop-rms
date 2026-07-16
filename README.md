@@ -2,7 +2,7 @@
 
 BOP-RMS is the Business Operating Platform and Restaurant Management System for configurable, multi-restaurant operations.
 
-This repository is implemented one reviewed Work Package at a time. WP-0001 contains only the deterministic monorepo and governance baseline; applications and business code start in later Work Packages.
+This repository is implemented one reviewed Work Package at a time. WP-0001 contains the deterministic monorepo and governance baseline. WP-0002 materializes the workspace directory boundaries without creating applications, packages, or business code.
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ corepack install --global pnpm@11.13.0
 pnpm install --frozen-lockfile
 ```
 
-## WP-0001 verification
+## Bootstrap verification
 
 ```bash
 node --version
@@ -34,9 +34,17 @@ git diff --check
 
 The canonical task names are `build`, `dev`, `lint`, `typecheck`, `test`, `test:integration`, `format:check`, and `clean`. At WP-0001 they intentionally load an empty workspace graph; later Work Packages add packages without renaming these contracts.
 
+## Workspace boundaries
+
+- `apps/`: deployable composition roots and runtime entry points
+- `packages/`: reusable BOP/RMS modules, contracts, persistence infrastructure, and testing support
+- `tooling/`: shared engineering configuration and developer tooling
+
+At WP-0002 these directories contain boundary documentation only. WP-0003 adds quality tooling, and WP-0004 owns the first runtime application skeletons.
+
 ## Roadmap
 
-- WP-0002: workspace directories
+- WP-0002 (active): workspace directories
 - WP-0003: TypeScript and quality tooling
 - WP-0004: runtime application skeletons, after the Figma UI Readiness Gate
 - WP-0005: local PostgreSQL and Docker Compose
