@@ -24,6 +24,11 @@ const privateExportSegments = new Set([
 ]);
 const sensitiveClasses = new Set(["sensitive_personal", "payment", "health", "credential"]);
 
+function expectedPackageName(layer, moduleName) {
+  if (!["BOP", "RMS"].includes(layer) || typeof moduleName !== "string") return null;
+  return `@${layer.toLowerCase()}/${moduleName}`;
+}
+
 function schemaError(error) {
   return `schema ${error.instancePath || "/"} ${error.message ?? "is invalid"}`;
 }
@@ -35,18 +40,31 @@ export function validateModuleManifest(manifest) {
     return { valid: false, errors };
   }
 
+  const canonicalPackageName = expectedPackageName(manifest.layer, manifest.moduleName);
+  if (canonicalPackageName && manifest.packageName !== canonicalPackageName) {
+    errors.push(
+      `packageName ${String(manifest.packageName)} must equal ${canonicalPackageName} for ${String(manifest.layer)} module ${String(manifest.moduleName)}`,
+    );
+  }
+
   const dependencies = Array.isArray(manifest.allowedSynchronousDependencies)
     ? manifest.allowedSynchronousDependencies
     : [];
-  const dependencyNames = new Set();
+  const dependencyPackages = new Set();
   for (const dependency of dependencies) {
     if (!dependency || typeof dependency !== "object") continue;
-    if (dependencyNames.has(dependency.moduleName)) {
-      errors.push(`duplicate synchronous dependency ${String(dependency.moduleName)}`);
+    if (dependencyPackages.has(dependency.packageName)) {
+      errors.push(`duplicate synchronous dependency ${String(dependency.packageName)}`);
     }
-    dependencyNames.add(dependency.moduleName);
-    if (dependency.moduleName === manifest.moduleName) {
-      errors.push(`${String(manifest.moduleName)} cannot depend synchronously on itself`);
+    dependencyPackages.add(dependency.packageName);
+    const expectedDependencyPackage = expectedPackageName(dependency.layer, dependency.moduleName);
+    if (expectedDependencyPackage && dependency.packageName !== expectedDependencyPackage) {
+      errors.push(
+        `dependency packageName ${String(dependency.packageName)} must equal ${expectedDependencyPackage} for ${String(dependency.layer)} module ${String(dependency.moduleName)}`,
+      );
+    }
+    if (dependency.packageName === manifest.packageName) {
+      errors.push(`${String(manifest.packageName)} cannot depend synchronously on itself`);
     }
     if (manifest.layer === "BOP" && dependency.layer === "RMS") {
       errors.push("BOP module cannot depend synchronously on RMS module");

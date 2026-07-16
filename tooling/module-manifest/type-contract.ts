@@ -1,7 +1,8 @@
 import { defineModuleManifest, type ModuleLayer } from "./module.manifest.js";
 
 const typedManifest = defineModuleManifest({
-  moduleName: "@bop-rms/synthetic-type-contract",
+  moduleName: "synthetic-type-contract",
+  packageName: "@bop/synthetic-type-contract",
   layer: "BOP",
   lifecycle: "Later",
   publicExports: ["."],
@@ -32,4 +33,17 @@ defineModuleManifest({
   ...typedManifest,
   // @ts-expect-error invalid layers are rejected at authoring time
   layer: "PLATFORM",
+});
+
+defineModuleManifest({
+  ...typedManifest,
+  // @ts-expect-error package identities use the canonical BOP or RMS namespace
+  packageName: "@bop-rms/synthetic-type-contract",
+});
+
+// @ts-expect-error BOP layers cannot use an RMS package namespace
+defineModuleManifest({
+  ...typedManifest,
+  packageName: "@rms/synthetic-type-contract",
+  layer: "BOP",
 });

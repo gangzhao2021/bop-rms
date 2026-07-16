@@ -82,7 +82,7 @@ The canonical task names are `build`, `dev`, `lint`, `typecheck`, `test`, `test:
 
 Run `pnpm repository-guidance:check` after changing any of these artifacts.
 
-The Section 48.2 Module Manifest authoring contract and deterministic synthetic fixtures live in [`tooling/module-manifest`](tooling/module-manifest). Run `pnpm module-manifest:check` after changing that contract. Database names in a Manifest are future ownership metadata only and do not create persistence artifacts.
+The Section 48.2 Module Manifest authoring contract and deterministic synthetic fixtures live in [`tooling/module-manifest`](tooling/module-manifest). A Manifest uses an unscoped kebab-case logical `moduleName`, a separate canonical `packageName` of `@bop/<moduleName>` or `@rms/<moduleName>`, and the matching `BOP` or `RMS` layer; synchronous dependency identities use the same three-part contract. Run `pnpm module-manifest:check` after changing that contract. Database names in a Manifest are future ownership metadata only and do not create persistence artifacts.
 
 ## Workspace boundaries
 
