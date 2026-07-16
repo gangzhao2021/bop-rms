@@ -1,0 +1,9 @@
+{
+  "layer": "BOP",
+  "moduleName": "synthetic-kernel",
+  "packageName": "@bop/synthetic-kernel",
+  "phase": "Phase 0",
+  "allowedDependencies": [],
+  "databaseSchemaName": null,
+  "owner": "Synthetic Platform Steward"
+}
