@@ -2,7 +2,7 @@
 
 BOP-RMS is the Business Operating Platform and Restaurant Management System for configurable, multi-restaurant operations.
 
-This repository is implemented one reviewed Work Package at a time. WP-0001 through WP-0003 establish the deterministic monorepo and quality baseline. WP-0004 adds bounded application skeletons and a machine-checkable Screen Registry without starting business features or persistence.
+This repository is implemented one reviewed Work Package at a time. WP-0001 through WP-0006 establish the deterministic monorepo, quality baseline, application skeletons, local PostgreSQL, and root environment lifecycle. WP-0007 materializes repository guidance without starting a business vertical slice.
 
 ## Prerequisites
 
@@ -21,6 +21,8 @@ corepack install --global pnpm@11.13.0
 pnpm install --frozen-lockfile
 pnpm verify
 ```
+
+See [`docs/onboarding/developer-setup.md`](docs/onboarding/developer-setup.md) for the complete setup, local secret-file, worktree, verification, and troubleshooting template.
 
 ## Local environment
 
@@ -58,6 +60,7 @@ node --version
 pnpm --version
 pnpm exec turbo --version
 pnpm install --frozen-lockfile
+pnpm repository-guidance:check
 pnpm format:check
 pnpm lint
 pnpm typecheck
@@ -69,7 +72,15 @@ pnpm exec turbo run build --dry=json
 git diff --check
 ```
 
-The canonical task names are `build`, `dev`, `lint`, `typecheck`, `test`, `test:integration`, `format:check`, and `clean`. At WP-0001 they intentionally load an empty workspace graph; later Work Packages add packages without renaming these contracts.
+The canonical task names are `build`, `dev`, `lint`, `typecheck`, `test`, `test:integration`, `format:check`, and `clean`.
+
+## Repository guidance
+
+- [`docs/adr/`](docs/adr/README.md) contains the stable ADR register and template.
+- [`docs/templates/module/README.md`](docs/templates/module/README.md) is the later-module README template; it does not instantiate a module.
+- [`.agents/skills/`](.agents/skills) contains the five explicitly triggered BOP-RMS project workflows. They guide execution and never replace `AGENTS.md`, the current WP brief, CI/tests, or explicit external-action authority.
+
+Run `pnpm repository-guidance:check` after changing any of these artifacts.
 
 ## Workspace boundaries
 
@@ -77,15 +88,14 @@ The canonical task names are `build`, `dev`, `lint`, `typecheck`, `test`, `test:
 - `packages/`: reusable BOP/RMS modules, contracts, persistence infrastructure, and testing support
 - `tooling/`: shared engineering configuration and developer tooling
 
-At WP-0004, `apps/` contains only deployable runtime/shell composition roots. `packages/ui` contains semantic tokens and minimal accessibility wrappers; it is not a business component library.
+At the current bootstrap stage, `apps/` contains only deployable runtime/shell composition roots. `packages/ui` contains semantic tokens and minimal accessibility wrappers; it is not a business component library.
 
 ## Roadmap
 
-- WP-0002: workspace directories (integrated)
-- WP-0003: TypeScript and quality tooling (integrated)
-- WP-0004: runtime application skeletons and Screen Registry
+- WP-0001–WP-0003: monorepo and quality baseline (integrated)
+- WP-0004: runtime application skeletons and Screen Registry (integrated)
 - WP-0005: local PostgreSQL and Docker Compose (integrated)
-- WP-0006 (active): root scripts and environment validation
-- WP-0007: ADRs, module documentation, setup templates, and repository-scoped skills
+- WP-0006: root scripts and environment validation (integrated)
+- WP-0007: ADRs, module documentation, setup templates, and repository-scoped skills (active)
 
 See [`docs/spec/README.md`](docs/spec/README.md) for specification authority and the active Work Package.

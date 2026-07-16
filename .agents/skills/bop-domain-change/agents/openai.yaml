@@ -1,0 +1,4 @@
+interface:
+  display_name: "BOP Domain Change"
+  short_description: "Review BOP-RMS domain and persistence changes"
+  default_prompt: "Use $bop-domain-change to review the ownership and contracts for this BOP-RMS domain change."

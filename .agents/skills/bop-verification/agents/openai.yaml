@@ -1,0 +1,4 @@
+interface:
+  display_name: "BOP Verification"
+  short_description: "Prove BOP-RMS Work Package completion"
+  default_prompt: "Use $bop-verification to verify this BOP-RMS Work Package before claiming Done."
