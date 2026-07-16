@@ -82,6 +82,8 @@ The canonical task names are `build`, `dev`, `lint`, `typecheck`, `test`, `test:
 
 Run `pnpm repository-guidance:check` after changing any of these artifacts.
 
+The Section 48.2 Module Manifest authoring contract and deterministic synthetic fixtures live in [`tooling/module-manifest`](tooling/module-manifest). Run `pnpm module-manifest:check` after changing that contract. Database names in a Manifest are future ownership metadata only and do not create persistence artifacts.
+
 ## Workspace boundaries
 
 - `apps/`: deployable composition roots and runtime entry points
@@ -96,6 +98,7 @@ At the current bootstrap stage, `apps/` contains only deployable runtime/shell c
 - WP-0004: runtime application skeletons and Screen Registry (integrated)
 - WP-0005: local PostgreSQL and Docker Compose (integrated)
 - WP-0006: root scripts and environment validation (integrated)
-- WP-0007: ADRs, module documentation, setup templates, and repository-scoped skills (active)
+- WP-0007: ADRs, module documentation, setup templates, and repository-scoped skills (integrated)
+- WP-0010: Module Manifest Schema and deterministic declaration validation (active)
 
 See [`docs/spec/README.md`](docs/spec/README.md) for specification authority and the active Work Package.
