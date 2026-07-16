@@ -14,10 +14,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Active Work Package
 
-- [`WP-0001 — Initialize TypeScript Monorepo and Workspace Baseline`](work-packages/WP-0001.md)
+- [`WP-0002 — Establish Workspace Directory Baseline`](work-packages/WP-0002.md)
+
+WP-0001 remains the dependency baseline and is integrated into `main` at `aa7a238`.
 
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
 
-WP-0001 owns only the root workspace, governance, reproducible install, and `bootstrap / verify` CI baseline. Under Section 91, the current private GitHub Free solo-development stage uses auditable PR + successful CI + explicit self-review process controls because server-side protection is unavailable. It does not authorize applications, TypeScript source, databases, infrastructure, providers, business behavior, merge, or WP-0002.
+WP-0002 owns only the tracked `apps/`, `packages/`, and `tooling/` boundaries, their concise ownership contracts, and deterministic checks added to `bootstrap / verify`. It does not authorize package manifests, applications, TypeScript source, databases, infrastructure, providers, or business behavior. Commit, push, Pull Request mutation, and merge remain separately authorized external actions.
+
+WP-0002 is based directly on the integrated WP-0001 `main` baseline. Do not duplicate, squash, or rewrite the WP-0001 evidence as part of this Work Package.

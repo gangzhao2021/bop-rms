@@ -45,6 +45,10 @@ jobs:
       - name: Verify workspace baseline
         run: |
           test "$(pnpm exec turbo --version)" = "2.10.5"
+          test -f apps/README.md
+          test -f packages/README.md
+          test -f tooling/README.md
+          test -z "$(find apps packages tooling -mindepth 1 -name package.json -print -quit)"
           pnpm list --depth 0
           pnpm exec turbo run build --dry=json
           node -e 'JSON.parse(require("node:fs").readFileSync("package.json")); JSON.parse(require("node:fs").readFileSync("turbo.json"))'
