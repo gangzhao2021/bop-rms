@@ -16,7 +16,7 @@ jobs:
   verify:
     name: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -42,7 +42,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify WP-0004 workspace baseline
+      - name: Verify WP-0005 PostgreSQL local environment
+        run: ./tooling/postgres/verify-local.sh
+
+      - name: Verify workspace baseline
         run: |
           test "$(pnpm exec turbo --version)" = "2.10.5"
           for package in api worker merchant-web customer-pwa; do test -f "apps/$package/package.json"; done
