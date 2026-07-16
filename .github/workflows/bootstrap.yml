@@ -1,0 +1,51 @@
+name: bootstrap
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Install exact package manager
+        run: |
+          npm install --global corepack@0.35.0
+          corepack enable pnpm
+          corepack install --global pnpm@11.13.0
+
+      - name: Verify tool versions
+        run: |
+          test "$(node --version)" = "v24.18.0"
+          test "$(corepack --version)" = "0.35.0"
+          test "$(pnpm --version)" = "11.13.0"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify workspace baseline
+        run: |
+          test "$(pnpm exec turbo --version)" = "2.10.5"
+          pnpm list --depth 0
+          pnpm exec turbo run build --dry=json
+          node -e 'JSON.parse(require("node:fs").readFileSync("package.json")); JSON.parse(require("node:fs").readFileSync("turbo.json"))'
+          git diff --check
