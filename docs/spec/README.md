@@ -14,14 +14,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Active Work Package
 
-- [`WP-0007 — Establish Repository Guidance Artifacts`](work-packages/WP-0007.md)
+- [`WP-0010 — Establish Module Manifest Schema`](work-packages/WP-0010.md)
 
-WP-0001 through WP-0006 are integrated into `main`; WP-0007 is based on the accepted WP-0006 squash-merge commit `8220bd315a9fbbd1aaa4444b8064555ee7ffd637`.
+WP-0001 through WP-0007 are integrated into `main`; WP-0010 is based on the accepted WP-0007 squash-merge commit `6d8e7aa415edc434a82dcc4bf4c4f37ab8694b8b`.
 
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
 
-WP-0007 owns only the Architecture Decision Register materialization, module README and developer-setup templates, the five Section 90 repository-scoped project skills, and deterministic validation of those guidance artifacts. It does not authorize the first business vertical slice, migration, schema, ORM, seed, business database integration, Provider, production infrastructure, deployment, or Figma changes.
+WP-0010 owns only the Section 48.2 Module Manifest type/schema contract, synthetic legal and invalid fixtures, deterministic value validation, and root/CI integration. Database fields are inert future ownership declarations. It does not authorize a business Module, generator, import/database/ORM architecture scan, migration, real schema/table, ORM, seed, business database integration, Provider, production infrastructure, deployment, or Figma changes.
 
 Commit, push, Draft Pull Request, WP-scoped CI repair, Ready transition, expected-head squash merge, post-merge CI verification, and clean main-worktree fast-forward are authorized for this WP only.
