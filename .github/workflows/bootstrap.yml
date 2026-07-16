@@ -55,6 +55,7 @@ jobs:
           test -f packages/ui/package.json
           node -e 'const fs=require("node:fs"); for (const file of ["package.json","turbo.json","docs/product/screen-registry.schema.json","apps/customer-pwa/public/manifest.webmanifest"]) JSON.parse(fs.readFileSync(file))'
           node --input-type=module -e 'import fs from "node:fs"; import { parse } from "yaml"; for (const file of ["pnpm-workspace.yaml",".github/workflows/bootstrap.yml","docs/product/screen-registry.yaml"]) parse(fs.readFileSync(file, "utf8"))'
+          pnpm repository-guidance:check
           pnpm screen-registry:check
           pnpm list --depth 0
           pnpm exec turbo run build --dry=json

@@ -1,0 +1,4 @@
+interface:
+  display_name: "BOP Screen Contract"
+  short_description: "Resolve BOP-RMS screen and UI contracts"
+  default_prompt: "Use $bop-screen-contract to resolve the complete contract for this BOP-RMS UI change."

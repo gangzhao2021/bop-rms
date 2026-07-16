@@ -1,0 +1,4 @@
+interface:
+  display_name: "BOP Work Package"
+  short_description: "Resolve and bound BOP-RMS Work Packages"
+  default_prompt: "Use $bop-work-package to resolve and plan the current BOP-RMS Work Package."

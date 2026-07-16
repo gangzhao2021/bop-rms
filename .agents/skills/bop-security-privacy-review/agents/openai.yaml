@@ -1,0 +1,4 @@
+interface:
+  display_name: "BOP Security Privacy Review"
+  short_description: "Review BOP-RMS security and sensitive data"
+  default_prompt: "Use $bop-security-privacy-review to review this BOP-RMS change for security and privacy risks."
