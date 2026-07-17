@@ -90,6 +90,8 @@ The Import Boundary Architecture Test lives in [`tooling/import-boundary`](tooli
 
 The Database Schema Ownership Architecture Test lives in [`tooling/database-ownership`](tooling/database-ownership). Run `pnpm database-ownership:check` or inspect `node tooling/database-ownership/validate.mjs --help`. It treats WP-0010 `ownedDatabase` as the sole business ownership source, validates pure-literal table/access evidence plus the finite shared-infrastructure registry, and rejects conflicts, non-owner writes, unresolved targets, unsafe paths, and unsupported real persistence assets. Tests use temporary synthetic Modules; WP-0013 commits no business Module or database asset.
 
+The Domain Layer Technology Dependency Test lives in [`tooling/domain-layer-boundary`](tooling/domain-layer-boundary). Run `pnpm domain-layer-boundary:check` or inspect `node tooling/domain-layer-boundary/validate.mjs --help`. It reuses WP-0012 Module discovery and source-reference parsing, scans only Canonical Module `src/domain/**`, treats type-only edges like runtime edges, and rejects Application / Infrastructure / Interface, ORM / database, HTTP / transport, Provider SDK, Node runtime / I/O, dynamic, unresolved, unsafe, or unclassified dependencies. Its pure-literal registry classifies technology safety only and grants no Module, export, package-install, Provider, or business authority. Tests use fully cleaned temporary synthetic Modules; WP-0014 commits no real Module or dependency.
+
 ## Workspace boundaries
 
 - `apps/`: deployable composition roots and runtime entry points
@@ -108,6 +110,7 @@ At the current bootstrap stage, `apps/` contains only deployable runtime/shell c
 - WP-0010: Module Manifest Schema and deterministic declaration validation (integrated)
 - WP-0011: deterministic Module Generator (integrated)
 - WP-0012: Import Boundary Architecture Test (integrated)
-- WP-0013: Database Schema Ownership Architecture Test (active)
+- WP-0013: Database Schema Ownership Architecture Test (integrated)
+- WP-0014: Domain Layer ORM / Infrastructure Test (active)
 
 See [`docs/spec/README.md`](docs/spec/README.md) for specification authority and the active Work Package.
