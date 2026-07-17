@@ -19,12 +19,14 @@
     "lint": "eslint . && turbo run lint",
     "local:status": "node tooling/environment/local.mjs status",
     "local:stop": "node tooling/environment/local.mjs stop",
+    "module-generator": "node tooling/module-generator/generate.mjs",
+    "module-generator:check": "vitest run tooling/module-generator/generate.test.mjs",
     "module-manifest:check": "node tooling/module-manifest/validate.mjs",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
     "test": "vitest run && turbo run test",
     "test:integration": "turbo run test:integration",
     "typecheck": "tsc --project tsconfig.json && turbo run typecheck",
-    "verify": "pnpm repository-guidance:check && pnpm module-manifest:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm screen-registry:check && pnpm test && pnpm build",
+    "verify": "pnpm repository-guidance:check && pnpm module-manifest:check && pnpm module-generator:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm screen-registry:check && pnpm test && pnpm build",
     "screen-registry:check": "node tooling/screen-registry/validate.ts"
   },
   "devDependencies": {

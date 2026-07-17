@@ -1,0 +1,9 @@
+{
+  "layer": "BOP",
+  "moduleName": "../escape",
+  "packageName": "@private/escape",
+  "phase": "Unknown",
+  "allowedDependencies": [],
+  "databaseSchemaName": null,
+  "owner": "Synthetic Invalid Steward"
+}

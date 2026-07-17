@@ -57,6 +57,7 @@ jobs:
           node --input-type=module -e 'import fs from "node:fs"; import { parse } from "yaml"; for (const file of ["pnpm-workspace.yaml",".github/workflows/bootstrap.yml","docs/product/screen-registry.yaml"]) parse(fs.readFileSync(file, "utf8"))'
           pnpm repository-guidance:check
           pnpm module-manifest:check
+          pnpm module-generator:check
           pnpm screen-registry:check
           pnpm list --depth 0
           pnpm exec turbo run build --dry=json

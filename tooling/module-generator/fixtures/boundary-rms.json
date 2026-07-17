@@ -1,0 +1,15 @@
+{
+  "layer": "RMS",
+  "moduleName": "synthetic-order-entry",
+  "packageName": "@rms/synthetic-order-entry",
+  "phase": "Phase 1",
+  "allowedDependencies": [
+    {
+      "moduleName": "synthetic-common-kernel",
+      "packageName": "@bop/synthetic-common-kernel",
+      "layer": "BOP"
+    }
+  ],
+  "databaseSchemaName": "synthetic_order_entry",
+  "owner": "Synthetic `RMS` Steward"
+}
