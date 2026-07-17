@@ -16,6 +16,7 @@
     "environment:verify": "node tooling/environment/verify-local.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check . && turbo run format:check",
+    "import-boundary:check": "vitest run tooling/import-boundary/validate.test.mjs && node tooling/import-boundary/validate.mjs",
     "lint": "eslint . && turbo run lint",
     "local:status": "node tooling/environment/local.mjs status",
     "local:stop": "node tooling/environment/local.mjs stop",
@@ -26,7 +27,7 @@
     "test": "vitest run && turbo run test",
     "test:integration": "turbo run test:integration",
     "typecheck": "tsc --project tsconfig.json && turbo run typecheck",
-    "verify": "pnpm repository-guidance:check && pnpm module-manifest:check && pnpm module-generator:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm screen-registry:check && pnpm test && pnpm build",
+    "verify": "pnpm repository-guidance:check && pnpm module-manifest:check && pnpm module-generator:check && pnpm import-boundary:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm screen-registry:check && pnpm test && pnpm build",
     "screen-registry:check": "node tooling/screen-registry/validate.ts"
   },
   "devDependencies": {

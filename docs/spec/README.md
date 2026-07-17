@@ -14,14 +14,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Active Work Package
 
-- [`WP-0011 — Establish Module Generator`](work-packages/WP-0011.md)
+- [`WP-0012 — Import Boundary Architecture Test`](work-packages/WP-0012.md)
 
-WP-0001 through the WP-0010 Canonical Module Identity Naming corrective follow-up are integrated into `main` at squash baseline `154d6afc81606ca67d178d5dfc9d48546f28cada`. WP-0011 is active from that exact baseline.
+WP-0001 through WP-0011 are integrated into `main` at squash baseline `c93f5e46ff0d9d88dd567af68875ebee2da84080`. WP-0012 is active from that exact baseline.
 
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
 
-WP-0011 owns only the deterministic Module Generator, synthetic fixtures/tests, reuse of the WP-0010 Manifest validator, and matching root/CI/guidance integration. It may generate canonical skeletons only in temporary test roots during this WP. Database fields remain inert future ownership declarations. It does not authorize a real business Module, import/database/ORM architecture scan, migration, real schema/table, ORM, seed, Repository, business database integration, Provider, production infrastructure, deployment, Figma changes, or the first vertical slice.
+WP-0012 owns only deterministic cross-Module import/public-export enforcement, synthetic fixtures/tests, reuse of WP-0010 Manifest validation and WP-0011 layout, and root/CI/guidance integration. It does not authorize a real business Module, database ownership or Domain-layer ORM scan, persistence artifacts, Provider, production/deploy/Figma changes, or the first vertical slice.
 
-Commit, push, Draft Pull Request, WP-scoped CI repair, explicit solo self-review, Ready transition, expected-head squash merge, post-merge CI verification, and main-worktree fast-forward while preserving the two user-provided untracked Canonical Evidence files are authorized for WP-0011 only.
+Commit, push, Draft Pull Request, WP-scoped CI repair, explicit solo self-review, Ready transition, expected-head squash merge, post-merge CI verification, and main-worktree fast-forward while preserving the two user-provided untracked Canonical Evidence files are authorized for WP-0012 only.
