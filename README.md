@@ -88,6 +88,8 @@ The bounded Module Generator lives in [`tooling/module-generator`](tooling/modul
 
 The Import Boundary Architecture Test lives in [`tooling/import-boundary`](tooling/import-boundary). Run `pnpm import-boundary:check` or inspect `node tooling/import-boundary/validate.mjs --help`. It discovers canonical Modules from their WP-0010 Manifest plus WP-0011 layout, requires exact package/export-map agreement, and rejects BOP-to-RMS, cross-Module relative/private/unexported/undeclared imports, case conflicts, path escapes, and unresolved dynamic imports. Tests use temporary synthetic Modules; WP-0012 commits no business Module.
 
+The Database Schema Ownership Architecture Test lives in [`tooling/database-ownership`](tooling/database-ownership). Run `pnpm database-ownership:check` or inspect `node tooling/database-ownership/validate.mjs --help`. It treats WP-0010 `ownedDatabase` as the sole business ownership source, validates pure-literal table/access evidence plus the finite shared-infrastructure registry, and rejects conflicts, non-owner writes, unresolved targets, unsafe paths, and unsupported real persistence assets. Tests use temporary synthetic Modules; WP-0013 commits no business Module or database asset.
+
 ## Workspace boundaries
 
 - `apps/`: deployable composition roots and runtime entry points
@@ -105,6 +107,7 @@ At the current bootstrap stage, `apps/` contains only deployable runtime/shell c
 - WP-0007: ADRs, module documentation, setup templates, and repository-scoped skills (integrated)
 - WP-0010: Module Manifest Schema and deterministic declaration validation (integrated)
 - WP-0011: deterministic Module Generator (integrated)
-- WP-0012: Import Boundary Architecture Test (active)
+- WP-0012: Import Boundary Architecture Test (integrated)
+- WP-0013: Database Schema Ownership Architecture Test (active)
 
 See [`docs/spec/README.md`](docs/spec/README.md) for specification authority and the active Work Package.

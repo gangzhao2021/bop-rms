@@ -111,7 +111,7 @@ function targets(value) {
   return Object.values(value).flatMap(targets);
 }
 
-async function discover(root, diagnostics) {
+export async function discoverModules(root, diagnostics) {
   const modules = [];
   for (const [segment, layer] of [
     ["bop", "BOP"],
@@ -481,7 +481,7 @@ function inspect(root, sourceModule, file, reference, modules, byPackage, diagno
 export async function validateImportBoundaries({ root = process.cwd() } = {}) {
   root = await realpath(root);
   const diagnostics = [];
-  const modules = await discover(root, diagnostics);
+  const modules = await discoverModules(root, diagnostics);
   const byPackage = new Map(modules.map((module) => [module.packageName, module]));
   for (const module of modules.sort((a, b) => a.packageName.localeCompare(b.packageName, "en")))
     for (const file of await files(module.root, root, diagnostics))

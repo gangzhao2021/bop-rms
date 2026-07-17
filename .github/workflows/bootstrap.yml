@@ -59,6 +59,7 @@ jobs:
           pnpm module-manifest:check
           pnpm module-generator:check
           pnpm import-boundary:check
+          pnpm database-ownership:check
           pnpm screen-registry:check
           pnpm list --depth 0
           pnpm exec turbo run build --dry=json
