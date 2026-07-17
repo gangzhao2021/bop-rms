@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     clearMocks: true,
     environment: "node",
-    include: ["tooling/**/*.{test.ts,test.mjs}"],
+    include: ["tooling/**/*.{test.ts,test.mjs}", "packages/database/src/**/*.test.ts"],
     passWithNoTests: false,
   },
 });

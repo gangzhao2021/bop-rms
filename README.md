@@ -61,6 +61,7 @@ pnpm --version
 pnpm exec turbo --version
 pnpm install --frozen-lockfile
 pnpm repository-guidance:check
+pnpm migration:check
 pnpm format:check
 pnpm lint
 pnpm typecheck
@@ -88,9 +89,28 @@ The bounded Module Generator lives in [`tooling/module-generator`](tooling/modul
 
 The Import Boundary Architecture Test lives in [`tooling/import-boundary`](tooling/import-boundary). Run `pnpm import-boundary:check` or inspect `node tooling/import-boundary/validate.mjs --help`. It discovers canonical Modules from their WP-0010 Manifest plus WP-0011 layout, requires exact package/export-map agreement, and rejects BOP-to-RMS, cross-Module relative/private/unexported/undeclared imports, case conflicts, path escapes, and unresolved dynamic imports. Tests use temporary synthetic Modules; WP-0012 commits no business Module.
 
-The Database Schema Ownership Architecture Test lives in [`tooling/database-ownership`](tooling/database-ownership). Run `pnpm database-ownership:check` or inspect `node tooling/database-ownership/validate.mjs --help`. It treats WP-0010 `ownedDatabase` as the sole business ownership source, validates pure-literal table/access evidence plus the finite shared-infrastructure registry, and rejects conflicts, non-owner writes, unresolved targets, unsafe paths, and unsupported real persistence assets. Tests use temporary synthetic Modules; WP-0013 commits no business Module or database asset.
+The Database Schema Ownership Architecture Test lives in [`tooling/database-ownership`](tooling/database-ownership). Run `pnpm database-ownership:check` or inspect `node tooling/database-ownership/validate.mjs --help`. It treats WP-0010 `ownedDatabase` as the sole business ownership source, validates pure-literal table/access evidence plus the finite shared-infrastructure registry, and rejects conflicts, non-owner writes, unresolved targets, unsafe paths, and unsupported real persistence assets. Section 94 adds only the root migration catalog、its runner-owned bootstrap and `packages/database` driver exception；Module persistence remains fail-closed until its owning later WP. Tests use temporary synthetic Modules and migration catalogs.
 
 The Domain Layer Technology Dependency Test lives in [`tooling/domain-layer-boundary`](tooling/domain-layer-boundary). Run `pnpm domain-layer-boundary:check` or inspect `node tooling/domain-layer-boundary/validate.mjs --help`. It reuses WP-0012 Module discovery and source-reference parsing, scans only Canonical Module `src/domain/**`, treats type-only edges like runtime edges, and rejects Application / Infrastructure / Interface, ORM / database, HTTP / transport, Provider SDK, Node runtime / I/O, dynamic, unresolved, unsafe, or unclassified dependencies. Its pure-literal registry classifies technology safety only and grants no Module, export, package-install, Provider, or business authority. Tests use fully cleaned temporary synthetic Modules; WP-0014 commits no real Module or dependency.
+
+## Database migrations
+
+The WP-0020 Migration Runner lives in [`packages/database`](packages/database) and executes only the immutable root [`migrations`](migrations) catalog. Inspect the catalog and CLI without connecting to PostgreSQL：
+
+```bash
+pnpm migration:check
+pnpm db:migrate -- --help
+```
+
+With an ignored environment file and 0600 password file，observe or verify a target explicitly：
+
+```bash
+pnpm db:migrate -- status --env-file .env
+pnpm db:migrate -- verify --env-file .env
+pnpm db:migrate -- apply --env-file .env --confirm-target local:bop_rms_local
+```
+
+`apply` is the only mutating command。It uses one dedicated client、the accepted advisory lock and one transaction per migration。There is no down、repair、baseline、force or checksum-bypass path；applied migrations are immutable and corrected through reviewed forward migrations。The only WP-0020 database object is `platform_core.migration_history`；WP-0021 foundation schemas and tables remain unimplemented。
 
 ## Workspace boundaries
 
@@ -111,6 +131,7 @@ At the current bootstrap stage, `apps/` contains only deployable runtime/shell c
 - WP-0011: deterministic Module Generator (integrated)
 - WP-0012: Import Boundary Architecture Test (integrated)
 - WP-0013: Database Schema Ownership Architecture Test (integrated)
-- WP-0014: Domain Layer ORM / Infrastructure Test (active)
+- WP-0014: Domain Layer ORM / Infrastructure Test (integrated)
+- WP-0020: Migration Runner and Namespace Rules (active)
 
 See [`docs/spec/README.md`](docs/spec/README.md) for specification authority and the active Work Package.

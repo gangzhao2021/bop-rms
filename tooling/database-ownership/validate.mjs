@@ -1,7 +1,7 @@
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import {
   canonicalPlatformDatabaseManifest,
@@ -14,6 +14,7 @@ import {
 } from "./contract.ts";
 import { piiClasses } from "../module-manifest/module.manifest.ts";
 import { discoverModules } from "../import-boundary/validate.mjs";
+import { readMigrationCatalog } from "../../packages/database/src/catalog.ts";
 
 const evidencePath = "src/infrastructure/persistence/database-access.manifest.ts";
 const platformPath = "tooling/database-ownership/platform-database.manifest.ts";
@@ -466,6 +467,11 @@ async function evidenceFor(root, module, diagnostics) {
 export async function validateDatabaseOwnership({ root = process.cwd() } = {}) {
   root = await realpath(root);
   const diagnostics = [];
+  if (await state(join(root, "migrations"))) {
+    const catalog = await readMigrationCatalog(root);
+    for (const item of catalog.diagnostics)
+      diagnostics.push(diag(item.code, item.file ?? "migrations", item.message, item.line ?? 1));
+  }
   let platformManifest;
   try {
     platformManifest = await readDeclaration(
@@ -655,7 +661,7 @@ function options(argv) {
   if (argv.length === 2 && argv[0] === "--root") return { root: resolve(argv[1]) };
   throw new DatabaseOwnershipError("expected --root <repository-root> or --help");
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   try {
     const parsed = options(process.argv.slice(2));
     if (parsed.help) process.stdout.write(databaseOwnershipUsage);

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "namespaces": [
+    { "namespace": "0000", "directory": "0000-platform" },
+    { "namespace": "0100", "directory": "0100-bop-common" },
+    { "namespace": "0200", "directory": "0200-bop-identity-tenancy" },
+    { "namespace": "0300", "directory": "0300-bop-governance" },
+    { "namespace": "0400", "directory": "0400-bop-operations" },
+    { "namespace": "1000", "directory": "1000-rms-store" },
+    { "namespace": "1100", "directory": "1100-rms-catalog" },
+    { "namespace": "1200", "directory": "1200-rms-pricing" },
+    { "namespace": "1300", "directory": "1300-rms-ordering" },
+    { "namespace": "1400", "directory": "1400-rms-payment" },
+    { "namespace": "1500", "directory": "1500-rms-kitchen" },
+    { "namespace": "1600", "directory": "1600-rms-device" },
+    { "namespace": "1700", "directory": "1700-rms-fulfillment" },
+    { "namespace": "1800", "directory": "1800-rms-reporting" }
+  ]
+}
