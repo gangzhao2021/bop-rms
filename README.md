@@ -86,6 +86,8 @@ The Section 48.2 Module Manifest authoring contract and deterministic synthetic 
 
 The bounded Module Generator lives in [`tooling/module-generator`](tooling/module-generator). Its JSON input requires Layer, unscoped Module Name, exact Package Name, Phase, Allowed Dependencies, future database schema metadata, and a caller-supplied Owner role. Inspect the closed input and safety behavior with `pnpm module-generator --help`, and run `pnpm module-generator:check` after changing it. The target is derived under `packages/bop/*` or `packages/rms/*`; existing, partial, unsafe, or case-colliding targets are never overwritten. Generator tests use temporary synthetic roots, and WP-0011 commits no generated business Module.
 
+The Import Boundary Architecture Test lives in [`tooling/import-boundary`](tooling/import-boundary). Run `pnpm import-boundary:check` or inspect `node tooling/import-boundary/validate.mjs --help`. It discovers canonical Modules from their WP-0010 Manifest plus WP-0011 layout, requires exact package/export-map agreement, and rejects BOP-to-RMS, cross-Module relative/private/unexported/undeclared imports, case conflicts, path escapes, and unresolved dynamic imports. Tests use temporary synthetic Modules; WP-0012 commits no business Module.
+
 ## Workspace boundaries
 
 - `apps/`: deployable composition roots and runtime entry points
@@ -102,6 +104,7 @@ At the current bootstrap stage, `apps/` contains only deployable runtime/shell c
 - WP-0006: root scripts and environment validation (integrated)
 - WP-0007: ADRs, module documentation, setup templates, and repository-scoped skills (integrated)
 - WP-0010: Module Manifest Schema and deterministic declaration validation (integrated)
-- WP-0011: deterministic Module Generator (active)
+- WP-0011: deterministic Module Generator (integrated)
+- WP-0012: Import Boundary Architecture Test (active)
 
 See [`docs/spec/README.md`](docs/spec/README.md) for specification authority and the active Work Package.
