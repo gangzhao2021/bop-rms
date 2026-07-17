@@ -5,7 +5,16 @@ import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { validateModuleManifest } from "../module-manifest/validate.mjs";
 
-const extensions = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
+export const sourceExtensions = new Set([
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+]);
 const ignored = new Set([".git", ".turbo", "build", "coverage", "dist", "node_modules"]);
 const privateSegments = new Set([
   "src",
@@ -259,7 +268,7 @@ export async function discoverModules(root, diagnostics) {
   return modules;
 }
 
-async function files(root, repositoryRoot, diagnostics) {
+export async function discoverSourceFiles(root, repositoryRoot, diagnostics) {
   const result = [];
   async function walk(directory) {
     for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) =>
@@ -278,14 +287,14 @@ async function files(root, repositoryRoot, diagnostics) {
       }
       const path = join(directory, entry.name);
       if (entry.isDirectory() && !ignored.has(entry.name)) await walk(path);
-      else if (entry.isFile() && extensions.has(extname(entry.name).toLowerCase()))
+      else if (entry.isFile() && sourceExtensions.has(extname(entry.name).toLowerCase()))
         result.push(path);
     }
   }
   await walk(root);
   return result;
 }
-function references(source, file) {
+export function parseSourceReferences(source, file) {
   const parsed = ts.createSourceFile(
     file,
     source,
@@ -316,7 +325,13 @@ function references(source, file) {
       ts.isExternalModuleReference(node.moduleReference) &&
       node.moduleReference.expression
     )
-      add(node, node.moduleReference.expression.text, "import-equals");
+      add(
+        node,
+        ts.isStringLiteralLike(node.moduleReference.expression)
+          ? node.moduleReference.expression.text
+          : null,
+        "import-equals",
+      );
     else if (
       ts.isImportTypeNode(node) &&
       ts.isLiteralTypeNode(node.argument) &&
@@ -336,16 +351,24 @@ function references(source, file) {
   visit(parsed);
   return result;
 }
-function canonical(specifier) {
+export function parseCanonicalModuleSpecifier(specifier) {
   const match = /^@(bop|rms)\/([^/]+)(\/.*)?$/u.exec(specifier);
   return match
     ? { packageName: `@${match[1]}/${match[2]}`, subpath: match[3] ? `.${match[3]}` : "." }
     : null;
 }
-const owner = (path, modules) =>
+export const findOwningModule = (path, modules) =>
   modules.find((module) => path === module.root || path.startsWith(`${module.root}${sep}`));
 
-function inspect(root, sourceModule, file, reference, modules, byPackage, diagnostics) {
+export function inspectModuleReference(
+  root,
+  sourceModule,
+  file,
+  reference,
+  modules,
+  byPackage,
+  diagnostics,
+) {
   const fileName = relative(root, file);
   if (reference.value === null) {
     diagnostics.push(
@@ -365,7 +388,7 @@ function inspect(root, sourceModule, file, reference, modules, byPackage, diagno
   )
     return;
   if (specifier.startsWith(".") || specifier.startsWith("/")) {
-    const targetModule = owner(resolve(dirname(file), specifier), modules);
+    const targetModule = findOwningModule(resolve(dirname(file), specifier), modules);
     if (!targetModule)
       diagnostics.push(
         diagnostic(
@@ -386,7 +409,7 @@ function inspect(root, sourceModule, file, reference, modules, byPackage, diagno
       );
     return;
   }
-  const parsed = canonical(specifier);
+  const parsed = parseCanonicalModuleSpecifier(specifier);
   if (!parsed) {
     if (/^@(bop|rms)\//iu.test(specifier))
       diagnostics.push(
@@ -484,9 +507,9 @@ export async function validateImportBoundaries({ root = process.cwd() } = {}) {
   const modules = await discoverModules(root, diagnostics);
   const byPackage = new Map(modules.map((module) => [module.packageName, module]));
   for (const module of modules.sort((a, b) => a.packageName.localeCompare(b.packageName, "en")))
-    for (const file of await files(module.root, root, diagnostics))
-      for (const reference of references(await readFile(file, "utf8"), file))
-        inspect(root, module, file, reference, modules, byPackage, diagnostics);
+    for (const file of await discoverSourceFiles(module.root, root, diagnostics))
+      for (const reference of parseSourceReferences(await readFile(file, "utf8"), file))
+        inspectModuleReference(root, module, file, reference, modules, byPackage, diagnostics);
   diagnostics.sort((a, b) => formatted(a).localeCompare(formatted(b), "en"));
   return {
     valid: diagnostics.length === 0,

@@ -60,6 +60,7 @@ jobs:
           pnpm module-generator:check
           pnpm import-boundary:check
           pnpm database-ownership:check
+          pnpm domain-layer-boundary:check
           pnpm screen-registry:check
           pnpm list --depth 0
           pnpm exec turbo run build --dry=json
