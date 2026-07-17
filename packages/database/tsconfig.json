@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "pg"],
+    "lib": ["ES2024"],
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -13,14 +13,18 @@ const EXPECTED = {
 
 const REQUIRED_KEYS = [
   "BOP_RMS_COMPOSE_PROJECT",
+  "BOP_RMS_ENVIRONMENT",
+  "BOP_RMS_POSTGRES_HOST",
   "BOP_RMS_POSTGRES_PASSWORD_FILE",
   "BOP_RMS_POSTGRES_PORT",
   "BOP_RMS_POSTGRES_DB",
   "BOP_RMS_POSTGRES_USER",
+  "BOP_RMS_POSTGRES_SSL_MODE",
   "BOP_RMS_API_PORT",
   "BOP_RMS_MERCHANT_WEB_PORT",
   "BOP_RMS_CUSTOMER_PWA_PORT",
 ];
+const OPTIONAL_KEYS = ["BOP_RMS_POSTGRES_SSL_CA_FILE"];
 
 const PORT_KEYS = [
   "BOP_RMS_POSTGRES_PORT",
@@ -61,7 +65,8 @@ export function parseEnvFile(file) {
   for (const key of REQUIRED_KEYS)
     if (!Object.hasOwn(values, key)) fail(`Missing required environment variable: ${key}`);
   const unknown = Object.keys(values).filter(
-    (key) => key.startsWith("BOP_RMS_") && !REQUIRED_KEYS.includes(key),
+    (key) =>
+      key.startsWith("BOP_RMS_") && !REQUIRED_KEYS.includes(key) && !OPTIONAL_KEYS.includes(key),
   );
   if (unknown.length) fail(`Unsupported BOP-RMS environment variable: ${unknown.join(", ")}`);
   return values;
@@ -77,6 +82,17 @@ function validateProjectName(value) {
     fail(
       "BOP_RMS_COMPOSE_PROJECT must start with bop-rms- and use lowercase letters, digits, or hyphens",
     );
+}
+
+function validateDatabaseConnection(values) {
+  if (!["local", "test"].includes(values.BOP_RMS_ENVIRONMENT))
+    fail("The root local environment supports only local or test");
+  if (!["127.0.0.1", "localhost", "::1"].includes(values.BOP_RMS_POSTGRES_HOST))
+    fail("The root local environment requires a loopback PostgreSQL host");
+  if (values.BOP_RMS_POSTGRES_SSL_MODE !== "disable")
+    fail("The root local environment requires disabled SSL on its loopback-only connection");
+  if (values.BOP_RMS_POSTGRES_SSL_CA_FILE)
+    fail("The root local environment does not accept a PostgreSQL CA file");
 }
 
 function parsePort(value, key) {
@@ -203,6 +219,7 @@ export async function loadEnvironment({ checkPorts = false, envFile, root }) {
   const absoluteEnvFile = path.resolve(root, envFile);
   const values = parseEnvFile(absoluteEnvFile);
   validateProjectName(values.BOP_RMS_COMPOSE_PROJECT);
+  validateDatabaseConnection(values);
   validateIdentifier(values.BOP_RMS_POSTGRES_DB, "BOP_RMS_POSTGRES_DB");
   validateIdentifier(values.BOP_RMS_POSTGRES_USER, "BOP_RMS_POSTGRES_USER");
   const ports = Object.fromEntries(PORT_KEYS.map((key) => [key, parsePort(values[key], key)]));

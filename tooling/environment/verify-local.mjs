@@ -127,10 +127,13 @@ try {
     envFile,
     [
       `BOP_RMS_COMPOSE_PROJECT=${projectName}`,
+      "BOP_RMS_ENVIRONMENT=test",
+      "BOP_RMS_POSTGRES_HOST=127.0.0.1",
       `BOP_RMS_POSTGRES_PASSWORD_FILE=${path.relative(root, secret)}`,
       `BOP_RMS_POSTGRES_PORT=${ports.postgres}`,
       "BOP_RMS_POSTGRES_DB=bop_rms_wp0006_verify",
       "BOP_RMS_POSTGRES_USER=bop_rms_wp0006_verify",
+      "BOP_RMS_POSTGRES_SSL_MODE=disable",
       `BOP_RMS_API_PORT=${ports.api}`,
       `BOP_RMS_MERCHANT_WEB_PORT=${ports.merchantWeb}`,
       `BOP_RMS_CUSTOMER_PWA_PORT=${ports.customerPwa}`,
