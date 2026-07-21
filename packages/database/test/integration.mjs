@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { readMigrationCatalog } from "../src/catalog.ts";
 import { verifyFoundation } from "../src/foundation.ts";
+import { verifyHelpers } from "../src/helpers.ts";
 import { migrationAdvisoryKey, runMigrationCommand } from "../src/runner.ts";
 
 const { Client } = pg;
@@ -103,6 +104,11 @@ async function targetClient(database) {
     port,
     user,
   });
+  // Failure cleanup FORCE-drops every isolated database. Keep the expected
+  // administrator disconnect from masking the assertion that triggered cleanup.
+  client.on("error", (error) => {
+    if (!("code" in error) || error.code !== "57P01") throw error;
+  });
   await client.connect();
   return client;
 }
@@ -118,7 +124,7 @@ async function syntheticCatalog(label, extraSql) {
         fixtureRoot,
         "migrations",
         "0000-platform",
-        "0000_006_create_synthetic_rollback_probe.sql",
+        "0000_010_create_synthetic_rollback_probe.sql",
       ),
       extraSql,
     );
@@ -182,6 +188,10 @@ try {
     "0000_003_create_platform_eventing",
     "0000_004_create_platform_audit",
     "0000_005_create_platform_jobs",
+    "0000_006_create_platform_helpers",
+    "0000_007_create_uuid_money_helpers",
+    "0000_008_create_time_helpers",
+    "0000_009_create_tenant_scope_helpers",
   ]);
   const pendingVerify = await runMigrationCommand({
     catalog,
@@ -214,6 +224,10 @@ try {
     "0000_003_create_platform_eventing",
     "0000_004_create_platform_audit",
     "0000_005_create_platform_jobs",
+    "0000_006_create_platform_helpers",
+    "0000_007_create_uuid_money_helpers",
+    "0000_008_create_time_helpers",
+    "0000_009_create_tenant_scope_helpers",
   ]);
   const repeated = await runMigrationCommand({
     catalog,
@@ -243,18 +257,70 @@ try {
         "SELECT count(*)::integer AS count FROM platform_core.migration_history",
       )
     ).rows[0].count,
-    5,
+    9,
   );
   assert.deepEqual(await verifyFoundation(lifecycleClient, user), {
     diagnostics: [],
     status: "compliant",
   });
+  assert.deepEqual(await verifyHelpers(lifecycleClient, user), []);
+
+  const helperBehavior = await lifecycleClient.query(`SELECT
+      platform_helpers.is_uuid_v7('01890f47-2f7d-7cc2-98b1-9b4f680a8f11'::uuid) AS uuid_v7_valid,
+      platform_helpers.is_uuid_v7('550e8400-e29b-41d4-a716-446655440000'::uuid) AS uuid_v4_invalid,
+      platform_helpers.is_iana_time_zone('America/Toronto') AS timezone_valid,
+      platform_helpers.is_iana_time_zone('Synthetic/Unknown') AS timezone_invalid,
+      '9223372036854775807'::platform_helpers.amount_minor::bigint AS amount_max,
+      'CAD'::platform_helpers.currency_code::text AS currency`);
+  assert.deepEqual(helperBehavior.rows[0], {
+    amount_max: "9223372036854775807",
+    currency: "CAD",
+    timezone_invalid: false,
+    timezone_valid: true,
+    uuid_v4_invalid: false,
+    uuid_v7_valid: true,
+  });
+  await assert.rejects(
+    lifecycleClient.query("SELECT 'cad'::platform_helpers.currency_code"),
+    /currency_code_shape_check/u,
+  );
+  await lifecycleClient.query("BEGIN");
+  await lifecycleClient.query(
+    "SELECT set_config('bop.brand_id', '01890f47-2f7d-7cc2-98b1-9b4f680a8f11', true)",
+  );
+  await lifecycleClient.query(
+    "SELECT set_config('bop.store_id', '01890f47-2f7d-7cc2-98b1-9b4f680a8f12', true)",
+  );
+  assert.deepEqual(
+    (
+      await lifecycleClient.query(`SELECT
+        platform_helpers.current_brand_id()::text AS brand_id,
+        platform_helpers.current_store_id()::text AS store_id`)
+    ).rows[0],
+    {
+      brand_id: "01890f47-2f7d-7cc2-98b1-9b4f680a8f11",
+      store_id: "01890f47-2f7d-7cc2-98b1-9b4f680a8f12",
+    },
+  );
+  await lifecycleClient.query("ROLLBACK");
+  assert.deepEqual(
+    (
+      await lifecycleClient.query(`SELECT
+        platform_helpers.current_brand_id() AS brand_id,
+        platform_helpers.current_store_id() AS store_id`)
+    ).rows[0],
+    { brand_id: null, store_id: null },
+  );
+  await lifecycleClient.query("BEGIN");
+  await lifecycleClient.query("SELECT set_config('bop.brand_id', 'not-a-uuid', true)");
+  await assert.rejects(lifecycleClient.query("SELECT platform_helpers.current_brand_id()"));
+  await lifecycleClient.query("ROLLBACK");
   await lifecycleClient.query(
     `INSERT INTO platform_core.migration_history
       (migration_id, namespace, sequence, relative_path, owner_id, schema_name,
        checksum_sha256, runner_contract_version)
-     VALUES ('0000_006_alter_orphan_history', 0, 6,
-       'migrations/0000-platform/0000_006_alter_orphan_history.sql',
+     VALUES ('0000_010_alter_orphan_history', 0, 10,
+       'migrations/0000-platform/0000_010_alter_orphan_history.sql',
        'shared-infrastructure/platform-core', 'platform_core', $1, 1)`,
     ["0".repeat(64)],
   );
@@ -335,7 +401,7 @@ SELECT 1 / 0;
   const rollbackState = await rollbackClient.query(`SELECT
       to_regclass('platform_core.synthetic_rollback_probe')::text AS probe,
       (SELECT count(*)::integer FROM platform_core.migration_history) AS history_count`);
-  assert.deepEqual(rollbackState.rows[0], { history_count: 5, probe: null });
+  assert.deepEqual(rollbackState.rows[0], { history_count: 9, probe: null });
   await rollbackClient.end();
 
   const orderDatabase = await createDatabase("order");
@@ -448,6 +514,32 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
     diagnostics: [],
     status: "compliant",
   });
+  const helpersCli = path.join(root, "packages", "database", "src", "helpers-cli.ts");
+  const helpersInvoke = (...args) =>
+    spawnSync(process.execPath, [helpersCli, ...args], {
+      cwd: root,
+      encoding: "utf8",
+      env: childEnvironment,
+    });
+  const helpersCompliant = helpersInvoke("--env-file", cliEnv, "--json");
+  assert.equal(helpersCompliant.status, 0);
+  assert.deepEqual(JSON.parse(helpersCompliant.stdout), {
+    diagnostics: [],
+    status: "compliant",
+  });
+
+  const helperViolationClient = await targetClient(cliDatabase);
+  await helperViolationClient.query("GRANT USAGE ON SCHEMA platform_helpers TO PUBLIC");
+  await helperViolationClient.end();
+  const helpersViolation = helpersInvoke("--env-file", cliEnv, "--json");
+  assert.equal(helpersViolation.status, 1);
+  assert.deepEqual(
+    JSON.parse(helpersViolation.stderr).diagnostics.map((item) => item.code),
+    ["HELPER_PUBLIC_PRIVILEGE"],
+  );
+  const helperRestoreClient = await targetClient(cliDatabase);
+  await helperRestoreClient.query("REVOKE ALL ON SCHEMA platform_helpers FROM PUBLIC");
+  await helperRestoreClient.end();
 
   const violationClient = await targetClient(cliDatabase);
   await violationClient.query("GRANT USAGE ON SCHEMA platform_core TO PUBLIC");
@@ -497,8 +589,18 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
   assert(!`${foundationRejected.stdout}${foundationRejected.stderr}`.includes(password));
   assert(!`${foundationRejected.stdout}${foundationRejected.stderr}`.includes("SELECT"));
 
+  const helpersRejected = helpersInvoke("--env-file", wrongEnv, "--json");
+  assert.equal(helpersRejected.status, 2);
+  assert.equal(JSON.parse(helpersRejected.stderr).status, "error");
+  assert.deepEqual(
+    JSON.parse(helpersRejected.stderr).diagnostics.map((item) => item.code),
+    ["HELPER_CONNECTION_FAILED"],
+  );
+  assert(!`${helpersRejected.stdout}${helpersRejected.stderr}`.includes(password));
+  assert(!`${helpersRejected.stdout}${helpersRejected.stderr}`.includes("SELECT"));
+
   process.stdout.write(
-    "WP-0021 foundation integration passed: schemas, ACL, verifier, no-op, drift, rollback, locks, CLI, redaction, and cleanup\n",
+    "WP-0022 helper integration passed: objects, behavior, transaction scope, ACL, verifier, no-op, drift, rollback, locks, CLI, redaction, and cleanup\n",
   );
 } finally {
   await cleanup();

@@ -35,6 +35,10 @@ describe("migration catalog", () => {
       "0000_003_create_platform_eventing",
       "0000_004_create_platform_audit",
       "0000_005_create_platform_jobs",
+      "0000_006_create_platform_helpers",
+      "0000_007_create_uuid_money_helpers",
+      "0000_008_create_time_helpers",
+      "0000_009_create_tenant_scope_helpers",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -45,7 +49,7 @@ describe("migration catalog", () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
     expect(
       catalog.migrations
-        .slice(1)
+        .slice(1, 5)
         .map((migration) => [migration.id, migration.metadata.owner, migration.metadata.schema]),
     ).toEqual([
       ["0000_002_alter_platform_core", "shared-infrastructure/platform-core", "platform_core"],
@@ -54,13 +58,27 @@ describe("migration catalog", () => {
       ["0000_005_create_platform_jobs", "shared-infrastructure/jobs", "platform_jobs"],
     ]);
     const wp0021Sql = catalog.migrations
-      .slice(1)
+      .slice(1, 5)
       .map((migration) => migration.sql)
       .join("\n");
     expect(wp0021Sql).not.toMatch(
       /\bCREATE\s+(?:TABLE|VIEW|MATERIALIZED|SEQUENCE|FUNCTION|TRIGGER|EXTENSION|ROLE|USER|POLICY)\b/iu,
     );
     expect(wp0021Sql).not.toContain("platform_projection");
+  });
+
+  it("registers the exact WP-0022 helper migration authority", async () => {
+    const catalog = await readMigrationCatalog(repositoryRoot);
+    expect(
+      catalog.migrations
+        .slice(5)
+        .map((migration) => [migration.id, migration.metadata.owner, migration.metadata.schema]),
+    ).toEqual([
+      ["0000_006_create_platform_helpers", "shared-infrastructure/helpers", "platform_helpers"],
+      ["0000_007_create_uuid_money_helpers", "shared-infrastructure/helpers", "platform_helpers"],
+      ["0000_008_create_time_helpers", "shared-infrastructure/helpers", "platform_helpers"],
+      ["0000_009_create_tenant_scope_helpers", "shared-infrastructure/helpers", "platform_helpers"],
+    ]);
   });
 
   it("rejects a changed namespace registry", async () => {
@@ -112,6 +130,17 @@ describe("migration catalog", () => {
     const root = await fixture();
     const file = migrationPath(root);
     await writeFile(file, `${await readFile(file, "utf8")}COMMIT;\n`);
+    expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
+      "MIGRATION_TRANSACTION_UNSUPPORTED",
+    );
+  });
+
+  it("allows only a fixed pg_catalog search path inside a function definition", async () => {
+    const clean = await readMigrationCatalog(repositoryRoot);
+    expect(clean.diagnostics).toEqual([]);
+    const root = await fixture();
+    const file = migrationPath(root);
+    await writeFile(file, `${await readFile(file, "utf8")}SET search_path = pg_catalog;\n`);
     expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
       "MIGRATION_TRANSACTION_UNSUPPORTED",
     );

@@ -5,7 +5,7 @@ import process from "node:process";
 
 const root = process.cwd();
 const proposed = Array.from({ length: 17 }, (_, index) => String(index + 1).padStart(4, "0"));
-const accepted = Array.from({ length: 15 }, (_, index) => String(index + 18).padStart(4, "0"));
+const accepted = Array.from({ length: 16 }, (_, index) => String(index + 18).padStart(4, "0"));
 const expectedAdrs = new Map([
   ...proposed.map((id) => [id, "Proposed"]),
   ...accepted.map((id) => [id, "Accepted"]),

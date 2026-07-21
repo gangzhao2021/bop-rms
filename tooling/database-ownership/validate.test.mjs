@@ -112,6 +112,11 @@ afterEach(async () =>
 );
 
 describe("Database Schema Ownership Architecture Test", () => {
+  it("registers the default-denied platform helper schema under migration authority", () => {
+    expect(platformSource).toContain('schema: "platform_helpers"');
+    expect(platformSource).toContain('technicalOwner: "shared-infrastructure/helpers"');
+  });
+
   it("accepts owner read/write and legal shared event Projection access", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "synthetic-ordering", "rms_synthetic_ordering", [

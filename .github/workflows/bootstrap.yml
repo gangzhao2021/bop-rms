@@ -65,6 +65,8 @@ jobs:
           pnpm db:migrate -- --help
           pnpm foundation:check
           pnpm foundation:verify -- --help
+          pnpm helpers:check
+          pnpm helpers:verify -- --help
           pnpm screen-registry:check
           pnpm list --depth 0
           pnpm exec turbo run build --dry=json
