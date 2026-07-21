@@ -31,6 +31,26 @@ describe("foundation verifier", () => {
     });
   });
 
+  it("delegates the accepted platform_helpers schema to the WP-0022 verifier", () => {
+    expect(
+      evaluateFoundationSnapshot(
+        {
+          ...compliant,
+          schemas: [
+            ...compliant.schemas,
+            {
+              name: "platform_helpers",
+              owner,
+              publicDefaultPrivilege: false,
+              publicSchemaPrivilege: false,
+            },
+          ],
+        },
+        owner,
+      ),
+    ).toEqual({ diagnostics: [], status: "compliant" });
+  });
+
   it("reports missing, unexpected, owner, privilege, and object violations deterministically", () => {
     const result = evaluateFoundationSnapshot(
       {

@@ -102,6 +102,11 @@ export const canonicalPlatformDatabaseManifest = {
       allowedWriteAuthority: "job-infrastructure",
     },
     {
+      schema: "platform_helpers",
+      technicalOwner: "shared-infrastructure/helpers",
+      allowedWriteAuthority: "migration-runner",
+    },
+    {
       schema: "platform_projection",
       technicalOwner: "shared-infrastructure/projection",
       allowedWriteAuthority: "projection-builder",

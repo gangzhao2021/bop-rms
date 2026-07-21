@@ -21,3 +21,14 @@ export {
   type MigrationDatabaseState,
   type MigrationRunResult,
 } from "./runner.ts";
+export {
+  compareHelperDiagnostics,
+  evaluateHelperSnapshot,
+  formatHelperDiagnostic,
+  readHelperSnapshot,
+  verifyHelpers,
+  type HelperDiagnostic,
+  type HelperDiagnosticCode,
+  type HelperObjectState,
+  type HelperSnapshot,
+} from "./helpers.ts";

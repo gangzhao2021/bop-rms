@@ -39,6 +39,7 @@ const platformOwners = new Map([
   ["platform_audit", "shared-infrastructure/audit"],
   ["platform_core", "shared-infrastructure/platform-core"],
   ["platform_eventing", "shared-infrastructure/eventing"],
+  ["platform_helpers", "shared-infrastructure/helpers"],
   ["platform_jobs", "shared-infrastructure/jobs"],
   ["platform_projection", "shared-infrastructure/projection"],
 ]);
@@ -187,7 +188,6 @@ function validateSql(
     /\b(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT)\b/iu,
     /\bSET\s+ROLE\b/iu,
     /\bSET\s+SESSION\s+AUTHORIZATION\b/iu,
-    /\bSET\s+(?:LOCAL\s+|SESSION\s+)?search_path\b/iu,
     /\b(?:VACUUM|ALTER\s+SYSTEM)\b/iu,
     /^\s*\\/mu,
   ];
@@ -200,6 +200,22 @@ function validateSql(
         metadataKeys.length + 1,
       ),
     );
+  for (const match of body.matchAll(/\bSET\s+(?:LOCAL\s+|SESSION\s+)?search_path\b[^\n;]*/giu)) {
+    const statement = match[0].trim();
+    const currentStatement = body.slice(body.lastIndexOf(";", match.index) + 1, match.index);
+    const acceptedFunctionSetting =
+      statement === "SET search_path = pg_catalog" &&
+      /\bCREATE\s+FUNCTION\b/iu.test(currentStatement);
+    if (!acceptedFunctionSetting)
+      diagnostics.push(
+        diagnostic(
+          "MIGRATION_TRANSACTION_UNSUPPORTED",
+          file,
+          "migration contains transaction-prohibited or runner-owned SQL",
+          metadataKeys.length + 1,
+        ),
+      );
+  }
   if (/\b(?:CREATE|ALTER|DROP)\s+(?:DATABASE|ROLE|USER|TABLESPACE|EXTENSION)\b/iu.test(body))
     diagnostics.push(
       diagnostic(

@@ -6,6 +6,7 @@ const expectedSchemas = [
   "platform_eventing",
   "platform_jobs",
 ] as const;
+const acceptedLaterSchemas = new Set(["platform_helpers"]);
 
 export type FoundationDiagnosticCode =
   | "FOUNDATION_SCHEMA_MISSING"
@@ -108,7 +109,11 @@ export function evaluateFoundationSnapshot(
   }
 
   for (const schema of snapshot.schemas)
-    if (schema.name.startsWith("platform_") && !expectedSchemas.includes(schema.name as never))
+    if (
+      schema.name.startsWith("platform_") &&
+      !expectedSchemas.includes(schema.name as never) &&
+      !acceptedLaterSchemas.has(schema.name)
+    )
       diagnostics.push(
         diagnostic(
           schema.name,
