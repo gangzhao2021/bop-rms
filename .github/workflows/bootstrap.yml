@@ -63,6 +63,8 @@ jobs:
           pnpm domain-layer-boundary:check
           pnpm migration:check
           pnpm db:migrate -- --help
+          pnpm foundation:check
+          pnpm foundation:verify -- --help
           pnpm screen-registry:check
           pnpm list --depth 0
           pnpm exec turbo run build --dry=json

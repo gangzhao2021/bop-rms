@@ -4,24 +4,24 @@
 
 - Canonical Library file: `BOP-RMS Complete Handoff Package.md`
 - Source document ID: `BOP-RMS-HANDOFF`
-- Source document version: `0.5.6`
+- Source document version: `0.5.7`
 - Architecture baseline: `v1.0`
-- Current discussion node: `Closed — Section 94`
+- Current discussion node: `Closed — Section 95`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. Resolve it through the approved Library context using the exact canonical filename. Never store Library credentials, signed URLs, account identities, or private access metadata in Git.
 
-Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Section 89 is authoritative for repository guidance and WSL2; Section 90 is authoritative for Codex, Figma, plugins, skills, and external-mutation boundaries; Section 91 is authoritative for GitHub Free solo governance; Section 92 is authoritative for WP-0013 database-ownership evidence; Section 93 is authoritative for WP-0014 Domain-layer technology-dependency enforcement; Section 94 is authoritative for WP-0020 migration catalog、namespace、bootstrap、integrity、locking、transaction、diagnostic and staged-enforcement behavior.
+Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema、owner、ACL、isolation and verifier behavior.
 
 ## Active Work Package
 
-- [`WP-0020 — Migration Runner and Namespace Rules`](work-packages/WP-0020.md)
+- [`WP-0021 — Core / Eventing / Audit / Job Foundation Schemas`](work-packages/WP-0021.md)
 
-WP-0001 through WP-0014 are integrated into `main` at squash baseline `da3f911bfa81f468308d7e4404f7642b3c2abb6a`. WP-0020 is active from that exact baseline.
+WP-0001 through WP-0020 are integrated into `main` at baseline `44b79f4385eb2f16ac9c697ec33291a60b3bdb66`. WP-0021 documentation、bounded implementation、isolated PostgreSQL verification and final Architecture / Data / Security review passed from that exact baseline on `2026-07-20`。Ready-for-review PR delivery is authorized and CI remains pending；merge and deployment remain gated。
 
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
 
-WP-0020 owns only the common Migration Runner、root migration catalog / namespace registry、byte-exact integrity and deterministic CLI、the minimal `platform_core.migration_history` bootstrap control plane、focused synthetic / isolated-database tests and root / CI / guidance integration。It does not authorize business Module persistence、WP-0021 Core / Eventing / Audit / Job functional schemas and tables、a reusable seed / fixture framework、application startup migration、Provider、production connection / deploy、API / UI or a vertical slice。
+WP-0021 is schema-only：harden the existing `platform_core` schema ACL and create empty `platform_eventing`、`platform_audit` and `platform_jobs` schemas with exact owner、default-deny ACL、read-only verification and isolated-test contracts。It creates zero functional tables；`platform_core.migration_history` remains the sole table；`platform_projection`、runtime grants、roles / logins、RLS policies and later Eventing / Audit / Job / Idempotency objects remain excluded。
 
-The Owner authorized the bounded WP-0020 branch、documentation、implementation、accepted dependency / lockfile change、local isolated PostgreSQL verification and one commit、push / Draft Pull Request on `2026-07-17`。Ready transition、merge、deploy、production connection、WP-0021 and Provider mutation remain unauthorized and require later explicit authorization。
+The Owner authorized the bounded WP-0021 branch、four exact migrations、independent read-only verifier、minimum root / sole-workflow integration、tests and local isolated PostgreSQL create / drop on `2026-07-20`。The Owner subsequently authorized final review、WP-scoped remediation、commit、push、a Ready-for-review PR and CI inspection。No dependency / lockfile change is authorized or required。Merge、deploy、staging / production connection and Provider mutation remain unauthorized。

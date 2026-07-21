@@ -29,9 +29,38 @@ describe("migration catalog", () => {
     const second = await readMigrationCatalog(repositoryRoot);
     expect(first.diagnostics).toEqual([]);
     expect(first).toEqual(second);
-    expect(first.migrations).toHaveLength(1);
-    expect(first.migrations[0]?.id).toBe("0000_001_create_migration_history");
-    expect(first.migrations[0]?.checksumSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(first.migrations.map((migration) => migration.id)).toEqual([
+      "0000_001_create_migration_history",
+      "0000_002_alter_platform_core",
+      "0000_003_create_platform_eventing",
+      "0000_004_create_platform_audit",
+      "0000_005_create_platform_jobs",
+    ]);
+    expect(
+      first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
+    ).toBe(true);
+  });
+
+  it("keeps WP-0021 schema-only with the exact owner and schema sequence", async () => {
+    const catalog = await readMigrationCatalog(repositoryRoot);
+    expect(
+      catalog.migrations
+        .slice(1)
+        .map((migration) => [migration.id, migration.metadata.owner, migration.metadata.schema]),
+    ).toEqual([
+      ["0000_002_alter_platform_core", "shared-infrastructure/platform-core", "platform_core"],
+      ["0000_003_create_platform_eventing", "shared-infrastructure/eventing", "platform_eventing"],
+      ["0000_004_create_platform_audit", "shared-infrastructure/audit", "platform_audit"],
+      ["0000_005_create_platform_jobs", "shared-infrastructure/jobs", "platform_jobs"],
+    ]);
+    const wp0021Sql = catalog.migrations
+      .slice(1)
+      .map((migration) => migration.sql)
+      .join("\n");
+    expect(wp0021Sql).not.toMatch(
+      /\bCREATE\s+(?:TABLE|VIEW|MATERIALIZED|SEQUENCE|FUNCTION|TRIGGER|EXTENSION|ROLE|USER|POLICY)\b/iu,
+    );
+    expect(wp0021Sql).not.toContain("platform_projection");
   });
 
   it("rejects a changed namespace registry", async () => {

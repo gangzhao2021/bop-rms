@@ -11,10 +11,11 @@
 - Execute migrations only from the root `migrations/` catalog and validate Manifest/platform-registry ownership before DDL.
 - Applied migration bytes and append-only history are immutable. Never add down, repair, baseline, force, checksum-bypass, or mark-applied behavior.
 - Use the fixed advisory lock, one dedicated client, one transaction per migration, finite local timeouts, fully qualified SQL, and atomic history insertion.
+- Keep the WP-0021 foundation verifier independent and read-only. It may inspect expected schemas, owner, ACL and unexpected objects but never execute DDL or repair state.
 - Keep WP-0013 fail-closed for Module persistence. A package/database exception is not a Module exception.
 
 ## Security and verification
 
 - Never accept or log a password, DSN, SQL body, bind value, unrestricted database error, or real business/PII fixture.
-- Local integration databases must have unique WP-0020-owned names and be cleaned after both success and failure.
+- Local integration databases must have unique active-WP-owned names and be cleaned after both success and failure.
 - Run the active WP migration, ownership, integration, root, security, and final-diff checks before handoff.

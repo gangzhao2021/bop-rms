@@ -95,11 +95,13 @@ The Domain Layer Technology Dependency Test lives in [`tooling/domain-layer-boun
 
 ## Database migrations
 
-The WP-0020 Migration Runner lives in [`packages/database`](packages/database) and executes only the immutable root [`migrations`](migrations) catalog. Inspect the catalog and CLI without connecting to PostgreSQL：
+The integrated WP-0020 Migration Runner lives in [`packages/database`](packages/database) and executes only the immutable root [`migrations`](migrations) catalog. Inspect the catalog and CLI without connecting to PostgreSQL：
 
 ```bash
 pnpm migration:check
 pnpm db:migrate -- --help
+pnpm foundation:check
+pnpm foundation:verify -- --help
 ```
 
 With an ignored environment file and 0600 password file，observe or verify a target explicitly：
@@ -110,7 +112,9 @@ pnpm db:migrate -- verify --env-file .env
 pnpm db:migrate -- apply --env-file .env --confirm-target local:bop_rms_local
 ```
 
-`apply` is the only mutating command。It uses one dedicated client、the accepted advisory lock and one transaction per migration。There is no down、repair、baseline、force or checksum-bypass path；applied migrations are immutable and corrected through reviewed forward migrations。The only WP-0020 database object is `platform_core.migration_history`；WP-0021 foundation schemas and tables remain unimplemented。
+`apply` is the only mutating command。It uses one dedicated client、the accepted advisory lock and one transaction per migration。There is no down、repair、baseline、force or checksum-bypass path；applied migrations are immutable and corrected through reviewed forward migrations。The only current database object is `platform_core.migration_history`。WP-0021 is decision-closed as a separately authorized schema-only implementation：three empty schemas plus Core ACL hardening，with zero new functional tables。
+
+After applying the catalog to an explicitly configured target，run the independent read-only verifier with `pnpm foundation:verify -- --env-file <path>`。It checks exact foundation schemas、owner、PUBLIC / default privileges and unexpected objects without executing DDL or repairing state。
 
 ## Workspace boundaries
 
@@ -132,6 +136,7 @@ At the current bootstrap stage, `apps/` contains only deployable runtime/shell c
 - WP-0012: Import Boundary Architecture Test (integrated)
 - WP-0013: Database Schema Ownership Architecture Test (integrated)
 - WP-0014: Domain Layer ORM / Infrastructure Test (integrated)
-- WP-0020: Migration Runner and Namespace Rules (active)
+- WP-0020: Migration Runner and Namespace Rules (integrated)
+- WP-0021: Core / Eventing / Audit / Job Foundation Schemas (bounded implementation and final review passed；Ready-for-review PR delivery authorized，CI pending)
 
 See [`docs/spec/README.md`](docs/spec/README.md) for specification authority and the active Work Package.
