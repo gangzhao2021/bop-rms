@@ -14,15 +14,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Active Work Package
 
-- [`WP-0022 — UUID / Money / Time / Tenant Scope Database Helpers`](work-packages/WP-0022.md)
+- None。WP-0022 is integrated and closed；the next Work Package requires a fresh authorized brief and must not be inferred from sequence alone。
 
-WP-0001 through WP-0021 are integrated into `main` at baseline `ea274863cc10018b96034a98b91f589c9e8a9f91`。WP-0021 documentation、bounded implementation、isolated PostgreSQL verification and final Architecture / Data / Security review passed；PR #15 and its owning CI passed，and the authorized squash merge produced that exact `origin/main` head。A fresh fetch on `2026-07-21` confirmed no later remote drift。Deployment remains gated。
+WP-0001 through WP-0022 are integrated into `main` at implementation integration baseline `2f87018d40f67f9717f0aeaab84ef2b815d02298`。WP-0022 documentation、bounded implementation、isolated PostgreSQL verification and final Architecture / Data / Security review passed；PR #16、its owning CI and the post-merge main push CI passed，and the authorized squash merge produced that exact implementation head。This closeout records that evidence without redefining the implementation baseline。Deployment remains gated。
 
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
 
-WP-0021 is integrated and closed without changing its accepted design。The Owner accepted Canonical `0.5.8` Section 96、ADR-0033 and IDR-0046 on `2026-07-21`，closing the WP-0022 exact object、ownership、ACL、migration、verification and non-goal decisions。WP-0022 is `Definition of Ready: PASS` at exact `origin/main@ea274863cc10018b96034a98b91f589c9e8a9f91`；local implementation、complete repository verification and the isolated PostgreSQL acceptance matrix pass。External Evidence remains gated and unclaimed。
+WP-0021 and WP-0022 are integrated and closed without changing their accepted designs。The Owner accepted Canonical `0.5.8` Section 96、ADR-0033 and IDR-0046 on `2026-07-21`，closing the WP-0022 exact object、ownership、ACL、migration、verification and non-goal decisions。WP-0022 local implementation、complete repository verification、isolated PostgreSQL acceptance、PR #16 owning CI、authorized squash merge and post-merge main CI pass at implementation integration baseline `main@2f87018d40f67f9717f0aeaab84ef2b815d02298`。External Evidence remains gated and unclaimed；no subsequent Work Package is active or implied。
 
 The current accepted floor is：PostgreSQL `18.4`；application-owned business、Command、Event and Correlation IDs use UUIDv7 through `uuid 14.0.1`；a database default may call built-in PostgreSQL 18 `uuidv7()` only for migration / repair paths；the extension allowlist remains only `pg_trgm` and `unaccent`。Money facts use `amount_minor bigint` plus ISO 4217 `currency_code char(3)` and never PostgreSQL `money` or binary floating point。Instants use UTC `timestamptz`，Store zones use IANA identifiers，local operating dates use `date` and wall-clock configuration uses `time without time zone`。Brand is the primary Tenant boundary；Store-owned facts carry both required scopes；critical uniqueness and query indexes include scope；future Brand / Store tables require application authorization plus RLS defense in depth using transaction-local server-resolved context。Cross-domain private-table access remains prohibited。
 
