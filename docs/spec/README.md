@@ -16,7 +16,7 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 - [`WP-0021 — Core / Eventing / Audit / Job Foundation Schemas`](work-packages/WP-0021.md)
 
-WP-0001 through WP-0020 are integrated into `main` at baseline `44b79f4385eb2f16ac9c697ec33291a60b3bdb66`. WP-0021 documentation、bounded implementation、isolated PostgreSQL verification and final Architecture / Data / Security review passed from that exact baseline on `2026-07-20`。Ready-for-review PR delivery is authorized and CI remains pending；merge and deployment remain gated。
+WP-0001 through WP-0020 are integrated into `main` at baseline `44b79f4385eb2f16ac9c697ec33291a60b3bdb66`. WP-0021 documentation、bounded implementation、isolated PostgreSQL verification and final Architecture / Data / Security review passed from that exact baseline on `2026-07-20`。Ready-for-review PR #15 and its owning CI passed；the Owner authorized squash merge，while deployment remains gated。
 
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
@@ -24,4 +24,4 @@ Agents must read the root `AGENTS.md`, this index, and the active Work Package b
 
 WP-0021 is schema-only：harden the existing `platform_core` schema ACL and create empty `platform_eventing`、`platform_audit` and `platform_jobs` schemas with exact owner、default-deny ACL、read-only verification and isolated-test contracts。It creates zero functional tables；`platform_core.migration_history` remains the sole table；`platform_projection`、runtime grants、roles / logins、RLS policies and later Eventing / Audit / Job / Idempotency objects remain excluded。
 
-The Owner authorized the bounded WP-0021 branch、four exact migrations、independent read-only verifier、minimum root / sole-workflow integration、tests and local isolated PostgreSQL create / drop on `2026-07-20`。The Owner subsequently authorized final review、WP-scoped remediation、commit、push、a Ready-for-review PR and CI inspection。No dependency / lockfile change is authorized or required。Merge、deploy、staging / production connection and Provider mutation remain unauthorized。
+The Owner authorized the bounded WP-0021 branch、four exact migrations、independent read-only verifier、minimum root / sole-workflow integration、tests and local isolated PostgreSQL create / drop on `2026-07-20`。The Owner subsequently authorized final review、WP-scoped remediation、commit、push、a Ready-for-review PR、CI inspection and squash merge after successful owning checks。No dependency / lockfile change is authorized or required。Deploy、staging / production connection and Provider mutation remain unauthorized。

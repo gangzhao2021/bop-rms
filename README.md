@@ -137,6 +137,6 @@ At the current bootstrap stage, `apps/` contains only deployable runtime/shell c
 - WP-0013: Database Schema Ownership Architecture Test (integrated)
 - WP-0014: Domain Layer ORM / Infrastructure Test (integrated)
 - WP-0020: Migration Runner and Namespace Rules (integrated)
-- WP-0021: Core / Eventing / Audit / Job Foundation Schemas (bounded implementation and final review passed；Ready-for-review PR delivery authorized，CI pending)
+- WP-0021: Core / Eventing / Audit / Job Foundation Schemas (bounded implementation and final review passed；PR #15 CI passed and squash merge authorized，deployment remains gated)
 
 See [`docs/spec/README.md`](docs/spec/README.md) for specification authority and the active Work Package.
