@@ -49,9 +49,12 @@ function isConnectionLoss(error: unknown): boolean {
   return code?.startsWith("08") === true || ["57P01", "57P02", "57P03"].includes(code ?? "");
 }
 
-async function connect(config: MigrationConnectionConfig): Promise<PgClient> {
+export async function connectMigrationDatabase(
+  config: MigrationConnectionConfig,
+  applicationName = "bop-rms-migration-runner",
+): Promise<PgClient> {
   const clientConfig: ClientConfig = {
-    application_name: "bop-rms-migration-runner",
+    application_name: applicationName,
     connectionTimeoutMillis: 10_000,
     database: config.database,
     host: config.host,
@@ -73,7 +76,10 @@ async function connect(config: MigrationConnectionConfig): Promise<PgClient> {
   }
 }
 
-async function verifyTarget(client: PgClient, config: MigrationConnectionConfig): Promise<void> {
+export async function verifyMigrationTarget(
+  client: PgClient,
+  config: MigrationConnectionConfig,
+): Promise<void> {
   try {
     const identity = await client.query<{
       database: string;
@@ -118,7 +124,10 @@ async function verifyTarget(client: PgClient, config: MigrationConnectionConfig)
   }
 }
 
-async function acquireLock(client: PgClient, command: MigrationCommand): Promise<boolean> {
+export async function acquireMigrationLock(
+  client: PgClient,
+  command: MigrationCommand,
+): Promise<boolean> {
   const fn = command === "apply" ? "pg_try_advisory_lock" : "pg_try_advisory_lock_shared";
   const result = await client.query<{ acquired: boolean }>(`SELECT ${fn}($1, $2) AS acquired`, [
     ...advisoryKey,
@@ -126,7 +135,10 @@ async function acquireLock(client: PgClient, command: MigrationCommand): Promise
   return result.rows[0]?.acquired === true;
 }
 
-async function releaseLock(client: PgClient, command: MigrationCommand): Promise<void> {
+export async function releaseMigrationLock(
+  client: PgClient,
+  command: MigrationCommand,
+): Promise<void> {
   const fn = command === "apply" ? "pg_advisory_unlock" : "pg_advisory_unlock_shared";
   await client.query(`SELECT ${fn}($1, $2)`, [...advisoryKey]);
 }
@@ -374,11 +386,11 @@ export async function runMigrationCommand(options: {
       "MIGRATION_CONFIG_UNSAFE",
       "apply target confirmation does not match the configured environment and database",
     );
-  const client = await connect(config);
+  const client = await connectMigrationDatabase(config);
   let locked = false;
   try {
-    await verifyTarget(client, config);
-    locked = await acquireLock(client, command);
+    await verifyMigrationTarget(client, config);
+    locked = await acquireMigrationLock(client, command);
     if (!locked)
       return {
         applied: [],
@@ -509,7 +521,7 @@ export async function runMigrationCommand(options: {
       "PostgreSQL operation failed",
     );
   } finally {
-    if (locked) await releaseLock(client, command).catch(() => undefined);
+    if (locked) await releaseMigrationLock(client, command).catch(() => undefined);
     await client.end().catch(() => undefined);
   }
 }
