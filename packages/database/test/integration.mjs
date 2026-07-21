@@ -315,6 +315,183 @@ try {
   await lifecycleClient.query("SELECT set_config('bop.brand_id', 'not-a-uuid', true)");
   await assert.rejects(lifecycleClient.query("SELECT platform_helpers.current_brand_id()"));
   await lifecycleClient.query("ROLLBACK");
+
+  await lifecycleClient.query("CREATE SCHEMA wp0023_concurrency AUTHORIZATION CURRENT_USER");
+  await lifecycleClient.query(`CREATE TABLE wp0023_concurrency.synthetic_aggregate (
+    id uuid PRIMARY KEY,
+    version bigint NOT NULL,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    created_by_actor_id uuid,
+    updated_by_actor_id uuid,
+    synthetic_value text NOT NULL
+  )`);
+  const aggregateId = "01890f47-2f7d-7cc2-98b1-9b4f680a8f21";
+  const creatorId = "01890f47-2f7d-7cc2-98b1-9b4f680a8f22";
+  const winnerActorId = "01890f47-2f7d-7cc2-98b1-9b4f680a8f23";
+  const staleActorId = "01890f47-2f7d-7cc2-98b1-9b4f680a8f24";
+  const retryActorId = "01890f47-2f7d-7cc2-98b1-9b4f680a8f25";
+  const createdAt = "2026-07-21T16:00:00.000Z";
+  const winnerUpdatedAt = "2026-07-21T16:01:00.000Z";
+  const staleUpdatedAt = "2026-07-21T16:02:00.000Z";
+  const retryUpdatedAt = "2026-07-21T16:03:00.000Z";
+  const rolledBackUpdatedAt = "2026-07-21T16:04:00.000Z";
+  await lifecycleClient.query(
+    `INSERT INTO wp0023_concurrency.synthetic_aggregate
+      (id, version, created_at, updated_at, created_by_actor_id, updated_by_actor_id,
+       synthetic_value)
+     VALUES ($1::uuid, 1, $2::timestamptz, $2::timestamptz, $3::uuid, $3::uuid, $4)`,
+    [aggregateId, createdAt, creatorId, "initial"],
+  );
+
+  const staleClient = await targetClient(lifecycleDatabase);
+  await lifecycleClient.query("SET statement_timeout TO '5s'");
+  await lifecycleClient.query("SET lock_timeout TO '5s'");
+  await staleClient.query("SET statement_timeout TO '5s'");
+  await staleClient.query("SET lock_timeout TO '5s'");
+  await lifecycleClient.query("BEGIN");
+  await staleClient.query("BEGIN");
+  const winnerRead = await lifecycleClient.query(
+    "SELECT version FROM wp0023_concurrency.synthetic_aggregate WHERE id = $1::uuid",
+    [aggregateId],
+  );
+  const staleRead = await staleClient.query(
+    "SELECT version FROM wp0023_concurrency.synthetic_aggregate WHERE id = $1::uuid",
+    [aggregateId],
+  );
+  assert.equal(typeof winnerRead.rows[0].version, "string");
+  assert.equal(typeof staleRead.rows[0].version, "string");
+  assert.equal(winnerRead.rows[0].version, "1");
+  assert.equal(staleRead.rows[0].version, "1");
+
+  const winnerUpdate = await lifecycleClient.query(
+    `UPDATE wp0023_concurrency.synthetic_aggregate
+     SET synthetic_value = $2,
+         version = version + 1,
+         updated_at = $3::timestamptz,
+         updated_by_actor_id = $4::uuid
+     WHERE id = $1::uuid AND version = $5::bigint
+     RETURNING version`,
+    [aggregateId, "winner", winnerUpdatedAt, winnerActorId, winnerRead.rows[0].version],
+  );
+  assert.equal(winnerUpdate.rowCount, 1);
+  assert.equal(typeof winnerUpdate.rows[0].version, "string");
+  assert.equal(winnerUpdate.rows[0].version, "2");
+  await lifecycleClient.query("COMMIT");
+
+  const staleUpdate = await staleClient.query(
+    `UPDATE wp0023_concurrency.synthetic_aggregate
+     SET synthetic_value = $2,
+         version = version + 1,
+         updated_at = $3::timestamptz,
+         updated_by_actor_id = $4::uuid
+     WHERE id = $1::uuid AND version = $5::bigint
+     RETURNING version`,
+    [aggregateId, "stale", staleUpdatedAt, staleActorId, staleRead.rows[0].version],
+  );
+  assert.equal(staleUpdate.rowCount, 0);
+  assert.deepEqual(staleUpdate.rows, []);
+  await staleClient.query("COMMIT");
+
+  const committedWinner = await staleClient.query(
+    `SELECT version,
+            synthetic_value,
+            created_at = $2::timestamptz AS created_at_unchanged,
+            updated_at = $3::timestamptz AS winner_updated_at,
+            created_by_actor_id = $4::uuid AS creator_unchanged,
+            updated_by_actor_id = $5::uuid AS winner_actor
+     FROM wp0023_concurrency.synthetic_aggregate
+     WHERE id = $1::uuid`,
+    [aggregateId, createdAt, winnerUpdatedAt, creatorId, winnerActorId],
+  );
+  assert.deepEqual(committedWinner.rows, [
+    {
+      created_at_unchanged: true,
+      creator_unchanged: true,
+      synthetic_value: "winner",
+      version: "2",
+      winner_actor: true,
+      winner_updated_at: true,
+    },
+  ]);
+
+  const retryUpdate = await staleClient.query(
+    `UPDATE wp0023_concurrency.synthetic_aggregate
+     SET synthetic_value = $2,
+         version = version + 1,
+         updated_at = $3::timestamptz,
+         updated_by_actor_id = $4::uuid
+     WHERE id = $1::uuid AND version = $5::bigint
+     RETURNING version`,
+    [aggregateId, "retry", retryUpdatedAt, retryActorId, committedWinner.rows[0].version],
+  );
+  assert.equal(retryUpdate.rowCount, 1);
+  assert.equal(retryUpdate.rows[0].version, "3");
+  const duplicateRetry = await staleClient.query(
+    `UPDATE wp0023_concurrency.synthetic_aggregate
+     SET synthetic_value = $2,
+         version = version + 1,
+         updated_at = $3::timestamptz,
+         updated_by_actor_id = $4::uuid
+     WHERE id = $1::uuid AND version = $5::bigint
+     RETURNING version`,
+    [aggregateId, "duplicate-retry", staleUpdatedAt, staleActorId, committedWinner.rows[0].version],
+  );
+  assert.equal(duplicateRetry.rowCount, 0);
+  assert.deepEqual(duplicateRetry.rows, []);
+
+  await staleClient.query("BEGIN");
+  const rolledBackUpdate = await staleClient.query(
+    `UPDATE wp0023_concurrency.synthetic_aggregate
+     SET synthetic_value = $2,
+         version = version + 1,
+         updated_at = $3::timestamptz,
+         updated_by_actor_id = $4::uuid
+     WHERE id = $1::uuid AND version = $5::bigint
+     RETURNING version`,
+    [aggregateId, "rolled-back", rolledBackUpdatedAt, staleActorId, retryUpdate.rows[0].version],
+  );
+  assert.equal(rolledBackUpdate.rowCount, 1);
+  assert.equal(rolledBackUpdate.rows[0].version, "4");
+  await staleClient.query("ROLLBACK");
+  const afterRollback = await staleClient.query(
+    `SELECT version,
+            synthetic_value,
+            updated_at = $2::timestamptz AS retry_updated_at,
+            updated_by_actor_id = $3::uuid AS retry_actor
+     FROM wp0023_concurrency.synthetic_aggregate
+     WHERE id = $1::uuid`,
+    [aggregateId, retryUpdatedAt, retryActorId],
+  );
+  assert.deepEqual(afterRollback.rows, [
+    {
+      retry_actor: true,
+      retry_updated_at: true,
+      synthetic_value: "retry",
+      version: "3",
+    },
+  ]);
+
+  const missingUpdate = await staleClient.query(
+    `UPDATE wp0023_concurrency.synthetic_aggregate
+     SET version = version + 1
+     WHERE id = $1::uuid AND version = $2::bigint
+     RETURNING version`,
+    ["01890f47-2f7d-7cc2-98b1-9b4f680a8fff", afterRollback.rows[0].version],
+  );
+  assert.equal(missingUpdate.rowCount, 0);
+  assert.deepEqual(missingUpdate.rows, []);
+  await staleClient.end();
+  await lifecycleClient.query("DROP SCHEMA wp0023_concurrency CASCADE");
+  assert.equal(
+    (
+      await lifecycleClient.query(
+        "SELECT to_regnamespace('wp0023_concurrency')::text AS schema_name",
+      )
+    ).rows[0].schema_name,
+    null,
+  );
+
   await lifecycleClient.query(
     `INSERT INTO platform_core.migration_history
       (migration_id, namespace, sequence, relative_path, owner_id, schema_name,
@@ -600,7 +777,7 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
   assert(!`${helpersRejected.stdout}${helpersRejected.stderr}`.includes("SELECT"));
 
   process.stdout.write(
-    "WP-0022 helper integration passed: objects, behavior, transaction scope, ACL, verifier, no-op, drift, rollback, locks, CLI, redaction, and cleanup\n",
+    "WP-0023 optimistic concurrency integration passed: one winner, stale rejection, exact bigint versions, retry, rollback, prior database contracts, redaction, and cleanup\n",
   );
 } finally {
   await cleanup();
