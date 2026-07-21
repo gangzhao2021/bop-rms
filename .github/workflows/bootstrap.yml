@@ -91,3 +91,6 @@ jobs:
           pnpm install --frozen-lockfile
           after="$(sha256sum pnpm-lock.yaml)"
           test "$before" = "$after"
+
+      - name: Verify WP-0024 isolated PostgreSQL lifecycle
+        run: pnpm isolated-database:acceptance

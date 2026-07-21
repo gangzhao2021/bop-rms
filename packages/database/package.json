@@ -12,9 +12,9 @@
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
-    "lint": "eslint src test",
-    "test": "vitest run --root ../.. packages/database/src/catalog.test.ts packages/database/src/config.test.ts packages/database/src/foundation.test.ts packages/database/src/helpers.test.ts",
-    "test:integration": "node test/integration.mjs",
+    "lint": "eslint src test test-support",
+    "test": "node test-support/isolated-database.test.mjs && vitest run --root ../.. packages/database/src/catalog.test.ts packages/database/src/config.test.ts packages/database/src/foundation.test.ts packages/database/src/helpers.test.ts",
+    "test:integration": "node test/integration.mjs && node test/isolated-database-acceptance.mjs",
     "typecheck": "tsc --project tsconfig.json"
   },
   "dependencies": {

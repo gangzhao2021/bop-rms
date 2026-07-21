@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { cp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -9,199 +9,89 @@ import { readMigrationCatalog } from "../src/catalog.ts";
 import { verifyFoundation } from "../src/foundation.ts";
 import { verifyHelpers } from "../src/helpers.ts";
 import { migrationAdvisoryKey, runMigrationCommand } from "../src/runner.ts";
+import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const localRoot = path.join(root, ".local");
-await mkdir(localRoot, { mode: 0o700, recursive: true });
-const temp = await mkdtemp(path.join(localRoot, "wp0021-integration-"));
-const project = `bop-rms-wp0021-verify-${process.pid}`;
-const port = Number.parseInt(process.env.BOP_RMS_WP0021_VERIFY_PORT ?? "55435", 10);
-const adminDatabase = "bop_rms_wp0021_admin";
-const user = "bop_rms_wp0021_runner";
-const password = `wp0021-synthetic-${process.pid}`;
-const secret = path.join(temp, "password");
-const composeEnv = path.join(temp, "compose.env");
-const logFile = path.join(temp, "postgres.log");
-const databases = new Set();
-let admin;
-
-assert.match(project, /^bop-rms-wp0021-verify-[0-9]+$/u);
-assert(Number.isInteger(port) && port >= 1 && port <= 65_535, "verification port must be safe");
-
-await writeFile(secret, password, { mode: 0o600 });
-await writeFile(
-  composeEnv,
-  [
-    `BOP_RMS_COMPOSE_PROJECT=${project}`,
-    "BOP_RMS_ENVIRONMENT=test",
-    "BOP_RMS_POSTGRES_HOST=127.0.0.1",
-    `BOP_RMS_POSTGRES_PASSWORD_FILE=${secret}`,
-    `BOP_RMS_POSTGRES_PORT=${port}`,
-    `BOP_RMS_POSTGRES_DB=${adminDatabase}`,
-    `BOP_RMS_POSTGRES_USER=${user}`,
-    "BOP_RMS_POSTGRES_SSL_MODE=disable",
-    "BOP_RMS_API_PORT=53021",
-    "BOP_RMS_MERCHANT_WEB_PORT=53022",
-    "BOP_RMS_CUSTOMER_PWA_PORT=53023",
-    "",
-  ].join("\n"),
-  { mode: 0o600 },
-);
-
-function compose(...args) {
-  return execFileSync(
-    "docker",
-    [
-      "compose",
-      "--project-directory",
-      root,
-      "--project-name",
-      project,
-      "--env-file",
-      composeEnv,
-      "--file",
-      path.join(root, "compose.yaml"),
-      ...args,
-    ],
-    { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-  );
-}
-
-function identifier(value) {
-  assert.match(value, /^bop_rms_wp0021_[a-z0-9_]+$/u);
-  return `"${value}"`;
-}
-
-function config(database) {
-  return {
-    database,
-    environment: "test",
-    host: "127.0.0.1",
-    password,
-    port,
-    ssl: false,
-    user,
-  };
-}
-
-async function createDatabase(label) {
-  const database = `bop_rms_wp0021_${process.pid}_${label}`;
-  identifier(database);
-  await admin.query(
-    `CREATE DATABASE ${identifier(database)} TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`,
-  );
-  databases.add(database);
-  return database;
-}
-
-async function targetClient(database) {
-  const client = new Client({
-    application_name: "bop-rms-wp0021-integration",
-    database,
-    host: "127.0.0.1",
-    password,
-    port,
-    user,
-  });
-  // Failure cleanup FORCE-drops every isolated database. Keep the expected
-  // administrator disconnect from masking the assertion that triggered cleanup.
-  client.on("error", (error) => {
-    if (!("code" in error) || error.code !== "57P01") throw error;
-  });
-  await client.connect();
-  return client;
-}
-
-async function syntheticCatalog(label, extraSql) {
-  const fixtureRoot = path.join(temp, `catalog-${label}`);
-  await cp(path.join(root, "migrations"), path.join(fixtureRoot, "migrations"), {
-    recursive: true,
-  });
-  if (extraSql)
-    await writeFile(
-      path.join(
-        fixtureRoot,
-        "migrations",
-        "0000-platform",
-        "0000_010_create_synthetic_rollback_probe.sql",
-      ),
-      extraSql,
-    );
-  const catalog = await readMigrationCatalog(fixtureRoot);
-  assert.deepEqual(catalog.diagnostics, []);
-  return { catalog, fixtureRoot };
-}
-
-async function cleanup() {
-  try {
-    if (admin) {
-      for (const database of databases) {
-        await admin.query(`DROP DATABASE IF EXISTS ${identifier(database)} WITH (FORCE)`);
-      }
-      await admin.end();
-    }
-  } catch {
-    // Compose cleanup still owns the isolated project and volume.
-  }
-  try {
-    const logs = compose("logs", "--no-color", "postgres");
-    await writeFile(logFile, logs, { mode: 0o600 });
-    assert(!logs.includes(password), "PostgreSQL logs disclosed the synthetic password");
-  } finally {
-    try {
-      compose("down", "--volumes", "--remove-orphans");
-    } finally {
-      await rm(temp, { force: true, recursive: true });
-    }
-  }
-}
-
-process.once("SIGINT", () => void cleanup().finally(() => process.exit(130)));
-process.once("SIGTERM", () => void cleanup().finally(() => process.exit(143)));
-
-try {
-  compose("down", "--volumes", "--remove-orphans");
-  compose("up", "--detach", "--wait", "--wait-timeout", "120", "postgres");
-  admin = new Client({
-    application_name: "bop-rms-wp0021-integration-admin",
-    database: adminDatabase,
-    host: "127.0.0.1",
-    password,
-    port,
-    user,
+await withIsolatedDatabase({ caseId: "integration", root }, async (isolated) => {
+  const { clientConfig, databaseName: lifecycleDatabase, fixtureRoot: temp, runId } = isolated;
+  const { password, user } = clientConfig;
+  const composeEnv = clientConfig.envFile;
+  const controlRoot = path.dirname(composeEnv);
+  const secret = path.join(path.dirname(composeEnv), "password");
+  const databases = new Set([lifecycleDatabase]);
+  const adminDatabase = `bop_rms_test_${runId}_admin`;
+  const admin = new Client({ ...clientConfig, database: adminDatabase });
+  admin.on("error", (error) => {
+    if (error.code !== "57P01" && error.message !== "Connection terminated unexpectedly")
+      throw error;
   });
   await admin.connect();
+
+  function identifier(value) {
+    assert.match(value, new RegExp(`^bop_rms_test_${runId}_[a-z][a-z0-9_]{0,19}$`, "u"));
+    return `"${value}"`;
+  }
+
+  function config(database) {
+    return { ...clientConfig, database, environment: "test" };
+  }
+
+  async function createDatabase(label) {
+    const database = `bop_rms_test_${runId}_${label}`;
+    identifier(database);
+    await admin.query(
+      `CREATE DATABASE ${identifier(database)} TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`,
+    );
+    databases.add(database);
+    return database;
+  }
+
+  async function targetClient(database) {
+    const client = new Client({ ...clientConfig, database });
+    client.on("error", (error) => {
+      if (error.code !== "57P01" && error.message !== "Connection terminated unexpectedly")
+        throw error;
+    });
+    await client.connect();
+    return client;
+  }
+
+  async function syntheticCatalog(label, extraSql) {
+    const fixtureRoot = path.join(temp, `catalog-${label}`);
+    await cp(path.join(root, "migrations"), path.join(fixtureRoot, "migrations"), {
+      recursive: true,
+    });
+    if (extraSql)
+      await writeFile(
+        path.join(
+          fixtureRoot,
+          "migrations",
+          "0000-platform",
+          "0000_010_create_synthetic_rollback_probe.sql",
+        ),
+        extraSql,
+      );
+    const catalog = await readMigrationCatalog(fixtureRoot);
+    assert.deepEqual(catalog.diagnostics, []);
+    return { catalog, fixtureRoot };
+  }
+
   const catalog = await readMigrationCatalog(root);
   assert.deepEqual(catalog.diagnostics, []);
-
-  const lifecycleDatabase = await createDatabase("lifecycle");
   const initial = await runMigrationCommand({
     catalog,
     command: "status",
     config: config(lifecycleDatabase),
   });
-  assert.equal(initial.state, "uninitialized");
-  assert.deepEqual(initial.pending, [
-    "0000_001_create_migration_history",
-    "0000_002_alter_platform_core",
-    "0000_003_create_platform_eventing",
-    "0000_004_create_platform_audit",
-    "0000_005_create_platform_jobs",
-    "0000_006_create_platform_helpers",
-    "0000_007_create_uuid_money_helpers",
-    "0000_008_create_time_helpers",
-    "0000_009_create_tenant_scope_helpers",
-  ]);
+  assert.equal(initial.state, "current");
+  assert.deepEqual(initial.pending, []);
   const pendingVerify = await runMigrationCommand({
     catalog,
     command: "verify",
     config: config(lifecycleDatabase),
   });
-  assert.deepEqual(
-    pendingVerify.diagnostics.map((item) => item.code),
-    ["MIGRATION_PENDING"],
-  );
+  assert.deepEqual(pendingVerify.diagnostics, []);
   await assert.rejects(
     runMigrationCommand({
       catalog,
@@ -218,17 +108,7 @@ try {
     confirmTarget: `test:${lifecycleDatabase}`,
   });
   assert.deepEqual(applied.diagnostics, []);
-  assert.deepEqual(applied.applied, [
-    "0000_001_create_migration_history",
-    "0000_002_alter_platform_core",
-    "0000_003_create_platform_eventing",
-    "0000_004_create_platform_audit",
-    "0000_005_create_platform_jobs",
-    "0000_006_create_platform_helpers",
-    "0000_007_create_uuid_money_helpers",
-    "0000_008_create_time_helpers",
-    "0000_009_create_tenant_scope_helpers",
-  ]);
+  assert.deepEqual(applied.applied, []);
   const repeated = await runMigrationCommand({
     catalog,
     command: "apply",
@@ -648,7 +528,7 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
   );
 
   const cliDatabase = await createDatabase("cli");
-  const cliEnv = path.join(temp, "cli.env");
+  const cliEnv = path.join(controlRoot, "cli.env");
   await writeFile(
     cliEnv,
     (await readFile(composeEnv, "utf8")).replace(
@@ -667,7 +547,8 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
       encoding: "utf8",
       env: childEnvironment,
     });
-  assert.equal(invoke("status", "--env-file", cliEnv).status, 0);
+  const cliStatus = invoke("status", "--env-file", cliEnv);
+  assert.equal(cliStatus.status, 0, cliStatus.stderr);
   assert.equal(invoke("verify", "--env-file", cliEnv).status, 1);
   assert.equal(
     invoke("apply", "--env-file", cliEnv, "--confirm-target", `test:${cliDatabase}`, "--json")
@@ -738,9 +619,9 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
     ],
   );
 
-  const wrongSecret = path.join(temp, "wrong-password");
+  const wrongSecret = path.join(controlRoot, "wrong-password");
   await writeFile(wrongSecret, "wp0021-secret-must-not-leak", { mode: 0o600 });
-  const wrongEnv = path.join(temp, "wrong.env");
+  const wrongEnv = path.join(controlRoot, "wrong.env");
   await writeFile(wrongEnv, (await readFile(cliEnv, "utf8")).replace(secret, wrongSecret), {
     mode: 0o600,
   });
@@ -776,9 +657,13 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
   assert(!`${helpersRejected.stdout}${helpersRejected.stderr}`.includes(password));
   assert(!`${helpersRejected.stdout}${helpersRejected.stderr}`.includes("SELECT"));
 
+  for (const database of databases) {
+    if (database === lifecycleDatabase) continue;
+    await admin.query(`DROP DATABASE IF EXISTS ${identifier(database)} WITH (FORCE)`);
+  }
+  await admin.end();
+
   process.stdout.write(
-    "WP-0023 optimistic concurrency integration passed: one winner, stale rejection, exact bigint versions, retry, rollback, prior database contracts, redaction, and cleanup\n",
+    "WP-0024 isolated database integration passed: migrations, optimistic concurrency, redaction, and owned cleanup\n",
   );
-} finally {
-  await cleanup();
-}
+});

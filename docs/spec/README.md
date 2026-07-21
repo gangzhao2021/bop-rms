@@ -4,17 +4,19 @@
 
 - Canonical Library file: `BOP-RMS Complete Handoff Package.md`
 - Source document ID: `BOP-RMS-HANDOFF`
-- Source document version: `0.5.8`
+- Source document version: `0.5.9`
 - Architecture baseline: `v1.0`
-- Current discussion node: `Closed — Section 96`
+- Current discussion node: `Closed — Section 97`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. Resolve it through the approved Library context using the exact canonical filename. Never store Library credentials, signed URLs, account identities, or private access metadata in Git.
 
-Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior.
+Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 
 ## Active Work Package
 
-- None。WP-0023 is integrated and closed；the next Work Package requires a fresh authorized brief and must not be inferred from sequence alone。
+- `WP-0024 — Seed、Fixture and Isolated Test Database Framework` is active from fresh `origin/main@f404d3cdc6f6ec099046e329cd10d348c55a783b`。
+- Canonical `0.5.9` / Section 97 / ADR-0034 / IDR-0047 accepts the complete reusable API、parallel resource lifecycle、diagnostic / exit、failure-injection、cleanup and exact implementation allowlist contract recorded in `docs/spec/work-packages/WP-0024.md`。
+- Definition of Ready is `PASS`；bounded local implementation、synthetic isolated PostgreSQL / Docker acceptance and the explicitly authorized delivery lifecycle may proceed。Deployment、staging / production database connection、real data、Provider mutation、credential rotation and dependency upgrade remain prohibited。
 
 WP-0001 through WP-0023 are integrated into `main`。WP-0023 frozen install、root verification、isolated PostgreSQL acceptance、resource cleanup、PR #18 two exact-head owning CI runs、explicit GitHub Free solo self-review、authorized squash merge and post-merge main CI passed。Its implementation integration baseline is `main@51ee9cf0d46544c065534194fd2f05e5bfdcba3a`。Deployment remains gated。
 
