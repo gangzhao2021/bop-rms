@@ -14,7 +14,8 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Active Work Package
 
-- None。WP-0024 is integrated and closed；the next Work Package requires a fresh authorized brief and must not be inferred from sequence alone。
+- `WP-0025 — Backup / Restore Staging Runbook`。The Owner authorized its bounded repository work on `2026-07-21` from fresh `origin/main@9267c6053cba27e6c51bb40a1ab7048f16a91bf7`。Its exact allowlist is documentation-only：the WP brief、Staging restore runbook、restricted evidence template and this index。
+- Repository implementation does not authorize or prove an AWS / RDS / Staging action。The real restore drill remains blocked until the exact account、Region、source、restore point、new target、cost、credentials、cleanup and external-action approval are supplied。WP-2053 retains cross-Region / production failover and final RPO / RTO evidence。
 
 WP-0001 through WP-0024 are integrated into `main`。WP-0024 frozen install、root verification、parallel / failure / signal / timeout isolated PostgreSQL acceptance、security review、resource cleanup、PR #20 exact-head owning CI、explicit GitHub Free solo self-review、authorized squash merge and post-merge main CI passed。Its implementation integration baseline is `main@bde2871b0f519c9942b8ce49f12583584a701518`。Deployment remains gated。
 
