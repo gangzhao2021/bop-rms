@@ -7,6 +7,10 @@ const expectedSchemas = [
   "platform_jobs",
 ] as const;
 const acceptedLaterSchemas = new Set(["platform_helpers"]);
+const acceptedLaterObjects = new Set([
+  "platform_eventing.outbox_event:table",
+  "platform_eventing.outbox_event_tenant_scope:policy",
+]);
 
 export type FoundationDiagnosticCode =
   | "FOUNDATION_SCHEMA_MISSING"
@@ -145,6 +149,7 @@ export function evaluateFoundationSnapshot(
     )
       continue;
     const target = `${object.schema}.${object.name}`;
+    if (acceptedLaterObjects.has(`${target}:${object.kind}`)) continue;
     diagnostics.push(
       diagnostic(
         target,

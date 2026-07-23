@@ -32,6 +32,7 @@
     "module-generator:check": "vitest run tooling/module-generator/generate.test.mjs",
     "module-manifest:check": "node tooling/module-manifest/validate.mjs",
     "migration:check": "vitest run packages/database/src/catalog.test.ts packages/database/src/config.test.ts && node packages/database/src/check.ts",
+    "outbox:acceptance": "vitest run --config packages/database/vitest.outbox.config.ts",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
     "test": "vitest run && turbo run test",
     "test:integration": "turbo run test:integration",

@@ -23,6 +23,7 @@ const codeExtensions = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".
 const snakeCase = /^[a-z][a-z0-9_]*$/u;
 const principalId = /^[a-z0-9@][a-z0-9@/._-]*$/u;
 const accessId = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
+const sharedAuthorityModules = new Map([["platform_eventing", "@bop/eventing"]]);
 
 export const databaseOwnershipUsage = `BOP-RMS Database Schema Ownership Architecture Test
 
@@ -362,7 +363,8 @@ function accessRules(access, module, owners, platforms, file, diagnostics) {
         shared.allowedWriteAuthority === "projection-builder"
           ? access.principal.kind === "projection-builder"
           : access.principal.kind === "shared-infrastructure" &&
-            access.principal.id === shared.allowedWriteAuthority;
+            access.principal.id === shared.allowedWriteAuthority &&
+            sharedAuthorityModules.get(access.target.schema) === module.packageName;
       if (!allowed)
         diagnostics.push(
           diag(
@@ -559,12 +561,16 @@ export async function validateDatabaseOwnership({ root = process.cwd() } = {}) {
       await scanUnsupported(root, module, diagnostics);
       continue;
     }
-    if (module.manifest.ownedDatabase?.schema === null) {
+    if (
+      module.manifest.ownedDatabase?.schema === null &&
+      (module.packageName !== "@bop/eventing" ||
+        (Array.isArray(evidence.tables) && evidence.tables.length > 0))
+    ) {
       diagnostics.push(
         diag(
           "DATABASE_TARGET_UNDECLARED",
           file,
-          `${module.packageName} has schema null and cannot declare database evidence`,
+          `${module.packageName} has schema null and cannot declare this database evidence`,
         ),
       );
     }

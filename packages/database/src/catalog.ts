@@ -251,8 +251,19 @@ function validateSql(
             metadataKeys.length + 1,
           ),
         );
-  for (const match of body.matchAll(/\b((?:platform|bop|rms)_[a-z0-9_]+)\s*\./gu))
-    if (match[1] !== metadata.schema)
+  const acceptedForeignReferences = new Set([
+    "platform_helpers.current_brand_id",
+    "platform_helpers.current_store_id",
+    "platform_helpers.uuid_v7",
+  ]);
+  for (const match of body.matchAll(/\b((?:platform|bop|rms)_[a-z0-9_]+)\s*\.([a-z][a-z0-9_]*)/gu))
+    if (
+      match[1] !== metadata.schema &&
+      !(
+        metadata.schema === "platform_eventing" &&
+        acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
+      )
+    )
       diagnostics.push(
         diagnostic(
           "MIGRATION_SCHEMA_MISMATCH",

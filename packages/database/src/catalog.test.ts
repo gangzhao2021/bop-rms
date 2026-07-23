@@ -39,6 +39,7 @@ describe("migration catalog", () => {
       "0000_007_create_uuid_money_helpers",
       "0000_008_create_time_helpers",
       "0000_009_create_tenant_scope_helpers",
+      "0000_010_create_outbox_event",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -71,7 +72,7 @@ describe("migration catalog", () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
     expect(
       catalog.migrations
-        .slice(5)
+        .slice(5, 9)
         .map((migration) => [migration.id, migration.metadata.owner, migration.metadata.schema]),
     ).toEqual([
       ["0000_006_create_platform_helpers", "shared-infrastructure/helpers", "platform_helpers"],
@@ -79,6 +80,36 @@ describe("migration catalog", () => {
       ["0000_008_create_time_helpers", "shared-infrastructure/helpers", "platform_helpers"],
       ["0000_009_create_tenant_scope_helpers", "shared-infrastructure/helpers", "platform_helpers"],
     ]);
+  });
+
+  it("registers the exact WP-0030 outbox migration and bounded helper references", async () => {
+    const catalog = await readMigrationCatalog(repositoryRoot);
+    const migration = catalog.migrations.at(-1);
+    expect(migration).toMatchObject({
+      id: "0000_010_create_outbox_event",
+      metadata: {
+        owner: "shared-infrastructure/eventing",
+        schema: "platform_eventing",
+        phase: "expand",
+        risk: "medium",
+      },
+    });
+    expect(migration?.sql).toContain("platform_helpers.uuid_v7");
+    expect(migration?.sql).toContain("platform_helpers.current_brand_id()");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE ROLE|CREATE USER)\b/iu);
+  });
+
+  it("rejects any non-allowlisted foreign helper reference", async () => {
+    const root = await fixture();
+    const file = path.join(root, "migrations", "0000-platform", "0000_010_create_outbox_event.sql");
+    await writeFile(
+      file,
+      `${await readFile(file, "utf8")}SELECT platform_helpers.unapproved_helper();\n`,
+    );
+    expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
+      "MIGRATION_SCHEMA_MISMATCH",
+    );
   });
 
   it("rejects a changed namespace registry", async () => {
