@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0030 documentation closeout authorized`
+- Current discussion node: `WP-0030 integrated and closed；WP-0031 not authorized`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,7 +14,8 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Active Work Package
 
-- `WP-0030 — Transactional Outbox Contract and Table` implementation is integrated into `main` at squash commit `9e267c2fe13e8e9fa509cc82e286d0289638d567`。The Owner authorized this documentation-only closeout on `2026-07-23` to reconcile the index and brief with the completed delivery evidence.
+- No implementation Work Package is active.
+- `WP-0030 — Transactional Outbox Contract and Table` implementation is integrated into `main` at squash commit `9e267c2fe13e8e9fa509cc82e286d0289638d567`。The Owner authorized its documentation-only closeout on `2026-07-23` to reconcile the index and brief with the completed delivery evidence.
 - WP-0030 owns only the business-agnostic Event Envelope、caller-transaction Outbox append contract、`platform_eventing.outbox_event` and synthetic atomicity/Tenant evidence。WP-0031–0036 publisher、Inbox、retry/dead-letter、trace/catalog and SSE capabilities remain excluded and are not authorized by this closeout.
 - WP-0025 repository documentation is integrated。Its real AWS/RDS Staging restore drill remains blocked by the External Evidence recorded in its brief and is not reopened by WP-0030.
 
