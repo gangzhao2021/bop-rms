@@ -144,6 +144,8 @@ importers:
         specifier: 10.3.1
         version: 10.3.1
 
+  packages/bop/eventing: {}
+
   packages/database:
     dependencies:
       pg:

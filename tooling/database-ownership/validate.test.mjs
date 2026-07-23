@@ -162,6 +162,36 @@ describe("Database Schema Ownership Architecture Test", () => {
     });
   });
 
+  it("accepts only @bop/eventing writing through the exact shared Eventing authority", async () => {
+    const root = await fixture();
+    const eventing = await writeModule(root, "BOP", "eventing", null, [], (base) => ({
+      ...base,
+      accesses: [
+        access(base.module, "append-outbox-event", "write", "platform_eventing", "outbox_event", {
+          mechanism: "raw-sql",
+          principal: { kind: "shared-infrastructure", id: "eventing-infrastructure" },
+        }),
+      ],
+    }));
+    expect(await validateDatabaseOwnership({ root })).toMatchObject({
+      valid: true,
+      diagnostics: [],
+    });
+
+    const other = await writeModule(root, "BOP", "synthetic-other", null, [], (base) => ({
+      ...base,
+      accesses: [
+        access(base.module, "append-outbox-event", "write", "platform_eventing", "outbox_event", {
+          mechanism: "raw-sql",
+          principal: { kind: "shared-infrastructure", id: "eventing-infrastructure" },
+        }),
+      ],
+    }));
+    expect(eventing.module.packageName).toBe("@bop/eventing");
+    expect(other.module.packageName).toBe("@bop/synthetic-other");
+    expect(await resultCodes(root)).toContain("UNDECLARED_OWNER_WRITE");
+  });
+
   it("accepts a named Reconciliation Job reading an approved source view", async () => {
     const root = await fixture();
     await writeModule(

@@ -51,6 +51,39 @@ describe("foundation verifier", () => {
     ).toEqual({ diagnostics: [], status: "compliant" });
   });
 
+  it("delegates only the exact WP-0030 Eventing table and policy", () => {
+    expect(
+      evaluateFoundationSnapshot(
+        {
+          ...compliant,
+          objects: [
+            ...compliant.objects,
+            { kind: "table", name: "outbox_event", schema: "platform_eventing" },
+            {
+              kind: "policy",
+              name: "outbox_event_tenant_scope",
+              schema: "platform_eventing",
+            },
+          ],
+        },
+        owner,
+      ),
+    ).toEqual({ diagnostics: [], status: "compliant" });
+
+    expect(
+      evaluateFoundationSnapshot(
+        {
+          ...compliant,
+          objects: [
+            ...compliant.objects,
+            { kind: "table", name: "unexpected_event", schema: "platform_eventing" },
+          ],
+        },
+        owner,
+      ).diagnostics.map((item) => item.code),
+    ).toContain("FOUNDATION_OBJECT_UNEXPECTED");
+  });
+
   it("reports missing, unexpected, owner, privilege, and object violations deterministically", () => {
     const result = evaluateFoundationSnapshot(
       {

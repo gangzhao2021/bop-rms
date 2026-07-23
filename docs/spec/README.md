@@ -2,20 +2,21 @@
 
 ## Authority
 
-- Canonical Library file: `BOP-RMS Complete Handoff Package.md`
 - Source document ID: `BOP-RMS-HANDOFF`
-- Source document version: `0.5.9`
-- Architecture baseline: `v1.0`
-- Current discussion node: `Closed — Section 97`
+- Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
+- Available source document version: `0.5.3`
+- Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
+- Current discussion node: `WP-0030 authorized`
 
-The complete Handoff Package remains outside this repository and is not duplicated here. Resolve it through the approved Library context using the exact canonical filename. Never store Library credentials, signed URLs, account identities, or private access metadata in Git.
+The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
 Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 
 ## Active Work Package
 
-- `WP-0025 — Backup / Restore Staging Runbook`。The Owner authorized its bounded repository work on `2026-07-21` from fresh `origin/main@9267c6053cba27e6c51bb40a1ab7048f16a91bf7`。Its exact allowlist is documentation-only：the WP brief、Staging restore runbook、restricted evidence template and this index。
-- Repository implementation does not authorize or prove an AWS / RDS / Staging action。The real restore drill remains blocked until the exact account、Region、source、restore point、new target、cost、credentials、cleanup and external-action approval are supplied。WP-2053 retains cross-Region / production failover and final RPO / RTO evidence。
+- `WP-0030 — Transactional Outbox Contract and Table`。The Owner authorized its bounded drafting and implementation on `2026-07-23` from fresh `origin/main@9e251de9bbb5d9bdb910a1c4403f440658adcbad` and explicitly accepted the composite authority baseline above.
+- WP-0030 owns only the business-agnostic Event Envelope、caller-transaction Outbox append contract、`platform_eventing.outbox_event` and synthetic atomicity/Tenant evidence。WP-0031–0036 publisher、Inbox、retry/dead-letter、trace/catalog and SSE capabilities remain excluded.
+- WP-0025 repository documentation is integrated。Its real AWS/RDS Staging restore drill remains blocked by the External Evidence recorded in its brief and is not reopened by WP-0030.
 
 WP-0001 through WP-0024 are integrated into `main`。WP-0024 frozen install、root verification、parallel / failure / signal / timeout isolated PostgreSQL acceptance、security review、resource cleanup、PR #20 exact-head owning CI、explicit GitHub Free solo self-review、authorized squash merge and post-merge main CI passed。Its implementation integration baseline is `main@bde2871b0f519c9942b8ce49f12583584a701518`。Deployment remains gated。
 
