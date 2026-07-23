@@ -40,6 +40,7 @@ describe("migration catalog", () => {
       "0000_008_create_time_helpers",
       "0000_009_create_tenant_scope_helpers",
       "0000_010_create_outbox_event",
+      "0000_011_alter_outbox_dispatch",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -82,10 +83,11 @@ describe("migration catalog", () => {
     ]);
   });
 
-  it("registers the exact WP-0030 outbox migration and bounded helper references", async () => {
+  it("registers the exact WP-0030 and WP-0031 Eventing migrations", async () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
-    const migration = catalog.migrations.at(-1);
-    expect(migration).toMatchObject({
+    const outbox = catalog.migrations.at(-2);
+    const dispatcher = catalog.migrations.at(-1);
+    expect(outbox).toMatchObject({
       id: "0000_010_create_outbox_event",
       metadata: {
         owner: "shared-infrastructure/eventing",
@@ -94,10 +96,23 @@ describe("migration catalog", () => {
         risk: "medium",
       },
     });
-    expect(migration?.sql).toContain("platform_helpers.uuid_v7");
-    expect(migration?.sql).toContain("platform_helpers.current_brand_id()");
-    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
-    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE ROLE|CREATE USER)\b/iu);
+    expect(outbox?.sql).toContain("platform_helpers.uuid_v7");
+    expect(outbox?.sql).toContain("platform_helpers.current_brand_id()");
+    expect(outbox?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(dispatcher).toMatchObject({
+      id: "0000_011_alter_outbox_dispatch",
+      metadata: {
+        owner: "shared-infrastructure/eventing",
+        schema: "platform_eventing",
+        phase: "expand",
+        risk: "medium",
+      },
+    });
+    expect(dispatcher?.sql).toContain("lease_token platform_helpers.uuid_v7");
+    expect(dispatcher?.sql).toContain("outbox_event_dispatch_claim_idx");
+    expect(`${outbox?.sql}\n${dispatcher?.sql}`).not.toMatch(
+      /\b(?:GRANT|CREATE ROLE|CREATE USER)\b/iu,
+    );
   });
 
   it("rejects any non-allowlisted foreign helper reference", async () => {

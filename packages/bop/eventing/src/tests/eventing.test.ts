@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   appendEventInTransaction,
+  claimOutboxBatch,
   InvalidDomainEventEnvelopeError,
+  markOutboxFailed,
+  markOutboxPublished,
   validateDomainEventEnvelope,
   type DomainEventEnvelope,
 } from "../index.js";
@@ -62,5 +65,106 @@ describe("Domain Event Envelope", () => {
     expect(values).toHaveLength(18);
     expect(values).toContain(envelope.eventId);
     expect(sql).not.toContain(envelope.eventId);
+  });
+});
+
+describe("Outbox dispatch persistence", () => {
+  const claimedRow = {
+    event_id: envelope.eventId,
+    event_type: envelope.eventType,
+    schema_version: envelope.schemaVersion,
+    occurred_at: envelope.occurredAt,
+    producer_module: envelope.producerModule,
+    brand_id: envelope.tenantId,
+    store_id: envelope.storeId ?? null,
+    aggregate_type: envelope.aggregateType,
+    aggregate_id: envelope.aggregateId,
+    aggregate_version: envelope.aggregateVersion.toString(),
+    correlation_id: envelope.correlationId,
+    causation_id: null,
+    actor_type: "System",
+    actor_id: null,
+    payload_json: envelope.payload,
+    redaction_classification: envelope.redactionClassification,
+    replay_metadata_json: envelope.replayMetadata,
+    attempt_count: 1,
+    lease_expires_at: "2026-07-23T12:00:30.000Z",
+    lease_token: id("5"),
+  } as const;
+
+  it("claims a bounded parameterized SKIP LOCKED batch and reconstructs the envelope", async () => {
+    const query = vi.fn().mockResolvedValue({ rowCount: 1, rows: [claimedRow] });
+    const result = await claimOutboxBatch(
+      { query },
+      {
+        batchSize: 25,
+        leaseDurationSeconds: 30,
+        leaseOwner: "synthetic_worker",
+        leaseToken: id("5"),
+      },
+    );
+    expect(result).toEqual([
+      {
+        attemptCount: 1,
+        envelope,
+        leaseExpiresAt: "2026-07-23T12:00:30.000Z",
+        leaseToken: id("5"),
+      },
+    ]);
+    const [sql, values] = query.mock.calls[0] as [string, readonly unknown[]];
+    expect(sql).toContain("FOR UPDATE OF candidate SKIP LOCKED");
+    expect(sql).toContain("earlier.aggregate_version");
+    expect(sql).not.toContain(envelope.eventId);
+    expect(values).toEqual([25, id("5"), "synthetic_worker", 30]);
+  });
+
+  it("conditionally completes and parks only the matching lease", async () => {
+    const completedQuery = vi.fn().mockResolvedValue({ rowCount: 1, rows: [] });
+    await expect(
+      markOutboxPublished(
+        { query: completedQuery },
+        { eventId: envelope.eventId, leaseToken: id("5") },
+      ),
+    ).resolves.toBe("completed");
+    expect(completedQuery.mock.calls[0]?.[0]).toContain("lease_token = $2");
+    const lostQuery = vi.fn().mockResolvedValue({ rowCount: 0, rows: [] });
+    await expect(
+      markOutboxFailed(
+        { query: lostQuery },
+        {
+          errorCode: "TRANSPORT_TIMEOUT",
+          eventId: envelope.eventId,
+          leaseToken: id("5"),
+        },
+      ),
+    ).resolves.toBe("lost_lease");
+    expect(lostQuery.mock.calls[0]?.[1]).toEqual([envelope.eventId, id("5"), "TRANSPORT_TIMEOUT"]);
+  });
+
+  it("rejects unsafe lease inputs and unbounded batches", async () => {
+    const query = vi.fn();
+    await expect(
+      claimOutboxBatch(
+        { query },
+        {
+          batchSize: 101,
+          leaseDurationSeconds: 30,
+          leaseOwner: "synthetic_worker",
+          leaseToken: id("5"),
+        },
+      ),
+    ).rejects.toThrow("batchSize");
+    await expect(
+      claimOutboxBatch(
+        { query },
+        {
+          batchSize: 25,
+          leaseDurationSeconds: 30,
+          leaseOwner: "host.name.example",
+          leaseToken: id("5"),
+        },
+      ),
+    ).rejects.toThrow("leaseOwner");
+    expect(query).not.toHaveBeenCalled();
   });
 });
