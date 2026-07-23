@@ -10,11 +10,18 @@ const moduleManifestInput = {
   consumedEvents: [],
   publishedEvents: [],
   ownedDatabase: { schema: null, tables: [] },
-  ownedJobs: [],
+  ownedJobs: ["outbox-dispatch"],
   featureFlags: [],
   killSwitches: [],
   piiClassification: {
-    classes: ["none"],
+    classes: [
+      "indirect_identifier",
+      "personal",
+      "sensitive_personal",
+      "payment",
+      "health",
+      "credential",
+    ],
     handling: {
       logs: "prohibited",
       urls: "prohibited",

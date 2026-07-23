@@ -11,6 +11,7 @@
     "typecheck": "tsc --project tsconfig.json"
   },
   "dependencies": {
+    "@bop/eventing": "workspace:*",
     "pino": "10.3.1"
   }
 }

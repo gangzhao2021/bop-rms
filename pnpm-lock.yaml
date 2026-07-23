@@ -140,6 +140,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@bop/eventing':
+        specifier: workspace:*
+        version: link:../../packages/bop/eventing
       pino:
         specifier: 10.3.1
         version: 10.3.1

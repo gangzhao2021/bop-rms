@@ -104,6 +104,9 @@ async function proveOutbox(context) {
         "published_at",
         "attempt_count",
         "last_error_code",
+        "lease_token",
+        "lease_owner",
+        "lease_expires_at",
       ],
     );
     for (const name of [
@@ -144,6 +147,7 @@ async function proveOutbox(context) {
       [
         "outbox_event_aggregate_order_idx",
         "outbox_event_correlation_idx",
+        "outbox_event_dispatch_claim_idx",
         "outbox_event_pkey",
         "outbox_event_publishable_idx",
       ],

@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0030 integrated and closed；WP-0031 not authorized`
+- Current discussion node: `WP-0031 locally implemented and verified；publication pending`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,7 +14,7 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Active Work Package
 
-- No implementation Work Package is active.
+- `WP-0031 — Worker Outbox Dispatcher` is the active delivery Work Package at exact baseline `origin/main@3a215e77db915a93b000cf6c917c6ed7c101c5da`. On `2026-07-23` the Owner accepted its ten implementation-significant decisions and separately authorized implementation、commit、push、PR and merge. Local implementation and bounded verification are complete；owning Linux PR CI、review and integration evidence remain pending. Deployment、runtime grant、non-local database and external broker integration remain outside WP-0031.
 - `WP-0030 — Transactional Outbox Contract and Table` implementation is integrated into `main` at squash commit `9e267c2fe13e8e9fa509cc82e286d0289638d567`。The Owner authorized its documentation-only closeout on `2026-07-23` to reconcile the index and brief with the completed delivery evidence.
 - WP-0030 owns only the business-agnostic Event Envelope、caller-transaction Outbox append contract、`platform_eventing.outbox_event` and synthetic atomicity/Tenant evidence。WP-0031–0036 publisher、Inbox、retry/dead-letter、trace/catalog and SSE capabilities remain excluded and are not authorized by this closeout.
 - WP-0025 repository documentation is integrated。Its real AWS/RDS Staging restore drill remains blocked by the External Evidence recorded in its brief and is not reopened by WP-0030.
@@ -29,7 +29,7 @@ Agents must read the root `AGENTS.md`, this index, and the active Work Package b
 
 ## Current repository stage
 
-WP-0030 implementation commit `6e5b7778cbc15a5368ce7d9a8dc74c7f020f9013`、PR #23 owning run `30021535796` / job `89255222004`、explicit solo self-review、authorized exact-head squash merge `9e267c2fe13e8e9fa509cc82e286d0289638d567` and post-merge `main` run `30022673489` / job `89259156985` passed on `2026-07-23`。The implementation branch and worktree were removed only after the local `main` fast-forward、clean-worktree and exact-tree checks passed。External Evidence remains gated and unclaimed；deployment、runtime grants and non-local database action remain unauthorized。WP-0031 is only the next roadmap candidate and requires a separately resolved brief and explicit Owner authorization。
+WP-0030 implementation commit `6e5b7778cbc15a5368ce7d9a8dc74c7f020f9013`、PR #23 owning run `30021535796` / job `89255222004`、explicit solo self-review、authorized exact-head squash merge `9e267c2fe13e8e9fa509cc82e286d0289638d567` and post-merge `main` run `30022673489` / job `89259156985` passed on `2026-07-23`。The implementation branch and worktree were removed only after the local `main` fast-forward、clean-worktree and exact-tree checks passed。External Evidence remains gated and unclaimed；deployment、runtime grants and non-local database action remain unauthorized。WP-0031 now owns the active bounded delivery described above.
 
 WP-0021、WP-0022 and WP-0023 are integrated and closed without changing their accepted designs。WP-0023 supplies bounded synthetic integration evidence for Sections 50.9 and 52.8 only；it creates no production database object or generic persistence abstraction。PR #18 final head `5a003ea30f33ac2d2b43d74baa8f5b79e068cea6`、owning run `29862008680` / job `88740808872`、explicit solo self-review、authorized squash merge `51ee9cf0d46544c065534194fd2f05e5bfdcba3a` and post-merge main run `29862383538` / job `88742098487` passed on `2026-07-21`。External Evidence remains gated and unclaimed；deployment and non-local database action remain unauthorized。
 
