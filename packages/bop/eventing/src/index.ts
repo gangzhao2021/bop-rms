@@ -31,4 +31,14 @@ export {
   type OutboxDispatchQueryResult,
   type OutboxDispatchTransaction,
 } from "./infrastructure/messaging/dispatch-outbox.js";
+export {
+  consumerErrorCodes,
+  ConsumerTransactionRollback,
+  type ConsumerErrorCode,
+  type ConsumerOutcome,
+  type ConsumerRegistration,
+  type ConsumerTransaction,
+} from "./contracts/consumer-inbox.js";
+export { ConsumerRegistry, InvalidConsumerRegistryError } from "./contracts/consumer-registry.js";
+export { consumeEventInTransaction } from "./infrastructure/messaging/consume-event-in-transaction.js";
 export { moduleManifest } from "./module.manifest.js";
