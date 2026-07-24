@@ -51,7 +51,7 @@ describe("foundation verifier", () => {
     ).toEqual({ diagnostics: [], status: "compliant" });
   });
 
-  it("delegates only the exact WP-0030 Eventing table and policy", () => {
+  it("delegates only the exact accepted Eventing tables and policies", () => {
     expect(
       evaluateFoundationSnapshot(
         {
@@ -62,6 +62,12 @@ describe("foundation verifier", () => {
             {
               kind: "policy",
               name: "outbox_event_tenant_scope",
+              schema: "platform_eventing",
+            },
+            { kind: "table", name: "consumer_inbox", schema: "platform_eventing" },
+            {
+              kind: "policy",
+              name: "consumer_inbox_tenant_scope",
               schema: "platform_eventing",
             },
           ],

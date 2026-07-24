@@ -8,6 +8,8 @@ const expectedSchemas = [
 ] as const;
 const acceptedLaterSchemas = new Set(["platform_helpers"]);
 const acceptedLaterObjects = new Set([
+  "platform_eventing.consumer_inbox:table",
+  "platform_eventing.consumer_inbox_tenant_scope:policy",
   "platform_eventing.outbox_event:table",
   "platform_eventing.outbox_event_tenant_scope:policy",
 ]);

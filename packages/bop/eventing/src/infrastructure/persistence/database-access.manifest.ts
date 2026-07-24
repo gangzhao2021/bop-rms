@@ -8,6 +8,21 @@ const databaseAccessManifestInput = {
   tables: [],
   accesses: [
     {
+      id: "coordinate-consumer-inbox",
+      operation: "write",
+      mechanism: "raw-sql",
+      target: {
+        schema: "platform_eventing",
+        table: "consumer_inbox",
+      },
+      principal: {
+        kind: "shared-infrastructure",
+        id: "eventing-infrastructure",
+      },
+      readPattern: null,
+      source: "packages/bop/eventing/src/infrastructure/messaging/consume-event-in-transaction.ts",
+    },
+    {
       id: "append-outbox-event",
       operation: "write",
       mechanism: "raw-sql",

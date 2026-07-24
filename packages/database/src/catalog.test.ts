@@ -41,6 +41,7 @@ describe("migration catalog", () => {
       "0000_009_create_tenant_scope_helpers",
       "0000_010_create_outbox_event",
       "0000_011_alter_outbox_dispatch",
+      "0000_012_create_consumer_inbox",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -85,8 +86,9 @@ describe("migration catalog", () => {
 
   it("registers the exact WP-0030 and WP-0031 Eventing migrations", async () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
-    const outbox = catalog.migrations.at(-2);
-    const dispatcher = catalog.migrations.at(-1);
+    const outbox = catalog.migrations.at(-3);
+    const dispatcher = catalog.migrations.at(-2);
+    const inbox = catalog.migrations.at(-1);
     expect(outbox).toMatchObject({
       id: "0000_010_create_outbox_event",
       metadata: {
@@ -110,7 +112,12 @@ describe("migration catalog", () => {
     });
     expect(dispatcher?.sql).toContain("lease_token platform_helpers.uuid_v7");
     expect(dispatcher?.sql).toContain("outbox_event_dispatch_claim_idx");
-    expect(`${outbox?.sql}\n${dispatcher?.sql}`).not.toMatch(
+    expect(inbox).toMatchObject({
+      id: "0000_012_create_consumer_inbox",
+      metadata: { owner: "shared-infrastructure/eventing", schema: "platform_eventing" },
+    });
+    expect(inbox?.sql).toContain("consumer_inbox_tenant_scope");
+    expect(`${outbox?.sql}\n${dispatcher?.sql}\n${inbox?.sql}`).not.toMatch(
       /\b(?:GRANT|CREATE ROLE|CREATE USER)\b/iu,
     );
   });
