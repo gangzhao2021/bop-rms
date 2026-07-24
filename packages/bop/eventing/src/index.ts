@@ -11,6 +11,16 @@ export {
   validateDomainEventEnvelope,
 } from "./contracts/validate-envelope.js";
 export {
+  continueTrustedCorrelationContext,
+  createRootCorrelationContext,
+  deriveCorrelationContextFromCommand,
+  deriveCorrelationContextFromEvent,
+  InvalidCorrelationContextError,
+  preserveEventCorrelationContext,
+  type CorrelationContext,
+  type UuidV7Factory,
+} from "./contracts/correlation-context.js";
+export {
   appendEventInTransaction,
   type OutboxTransaction,
 } from "./infrastructure/messaging/append-event-in-transaction.js";

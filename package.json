@@ -35,6 +35,7 @@
     "outbox:acceptance": "vitest run --config packages/database/vitest.outbox.config.ts",
     "outbox-dispatcher:acceptance": "vitest run --config packages/database/vitest.outbox-dispatcher.config.ts",
     "consumer-inbox:acceptance": "vitest run --config packages/database/vitest.consumer-inbox.config.ts",
+    "correlation-context:acceptance": "vitest run --config packages/database/vitest.correlation-context.config.ts",
     "retry-dead-letter:acceptance": "vitest run --config packages/database/vitest.retry-dead-letter.config.ts",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
     "test": "vitest run && turbo run test",
