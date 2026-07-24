@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  appendEventInTransaction,
   ConsumerRegistry,
   ConsumerTransactionRollback,
+  deriveCorrelationContextFromEvent,
   InvalidConsumerRegistryError,
   consumeEventInTransaction,
   type ConsumerRegistration,
@@ -88,6 +90,36 @@ describe("consumer inbox coordinator", () => {
     ).resolves.toEqual({ status: "processed" });
     expect(handler).toHaveBeenCalledOnce();
     expect(statements.join("\n")).not.toContain("payload");
+  });
+
+  it("uses the consumed Event ID as the immediate cause of a consumer-created Event", async () => {
+    const queries: { readonly sql: string; readonly values: readonly unknown[] }[] = [];
+    const transaction = {
+      query: vi.fn(async (sql: string, values: readonly unknown[]) => {
+        queries.push({ sql, values });
+        return { rowCount: 1, rows: [{ consumer_name: "synthetic.projector:v1" }] };
+      }),
+    } as unknown as ConsumerTransaction;
+    const handler: ConsumerRegistration["handler"] = vi.fn(async ({ envelope: consumed }) => {
+      const context = deriveCorrelationContextFromEvent(consumed);
+      await appendEventInTransaction(transaction, {
+        ...envelope,
+        eventId: "018f1f48-7b5d-7dd1-8a1b-123456789abc",
+        aggregateVersion: 2n,
+        correlationId: context.correlationId,
+        ...(context.causationId ? { causationId: context.causationId } : {}),
+      });
+      return undefined;
+    });
+
+    await expect(
+      consumeEventInTransaction(transaction, registration(handler), envelope),
+    ).resolves.toEqual({ status: "processed" });
+    const outboxInsert = queries.find((query) =>
+      query.sql.startsWith("INSERT INTO platform_eventing.outbox_event"),
+    );
+    expect(outboxInsert?.values[9]).toBe(envelope.correlationId);
+    expect(outboxInsert?.values[10]).toBe(envelope.eventId);
   });
 
   it("returns completed duplicates without invoking the handler", async () => {

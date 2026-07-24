@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0033 integrated；documentation closeout authorized`
+- Current discussion node: `WP-0034 local gates passed；Draft PR delivery authorized`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,6 +14,7 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Active Work Package
 
+- `WP-0034 — Correlation / Causation Context` is the active Work Package at exact baseline `origin/main@133abf11c63ada66fe284ca86aac661f0a07aaee`. On `2026-07-24` Toronto time the Owner accepted Decisions 1–12 and the final allowlist and authorized bounded local implementation、verification、commit、push、Draft PR、exact-head CI confirmation and Ready transition. Frozen install、the dedicated and four regression PostgreSQL 18 acceptances and complete pinned-Linux `pnpm verify` passed locally；final scope/security review found no open Blocker/High. Squash merge、deployment、runtime grant、external broker and non-local database action remain unauthorized.
 - `WP-0032 — Inbox / Consumer Idempotency` is integrated into `main` at squash commit `5c95b21f08a426aba554bbbf06a34f3878838b3e`. PR #27 exact-head run `30059992182` / job `89379525670`、explicit GitHub Free solo self-review、authorized squash merge and post-merge `main` run `30060272695` / job `89380338169` passed on `2026-07-23` Toronto time (`2026-07-24` UTC). Deployment、runtime grant、external broker and non-local database action remain unauthorized.
 - `WP-0033 — Retry / Dead-letter` is integrated into `main` at squash commit `76ca67a7422f43424bb79c662b19c76ac2a0a3e9`. PR #29 exact head `1789c32efefdfdf530b4766e022c14f217b9a4ea`、run `30065998074` / job `89396985271`、explicit GitHub Free solo self-review、authorized squash merge and post-merge `main` run `30094395470` / job `89484902952` passed on `2026-07-24` Toronto time. Deployment、runtime grant、external broker and non-local database action remain unauthorized.
 - `WP-0031 — Worker Outbox Dispatcher` is integrated into `main` at squash commit `2810ba2964dd4e995cadbb210b48bf5d63e817b7`. Its accepted lease/fencing、bounded fairness、at-least-once、Aggregate ordering、Tenant/Store RLS、least-privilege、failure parking and transport-neutral contracts are closed. Deployment、runtime grant、non-local database and external broker integration remain outside WP-0031.
