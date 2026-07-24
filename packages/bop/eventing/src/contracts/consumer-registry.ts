@@ -14,12 +14,22 @@ export class ConsumerRegistry {
   constructor(registrations: readonly ConsumerRegistration[]) {
     for (const item of registrations) {
       if (
+        typeof item.consumerName !== "string" ||
         !name.test(item.consumerName) ||
         !Number.isInteger(item.consumerVersion) ||
         item.consumerVersion < 1 ||
+        !item.consumerName.endsWith(`:v${item.consumerVersion}`) ||
+        typeof item.eventType !== "string" ||
         !event.test(item.eventType) ||
+        !Array.isArray(item.schemaVersions) ||
+        typeof item.ownerModule !== "string" ||
         !/^@(bop|rms)\/[a-z][a-z0-9-]*$/u.test(item.ownerModule) ||
+        (item.tenantScope !== "brand" && item.tenantScope !== "store") ||
+        (item.ordering !== "aggregate" && item.ordering !== "none") ||
+        typeof item.sideEffect !== "string" ||
         !/^[a-z][a-z0-9._-]{0,63}$/u.test(item.sideEffect) ||
+        typeof item.replaySafe !== "boolean" ||
+        typeof item.handler !== "function" ||
         item.schemaVersions.length === 0 ||
         item.schemaVersions.some((version) => !Number.isInteger(version) || version < 1) ||
         new Set(item.schemaVersions).size !== item.schemaVersions.length

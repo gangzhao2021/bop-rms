@@ -51,6 +51,22 @@ describe("consumer registry", () => {
       errorCode: "EVENT_SCHEMA_VERSION_UNSUPPORTED",
     });
   });
+
+  it.each([
+    ["consumer version identity", { consumerVersion: 2 }],
+    ["tenant scope", { tenantScope: "all" }],
+    ["ordering", { ordering: "global" }],
+    ["replay declaration", { replaySafe: "yes" }],
+    ["handler", { handler: null }],
+    ["schema versions", { schemaVersions: "1" }],
+  ])("rejects an invalid %s declaration before startup", (_label, replacement) => {
+    expect(
+      () =>
+        new ConsumerRegistry([
+          { ...registration(), ...replacement } as unknown as ConsumerRegistration,
+        ]),
+    ).toThrow(InvalidConsumerRegistryError);
+  });
 });
 
 describe("consumer inbox coordinator", () => {
