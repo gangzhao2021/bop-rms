@@ -70,6 +70,46 @@ describe("foundation verifier", () => {
               name: "consumer_inbox_tenant_scope",
               schema: "platform_eventing",
             },
+            {
+              kind: "table",
+              name: "delivery_attempt",
+              schema: "platform_eventing",
+            },
+            {
+              kind: "policy",
+              name: "delivery_attempt_tenant_scope",
+              schema: "platform_eventing",
+            },
+            {
+              kind: "table",
+              name: "consumer_retry_schedule",
+              schema: "platform_eventing",
+            },
+            {
+              kind: "policy",
+              name: "consumer_retry_schedule_tenant_scope",
+              schema: "platform_eventing",
+            },
+            {
+              kind: "table",
+              name: "dead_letter_item",
+              schema: "platform_eventing",
+            },
+            {
+              kind: "policy",
+              name: "dead_letter_item_tenant_scope",
+              schema: "platform_eventing",
+            },
+            {
+              kind: "table",
+              name: "dead_letter_action",
+              schema: "platform_eventing",
+            },
+            {
+              kind: "policy",
+              name: "dead_letter_action_tenant_scope",
+              schema: "platform_eventing",
+            },
           ],
         },
         owner,

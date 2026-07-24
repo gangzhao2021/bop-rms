@@ -108,10 +108,11 @@ async function proveDispatcher(context) {
       WHERE table_schema = 'platform_eventing'
         AND table_name = 'outbox_event'
       ORDER BY ordinal_position`);
-    assert.deepEqual(columns.rows.slice(-3), [
+    assert.deepEqual(columns.rows.slice(-4), [
       { column_name: "lease_token" },
       { column_name: "lease_owner" },
       { column_name: "lease_expires_at" },
+      { column_name: "ordering_released_at" },
     ]);
     const constraints = await admin.query(`SELECT pg_get_constraintdef(oid) AS definition
       FROM pg_constraint

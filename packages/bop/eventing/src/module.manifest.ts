@@ -10,7 +10,7 @@ const moduleManifestInput = {
   consumedEvents: [],
   publishedEvents: [],
   ownedDatabase: { schema: null, tables: [] },
-  ownedJobs: ["outbox-dispatch"],
+  ownedJobs: ["consumer-retry-schedule", "outbox-dispatch"],
   featureFlags: [],
   killSwitches: [],
   piiClassification: {

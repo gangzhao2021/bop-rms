@@ -54,6 +54,7 @@ const claimSql = `WITH candidates AS (
   FROM platform_eventing.outbox_event AS candidate
   WHERE candidate.published_at IS NULL
     AND candidate.last_error_code IS NULL
+    AND candidate.attempt_count < 8
     AND candidate.available_at <= statement_timestamp()
     AND (
       (
@@ -73,6 +74,7 @@ const claimSql = `WITH candidates AS (
         AND earlier.aggregate_type = candidate.aggregate_type
         AND earlier.aggregate_id = candidate.aggregate_id
         AND earlier.published_at IS NULL
+        AND earlier.ordering_released_at IS NULL
         AND (earlier.aggregate_version, earlier.event_id)
           < (candidate.aggregate_version, candidate.event_id)
     )

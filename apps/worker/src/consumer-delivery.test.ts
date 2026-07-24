@@ -4,7 +4,7 @@ import {
   ConsumerTransactionRollback,
   type DomainEventEnvelope,
 } from "@bop/eventing";
-import { ConsumerDeliveryWorker } from "./consumer-delivery.js";
+import { ConsumerDeliveryPersistenceError, ConsumerDeliveryWorker } from "./consumer-delivery.js";
 
 const envelope = {
   eventId: "018f1f48-7b5d-7cc1-8a1b-123456789abc",
@@ -26,8 +26,11 @@ const envelope = {
 describe("ConsumerDeliveryWorker", () => {
   it("rejects unknown consumers before starting a transaction", async () => {
     const transaction = vi.fn();
+    const recordFailure = vi.fn();
     const worker = new ConsumerDeliveryWorker({
       database: { transaction },
+      failureRecorder: { recordFailure },
+      nowMs: vi.fn(() => 0),
       registry: new ConsumerRegistry([]),
     });
     await expect(worker.deliver("unknown:v1", envelope)).resolves.toEqual({
@@ -35,6 +38,14 @@ describe("ConsumerDeliveryWorker", () => {
       errorCode: "CONSUMER_UNKNOWN",
     });
     expect(transaction).not.toHaveBeenCalled();
+    expect(recordFailure).toHaveBeenCalledWith({
+      attemptNumber: 0,
+      consumerName: "unknown:v1",
+      errorCode: "CONSUMER_UNKNOWN",
+      eventId: envelope.eventId,
+      firstAttemptAt: "1970-01-01T00:00:00.000Z",
+      scope: { brandId: envelope.tenantId },
+    });
   });
 
   it.each([
@@ -98,6 +109,62 @@ describe("ConsumerDeliveryWorker", () => {
       ]),
     });
     await expect(worker.deliver("synthetic.projector:v1", envelope)).resolves.toEqual(outcome);
+  });
+
+  it("records failure evidence only after rollback and reconciles unknown commit with the same key", async () => {
+    const order: string[] = [];
+    const recordFailure = vi.fn(async () => {
+      order.push("record");
+    });
+    const transaction = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        order.push("rollback");
+        throw new ConsumerDeliveryPersistenceError("COMMIT_OUTCOME_UNKNOWN");
+      })
+      .mockImplementationOnce(async (_scope, work) => {
+        order.push("reconcile");
+        return await work({
+          query: vi
+            .fn()
+            .mockResolvedValueOnce({ rowCount: 0, rows: [] })
+            .mockResolvedValueOnce({
+              rowCount: 1,
+              rows: [
+                {
+                  event_type: envelope.eventType,
+                  schema_version: envelope.schemaVersion,
+                  brand_id: envelope.tenantId,
+                  store_id: null,
+                  status: "completed",
+                },
+              ],
+            }),
+        });
+      });
+    const worker = new ConsumerDeliveryWorker({
+      database: { transaction },
+      failureRecorder: { recordFailure },
+      registry: new ConsumerRegistry([
+        {
+          consumerName: "synthetic.projector:v1",
+          consumerVersion: 1,
+          eventType: "SyntheticChanged",
+          schemaVersions: [1],
+          ownerModule: "@bop/eventing",
+          tenantScope: "brand",
+          ordering: "none",
+          sideEffect: "synthetic-effect",
+          replaySafe: true,
+          handler: vi.fn(async () => undefined),
+        },
+      ]),
+    });
+    await expect(worker.deliver("synthetic.projector:v1", envelope)).resolves.toEqual({
+      status: "duplicate_completed",
+    });
+    expect(order).toEqual(["rollback", "reconcile"]);
+    expect(recordFailure).not.toHaveBeenCalled();
   });
 
   it("records bounded telemetry and maps unexpected failures without exposing payload or errors", async () => {
