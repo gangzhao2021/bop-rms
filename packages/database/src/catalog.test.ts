@@ -42,6 +42,7 @@ describe("migration catalog", () => {
       "0000_010_create_outbox_event",
       "0000_011_alter_outbox_dispatch",
       "0000_012_create_consumer_inbox",
+      "0000_013_create_retry_dead_letter",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -86,9 +87,10 @@ describe("migration catalog", () => {
 
   it("registers the exact WP-0030 and WP-0031 Eventing migrations", async () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
-    const outbox = catalog.migrations.at(-3);
-    const dispatcher = catalog.migrations.at(-2);
-    const inbox = catalog.migrations.at(-1);
+    const outbox = catalog.migrations.at(-4);
+    const dispatcher = catalog.migrations.at(-3);
+    const inbox = catalog.migrations.at(-2);
+    const retry = catalog.migrations.at(-1);
     expect(outbox).toMatchObject({
       id: "0000_010_create_outbox_event",
       metadata: {
@@ -117,7 +119,14 @@ describe("migration catalog", () => {
       metadata: { owner: "shared-infrastructure/eventing", schema: "platform_eventing" },
     });
     expect(inbox?.sql).toContain("consumer_inbox_tenant_scope");
-    expect(`${outbox?.sql}\n${dispatcher?.sql}\n${inbox?.sql}`).not.toMatch(
+    expect(retry).toMatchObject({
+      id: "0000_013_create_retry_dead_letter",
+      metadata: { owner: "shared-infrastructure/eventing", schema: "platform_eventing" },
+    });
+    expect(retry?.sql).toContain("CREATE TABLE platform_eventing.delivery_attempt");
+    expect(retry?.sql).toContain("CREATE TABLE platform_eventing.dead_letter_item");
+    expect(retry?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(`${outbox?.sql}\n${dispatcher?.sql}\n${inbox?.sql}\n${retry?.sql}`).not.toMatch(
       /\b(?:GRANT|CREATE ROLE|CREATE USER)\b/iu,
     );
   });

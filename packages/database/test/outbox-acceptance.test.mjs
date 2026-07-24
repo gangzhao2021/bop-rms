@@ -107,6 +107,7 @@ async function proveOutbox(context) {
         "lease_token",
         "lease_owner",
         "lease_expires_at",
+        "ordering_released_at",
       ],
     );
     for (const name of [

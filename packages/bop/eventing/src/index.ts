@@ -41,4 +41,36 @@ export {
 } from "./contracts/consumer-inbox.js";
 export { ConsumerRegistry, InvalidConsumerRegistryError } from "./contracts/consumer-registry.js";
 export { consumeEventInTransaction } from "./infrastructure/messaging/consume-event-in-transaction.js";
+export {
+  commitUnknownSafeCodes,
+  deadLetterPermissions,
+  deadLetterReasons,
+  nonRetryableSafeCodes,
+  resolveRetry,
+  retryableSafeCodes,
+  retryPolicy,
+  retryTelemetryBuckets,
+  validateRetryResolution,
+  type DeadLetterCommand,
+  type DeadLetterPermission,
+  type DeadLetterReason,
+  type RetryFailureClass,
+  type RetryPath,
+  type RetryResolution,
+  type RetrySafeCode,
+  type RetryTelemetryEvent,
+} from "./contracts/retry-dead-letter.js";
+export {
+  applyDeadLetterCommand,
+  claimConsumerRetryBatch,
+  completeConsumerRetry,
+  recordConsumerFailureDecision,
+  recordOutboxFailureDecision,
+  resolveDeadLetter,
+  scheduleParkedOutboxBatch,
+  type ClaimedConsumerRetry,
+  type DeliveryDecisionResult,
+  type RecordDeliveryDecisionInput,
+  type RetryDeadLetterTransaction,
+} from "./infrastructure/messaging/retry-dead-letter.js";
 export { moduleManifest } from "./module.manifest.js";
