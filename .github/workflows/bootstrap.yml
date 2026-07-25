@@ -85,6 +85,15 @@ jobs:
           pnpm test
           pnpm build
 
+      - name: Verify WP-0035 Event Catalog and Eventing regressions
+        run: |
+          pnpm event-catalog:acceptance
+          pnpm outbox:acceptance
+          pnpm outbox-dispatcher:acceptance
+          pnpm consumer-inbox:acceptance
+          pnpm retry-dead-letter:acceptance
+          pnpm correlation-context:acceptance
+
       - name: Verify frozen install idempotence
         run: |
           before="$(sha256sum pnpm-lock.yaml)"

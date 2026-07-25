@@ -1,0 +1,23 @@
+{
+  "name": "@bop-rms/contracts-events",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "event-catalog:check": "node events/generate.ts --check && node events/validate-asyncapi.ts && CI=true SUPPRESS_NO_CONFIG_WARNING=true ASYNCAPI_METRICS_CONFIG_PATH=events/asyncapi-metrics-disabled.json asyncapi validate events/generated/event-catalog.asyncapi.json",
+    "event-catalog:generate": "node events/generate.ts --write",
+    "format:check": "prettier --check . --ignore-path ../../.prettierignore",
+    "lint": "eslint events",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@asyncapi/cli": "6.0.2",
+    "@asyncapi/parser": "3.6.0",
+    "@types/node-fetch": "2.6.13"
+  }
+}
