@@ -1,8 +1,10 @@
 import express, { type ErrorRequestHandler, type Express } from "express";
 import helmet from "helmet";
+import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
 
 export interface AppOptions {
   now?: () => string;
+  realtime?: RealtimeTransport;
 }
 const errorHandler: ErrorRequestHandler = (error, _request, response, next) => {
   void next;
@@ -17,7 +19,10 @@ const errorHandler: ErrorRequestHandler = (error, _request, response, next) => {
   });
 };
 
-export function createApp({ now = () => new Date().toISOString() }: AppOptions = {}): Express {
+export function createApp({
+  now = () => new Date().toISOString(),
+  realtime,
+}: AppOptions = {}): Express {
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet());
@@ -37,6 +42,7 @@ export function createApp({ now = () => new Date().toISOString() }: AppOptions =
       dependencies: { database: { status: "not_configured", required: true } },
     }),
   );
+  app.get("/bff/realtime", realtime?.handler() ?? unavailableRealtimeHandler);
   app.use((_request, response) =>
     response
       .status(404)

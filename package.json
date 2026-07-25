@@ -40,6 +40,7 @@
     "correlation-context:acceptance": "vitest run --config packages/database/vitest.correlation-context.config.ts",
     "retry-dead-letter:acceptance": "vitest run --config packages/database/vitest.retry-dead-letter.config.ts",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
+    "realtime:acceptance": "pnpm --filter @bop-rms/api realtime:acceptance",
     "test": "vitest run && turbo run test",
     "test:integration": "turbo run test:integration",
     "typecheck": "tsc --project tsconfig.json && turbo run typecheck",
