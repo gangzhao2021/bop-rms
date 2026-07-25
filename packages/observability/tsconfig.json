@@ -2,7 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
-    "lib": ["ES2024"]
+    "lib": ["ES2024"],
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src"
   },
-  "include": ["src/**/*.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts"]
 }
