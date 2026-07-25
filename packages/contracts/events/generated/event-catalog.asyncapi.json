@@ -1,0 +1,12 @@
+{
+  "asyncapi": "3.0.0",
+  "channels": {},
+  "components": {
+    "messages": {}
+  },
+  "defaultContentType": "application/json",
+  "info": {
+    "title": "BOP-RMS Event Catalog",
+    "version": "0.1.0"
+  }
+}

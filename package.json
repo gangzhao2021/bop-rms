@@ -13,6 +13,8 @@
     "database-ownership:check": "vitest run tooling/database-ownership/validate.test.mjs && node tooling/database-ownership/validate.mjs",
     "db:migrate": "node packages/database/src/cli.ts",
     "domain-layer-boundary:check": "vitest run tooling/domain-layer-boundary/validate.test.mjs && node tooling/domain-layer-boundary/validate.mjs",
+    "event-catalog:acceptance": "pnpm --filter @bop-rms/contracts-events test && pnpm --filter @bop-rms/contracts-events event-catalog:check",
+    "event-catalog:check": "pnpm --filter @bop-rms/contracts-events event-catalog:check",
     "clean": "turbo run clean",
     "dev": "node tooling/environment/local.mjs start",
     "environment:check": "node tooling/environment/validate.mjs --env-file .env --check-ports",
@@ -41,7 +43,7 @@
     "test": "vitest run && turbo run test",
     "test:integration": "turbo run test:integration",
     "typecheck": "tsc --project tsconfig.json && turbo run typecheck",
-    "verify": "pnpm repository-guidance:check && pnpm module-manifest:check && pnpm module-generator:check && pnpm import-boundary:check && pnpm database-ownership:check && pnpm domain-layer-boundary:check && pnpm migration:check && pnpm foundation:check && pnpm helpers:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm screen-registry:check && pnpm test && pnpm build",
+    "verify": "pnpm repository-guidance:check && pnpm module-manifest:check && pnpm module-generator:check && pnpm import-boundary:check && pnpm database-ownership:check && pnpm domain-layer-boundary:check && pnpm migration:check && pnpm foundation:check && pnpm helpers:check && pnpm event-catalog:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm screen-registry:check && pnpm test && pnpm build",
     "screen-registry:check": "node tooling/screen-registry/validate.ts"
   },
   "devDependencies": {
