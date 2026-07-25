@@ -7,11 +7,12 @@
     "build": "tsc --project tsconfig.build.json",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
     "lint": "eslint src",
+    "structured-logging:acceptance": "vitest run src/structured-logging.test.ts",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json"
   },
   "dependencies": {
-    "@bop/eventing": "workspace:*",
-    "pino": "10.3.1"
+    "@bop-rms/observability": "workspace:*",
+    "@bop/eventing": "workspace:*"
   }
 }

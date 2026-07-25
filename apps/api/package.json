@@ -8,13 +8,14 @@
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
     "lint": "eslint src",
     "realtime:acceptance": "vitest run src/realtime.acceptance.test.ts",
+    "structured-logging:acceptance": "vitest run src/structured-logging.test.ts",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json"
   },
   "dependencies": {
+    "@bop-rms/observability": "workspace:*",
     "express": "5.2.1",
-    "helmet": "8.3.0",
-    "pino": "10.3.1"
+    "helmet": "8.3.0"
   },
   "devDependencies": {
     "@types/express": "5.0.6"
