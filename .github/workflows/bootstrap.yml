@@ -85,8 +85,9 @@ jobs:
           pnpm test
           pnpm build
 
-      - name: Verify WP-0035 Event Catalog and Eventing regressions
+      - name: Verify WP-0036 Realtime and Eventing regressions
         run: |
+          pnpm realtime:acceptance
           pnpm event-catalog:acceptance
           pnpm outbox:acceptance
           pnpm outbox-dispatcher:acceptance

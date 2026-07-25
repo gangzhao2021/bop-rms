@@ -57,4 +57,20 @@ describe("API skeleton", () => {
     });
     expect(response.status).toBe(413);
   });
+  it("fails closed when realtime authorization is not configured", async () => {
+    const response = await request("/bff/realtime", {
+      headers: {
+        origin: "https://merchant.example.test",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+      },
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "realtime_not_configured",
+        message: "The stream is unavailable.",
+      },
+    });
+  });
 });
