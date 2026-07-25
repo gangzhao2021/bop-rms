@@ -47,15 +47,15 @@ importers:
 
   apps/api:
     dependencies:
+      '@bop-rms/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       express:
         specifier: 5.2.1
         version: 5.2.1(supports-color@8.1.1)
       helmet:
         specifier: 8.3.0
         version: 8.3.0
-      pino:
-        specifier: 10.3.1
-        version: 10.3.1
     devDependencies:
       '@types/express':
         specifier: 5.0.6
@@ -143,12 +143,12 @@ importers:
 
   apps/worker:
     dependencies:
+      '@bop-rms/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@bop/eventing':
         specifier: workspace:*
         version: link:../../packages/bop/eventing
-      pino:
-        specifier: 10.3.1
-        version: 10.3.1
 
   packages/bop/eventing: {}
 
@@ -180,6 +180,12 @@ importers:
       '@types/pg':
         specifier: 8.20.0
         version: 8.20.0
+
+  packages/observability:
+    dependencies:
+      pino:
+        specifier: 10.3.1
+        version: 10.3.1
 
   packages/ui:
     devDependencies:
