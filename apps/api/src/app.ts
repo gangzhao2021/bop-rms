@@ -1,10 +1,18 @@
-import express, { type ErrorRequestHandler, type Express } from "express";
+import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import helmet from "helmet";
 import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
+import {
+  createRequestCorrelationMiddleware,
+  type RequestCompletionLogger,
+} from "./request-correlation.js";
 
 export interface AppOptions {
+  correlationAcceptanceHandler?: RequestHandler;
   now?: () => string;
+  nowMilliseconds?: () => number;
   realtime?: RealtimeTransport;
+  requestLogger?: RequestCompletionLogger;
+  uuidV7Factory?: () => string;
 }
 const errorHandler: ErrorRequestHandler = (error, _request, response, next) => {
   void next;
@@ -20,11 +28,22 @@ const errorHandler: ErrorRequestHandler = (error, _request, response, next) => {
 };
 
 export function createApp({
+  correlationAcceptanceHandler,
   now = () => new Date().toISOString(),
+  nowMilliseconds,
   realtime,
+  requestLogger,
+  uuidV7Factory,
 }: AppOptions = {}): Express {
   const app = express();
   app.disable("x-powered-by");
+  app.use(
+    createRequestCorrelationMiddleware({
+      ...(nowMilliseconds === undefined ? {} : { nowMilliseconds }),
+      ...(requestLogger === undefined ? {} : { logger: requestLogger }),
+      ...(uuidV7Factory === undefined ? {} : { uuidV7Factory }),
+    }),
+  );
   app.use(helmet());
   app.use(express.json({ limit: "64kb", strict: true }));
   app.use((_request, response, next) => {
@@ -43,6 +62,8 @@ export function createApp({
     }),
   );
   app.get("/bff/realtime", realtime?.handler() ?? unavailableRealtimeHandler);
+  if (correlationAcceptanceHandler !== undefined)
+    app.post("/__acceptance/request-command-event", correlationAcceptanceHandler);
   app.use((_request, response) =>
     response
       .status(404)

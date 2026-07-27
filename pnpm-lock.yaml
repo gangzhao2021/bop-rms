@@ -50,12 +50,18 @@ importers:
       '@bop-rms/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@bop/eventing':
+        specifier: workspace:*
+        version: link:../../packages/bop/eventing
       express:
         specifier: 5.2.1
         version: 5.2.1(supports-color@8.1.1)
       helmet:
         specifier: 8.3.0
         version: 8.3.0
+      uuid:
+        specifier: 14.0.1
+        version: 14.0.1
     devDependencies:
       '@types/express':
         specifier: 5.0.6
