@@ -39,7 +39,11 @@ async function prove(context) {
     await client.query(`GRANT USAGE ON SCHEMA public, platform_audit, platform_helpers TO ${role}`);
     await client.query(`GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ${role}`);
     await client.query(
-      `GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(), platform_helpers.current_store_id() TO ${role}`,
+      `GRANT EXECUTE ON FUNCTION
+         platform_helpers.is_uuid_v7(uuid),
+         platform_helpers.current_brand_id(),
+         platform_helpers.current_store_id()
+       TO ${role}`,
     );
     await client.query(
       `GRANT SELECT, INSERT ON TABLE public.wp0042_probe, platform_audit.audit_record TO ${role}`,
