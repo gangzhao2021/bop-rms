@@ -36,10 +36,13 @@ describe("WP-0040 structured logger", () => {
     const logger = createStructuredLogger(config, { destination });
 
     logger.info({
+      durationMs: 27,
       event: "operation_completed",
       port: 3100,
+      requestId: "018f1f48-7b5d-7aa5-8a1b-123456789abc",
       resultCode: "SUCCESS",
       signal: "SIGTERM",
+      statusCode: 202,
       trustedContext: {
         correlationId: "018f1f48-7b5d-7aa6-8a1b-123456789abc",
         causationId: "018f1f48-7b5d-7aa7-8a1b-123456789abc",
@@ -50,26 +53,32 @@ describe("WP-0040 structured logger", () => {
     expect(record).toMatchObject({
       causationId: "018f1f48-7b5d-7aa7-8a1b-123456789abc",
       correlationId: "018f1f48-7b5d-7aa6-8a1b-123456789abc",
+      durationMs: 27,
       environment: "test",
       event: "operation_completed",
       module: "acceptance",
       port: 3100,
+      requestId: "018f1f48-7b5d-7aa5-8a1b-123456789abc",
       resultCode: "SUCCESS",
       service: "bop-rms-test",
       signal: "SIGTERM",
+      statusCode: 202,
     });
     expect(Object.keys(record ?? {}).sort()).toEqual(
       [
         "causationId",
         "correlationId",
+        "durationMs",
         "environment",
         "event",
         "level",
         "module",
         "port",
+        "requestId",
         "resultCode",
         "service",
         "signal",
+        "statusCode",
         "time",
       ].sort(),
     );
@@ -143,6 +152,27 @@ describe("WP-0040 structured logger", () => {
     ]);
     expect(destination.records.join("")).not.toContain("raw-header-value");
     expect(destination.records.join("")).not.toContain("must-never-log");
+  });
+
+  it.each([
+    { durationMs: -1 },
+    { durationMs: 86_400_001 },
+    { durationMs: 1.5 },
+    { requestId: "raw-header-value" },
+    { statusCode: 99 },
+    { statusCode: 600 },
+  ])("fails closed for an invalid bounded HTTP field %#", (unsafeField) => {
+    const destination = new MemoryDestination();
+    const failures: StructuredLogFailure[] = [];
+    const logger = createStructuredLogger(config, {
+      destination,
+      onSafeFailure: (failure) => failures.push(failure),
+    });
+
+    logger.info({ event: "operation_completed", ...unsafeField } as never);
+
+    expect(failures).toEqual(["LOG_REDACTION_FAILED"]);
+    expect(destination.records.join("")).not.toContain("raw-header-value");
   });
 
   it("isolates a redaction accessor failure without exposing the value", () => {

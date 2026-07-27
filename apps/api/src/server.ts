@@ -8,6 +8,7 @@ import {
 import { createApp } from "./app.js";
 
 const apiLogEvents = [
+  "http_request_completed",
   "listening",
   "shutdown_complete",
   "shutdown_failed",
@@ -35,7 +36,7 @@ export function startApiRuntime(): void {
   const port = Number.parseInt(process.env.PORT ?? "3000", 10);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("PORT must be an integer from 1 to 65535");
-  const server = createServer(createApp());
+  const server = createServer(createApp({ requestLogger: logger }));
   server.requestTimeout = 15_000;
   server.headersTimeout = 10_000;
   server.keepAliveTimeout = 5_000;

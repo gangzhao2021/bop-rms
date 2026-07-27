@@ -4,7 +4,17 @@ const safeName = /^[a-z][a-z0-9-]{0,62}$/u;
 const safeEvent = /^[a-z][a-z0-9_]{0,62}$/u;
 const safeCode = /^[A-Z][A-Z0-9_]{0,63}$/u;
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const inputFields = new Set(["error", "event", "port", "resultCode", "signal", "trustedContext"]);
+const inputFields = new Set([
+  "durationMs",
+  "error",
+  "event",
+  "port",
+  "requestId",
+  "resultCode",
+  "signal",
+  "statusCode",
+  "trustedContext",
+]);
 const contextFields = new Set(["causationId", "correlationId"]);
 const errorFields = new Set(["code", "value"]);
 const environments = new Set(["development", "production", "staging", "test"]);
@@ -42,14 +52,17 @@ export interface StructuredLoggerOptions {
 }
 
 export interface StructuredLogInput<EventName extends string = string> {
+  readonly durationMs?: number;
   readonly error?: {
     readonly code: string;
     readonly value: unknown;
   };
   readonly event: EventName;
   readonly port?: number;
+  readonly requestId?: string;
   readonly resultCode?: string;
   readonly signal?: "SIGINT" | "SIGTERM";
+  readonly statusCode?: number;
   /**
    * Only a context already validated by the WP-0034 trusted in-process
    * boundary may be supplied. Never pass header/query/body/Provider input.
@@ -67,14 +80,17 @@ export interface StructuredLogger<EventName extends string = string> {
 interface SerializedRecord {
   causationId?: string;
   correlationId?: string;
+  durationMs?: number;
   error?: {
     readonly code: string;
     readonly stack?: string;
   };
   event: string;
   port?: number;
+  requestId?: string;
   resultCode?: string;
   signal?: "SIGINT" | "SIGTERM";
+  statusCode?: number;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -170,6 +186,34 @@ function serializeRecord(input: unknown, allowedEvents: ReadonlySet<string>): Se
     if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535)
       throw new TypeError("structured log port rejected");
     record.port = port;
+  }
+  const requestId = input.requestId;
+  if (requestId !== undefined) {
+    if (typeof requestId !== "string" || !uuidV7.test(requestId))
+      throw new TypeError("structured log request identifier rejected");
+    record.requestId = requestId;
+  }
+  const durationMs = input.durationMs;
+  if (durationMs !== undefined) {
+    if (
+      typeof durationMs !== "number" ||
+      !Number.isInteger(durationMs) ||
+      durationMs < 0 ||
+      durationMs > 86_400_000
+    )
+      throw new TypeError("structured log duration rejected");
+    record.durationMs = durationMs;
+  }
+  const statusCode = input.statusCode;
+  if (statusCode !== undefined) {
+    if (
+      typeof statusCode !== "number" ||
+      !Number.isInteger(statusCode) ||
+      statusCode < 100 ||
+      statusCode > 599
+    )
+      throw new TypeError("structured log status rejected");
+    record.statusCode = statusCode;
   }
 
   if (input.trustedContext !== undefined) {
