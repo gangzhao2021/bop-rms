@@ -156,6 +156,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/bop/eventing
 
+  packages/bop/audit: {}
+
   packages/bop/eventing: {}
 
   packages/contracts:
