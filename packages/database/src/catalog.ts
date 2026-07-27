@@ -260,7 +260,7 @@ function validateSql(
     if (
       match[1] !== metadata.schema &&
       !(
-        metadata.schema === "platform_eventing" &&
+        ["platform_audit", "platform_eventing"].includes(metadata.schema) &&
         acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
       )
     )

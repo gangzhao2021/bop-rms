@@ -23,7 +23,10 @@ const codeExtensions = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".
 const snakeCase = /^[a-z][a-z0-9_]*$/u;
 const principalId = /^[a-z0-9@][a-z0-9@/._-]*$/u;
 const accessId = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
-const sharedAuthorityModules = new Map([["platform_eventing", "@bop/eventing"]]);
+const sharedAuthorityModules = new Map([
+  ["platform_audit", "@bop/audit"],
+  ["platform_eventing", "@bop/eventing"],
+]);
 
 export const databaseOwnershipUsage = `BOP-RMS Database Schema Ownership Architecture Test
 
@@ -150,9 +153,10 @@ async function scanUnsupported(root, module, diagnostics) {
       } else if (entry.isFile() && !file.endsWith(evidencePath)) {
         const moduleRelative = relative(module.root, path).replaceAll("\\", "/");
         if (
-          moduleRelative.startsWith("src/infrastructure/persistence/") ||
-          moduleRelative.startsWith("migrations/") ||
-          extname(path).toLowerCase() === ".sql"
+          (moduleRelative.startsWith("src/infrastructure/persistence/") ||
+            moduleRelative.startsWith("migrations/") ||
+            extname(path).toLowerCase() === ".sql") &&
+          ![...sharedAuthorityModules.values()].includes(module.packageName)
         )
           diagnostics.push(
             diag(
@@ -563,7 +567,7 @@ export async function validateDatabaseOwnership({ root = process.cwd() } = {}) {
     }
     if (
       module.manifest.ownedDatabase?.schema === null &&
-      (module.packageName !== "@bop/eventing" ||
+      (!["@bop/audit", "@bop/eventing"].includes(module.packageName) ||
         (Array.isArray(evidence.tables) && evidence.tables.length > 0))
     ) {
       diagnostics.push(
