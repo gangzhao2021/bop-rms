@@ -1,0 +1,29 @@
+import { defineModuleManifest } from "../../../../tooling/module-manifest/module.manifest.js";
+
+const moduleManifestInput = {
+  moduleName: "identity",
+  packageName: "@bop/identity",
+  layer: "BOP",
+  lifecycle: "Phase 0",
+  publicExports: ["."],
+  allowedSynchronousDependencies: [],
+  consumedEvents: [],
+  publishedEvents: ["identity.credential-compromised.v1", "identity.session-revoked.v1"],
+  ownedDatabase: { schema: null, tables: [] },
+  ownedJobs: [],
+  featureFlags: [],
+  killSwitches: [],
+  piiClassification: {
+    classes: ["indirect_identifier", "personal", "sensitive_personal", "credential"],
+    handling: {
+      logs: "prohibited",
+      urls: "prohibited",
+      analytics: "prohibited",
+      fixtures: "synthetic-only",
+    },
+  },
+  moduleOwner: { role: "Identity Engineering Owner" },
+} as const;
+
+export const moduleManifest = defineModuleManifest(moduleManifestInput);
+export default moduleManifest;
