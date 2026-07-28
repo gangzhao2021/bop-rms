@@ -222,6 +222,50 @@ describe("Database Schema Ownership Architecture Test", () => {
     expect(await resultCodes(root)).toContain("UNDECLARED_OWNER_WRITE");
   });
 
+  it("accepts only @bop/audit advancing the Audit chain head", async () => {
+    const root = await fixture();
+    const audit = await writeModule(root, "BOP", "audit", null, [], (base) => ({
+      ...base,
+      accesses: [
+        access(
+          base.module,
+          "advance-audit-chain-head",
+          "write",
+          "platform_audit",
+          "audit_chain_head",
+          {
+            mechanism: "raw-sql",
+            principal: { kind: "shared-infrastructure", id: "audit-infrastructure" },
+          },
+        ),
+      ],
+    }));
+    expect(await validateDatabaseOwnership({ root })).toMatchObject({
+      valid: true,
+      diagnostics: [],
+    });
+
+    const other = await writeModule(root, "BOP", "synthetic-chain-writer", null, [], (base) => ({
+      ...base,
+      accesses: [
+        access(
+          base.module,
+          "advance-audit-chain-head",
+          "write",
+          "platform_audit",
+          "audit_chain_head",
+          {
+            mechanism: "raw-sql",
+            principal: { kind: "shared-infrastructure", id: "audit-infrastructure" },
+          },
+        ),
+      ],
+    }));
+    expect(audit.module.packageName).toBe("@bop/audit");
+    expect(other.module.packageName).toBe("@bop/synthetic-chain-writer");
+    expect(await resultCodes(root)).toContain("UNDECLARED_OWNER_WRITE");
+  });
+
   it("accepts a named Reconciliation Job reading an approved source view", async () => {
     const root = await fixture();
     await writeModule(

@@ -12,6 +12,15 @@ const databaseAccessManifestInput = {
       readPattern: null,
       source: "packages/bop/audit/src/infrastructure/persistence/append-audit-record.ts",
     },
+    {
+      id: "advance-audit-chain-head",
+      operation: "write",
+      mechanism: "raw-sql",
+      target: { schema: "platform_audit", table: "audit_chain_head" },
+      principal: { kind: "shared-infrastructure", id: "audit-infrastructure" },
+      readPattern: null,
+      source: "packages/bop/audit/src/infrastructure/persistence/append-audit-record.ts",
+    },
   ],
 } as const;
 

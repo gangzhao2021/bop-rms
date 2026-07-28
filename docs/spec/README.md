@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0046 — Audit Hash Chain、KMS-signed Daily Digest and Immutable Archive Verification documentation-only readiness is active from exact origin/main@5e8b50b340d9764388f4013375cf50ef3e22defe on branch codex/wp-0046-readiness；WP-0045 is integrated、exact-main verified and cleaned`
+- Current discussion node: `WP-0046 — Audit Hash Chain、KMS-signed Daily Digest and Immutable Archive Verification implementation is locally verified from exact origin/main@df438688324130a9cf4f74fc69a33567083b038d on branch codex/wp-0046；exact-head CI is pending`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -15,6 +15,8 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 ## Latest Work Package Status
 
 Entries are newest-first；the WP-0045 readiness and WP-0044/WP-0047 integration entries below supersede older historical snapshots retained later in this index.
+
+- `WP-0046 — Audit Hash Chain、KMS-signed Daily Digest and Immutable Archive Verification` implementation is locally verified from exact `origin/main@df438688324130a9cf4f74fc69a33567083b038d` on branch `codex/wp-0046`. It adds the per-scope transactional chain/head、dependency-free RFC 8785、non-empty UTC daily manifest、closed KMS P-256 digest port、archive receipt verifier and 29 focused / 41 total Audit tests. Format、lint、typecheck、build、architecture and production audit gates pass；the existing macOS APFS/realpath and Docker compose exit `125` boundaries remain recorded, with exact-head pinned-Linux CI pending. Readiness PR [#52](https://github.com/gangzhao2021/bop-rms/pull/52) exact head `b6f867d8954b7623ba898bf628684f7c8958d66b` passed run/job `30349616905` / `90243767176`; squash `df438688324130a9cf4f74fc69a33567083b038d` passed post-merge run/job `30350236805` / `90245729505`. Real KMS/S3/retention evidence remains gated and unclaimed.
 
 - `WP-0046 — Audit Hash Chain、KMS-signed Daily Digest and Immutable Archive Verification` documentation-only readiness is active from exact `origin/main@5e8b50b340d9764388f4013375cf50ef3e22defe` on branch `codex/wp-0046-readiness`. The candidate repository increment adds a per-Brand/Store-scope ordered SHA-256 chain、RFC 8785 canonicalization、daily manifest/signature/archive verification ports and fail-closed synthetic evidence without creating a KMS key、S3 bucket、Object Lock policy、credential or cloud resource. Real KMS ECDSA P-256 signing、cross-account immutable archive、retention and restore verification remain gated External Evidence and cannot be represented as passed.
 

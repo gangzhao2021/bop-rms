@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { appendAuditRecordInTransaction, validateAuditRecord } from "../index.js";
+import {
+  appendAuditRecordInTransaction,
+  AuditPersistenceError,
+  validateAuditRecord,
+} from "../index.js";
 
 const id = (digit: string) => `018f1f48-7b5d-7cc${digit}-8a1b-123456789abc`;
 const record = () => ({
@@ -22,12 +26,36 @@ const record = () => ({
 });
 
 describe("Audit append contract", () => {
-  it("validates and performs exactly one parameterized insert", async () => {
-    const query = vi.fn().mockResolvedValue({});
-    await appendAuditRecordInTransaction({ query }, record());
-    expect(query).toHaveBeenCalledOnce();
-    expect(query.mock.calls[0]?.[0]).toContain("INSERT INTO platform_audit.audit_record");
-    expect(query.mock.calls[0]?.[1]).toHaveLength(19);
+  it("validates, allocates and advances one exact chain partition", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] })
+      .mockResolvedValueOnce({
+        rowCount: 1,
+        rows: [
+          {
+            next_sequence: "1",
+            previous_hash: null,
+            recorded_at: "2026-07-27T12:01:02.003Z",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ next_sequence: "2" }] });
+    const appended = await appendAuditRecordInTransaction({ query }, record());
+    expect(query).toHaveBeenCalledTimes(4);
+    expect(query.mock.calls[0]?.[0]).toContain("INSERT INTO platform_audit.audit_chain_head");
+    expect(query.mock.calls[1]?.[0]).toContain("FOR UPDATE");
+    expect(query.mock.calls[2]?.[0]).toContain("INSERT INTO platform_audit.audit_record");
+    expect(query.mock.calls[2]?.[1]).toHaveLength(24);
+    expect(query.mock.calls[3]?.[0]).toContain("UPDATE platform_audit.audit_chain_head");
+    expect(appended).toMatchObject({
+      version: "AUDIT_CHAIN_V1",
+      sequence: 1,
+      previousHash: null,
+      recordedAt: "2026-07-27T12:01:02.003Z",
+    });
+    expect(appended.recordHash).toMatch(/^[0-9a-f]{64}$/u);
   });
 
   it.each([
@@ -49,6 +77,42 @@ describe("Audit append contract", () => {
   it("accepts old occurredAt without rewriting it", () => {
     expect(validateAuditRecord(record(), Date.parse("2030-01-01T00:00:00.000Z")).occurredAt).toBe(
       record().occurredAt,
+    );
+  });
+
+  it("fails closed on an invalid locked head or lost guarded advance", async () => {
+    const invalidHead = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            next_sequence: "2",
+            previous_hash: null,
+            recorded_at: "2026-07-27T12:01:02.003Z",
+          },
+        ],
+      });
+    await expect(appendAuditRecordInTransaction({ query: invalidHead }, record())).rejects.toThrow(
+      AuditPersistenceError,
+    );
+
+    const lostAdvance = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            next_sequence: "1",
+            previous_hash: null,
+            recorded_at: "2026-07-27T12:01:02.003Z",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    await expect(appendAuditRecordInTransaction({ query: lostAdvance }, record())).rejects.toThrow(
+      AuditPersistenceError,
     );
   });
 });
