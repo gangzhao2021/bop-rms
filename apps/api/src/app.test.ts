@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
+import { HealthReadinessController } from "./health-readiness.js";
 
 const servers: ReturnType<typeof createServer>[] = [];
 afterEach(async () => {
@@ -15,8 +16,12 @@ afterEach(async () => {
       ),
   );
 });
-async function request(path: string, init?: RequestInit) {
-  const server = createServer(createApp({ now: () => "2026-07-16T00:00:00.000Z" }));
+async function request(
+  path: string,
+  init?: RequestInit,
+  options: Parameters<typeof createApp>[0] = {},
+) {
+  const server = createServer(createApp({ now: () => "2026-07-16T00:00:00.000Z", ...options }));
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -50,10 +55,31 @@ describe("API skeleton", () => {
     const response = await request("/ready");
     expect(response.status).toBe(503);
     expectGeneratedCorrelationHeaders(response);
-    const body = await response.json();
-    expect(body).toMatchObject({
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      checkedAt: "2026-07-16T00:00:00.000Z",
+      service: "bop-rms-api",
       status: "not_ready",
       dependencies: { database: { status: "not_configured", required: true } },
+    });
+  });
+  it("reports ready only for an accepting runtime with a ready required dependency", async () => {
+    const healthReadiness = new HealthReadinessController({
+      databaseProbe: () => "ready",
+      now: () => "2026-07-16T00:00:00.000Z",
+    });
+    healthReadiness.completeStartup();
+
+    const response = await request("/ready", undefined, { healthReadiness });
+
+    expect(response.status).toBe(200);
+    expectGeneratedCorrelationHeaders(response);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      checkedAt: "2026-07-16T00:00:00.000Z",
+      dependencies: { database: { required: true, status: "ready" } },
+      service: "bop-rms-api",
+      status: "ready",
     });
   });
   it("uses security headers and a non-reflective 404", async () => {
