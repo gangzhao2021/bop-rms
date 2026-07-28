@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
+    "core-telemetry:acceptance": "vitest run src/core-telemetry.test.ts src/lifecycle.test.ts",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
     "lint": "eslint src",
     "structured-logging:acceptance": "vitest run src/structured-logging.test.ts",

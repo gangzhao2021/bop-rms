@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
+    "core-telemetry:acceptance": "vitest run src/core-telemetry.test.ts src/request-correlation.test.ts src/server.test.ts",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
     "health-readiness:acceptance": "vitest run src/health-readiness.test.ts src/app.test.ts src/server.test.ts",
     "lint": "eslint src",

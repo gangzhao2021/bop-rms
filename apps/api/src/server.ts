@@ -1,8 +1,12 @@
 import { createServer, type Server } from "node:http";
 import { pathToFileURL } from "node:url";
 import {
+  createCoreTelemetry,
+  createNodeTelemetryRuntime,
   createStructuredLogger,
+  type CoreTelemetry,
   type LoggerEnvironment,
+  type NodeTelemetryRuntime,
   type StructuredLogDestination,
   type StructuredLogger,
 } from "@bop-rms/observability";
@@ -12,10 +16,13 @@ import type { RealtimeTransport } from "./realtime.js";
 
 const apiLogEvents = [
   "http_request_completed",
+  "http_request_failed",
   "listening",
+  "startup_failed",
   "shutdown_complete",
   "shutdown_failed",
   "shutdown_started",
+  "telemetry_shutdown_failed",
 ] as const;
 
 function runtimeEnvironment(): LoggerEnvironment {
@@ -42,17 +49,57 @@ export interface ApiServerRuntime {
 }
 
 export interface ApiServerRuntimeOptions {
+  coreTelemetry?: CoreTelemetry;
   healthReadiness?: HealthReadinessController;
   host?: string;
   logger?: StructuredLogger;
+  nodeTelemetry?: NodeTelemetryRuntime;
+  nowMilliseconds?: () => number;
   port?: number;
   realtime?: RealtimeTransport;
 }
 
+export function createApiCoreTelemetry(): CoreTelemetry {
+  return createCoreTelemetry({
+    allowedErrorCodes: ["API_SHUTDOWN_FAILED", "API_START_FAILED", "INTERNAL_ERROR"],
+    allowedOperations: ["api_shutdown", "api_startup", "http_request"],
+    allowedResultCodes: [
+      "API_SHUTDOWN_FAILED",
+      "API_START_FAILED",
+      "HTTP_CLIENT_ERROR",
+      "HTTP_SERVER_ERROR",
+      "HTTP_SUCCESS",
+      "SUCCESS",
+    ],
+    environment: runtimeEnvironment(),
+    module: "api-runtime",
+    routes: [
+      "/__acceptance/request-command-event",
+      "/bff/realtime",
+      "/health",
+      "/ready",
+      "unmatched",
+    ],
+    service: "bop-rms-api",
+  });
+}
+
+function runtimeDuration(startedAt: number, completedAt: number): number {
+  const duration = completedAt - startedAt;
+  if (!Number.isFinite(duration)) return 0;
+  return Math.min(86_400_000, Math.max(0, Math.trunc(duration)));
+}
+
 export function createApiServerRuntime({
+  coreTelemetry = createApiCoreTelemetry(),
   healthReadiness = new HealthReadinessController(),
   host = "127.0.0.1",
   logger = createApiRuntimeLogger(),
+  nodeTelemetry = createNodeTelemetryRuntime({
+    environment: runtimeEnvironment(),
+    serviceName: "bop-rms-api",
+  }),
+  nowMilliseconds = Date.now,
   port = 3000,
   realtime,
 }: ApiServerRuntimeOptions = {}): ApiServerRuntime {
@@ -61,8 +108,11 @@ export function createApiServerRuntime({
   const server = createServer(
     createApp({
       healthReadiness,
+      errorLogger: logger,
+      nowMilliseconds,
       ...(realtime === undefined ? {} : { realtime }),
       requestLogger: logger,
+      telemetry: coreTelemetry,
     }),
   );
   server.requestTimeout = 15_000;
@@ -73,26 +123,56 @@ export function createApiServerRuntime({
   let listenPromise: Promise<void> | undefined;
   const listen = (): Promise<void> => {
     if (listenPromise !== undefined) return listenPromise;
-    listenPromise = new Promise<void>((resolve, reject) => {
-      const onError = (error: Error) => {
-        server.off("listening", onListening);
-        reject(error);
-      };
-      const onListening = () => {
-        server.off("error", onError);
-        healthReadiness.completeStartup();
-        const address = server.address();
-        logger.info({
-          event: "listening",
-          ...(address !== null && typeof address !== "string" ? { port: address.port } : {}),
-          resultCode: "SUCCESS",
-        });
-        resolve();
-      };
-      server.once("error", onError);
-      server.once("listening", onListening);
-      server.listen(port, host);
-    });
+    listenPromise = Promise.resolve().then(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          try {
+            nodeTelemetry.start();
+          } catch (error) {
+            logger.error({
+              error: { code: "API_START_FAILED", value: error },
+              event: "startup_failed",
+              resultCode: "API_START_FAILED",
+            });
+            reject(error);
+            return;
+          }
+          const startedAt = nowMilliseconds();
+          const telemetryOperation = coreTelemetry.startOperation("api_startup");
+          const onError = (error: Error) => {
+            server.off("listening", onListening);
+            telemetryOperation.complete({
+              durationMs: runtimeDuration(startedAt, nowMilliseconds()),
+              errorCode: "API_START_FAILED",
+              resultCode: "API_START_FAILED",
+            });
+            logger.error({
+              error: { code: "API_START_FAILED", value: error },
+              event: "startup_failed",
+              resultCode: "API_START_FAILED",
+            });
+            reject(error);
+          };
+          const onListening = () => {
+            server.off("error", onError);
+            healthReadiness.completeStartup();
+            telemetryOperation.complete({
+              durationMs: runtimeDuration(startedAt, nowMilliseconds()),
+              resultCode: "SUCCESS",
+            });
+            const address = server.address();
+            logger.info({
+              event: "listening",
+              ...(address !== null && typeof address !== "string" ? { port: address.port } : {}),
+              resultCode: "SUCCESS",
+            });
+            resolve();
+          };
+          server.once("error", onError);
+          server.once("listening", onListening);
+          server.listen(port, host);
+        }),
+    );
     return listenPromise;
   };
 
@@ -101,6 +181,8 @@ export function createApiServerRuntime({
     if (shutdownPromise !== undefined) return shutdownPromise;
     healthReadiness.beginDrain();
     logger.info({ event: "shutdown_started", signal });
+    const startedAt = nowMilliseconds();
+    const telemetryOperation = coreTelemetry.startOperation("api_shutdown");
     shutdownPromise = (async () => {
       let shutdownError: unknown;
       try {
@@ -117,15 +199,30 @@ export function createApiServerRuntime({
       }
       if (shutdownError === undefined) {
         logger.info({ event: "shutdown_complete", resultCode: "SUCCESS" });
+        telemetryOperation.complete({
+          durationMs: runtimeDuration(startedAt, nowMilliseconds()),
+          resultCode: "SUCCESS",
+        });
       } else {
         logger.error({
           error: { code: "API_SHUTDOWN_FAILED", value: shutdownError },
           event: "shutdown_failed",
           resultCode: "API_SHUTDOWN_FAILED",
         });
+        telemetryOperation.complete({
+          durationMs: runtimeDuration(startedAt, nowMilliseconds()),
+          errorCode: "API_SHUTDOWN_FAILED",
+          resultCode: "API_SHUTDOWN_FAILED",
+        });
         process.exitCode = 1;
-        throw shutdownError;
       }
+      const telemetryShutdown = await nodeTelemetry.shutdown();
+      if (telemetryShutdown === "failed" || telemetryShutdown === "timeout")
+        logger.warn({
+          event: "telemetry_shutdown_failed",
+          resultCode: "TELEMETRY_SHUTDOWN_FAILED",
+        });
+      if (shutdownError !== undefined) throw shutdownError;
     })();
     return shutdownPromise;
   };

@@ -5,14 +5,17 @@ import {
   type CorrelationContext,
   type UuidV7Factory,
 } from "@bop/eventing";
+import type { CoreTelemetry } from "@bop-rms/observability";
 import type { Request, RequestHandler } from "express";
 import { v7 as uuidV7 } from "uuid";
 
 const requestContextKey = Symbol("bop.request-correlation");
+const requestErrorCodeKey = Symbol("bop.request-error-code");
 const maximumDurationMs = 86_400_000;
 
 type RequestWithCorrelation = Request & {
   [requestContextKey]?: RequestCorrelationContext;
+  [requestErrorCodeKey]?: "INTERNAL_ERROR";
 };
 
 export interface RequestCorrelationContext {
@@ -39,6 +42,8 @@ export interface RequestCompletionLogger {
 export interface RequestCorrelationOptions {
   readonly logger?: RequestCompletionLogger;
   readonly nowMilliseconds?: () => number;
+  readonly routeTemplates?: readonly string[];
+  readonly telemetry?: CoreTelemetry;
   readonly uuidV7Factory?: UuidV7Factory;
 }
 
@@ -54,6 +59,11 @@ function resultCode(
   if (statusCode >= 500) return "HTTP_SERVER_ERROR";
   if (statusCode >= 400) return "HTTP_CLIENT_ERROR";
   return "HTTP_SUCCESS";
+}
+
+function routeTemplate(request: Request, registered: ReadonlySet<string>): string {
+  const route = (request.route as { path?: unknown } | undefined)?.path;
+  return typeof route === "string" && registered.has(route) ? route : "unmatched";
 }
 
 export function getRequestCorrelationContext(request: Request): RequestCorrelationContext {
@@ -82,13 +92,27 @@ export function correlationForEventEmittedByCommand(
   );
 }
 
+export function markRequestError(request: Request, errorCode: "INTERNAL_ERROR"): void {
+  const localRequest = request as RequestWithCorrelation;
+  Object.defineProperty(localRequest, requestErrorCodeKey, {
+    configurable: true,
+    enumerable: false,
+    value: errorCode,
+    writable: false,
+  });
+}
+
 export function createRequestCorrelationMiddleware({
   logger,
   nowMilliseconds = Date.now,
+  routeTemplates = [],
+  telemetry,
   uuidV7Factory = uuidV7,
 }: RequestCorrelationOptions = {}): RequestHandler {
+  const registeredRoutes = new Set(routeTemplates);
   return (request, response, next) => {
     const startedAt = nowMilliseconds();
+    const telemetryOperation = telemetry?.startOperation("http_request");
     const requestId = continueTrustedCorrelationContext({
       correlationId: uuidV7Factory(),
     }).correlationId;
@@ -111,14 +135,25 @@ export function createRequestCorrelationMiddleware({
       completed = true;
       response.off("finish", complete);
       response.off("close", complete);
+      const durationMs = durationBetween(startedAt, nowMilliseconds());
+      const completionResult = resultCode(response.statusCode);
+      telemetryOperation?.complete({
+        durationMs,
+        ...(localRequest[requestErrorCodeKey] === undefined
+          ? {}
+          : { errorCode: localRequest[requestErrorCodeKey] }),
+        resultCode: completionResult,
+        routeTemplate: routeTemplate(request, registeredRoutes),
+      });
       Reflect.deleteProperty(localRequest, requestContextKey);
+      Reflect.deleteProperty(localRequest, requestErrorCodeKey);
       if (logger === undefined) return;
       try {
         logger.info({
-          durationMs: durationBetween(startedAt, nowMilliseconds()),
+          durationMs,
           event: "http_request_completed",
           requestId,
-          resultCode: resultCode(response.statusCode),
+          resultCode: completionResult,
           statusCode: response.statusCode,
           trustedContext: correlation,
         });
@@ -128,6 +163,7 @@ export function createRequestCorrelationMiddleware({
     };
     response.once("finish", complete);
     response.once("close", complete);
-    next();
+    if (telemetryOperation === undefined) next();
+    else telemetryOperation.run(next);
   };
 }

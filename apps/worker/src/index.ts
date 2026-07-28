@@ -1,7 +1,10 @@
 import { MessageChannel } from "node:worker_threads";
 import { pathToFileURL } from "node:url";
 import {
+  createCoreTelemetry,
+  createNodeTelemetryRuntime,
   createStructuredLogger,
+  type CoreTelemetry,
   type LoggerEnvironment,
   type StructuredLogDestination,
 } from "@bop-rms/observability";
@@ -14,6 +17,7 @@ const workerLogEvents = [
   "shutdown_started",
   "worker_start_failed",
   "worker_started",
+  "telemetry_shutdown_failed",
 ] as const;
 
 function runtimeEnvironment(): LoggerEnvironment {
@@ -32,9 +36,25 @@ export function createWorkerRuntimeLogger(destination?: StructuredLogDestination
   );
 }
 
+export function createWorkerCoreTelemetry(): CoreTelemetry {
+  return createCoreTelemetry({
+    allowedErrorCodes: ["WORKER_SHUTDOWN_FAILED", "WORKER_START_FAILED"],
+    allowedOperations: ["worker_shutdown", "worker_startup"],
+    allowedResultCodes: ["SUCCESS", "WORKER_SHUTDOWN_FAILED", "WORKER_START_FAILED"],
+    environment: runtimeEnvironment(),
+    module: "worker-runtime",
+    service: "bop-rms-worker",
+  });
+}
+
 export async function startWorkerRuntime(): Promise<void> {
   const logger = createWorkerRuntimeLogger();
-  const lifecycle = new WorkerLifecycle();
+  const coreTelemetry = createWorkerCoreTelemetry();
+  const nodeTelemetry = createNodeTelemetryRuntime({
+    environment: runtimeEnvironment(),
+    serviceName: "bop-rms-worker",
+  });
+  const lifecycle = new WorkerLifecycle({ telemetry: coreTelemetry });
   const runtimeLatch = new MessageChannel();
   runtimeLatch.port1.on("message", () => undefined);
   runtimeLatch.port1.ref();
@@ -43,6 +63,14 @@ export async function startWorkerRuntime(): Promise<void> {
     runtimeLatch.port2.close();
   };
   let removeHandlers: () => void = () => undefined;
+  const shutdownTelemetry = async () => {
+    const result = await nodeTelemetry.shutdown();
+    if (result === "failed" || result === "timeout")
+      logger.warn({
+        event: "telemetry_shutdown_failed",
+        resultCode: "TELEMETRY_SHUTDOWN_FAILED",
+      });
+  };
   async function shutdown(signal: "SIGINT" | "SIGTERM") {
     logger.info({ event: "shutdown_started", signal });
     try {
@@ -56,12 +84,14 @@ export async function startWorkerRuntime(): Promise<void> {
       });
       process.exitCode = 1;
     } finally {
+      await shutdownTelemetry();
       closeRuntimeLatch();
       removeHandlers();
     }
   }
   removeHandlers = installSignalHandlers(process, shutdown);
   try {
+    nodeTelemetry.start();
     await lifecycle.start();
     logger.info({ event: "worker_started", resultCode: "SUCCESS" });
   } catch (error) {
@@ -71,6 +101,7 @@ export async function startWorkerRuntime(): Promise<void> {
       resultCode: "WORKER_START_FAILED",
     });
     process.exitCode = 1;
+    await shutdownTelemetry();
     closeRuntimeLatch();
     removeHandlers();
   }
