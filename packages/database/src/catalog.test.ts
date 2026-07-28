@@ -44,6 +44,7 @@ describe("migration catalog", () => {
       "0000_012_create_consumer_inbox",
       "0000_013_create_retry_dead_letter",
       "0000_014_create_audit_record",
+      "0000_015_alter_audit_hash_chain",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -88,10 +89,10 @@ describe("migration catalog", () => {
 
   it("registers the exact WP-0030 and WP-0031 Eventing migrations", async () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
-    const outbox = catalog.migrations.at(-5);
-    const dispatcher = catalog.migrations.at(-4);
-    const inbox = catalog.migrations.at(-3);
-    const retry = catalog.migrations.at(-2);
+    const outbox = catalog.migrations.at(-6);
+    const dispatcher = catalog.migrations.at(-5);
+    const inbox = catalog.migrations.at(-4);
+    const retry = catalog.migrations.at(-3);
     expect(outbox).toMatchObject({
       id: "0000_010_create_outbox_event",
       metadata: {
@@ -133,7 +134,7 @@ describe("migration catalog", () => {
   });
 
   it("registers the exact WP-0042 Audit migration authority", async () => {
-    const audit = (await readMigrationCatalog(repositoryRoot)).migrations.at(-1);
+    const audit = (await readMigrationCatalog(repositoryRoot)).migrations.at(-2);
     expect(audit).toMatchObject({
       id: "0000_014_create_audit_record",
       metadata: {
@@ -146,6 +147,24 @@ describe("migration catalog", () => {
     expect(audit?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(audit?.sql).toContain("corrects_audit_id");
     expect(audit?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-0046 Audit integrity migration authority", async () => {
+    const integrity = (await readMigrationCatalog(repositoryRoot)).migrations.at(-1);
+    expect(integrity).toMatchObject({
+      id: "0000_015_alter_audit_hash_chain",
+      metadata: {
+        owner: "shared-infrastructure/audit",
+        schema: "platform_audit",
+        phase: "expand",
+        risk: "high",
+      },
+    });
+    expect(integrity?.sql).toContain("requires an empty audit_record table");
+    expect(integrity?.sql).toContain("CREATE TABLE platform_audit.audit_chain_head");
+    expect(integrity?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(integrity?.sql).toContain("AUDIT_CHAIN_V1");
+    expect(integrity?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
   it("rejects any non-allowlisted foreign helper reference", async () => {
