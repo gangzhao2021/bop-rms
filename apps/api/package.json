@@ -12,12 +12,16 @@
     "request-correlation:acceptance": "vitest run src/request-correlation.test.ts src/app.test.ts",
     "realtime:acceptance": "vitest run src/realtime.acceptance.test.ts",
     "structured-logging:acceptance": "vitest run src/structured-logging.test.ts",
+    "tenant-context:acceptance": "vitest run src/tenant-context.test.ts",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json"
   },
   "dependencies": {
     "@bop-rms/observability": "workspace:*",
     "@bop/eventing": "workspace:*",
+    "@bop/identity": "workspace:*",
+    "@bop/membership": "workspace:*",
+    "@bop/tenant": "workspace:*",
     "express": "5.2.1",
     "helmet": "8.3.0",
     "uuid": "14.0.1"

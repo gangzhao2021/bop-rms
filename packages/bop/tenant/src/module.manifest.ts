@@ -6,7 +6,13 @@ const moduleManifestInput = {
   layer: "BOP",
   lifecycle: "Phase 0",
   publicExports: ["."],
-  allowedSynchronousDependencies: [],
+  allowedSynchronousDependencies: [
+    {
+      moduleName: "identity",
+      packageName: "@bop/identity",
+      layer: "BOP",
+    },
+  ],
   consumedEvents: [],
   publishedEvents: [],
   ownedDatabase: { schema: "bop_tenant", tables: ["brand", "store"] },
@@ -14,7 +20,7 @@ const moduleManifestInput = {
   featureFlags: [],
   killSwitches: [],
   piiClassification: {
-    classes: ["indirect_identifier"],
+    classes: ["indirect_identifier", "sensitive_personal"],
     handling: {
       logs: "prohibited",
       urls: "prohibited",
