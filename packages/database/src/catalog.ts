@@ -43,6 +43,10 @@ const platformOwners = new Map([
   ["platform_jobs", "shared-infrastructure/jobs"],
   ["platform_projection", "shared-infrastructure/projection"],
 ]);
+const businessOwners = new Map([
+  ["bop_tenant", "@bop/tenant"],
+  ["bop_operating_entity", "@bop/operating-entity"],
+]);
 const metadataKeys = [
   "bop-rms-migration",
   "owner",
@@ -260,8 +264,9 @@ function validateSql(
     if (
       match[1] !== metadata.schema &&
       !(
-        ["platform_audit", "platform_eventing"].includes(metadata.schema) &&
-        acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
+        ["platform_audit", "platform_eventing", "bop_tenant", "bop_operating_entity"].includes(
+          metadata.schema,
+        ) && acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
       )
     )
       diagnostics.push(
@@ -394,8 +399,8 @@ function parseMigration(
     );
     return null;
   }
-  const platformOwner = platformOwners.get(schema);
-  if (schema === "public" || !platformOwner) {
+  const expectedOwner = platformOwners.get(schema) ?? businessOwners.get(schema);
+  if (schema === "public" || !expectedOwner) {
     diagnostics.push(
       diagnostic(
         "MIGRATION_OWNER_MISMATCH",
@@ -406,7 +411,7 @@ function parseMigration(
     );
     return null;
   }
-  if (platformOwner !== owner)
+  if (expectedOwner !== owner)
     diagnostics.push(
       diagnostic(
         "MIGRATION_OWNER_MISMATCH",

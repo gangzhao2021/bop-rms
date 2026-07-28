@@ -45,6 +45,8 @@ describe("migration catalog", () => {
       "0000_013_create_retry_dead_letter",
       "0000_014_create_audit_record",
       "0000_015_alter_audit_hash_chain",
+      "0200_001_create_tenant_organization",
+      "0200_002_create_operating_entity",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -89,10 +91,18 @@ describe("migration catalog", () => {
 
   it("registers the exact WP-0030 and WP-0031 Eventing migrations", async () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
-    const outbox = catalog.migrations.at(-6);
-    const dispatcher = catalog.migrations.at(-5);
-    const inbox = catalog.migrations.at(-4);
-    const retry = catalog.migrations.at(-3);
+    const outbox = catalog.migrations.find(
+      (migration) => migration.id === "0000_010_create_outbox_event",
+    );
+    const dispatcher = catalog.migrations.find(
+      (migration) => migration.id === "0000_011_alter_outbox_dispatch",
+    );
+    const inbox = catalog.migrations.find(
+      (migration) => migration.id === "0000_012_create_consumer_inbox",
+    );
+    const retry = catalog.migrations.find(
+      (migration) => migration.id === "0000_013_create_retry_dead_letter",
+    );
     expect(outbox).toMatchObject({
       id: "0000_010_create_outbox_event",
       metadata: {
@@ -134,7 +144,9 @@ describe("migration catalog", () => {
   });
 
   it("registers the exact WP-0042 Audit migration authority", async () => {
-    const audit = (await readMigrationCatalog(repositoryRoot)).migrations.at(-2);
+    const audit = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (migration) => migration.id === "0000_014_create_audit_record",
+    );
     expect(audit).toMatchObject({
       id: "0000_014_create_audit_record",
       metadata: {
@@ -150,7 +162,9 @@ describe("migration catalog", () => {
   });
 
   it("registers the exact WP-0046 Audit integrity migration authority", async () => {
-    const integrity = (await readMigrationCatalog(repositoryRoot)).migrations.at(-1);
+    const integrity = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (migration) => migration.id === "0000_015_alter_audit_hash_chain",
+    );
     expect(integrity).toMatchObject({
       id: "0000_015_alter_audit_hash_chain",
       metadata: {
@@ -165,6 +179,25 @@ describe("migration catalog", () => {
     expect(integrity?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(integrity?.sql).toContain("AUDIT_CHAIN_V1");
     expect(integrity?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers only the exact WP-0101 business migration authorities", async () => {
+    const migrations = (await readMigrationCatalog(repositoryRoot)).migrations.filter(
+      (migration) => migration.namespace === 200,
+    );
+    expect(
+      migrations.map((migration) => [
+        migration.id,
+        migration.metadata.owner,
+        migration.metadata.schema,
+      ]),
+    ).toEqual([
+      ["0200_001_create_tenant_organization", "@bop/tenant", "bop_tenant"],
+      ["0200_002_create_operating_entity", "@bop/operating-entity", "bop_operating_entity"],
+    ]);
+    expect(migrations.map((migration) => migration.sql).join("\n")).not.toMatch(
+      /\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu,
+    );
   });
 
   it("rejects any non-allowlisted foreign helper reference", async () => {
