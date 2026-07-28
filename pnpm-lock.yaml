@@ -53,6 +53,15 @@ importers:
       '@bop/eventing':
         specifier: workspace:*
         version: link:../../packages/bop/eventing
+      '@bop/identity':
+        specifier: workspace:*
+        version: link:../../packages/bop/identity
+      '@bop/membership':
+        specifier: workspace:*
+        version: link:../../packages/bop/membership
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../../packages/bop/tenant
       express:
         specifier: 5.2.1
         version: 5.2.1(supports-color@8.1.1)
@@ -177,7 +186,11 @@ importers:
         specifier: workspace:*
         version: link:../tenant
 
-  packages/bop/tenant: {}
+  packages/bop/tenant:
+    dependencies:
+      '@bop/identity':
+        specifier: workspace:*
+        version: link:../identity
 
   packages/contracts:
     dependencies:

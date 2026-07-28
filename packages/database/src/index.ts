@@ -32,3 +32,10 @@ export {
   type HelperObjectState,
   type HelperSnapshot,
 } from "./helpers.ts";
+export {
+  tenantContextDatabaseErrorCodes,
+  TenantContextDatabaseError,
+  withTenantContextTransaction,
+  type TenantContextDatabaseErrorCode,
+  type TenantDatabaseScope,
+} from "./tenant-context.ts";
