@@ -160,6 +160,8 @@ importers:
 
   packages/bop/eventing: {}
 
+  packages/bop/identity: {}
+
   packages/contracts:
     dependencies:
       zod:
