@@ -41,6 +41,7 @@
     "migration:check": "vitest run packages/database/src/catalog.test.ts packages/database/src/config.test.ts && node packages/database/src/check.ts",
     "membership-aggregate:acceptance": "pnpm --filter @bop/membership test && vitest run --config packages/database/vitest.membership-aggregate.config.ts",
     "organization-aggregate:acceptance": "pnpm --filter @bop/tenant test && pnpm --filter @bop/operating-entity test && vitest run --config packages/database/vitest.organization-aggregate.config.ts",
+    "permission-evaluation:acceptance": "pnpm --filter @bop/permission test",
     "outbox:acceptance": "vitest run --config packages/database/vitest.outbox.config.ts",
     "outbox-dispatcher:acceptance": "vitest run --config packages/database/vitest.outbox-dispatcher.config.ts",
     "consumer-inbox:acceptance": "vitest run --config packages/database/vitest.consumer-inbox.config.ts",

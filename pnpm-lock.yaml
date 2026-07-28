@@ -186,6 +186,12 @@ importers:
         specifier: workspace:*
         version: link:../tenant
 
+  packages/bop/permission:
+    dependencies:
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../tenant
+
   packages/bop/tenant:
     dependencies:
       '@bop/identity':
