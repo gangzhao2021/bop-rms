@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0045 — Alert Routing and Basic Runbook implementation is locally verified from exact origin/main@5693627a0150fb3b7939e6c4959b83d1c60d75c4 on branch codex/wp-0045；exact-head CI remains pending`
+- Current discussion node: `WP-0046 — Audit Hash Chain、KMS-signed Daily Digest and Immutable Archive Verification documentation-only readiness is active from exact origin/main@5e8b50b340d9764388f4013375cf50ef3e22defe on branch codex/wp-0046-readiness；WP-0045 is integrated、exact-main verified and cleaned`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -15,6 +15,10 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 ## Latest Work Package Status
 
 Entries are newest-first；the WP-0045 readiness and WP-0044/WP-0047 integration entries below supersede older historical snapshots retained later in this index.
+
+- `WP-0046 — Audit Hash Chain、KMS-signed Daily Digest and Immutable Archive Verification` documentation-only readiness is active from exact `origin/main@5e8b50b340d9764388f4013375cf50ef3e22defe` on branch `codex/wp-0046-readiness`. The candidate repository increment adds a per-Brand/Store-scope ordered SHA-256 chain、RFC 8785 canonicalization、daily manifest/signature/archive verification ports and fail-closed synthetic evidence without creating a KMS key、S3 bucket、Object Lock policy、credential or cloud resource. Real KMS ECDSA P-256 signing、cross-account immutable archive、retention and restore verification remain gated External Evidence and cannot be represented as passed.
+
+- `WP-0045 — Alert Routing and Basic Runbook` is implemented、verified、integrated and cleaned at squash merge `5e8b50b340d9764388f4013375cf50ef3e22defe`. Its exact implementation baseline was `origin/main@5693627a0150fb3b7939e6c4959b83d1c60d75c4` and exact head was `2234bc10738ffaabee7dc92d19a12420f4fdecc5`. PR [#51](https://github.com/gangzhao2021/bop-rms/pull/51) exact-head run/job `30347705878` / `90237711252` and post-merge exact-main run/job `30348279845` / `90239521438` passed. Section 91 recorded open Blocker/High/Medium/Low `0`、reviews `0` and unresolved threads `0`; branch、generated/runtime and Docker resources were removed. External CloudWatch/SNS/contact/staging evidence remains gated and unclaimed.
 
 - `WP-0045 — Alert Routing and Basic Runbook` implementation is locally verified from exact `origin/main@5693627a0150fb3b7939e6c4959b83d1c60d75c4` on branch `codex/wp-0045`. It adds five closed technical alert classes、registry-owned service/result/error/severity/role routing、a privacy-safe deterministic route plan、25 dedicated acceptance tests and a versioned basic observability runbook. No cloud/provider/contact resource or dependency/lockfile change occurs；real staging delivery、verified subscriptions、contacts and acknowledgement remain gated External Evidence. Readiness PR [#50](https://github.com/gangzhao2021/bop-rms/pull/50) exact-head run/job `30345420544` / `90230374267` and squash `5693627a0150fb3b7939e6c4959b83d1c60d75c4` post-merge run/job `30346034283` / `90232342633` passed.
 
