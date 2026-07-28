@@ -6,13 +6,19 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0044 — Error Tracking and Core Metrics documentation-only readiness is active from exact origin/main@e50261d43450e84b265a7f9fc9092f16361dfac5 on branch codex/wp-0044-readiness；the Owner's serial authorization adopts Recommended Owner Decisions 1–18 and the exact candidate implementation tracked-file allowlist；implementation remains gated until readiness PR、exact-head CI、Section 91 solo self-review、squash merge、post-merge exact-main CI and cleanup complete`
+- Current discussion node: `WP-0047 — React Router 8.3.0 Security Remediation documentation-only readiness is active from exact origin/main@3f3af5dcee496997bf0ee842ee24726bb3e614b4 on branch codex/wp-0047-readiness；the Owner inserted this independent dependency-security gate before WP-0044 may resume`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
 Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 
 ## Latest Work Package Status
+
+Entries are newest-first；the WP-0047 and WP-0044 integration entries below supersede older historical readiness snapshots retained later in this index.
+
+- `WP-0047 — React Router 8.3.0 Security Remediation` documentation-only readiness is active from exact `origin/main@3f3af5dcee496997bf0ee842ee24726bb3e614b4` on branch `codex/wp-0047-readiness`. The Owner authorized this independent inserted WP after the WP-0044 production dependency audit found GitHub-reviewed High advisory `GHSA-qwww-vcr4-c8h2` in both baseline frontend `react-router@8.2.0` pins. The adopted target is exact patched `8.3.0`; readiness is limited to this index and `docs/spec/work-packages/WP-0047.md`. WP-0044's in-allowlist local implementation is parked separately and remains paused.
+
+- `WP-0044 — Error Tracking and Core Metrics` readiness is integrated at squash commit `3f3af5dcee496997bf0ee842ee24726bb3e614b4`. Its implementation started from that exact baseline but is paused before commit/publication because the required production dependency audit exposed baseline High advisory `GHSA-qwww-vcr4-c8h2` in the two frontend React Router pins. WP-0044 did not introduce the vulnerable dependency and remains isolated from WP-0047.
 
 - `WP-0044 — Error Tracking and Core Metrics` documentation-only readiness is active from exact `origin/main@e50261d43450e84b265a7f9fc9092f16361dfac5` on branch `codex/wp-0044-readiness`. Accepted IDR-0014 fixes OpenTelemetry API `1.9.1` + Node SDK `0.220.0`、ADOT and CloudWatch/X-Ray as the v0.1 direction and excludes an independent Error Tracking SaaS. The Owner's serial authorization adopts the brief's bounded Recommended Owner Decisions `1–18` and exact candidate implementation allowlist. Real AWS/Collector/CloudWatch behavior、alert routing、staging/production evidence and credentials remain gated and unclaimed. No implementation、dependency、lockfile、cloud or external-service mutation occurs on this readiness branch.
 
@@ -45,6 +51,8 @@ WP-0024 implementation commit `6371aa8cc96da021fc2a337a768039abce46548b`、PR #2
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
+
+WP-0047 documentation-only readiness is active from exact `origin/main@3f3af5dcee496997bf0ee842ee24726bb3e614b4` on the sole active branch `codex/wp-0047-readiness`. WP-0044 readiness is integrated；its uncommitted in-allowlist implementation is parked in a local named stash and must not resume until WP-0047 completes readiness、implementation、exact-head CI、merge、post-merge exact-main verification and cleanup. This paragraph supersedes the historical WP-0044 readiness snapshot retained below.
 
 WP-0044 documentation-only readiness is active from exact `origin/main@e50261d43450e84b265a7f9fc9092f16361dfac5` on the sole branch `codex/wp-0044-readiness`. WP-0043 implementation、exact-head CI、Section 91 review、squash merge、post-merge exact-main CI、main synchronization and branch/resource cleanup are complete. Readiness is limited to this index and `docs/spec/work-packages/WP-0044.md`; implementation、dependency/lockfile changes、cloud resources、credentials、alerts and external-service mutation remain gated until readiness integration.
 
