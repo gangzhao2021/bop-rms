@@ -162,6 +162,15 @@ importers:
 
   packages/bop/identity: {}
 
+  packages/bop/membership:
+    dependencies:
+      '@bop/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../tenant
+
   packages/bop/operating-entity:
     dependencies:
       '@bop/tenant':
