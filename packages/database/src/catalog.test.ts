@@ -47,6 +47,7 @@ describe("migration catalog", () => {
       "0000_015_alter_audit_hash_chain",
       "0200_001_create_tenant_organization",
       "0200_002_create_operating_entity",
+      "0200_003_create_membership",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -181,7 +182,7 @@ describe("migration catalog", () => {
     expect(integrity?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
-  it("registers only the exact WP-0101 business migration authorities", async () => {
+  it("registers the exact WP-0101 and WP-0102 business migration authorities", async () => {
     const migrations = (await readMigrationCatalog(repositoryRoot)).migrations.filter(
       (migration) => migration.namespace === 200,
     );
@@ -194,6 +195,7 @@ describe("migration catalog", () => {
     ).toEqual([
       ["0200_001_create_tenant_organization", "@bop/tenant", "bop_tenant"],
       ["0200_002_create_operating_entity", "@bop/operating-entity", "bop_operating_entity"],
+      ["0200_003_create_membership", "@bop/membership", "bop_membership"],
     ]);
     expect(migrations.map((migration) => migration.sql).join("\n")).not.toMatch(
       /\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu,

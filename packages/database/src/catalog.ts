@@ -44,6 +44,7 @@ const platformOwners = new Map([
   ["platform_projection", "shared-infrastructure/projection"],
 ]);
 const businessOwners = new Map([
+  ["bop_membership", "@bop/membership"],
   ["bop_tenant", "@bop/tenant"],
   ["bop_operating_entity", "@bop/operating-entity"],
 ]);
@@ -264,9 +265,13 @@ function validateSql(
     if (
       match[1] !== metadata.schema &&
       !(
-        ["platform_audit", "platform_eventing", "bop_tenant", "bop_operating_entity"].includes(
-          metadata.schema,
-        ) && acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
+        [
+          "platform_audit",
+          "platform_eventing",
+          "bop_membership",
+          "bop_tenant",
+          "bop_operating_entity",
+        ].includes(metadata.schema) && acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
       )
     )
       diagnostics.push(
