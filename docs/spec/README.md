@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0045 — Alert Routing and Basic Runbook documentation-only readiness is active from exact origin/main@3f32f67c877214051c415ba01531165f2ccc19f5 on branch codex/wp-0045-readiness；WP-0044 and inserted WP-0047 are integrated、exact-main verified and cleaned`
+- Current discussion node: `WP-0045 — Alert Routing and Basic Runbook implementation is locally verified from exact origin/main@5693627a0150fb3b7939e6c4959b83d1c60d75c4 on branch codex/wp-0045；exact-head CI remains pending`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -15,6 +15,8 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 ## Latest Work Package Status
 
 Entries are newest-first；the WP-0045 readiness and WP-0044/WP-0047 integration entries below supersede older historical snapshots retained later in this index.
+
+- `WP-0045 — Alert Routing and Basic Runbook` implementation is locally verified from exact `origin/main@5693627a0150fb3b7939e6c4959b83d1c60d75c4` on branch `codex/wp-0045`. It adds five closed technical alert classes、registry-owned service/result/error/severity/role routing、a privacy-safe deterministic route plan、25 dedicated acceptance tests and a versioned basic observability runbook. No cloud/provider/contact resource or dependency/lockfile change occurs；real staging delivery、verified subscriptions、contacts and acknowledgement remain gated External Evidence. Readiness PR [#50](https://github.com/gangzhao2021/bop-rms/pull/50) exact-head run/job `30345420544` / `90230374267` and squash `5693627a0150fb3b7939e6c4959b83d1c60d75c4` post-merge run/job `30346034283` / `90232342633` passed.
 
 - `WP-0045 — Alert Routing and Basic Runbook` documentation-only readiness is active from exact `origin/main@3f32f67c877214051c415ba01531165f2ccc19f5` on branch `codex/wp-0045-readiness`. The adopted boundary is a closed、privacy-safe alert-routing contract、role-based escalation plan、deterministic synthetic acceptance evidence and a versioned basic observability runbook. It creates no AWS、CloudWatch、SNS、subscription、credential、contact、staging or paid resource. Real staging fault delivery、verified primary/backup subscriptions and acknowledgement drill remain External Evidence owned by WP-2065/deployment composition and are not represented as passed.
 

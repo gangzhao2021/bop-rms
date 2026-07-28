@@ -1,4 +1,20 @@
 export {
+  ALERT_ROUTING_REGISTRY,
+  ALERT_ROUTING_RUNBOOK_ID,
+  ALERT_ROUTING_SERVICES,
+  planAlertRoute,
+  type AlertCode,
+  type AlertDestinationRole,
+  type AlertEnvironment,
+  type AlertRoutePlan,
+  type AlertRoutePlanningFailure,
+  type AlertRoutePlanningInput,
+  type AlertRoutePlanningResult,
+  type AlertRoutingRule,
+  type AlertService,
+  type AlertSeverity,
+} from "./alert-routing.js";
+export {
   createCoreTelemetry,
   type CoreTelemetry,
   type CoreTelemetryBackend,

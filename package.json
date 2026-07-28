@@ -9,6 +9,7 @@
     "pnpm": "11.13.0"
   },
   "scripts": {
+    "alert-routing:acceptance": "pnpm --filter @bop-rms/observability build && pnpm --filter @bop-rms/observability alert-routing:acceptance",
     "build": "turbo run build",
     "audit-record:acceptance": "vitest run --config packages/database/vitest.audit-record.config.ts",
     "database-ownership:check": "vitest run tooling/database-ownership/validate.test.mjs && node tooling/database-ownership/validate.mjs",
