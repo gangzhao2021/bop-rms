@@ -1,5 +1,6 @@
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import helmet from "helmet";
+import { HealthReadinessController } from "./health-readiness.js";
 import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
 import {
   createRequestCorrelationMiddleware,
@@ -8,6 +9,7 @@ import {
 
 export interface AppOptions {
   correlationAcceptanceHandler?: RequestHandler;
+  healthReadiness?: HealthReadinessController;
   now?: () => string;
   nowMilliseconds?: () => number;
   realtime?: RealtimeTransport;
@@ -29,6 +31,7 @@ const errorHandler: ErrorRequestHandler = (error, _request, response, next) => {
 
 export function createApp({
   correlationAcceptanceHandler,
+  healthReadiness,
   now = () => new Date().toISOString(),
   nowMilliseconds,
   realtime,
@@ -36,6 +39,7 @@ export function createApp({
   uuidV7Factory,
 }: AppOptions = {}): Express {
   const app = express();
+  const health = healthReadiness ?? new HealthReadinessController({ now });
   app.disable("x-powered-by");
   app.use(
     createRequestCorrelationMiddleware({
@@ -50,17 +54,11 @@ export function createApp({
     response.setHeader("Cache-Control", "no-store");
     next();
   });
-  app.get("/health", (_request, response) =>
-    response.status(200).json({ service: "bop-rms-api", status: "healthy", checkedAt: now() }),
-  );
-  app.get("/ready", (_request, response) =>
-    response.status(503).json({
-      service: "bop-rms-api",
-      status: "not_ready",
-      checkedAt: now(),
-      dependencies: { database: { status: "not_configured", required: true } },
-    }),
-  );
+  app.get("/health", (_request, response) => response.status(200).json(health.healthSnapshot()));
+  app.get("/ready", async (_request, response) => {
+    const snapshot = await health.readinessSnapshot();
+    response.status(snapshot.status === "ready" ? 200 : 503).json(snapshot);
+  });
   app.get("/bff/realtime", realtime?.handler() ?? unavailableRealtimeHandler);
   if (correlationAcceptanceHandler !== undefined)
     app.post("/__acceptance/request-command-event", correlationAcceptanceHandler);
