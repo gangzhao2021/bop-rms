@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0047 — React Router 8.3.0 Security Remediation documentation-only readiness is active from exact origin/main@3f3af5dcee496997bf0ee842ee24726bb3e614b4 on branch codex/wp-0047-readiness；the Owner inserted this independent dependency-security gate before WP-0044 may resume`
+- Current discussion node: `WP-0047 — React Router 8.3.0 Security Remediation implementation is active from exact origin/main@5bbe3e0f3f76ec617249b2a5f1aceff48b8f9319 on branch codex/wp-0047；both frontend pins and the authoritative WP-0004 baseline are updated to exact 8.3.0；local security/affected verification passed and exact-head CI remains pending`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -15,6 +15,8 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 ## Latest Work Package Status
 
 Entries are newest-first；the WP-0047 and WP-0044 integration entries below supersede older historical readiness snapshots retained later in this index.
+
+- `WP-0047 — React Router 8.3.0 Security Remediation` implementation is active from exact `origin/main@5bbe3e0f3f76ec617249b2a5f1aceff48b8f9319` on branch `codex/wp-0047`. Both frontend manifests and the lockfile resolve exact `react-router@8.3.0`; WP-0004's repository-accepted baseline is synchronized；the production dependency audit reports no known vulnerabilities；both frontend format/lint/typecheck/test/build matrices and all continued repository gates pass. Local complete verification retains the known macOS APFS/realpath `26/30` Migration and `179/183` root-test results without downgrade；exact-head pinned-Linux CI remains pending.
 
 - `WP-0047 — React Router 8.3.0 Security Remediation` documentation-only readiness is active from exact `origin/main@3f3af5dcee496997bf0ee842ee24726bb3e614b4` on branch `codex/wp-0047-readiness`. The Owner authorized this independent inserted WP after the WP-0044 production dependency audit found GitHub-reviewed High advisory `GHSA-qwww-vcr4-c8h2` in both baseline frontend `react-router@8.2.0` pins. The adopted target is exact patched `8.3.0`; readiness is limited to this index and `docs/spec/work-packages/WP-0047.md`. WP-0044's in-allowlist local implementation is parked separately and remains paused.
 
@@ -51,6 +53,8 @@ WP-0024 implementation commit `6371aa8cc96da021fc2a337a768039abce46548b`、PR #2
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
+
+WP-0047 implementation is active from exact `origin/main@5bbe3e0f3f76ec617249b2a5f1aceff48b8f9319` on the sole active branch `codex/wp-0047`. Its readiness PR #47、exact-head run `30339661359` / job `90212140486`、Section 91 solo self-review、squash merge and post-merge exact-main run `30340263932` / job `90214036024` passed；readiness branches and resources were cleaned. The implementation may change only the accepted six-file allowlist and must complete its own exact-head lifecycle before WP-0044 resumes. This paragraph supersedes the historical WP-0047 readiness snapshot below.
 
 WP-0047 documentation-only readiness is active from exact `origin/main@3f3af5dcee496997bf0ee842ee24726bb3e614b4` on the sole active branch `codex/wp-0047-readiness`. WP-0044 readiness is integrated；its uncommitted in-allowlist implementation is parked in a local named stash and must not resume until WP-0047 completes readiness、implementation、exact-head CI、merge、post-merge exact-main verification and cleanup. This paragraph supersedes the historical WP-0044 readiness snapshot retained below.
 
