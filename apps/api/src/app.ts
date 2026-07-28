@@ -1,41 +1,83 @@
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import helmet from "helmet";
+import type { CoreTelemetry } from "@bop-rms/observability";
 import { HealthReadinessController } from "./health-readiness.js";
 import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
 import {
   createRequestCorrelationMiddleware,
+  getRequestCorrelationContext,
+  markRequestError,
   type RequestCompletionLogger,
 } from "./request-correlation.js";
 
+const routeTemplates = [
+  "/__acceptance/request-command-event",
+  "/bff/realtime",
+  "/health",
+  "/ready",
+  "unmatched",
+] as const;
+
+export interface RequestErrorLogger {
+  error(input: {
+    readonly error: { readonly code: "INTERNAL_ERROR"; readonly value: unknown };
+    readonly event: "http_request_failed";
+    readonly resultCode: "INTERNAL_ERROR";
+    readonly trustedContext: { readonly correlationId: string };
+  }): void;
+}
+
 export interface AppOptions {
   correlationAcceptanceHandler?: RequestHandler;
+  errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
   now?: () => string;
   nowMilliseconds?: () => number;
   realtime?: RealtimeTransport;
   requestLogger?: RequestCompletionLogger;
+  telemetry?: CoreTelemetry;
   uuidV7Factory?: () => string;
 }
-const errorHandler: ErrorRequestHandler = (error, _request, response, next) => {
-  void next;
-  const candidate = error as { status?: number; type?: string };
-  const status = candidate.type === "entity.too.large" ? 413 : candidate.status === 400 ? 400 : 500;
-  response.status(status).json({
-    error: {
-      code:
-        status === 413 ? "payload_too_large" : status === 400 ? "invalid_json" : "internal_error",
-      message: status >= 500 ? "The request could not be completed." : "The request was rejected.",
-    },
-  });
-};
+
+function createErrorHandler(errorLogger: RequestErrorLogger | undefined): ErrorRequestHandler {
+  return (error, request, response, next) => {
+    void next;
+    const candidate = error as { status?: number; type?: string };
+    const status =
+      candidate.type === "entity.too.large" ? 413 : candidate.status === 400 ? 400 : 500;
+    if (status === 500) {
+      markRequestError(request, "INTERNAL_ERROR");
+      try {
+        errorLogger?.error({
+          error: { code: "INTERNAL_ERROR", value: error },
+          event: "http_request_failed",
+          resultCode: "INTERNAL_ERROR",
+          trustedContext: getRequestCorrelationContext(request).correlation,
+        });
+      } catch {
+        // Error response and business control flow never depend on observability.
+      }
+    }
+    response.status(status).json({
+      error: {
+        code:
+          status === 413 ? "payload_too_large" : status === 400 ? "invalid_json" : "internal_error",
+        message:
+          status >= 500 ? "The request could not be completed." : "The request was rejected.",
+      },
+    });
+  };
+}
 
 export function createApp({
   correlationAcceptanceHandler,
+  errorLogger,
   healthReadiness,
   now = () => new Date().toISOString(),
   nowMilliseconds,
   realtime,
   requestLogger,
+  telemetry,
   uuidV7Factory,
 }: AppOptions = {}): Express {
   const app = express();
@@ -45,6 +87,8 @@ export function createApp({
     createRequestCorrelationMiddleware({
       ...(nowMilliseconds === undefined ? {} : { nowMilliseconds }),
       ...(requestLogger === undefined ? {} : { logger: requestLogger }),
+      routeTemplates,
+      ...(telemetry === undefined ? {} : { telemetry }),
       ...(uuidV7Factory === undefined ? {} : { uuidV7Factory }),
     }),
   );
@@ -67,6 +111,6 @@ export function createApp({
       .status(404)
       .json({ error: { code: "not_found", message: "The requested resource is unavailable." } }),
   );
-  app.use(errorHandler);
+  app.use(createErrorHandler(errorLogger));
   return app;
 }

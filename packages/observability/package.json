@@ -13,10 +13,13 @@
     "build": "tsc --project tsconfig.json",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
     "lint": "eslint src",
+    "sdk-smoke": "OTEL_SDK_DISABLED=true node --input-type=module -e \"import { NodeSDK } from '@opentelemetry/sdk-node'; const sdk = new NodeSDK({ serviceName: 'bop-rms-sdk-smoke' }); sdk.start(); await sdk.shutdown();\"",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/sdk-node": "0.220.0",
     "pino": "10.3.1"
   }
 }
