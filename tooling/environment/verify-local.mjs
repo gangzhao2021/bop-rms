@@ -15,6 +15,7 @@ const envFile = path.join(temp, "environment.env");
 const logFile = path.join(temp, "supervisor.log");
 const projectName = "bop-rms-wp0006-verify";
 const ports = { api: 53001, customerPwa: 53003, merchantWeb: 53002, postgres: 55433 };
+const healthyStatusTimeoutMs = 180_000;
 let supervisor;
 let logHandle;
 
@@ -67,7 +68,7 @@ function assertFailure(result, expected) {
 }
 
 async function waitForStatus() {
-  const deadline = Date.now() + 90_000;
+  const deadline = Date.now() + healthyStatusTimeoutMs;
   let last = "no status result";
   while (Date.now() < deadline) {
     if (supervisor.exitCode !== null) {
@@ -83,7 +84,12 @@ async function waitForStatus() {
     if (result.status === 0) return JSON.parse(result.stdout);
     await delay(500);
   }
-  throw new Error(`Local environment did not become healthy: ${last}`);
+  const supervisorLog = fs.existsSync(logFile)
+    ? fs.readFileSync(logFile, "utf8").split(/\r?\n/u).slice(-40).join("\n")
+    : "log unavailable";
+  throw new Error(
+    `Local environment did not become healthy within ${healthyStatusTimeoutMs}ms: ${last}\n${supervisorLog}`,
+  );
 }
 
 async function portIsFree(port) {
