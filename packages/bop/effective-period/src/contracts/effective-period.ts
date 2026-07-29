@@ -403,6 +403,11 @@ export function createEffectiveResolutionRecord(input: {
   readonly candidateSetDigest: CandidateSetDigest;
   readonly candidates: readonly EffectiveConfigurationVersion[];
 }): EffectiveResolutionRecord {
+  exact(
+    input,
+    ["familyReference", "scope", "evaluationInstant", "candidateSetDigest", "candidates"],
+    "EFFECTIVE_PERIOD_CANDIDATES_INVALID",
+  );
   const familyReference = parseEffectivePeriodReference(input.familyReference);
   const scope = createEffectiveScope(input.scope);
   const evaluationInstant = canonical(input.evaluationInstant, "EFFECTIVE_PERIOD_TIME_INVALID");

@@ -427,6 +427,19 @@ describe("overlap and explicit resolution", () => {
       }),
     ).toThrow(EffectivePeriodContractError);
   });
+
+  it("rejects extra resolution payload instead of silently carrying it", () => {
+    expect(() =>
+      createEffectiveResolutionRecord({
+        familyReference: parseEffectivePeriodReference(ids.family),
+        scope: scope(),
+        evaluationInstant: from,
+        candidateSetDigest: parseCandidateSetDigest(`sha256:${"c".repeat(64)}`),
+        candidates: [version()],
+        payload: { privateConfiguration: true },
+      } as never),
+    ).toThrow(EffectivePeriodContractError);
+  });
 });
 
 describe("Schedule and Renew service", () => {

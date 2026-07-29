@@ -26,7 +26,8 @@ historical snapshots retained later in this index.
   idempotency and atomic Audit while recording only deterministic activation/optional expiry
   intents. It owns no configuration payload、overlay priority、persistence、clock/worker、
   Task/Notification delivery、Event、production API/UI、Provider/resource or real schedule.
-  Exact-head CI、Section 91 review、merge and post-merge verification remain pending.
+  Focused acceptance is `15/15`; exact-head CI、Section 91 review、merge and post-merge verification
+  remain pending.
 - `WP-0123` documentation-only readiness is integrated at squash merge
   `f053544c308438b8c4ffce34dda80259798d4711`. PR
   [#80](https://github.com/gangzhao2021/bop-rms/pull/80) passed exact-head run/job
