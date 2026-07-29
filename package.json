@@ -19,6 +19,7 @@
     "domain-layer-boundary:check": "vitest run tooling/domain-layer-boundary/validate.test.mjs && node tooling/domain-layer-boundary/validate.mjs",
     "event-catalog:acceptance": "pnpm --filter @bop-rms/contracts-events test && pnpm --filter @bop-rms/contracts-events event-catalog:check",
     "event-catalog:check": "pnpm --filter @bop-rms/contracts-events event-catalog:check",
+    "feature-control:acceptance": "pnpm --filter @bop/feature-control test",
     "clean": "turbo run clean",
     "dev": "node tooling/environment/local.mjs start",
     "environment:check": "node tooling/environment/validate.mjs --env-file .env --check-ports",
