@@ -11,7 +11,14 @@ const moduleManifestInput = {
   publishedEvents: ["identity.credential-compromised.v1", "identity.session-revoked.v1"],
   ownedDatabase: {
     schema: "bop_identity",
-    tables: ["authentication_session", "oidc_authorization_transaction"],
+    tables: [
+      "authentication_session",
+      "oidc_authorization_transaction",
+      "session_revocation_request",
+      "workforce_invitation",
+      "workforce_mfa_status",
+      "workforce_recovery_case",
+    ],
   },
   ownedJobs: [],
   featureFlags: [],

@@ -103,4 +103,63 @@ export {
   type BrowserCookieMutation,
   type BrowserSessionServiceOptions,
 } from "./application/browser-session-service.js";
+export {
+  assertRecentTotp,
+  createSessionRevocationRequest,
+  createWorkforceInvitation,
+  createWorkforceMfaStatus,
+  createWorkforceRecoveryCase,
+  invitationStatuses,
+  mfaStatuses,
+  parseEvidenceReference,
+  parseInvitationReference,
+  parseMembershipEvidenceReference,
+  parseRecoveryReference,
+  parseRoleAssignmentEvidenceReference,
+  parseSecurityVersion,
+  parseStoreAssignmentEvidenceReference,
+  recoveryStatuses,
+  revocationRequestReasons,
+  WorkforceIdentitySecurityError,
+  workforceIdentitySecurityErrorCodes,
+  type EvidenceReference,
+  type InvitationReference,
+  type InvitationStatus,
+  type MembershipEvidenceReference,
+  type MfaStatus,
+  type RecoveryReference,
+  type RecoveryStatus,
+  type RevocationRequestReason,
+  type RoleAssignmentEvidenceReference,
+  type SecurityVersion,
+  type SessionRevocationRequest,
+  type StoreAssignmentEvidenceReference,
+  type WorkforceInvitation,
+  type WorkforceMfaStatus,
+  type WorkforceRecoveryCase,
+} from "./contracts/workforce-identity-security.js";
+export {
+  type CreateRecoveryCaseCommand,
+  type CompleteRecoveryCaseCommand,
+  type ConsumeWorkforceInvitationCommand,
+  type IdentitySecurityCredentialPort,
+  type IdentitySecuritySessionRotationPort,
+  type IssueWorkforceInvitationCommand,
+  type RecordTotpVerifiedCommand,
+  type RevokeActorSessionsCommand,
+  type WorkforceIdentitySecurityStorePort,
+} from "./application/ports/workforce-identity-security-port.js";
+export { type WorkforceIdentityProviderPort } from "./application/ports/workforce-identity-provider-port.js";
+export {
+  type IdentitySecurityAuditDescriptor,
+  type IdentitySecurityAuditPort,
+} from "./application/ports/identity-security-audit-port.js";
+export {
+  membershipEvidenceReference,
+  roleRemovalEvidenceReference,
+  storeAssignmentEvidenceReference,
+  WorkforceIdentitySecurityService,
+  type SecurityOperationContext,
+  type WorkforceIdentitySecurityServiceOptions,
+} from "./application/workforce-identity-security-service.js";
 export { moduleManifest } from "./module.manifest.js";

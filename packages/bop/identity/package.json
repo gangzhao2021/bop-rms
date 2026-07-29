@@ -16,6 +16,7 @@
     "identity-session:acceptance": "vitest run --config vitest.config.ts src/tests/identity-session-contract.test.ts",
     "lint": "eslint src",
     "test": "vitest run --config vitest.config.ts",
+    "workforce-identity-security:acceptance": "vitest run --config vitest.config.ts src/tests/workforce-identity-security.test.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   }
 }
