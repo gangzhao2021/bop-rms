@@ -26,6 +26,10 @@ async function prove(context) {
     assert.deepEqual(inventory.rows, [
       { table_name: "authentication_session" },
       { table_name: "oidc_authorization_transaction" },
+      { table_name: "session_revocation_request" },
+      { table_name: "workforce_invitation" },
+      { table_name: "workforce_mfa_status" },
+      { table_name: "workforce_recovery_case" },
     ]);
 
     await client.query(
