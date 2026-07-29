@@ -44,6 +44,7 @@
     "module-generator:check": "vitest run tooling/module-generator/generate.test.mjs",
     "module-manifest:check": "node tooling/module-manifest/validate.mjs",
     "migration:check": "vitest run packages/database/src/catalog.test.ts packages/database/src/config.test.ts && node packages/database/src/check.ts",
+    "notification:acceptance": "pnpm --filter @bop/notification test",
     "membership-aggregate:acceptance": "pnpm --filter @bop/membership test && vitest run --config packages/database/vitest.membership-aggregate.config.ts",
     "merchant-authentication:acceptance": "pnpm --filter @bop-rms/api merchant-authentication:acceptance",
     "merchant-bff:acceptance": "pnpm --filter @bop-rms/api merchant-bff:acceptance",

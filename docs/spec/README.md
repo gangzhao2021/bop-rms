@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0124 — Notification Stub and Delivery Adapter Contract documentation-only readiness from exact verified main@814f53e4baad28a8e0dd82ef6f1a8cd06ba06cdf on branch codex/wp-0124-readiness`
+- Current discussion node: `WP-0124 — Notification Stub and Delivery Adapter Contract implementation from exact verified main@dd79b2922e49edc0741342b59a006e18fc5adae3 on branch codex/wp-0124-implementation`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,19 +14,33 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-0124 readiness and WP-0123 closeout entries below supersede older
+Entries are newest-first；the WP-0124 implementation and WP-0123 closeout entries below supersede older
 historical snapshots retained later in this index.
 
-- `WP-0124 — Notification Stub and Delivery Adapter Contract` documentation-only readiness is
-  active from exact verified `main@814f53e4baad28a8e0dd82ef6f1a8cd06ba06cdf` on branch
-  `codex/wp-0124-readiness`. The bounded candidate adds a provider-neutral `@bop/notification`
-  contract for Event-sourced opaque Notification Requests、immutable Template/recipient references、
-  exact Tenant scope、transactional/marketing preference separation、deduplication、suppression、
-  Email/SMS/Push routing contracts and append-only delivery attempts. Pilot behavior keeps only
-  transactional Email contractually eligible；SMS、Push and marketing delivery are disabled.
-  There is no recipient PII、template body、Provider payload、SES/resource/credential、actual send、
-  Event consumer、retry worker、bounce/complaint processing、database/migration、production API/UI
-  or External Evidence.
+- `WP-0124 — Notification Stub and Delivery Adapter Contract` implementation is locally verified
+  from exact readiness integration `main@dd79b2922e49edc0741342b59a006e18fc5adae3` on branch
+  `codex/wp-0124-implementation`. The allowlisted `@bop/notification` package validates Event-only
+  opaque requests、exact Tenant scope、immutable Publishing template/content references、
+  transactional/marketing preference separation、suppression、Pilot channel routing、deduplication
+  and append-only delivery attempts. First-Pilot routing enables only transactional Email；
+  adapter error or malformed/raw response records `Unknown`, and explicit resend creates a new
+  sequence. Focused acceptance is `18/18`. No recipient PII、body、Provider payload、Event Consumer、
+  persistence、real delivery or external resource exists. Exact-head CI、Section 91 review、merge
+  and post-merge verification remain pending.
+- `WP-0124` documentation-only readiness is integrated at squash merge
+  `dd79b2922e49edc0741342b59a006e18fc5adae3`. PR
+  [#82](https://github.com/gangzhao2021/bop-rms/pull/82) passed exact-head run/job
+  `30485489192 / 90689984092` in `9m33s`; post-merge exact-main run/job
+  `30486219834 / 90692441445` passed in `9m37s`. Section 91 recorded
+  Blocker/High/Medium/Low `0/0/0/0`.
+- `WP-0124 — Notification Stub and Delivery Adapter Contract` documentation-only readiness was
+  opened from exact verified `main@814f53e4baad28a8e0dd82ef6f1a8cd06ba06cdf` on branch
+  `codex/wp-0124-readiness`. The bounded candidate locked Event-sourced opaque Notification
+  Requests、immutable Template/recipient references、exact Tenant scope、transactional/marketing
+  preference separation、deduplication、suppression、Email/SMS/Push routing contracts and
+  append-only delivery attempts. It gated recipient PII、template body、Provider payload、
+  SES/resource/credential、actual send、Event consumer、retry worker、bounce/complaint processing、
+  database/migration、production API/UI and External Evidence.
 - `WP-0123 — Configuration Version / Effective Period Contract` is implemented、verified、
   integrated and cleaned at squash merge `814f53e4baad28a8e0dd82ef6f1a8cd06ba06cdf`.
   PR [#81](https://github.com/gangzhao2021/bop-rms/pull/81) passed exact-head run/job
