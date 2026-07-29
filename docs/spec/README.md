@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0124 — Notification Stub and Delivery Adapter Contract implementation from exact verified main@dd79b2922e49edc0741342b59a006e18fc5adae3 on branch codex/wp-0124-implementation`
+- Current discussion node: `WP-0125 — Task Minimum Contract implemented、verified and integrated at main@0d9a57afc90e348de685d6cce1fca8577aa68c87`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,16 +17,23 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-0125 implementation and WP-0124 closeout entries below supersede older
 historical snapshots retained later in this index.
 
-- `WP-0125 — Task Minimum Contract` implementation is locally verified from exact readiness
-  integration `main@eefde15a2a92f48ec5b68750302bc84530ba8861` on branch
-  `codex/wp-0125-implementation`. The allowlisted `@bop/task` package validates exact-scope opaque
-  Tasks、User/Role/Position/Queue assignment、append-only assignment/claim history、
-  Membership-backed claim eligibility、Permission、expected version、sha256 idempotency、atomic
-  Audit、terminal finality and explicit overdue escalation. Task completion records only an opaque
-  reference；Notification failure cannot roll back escalation or change the source business result.
-  Focused acceptance is `25/25`. No PII/free-form body、database/migration、scheduler/worker、
-  production API/UI、real assignment/Notification or external resource exists. Exact-head CI、
-  Section 91 review、merge and post-merge verification remain pending.
+- `WP-0125 — Task Minimum Contract` is implemented、verified、integrated and cleaned at squash
+  merge `0d9a57afc90e348de685d6cce1fca8577aa68c87`. PR
+  [#85](https://github.com/gangzhao2021/bop-rms/pull/85) passed exact head
+  `5efcffc298877c445fbd9ac39b981dfd141c41b1` in run/job
+  `30494011976 / 90718492705` in `10m04s`; Section 91 recorded
+  Blocker/High/Medium/Low `0/0/0/0`. Post-merge exact-main run/job
+  `30494706604 / 90720705163` passed in `9m48s`. A deterministic pre-existing WP-0006 cold-start
+  timeout was isolated from Task code、fixed through PR
+  [#86](https://github.com/gangzhao2021/bop-rms/pull/86), and independently passed exact-head and
+  exact-main CI before WP-0125 was rerun；no failed run was used as acceptance evidence. The
+  allowlisted `@bop/task` package validates exact-scope opaque Tasks、User/Role/Position/Queue
+  assignment、append-only assignment/claim history、Membership-backed claim eligibility、
+  Permission、expected version、sha256 idempotency、atomic Audit、terminal finality and explicit
+  overdue escalation. Task completion records only an opaque reference；Notification failure
+  cannot roll back escalation or change the source business result. Focused acceptance is `25/25`.
+  No PII/free-form body、database/migration、scheduler/worker、production API/UI、real
+  assignment/Notification or external resource exists.
 - `WP-0125` documentation-only readiness is integrated at squash merge
   `eefde15a2a92f48ec5b68750302bc84530ba8861`. PR
   [#84](https://github.com/gangzhao2021/bop-rms/pull/84) passed exact-head run/job
