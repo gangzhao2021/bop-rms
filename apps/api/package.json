@@ -16,7 +16,8 @@
     "structured-logging:acceptance": "vitest run src/structured-logging.test.ts",
     "tenant-context:acceptance": "vitest run src/tenant-context.test.ts",
     "test": "vitest run",
-    "typecheck": "tsc --project tsconfig.json"
+    "typecheck": "tsc --project tsconfig.json",
+    "workforce-identity-security:acceptance": "vitest run src/workforce-identity-security.test.ts"
   },
   "dependencies": {
     "@bop-rms/observability": "workspace:*",
