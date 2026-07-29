@@ -59,6 +59,9 @@ importers:
       '@bop/membership':
         specifier: workspace:*
         version: link:../../packages/bop/membership
+      '@bop/permission':
+        specifier: workspace:*
+        version: link:../../packages/bop/permission
       '@bop/tenant':
         specifier: workspace:*
         version: link:../../packages/bop/tenant
