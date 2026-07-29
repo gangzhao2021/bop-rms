@@ -9,6 +9,7 @@
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
     "health-readiness:acceptance": "vitest run src/health-readiness.test.ts src/app.test.ts src/server.test.ts",
     "lint": "eslint src",
+    "merchant-bff:acceptance": "vitest run src/merchant-bff.test.ts",
     "merchant-authentication:acceptance": "vitest run src/merchant-authentication.test.ts src/tenant-context.test.ts",
     "request-correlation:acceptance": "vitest run src/request-correlation.test.ts src/app.test.ts",
     "realtime:acceptance": "vitest run src/realtime.acceptance.test.ts",

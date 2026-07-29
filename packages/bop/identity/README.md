@@ -5,17 +5,23 @@
 - Module Name: `identity`
 - Package Name: `@bop/identity`
 - Layer / Domain: `BOP / Identity`
-- Phase / owning Work Package: `Phase 0 / WP-0100`
+- Phase / owning Work Package: `Phase 0 / WP-0100, WP-0107`
 - Owner role: `Identity Engineering Owner`
 - Status: `active`
-- Responsibility: stable opaque Actor identity、provider-independent Authentication Session lifecycle、strict contract validation and current-session resolution/revocation ports.
-- Explicit non-goals: Brand、Store、Operating Entity、Membership、Role、Permission、Tenant Context、database persistence、Cognito/BFF、Cookie、Token、PKCE、CSRF、MFA workflow、Provider adapter and UI.
+- Responsibility: stable opaque Actor identity、provider-independent Authentication Session
+  lifecycle、browser credential and OIDC transaction contracts、strict validation and
+  current-session resolution/revocation ports.
+- Explicit non-goals: Brand、Store、Operating Entity、Membership、Role、Permission、Tenant Context、
+  concrete Cognito/KMS/Secrets Manager adapters、production route registration、MFA workflow and UI.
 
 ## Public contract
 
 - `IdentityActor`: closed `User | System | Service` classification、opaque UUIDv7 Actor reference、identity-only account kind、authentication method and verification level.
 - `AuthenticationSession`: closed lifecycle、exact accepted policy snapshot、UTC time bounds、rotation reference、positive version and closed revocation fact. It contains no browser secret or Provider token.
 - `IdentitySessionPort`: issue、resolve、revoke and rotate operations. Mutations carry expected version、correlation、purpose and idempotency facts. Tenant and Permission composition is owned by WP-0103/0104.
+- `BrowserSessionService`: provider-independent Authorization Code + PKCE orchestration over injected
+  Store、OIDC、selector-hash、randomness and envelope-crypto ports. Raw selectors and token material
+  never enter the public Session object.
 - Events: `identity.session-revoked.v1` and `identity.credential-compromised.v1`, both strict and minimal; credential correlation uses only an environment-keyed HMAC-SHA-256 surrogate.
 - Errors: closed stable `IdentityContractError` codes with privacy-safe messages and no existence detail.
 
@@ -30,7 +36,8 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 
 ## Data ownership and lifecycle
 
-- Owned facts: stable Actor identity and Authentication Session lifecycle contract. No persistence is implemented.
+- Owned facts: stable Actor identity、Authentication Session lifecycle、browser Session record and
+  one-time OIDC authorization transaction.
 - Write owner and allowed reads: `@bop/identity` public ports only.
 - Tenant / Brand / Store / location scope: deliberately absent. Identity cannot grant business scope.
 - Money: not applicable.
@@ -41,11 +48,16 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 
 ## Persistence and eventing
 
-Not implemented. WP-0100 owns no schema、table、migration、Repository adapter、Outbox writer、job or Projection. WP-0107 owns the PostgreSQL Session Store and BFF persistence composition.
+The `bop_identity` schema owns `authentication_session` and
+`oidc_authorization_transaction`. WP-0107 supplies constrained Stage DB-1 storage and an injected
+Store port but no production Repository adapter、runtime role、Outbox writer、job or Projection.
 
 ## Security and privacy
 
-Provider subject、email、phone、username、Cookie、Token、authorization code、state、nonce、PKCE verifier、client secret、TOTP seed and encrypted token bundle are not Actor references and never enter this public contract. Exact closed-object validation rejects unknown keys、accessors、symbol keys、non-plain prototypes、invalid shapes and noncanonical time. Identity does not evaluate a Permission or Tenant scope.
+Provider subject、email、phone、username、Cookie、Token、authorization code、state、nonce、PKCE
+verifier、client secret and TOTP seed are not Actor references. Raw browser credentials are
+short-lived application inputs only; persistence holds keyed hashes and authenticated ciphertext.
+Identity does not evaluate a Permission or Tenant scope.
 
 ## Operations
 
@@ -58,6 +70,7 @@ Provider subject、email、phone、username、Cookie、Token、authorization cod
 
 ```bash
 pnpm identity-session:acceptance
+pnpm browser-session:acceptance
 pnpm module-manifest:check
 pnpm import-boundary:check
 pnpm database-ownership:check

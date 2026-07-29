@@ -54,4 +54,53 @@ export {
   type RotateAuthenticationSessionCommand,
   type SessionRevocationResult,
 } from "./application/ports/identity-session-port.js";
+export {
+  authorizationCookie,
+  browserSessionErrorCodes,
+  BrowserSessionError,
+  createAuthorizationTransaction,
+  createBrowserSessionRecord,
+  merchantSessionCookie,
+  parseAuthorizationTransactionReference,
+  parseBrowserSessionReference,
+  parseExactHttpsUri,
+  parsePostLoginPath,
+  parseRawBrowserCredential,
+  parseSelectorHash,
+  type AuthorizationTransaction,
+  type AuthorizationTransactionReference,
+  type BrowserCookieDescriptor,
+  type BrowserSessionConfiguration,
+  type BrowserSessionErrorCode,
+  type BrowserSessionRecord,
+  type EncryptedSecretEnvelope,
+  type IssueBrowserSessionInput,
+  type RawBrowserCredential,
+  type RevokeBrowserSessionInput,
+  type SelectorHash,
+} from "./contracts/browser-session.js";
+export {
+  type BrowserSessionStorePort,
+  type ConsumeAuthorizationTransactionCommand,
+  type CreateBrowserSessionCommand,
+  type RevokeBrowserSessionCommand,
+  type RotateBrowserSessionCommand,
+} from "./application/ports/browser-session-store-port.js";
+export {
+  type OidcAuthorizationRequest,
+  type OidcCodeExchangeRequest,
+  type OidcCodeExchangeResult,
+  type OidcProviderPort,
+} from "./application/ports/oidc-provider-port.js";
+export {
+  type BrowserCredentialGeneratorPort,
+  type BrowserCredentialHasherPort,
+  type PkcePort,
+  type SessionEnvelopeCryptoPort,
+} from "./application/ports/session-credential-ports.js";
+export {
+  BrowserSessionService,
+  type BrowserCookieMutation,
+  type BrowserSessionServiceOptions,
+} from "./application/browser-session-service.js";
 export { moduleManifest } from "./module.manifest.js";
