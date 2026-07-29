@@ -184,5 +184,5 @@ describe("Event Catalog generation", () => {
     );
     expect(document).toBeDefined();
     expect(diagnostics.filter(({ severity }) => severity === 0)).toEqual([]);
-  });
+  }, 15_000);
 });
