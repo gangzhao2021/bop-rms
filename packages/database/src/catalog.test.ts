@@ -48,6 +48,7 @@ describe("migration catalog", () => {
       "0200_001_create_tenant_organization",
       "0200_002_create_operating_entity",
       "0200_003_create_membership",
+      "0200_004_create_identity_session",
       "0300_001_create_permission",
     ]);
     expect(
@@ -183,7 +184,7 @@ describe("migration catalog", () => {
     expect(integrity?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
-  it("registers the exact WP-0101, WP-0102 and WP-0105 business migration authorities", async () => {
+  it("registers the exact WP-0101, WP-0102, WP-0105 and WP-0107 business migration authorities", async () => {
     const migrations = (await readMigrationCatalog(repositoryRoot)).migrations.filter(
       (migration) => migration.namespace === 200 || migration.namespace === 300,
     );
@@ -197,6 +198,7 @@ describe("migration catalog", () => {
       ["0200_001_create_tenant_organization", "@bop/tenant", "bop_tenant"],
       ["0200_002_create_operating_entity", "@bop/operating-entity", "bop_operating_entity"],
       ["0200_003_create_membership", "@bop/membership", "bop_membership"],
+      ["0200_004_create_identity_session", "@bop/identity", "bop_identity"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(

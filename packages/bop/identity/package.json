@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",
+    "browser-session:acceptance": "vitest run --config vitest.config.ts src/tests/browser-session.test.ts",
     "format:check": "prettier --check . --ignore-path ../../../.prettierignore",
     "identity-session:acceptance": "vitest run --config vitest.config.ts src/tests/identity-session-contract.test.ts",
     "lint": "eslint src",

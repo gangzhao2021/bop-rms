@@ -9,7 +9,10 @@ const moduleManifestInput = {
   allowedSynchronousDependencies: [],
   consumedEvents: [],
   publishedEvents: ["identity.credential-compromised.v1", "identity.session-revoked.v1"],
-  ownedDatabase: { schema: null, tables: [] },
+  ownedDatabase: {
+    schema: "bop_identity",
+    tables: ["authentication_session", "oidc_authorization_transaction"],
+  },
   ownedJobs: [],
   featureFlags: [],
   killSwitches: [],
