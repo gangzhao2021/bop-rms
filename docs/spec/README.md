@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0122 — Publishing Lifecycle Minimum Contract implementation from exact origin/main@036a24727be52279270153547b557c98fd9f92bb on branch codex/wp-0122-implementation`
+- Current discussion node: `WP-0123 — Configuration Version / Effective Period Contract documentation-only readiness from exact origin/main@02516889ec494c78e4913560d1112cf82c953aa1 on branch codex/wp-0123-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,9 +14,22 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-0122 implementation and closeout entries below supersede older
+Entries are newest-first；the WP-0123 readiness and WP-0122 closeout entries below supersede older
 historical snapshots retained later in this index.
 
+- `WP-0123 — Configuration Version / Effective Period Contract` documentation-only readiness is
+  active from exact verified `origin/main@02516889ec494c78e4913560d1112cf82c953aa1` on branch
+  `codex/wp-0123-readiness`. The bounded candidate adds provider-neutral immutable configuration
+  version timing metadata、explicit UTC + IANA/local-offset boundaries、half-open period
+  validation、overlap rejection、historical/current effective resolution and idempotent
+  activation/expiry schedule intents. It does not own configuration payload、overlay priority、
+  persistence、clock/worker、Task/Notification delivery、event publication、production API/UI、
+  Provider/resource or real schedule. External Evidence remains gated.
+- `WP-0122 — Publishing Lifecycle Minimum Contract` is implemented、verified、integrated and
+  cleaned at squash merge `02516889ec494c78e4913560d1112cf82c953aa1`. PR
+  [#79](https://github.com/gangzhao2021/bop-rms/pull/79) passed exact-head run/job
+  `30478972766 / 90667724076` in `10m17s`; Section 91 recorded Blocker/High/Medium/Low
+  `0/0/0/0`. Post-merge run/job `30479824170 / 90670675737` passed in `8m56s`.
 - `WP-0122 — Publishing Lifecycle Minimum Contract` implementation is active from exact verified
   `origin/main@036a24727be52279270153547b557c98fd9f92bb` on branch
   `codex/wp-0122-implementation`. The allowlisted `@bop/publishing` package owns strict opaque
