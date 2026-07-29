@@ -19,6 +19,7 @@
     "domain-layer-boundary:check": "vitest run tooling/domain-layer-boundary/validate.test.mjs && node tooling/domain-layer-boundary/validate.mjs",
     "event-catalog:acceptance": "pnpm --filter @bop-rms/contracts-events test && pnpm --filter @bop-rms/contracts-events event-catalog:check",
     "event-catalog:check": "pnpm --filter @bop-rms/contracts-events event-catalog:check",
+    "effective-period:acceptance": "pnpm --filter @bop/effective-period test",
     "feature-control:acceptance": "pnpm --filter @bop/feature-control test",
     "media:acceptance": "pnpm --filter @bop/media test",
     "publishing:acceptance": "pnpm --filter @bop/publishing test",
