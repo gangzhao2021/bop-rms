@@ -231,6 +231,24 @@ importers:
         specifier: workspace:*
         version: link:../tenant
 
+  packages/bop/task:
+    dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@bop/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@bop/membership':
+        specifier: workspace:*
+        version: link:../membership
+      '@bop/notification':
+        specifier: workspace:*
+        version: link:../notification
+      '@bop/permission':
+        specifier: workspace:*
+        version: link:../permission
+
   packages/bop/operating-entity:
     dependencies:
       '@bop/tenant':

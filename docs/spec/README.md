@@ -14,10 +14,26 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-0125 readiness and WP-0124 closeout entries below supersede older
+Entries are newest-first；the WP-0125 implementation and WP-0124 closeout entries below supersede older
 historical snapshots retained later in this index.
 
-- `WP-0125 — Task Minimum Contract` documentation-only readiness is active from exact verified
+- `WP-0125 — Task Minimum Contract` implementation is locally verified from exact readiness
+  integration `main@eefde15a2a92f48ec5b68750302bc84530ba8861` on branch
+  `codex/wp-0125-implementation`. The allowlisted `@bop/task` package validates exact-scope opaque
+  Tasks、User/Role/Position/Queue assignment、append-only assignment/claim history、
+  Membership-backed claim eligibility、Permission、expected version、sha256 idempotency、atomic
+  Audit、terminal finality and explicit overdue escalation. Task completion records only an opaque
+  reference；Notification failure cannot roll back escalation or change the source business result.
+  Focused acceptance is `25/25`. No PII/free-form body、database/migration、scheduler/worker、
+  production API/UI、real assignment/Notification or external resource exists. Exact-head CI、
+  Section 91 review、merge and post-merge verification remain pending.
+- `WP-0125` documentation-only readiness is integrated at squash merge
+  `eefde15a2a92f48ec5b68750302bc84530ba8861`. PR
+  [#84](https://github.com/gangzhao2021/bop-rms/pull/84) passed exact-head run/job
+  `30489488170 / 90703494416` in `8m52s`; post-merge exact-main run/job
+  `30490091853 / 90705521390` passed in `9m49s`. Section 91 recorded
+  Blocker/High/Medium/Low `0/0/0/0`.
+- `WP-0125 — Task Minimum Contract` documentation-only readiness was opened from exact verified
   `main@bf672b512c6872a661300bc68b579f8129061e83` on branch `codex/wp-0125-readiness`. The bounded
   candidate locks exact-scope opaque Tasks、User/Role/Position/Queue assignment、append-only
   assignment and escalation history、Membership claim eligibility、Permission、expected version、
