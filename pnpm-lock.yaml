@@ -188,6 +188,12 @@ importers:
 
   packages/bop/permission:
     dependencies:
+      '@bop/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@bop/membership':
+        specifier: workspace:*
+        version: link:../membership
       '@bop/tenant':
         specifier: workspace:*
         version: link:../tenant

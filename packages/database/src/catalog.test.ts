@@ -48,6 +48,7 @@ describe("migration catalog", () => {
       "0200_001_create_tenant_organization",
       "0200_002_create_operating_entity",
       "0200_003_create_membership",
+      "0300_001_create_permission",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -182,9 +183,9 @@ describe("migration catalog", () => {
     expect(integrity?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
-  it("registers the exact WP-0101 and WP-0102 business migration authorities", async () => {
+  it("registers the exact WP-0101, WP-0102 and WP-0105 business migration authorities", async () => {
     const migrations = (await readMigrationCatalog(repositoryRoot)).migrations.filter(
-      (migration) => migration.namespace === 200,
+      (migration) => migration.namespace === 200 || migration.namespace === 300,
     );
     expect(
       migrations.map((migration) => [
@@ -196,7 +197,14 @@ describe("migration catalog", () => {
       ["0200_001_create_tenant_organization", "@bop/tenant", "bop_tenant"],
       ["0200_002_create_operating_entity", "@bop/operating-entity", "bop_operating_entity"],
       ["0200_003_create_membership", "@bop/membership", "bop_membership"],
+      ["0300_001_create_permission", "@bop/permission", "bop_permission"],
     ]);
+    const permission = migrations.find(
+      (migration) => migration.id === "0300_001_create_permission",
+    );
+    expect(permission?.sql).toContain("CREATE TABLE bop_permission.policy_state");
+    expect(permission?.sql).toContain("CREATE TABLE bop_permission.permission_override");
+    expect(permission?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migrations.map((migration) => migration.sql).join("\n")).not.toMatch(
       /\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu,
     );
