@@ -14,10 +14,24 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-0124 implementation and WP-0123 closeout entries below supersede older
+Entries are newest-first；the WP-0125 readiness and WP-0124 closeout entries below supersede older
 historical snapshots retained later in this index.
 
-- `WP-0124 — Notification Stub and Delivery Adapter Contract` implementation is locally verified
+- `WP-0125 — Task Minimum Contract` documentation-only readiness is active from exact verified
+  `main@bf672b512c6872a661300bc68b579f8129061e83` on branch `codex/wp-0125-readiness`. The bounded
+  candidate locks exact-scope opaque Tasks、User/Role/Position/Queue assignment、append-only
+  assignment and escalation history、Membership claim eligibility、Permission、expected version、
+  idempotency、atomic Audit、terminal finality and source-business isolation. It gates PII/free-form
+  payload、business-result ownership、worker/scheduler、real Notification、persistence、production
+  API/UI、external resources and External Evidence.
+- `WP-0124 — Notification Stub and Delivery Adapter Contract` is implemented、verified、integrated
+  and cleaned at squash merge `bf672b512c6872a661300bc68b579f8129061e83`. PR
+  [#83](https://github.com/gangzhao2021/bop-rms/pull/83) passed exact-head run/job
+  `30487691046 / 90697383204` in `9m47s`; Section 91 recorded Blocker/High/Medium/Low `0/0/0/0`.
+  Post-merge run `30488366739` passed every gate in unchanged-SHA rerun job `90700441380` in
+  `9m41s` after the first runner-local startup attempt stopped before repository checks. Readiness
+  and implementation branches were removed.
+- `WP-0124 — Notification Stub and Delivery Adapter Contract` implementation was locally verified
   from exact readiness integration `main@dd79b2922e49edc0741342b59a006e18fc5adae3` on branch
   `codex/wp-0124-implementation`. The allowlisted `@bop/notification` package validates Event-only
   opaque requests、exact Tenant scope、immutable Publishing template/content references、
