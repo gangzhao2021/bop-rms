@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0123 — Configuration Version / Effective Period Contract documentation-only readiness from exact origin/main@02516889ec494c78e4913560d1112cf82c953aa1 on branch codex/wp-0123-readiness`
+- Current discussion node: `WP-0123 — Configuration Version / Effective Period Contract implementation from exact verified main@f053544c308438b8c4ffce34dda80259798d4711 on branch codex/wp-0123-implementation`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,17 +14,25 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-0123 readiness and WP-0122 closeout entries below supersede older
+Entries are newest-first；the WP-0123 implementation and WP-0122 closeout entries below supersede older
 historical snapshots retained later in this index.
 
-- `WP-0123 — Configuration Version / Effective Period Contract` documentation-only readiness is
-  active from exact verified `origin/main@02516889ec494c78e4913560d1112cf82c953aa1` on branch
-  `codex/wp-0123-readiness`. The bounded candidate adds provider-neutral immutable configuration
-  version timing metadata、explicit UTC + IANA/local-offset boundaries、half-open period
-  validation、overlap rejection、historical/current effective resolution and idempotent
-  activation/expiry schedule intents. It does not own configuration payload、overlay priority、
-  persistence、clock/worker、Task/Notification delivery、event publication、production API/UI、
-  Provider/resource or real schedule. External Evidence remains gated.
+- `WP-0123 — Configuration Version / Effective Period Contract` implementation is locally verified
+  from exact readiness integration `main@f053544c308438b8c4ffce34dda80259798d4711` on branch
+  `codex/wp-0123-implementation`. The allowlisted provider-neutral `@bop/effective-period` package
+  validates immutable opaque timing metadata、explicit UTC + IANA/local-offset round trips、
+  half-open/open-ended periods、exact family/scope overlap and reproducible zero/one/conflict
+  resolution. Schedule/Renew requires exact Tenant、Permission、accepted approval、expected version、
+  idempotency and atomic Audit while recording only deterministic activation/optional expiry
+  intents. It owns no configuration payload、overlay priority、persistence、clock/worker、
+  Task/Notification delivery、Event、production API/UI、Provider/resource or real schedule.
+  Exact-head CI、Section 91 review、merge and post-merge verification remain pending.
+- `WP-0123` documentation-only readiness is integrated at squash merge
+  `f053544c308438b8c4ffce34dda80259798d4711`. PR
+  [#80](https://github.com/gangzhao2021/bop-rms/pull/80) passed exact-head run/job
+  `30480840077 / 90674233584` in `7m59s`; post-merge exact-main run/job
+  `30481505444 / 90676471757` passed in `9m26s`. Section 91 recorded
+  Blocker/High/Medium/Low `0/0/0/0`.
 - `WP-0122 — Publishing Lifecycle Minimum Contract` is implemented、verified、integrated and
   cleaned at squash merge `02516889ec494c78e4913560d1112cf82c953aa1`. PR
   [#79](https://github.com/gangzhao2021/bop-rms/pull/79) passed exact-head run/job
