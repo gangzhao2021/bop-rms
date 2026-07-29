@@ -219,6 +219,18 @@ importers:
         specifier: workspace:*
         version: link:../tenant
 
+  packages/bop/notification:
+    dependencies:
+      '@bop/eventing':
+        specifier: workspace:*
+        version: link:../eventing
+      '@bop/publishing':
+        specifier: workspace:*
+        version: link:../publishing
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../tenant
+
   packages/bop/operating-entity:
     dependencies:
       '@bop/tenant':
