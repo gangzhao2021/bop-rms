@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0120 — Feature Flag / Kill Switch Minimum Contract implementation from exact origin/main@d319e144589e277bc3d335b1a0521e6f1e51e4de on branch codex/wp-0120`
+- Current discussion node: `WP-0121 — Media Asset Metadata and Upload Reference documentation-only readiness from exact origin/main@71146b9754fccde5a1ab38847f8d0c15c077be03 on branch codex/wp-0121-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,9 +14,27 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-0120 implementation and WP-0109 closeout entries below supersede older
+Entries are newest-first；the WP-0121 readiness and WP-0120 closeout entries below supersede older
 historical snapshots retained later in this index.
 
+- `WP-0121 — Media Asset Metadata and Upload Reference` documentation-only readiness is active from
+  exact verified `origin/main@71146b9754fccde5a1ab38847f8d0c15c077be03` on branch
+  `codex/wp-0121-readiness`. The bounded candidate adds a provider-neutral `@bop/media` contract for
+  private Asset metadata、one-time expiring Upload Sessions、quarantine and bounded check/processing
+  states、immutable Asset Versions、exact Brand/Store access scope and Dynamic/Pinned references.
+  Business Domains receive references only；they never receive binary data、temporary URLs、
+  credentials、storage locators or upload authority. The package creates no database/migration、
+  S3/GuardDuty/KMS/scanner integration、signed URL、production route/UI、real media fact、Provider、
+  credential、external resource or deployment. External Evidence remains gated and unclaimed.
+- `WP-0120 — Feature Flag / Kill Switch Minimum Contract` is implemented、verified、integrated and
+  cleaned at squash merge `71146b9754fccde5a1ab38847f8d0c15c077be03`. Readiness PR
+  [#74](https://github.com/gangzhao2021/bop-rms/pull/74) passed exact-head and post-merge exact-main
+  CI. Implementation PR [#75](https://github.com/gangzhao2021/bop-rms/pull/75) passed exact-head
+  run/job `30466097198 / 90626020711` on its unchanged-SHA rerun after one Event Catalog timeout；
+  Section 91 recorded Blocker/High/Medium/Low `0/0/0/0`、reviews `0` and unresolved threads `0`.
+  Post-merge exact-main run/job `30467541371 / 90631161796` passed on the same-SHA rerun after one
+  registry-download-only failure. Local/remote branches were removed；External Evidence remains
+  gated and unclaimed.
 - `WP-0120 — Feature Flag / Kill Switch Minimum Contract` implementation is locally verified from exact `origin/main@d319e144589e277bc3d335b1a0521e6f1e51e4de` on branch `codex/wp-0120`; exact behavior head is `294bacd5adfc501db3fc7684cdfa8a108a47d3e8`. It adds the provider-neutral `@bop/feature-control` owner with strict Release Flag / Kill Switch definitions、exact Brand/Store precedence、opaque deterministic basis-point rollout、one frontend-hint/backend-authority evaluation、explicit in-flight policy、exact Permission-gated mutation、atomic Audit composition and validated sequential recovery. Focused Feature Control `15/15`、Tenant `9/9`、Permission `17/17`、Audit `41/41`、Event Catalog `13/13`、format、lint、typecheck、all 16 builds、architecture runtimes and production audit pass locally. The unchanged macOS fixture boundaries remain recorded at Domain `55/56`、Migration `28/32` and root `184/191`; exact-head pinned-Linux CI owns those cases. No database/migration、generic Policy Engine、production route/UI、raw identity hashing、real control、Provider、credential、external resource or deployment is included.
 - `WP-0120 — Feature Flag / Kill Switch Minimum Contract` documentation-only readiness is active from exact verified `origin/main@9763aadf914e2aa90592f6f7e1c85b0ede13c5a2` on branch `codex/wp-0120-readiness`. The bounded candidate adds a provider-neutral `@bop/feature-control` contract for strict Release Flag / Kill Switch metadata、exact Brand/Store scope and Store precedence、opaque deterministic basis-point rollout、one frontend-hint/backend-authority evaluation、explicit in-flight shutdown policy、Permission-gated state changes、Audit-before-success and validated bounded recovery. It creates no generic Policy Engine、database/migration/RLS/role、production route/UI、raw rollout identity、real Tenant/operational control、Provider、credential、external resource or deployment. External Evidence remains gated and unclaimed.
 - `WP-0109 — Object-level Authorization、Store Switch and Cross-Tenant Negative Test` is implemented、verified、integrated and cleaned at squash merge `9763aadf914e2aa90592f6f7e1c85b0ede13c5a2`. Readiness PR [#72](https://github.com/gangzhao2021/bop-rms/pull/72) passed exact-head CI and its same-SHA post-merge rerun after one unchanged Event Catalog timeout. Implementation PR [#73](https://github.com/gangzhao2021/bop-rms/pull/73) passed exact-head run/job `30460276496 / 90604237768` in `8m58s`; Section 91 recorded Blocker/High/Medium/Low `0/0/0/0`、reviews `0` and unresolved threads `0`. Post-merge exact-main run/job `30461222043 / 90607481259` passed in `8m48s`. Local/remote branches were removed；the Owner Handoff remains untracked and unchanged；External Evidence remains gated and unclaimed.
