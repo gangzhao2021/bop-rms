@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0122 — Publishing Lifecycle Minimum Contract documentation-only readiness from exact origin/main@dfd638e408adff3a32524176c55da40e78c51969 on branch codex/wp-0122-readiness`
+- Current discussion node: `WP-0122 — Publishing Lifecycle Minimum Contract implementation from exact origin/main@036a24727be52279270153547b557c98fd9f92bb on branch codex/wp-0122-implementation`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,17 +14,22 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-0121 readiness and WP-0120 closeout entries below supersede older
+Entries are newest-first；the WP-0122 implementation and closeout entries below supersede older
 historical snapshots retained later in this index.
 
-- `WP-0122 — Publishing Lifecycle Minimum Contract` documentation-only readiness is active from
-  exact verified `origin/main@dfd638e408adff3a32524176c55da40e78c51969` on branch
-  `codex/wp-0122-readiness`. The bounded candidate adds a provider-neutral `@bop/publishing`
-  contract for opaque configuration snapshots、Draft/Review/Approval/Publish/Archive/Rollback
-  transitions、immutable Release Records、exact Brand/Store Permission and atomic Audit. Schedule
-  and effective resolution remain WP-0123. It creates no configuration payload ownership、
-  database/migration、Approval/Effective Period implementation、event publication、production
-  route/UI、Provider、real configuration or deployment. External Evidence remains gated.
+- `WP-0122 — Publishing Lifecycle Minimum Contract` implementation is active from exact verified
+  `origin/main@036a24727be52279270153547b557c98fd9f92bb` on branch
+  `codex/wp-0122-implementation`. The allowlisted `@bop/publishing` package owns strict opaque
+  metadata、sequential Draft/Review/Approval/Publish/Archive/Rollback transitions、immutable
+  Release Records、exact Brand/Store Permission and atomic Audit composition. Schedule and
+  effective resolution remain WP-0123；there is no payload ownership、database/migration、event、
+  production API/UI、Provider/resource or real configuration.
+- `WP-0122` readiness is integrated at squash merge
+  `036a24727be52279270153547b557c98fd9f92bb`. PR
+  [#78](https://github.com/gangzhao2021/bop-rms/pull/78) passed exact-head run/job
+  `30476251480 / 90658580674` after a bounded per-test timeout stabilized the existing official
+  AsyncAPI parser gate；post-merge run/job `30477042301 / 90661245627` passed in `8m53s`.
+  Section 91 recorded Blocker/High/Medium/Low `0/0/0/0`.
 - `WP-0121 — Media Asset Metadata and Upload Reference` is implemented、verified、integrated and
   cleaned at squash merge `dfd638e408adff3a32524176c55da40e78c51969`. PR
   [#77](https://github.com/gangzhao2021/bop-rms/pull/77) passed same-SHA exact-head CI attempt 2

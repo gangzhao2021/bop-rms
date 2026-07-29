@@ -225,6 +225,18 @@ importers:
         specifier: workspace:*
         version: link:../tenant
 
+  packages/bop/publishing:
+    dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@bop/permission':
+        specifier: workspace:*
+        version: link:../permission
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../tenant
+
   packages/bop/tenant:
     dependencies:
       '@bop/identity':

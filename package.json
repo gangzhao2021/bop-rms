@@ -21,6 +21,7 @@
     "event-catalog:check": "pnpm --filter @bop-rms/contracts-events event-catalog:check",
     "feature-control:acceptance": "pnpm --filter @bop/feature-control test",
     "media:acceptance": "pnpm --filter @bop/media test",
+    "publishing:acceptance": "pnpm --filter @bop/publishing test",
     "clean": "turbo run clean",
     "dev": "node tooling/environment/local.mjs start",
     "environment:check": "node tooling/environment/validate.mjs --env-file .env --check-ports",
