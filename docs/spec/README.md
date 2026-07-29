@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0121 — Media Asset Metadata and Upload Reference implementation from exact origin/main@86140374b8c2b90c2072528b8699d6f114d85ec2 on branch codex/wp-0121`
+- Current discussion node: `WP-0122 — Publishing Lifecycle Minimum Contract documentation-only readiness from exact origin/main@dfd638e408adff3a32524176c55da40e78c51969 on branch codex/wp-0122-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,6 +17,19 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-0121 readiness and WP-0120 closeout entries below supersede older
 historical snapshots retained later in this index.
 
+- `WP-0122 — Publishing Lifecycle Minimum Contract` documentation-only readiness is active from
+  exact verified `origin/main@dfd638e408adff3a32524176c55da40e78c51969` on branch
+  `codex/wp-0122-readiness`. The bounded candidate adds a provider-neutral `@bop/publishing`
+  contract for opaque configuration snapshots、Draft/Review/Approval/Publish/Archive/Rollback
+  transitions、immutable Release Records、exact Brand/Store Permission and atomic Audit. Schedule
+  and effective resolution remain WP-0123. It creates no configuration payload ownership、
+  database/migration、Approval/Effective Period implementation、event publication、production
+  route/UI、Provider、real configuration or deployment. External Evidence remains gated.
+- `WP-0121 — Media Asset Metadata and Upload Reference` is implemented、verified、integrated and
+  cleaned at squash merge `dfd638e408adff3a32524176c55da40e78c51969`. PR
+  [#77](https://github.com/gangzhao2021/bop-rms/pull/77) passed same-SHA exact-head CI attempt 2
+  after one unchanged Event Catalog timeout；Section 91 recorded Blocker/High/Medium/Low
+  `0/0/0/0`. Post-merge run/job `30473117534 / 90648012366` passed in `8m57s`.
 - `WP-0121 — Media Asset Metadata and Upload Reference` implementation is active from exact
   verified `origin/main@86140374b8c2b90c2072528b8699d6f114d85ec2` on branch `codex/wp-0121`.
   It adds the provider-neutral `@bop/media` owner for strict private metadata、one-time bounded
