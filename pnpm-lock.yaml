@@ -172,6 +172,18 @@ importers:
 
   packages/bop/eventing: {}
 
+  packages/bop/feature-control:
+    dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@bop/permission':
+        specifier: workspace:*
+        version: link:../permission
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../tenant
+
   packages/bop/identity: {}
 
   packages/bop/membership:
