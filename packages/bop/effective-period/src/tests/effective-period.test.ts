@@ -376,6 +376,18 @@ describe("overlap and explicit resolution", () => {
         },
       ),
     ).toBe(false);
+    expect(
+      periodsOverlap(
+        {
+          effectiveFrom: first.effectiveFrom.instant,
+          effectiveUntil: null,
+        },
+        {
+          effectiveFrom: adjacent.effectiveFrom.instant,
+          effectiveUntil: adjacentUntil.instant,
+        },
+      ),
+    ).toBe(true);
     expect(() =>
       validateNoEffectiveOverlap(version(), [version(2, ids.timing2, adjacent)]),
     ).not.toThrow();
