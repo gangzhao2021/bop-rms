@@ -8,6 +8,16 @@ const moduleManifestInput = {
   publicExports: ["."],
   allowedSynchronousDependencies: [
     {
+      moduleName: "identity",
+      packageName: "@bop/identity",
+      layer: "BOP",
+    },
+    {
+      moduleName: "membership",
+      packageName: "@bop/membership",
+      layer: "BOP",
+    },
+    {
       moduleName: "tenant",
       packageName: "@bop/tenant",
       layer: "BOP",
@@ -15,7 +25,17 @@ const moduleManifestInput = {
   ],
   consumedEvents: [],
   publishedEvents: [],
-  ownedDatabase: { schema: null, tables: [] },
+  ownedDatabase: {
+    schema: "bop_permission",
+    tables: [
+      "policy_state",
+      "permission_definition",
+      "role",
+      "role_assignment",
+      "permission_grant",
+      "permission_override",
+    ],
+  },
   ownedJobs: [],
   featureFlags: [],
   killSwitches: [],

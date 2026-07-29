@@ -45,6 +45,7 @@ const platformOwners = new Map([
 ]);
 const businessOwners = new Map([
   ["bop_membership", "@bop/membership"],
+  ["bop_permission", "@bop/permission"],
   ["bop_tenant", "@bop/tenant"],
   ["bop_operating_entity", "@bop/operating-entity"],
 ]);
@@ -269,6 +270,7 @@ function validateSql(
           "platform_audit",
           "platform_eventing",
           "bop_membership",
+          "bop_permission",
           "bop_tenant",
           "bop_operating_entity",
         ].includes(metadata.schema) && acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
