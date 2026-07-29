@@ -26,6 +26,13 @@ historical snapshots retained later in this index.
   versions resolve and formal uses require Pinned. No database/migration、Provider/scanner、
   Privacy lifecycle、publishing、production API/UI、real media、external resource or deployment is
   included. External Evidence remains gated and unclaimed.
+- `WP-0121 — Media Asset Metadata and Upload Reference` implementation is locally verified at
+  exact behavior commit `f4f7c576945c0338400670c34de8a228a0543de1`. Focused Media `12/12`、
+  Tenant `9/9`、Permission `17/17`、Audit `41/41`、Event `13/13`、format、lint、typecheck、all
+  `17` builds、architecture runtimes and production audit pass. The lockfile adds only the local
+  workspace importer. Root `184/191` retains exactly the seven known macOS fixture boundaries；
+  exact-head pinned-Linux CI owns the full matrix. Security/privacy/Domain review records open
+  Blocker/High/Medium/Low `0/0/0/0`.
 - `WP-0121 — Media Asset Metadata and Upload Reference` documentation-only readiness is
   integrated and cleaned at squash merge `86140374b8c2b90c2072528b8699d6f114d85ec2`. PR
   [#76](https://github.com/gangzhao2021/bop-rms/pull/76) passed exact-head run/job
