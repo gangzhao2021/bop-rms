@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0109 — Object-level Authorization、Store Switch and Cross-Tenant Negative Test implementation from exact origin/main@82d7501fb16fb3d4fa2e8d5e7e5888e6a5969a9e on branch codex/wp-0109`
+- Current discussion node: `WP-0120 — Feature Flag / Kill Switch Minimum Contract documentation-only readiness from exact origin/main@9763aadf914e2aa90592f6f7e1c85b0ede13c5a2 on branch codex/wp-0120-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,9 +14,11 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-0109 implementation/readiness and WP-0108 closeout entries below supersede older
+Entries are newest-first；the WP-0120 readiness and WP-0109 closeout entries below supersede older
 historical snapshots retained later in this index.
 
+- `WP-0120 — Feature Flag / Kill Switch Minimum Contract` documentation-only readiness is active from exact verified `origin/main@9763aadf914e2aa90592f6f7e1c85b0ede13c5a2` on branch `codex/wp-0120-readiness`. The bounded candidate adds a provider-neutral `@bop/feature-control` contract for strict Release Flag / Kill Switch metadata、exact Brand/Store scope and Store precedence、opaque deterministic basis-point rollout、one frontend-hint/backend-authority evaluation、explicit in-flight shutdown policy、Permission-gated state changes、Audit-before-success and validated bounded recovery. It creates no generic Policy Engine、database/migration/RLS/role、production route/UI、raw rollout identity、real Tenant/operational control、Provider、credential、external resource or deployment. External Evidence remains gated and unclaimed.
+- `WP-0109 — Object-level Authorization、Store Switch and Cross-Tenant Negative Test` is implemented、verified、integrated and cleaned at squash merge `9763aadf914e2aa90592f6f7e1c85b0ede13c5a2`. Readiness PR [#72](https://github.com/gangzhao2021/bop-rms/pull/72) passed exact-head CI and its same-SHA post-merge rerun after one unchanged Event Catalog timeout. Implementation PR [#73](https://github.com/gangzhao2021/bop-rms/pull/73) passed exact-head run/job `30460276496 / 90604237768` in `8m58s`; Section 91 recorded Blocker/High/Medium/Low `0/0/0/0`、reviews `0` and unresolved threads `0`. Post-merge exact-main run/job `30461222043 / 90607481259` passed in `8m48s`. Local/remote branches were removed；the Owner Handoff remains untracked and unchanged；External Evidence remains gated and unclaimed.
 - `WP-0109 — Object-level Authorization、Store Switch and Cross-Tenant Negative Test` implementation is locally verified from exact `origin/main@82d7501fb16fb3d4fa2e8d5e7e5888e6a5969a9e` on branch `codex/wp-0109`; exact behavior head is `d6e38ac379a22ebcf3ee0814bf9e70f9760340b8`. It adds only provider-neutral API composition: strict owning-Domain object-scope evidence after accepted action Permission, and a same-origin/CSRF-authorized Store-switch service that derives Brand from Tenant-owned Store、revalidates active Membership/exact Store Assignment、rotates Session/CSRF authority and returns only the new Cookie mutation plus minimum canonical Tenant Context. Focused object/switch tests `20/20`、complete API `87/87`、Identity `59/59`、Tenant `9/9`、Membership `9/9`、Permission `17/17`、format、lint、typecheck、all 15 builds、architecture runtime and production audit pass locally. No new Domain/repository、private query、database/migration、dependency/lockfile、production route/UI、real fact、Provider、credential、external resource or deployment exists.
 - `WP-0109 — Object-level Authorization、Store Switch and Cross-Tenant Negative Test` documentation-only readiness is active from exact verified `origin/main@05b1b87308f26b23bfd2efbbdea81cce0198d328` on branch `codex/wp-0109-readiness`. The bounded candidate adds only API composition over existing public Identity、Tenant、Membership and Permission contracts: an owning-Domain-injected exact object-scope evidence resolver, and a same-origin/CSRF-authorized Store-switch service that revalidates the target Brand/Store/Membership/Store Assignment before rotating Session and CSRF authority. It adds no generic object repository、cross-Domain private query、new Domain、database/migration、Permission seed、production route/UI、real Tenant/workforce fact、Provider、credential、external resource or deployment. External Evidence remains gated and unclaimed.
 - `WP-0108 — Workforce Invite、TOTP MFA、Recovery and Session Revocation Policy` is implemented、verified、integrated and cleaned at squash merge `05b1b87308f26b23bfd2efbbdea81cce0198d328`. PR [#71](https://github.com/gangzhao2021/bop-rms/pull/71) first failed exact-head run/job `30454446563 / 90584311790` because the existing Identity session-store acceptance retained a stale two-table inventory；the brief allowlist was explicitly refreshed before the six-table expectation was corrected. Replacement exact head `5476b235c7a8867796866eaeefe7bd4145c7b669` passed run/job `30455197348 / 90586874988` in `8m52s`; Section 91 recorded Blocker/High/Medium/Low `0/0/0/0`、reviews `0` and unresolved threads `0`. Post-merge exact-main run/job `30456015568 / 90589649266` passed in `8m30s`. Local/remote branches and temporary Docker/Compose resources were removed；External Evidence remains gated and unclaimed.
@@ -100,13 +102,14 @@ Agents must read the root `AGENTS.md`, this index, and the active Work Package b
 
 ## Current repository stage
 
-WP-0109 implementation is active from exact verified
-`origin/main@82d7501fb16fb3d4fa2e8d5e7e5888e6a5969a9e` on the sole active branch
-`codex/wp-0109`. Its readiness PR、exact-head CI、Section 91 solo self-review、squash merge、
-same-SHA post-merge exact-main CI and branch/resource cleanup are complete. The bounded
-implementation is limited to the exact six-file allowlist in `docs/spec/work-packages/WP-0109.md`;
-dependency/lockfile、database/migration、production route/UI、real Tenant/workforce/Provider fact、
-credential、external-resource and deployment changes remain gated.
+WP-0120 documentation-only readiness is active from exact verified
+`origin/main@9763aadf914e2aa90592f6f7e1c85b0ede13c5a2` on the sole active branch
+`codex/wp-0120-readiness`. WP-0109 readiness and implementation、exact-head CI、Section 91
+solo self-review、authorized squash merge、post-merge exact-main CI and branch/resource cleanup are
+complete. This readiness is limited to this index and `docs/spec/work-packages/WP-0120.md`;
+implementation、dependency/lockfile、database/migration、production route/UI、real
+Tenant/operational-control fact、Provider、credential、external-resource and deployment changes
+remain gated.
 This paragraph supersedes the historical active-stage snapshots below.
 
 WP-0047 documentation-only readiness is active from exact `origin/main@3f3af5dcee496997bf0ee842ee24726bb3e614b4` on the sole active branch `codex/wp-0047-readiness`. WP-0044 readiness is integrated；its uncommitted in-allowlist implementation is parked in a local named stash and must not resume until WP-0047 completes readiness、implementation、exact-head CI、merge、post-merge exact-main verification and cleanup. This paragraph supersedes the historical WP-0044 readiness snapshot retained below.
