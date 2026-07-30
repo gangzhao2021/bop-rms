@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1000 — Store Public Profile Query documentation-only readiness from exact verified main@b2293c3e44becd86e3aa854280752dedc772485f on branch codex/wp-1000-readiness`
+- Current discussion node: `WP-1000 — Store Public Profile Query implementation locally verified from exact readiness main@c6c255e2f07e94badf2af9dad18be501e42f68d4 on branch codex/wp-1000`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,18 +14,24 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1000 readiness and WP-0125 closeout entries below supersede older
+Entries are newest-first；the WP-1000 implementation and WP-0125 closeout entries below supersede older
 historical snapshots retained later in this index.
 
-- `WP-1000 — Store Public Profile Query` documentation-only readiness is active from exact
-  verified `main@b2293c3e44becd86e3aa854280752dedc772485f` on branch
-  `codex/wp-1000-readiness`. The bounded candidate creates a provider-neutral `@rms/store`
-  Public Query contract over existing public Tenant、Publishing、Effective Period and Media
-  evidence. It returns only an allowlisted、published、currently effective Public Store Profile
-  with deterministic locale resolution and uniform unavailable behavior；it never treats a public
-  reference as authorization or permits internal-ID lookup. Operating status/hours、QR、Customer
-  Session、database/migration、Merchant authoring、API/UI、real Store facts、Provider、credential、
-  external resource and deployment remain gated. External Evidence is unavailable and unclaimed.
+- `WP-1000 — Store Public Profile Query` implementation is locally verified from exact integrated
+  readiness `main@c6c255e2f07e94badf2af9dad18be501e42f68d4` on branch `codex/wp-1000`.
+  Readiness PR [#88](https://github.com/gangzhao2021/bop-rms/pull/88) passed exact-head run/job
+  `30501916664 / 90743212987` in `10m12s`、Section 91 Blocker/High/Medium/Low `0/0/0/0` and
+  post-merge exact-main run/job `30502503415 / 90745020369` in `9m57s`. The bounded
+  provider-neutral `@rms/store` Public Query validates exact injected Tenant、Publishing、
+  Effective Period and Media evidence、selects one published currently effective profile and
+  returns only a closed Public allowlist with deterministic locale fallback. A valid-shaped
+  internal Store ID remains unavailable and never becomes authorization；all lifecycle、scope、
+  publication、timing、Media、shape and dependency failures are externally uniform. Focused
+  acceptance is `31/31`；all `22` package format/lint/typecheck/build gates、architecture runtime、
+  dependency-Domain regressions and production audit pass locally. Operating status/hours、QR、
+  Customer Session、database/migration、Merchant authoring、API/UI、real Store facts、Provider、
+  credential、external resource and deployment remain gated. External Evidence is unavailable and
+  unclaimed.
 - `WP-0125 — Task Minimum Contract` is implemented、verified、integrated and cleaned at squash
   merge `0d9a57afc90e348de685d6cce1fca8577aa68c87`. PR
   [#85](https://github.com/gangzhao2021/bop-rms/pull/85) passed exact head

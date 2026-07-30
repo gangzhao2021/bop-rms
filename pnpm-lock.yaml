@@ -231,24 +231,6 @@ importers:
         specifier: workspace:*
         version: link:../tenant
 
-  packages/bop/task:
-    dependencies:
-      '@bop/audit':
-        specifier: workspace:*
-        version: link:../audit
-      '@bop/identity':
-        specifier: workspace:*
-        version: link:../identity
-      '@bop/membership':
-        specifier: workspace:*
-        version: link:../membership
-      '@bop/notification':
-        specifier: workspace:*
-        version: link:../notification
-      '@bop/permission':
-        specifier: workspace:*
-        version: link:../permission
-
   packages/bop/operating-entity:
     dependencies:
       '@bop/tenant':
@@ -278,6 +260,24 @@ importers:
       '@bop/tenant':
         specifier: workspace:*
         version: link:../tenant
+
+  packages/bop/task:
+    dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@bop/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@bop/membership':
+        specifier: workspace:*
+        version: link:../membership
+      '@bop/notification':
+        specifier: workspace:*
+        version: link:../notification
+      '@bop/permission':
+        specifier: workspace:*
+        version: link:../permission
 
   packages/bop/tenant:
     dependencies:
@@ -325,6 +325,21 @@ importers:
       pino:
         specifier: 10.3.1
         version: 10.3.1
+
+  packages/rms/store:
+    dependencies:
+      '@bop/effective-period':
+        specifier: workspace:*
+        version: link:../../bop/effective-period
+      '@bop/media':
+        specifier: workspace:*
+        version: link:../../bop/media
+      '@bop/publishing':
+        specifier: workspace:*
+        version: link:../../bop/publishing
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../../bop/tenant
 
   packages/ui:
     devDependencies:
