@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1004 — Invalid / Expired QR Error Contract implementation from exact verified readiness squash main@a0433ae09c8c6ecab16bc4dd277106ae769dc059 on branch codex/wp-1004-implementation`
+- Current discussion node: `WP-1005 — Order Resume、Public Reference 与 Pickup Proof Capability Contract readiness from exact verified main@d603b9673169018a9c8d76af3767a7b133696196 on branch codex/wp-1005-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,9 +14,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1004 readiness and WP-1003–1000 closeout entries below supersede older
-historical snapshots retained later in this index.
+Entries are newest-first；the WP-1005 readiness and WP-1004–1000 closeout entries below supersede
+older historical snapshots retained later in this index.
 
+- `WP-1005 — Order Resume、Public Reference 与 Pickup Proof Capability Contract`
+  documentation-only readiness is active from exact verified
+  `main@d603b9673169018a9c8d76af3767a7b133696196` on branch `codex/wp-1005-readiness`.
+  The bounded candidate adds a dependency-free `@bop/public-capability` contract module for
+  unguessable non-authorizing Order references、single-use 30-minute Order Resume credentials and
+  Ready-bound 60-minute Pickup Proof policy. Raw credentials remain trusted-memory-only and only
+  purpose-separated keyed hashes may persist in future owner Domains. No Order/Fulfillment fact、
+  database、HTTP/UI/email、Guest Session mutation、abuse limiter、Manager Override、Provider、
+  external resource or External Evidence is added.
 - `WP-1004 — Invalid / Expired QR Error Contract` implementation is locally verified from exact
   readiness squash `main@a0433ae09c8c6ecab16bc4dd277106ae769dc059` on branch
   `codex/wp-1004-implementation`. Readiness PR
