@@ -53,10 +53,25 @@ describe("migration catalog", () => {
       "0200_006_create_guest_session",
       "0200_007_alter_guest_dining_binding",
       "0300_001_create_permission",
+      "1100_001_create_product_aggregate",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
     ).toBe(true);
+  });
+
+  it("registers the exact WP-1020 Catalog aggregate migration authority", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1100_001_create_product_aggregate",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/catalog");
+    expect(migration?.metadata.schema).toBe("rms_catalog");
+    expect(migration?.sql).toContain("CREATE TABLE rms_catalog.product");
+    expect(migration?.sql).toContain("CREATE TABLE rms_catalog.product_version");
+    expect(migration?.sql).toContain("CREATE TABLE rms_catalog.sku");
+    expect(migration?.sql).toContain("CREATE TABLE rms_catalog.product_operation_record");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
   it("keeps WP-0021 schema-only with the exact owner and schema sequence", async () => {
