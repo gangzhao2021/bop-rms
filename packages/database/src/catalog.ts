@@ -208,10 +208,13 @@ function validateSql(
         metadataKeys.length + 1,
       ),
     );
-  const withoutDollarQuotedFunctionBodies = body.replace(/\$\$[\s\S]*?\$\$/gu, "$$");
+  const withoutFunctionBodies = body.replace(
+    /\bCREATE\s+FUNCTION\b[\s\S]*?\bAS\s+(\$[A-Za-z0-9_]*\$)[\s\S]*?\1\s*;/giu,
+    "CREATE FUNCTION AS $$function-body$$;",
+  );
   if (
     /\b(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT)\b/iu.test(
-      withoutDollarQuotedFunctionBodies,
+      withoutFunctionBodies,
     )
   )
     diagnostics.push(

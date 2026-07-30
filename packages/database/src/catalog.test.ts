@@ -364,6 +364,24 @@ $$;
     expect((await readMigrationCatalog(root)).diagnostics).toEqual([]);
   });
 
+  it("still rejects transaction control hidden in a non-function dollar quote", async () => {
+    const root = await fixture();
+    const file = migrationPath(root);
+    await writeFile(
+      file,
+      `${await readFile(file, "utf8")}
+DO $unsafe$
+BEGIN
+  COMMIT;
+END;
+$unsafe$;
+`,
+    );
+    expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
+      "MIGRATION_TRANSACTION_UNSUPPORTED",
+    );
+  });
+
   it("rejects database, role, tablespace, or extension DDL", async () => {
     const root = await fixture();
     const file = migrationPath(root);
