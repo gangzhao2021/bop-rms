@@ -10,6 +10,7 @@ const { Client, Pool } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const id = (digit) => `018f3f7a-8b1c-7a11-8d01-0000000000${digit.padStart(2, "0")}`;
 const expectedForcedTables = [
+  "bop_identity.guest_session",
   "bop_membership.membership",
   "bop_membership.store_assignment",
   "bop_operating_entity.brand_operating_entity_assignment",

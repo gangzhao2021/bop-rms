@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "identity", packageName: "@bop/identity", layer: "BOP" },
   tables: [
     {
+      table: "guest_session",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@bop/identity" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "credential"],
+    },
+    {
       table: "authentication_session",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@bop/identity" },
