@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1003 — Customer Guest Session Context implementation from verified readiness squash main@9c1f1ee0826d16870edee51cdce98e367d37057a on branch codex/wp-1003-implementation`
+- Current discussion node: `WP-1004 — Invalid / Expired QR Error Contract readiness from exact verified main@b53695a4a642f0aa5ad1ecff65914c98e05704de on branch codex/wp-1004-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,9 +14,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1002 readiness and WP-1001/WP-1000 closeout entries below supersede older
+Entries are newest-first；the WP-1004 readiness and WP-1003–1000 closeout entries below supersede older
 historical snapshots retained later in this index.
 
+- `WP-1004 — Invalid / Expired QR Error Contract` documentation-only readiness is active from
+  exact verified `main@b53695a4a642f0aa5ad1ecff65914c98e05704de` on branch
+  `codex/wp-1004-readiness`. The bounded candidate adds a same-origin
+  `POST /bff/customer/entry` transport over one injected server composition port. Signed QR input
+  is body-only；all valid-shaped unusable causes remain one non-oracular `entry_unavailable`
+  response with Store selection hidden. Success may emit only the fixed Guest Cookie、page-memory
+  CSRF and customer-safe public context. No QR URL、cause detail、Store guessing、CORS、cache、
+  Service Worker、Customer screen、Menu/Cart/Order/Dining capability、production adapter、
+  Provider/resource or External Evidence is allowed.
 - `WP-1003 — Customer Guest Session Context` implementation is locally verified from verified
   readiness squash `main@9c1f1ee0826d16870edee51cdce98e367d37057a` on branch
   `codex/wp-1003-implementation`. Readiness PR
