@@ -11,6 +11,21 @@ const moduleManifestInput =
     publicExports: ["."],
     allowedSynchronousDependencies: [
       {
+        moduleName: "audit",
+        packageName: "@bop/audit",
+        layer: "BOP",
+      },
+      {
+        moduleName: "permission",
+        packageName: "@bop/permission",
+        layer: "BOP",
+      },
+      {
+        moduleName: "public-capability",
+        packageName: "@bop/public-capability",
+        layer: "BOP",
+      },
+      {
         moduleName: "tenant",
         packageName: "@bop/tenant",
         layer: "BOP",

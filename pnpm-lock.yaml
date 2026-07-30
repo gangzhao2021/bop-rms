@@ -330,6 +330,15 @@ importers:
 
   packages/rms/dining:
     dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../../bop/audit
+      '@bop/permission':
+        specifier: workspace:*
+        version: link:../../bop/permission
+      '@bop/public-capability':
+        specifier: workspace:*
+        version: link:../../bop/public-capability
       '@bop/tenant':
         specifier: workspace:*
         version: link:../../bop/tenant

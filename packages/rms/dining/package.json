@@ -17,6 +17,9 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@bop/audit": "workspace:*",
+    "@bop/permission": "workspace:*",
+    "@bop/public-capability": "workspace:*",
     "@bop/tenant": "workspace:*"
   }
 }

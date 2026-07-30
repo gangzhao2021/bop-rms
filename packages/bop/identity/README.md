@@ -5,7 +5,7 @@
 - Module Name: `identity`
 - Package Name: `@bop/identity`
 - Layer / Domain: `BOP / Identity`
-- Phase / owning Work Package: `Phase 0 / WP-0100, WP-0107, WP-0108, WP-1003`
+- Phase / owning Work Package: `Phase 0/1 / WP-0100, WP-0107, WP-0108, WP-1003, WP-1006`
 - Owner role: `Identity Engineering Owner`
 - Status: `active`
 - Responsibility: stable opaque Actor identity、provider-independent Authentication Session
@@ -31,8 +31,9 @@
   purpose-separated 256-bit Session/CSRF credentials、resolves current immutable scope through an
   injected binding port and rotates/revokes with expected-version and bounded idempotency.
 - `GuestSession`: one exact Brand/Store/public Store/Table/channel/locale/QR context. Dine-in is
-  always `ContextOnly` in WP-1003 and carries no join、Host、Cart、Order、Customer or Merchant
-  authority.
+  initially `ContextOnly`. WP-1006 may consume one exact Dining admission and atomically rotate
+  both credentials into `DiningBound` with opaque Dining Session/Participant references. Identity
+  stores no Host fact and grants no Cart、Order、Payment、Customer or Merchant authority.
 - Events: `identity.session-revoked.v1` and `identity.credential-compromised.v1`, both strict and minimal; credential correlation uses only an environment-keyed HMAC-SHA-256 surrogate.
 - Errors: closed stable `IdentityContractError` codes with privacy-safe messages and no existence detail.
 
@@ -65,7 +66,7 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 
 The `bop_identity` schema owns `authentication_session`、`oidc_authorization_transaction`、
 `workforce_invitation`、`workforce_mfa_status`、`workforce_recovery_case` and
-`session_revocation_request` plus forced-RLS `guest_session`. WP-0107/0108 and WP-1003 supply
+`session_revocation_request` plus forced-RLS `guest_session`. WP-0107/0108、WP-1003 and WP-1006 supply
 constrained Stage DB-1 storage and injected Store ports but no production Repository adapter、
 runtime role、Outbox writer、job or Projection.
 
@@ -77,7 +78,8 @@ short-lived application inputs only; persistence holds keyed hashes and authenti
 Identity does not evaluate a Permission or Tenant scope.
 Guest persistence receives only purpose-separated keyed hashes；raw Guest Session and CSRF
 credentials exist only in the immediate issue/authorize boundary. Current Store/QR validation is
-injected and fails closed.
+injected and fails closed. Dining binding consumes only an opaque, time-bounded server admission;
+Identity never imports RMS or receives the raw Join credential.
 
 ## Operations
 

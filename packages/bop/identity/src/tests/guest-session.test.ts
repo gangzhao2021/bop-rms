@@ -29,6 +29,10 @@ const ids = {
   publicStore: "00000000-0000-7000-8000-000000000010",
   publicTable: "00000000-0000-7000-8000-000000000011",
   qr: "00000000-0000-7000-8000-000000000012",
+  diningAdmission: "00000000-0000-7000-8000-000000000013",
+  diningSession: "00000000-0000-7000-8000-000000000014",
+  diningParticipant: "00000000-0000-7000-8000-000000000015",
+  unrelatedOperation: "00000000-0000-7000-8000-000000000016",
 };
 const now = "2026-07-29T12:00:00.000Z";
 const sessionCredential = "A".repeat(43) as GuestRawCredential;
@@ -54,6 +58,19 @@ const evidence = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const diningEvidence = (overrides: Record<string, unknown> = {}) => ({
+  decision: "Allowed",
+  admissionReference: ids.diningAdmission,
+  operationReference: ids.nextOperation,
+  storeReference: ids.store,
+  publicTableReference: ids.publicTable,
+  diningSessionReference: ids.diningSession,
+  diningParticipantReference: ids.diningParticipant,
+  evaluatedAt: "2026-07-29T12:01:00.000Z",
+  validUntil: "2026-07-29T12:06:00.000Z",
+  ...overrides,
+});
+
 const session = (overrides: Record<string, unknown> = {}) => ({
   sessionReference: ids.session,
   status: "Active",
@@ -67,6 +84,8 @@ const session = (overrides: Record<string, unknown> = {}) => ({
   qrReference: ids.qr,
   qrRevocationVersion: 3,
   diningState: "ContextOnly",
+  diningSessionReference: null,
+  diningParticipantReference: null,
   createdAt: now,
   lastSeenAt: now,
   idleExpiresAt: "2026-07-29T16:00:00.000Z",
@@ -118,9 +137,11 @@ class SyntheticCredentials implements GuestSessionCredentialPort {
         ? "e"
         : intent.includes("Revoke:")
           ? "f"
-          : intent.includes(ids.nextEntry)
-            ? "8"
-            : "9",
+          : intent.includes("BindDining:")
+            ? "7"
+            : intent.includes(ids.nextEntry)
+              ? "8"
+              : "9",
     );
   }
   equals(left: GuestSelectorHash, right: GuestSelectorHash) {
@@ -234,6 +255,7 @@ class MemoryStore implements GuestSessionStorePort {
 const fixture = (
   admissionValue: GuestAdmissionEvidence | null = parseGuestAdmissionEvidence(evidence()),
   binding: "Current" | "Unavailable" = "Current",
+  diningAdmissionValue: unknown = diningEvidence(),
 ) => {
   const store = new MemoryStore();
   const credentials = new SyntheticCredentials();
@@ -243,6 +265,11 @@ const fixture = (
       async consume(command) {
         admissionCalls.push(command);
         return admissionValue;
+      },
+    },
+    diningAdmission: {
+      async consume() {
+        return diningAdmissionValue as never;
       },
     },
     binding: { validate: async () => binding },
@@ -318,7 +345,11 @@ describe("Guest Session contract", () => {
     expect(JSON.stringify(persisted)).not.toContain(csrfCredential);
     expect(persisted?.session).not.toHaveProperty("customer");
     expect(persisted?.session).not.toHaveProperty("permissions");
-    expect(persisted?.session).not.toHaveProperty("diningSessionReference");
+    expect(persisted?.session).toMatchObject({
+      diningState: "ContextOnly",
+      diningSessionReference: null,
+      diningParticipantReference: null,
+    });
   });
 
   it("ignores fixation-shaped extra caller state because it is outside the closed create command", async () => {
@@ -487,6 +518,77 @@ describe("Guest Session contract", () => {
     await expect(
       service.resolve({ sessionCredential, activity: "Background" }),
     ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+  });
+
+  it("atomically binds a DineIn guest to the consumed Dining admission and rotates both credentials", async () => {
+    const { service } = fixture();
+    await issue(service);
+    const bound = await service.bindDining({
+      sessionCredential,
+      expectedVersion: 1,
+      diningAdmissionReference: ids.diningAdmission,
+      operationReference: ids.nextOperation,
+      requestedAt: "2026-07-29T12:01:00.000Z",
+    });
+    expect(bound).toMatchObject({
+      status: "Issued",
+      sessionCredential: nextSessionCredential,
+      csrfCredential: nextCsrfCredential,
+      session: {
+        diningState: "DiningBound",
+        diningSessionReference: ids.diningSession,
+        diningParticipantReference: ids.diningParticipant,
+        rotatedFromGuestSessionReference: ids.session,
+      },
+    });
+    await expect(
+      service.bindDining({
+        sessionCredential,
+        expectedVersion: 1,
+        diningAdmissionReference: ids.diningAdmission,
+        operationReference: ids.nextOperation,
+        requestedAt: "2026-07-29T12:01:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      status: "AlreadyApplied",
+      session: {
+        diningState: "DiningBound",
+        diningSessionReference: ids.diningSession,
+        diningParticipantReference: ids.diningParticipant,
+      },
+    });
+    await expect(
+      service.resolve({ sessionCredential, activity: "Background" }),
+    ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+    await expect(
+      service.bindDining({
+        sessionCredential: nextSessionCredential,
+        expectedVersion: 1,
+        diningAdmissionReference: ids.diningAdmission,
+        operationReference: ids.unrelatedOperation,
+        requestedAt: "2026-07-29T12:01:00.000Z",
+      }),
+    ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+  });
+
+  it("fails Dining binding closed for mismatched or stale server admission evidence", async () => {
+    for (const admission of [
+      diningEvidence({ publicTableReference: "00000000-0000-7000-8000-000000000099" }),
+      diningEvidence({ validUntil: "2026-07-29T12:01:00.000Z" }),
+      null,
+    ]) {
+      const { service } = fixture(parseGuestAdmissionEvidence(evidence()), "Current", admission);
+      await issue(service);
+      await expect(
+        service.bindDining({
+          sessionCredential,
+          expectedVersion: 1,
+          diningAdmissionReference: ids.diningAdmission,
+          operationReference: ids.nextOperation,
+          requestedAt: "2026-07-29T12:01:00.000Z",
+        }),
+      ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+    }
   });
 
   it("returns a bounded replay without reissuing raw credentials and rejects changed intent", async () => {

@@ -5,11 +5,14 @@ import {
   guestSessionCookie,
   GuestSessionError,
   parseGuestAdmissionEvidence,
+  parseGuestDiningAdmissionEvidence,
+  parseGuestDiningAdmissionReference,
   parseGuestEntryRequestReference,
   parseGuestOperationReference,
   parseGuestRawCredential,
   parseGuestSessionReference,
   type GuestAdmissionEvidence,
+  type GuestDiningAdmissionEvidence,
   type GuestRawCredential,
   type GuestSession,
   type GuestSessionRecord,
@@ -18,6 +21,7 @@ import {
 import { parseCanonicalInstant, type CanonicalInstant } from "../contracts/identity-actor.js";
 import type {
   GuestEntryAdmissionPort,
+  GuestDiningAdmissionPort,
   GuestSessionBindingPort,
   GuestSessionCredentialPort,
   GuestSessionStorePort,
@@ -60,6 +64,7 @@ const command = (
 
 export interface GuestSessionServiceOptions {
   readonly admission: GuestEntryAdmissionPort;
+  readonly diningAdmission?: GuestDiningAdmissionPort;
   readonly binding: GuestSessionBindingPort;
   readonly store: GuestSessionStorePort;
   readonly credentials: GuestSessionCredentialPort;
@@ -85,6 +90,7 @@ interface FreshGuestSessionRecord {
 
 export class GuestSessionService {
   readonly #admission: GuestEntryAdmissionPort;
+  readonly #diningAdmission: GuestDiningAdmissionPort | null;
   readonly #binding: GuestSessionBindingPort;
   readonly #store: GuestSessionStorePort;
   readonly #credentials: GuestSessionCredentialPort;
@@ -92,6 +98,7 @@ export class GuestSessionService {
 
   constructor(options: GuestSessionServiceOptions) {
     this.#admission = options.admission;
+    this.#diningAdmission = options.diningAdmission ?? null;
     this.#binding = options.binding;
     this.#store = options.store;
     this.#credentials = options.credentials;
@@ -208,6 +215,8 @@ export class GuestSessionService {
       qrReference: evidence.qrReference,
       qrRevocationVersion: evidence.qrRevocationVersion,
       diningState: "ContextOnly",
+      diningSessionReference: null,
+      diningParticipantReference: null,
       createdAt: observedAt,
       lastSeenAt: observedAt,
       idleExpiresAt: plus(observedAt, fourHours),
@@ -337,6 +346,127 @@ export class GuestSessionService {
     } catch {
       throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
     }
+  }
+
+  async bindDining(input: {
+    readonly sessionCredential: unknown;
+    readonly expectedVersion: unknown;
+    readonly diningAdmissionReference: unknown;
+    readonly operationReference: unknown;
+    readonly requestedAt?: unknown;
+  }): Promise<GuestSessionIssueResult | GuestSessionReplayResult> {
+    const raw = command(
+      input,
+      ["sessionCredential", "expectedVersion", "diningAdmissionReference", "operationReference"],
+      ["requestedAt"],
+    );
+    const requestedAt = this.#at(raw.requestedAt);
+    if (!Number.isSafeInteger(raw.expectedVersion) || (raw.expectedVersion as number) < 1) {
+      throw new GuestSessionError("GUEST_SESSION_INPUT_INVALID");
+    }
+    if (this.#diningAdmission === null) {
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    }
+    const credential = parseGuestRawCredential(raw.sessionCredential);
+    const currentSelectorHash = this.#selector("Session", credential);
+    const current = await this.#storeCall(() => this.#store.resolve(currentSelectorHash));
+    if (current === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    const resolvedCurrent = this.#record(current).session;
+    const operationReference = parseGuestOperationReference(raw.operationReference);
+    const admissionReference = parseGuestDiningAdmissionReference(raw.diningAdmissionReference);
+    const intent = this.#intent(
+      `BindDining:${resolvedCurrent.sessionReference}:${raw.expectedVersion}:${admissionReference}`,
+    );
+    const prior = await this.#storeCall(() => this.#store.resolveOperation(operationReference));
+    if (prior !== null) {
+      if (!this.#credentials.equals(prior.operationIntentHash, intent)) {
+        throw new GuestSessionError("GUEST_SESSION_IDEMPOTENCY_CONFLICT");
+      }
+      return Object.freeze({
+        status: "AlreadyApplied",
+        session: prior.session,
+        cookie: guestSessionCookie,
+      });
+    }
+    const currentSession = assertGuestSessionUsable(resolvedCurrent, requestedAt);
+    if (currentSession.version !== raw.expectedVersion) {
+      throw new GuestSessionError("GUEST_SESSION_VERSION_CONFLICT");
+    }
+    if (
+      currentSession.channel !== "DineIn" ||
+      currentSession.diningState !== "ContextOnly" ||
+      currentSession.publicTableReference === null
+    ) {
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    }
+    let evidence: GuestDiningAdmissionEvidence;
+    try {
+      evidence = parseGuestDiningAdmissionEvidence(
+        await this.#diningAdmission.consume({
+          admissionReference,
+          operationReference,
+          requestedAt,
+        }),
+      );
+      if (
+        evidence.admissionReference !== admissionReference ||
+        evidence.operationReference !== operationReference ||
+        evidence.storeReference !== currentSession.storeReference ||
+        evidence.publicTableReference !== currentSession.publicTableReference ||
+        Date.parse(evidence.evaluatedAt) > Date.parse(requestedAt) ||
+        Date.parse(evidence.validUntil) <= Date.parse(requestedAt)
+      ) {
+        throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      }
+    } catch {
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    }
+    const sessionCredential = parseGuestRawCredential(
+      this.#credentials.generateCredential("Session"),
+    );
+    const csrfCredential = parseGuestRawCredential(this.#credentials.generateCredential("Csrf"));
+    const nextSession = createGuestSession({
+      ...currentSession,
+      sessionReference: parseGuestSessionReference(this.#credentials.generateSessionReference()),
+      version: 1,
+      diningState: "DiningBound",
+      diningSessionReference: evidence.diningSessionReference,
+      diningParticipantReference: evidence.diningParticipantReference,
+      createdAt: requestedAt,
+      lastSeenAt: requestedAt,
+      idleExpiresAt: plus(requestedAt, fourHours),
+      absoluteExpiresAt: plus(requestedAt, twentyFourHours),
+      orderClosedAt: null,
+      closureExpiresAt: null,
+      rotatedFromGuestSessionReference: currentSession.sessionReference,
+      revocationReason: null,
+      revokedAt: null,
+    });
+    const nextRecord = createGuestSessionRecord({
+      session: nextSession,
+      sessionSelectorHash: this.#selector("Session", sessionCredential),
+      csrfSelectorHash: this.#selector("Csrf", csrfCredential),
+      operationReference,
+      operationIntentHash: intent,
+    });
+    const persisted = this.#record(
+      await this.#storeCall(() =>
+        this.#store.rotate({
+          currentSelectorHash,
+          expectedVersion: raw.expectedVersion as number,
+          reason: "BindingChanged",
+          observedAt: requestedAt,
+          nextRecord,
+        }),
+      ),
+    );
+    return Object.freeze({
+      status: "Issued",
+      session: persisted.session,
+      sessionCredential,
+      csrfCredential,
+      cookie: guestSessionCookie,
+    });
   }
 
   async rotate(input: {

@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1006 — Pilot Staff-started Dining Session、short-lived Join Credential 与 copied-Table-QR Abuse Contract readiness from exact verified main@66dbbd835084e4d14bfff21e87eff65adc2b9c3c on branch codex/wp-1006-readiness`
+- Current discussion node: `WP-1006 — Pilot Staff-started Dining Session、short-lived Join Credential 与 copied-Table-QR Abuse Contract implementation from readiness squash main@de6722e16aeb3804dde9ae402aaa9a0041037c95 on branch codex/wp-1006-implementation`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -18,9 +18,10 @@ Entries are newest-first；the WP-1006 readiness and WP-1005–1000 closeout ent
 older historical snapshots retained later in this index.
 
 - `WP-1006 — Pilot Staff-started Dining Session、short-lived Join Credential 与
-copied-Table-QR Abuse Contract` documentation-only readiness is active from exact verified
-  `main@66dbbd835084e4d14bfff21e87eff65adc2b9c3c` on branch `codex/wp-1006-readiness`.
-  The bounded candidate extends Dining with Staff-authorized idempotent Session start and
+copied-Table-QR Abuse Contract` implementation is active from readiness squash
+  `main@de6722e16aeb3804dde9ae402aaa9a0041037c95` on branch
+  `codex/wp-1006-implementation`. The bounded implementation extends Dining with
+  Staff-authorized idempotent Session start and
   single-use Participant join, extends Public Capability with 128-bit/six-digit 15-minute
   purpose-separated Join proof, and extends Identity with rotated `DiningBound` Guest Session
   state. A fixed Table QR remains context-only. WP-2048 retains atomic abuse-bucket ownership；

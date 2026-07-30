@@ -3,11 +3,11 @@
 ## Identity and responsibility
 
 - Layer: BOP cross-cutting contract
-- Phase / owner: Phase 1 / WP-1005
+- Phase / owner: Phase 1 / WP-1005 and WP-1006
 - Owner role: Public Capability Security Owner
 - Status: implemented contract
 - Responsibility: closed credential grammar, maximum lifetime policy, purpose/scope separation,
-  and pure fail-closed evaluation for Order Resume and Pickup Proof capabilities
+  and pure fail-closed evaluation for Order Resume、Pickup Proof and Dining Join capabilities
 - Non-goals: credential generation or hashing, persistence, transactions, Guest Session mutation,
   Ordering or Fulfillment facts, HTTP/PWA routes, notifications, abuse limiting, completion, and
   Manager Override
@@ -28,6 +28,12 @@ atomic compare-version persistence, sibling revocation, and Guest Session set/ro
 `evaluatePickupProof` returns proof evidence only; it never grants Fulfillment completion or
 Manager Override authority. `regeneratePickupProof` requires the exact next generation and fresh
 capability reference/hash while returning the prior record as Revoked.
+
+`DiningJoinCapability` accepts only a canonical 16-byte unpadded-base64url invitation or six ASCII
+digits. It is scoped to exact Store、Table、Dining Session、assignment version and generation,
+expires within 15 minutes, consumes once, and regenerates only to a fresh next generation while
+revoking the prior one. Evaluation also requires injected `Admitted` abuse evidence and an Active
+Dining Session; the fixed Table QR is never a Join credential.
 
 Detailed bounded reason codes are trusted-adapter diagnostics. Public callers must map every
 rejection to one generic `Unavailable` response without existence disclosure.
@@ -57,8 +63,10 @@ authorization or telemetry labels.
 
 Resume lifetime is at most 30 minutes with at most two unexpired siblings per Order/purpose.
 Pickup lifetime is at most 60 minutes from Ready and ends earlier on completion or cancellation.
-Regeneration invalidates the previous generation. Records are immutable; correction is a new
-versioned transition rather than a history edit.
+Dining Join lifetime is at most 15 minutes and exports fixed `5/10m/Guest Session` and
+`20/10m/network-device` budgets for WP-2048 enforcement. Regeneration invalidates the previous
+generation. Records are immutable; correction is a new versioned transition rather than a history
+edit.
 
 No production persistence, eventing, runtime secret, external evidence, or abuse control is
 implemented. WP-2048 owns abuse budgets, WP-1723 owns notification mint/delivery, and later
