@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1005 — Order Resume、Public Reference 与 Pickup Proof Capability Contract implementation from verified readiness squash main@50d271f45cc11d8cc89028c5a72307db75de6a25 on branch codex/wp-1005-implementation`
+- Current discussion node: `WP-1006 — Pilot Staff-started Dining Session、short-lived Join Credential 与 copied-Table-QR Abuse Contract readiness from exact verified main@66dbbd835084e4d14bfff21e87eff65adc2b9c3c on branch codex/wp-1006-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,11 +14,27 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1005 implementation and WP-1004–1000 closeout entries below supersede
+Entries are newest-first；the WP-1006 readiness and WP-1005–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1006 — Pilot Staff-started Dining Session、short-lived Join Credential 与
+copied-Table-QR Abuse Contract` documentation-only readiness is active from exact verified
+  `main@66dbbd835084e4d14bfff21e87eff65adc2b9c3c` on branch `codex/wp-1006-readiness`.
+  The bounded candidate extends Dining with Staff-authorized idempotent Session start and
+  single-use Participant join, extends Public Capability with 128-bit/six-digit 15-minute
+  purpose-separated Join proof, and extends Identity with rotated `DiningBound` Guest Session
+  state. A fixed Table QR remains context-only. WP-2048 retains atomic abuse-bucket ownership；
+  this WP accepts only injected admission/cooldown evidence and exports the accepted budgets. No
+  Guest Self-Start、Convenience Mode、Ordering、Closing、Payment、database-backed Dining adapter、
+  HTTP/UI、real Staff/Guest/Table、Provider、external resource or External Evidence is added.
 - `WP-1005 — Order Resume、Public Reference 与 Pickup Proof Capability Contract`
-  implementation is locally verified from readiness squash
+  is implemented、verified、integrated and cleaned at squash
+  `66dbbd835084e4d14bfff21e87eff65adc2b9c3c`. Implementation PR
+  [#99](https://github.com/gangzhao2021/bop-rms/pull/99) passed exact head
+  `7d3594f1b9c4a3bdc7262c6cabf8049cf7100572` in run/job
+  `30520134755 / 90798448803` in `10m45s`；Section 91 findings were `0/0/0/0` and
+  post-merge exact-main run/job `30520767677 / 90800408366` passed in `10m05s`.
+  Implementation started from readiness squash
   `main@50d271f45cc11d8cc89028c5a72307db75de6a25` on branch
   `codex/wp-1005-implementation`. Readiness PR
   [#98](https://github.com/gangzhao2021/bop-rms/pull/98) passed exact head
@@ -32,7 +48,8 @@ older historical snapshots retained later in this index.
   database、HTTP/UI/email、Guest Session mutation、abuse limiter、Manager Override、Provider、
   external resource or External Evidence is added. Focused synthetic acceptance is `47/47`；
   Customer-entry `14/14`、Identity focused `14/14`、Tenant `9/9`、Store `73/73` and Dining
-  `32/32` regressions pass. The isolated PostgreSQL matrix remains pinned-Linux CI evidence.
+  `32/32` regressions pass. Both exact-head and post-merge pinned-Linux isolated PostgreSQL
+  matrices passed；the implementation branch was removed.
 - `WP-1004 — Invalid / Expired QR Error Contract` implementation is locally verified from exact
   readiness squash `main@a0433ae09c8c6ecab16bc4dd277106ae769dc059` on branch
   `codex/wp-1004-implementation`. Readiness PR
