@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1001 — Store Operating Status Query readiness from exact verified main@5b68af440c5ee5afb53e232d501af73e9a85e891 on branch codex/wp-1001-readiness`
+- Current discussion node: `WP-1001 — Store Operating Status Query implementation locally verified from exact readiness main@89964340482639cb5a2e5f0ee94099da44f935cf on branch codex/wp-1001-implementation`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,18 +17,26 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1001 readiness and WP-1000 closeout entries below supersede older
 historical snapshots retained later in this index.
 
-- `WP-1001 — Store Operating Status Query` documentation-only readiness is active from exact
-  verified `main@5b68af440c5ee5afb53e232d501af73e9a85e891` on branch
-  `codex/wp-1001-readiness`. The bounded candidate extends `@rms/store` with a query-only contract
-  that resolves one active Tenant-owned Store and one published、currently effective immutable
-  operating-hours configuration at an explicit UTC instant. It derives the Store-local calendar
-  date、weekday and wall-clock time through the configured IANA time zone；date-specific exception
-  hours replace weekly hours, and exact UTC temporary-closure intervals can suppress all or a
-  closed subset of `DineIn`、`Pickup` and `Delivery`. Zero/conflicting effective versions、
-  malformed schedules、scope/publication drift、unknown fields and dependency failures fail closed
-  as uniform `StoreUnavailable`. Business Date / Business Day Start、cutoffs / lead time、capacity、
-  catalog / inventory、Feature Control、QR / Session、Merchant authoring、event、database /
-  migration、API/UI、real Store hours and External Evidence remain gated and unclaimed.
+- `WP-1001 — Store Operating Status Query` implementation is locally verified from exact integrated
+  readiness `main@89964340482639cb5a2e5f0ee94099da44f935cf` on branch
+  `codex/wp-1001-implementation`. Readiness PR
+  [#90](https://github.com/gangzhao2021/bop-rms/pull/90) passed exact head
+  `355070f6f7eec65400d87f2e43c1f7c5b9a7d774` in run/job
+  `30505314830 / 90753684163` in `10m44s`、Section 91 Blocker/High/Medium/Low `0/0/0/0` and
+  post-merge exact-main run/job `30505885330 / 90755422963` in `9m13s`. The bounded
+  `@rms/store` extension resolves one active Tenant-owned Store and one published、currently
+  effective immutable operating-hours configuration at an explicit UTC instant. It maps through
+  the configured IANA zone、evaluates weekly and exact-date replacement schedules、handles
+  overnight intervals and DST gap/overlap instants、applies all/partial temporary closures and
+  returns only `Open`、`Closed` or `TemporarilyClosed` with canonical `DineIn`、`Pickup` and
+  `Delivery` availability. Malformed/ambiguous evidence fails closed and telemetry is bounded.
+  WP-1001 focused acceptance is `42/42`；Store total is `73/73`、all `22` package quality/build
+  gates、dependency regressions、architecture runtimes and production audit pass locally. One
+  Domain hard stop was resolved without an exception by keeping the evaluator dependency-free and
+  cross-Domain validation in Application composition. Business Date / Business Day Start、cutoffs /
+  lead time、capacity、catalog / inventory、Feature Control、QR / Session、Merchant authoring、
+  event、database/migration、API/UI、real Store hours and External Evidence remain gated and
+  unclaimed.
 - `WP-1000 — Store Public Profile Query` is implemented、verified、integrated and cleaned at squash
   merge `5b68af440c5ee5afb53e232d501af73e9a85e891`.
   Readiness PR [#88](https://github.com/gangzhao2021/bop-rms/pull/88) passed exact-head run/job
