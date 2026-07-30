@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1001 — Store Operating Status Query implementation locally verified from exact readiness main@89964340482639cb5a2e5f0ee94099da44f935cf on branch codex/wp-1001-implementation`
+- Current discussion node: `WP-1002 — QR Token / Table Context Resolution readiness from exact verified main@1b7bc26f6b79909a56c51ed36902d93db55e1205 on branch codex/wp-1002-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,9 +14,22 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1001 readiness and WP-1000 closeout entries below supersede older
+Entries are newest-first；the WP-1002 readiness and WP-1001/WP-1000 closeout entries below supersede older
 historical snapshots retained later in this index.
 
+- `WP-1002 — QR Token / Table Context Resolution` documentation-only readiness is active from exact
+  verified `main@1b7bc26f6b79909a56c51ed36902d93db55e1205` on branch
+  `codex/wp-1002-readiness`. The bounded candidate creates the provider-neutral `@rms/dining`
+  Phase-1 stub for a compact canonical ES256 Table/Store QR verification query. A static QR is
+  reusable context only: it may propose a public Store、optional Table、`DineIn` / `Pickup`
+  channel and locale, but grants no Guest Session、Dining join、Host、Order or Merchant authority.
+  Verification accepts only an exact current/overlap key registry、a 64-byte JOSE signature、a
+  maximum 180-day half-open validity interval and matching active Tenant/Table assignment plus
+  revocation version. Key compromise、Store/Table lifecycle drift、reassignment、revocation、
+  malformed/unknown fields、signature failure and dependency failure are externally uniform.
+  Guest Session creation、invalid/expired UX mapping、copied-QR abuse、short-lived Dining join
+  credential、rate limiting/WAF、KMS/public-key retrieval、signing、database/migration、API/UI、
+  real QR/Store/Table facts and External Evidence remain gated and unclaimed.
 - `WP-1001 — Store Operating Status Query` implementation is locally verified from exact integrated
   readiness `main@89964340482639cb5a2e5f0ee94099da44f935cf` on branch
   `codex/wp-1001-implementation`. Readiness PR
