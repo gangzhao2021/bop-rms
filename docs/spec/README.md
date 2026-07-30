@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1007 — Dine-in Session Closing、Unpaid Batch Exception Task 与 Authorized Write-off Boundary implementation from exact verified readiness squash main@6487d03f86789438ef37ecdb1f3d41d93f18b81b on branch codex/wp-1007-implementation`
+- Current discussion node: `WP-1020 — Product / Sellable / SKU Minimum Aggregate readiness from exact verified main@614062e949a0d14d8c9b1d4fd9a4041f7bd964e7 on branch codex/wp-1020-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,17 +14,28 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1007 readiness and WP-1006–1000 closeout entries below supersede
+Entries are newest-first；the WP-1020 readiness and WP-1007–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1020 — Product / Sellable / SKU Minimum Aggregate` documentation-only readiness is active
+  from exact verified `main@614062e949a0d14d8c9b1d4fd9a4041f7bd964e7` on branch
+  `codex/wp-1020-readiness`. The bounded candidate adds one Brand-scoped Product Aggregate、
+  complete Draft snapshot、Product-owned stable SKU Entities、non-authorizing SKU Sellable
+  values and the first Catalog-owned forced-RLS migration. SKU never becomes an independent
+  Aggregate. Category/Menu/Option/Availability/Publishing/API/UI/Projection、price、inventory、
+  Recipe、allergen/legal content、real Catalog fact、external resource and External Evidence
+  remain absent.
 - `WP-1007 — Dine-in Session Closing、Unpaid Batch Exception Task 与 Authorized Write-off
-Boundary` implementation is locally in verification from exact readiness squash
-  `main@6487d03f86789438ef37ecdb1f3d41d93f18b81b` on branch
-  `codex/wp-1007-implementation`. Readiness PR
+Boundary` is implemented、verified、integrated and cleaned at squash
+  `614062e949a0d14d8c9b1d4fd9a4041f7bd964e7`. Readiness PR
   [#102](https://github.com/gangzhao2021/bop-rms/pull/102) passed exact head
   `6c5459ad9a3f5b0cbba2ca79bad819355b51840a` in run/job
   `30527265371 / 90820994024` in `9m17s`；Section 91 findings were `0/0/0/0` and
   post-merge exact-main run/job `30527925422 / 90823114446` passed in `10m30s`.
+  Implementation PR [#103](https://github.com/gangzhao2021/bop-rms/pull/103) passed exact head
+  `fb864f716dd7513624d8c6234b5487a3a2e10685` in run/job
+  `30529607075 / 90828541797` in `10m16s`；Section 91 findings were `0/0/0/0` and
+  post-merge exact-main run/job `30530384234 / 90831061463` passed in `9m53s`.
   The bounded implementation adds only Dining phase close policy、
   Active-only Batch admission、fresh owner-evidence finality and idempotent Store-scoped Task
   composition. Dining never executes/approves a Write-off or mutates Order、Payment or Task
