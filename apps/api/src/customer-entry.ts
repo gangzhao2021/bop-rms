@@ -1,16 +1,20 @@
-import {
-  guestSessionCookie,
-  parseCanonicalInstant,
-  parseGuestRawCredential,
-  parseOpaqueUuidV7,
-  type GuestRawCredential,
-  type GuestSessionCookieDescriptor,
-} from "@bop/identity";
+import type { GuestRawCredential, GuestSessionCookieDescriptor } from "@bop/identity";
 import type { RequestHandler, Response } from "express";
 
 const compactSegmentPattern = /^[A-Za-z0-9_-]+$/u;
 const localePattern = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|\d{3})?$/u;
+const rawCredentialPattern = /^[A-Za-z0-9_-]{43}$/u;
+const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const canonicalInstantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const entryRoute = "/bff/customer/entry";
+const expectedGuestSessionCookie: GuestSessionCookieDescriptor = Object.freeze({
+  name: "__Host-bop-guest",
+  secure: true,
+  httpOnly: true,
+  sameSite: "lax",
+  path: "/",
+  domain: null,
+});
 
 export interface CustomerEntryPortInput {
   readonly entryRequestReference: string;
@@ -151,22 +155,43 @@ function parseOrigin(value: string): string {
 }
 
 function parseUuidV7(value: unknown): string {
-  return parseOpaqueUuidV7(value, "IDENTITY_INPUT_INVALID");
+  if (typeof value !== "string" || !uuidV7Pattern.test(value)) {
+    throw new TypeError("opaque UUIDv7 required");
+  }
+  return value;
+}
+
+function parseCanonicalInstant(value: unknown): string {
+  if (typeof value !== "string" || !canonicalInstantPattern.test(value)) {
+    throw new TypeError("canonical instant required");
+  }
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
+    throw new TypeError("canonical instant required");
+  }
+  return value;
+}
+
+function parseGuestRawCredential(value: unknown): GuestRawCredential {
+  if (typeof value !== "string" || !rawCredentialPattern.test(value)) {
+    throw new TypeError("Guest raw credential required");
+  }
+  return value as GuestRawCredential;
 }
 
 function parseCookie(value: unknown): GuestSessionCookieDescriptor {
   const cookie = closedRecord(value, ["name", "secure", "httpOnly", "sameSite", "path", "domain"]);
   if (
-    cookie.name !== guestSessionCookie.name ||
-    cookie.secure !== guestSessionCookie.secure ||
-    cookie.httpOnly !== guestSessionCookie.httpOnly ||
-    cookie.sameSite !== guestSessionCookie.sameSite ||
-    cookie.path !== guestSessionCookie.path ||
-    cookie.domain !== guestSessionCookie.domain
+    cookie.name !== expectedGuestSessionCookie.name ||
+    cookie.secure !== expectedGuestSessionCookie.secure ||
+    cookie.httpOnly !== expectedGuestSessionCookie.httpOnly ||
+    cookie.sameSite !== expectedGuestSessionCookie.sameSite ||
+    cookie.path !== expectedGuestSessionCookie.path ||
+    cookie.domain !== expectedGuestSessionCookie.domain
   ) {
     throw new TypeError("unexpected Guest Cookie descriptor");
   }
-  return guestSessionCookie;
+  return expectedGuestSessionCookie;
 }
 
 function parseEstablished(
@@ -240,7 +265,7 @@ function parsePortResult(
 }
 
 function serializeCookie(credential: GuestRawCredential): string {
-  return `${guestSessionCookie.name}=${credential}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+  return `${expectedGuestSessionCookie.name}=${credential}; Path=/; Secure; HttpOnly; SameSite=Lax`;
 }
 
 export const unavailableCustomerEntryHandler: RequestHandler = (_request, response) => {

@@ -1,6 +1,6 @@
 import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { guestSessionCookie, type GuestRawCredential } from "@bop/identity";
+import type { GuestRawCredential, GuestSessionCookieDescriptor } from "@bop/identity";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import {
@@ -19,6 +19,14 @@ const NEXT_ENTRY_REFERENCE = "018f0000-0000-7000-8000-000000000105";
 const NEXT_OPERATION_REFERENCE = "018f0000-0000-7000-8000-000000000106";
 const SESSION_CREDENTIAL = "S".repeat(43) as GuestRawCredential;
 const CSRF_CREDENTIAL = "C".repeat(43) as GuestRawCredential;
+const GUEST_SESSION_COOKIE: GuestSessionCookieDescriptor = Object.freeze({
+  name: "__Host-bop-guest",
+  secure: true,
+  httpOnly: true,
+  sameSite: "lax",
+  path: "/",
+  domain: null,
+});
 const TOKEN = [
   Buffer.from('{"alg":"ES256","kid":"synthetic"}').toString("base64url"),
   Buffer.from('{"synthetic":true}').toString("base64url"),
@@ -51,7 +59,7 @@ function established(
     contextExpiresAt: "2026-07-30T06:00:00.000Z",
     sessionCredential: SESSION_CREDENTIAL,
     csrfCredential: CSRF_CREDENTIAL,
-    cookie: guestSessionCookie,
+    cookie: GUEST_SESSION_COOKIE,
     ...overrides,
   };
 }
@@ -369,7 +377,7 @@ describe("WP-1004 Customer-entry contract", () => {
       { status: "EntryUnavailable", reason: "database-secret" },
       { status: "Unknown" },
       { ...established(), internalStoreReference: "internal-secret" },
-      { ...established(), cookie: { ...guestSessionCookie, secure: false } },
+      { ...established(), cookie: { ...GUEST_SESSION_COOKIE, secure: false } },
       { ...established(), contextExpiresAt: "2026-07-30T04:00:00.000Z" },
       Object.assign(Object.create({ inherited: true }) as object, established()),
       Object.defineProperty({}, "status", { get: () => "Established" }),
