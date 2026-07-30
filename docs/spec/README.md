@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1000 — Store Public Profile Query implementation locally verified from exact readiness main@c6c255e2f07e94badf2af9dad18be501e42f68d4 on branch codex/wp-1000`
+- Current discussion node: `WP-1001 — Store Operating Status Query readiness from exact verified main@5b68af440c5ee5afb53e232d501af73e9a85e891 on branch codex/wp-1001-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,14 +14,30 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1000 implementation and WP-0125 closeout entries below supersede older
+Entries are newest-first；the WP-1001 readiness and WP-1000 closeout entries below supersede older
 historical snapshots retained later in this index.
 
-- `WP-1000 — Store Public Profile Query` implementation is locally verified from exact integrated
-  readiness `main@c6c255e2f07e94badf2af9dad18be501e42f68d4` on branch `codex/wp-1000`.
+- `WP-1001 — Store Operating Status Query` documentation-only readiness is active from exact
+  verified `main@5b68af440c5ee5afb53e232d501af73e9a85e891` on branch
+  `codex/wp-1001-readiness`. The bounded candidate extends `@rms/store` with a query-only contract
+  that resolves one active Tenant-owned Store and one published、currently effective immutable
+  operating-hours configuration at an explicit UTC instant. It derives the Store-local calendar
+  date、weekday and wall-clock time through the configured IANA time zone；date-specific exception
+  hours replace weekly hours, and exact UTC temporary-closure intervals can suppress all or a
+  closed subset of `DineIn`、`Pickup` and `Delivery`. Zero/conflicting effective versions、
+  malformed schedules、scope/publication drift、unknown fields and dependency failures fail closed
+  as uniform `StoreUnavailable`. Business Date / Business Day Start、cutoffs / lead time、capacity、
+  catalog / inventory、Feature Control、QR / Session、Merchant authoring、event、database /
+  migration、API/UI、real Store hours and External Evidence remain gated and unclaimed.
+- `WP-1000 — Store Public Profile Query` is implemented、verified、integrated and cleaned at squash
+  merge `5b68af440c5ee5afb53e232d501af73e9a85e891`.
   Readiness PR [#88](https://github.com/gangzhao2021/bop-rms/pull/88) passed exact-head run/job
   `30501916664 / 90743212987` in `10m12s`、Section 91 Blocker/High/Medium/Low `0/0/0/0` and
-  post-merge exact-main run/job `30502503415 / 90745020369` in `9m57s`. The bounded
+  post-merge exact-main run/job `30502503415 / 90745020369` in `9m57s`. Implementation PR
+  [#89](https://github.com/gangzhao2021/bop-rms/pull/89) passed exact head
+  `0e4af5dd123056276edbab053b63ad5224c1737d` in run/job
+  `30503865349 / 90749271893` in `8m51s`、Section 91 Blocker/High/Medium/Low `0/0/0/0` and
+  post-merge exact-main run/job `30504350058 / 90750744423` in `10m05s`. The bounded
   provider-neutral `@rms/store` Public Query validates exact injected Tenant、Publishing、
   Effective Period and Media evidence、selects one published currently effective profile and
   returns only a closed Public allowlist with deterministic locale fallback. A valid-shaped
@@ -30,8 +46,8 @@ historical snapshots retained later in this index.
   acceptance is `31/31`；all `22` package format/lint/typecheck/build gates、architecture runtime、
   dependency-Domain regressions and production audit pass locally. Operating status/hours、QR、
   Customer Session、database/migration、Merchant authoring、API/UI、real Store facts、Provider、
-  credential、external resource and deployment remain gated. External Evidence is unavailable and
-  unclaimed.
+  credential、external resource and deployment remain gated. Both WP-owned branches were removed；
+  External Evidence is unavailable and unclaimed.
 - `WP-0125 — Task Minimum Contract` is implemented、verified、integrated and cleaned at squash
   merge `0d9a57afc90e348de685d6cce1fca8577aa68c87`. PR
   [#85](https://github.com/gangzhao2021/bop-rms/pull/85) passed exact head
