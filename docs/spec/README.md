@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1007 — Dine-in Session Closing、Unpaid Batch Exception Task 与 Authorized Write-off Boundary readiness from exact verified main@5a56328aa90c9c63291b926bc8a746dd8f1f6b31 on branch codex/wp-1007-readiness`
+- Current discussion node: `WP-1007 — Dine-in Session Closing、Unpaid Batch Exception Task 与 Authorized Write-off Boundary implementation from exact verified readiness squash main@6487d03f86789438ef37ecdb1f3d41d93f18b81b on branch codex/wp-1007-implementation`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -18,9 +18,14 @@ Entries are newest-first；the WP-1007 readiness and WP-1006–1000 closeout ent
 older historical snapshots retained later in this index.
 
 - `WP-1007 — Dine-in Session Closing、Unpaid Batch Exception Task 与 Authorized Write-off
-Boundary` documentation-only readiness is active from exact verified
-  `main@5a56328aa90c9c63291b926bc8a746dd8f1f6b31` on branch
-  `codex/wp-1007-readiness`. The bounded candidate adds only Dining phase close policy、
+Boundary` implementation is locally in verification from exact readiness squash
+  `main@6487d03f86789438ef37ecdb1f3d41d93f18b81b` on branch
+  `codex/wp-1007-implementation`. Readiness PR
+  [#102](https://github.com/gangzhao2021/bop-rms/pull/102) passed exact head
+  `6c5459ad9a3f5b0cbba2ca79bad819355b51840a` in run/job
+  `30527265371 / 90820994024` in `9m17s`；Section 91 findings were `0/0/0/0` and
+  post-merge exact-main run/job `30527925422 / 90823114446` passed in `10m30s`.
+  The bounded implementation adds only Dining phase close policy、
   Active-only Batch admission、fresh owner-evidence finality and idempotent Store-scoped Task
   composition. Dining never executes/approves a Write-off or mutates Order、Payment or Task
   private facts. Unpaid/indeterminate Order remains Open after Dining closes. No Ordering/Payment

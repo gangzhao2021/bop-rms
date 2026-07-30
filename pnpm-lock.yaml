@@ -339,6 +339,9 @@ importers:
       '@bop/public-capability':
         specifier: workspace:*
         version: link:../../bop/public-capability
+      '@bop/task':
+        specifier: workspace:*
+        version: link:../../bop/task
       '@bop/tenant':
         specifier: workspace:*
         version: link:../../bop/tenant
