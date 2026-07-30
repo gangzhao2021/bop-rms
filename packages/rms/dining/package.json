@@ -20,6 +20,7 @@
     "@bop/audit": "workspace:*",
     "@bop/permission": "workspace:*",
     "@bop/public-capability": "workspace:*",
+    "@bop/task": "workspace:*",
     "@bop/tenant": "workspace:*"
   }
 }

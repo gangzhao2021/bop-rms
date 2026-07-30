@@ -26,6 +26,11 @@ const moduleManifestInput =
         layer: "BOP",
       },
       {
+        moduleName: "task",
+        packageName: "@bop/task",
+        layer: "BOP",
+      },
+      {
         moduleName: "tenant",
         packageName: "@bop/tenant",
         layer: "BOP",
