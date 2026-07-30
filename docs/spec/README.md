@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1002 — QR Token / Table Context Resolution implementation from exact verified readiness main@5cf0dae86bca56456bb89c732d04419f0663be98 on branch codex/wp-1002-implementation`
+- Current discussion node: `WP-1003 — Customer Guest Session Context readiness from exact verified main@f7c5ca11b36d58585b02bd01048b03647494675e on branch codex/wp-1003-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,6 +17,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1002 readiness and WP-1001/WP-1000 closeout entries below supersede older
 historical snapshots retained later in this index.
 
+- `WP-1003 — Customer Guest Session Context` documentation-only readiness is active from exact
+  verified `main@f7c5ca11b36d58585b02bd01048b03647494675e` on branch
+  `codex/wp-1003-readiness`. The bounded candidate extends Identity with one provider-neutral
+  server-side Guest Session aggregate and constrained `bop_identity.guest_session` table. Only
+  injected current Store/QR/abuse admission evidence may create it；the browser receives fresh
+  256-bit opaque Session/CSRF credentials while persistence stores purpose-separated keyed hashes.
+  Sessions are bound to one Brand/Store/public Store/Table/channel context, expire after four hours
+  idle or 24 hours absolute, rotate on every binding change and remain `ContextOnly` for Dine-in
+  until WP-1006 supplies a separate active credential. Customer Profile、Merchant authority、
+  Dine-in join/Host/Order capability、raw IP/device、production API/UI、Provider/resource and
+  External Evidence remain gated and unclaimed.
 - `WP-1002 — QR Token / Table Context Resolution` implementation is locally verified from exact
   readiness squash `main@5cf0dae86bca56456bb89c732d04419f0663be98` on branch
   `codex/wp-1002-implementation`. Readiness PR
