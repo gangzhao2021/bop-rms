@@ -13,6 +13,7 @@ const moduleManifestInput = {
     schema: "bop_identity",
     tables: [
       "authentication_session",
+      "guest_session",
       "oidc_authorization_transaction",
       "session_revocation_request",
       "workforce_invitation",

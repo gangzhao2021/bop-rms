@@ -50,6 +50,7 @@ describe("migration catalog", () => {
       "0200_003_create_membership",
       "0200_004_create_identity_session",
       "0200_005_create_workforce_identity_security",
+      "0200_006_create_guest_session",
       "0300_001_create_permission",
     ]);
     expect(
@@ -201,6 +202,7 @@ describe("migration catalog", () => {
       ["0200_003_create_membership", "@bop/membership", "bop_membership"],
       ["0200_004_create_identity_session", "@bop/identity", "bop_identity"],
       ["0200_005_create_workforce_identity_security", "@bop/identity", "bop_identity"],
+      ["0200_006_create_guest_session", "@bop/identity", "bop_identity"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
@@ -216,6 +218,11 @@ describe("migration catalog", () => {
     expect(workforceSecurity?.sql).toContain(
       "CREATE TABLE bop_identity.session_revocation_request",
     );
+    const guestSession = migrations.find(
+      (migration) => migration.id === "0200_006_create_guest_session",
+    );
+    expect(guestSession?.sql).toContain("CREATE TABLE bop_identity.guest_session");
+    expect(guestSession?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migrations.map((migration) => migration.sql).join("\n")).not.toMatch(
       /\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu,
     );
