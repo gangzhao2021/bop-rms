@@ -1,5 +1,7 @@
 import type {
   GuestAdmissionEvidence,
+  GuestDiningAdmissionEvidence,
+  GuestDiningAdmissionReference,
   GuestEntryRequestReference,
   GuestOperationReference,
   GuestRawCredential,
@@ -16,6 +18,14 @@ export interface GuestEntryAdmissionPort {
     readonly operationReference: GuestOperationReference;
     readonly requestedAt: CanonicalInstant;
   }): Promise<GuestAdmissionEvidence | null>;
+}
+
+export interface GuestDiningAdmissionPort {
+  consume(command: {
+    readonly admissionReference: GuestDiningAdmissionReference;
+    readonly operationReference: GuestOperationReference;
+    readonly requestedAt: CanonicalInstant;
+  }): Promise<GuestDiningAdmissionEvidence | null>;
 }
 
 export interface GuestSessionBindingPort {

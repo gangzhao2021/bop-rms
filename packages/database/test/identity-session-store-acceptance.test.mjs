@@ -200,7 +200,44 @@ async function prove(context) {
         "revocation_reason",
         "revoked_at",
         "version",
+        "dining_session_id",
+        "dining_participant_id",
       ],
+    );
+    const bound = await client.query(
+      `UPDATE bop_identity.guest_session
+       SET dining_state = 'DiningBound',
+           dining_session_id = $2,
+           dining_participant_id = $3
+       WHERE guest_session_id = $1
+       RETURNING dining_state, dining_session_id, dining_participant_id`,
+      [id("20"), id("31"), id("32")],
+    );
+    assert.deepEqual(bound.rows, [
+      {
+        dining_state: "DiningBound",
+        dining_session_id: id("31"),
+        dining_participant_id: id("32"),
+      },
+    ]);
+    await assert.rejects(
+      client.query(
+        `UPDATE bop_identity.guest_session
+         SET dining_state = 'ContextOnly'
+         WHERE guest_session_id = $1`,
+        [id("20")],
+      ),
+      /check constraint/u,
+    );
+    await assert.rejects(
+      client.query(
+        `UPDATE bop_identity.guest_session
+         SET dining_state = 'DiningBound',
+             dining_session_id = NULL
+         WHERE guest_session_id = $1`,
+        [id("20")],
+      ),
+      /check constraint/u,
     );
     const guestRls = await client.query(
       `SELECT relrowsecurity, relforcerowsecurity

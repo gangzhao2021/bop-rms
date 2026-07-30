@@ -53,12 +53,21 @@ export type GuestPublicTableReference = string & {
   readonly __guestPublicTableReference: unique symbol;
 };
 export type GuestQrReference = string & { readonly __guestQrReference: unique symbol };
+export type GuestDiningAdmissionReference = string & {
+  readonly __guestDiningAdmissionReference: unique symbol;
+};
+export type GuestDiningSessionReference = string & {
+  readonly __guestDiningSessionReference: unique symbol;
+};
+export type GuestDiningParticipantReference = string & {
+  readonly __guestDiningParticipantReference: unique symbol;
+};
 export type GuestRawCredential = string & { readonly __guestRawCredential: unique symbol };
 export type GuestSelectorHash = string & { readonly __guestSelectorHash: unique symbol };
 export type GuestLocale = string & { readonly __guestLocale: unique symbol };
 export type GuestChannel = "DineIn" | "Pickup";
 export type GuestSessionStatus = "Active" | "Revoked" | "Expired";
-export type GuestDiningState = "ContextOnly";
+export type GuestDiningState = "ContextOnly" | "DiningBound";
 export type GuestSessionRevocationReason =
   | "Rotated"
   | "BindingChanged"
@@ -86,6 +95,18 @@ export interface GuestAdmissionEvidence {
   readonly validUntil: CanonicalInstant;
 }
 
+export interface GuestDiningAdmissionEvidence {
+  readonly decision: "Allowed";
+  readonly admissionReference: GuestDiningAdmissionReference;
+  readonly operationReference: GuestOperationReference;
+  readonly storeReference: GuestStoreReference;
+  readonly publicTableReference: GuestPublicTableReference;
+  readonly diningSessionReference: GuestDiningSessionReference;
+  readonly diningParticipantReference: GuestDiningParticipantReference;
+  readonly evaluatedAt: CanonicalInstant;
+  readonly validUntil: CanonicalInstant;
+}
+
 export interface GuestSession {
   readonly sessionReference: GuestSessionReference;
   readonly status: GuestSessionStatus;
@@ -99,6 +120,8 @@ export interface GuestSession {
   readonly qrReference: GuestQrReference;
   readonly qrRevocationVersion: number;
   readonly diningState: GuestDiningState;
+  readonly diningSessionReference: GuestDiningSessionReference | null;
+  readonly diningParticipantReference: GuestDiningParticipantReference | null;
   readonly createdAt: CanonicalInstant;
   readonly lastSeenAt: CanonicalInstant;
   readonly idleExpiresAt: CanonicalInstant;
@@ -170,6 +193,8 @@ export const parseGuestOperationReference = (value: unknown): GuestOperationRefe
   uuid<GuestOperationReference>(value);
 export const parseGuestEntryRequestReference = (value: unknown): GuestEntryRequestReference =>
   uuid<GuestEntryRequestReference>(value);
+export const parseGuestDiningAdmissionReference = (value: unknown): GuestDiningAdmissionReference =>
+  uuid<GuestDiningAdmissionReference>(value);
 export const parseGuestRawCredential = (value: unknown): GuestRawCredential => {
   if (typeof value !== "string" || !rawCredentialPattern.test(value)) {
     throw new GuestSessionError("GUEST_SESSION_INPUT_INVALID");
@@ -239,6 +264,41 @@ export function parseGuestAdmissionEvidence(value: unknown): GuestAdmissionEvide
   });
 }
 
+export function parseGuestDiningAdmissionEvidence(value: unknown): GuestDiningAdmissionEvidence {
+  const raw = closed(value, [
+    "decision",
+    "admissionReference",
+    "operationReference",
+    "storeReference",
+    "publicTableReference",
+    "diningSessionReference",
+    "diningParticipantReference",
+    "evaluatedAt",
+    "validUntil",
+  ]);
+  if (raw.decision !== "Allowed") {
+    throw new GuestSessionError("GUEST_SESSION_INPUT_INVALID");
+  }
+  const evaluatedAt = instant(raw.evaluatedAt);
+  const validUntil = instant(raw.validUntil);
+  if (Date.parse(validUntil) <= Date.parse(evaluatedAt)) {
+    throw new GuestSessionError("GUEST_SESSION_INPUT_INVALID");
+  }
+  return Object.freeze({
+    decision: "Allowed",
+    admissionReference: uuid<GuestDiningAdmissionReference>(raw.admissionReference),
+    operationReference: parseGuestOperationReference(raw.operationReference),
+    storeReference: uuid<GuestStoreReference>(raw.storeReference),
+    publicTableReference: uuid<GuestPublicTableReference>(raw.publicTableReference),
+    diningSessionReference: uuid<GuestDiningSessionReference>(raw.diningSessionReference),
+    diningParticipantReference: uuid<GuestDiningParticipantReference>(
+      raw.diningParticipantReference,
+    ),
+    evaluatedAt,
+    validUntil,
+  });
+}
+
 export function createGuestSession(value: unknown): GuestSession {
   const raw = closed(value, [
     "sessionReference",
@@ -253,6 +313,8 @@ export function createGuestSession(value: unknown): GuestSession {
     "qrReference",
     "qrRevocationVersion",
     "diningState",
+    "diningSessionReference",
+    "diningParticipantReference",
     "createdAt",
     "lastSeenAt",
     "idleExpiresAt",
@@ -268,7 +330,7 @@ export function createGuestSession(value: unknown): GuestSession {
     !Number.isSafeInteger(raw.version) ||
     (raw.version as number) < 1 ||
     (raw.channel !== "DineIn" && raw.channel !== "Pickup") ||
-    raw.diningState !== "ContextOnly" ||
+    (raw.diningState !== "ContextOnly" && raw.diningState !== "DiningBound") ||
     typeof raw.locale !== "string" ||
     !localePattern.test(raw.locale) ||
     !Number.isSafeInteger(raw.qrRevocationVersion) ||
@@ -281,6 +343,24 @@ export function createGuestSession(value: unknown): GuestSession {
       ? null
       : uuid<GuestPublicTableReference>(raw.publicTableReference);
   if ((raw.channel === "DineIn") !== (publicTableReference !== null)) {
+    throw new GuestSessionError("GUEST_SESSION_INPUT_INVALID");
+  }
+  const diningSessionReference =
+    raw.diningSessionReference === null
+      ? null
+      : uuid<GuestDiningSessionReference>(raw.diningSessionReference);
+  const diningParticipantReference =
+    raw.diningParticipantReference === null
+      ? null
+      : uuid<GuestDiningParticipantReference>(raw.diningParticipantReference);
+  if (
+    (raw.diningState === "ContextOnly" &&
+      (diningSessionReference !== null || diningParticipantReference !== null)) ||
+    (raw.diningState === "DiningBound" &&
+      (raw.channel !== "DineIn" ||
+        diningSessionReference === null ||
+        diningParticipantReference === null))
+  ) {
     throw new GuestSessionError("GUEST_SESSION_INPUT_INVALID");
   }
   const createdAt = instant(raw.createdAt);
@@ -332,7 +412,9 @@ export function createGuestSession(value: unknown): GuestSession {
     locale: raw.locale as GuestLocale,
     qrReference: uuid<GuestQrReference>(raw.qrReference),
     qrRevocationVersion: raw.qrRevocationVersion as number,
-    diningState: "ContextOnly",
+    diningState: raw.diningState,
+    diningSessionReference,
+    diningParticipantReference,
     createdAt,
     lastSeenAt,
     idleExpiresAt,

@@ -51,6 +51,7 @@ describe("migration catalog", () => {
       "0200_004_create_identity_session",
       "0200_005_create_workforce_identity_security",
       "0200_006_create_guest_session",
+      "0200_007_alter_guest_dining_binding",
       "0300_001_create_permission",
     ]);
     expect(
@@ -203,6 +204,7 @@ describe("migration catalog", () => {
       ["0200_004_create_identity_session", "@bop/identity", "bop_identity"],
       ["0200_005_create_workforce_identity_security", "@bop/identity", "bop_identity"],
       ["0200_006_create_guest_session", "@bop/identity", "bop_identity"],
+      ["0200_007_alter_guest_dining_binding", "@bop/identity", "bop_identity"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
