@@ -31,6 +31,10 @@ const expectedForcedTables = [
   "platform_eventing.dead_letter_item",
   "platform_eventing.delivery_attempt",
   "platform_eventing.outbox_event",
+  "rms_catalog.product",
+  "rms_catalog.product_operation_record",
+  "rms_catalog.product_version",
+  "rms_catalog.sku",
 ];
 
 async function prove(context) {
