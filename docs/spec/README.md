@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1006 — Pilot Staff-started Dining Session、short-lived Join Credential 与 copied-Table-QR Abuse Contract implementation from readiness squash main@de6722e16aeb3804dde9ae402aaa9a0041037c95 on branch codex/wp-1006-implementation`
+- Current discussion node: `WP-1007 — Dine-in Session Closing、Unpaid Batch Exception Task 与 Authorized Write-off Boundary readiness from exact verified main@5a56328aa90c9c63291b926bc8a746dd8f1f6b31 on branch codex/wp-1007-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,14 +14,26 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1006 readiness and WP-1005–1000 closeout entries below supersede
+Entries are newest-first；the WP-1007 readiness and WP-1006–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1007 — Dine-in Session Closing、Unpaid Batch Exception Task 与 Authorized Write-off
+Boundary` documentation-only readiness is active from exact verified
+  `main@5a56328aa90c9c63291b926bc8a746dd8f1f6b31` on branch
+  `codex/wp-1007-readiness`. The bounded candidate adds only Dining phase close policy、
+  Active-only Batch admission、fresh owner-evidence finality and idempotent Store-scoped Task
+  composition. Dining never executes/approves a Write-off or mutates Order、Payment or Task
+  private facts. Unpaid/indeterminate Order remains Open after Dining closes. No Ordering/Payment
+  aggregate、Task database、HTTP/UI/Projection、real financial/Provider fact、external resource or
+  External Evidence is added.
 - `WP-1006 — Pilot Staff-started Dining Session、short-lived Join Credential 与
-copied-Table-QR Abuse Contract` implementation is active from readiness squash
-  `main@de6722e16aeb3804dde9ae402aaa9a0041037c95` on branch
-  `codex/wp-1006-implementation`. The bounded implementation extends Dining with
-  Staff-authorized idempotent Session start and
+copied-Table-QR Abuse Contract` is implemented、verified、integrated and cleaned at squash
+  `5a56328aa90c9c63291b926bc8a746dd8f1f6b31`. Implementation PR
+  [#101](https://github.com/gangzhao2021/bop-rms/pull/101) passed exact head
+  `182b6f2f650659bd124e3a01f7e3ec714e5c0a90` in run/job
+  `30525392728 / 90815000907` in `11m06s`；Section 91 findings were `0/0/0/0` and
+  post-merge exact-main run/job `30526236474 / 90817679296` passed in `10m11s`.
+  The bounded implementation extends Dining with Staff-authorized idempotent Session start and
   single-use Participant join, extends Public Capability with 128-bit/six-digit 15-minute
   purpose-separated Join proof, and extends Identity with rotated `DiningBound` Guest Session
   state. A fixed Table QR remains context-only. WP-2048 retains atomic abuse-bucket ownership；
