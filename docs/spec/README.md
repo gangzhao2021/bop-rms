@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-0125 — Task Minimum Contract implemented、verified and integrated at main@0d9a57afc90e348de685d6cce1fca8577aa68c87`
+- Current discussion node: `WP-1000 — Store Public Profile Query documentation-only readiness from exact verified main@b2293c3e44becd86e3aa854280752dedc772485f on branch codex/wp-1000-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,9 +14,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-0125 implementation and WP-0124 closeout entries below supersede older
+Entries are newest-first；the WP-1000 readiness and WP-0125 closeout entries below supersede older
 historical snapshots retained later in this index.
 
+- `WP-1000 — Store Public Profile Query` documentation-only readiness is active from exact
+  verified `main@b2293c3e44becd86e3aa854280752dedc772485f` on branch
+  `codex/wp-1000-readiness`. The bounded candidate creates a provider-neutral `@rms/store`
+  Public Query contract over existing public Tenant、Publishing、Effective Period and Media
+  evidence. It returns only an allowlisted、published、currently effective Public Store Profile
+  with deterministic locale resolution and uniform unavailable behavior；it never treats a public
+  reference as authorization or permits internal-ID lookup. Operating status/hours、QR、Customer
+  Session、database/migration、Merchant authoring、API/UI、real Store facts、Provider、credential、
+  external resource and deployment remain gated. External Evidence is unavailable and unclaimed.
 - `WP-0125 — Task Minimum Contract` is implemented、verified、integrated and cleaned at squash
   merge `0d9a57afc90e348de685d6cce1fca8577aa68c87`. PR
   [#85](https://github.com/gangzhao2021/bop-rms/pull/85) passed exact head
