@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 const id = (n) => `018f4000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
 async function prove(context) {
-  const admin = new Client(context.adminConfig);
+  const admin = new Client(context.clientConfig);
   const role = `bop_wp1020_${context.runId}`;
   await admin.connect();
   try {
