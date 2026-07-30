@@ -67,7 +67,7 @@
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
     "realtime:acceptance": "pnpm --filter @bop-rms/api realtime:acceptance",
     "request-correlation:acceptance": "pnpm --filter @bop-rms/api request-correlation:acceptance && vitest run --config packages/database/vitest.request-command-event-correlation.config.ts",
-    "test": "vitest run && turbo run test && pnpm audit-record:acceptance && vitest run --config packages/database/vitest.tenant-context.config.ts && vitest run --config packages/database/vitest.permission-policy.config.ts && vitest run --config packages/database/vitest.identity-session-store.config.ts && vitest run --config packages/database/vitest.workforce-identity-security.config.ts",
+    "test": "vitest run && turbo run test && pnpm audit-record:acceptance && vitest run --config packages/database/vitest.tenant-context.config.ts && vitest run --config packages/database/vitest.permission-policy.config.ts && vitest run --config packages/database/vitest.identity-session-store.config.ts && vitest run --config packages/database/vitest.workforce-identity-security.config.ts && pnpm catalog-product:acceptance",
     "test:integration": "turbo run test:integration",
     "typecheck": "tsc --project tsconfig.json && turbo run typecheck",
     "verify": "pnpm repository-guidance:check && pnpm module-manifest:check && pnpm module-generator:check && pnpm import-boundary:check && pnpm database-ownership:check && pnpm domain-layer-boundary:check && pnpm migration:check && pnpm foundation:check && pnpm helpers:check && pnpm event-catalog:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm screen-registry:check && pnpm test && pnpm build",
