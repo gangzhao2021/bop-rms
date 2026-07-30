@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1005 — Order Resume、Public Reference 与 Pickup Proof Capability Contract readiness from exact verified main@d603b9673169018a9c8d76af3767a7b133696196 on branch codex/wp-1005-readiness`
+- Current discussion node: `WP-1005 — Order Resume、Public Reference 与 Pickup Proof Capability Contract implementation from verified readiness squash main@50d271f45cc11d8cc89028c5a72307db75de6a25 on branch codex/wp-1005-implementation`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,18 +14,25 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1005 readiness and WP-1004–1000 closeout entries below supersede
+Entries are newest-first；the WP-1005 implementation and WP-1004–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
 - `WP-1005 — Order Resume、Public Reference 与 Pickup Proof Capability Contract`
-  documentation-only readiness is active from exact verified
-  `main@d603b9673169018a9c8d76af3767a7b133696196` on branch `codex/wp-1005-readiness`.
-  The bounded candidate adds a dependency-free `@bop/public-capability` contract module for
+  implementation is locally verified from readiness squash
+  `main@50d271f45cc11d8cc89028c5a72307db75de6a25` on branch
+  `codex/wp-1005-implementation`. Readiness PR
+  [#98](https://github.com/gangzhao2021/bop-rms/pull/98) passed exact head
+  `be0ecb524b2bf8fc14f31305eced8d7044922275` in run/job
+  `30518130402 / 90792415948` in `10m43s` and post-merge exact-main run/job
+  `30518713922 / 90794186985` in `10m15s`, with Section 91 findings `0/0/0/0`.
+  The bounded implementation adds a dependency-free `@bop/public-capability` contract module for
   unguessable non-authorizing Order references、single-use 30-minute Order Resume credentials and
   Ready-bound 60-minute Pickup Proof policy. Raw credentials remain trusted-memory-only and only
   purpose-separated keyed hashes may persist in future owner Domains. No Order/Fulfillment fact、
   database、HTTP/UI/email、Guest Session mutation、abuse limiter、Manager Override、Provider、
-  external resource or External Evidence is added.
+  external resource or External Evidence is added. Focused synthetic acceptance is `47/47`；
+  Customer-entry `14/14`、Identity focused `14/14`、Tenant `9/9`、Store `73/73` and Dining
+  `32/32` regressions pass. The isolated PostgreSQL matrix remains pinned-Linux CI evidence.
 - `WP-1004 — Invalid / Expired QR Error Contract` implementation is locally verified from exact
   readiness squash `main@a0433ae09c8c6ecab16bc4dd277106ae769dc059` on branch
   `codex/wp-1004-implementation`. Readiness PR

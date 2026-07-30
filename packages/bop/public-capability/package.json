@@ -1,0 +1,20 @@
+{
+  "name": "@bop/public-capability",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "format:check": "prettier --check . --ignore-path ../../../.prettierignore",
+    "lint": "eslint src",
+    "public-capability:acceptance": "vitest run --config vitest.config.ts",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --project tsconfig.json"
+  }
+}

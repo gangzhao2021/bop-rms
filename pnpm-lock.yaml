@@ -249,6 +249,8 @@ importers:
         specifier: workspace:*
         version: link:../tenant
 
+  packages/bop/public-capability: {}
+
   packages/bop/publishing:
     dependencies:
       '@bop/audit':
