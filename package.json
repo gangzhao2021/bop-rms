@@ -59,6 +59,7 @@
     "correlation-context:acceptance": "vitest run --config packages/database/vitest.correlation-context.config.ts",
     "core-telemetry:acceptance": "pnpm --filter @bop/eventing build && pnpm --filter @bop-rms/observability build && pnpm --filter @bop-rms/observability test && pnpm --filter @bop-rms/observability sdk-smoke && pnpm --filter @bop-rms/api core-telemetry:acceptance && pnpm --filter @bop-rms/worker core-telemetry:acceptance",
     "customer-entry:acceptance": "pnpm --filter @bop/identity build && pnpm --filter @bop-rms/api customer-entry:acceptance",
+    "public-capability:acceptance": "pnpm --filter @bop/public-capability public-capability:acceptance",
     "retry-dead-letter:acceptance": "vitest run --config packages/database/vitest.retry-dead-letter.config.ts",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
     "realtime:acceptance": "pnpm --filter @bop-rms/api realtime:acceptance",
