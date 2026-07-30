@@ -328,6 +328,18 @@ importers:
         specifier: 10.3.1
         version: 10.3.1
 
+  packages/rms/catalog:
+    dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../../bop/audit
+      '@bop/permission':
+        specifier: workspace:*
+        version: link:../../bop/permission
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../../bop/tenant
+
   packages/rms/dining:
     dependencies:
       '@bop/audit':
