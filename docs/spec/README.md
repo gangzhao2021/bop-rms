@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1021 — Category and Menu Structure implementation from readiness squash 4607e6bae495ddd0e2456a12e45d9b752bdc8800 on branch codex/wp-1021-implementation`
+- Current discussion node: `WP-1021 — Category and Menu Structure implemented、verified、integrated and cleaned at main@6fcc0dec66f921d347dd9a758a17adf6ad666eb5`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -22,8 +22,13 @@ older historical snapshots retained later in this index.
   `b63704485791a32bc4aa057ee954f2a3dfadf286` in run/job
   `30537473095 / 90854111215` in `10m04s`；Section 91 findings were `0/0/0/0`；it
   squash-merged as `4607e6bae495ddd0e2456a12e45d9b752bdc8800` and exact-main post-merge
-  run/job `30538162626 / 90856356984` passed in `11m10s`. Bounded implementation is active
-  on `codex/wp-1021-implementation`. It adds a Brand-scoped Category tree and a
+  run/job `30538162626 / 90856356984` passed in `11m10s`. Implementation PR
+  [#107](https://github.com/gangzhao2021/bop-rms/pull/107) passed final exact head
+  `823b10dce6b7164a952714e476d30e818d271fa4` in run/job
+  `30541291458 / 90866428347` in `11m02s` with Section 91 findings `0/0/0/0`；it
+  squash-merged as `6fcc0dec66f921d347dd9a758a17adf6ad666eb5` and exact-main post-merge
+  run/job `30542123259 / 90869161412` passed in `11m23s`. Both implementation and readiness
+  branches are removed. The implementation adds a Brand-scoped Category tree and a
   Draft-only Menu structure with Menu-owned Sections and SKU Sellable Placements. Category remains
   Master Data and never becomes a Menu Section. Publishing、effective Availability、Option、
   Pricing、Customer projection/API、UI and External Evidence remain absent.
