@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1021 — Category and Menu Structure readiness from exact verified main@ce4e9bf3095b024121796286ffbc2cd2ee753e10 on branch codex/wp-1021-readiness`
+- Current discussion node: `WP-1021 — Category and Menu Structure implementation from readiness squash 4607e6bae495ddd0e2456a12e45d9b752bdc8800 on branch codex/wp-1021-implementation`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,9 +17,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1021 — Category and Menu Structure` documentation-only readiness is active from exact
-  verified `main@ce4e9bf3095b024121796286ffbc2cd2ee753e10` on branch
-  `codex/wp-1021-readiness`. The bounded candidate adds a Brand-scoped Category tree and a
+- `WP-1021 — Category and Menu Structure` readiness PR
+  [#106](https://github.com/gangzhao2021/bop-rms/pull/106) passed exact head
+  `b63704485791a32bc4aa057ee954f2a3dfadf286` in run/job
+  `30537473095 / 90854111215` in `10m04s`；Section 91 findings were `0/0/0/0`；it
+  squash-merged as `4607e6bae495ddd0e2456a12e45d9b752bdc8800` and exact-main post-merge
+  run/job `30538162626 / 90856356984` passed in `11m10s`. Bounded implementation is active
+  on `codex/wp-1021-implementation`. It adds a Brand-scoped Category tree and a
   Draft-only Menu structure with Menu-owned Sections and SKU Sellable Placements. Category remains
   Master Data and never becomes a Menu Section. Publishing、effective Availability、Option、
   Pricing、Customer projection/API、UI and External Evidence remain absent.

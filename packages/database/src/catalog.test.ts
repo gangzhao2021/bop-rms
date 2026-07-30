@@ -54,6 +54,7 @@ describe("migration catalog", () => {
       "0200_007_alter_guest_dining_binding",
       "0300_001_create_permission",
       "1100_001_create_product_aggregate",
+      "1101_001_create_category_menu_structure",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -71,6 +72,28 @@ describe("migration catalog", () => {
     expect(migration?.sql).toContain("CREATE TABLE rms_catalog.sku");
     expect(migration?.sql).toContain("CREATE TABLE rms_catalog.product_operation_record");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1021 Category and Menu structure migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1101_001_create_category_menu_structure",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/catalog");
+    expect(migration?.metadata.schema).toBe("rms_catalog");
+    for (const table of [
+      "category",
+      "category_operation_record",
+      "menu",
+      "menu_version",
+      "menu_section",
+      "sellable_placement",
+      "menu_operation_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).toContain("enforce_category_tree");
+    expect(migration?.sql).toContain("enforce_menu_inheritance");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
@@ -320,6 +343,25 @@ describe("migration catalog", () => {
     expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
       "MIGRATION_TRANSACTION_UNSUPPORTED",
     );
+  });
+
+  it("does not confuse a PL/pgSQL block with runner-owned transaction control", async () => {
+    const root = await fixture();
+    const file = migrationPath(root);
+    await writeFile(
+      file,
+      `${await readFile(file, "utf8")}
+CREATE FUNCTION platform_core.wp1021_trigger_probe() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+BEGIN
+  RETURN NEW;
+END;
+$$;
+`,
+    );
+    expect((await readMigrationCatalog(root)).diagnostics).toEqual([]);
   });
 
   it("rejects database, role, tablespace, or extension DDL", async () => {

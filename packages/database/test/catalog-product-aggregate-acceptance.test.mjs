@@ -18,6 +18,7 @@ async function prove(context) {
       `SELECT table_name
          FROM information_schema.tables
         WHERE table_schema = 'rms_catalog'
+          AND table_name IN ('product','product_operation_record','product_version','sku')
         ORDER BY table_name`,
     );
     assert.deepEqual(tables.rows, [
@@ -30,6 +31,7 @@ async function prove(context) {
       `SELECT tablename
          FROM pg_policies
         WHERE schemaname = 'rms_catalog'
+          AND tablename IN ('product','product_operation_record','product_version','sku')
         ORDER BY tablename`,
     );
     assert.deepEqual(

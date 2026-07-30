@@ -15,6 +15,7 @@ const expectedNamespaces = [
   ["0400", "0400-bop-operations"],
   ["1000", "1000-rms-store"],
   ["1100", "1100-rms-catalog"],
+  ["1101", "1101-rms-catalog-category-menu"],
   ["1200", "1200-rms-pricing"],
   ["1300", "1300-rms-ordering"],
   ["1400", "1400-rms-payment"],
@@ -193,13 +194,26 @@ function validateSql(
     /\bDROP\s+INDEX\s+CONCURRENTLY\b/iu,
     /\bREINDEX\s+(?:INDEX|TABLE|SCHEMA|DATABASE|SYSTEM)?\s*CONCURRENTLY\b/iu,
     /\bREFRESH\s+MATERIALIZED\s+VIEW\s+CONCURRENTLY\b/iu,
-    /\b(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT)\b/iu,
     /\bSET\s+ROLE\b/iu,
     /\bSET\s+SESSION\s+AUTHORIZATION\b/iu,
     /\b(?:VACUUM|ALTER\s+SYSTEM)\b/iu,
     /^\s*\\/mu,
   ];
   if (unsupported.some((pattern) => pattern.test(body)))
+    diagnostics.push(
+      diagnostic(
+        "MIGRATION_TRANSACTION_UNSUPPORTED",
+        file,
+        "migration contains transaction-prohibited or runner-owned SQL",
+        metadataKeys.length + 1,
+      ),
+    );
+  const withoutDollarQuotedFunctionBodies = body.replace(/\$\$[\s\S]*?\$\$/gu, "$$");
+  if (
+    /\b(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT)\b/iu.test(
+      withoutDollarQuotedFunctionBodies,
+    )
+  )
     diagnostics.push(
       diagnostic(
         "MIGRATION_TRANSACTION_UNSUPPORTED",
