@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1020 — Product / Sellable / SKU Minimum Aggregate implementation from exact verified readiness squash main@3ae211018664580e69fe7f879922f5438d8aed97 on branch codex/wp-1020-implementation`
+- Current discussion node: `WP-1021 — Category and Menu Structure readiness from exact verified main@ce4e9bf3095b024121796286ffbc2cd2ee753e10 on branch codex/wp-1021-readiness`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,12 +14,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1020 readiness and WP-1007–1000 closeout entries below supersede
+Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1020 — Product / Sellable / SKU Minimum Aggregate` implementation is locally verified from
-  exact readiness squash `main@3ae211018664580e69fe7f879922f5438d8aed97` on branch
-  `codex/wp-1020-implementation`. Readiness PR
+- `WP-1021 — Category and Menu Structure` documentation-only readiness is active from exact
+  verified `main@ce4e9bf3095b024121796286ffbc2cd2ee753e10` on branch
+  `codex/wp-1021-readiness`. The bounded candidate adds a Brand-scoped Category tree and a
+  Draft-only Menu structure with Menu-owned Sections and SKU Sellable Placements. Category remains
+  Master Data and never becomes a Menu Section. Publishing、effective Availability、Option、
+  Pricing、Customer projection/API、UI and External Evidence remain absent.
+- `WP-1020 — Product / Sellable / SKU Minimum Aggregate` is implemented、verified、integrated and
+  cleaned at squash `ce4e9bf3095b024121796286ffbc2cd2ee753e10`. Readiness PR
   [#104](https://github.com/gangzhao2021/bop-rms/pull/104) passed exact head
   `38d65544de4a7c7ffc5483dfcc4661b56dea8140` in run/job
   `30531384052 / 90834292723` in `10m26s`；Section 91 findings were `0/0/0/0` and
@@ -27,8 +32,11 @@ older historical snapshots retained later in this index.
   implementation adds one Brand-scoped Product Aggregate、
   complete Draft snapshot、Product-owned stable SKU Entities、non-authorizing SKU Sellable
   values and the first Catalog-owned forced-RLS migration. Local Catalog acceptance is `8/8`；
-  exact-head pinned-Linux CI、Section 91、merge and post-merge evidence remain pending. SKU never
-  becomes an independent
+  implementation PR [#105](https://github.com/gangzhao2021/bop-rms/pull/105) passed exact head
+  `3d8ef0856b581344b9e574fbf8679418750b0039` in run/job
+  `30535628389 / 90848135190` in `11m04s`；Section 91 findings were `0/0/0/0`. It
+  squash-merged as `ce4e9bf3095b024121796286ffbc2cd2ee753e10`, and exact-main post-merge
+  run/job `30536420197 / 90850710615` passed in `11m37s`. SKU never becomes an independent
   Aggregate. Category/Menu/Option/Availability/Publishing/API/UI/Projection、price、inventory、
   Recipe、allergen/legal content、real Catalog fact、external resource and External Evidence
   remain absent.
