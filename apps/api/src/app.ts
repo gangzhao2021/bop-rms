@@ -1,6 +1,11 @@
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import helmet from "helmet";
 import type { CoreTelemetry } from "@bop-rms/observability";
+import {
+  sendInvalidCustomerEntryRequest,
+  type CustomerEntryHandler,
+  unavailableCustomerEntryHandler,
+} from "./customer-entry.js";
 import { HealthReadinessController } from "./health-readiness.js";
 import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
 import {
@@ -12,6 +17,7 @@ import {
 
 const routeTemplates = [
   "/__acceptance/request-command-event",
+  "/bff/customer/entry",
   "/bff/realtime",
   "/health",
   "/ready",
@@ -29,6 +35,7 @@ export interface RequestErrorLogger {
 
 export interface AppOptions {
   correlationAcceptanceHandler?: RequestHandler;
+  customerEntry?: CustomerEntryHandler;
   errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
   now?: () => string;
@@ -43,6 +50,13 @@ function createErrorHandler(errorLogger: RequestErrorLogger | undefined): ErrorR
   return (error, request, response, next) => {
     void next;
     const candidate = error as { status?: number; type?: string };
+    if (
+      request.originalUrl === "/bff/customer/entry" &&
+      (candidate.type === "entity.too.large" || candidate.status === 400)
+    ) {
+      sendInvalidCustomerEntryRequest(response);
+      return;
+    }
     const status =
       candidate.type === "entity.too.large" ? 413 : candidate.status === 400 ? 400 : 500;
     if (status === 500) {
@@ -71,6 +85,7 @@ function createErrorHandler(errorLogger: RequestErrorLogger | undefined): ErrorR
 
 export function createApp({
   correlationAcceptanceHandler,
+  customerEntry,
   errorLogger,
   healthReadiness,
   now = () => new Date().toISOString(),
@@ -104,6 +119,7 @@ export function createApp({
     response.status(snapshot.status === "ready" ? 200 : 503).json(snapshot);
   });
   app.get("/bff/realtime", realtime?.handler() ?? unavailableRealtimeHandler);
+  app.post("/bff/customer/entry", customerEntry?.handler() ?? unavailableCustomerEntryHandler);
   if (correlationAcceptanceHandler !== undefined)
     app.post("/__acceptance/request-command-event", correlationAcceptanceHandler);
   app.use((_request, response) =>

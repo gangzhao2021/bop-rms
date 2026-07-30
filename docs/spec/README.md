@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1004 — Invalid / Expired QR Error Contract readiness from exact verified main@b53695a4a642f0aa5ad1ecff65914c98e05704de on branch codex/wp-1004-readiness`
+- Current discussion node: `WP-1004 — Invalid / Expired QR Error Contract implementation from exact verified readiness squash main@a0433ae09c8c6ecab16bc4dd277106ae769dc059 on branch codex/wp-1004-implementation`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,15 +17,22 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1004 readiness and WP-1003–1000 closeout entries below supersede older
 historical snapshots retained later in this index.
 
-- `WP-1004 — Invalid / Expired QR Error Contract` documentation-only readiness is active from
-  exact verified `main@b53695a4a642f0aa5ad1ecff65914c98e05704de` on branch
-  `codex/wp-1004-readiness`. The bounded candidate adds a same-origin
+- `WP-1004 — Invalid / Expired QR Error Contract` implementation is locally verified from exact
+  readiness squash `main@a0433ae09c8c6ecab16bc4dd277106ae769dc059` on branch
+  `codex/wp-1004-implementation`. Readiness PR
+  [#96](https://github.com/gangzhao2021/bop-rms/pull/96) passed exact head
+  `94b44d9f631c06848020b1f9c86344d11ca64526` in run/job
+  `30514812330 / 90782165829` in `10m33s`、Section 91 Blocker/High/Medium/Low `0/0/0/0` and
+  post-merge exact-main run/job `30515315918 / 90783715236` in `11m14s`. The bounded
+  implementation adds a same-origin
   `POST /bff/customer/entry` transport over one injected server composition port. Signed QR input
   is body-only；all valid-shaped unusable causes remain one non-oracular `entry_unavailable`
   response with Store selection hidden. Success may emit only the fixed Guest Cookie、page-memory
   CSRF and customer-safe public context. No QR URL、cause detail、Store guessing、CORS、cache、
   Service Worker、Customer screen、Menu/Cart/Order/Dining capability、production adapter、
-  Provider/resource or External Evidence is allowed.
+  Provider/resource or External Evidence is added. Focused acceptance is `14/14` and API total is
+  `101/101`；Identity `73/73`、Tenant `9/9`、Store `73/73` and Dining `32/32` regressions pass,
+  together with all `23` package format/lint/typecheck/build gates and the production audit.
 - `WP-1003 — Customer Guest Session Context` implementation is locally verified from verified
   readiness squash `main@9c1f1ee0826d16870edee51cdce98e367d37057a` on branch
   `codex/wp-1003-implementation`. Readiness PR
