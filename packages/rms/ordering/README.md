@@ -32,8 +32,11 @@ and Quote history. Legacy, deadline-reached, Abandoned and Expired Carts fail cl
 Quote commands.
 
 The module does not implement Cart creation transport, lifecycle scheduler registration, physical
-retention cleanup, Checkout, Order, Event, Projection, UI, or external evidence. Those
-remain owned by later Work Packages.
+retention cleanup, Event, Projection, UI, or external evidence. WP-1220 adds fail-closed Checkout
+validation evidence. WP-1221 consumes only current evidence to create the first immutable minimum
+`Order → Order Batch → Order Item identity` aggregate in `Submitted + Open`; transaction snapshots,
+business date/order number, durable idempotency, Payment, API and lifecycle transitions remain
+owned by later Work Packages.
 Cart identifiers and attribution references are indirect identifiers and are prohibited from logs,
 URLs, analytics, screenshots, and non-synthetic fixtures.
 
