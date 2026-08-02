@@ -61,6 +61,7 @@ describe("migration catalog", () => {
       "1105_001_create_published_menu_projection",
       "1106_001_create_allergen_provenance",
       "1200_001_create_tax_configuration",
+      "1200_002_create_price_book",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -140,6 +141,22 @@ describe("migration catalog", () => {
       "tax_configuration_version",
       "tax_configuration_rule",
       "tax_configuration_operation_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1102 Price Resolution migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1200_002_create_price_book",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/pricing");
+    for (const table of [
+      "price_book",
+      "price_book_version",
+      "price_entry",
+      "price_book_operation_record",
     ])
       expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");

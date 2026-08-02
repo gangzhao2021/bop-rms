@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1101 — Store Tax Configuration locally verified from main@5a19f44837c5496770301e7033a02b6b2958ceac`
+- Current discussion node: `WP-1102 — Price Resolution locally verified from main@61f20b46463cab02b99df8307c6a1e04e81c47a1`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,8 +17,19 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1101 — Store Tax Configuration` is locally verified from exact integrated predecessor
-  `main@5a19f44837c5496770301e7033a02b6b2958ceac`. It adds versioned Store-scoped `CA-ON/CAD`
+- `WP-1102 — Price Resolution` is locally verified from exact integrated predecessor
+  `main@61f20b46463cab02b99df8307c6a1e04e81c47a1`. It adds single-Currency versioned Price Books,
+  Sellable Price Entries and the canonical eight-level Store/Store Group/Region/Brand resolution
+  order. Effective periods are eligibility only; same-priority ambiguity, missing coverage,
+  unpublished books and Brand/Currency mismatch fail closed. Pricing tests are `52/52 PASS` and
+  isolated PostgreSQL acceptance is `1/1 PASS`. FX, Promotion, Quote/API, UI and External Evidence
+  remain absent. Exact results are in `docs/spec/work-packages/WP-1102.md`.
+
+- `WP-1101 — Store Tax Configuration` is implemented, verified, integrated and cleaned at squash
+  `61f20b46463cab02b99df8307c6a1e04e81c47a1`. PR #117 exact head
+  `c6c43c2e034771bc1e596fbe606569c1d8860180` passed run/job
+  `30739647570 / 91474624538`; exact-main run/job `30740044027 / 91475700769` passed. It adds
+  versioned Store-scoped `CA-ON/CAD`
   configuration snapshots, exact effective periods, classification/order/charge rule resolution,
   compound order, receipt presentation, exception evidence, publish evidence gates and the first
   forced-RLS `rms_pricing` persistence. Domain tests are `37/37 PASS` and isolated PostgreSQL
