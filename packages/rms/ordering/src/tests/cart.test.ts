@@ -16,6 +16,17 @@ function pickup() {
     aggregateVersion: 1,
     createdAt: at,
     updatedAt: at,
+    lifecycle: {
+      status: "Active",
+      policyVersionReference: id(11),
+      policyDigest: `sha256:${"a".repeat(64)}`,
+      idleTimeoutSeconds: 3600,
+      absoluteTimeoutSeconds: 86400,
+      idleExpiresAt: "2026-08-02T15:00:00.000Z",
+      absoluteExpiresAt: "2026-08-03T14:00:00.000Z",
+      terminalAt: null,
+      terminalReason: null,
+    },
     items: [
       {
         cartItemReference: id(5),
@@ -36,7 +47,11 @@ function pickup() {
 describe("Cart aggregate minimum model", () => {
   it("parses and freezes a Store-scoped Pickup Cart without price facts", () => {
     const cart = parseCartAggregate(pickup());
-    expect(cart).toMatchObject({ orderType: "Pickup", aggregateVersion: 1 });
+    expect(cart).toMatchObject({
+      orderType: "Pickup",
+      aggregateVersion: 1,
+      lifecycle: { status: "Active" },
+    });
     expect(Object.isFrozen(cart)).toBe(true);
     expect(Object.isFrozen(cart.items)).toBe(true);
     expect(Object.keys(cart.items[0] ?? {})).not.toContain("price");

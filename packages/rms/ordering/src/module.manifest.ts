@@ -41,6 +41,7 @@ const moduleManifestInput =
         "cart_operation_record",
         "cart_quote_attachment",
         "cart_quote_attachment_line",
+        "cart_lifecycle_operation_record",
       ],
     },
     ownedJobs: [],

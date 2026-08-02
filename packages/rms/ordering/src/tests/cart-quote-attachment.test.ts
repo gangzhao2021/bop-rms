@@ -74,6 +74,17 @@ function cart(overrides: Partial<CartAggregate> = {}): CartAggregate {
     aggregateVersion: 4,
     createdAt: "2026-08-02T14:00:00.000Z",
     updatedAt: "2026-08-02T14:30:00.000Z",
+    lifecycle: {
+      status: "Active",
+      policyVersionReference: id(40),
+      policyDigest: digest("c"),
+      idleTimeoutSeconds: 3600,
+      absoluteTimeoutSeconds: 86400,
+      idleExpiresAt: "2026-08-02T15:30:00.000Z",
+      absoluteExpiresAt: "2026-08-03T14:00:00.000Z",
+      terminalAt: null,
+      terminalReason: null,
+    },
     items: [
       {
         cartItemReference: ids.item,
@@ -301,6 +312,31 @@ describe("WP-1203 Cart Quote attachment", () => {
     await expect(fixture({ cart: legacy }).service.attach(input())).rejects.toMatchObject({
       code: "CART_QUOTE_INVALID",
     });
+  });
+
+  it("fails closed for legacy, due and terminal Cart lifecycle", async () => {
+    await expect(
+      fixture({ cart: cart({ lifecycle: null }) }).service.attach(input()),
+    ).rejects.toMatchObject({ code: "CART_LIFECYCLE_UNAVAILABLE" });
+    const due = cart({
+      lifecycle: { ...cart().lifecycle, idleExpiresAt: requestedAt } as never,
+    });
+    await expect(fixture({ cart: due }).service.attach(input())).rejects.toMatchObject({
+      code: "CART_EXPIRED",
+    });
+    const abandoned = cart({
+      aggregateVersion: 5,
+      updatedAt: "2026-08-02T14:59:00.000Z" as never,
+      lifecycle: {
+        ...cart().lifecycle,
+        status: "Abandoned",
+        terminalAt: "2026-08-02T14:59:00.000Z",
+        terminalReason: "CUSTOMER_ABANDONED",
+      } as never,
+    });
+    await expect(
+      fixture({ cart: abandoned }).service.attach(input({ expectedCartVersion: 5 })),
+    ).rejects.toMatchObject({ code: "CART_ABANDONED" });
   });
 
   it.each([

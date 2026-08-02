@@ -1,3 +1,5 @@
+import { parseCartLifecycle, type CartLifecycle } from "./cart-lifecycle.js";
+
 export type OrderingReference = string & { readonly __orderingReference: unique symbol };
 export type OrderingInstant = string & { readonly __orderingInstant: unique symbol };
 export type OrderingHash = string & { readonly __orderingHash: unique symbol };
@@ -47,6 +49,7 @@ export interface CartAggregate {
   readonly aggregateVersion: number;
   readonly createdAt: OrderingInstant;
   readonly updatedAt: OrderingInstant;
+  readonly lifecycle: CartLifecycle | null;
   readonly items: readonly CartItem[];
 }
 
@@ -61,6 +64,10 @@ export const cartErrorCodes = [
   "CART_SELECTION_INVALID",
   "CART_QUOTE_INVALID",
   "CART_QUOTE_EXPIRED",
+  "CART_LIFECYCLE_UNAVAILABLE",
+  "CART_EXPIRED",
+  "CART_ABANDONED",
+  "CART_EXPIRATION_NOT_DUE",
   "CART_DEPENDENCY_UNAVAILABLE",
 ] as const;
 export type CartErrorCode = (typeof cartErrorCodes)[number];
@@ -267,6 +274,7 @@ export function parseCartAggregate(value: unknown): CartAggregate {
     "aggregateVersion",
     "createdAt",
     "updatedAt",
+    "lifecycle",
     "items",
   ]);
   if (raw.orderType !== "DineIn" && raw.orderType !== "Pickup") return invalid();
@@ -275,11 +283,19 @@ export function parseCartAggregate(value: unknown): CartAggregate {
   const cartReference = parseOrderingReference(raw.cartReference);
   const createdAt = parseOrderingInstant(raw.createdAt);
   const updatedAt = parseOrderingInstant(raw.updatedAt);
+  const lifecycle = parseCartLifecycle(raw.lifecycle);
   const diningSessionReference =
     raw.diningSessionReference === null ? null : parseOrderingReference(raw.diningSessionReference);
   if (
     Date.parse(updatedAt) < Date.parse(createdAt) ||
-    (raw.orderType === "DineIn") !== (diningSessionReference !== null)
+    (raw.orderType === "DineIn") !== (diningSessionReference !== null) ||
+    (lifecycle !== null &&
+      (Date.parse(lifecycle.idleExpiresAt) <= Date.parse(createdAt) ||
+        Date.parse(lifecycle.absoluteExpiresAt) <= Date.parse(createdAt) ||
+        (lifecycle.status === "Active" &&
+          (Date.parse(updatedAt) >= Date.parse(lifecycle.idleExpiresAt) ||
+            Date.parse(updatedAt) >= Date.parse(lifecycle.absoluteExpiresAt))) ||
+        (lifecycle.status !== "Active" && lifecycle.terminalAt !== updatedAt)))
   )
     return invalid();
   const items = raw.items.map(parseCartItem);
@@ -303,6 +319,7 @@ export function parseCartAggregate(value: unknown): CartAggregate {
     aggregateVersion: quantity(raw.aggregateVersion),
     createdAt,
     updatedAt,
+    lifecycle,
     items: Object.freeze(items),
   });
 }

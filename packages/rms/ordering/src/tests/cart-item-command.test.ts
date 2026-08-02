@@ -78,6 +78,17 @@ function cart(overrides: Partial<CartAggregate> = {}): CartAggregate {
     aggregateVersion: 1,
     createdAt,
     updatedAt: createdAt,
+    lifecycle: {
+      status: "Active",
+      policyVersionReference: id(40),
+      policyDigest: `sha256:${"a".repeat(64)}`,
+      idleTimeoutSeconds: 3600,
+      absoluteTimeoutSeconds: 86400,
+      idleExpiresAt: "2026-08-02T15:00:00.000Z",
+      absoluteExpiresAt: "2026-08-03T14:00:00.000Z",
+      terminalAt: null,
+      terminalReason: null,
+    },
     items: [],
     ...overrides,
   });
@@ -214,6 +225,7 @@ describe("Cart Item Add / Update / Remove commands", () => {
     expect(retry).toMatchObject({ status: "AlreadyApplied", cartItemReference: ids.item });
     expect(retry.aggregate).toEqual(first.aggregate);
     expect(state.current()).toMatchObject({ aggregateVersion: 2 });
+    expect(state.current().lifecycle?.idleExpiresAt).toBe("2026-08-02T15:01:00.000Z");
     expect(state.current().items).toHaveLength(1);
     expect(state.current().items[0]?.catalogSelectionEvidence).toMatchObject({
       menuVersionReference: ids.menuVersion,
@@ -283,6 +295,37 @@ describe("Cart Item Add / Update / Remove commands", () => {
     await expect(state.service.add(addInput({ clientPrice: 100 }))).rejects.toMatchObject({
       code: "CART_INPUT_INVALID",
     });
+  });
+
+  it("fails closed for legacy, due and terminal Cart lifecycle", async () => {
+    await expect(
+      fixture({ aggregate: cart({ lifecycle: null }) }).service.add(addInput()),
+    ).rejects.toMatchObject({
+      code: "CART_LIFECYCLE_UNAVAILABLE",
+    });
+    const due = cart({
+      lifecycle: {
+        ...cart().lifecycle,
+        idleExpiresAt: requestedAt,
+      } as never,
+    });
+    await expect(fixture({ aggregate: due }).service.add(addInput())).rejects.toMatchObject({
+      code: "CART_EXPIRED",
+    });
+    const abandonedAt = "2026-08-02T14:00:30.000Z";
+    const abandoned = cart({
+      aggregateVersion: 2,
+      updatedAt: abandonedAt as never,
+      lifecycle: {
+        ...cart().lifecycle,
+        status: "Abandoned",
+        terminalAt: abandonedAt,
+        terminalReason: "CUSTOMER_ABANDONED",
+      } as never,
+    });
+    await expect(
+      fixture({ aggregate: abandoned }).service.add(addInput({ expectedAggregateVersion: 2 })),
+    ).rejects.toMatchObject({ code: "CART_ABANDONED" });
   });
 
   it("rejects wrong Store, expired session and mismatched Audit", async () => {

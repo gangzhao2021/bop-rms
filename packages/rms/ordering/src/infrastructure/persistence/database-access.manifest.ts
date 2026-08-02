@@ -42,6 +42,14 @@ const databaseAccessManifestInput = {
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier"],
     },
+    {
+      table: "cart_lifecycle_operation_record",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "ephemeral-technical",
+      piiClassification: ["indirect_identifier", "personal", "health"],
+    },
   ],
   accesses: [],
 } as const;
