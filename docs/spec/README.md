@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1104 — Quote Expiration and Requote integrated at main@4e4644e2b1c51ecb99a78ea43cb9bda0edbddecb`
+- Current discussion node: `WP-1221 — Order Aggregate Minimum Model candidate on codex/wp-1221`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-1221 — Order Aggregate Minimum Model` is implemented and locally verified on its candidate
+  branch. It consumes only a current, exact-scope WP-1220 Checkout validation to create one deeply
+  frozen `Order → Order Batch → Order Item identity` aggregate at `Submitted + Open`, preserving
+  Brand、Store、Order Type、Source Channel、Cart / Version、Quote、Submission and separate Created /
+  Submitted Actor references. Item payloads intentionally contain no transaction snapshot；WP-1222
+  remains owner of immutable Catalog、Option、Price and Tax facts. Ordering tests are `63/63` and
+  retained isolated PostgreSQL acceptance is `1/1`. Exact-head and exact-main CI remain pending；
+  local platform-bound fixture details are recorded in `docs/spec/work-packages/WP-1221.md`.
 
 - `WP-1104 — Quote Expiration and Requote` is implemented, verified, integrated and locally
   cleaned at squash `4e4644e2b1c51ecb99a78ea43cb9bda0edbddecb`. PR #121 exact head
