@@ -381,6 +381,9 @@ importers:
       '@bop/identity':
         specifier: workspace:*
         version: link:../../bop/identity
+      '@rms/catalog':
+        specifier: workspace:*
+        version: link:../catalog
 
   packages/rms/pricing:
     dependencies:

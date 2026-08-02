@@ -24,6 +24,7 @@ function pickup() {
         quantity: 2,
         optionSelections: [{ optionReference: id(7), quantity: 1 }],
         customerNote: null,
+        catalogSelectionEvidence: null,
         addedByActorReference: id(4),
         addedByParticipantReference: null,
         addedAt: at,

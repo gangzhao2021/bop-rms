@@ -1,5 +1,6 @@
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { GuestSession } from "@bop/identity";
+import type { CatalogSelectionValidationResult, ValidateCatalogSelectionInput } from "@rms/catalog";
 import type {
   CartAggregate,
   OrderingHash,
@@ -22,6 +23,11 @@ export interface CartItemOperationRecord {
 }
 
 export interface CartItemCommandPorts {
+  readonly catalog: {
+    validateSelection(
+      input: ValidateCatalogSelectionInput,
+    ): Promise<CatalogSelectionValidationResult>;
+  };
   readonly authorization: {
     authorize(input: {
       readonly action: CartItemOperationAction;

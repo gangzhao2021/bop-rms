@@ -16,9 +16,24 @@ export interface CartItem {
   readonly quantity: number;
   readonly optionSelections: readonly CartOptionSelection[];
   readonly customerNote: string | null;
+  readonly catalogSelectionEvidence: CatalogSelectionEvidence | null;
   readonly addedByActorReference: OrderingReference;
   readonly addedByParticipantReference: OrderingReference | null;
   readonly addedAt: OrderingInstant;
+}
+
+export interface CartSelectionRuleEvidence {
+  readonly bindingReference: OrderingReference;
+  readonly optionSetVersionReference: OrderingReference;
+}
+
+export interface CatalogSelectionEvidence {
+  readonly menuVersionReference: OrderingReference;
+  readonly productVersionReference: OrderingReference;
+  readonly catalogChannelCode: string;
+  readonly catalogOrderTypeCode: string;
+  readonly ruleEvidence: readonly CartSelectionRuleEvidence[];
+  readonly validatedAt: OrderingInstant;
 }
 
 export interface CartAggregate {
@@ -43,6 +58,7 @@ export const cartErrorCodes = [
   "CART_IDEMPOTENCY_CONFLICT",
   "CART_ITEM_NOT_FOUND",
   "CART_ITEM_LIMIT_REACHED",
+  "CART_SELECTION_INVALID",
   "CART_DEPENDENCY_UNAVAILABLE",
 ] as const;
 export type CartErrorCode = (typeof cartErrorCodes)[number];
@@ -68,6 +84,7 @@ export class CartError extends Error {
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const hashPattern = /^sha256:[0-9a-f]{64}$/u;
+const codePattern = /^[A-Z][A-Z0-9_]{0,63}$/u;
 
 function invalid(): never {
   throw new CartError("CART_INPUT_INVALID");
@@ -148,6 +165,43 @@ export function parseCustomerNote(value: unknown): string | null {
   return normalized;
 }
 
+function code(value: unknown): string {
+  if (typeof value !== "string" || !codePattern.test(value)) return invalid();
+  return value;
+}
+
+function parseCartSelectionRuleEvidence(value: unknown): CartSelectionRuleEvidence {
+  const raw = closed(value, ["bindingReference", "optionSetVersionReference"]);
+  return Object.freeze({
+    bindingReference: parseOrderingReference(raw.bindingReference),
+    optionSetVersionReference: parseOrderingReference(raw.optionSetVersionReference),
+  });
+}
+
+export function parseCatalogSelectionEvidence(value: unknown): CatalogSelectionEvidence | null {
+  if (value === null) return null;
+  const raw = closed(value, [
+    "menuVersionReference",
+    "productVersionReference",
+    "catalogChannelCode",
+    "catalogOrderTypeCode",
+    "ruleEvidence",
+    "validatedAt",
+  ]);
+  if (!Array.isArray(raw.ruleEvidence) || raw.ruleEvidence.length > 100) return invalid();
+  const ruleEvidence = raw.ruleEvidence.map(parseCartSelectionRuleEvidence);
+  if (new Set(ruleEvidence.map((item) => item.bindingReference)).size !== ruleEvidence.length)
+    return invalid();
+  return Object.freeze({
+    menuVersionReference: parseOrderingReference(raw.menuVersionReference),
+    productVersionReference: parseOrderingReference(raw.productVersionReference),
+    catalogChannelCode: code(raw.catalogChannelCode),
+    catalogOrderTypeCode: code(raw.catalogOrderTypeCode),
+    ruleEvidence: Object.freeze(ruleEvidence),
+    validatedAt: parseOrderingInstant(raw.validatedAt),
+  });
+}
+
 function quantity(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 999)
     return invalid();
@@ -170,6 +224,7 @@ export function parseCartItem(value: unknown): CartItem {
     "quantity",
     "optionSelections",
     "customerNote",
+    "catalogSelectionEvidence",
     "addedByActorReference",
     "addedByParticipantReference",
     "addedAt",
@@ -188,6 +243,7 @@ export function parseCartItem(value: unknown): CartItem {
     quantity: quantity(raw.quantity),
     optionSelections: Object.freeze(optionSelections),
     customerNote: parseCustomerNote(raw.customerNote),
+    catalogSelectionEvidence: parseCatalogSelectionEvidence(raw.catalogSelectionEvidence),
     addedByActorReference: parseOrderingReference(raw.addedByActorReference),
     addedByParticipantReference:
       raw.addedByParticipantReference === null

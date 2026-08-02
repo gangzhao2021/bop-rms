@@ -11,7 +11,15 @@ const id = (n) => `018f5000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
 async function prove(context) {
   const admin = new Client(context.clientConfig);
-  const role = `bop_wp1201_${context.runId}`;
+  const role = `bop_wp1202_${context.runId}`;
+  const selectionEvidence = {
+    menuVersionReference: id(20),
+    productVersionReference: id(21),
+    catalogChannelCode: "PILOT_CHANNEL",
+    catalogOrderTypeCode: "PILOT_ORDER_TYPE",
+    ruleEvidence: [{ bindingReference: id(22), optionSetVersionReference: id(23) }],
+    validatedAt: "2026-08-02T14:01:00.000Z",
+  };
   await admin.connect();
   try {
     const tables = await admin.query(
@@ -47,8 +55,8 @@ async function prove(context) {
     await admin.query(
       `INSERT INTO rms_ordering.cart_line
        (cart_line_id,cart_id,brand_id,store_id,sellable_id,quantity,option_selections_json,
-        customer_note,added_by_actor_id,added_at)
-       VALUES ($1,$2,$3,$4,$5,2,$6::jsonb,'Extra napkins',$7,$8)`,
+        customer_note,catalog_selection_evidence_json,added_by_actor_id,added_at)
+       VALUES ($1,$2,$3,$4,$5,2,$6::jsonb,'Extra napkins',$7::jsonb,$8,$9)`,
       [
         id(5),
         id(1),
@@ -56,6 +64,7 @@ async function prove(context) {
         id(3),
         id(6),
         JSON.stringify([{ optionReference: id(7), quantity: 1 }]),
+        JSON.stringify(selectionEvidence),
         id(4),
         "2026-08-02T14:00:00.000Z",
       ],
@@ -152,6 +161,23 @@ async function prove(context) {
       ),
       /cart_line_customer_note_check/u,
     );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO rms_ordering.cart_line
+         (cart_line_id,cart_id,brand_id,store_id,sellable_id,quantity,
+          option_selections_json,catalog_selection_evidence_json,added_by_actor_id,added_at)
+         VALUES ($1,$2,$3,$4,$5,1,'[]'::jsonb,'{}'::jsonb,$6,$7)`,
+        [id(24), id(1), id(2), id(3), id(6), id(4), "2026-08-02T14:00:00.000Z"],
+      ),
+      /cart_line_catalog_selection_evidence_check/u,
+    );
+    await admin.query(
+      `INSERT INTO rms_ordering.cart_line
+       (cart_line_id,cart_id,brand_id,store_id,sellable_id,quantity,
+        option_selections_json,catalog_selection_evidence_json,added_by_actor_id,added_at)
+       VALUES ($1,$2,$3,$4,$5,1,'[]'::jsonb,NULL,$6,$7)`,
+      [id(25), id(1), id(2), id(3), id(6), id(4), "2026-08-02T14:00:00.000Z"],
+    );
 
     await admin.query(
       `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS`,
@@ -208,6 +234,6 @@ async function prove(context) {
   }
 }
 
-it("enforces the Store-scoped Cart aggregate and Item command persistence contract", async () => {
-  await withIsolatedDatabase({ caseId: "wp1201_cart", root }, prove);
+it("enforces Cart command persistence and selection evidence", async () => {
+  await withIsolatedDatabase({ caseId: "wp1202_cart", root }, prove);
 });

@@ -20,6 +20,11 @@ const moduleManifestInput =
         packageName: "@bop/identity",
         layer: "BOP",
       },
+      {
+        moduleName: "catalog",
+        packageName: "@rms/catalog",
+        layer: "RMS",
+      },
     ],
     consumedEvents: [],
     publishedEvents: [],
