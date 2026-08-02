@@ -25,8 +25,14 @@ financial fields, verifies complete scope/line/Currency/total/UTC evidence, and 
 attachment without incrementing Cart Version. Later Item mutation invalidates eligibility through
 the pinned version; prior Quote attachments remain history.
 
-The module does not implement Cart creation transport, expiration/abandonment actions, Checkout,
-Order, Event, Projection, UI, or external evidence. Those
+WP-1204 adds version-pinned idle and absolute Cart lifecycle deadlines without inventing a Pilot
+duration. Item mutations advance idle expiry up to the absolute boundary. Customer abandonment and
+System expiration are authorized, audited, idempotent terminal transitions that preserve Cart Item
+and Quote history. Legacy, deadline-reached, Abandoned and Expired Carts fail closed for new Item or
+Quote commands.
+
+The module does not implement Cart creation transport, lifecycle scheduler registration, physical
+retention cleanup, Checkout, Order, Event, Projection, UI, or external evidence. Those
 remain owned by later Work Packages.
 Cart identifiers and attribution references are indirect identifiers and are prohibited from logs,
 URLs, analytics, screenshots, and non-synthetic fixtures.

@@ -17,6 +17,7 @@ import {
   type OrderingInstant,
   type OrderingReference,
 } from "../domain/cart.js";
+import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import type { CartQuoteAttachmentPorts } from "./ports/cart-quote-attachment-ports.js";
 
 const dayMilliseconds = 24 * 60 * 60 * 1_000;
@@ -458,6 +459,7 @@ export function createCartQuoteAttachmentService(ports: CartQuoteAttachmentPorts
       const cart = parseCartAggregate(loaded);
       if (cart.aggregateVersion !== expectedCartVersion)
         throw new CartError("CART_VERSION_CONFLICT");
+      assertCartLifecycleActive(cart.lifecycle, requestedAt);
       sessionScope(session, cart, requestedAt);
       const auditRecord = audit(authorized.audit, cart, requestedAt);
       if (

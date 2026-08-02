@@ -15,6 +15,7 @@ import {
   type OrderingInstant,
   type OrderingReference,
 } from "../domain/cart.js";
+import { advanceCartLifecycle, assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import type {
   CartItemCommandPorts,
   CartItemOperationAction,
@@ -445,6 +446,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       if (prior !== null) return prior;
       if (current.aggregate.aggregateVersion !== expectedVersion)
         throw new CartError("CART_VERSION_CONFLICT");
+      assertCartLifecycleActive(current.aggregate.lifecycle, requestedAt);
       if (current.aggregate.items.length >= 100) throw new CartError("CART_ITEM_LIMIT_REACHED");
       const selectionEvidence = await catalogEvidence(
         ports,
@@ -473,6 +475,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         ...current.aggregate,
         aggregateVersion: expectedVersion + 1,
         updatedAt: requestedAt,
+        lifecycle: advanceCartLifecycle(current.aggregate.lifecycle, requestedAt),
         items: [...current.aggregate.items, item],
       });
       return commit(ports, {
@@ -535,6 +538,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       if (prior !== null) return prior;
       if (current.aggregate.aggregateVersion !== expectedVersion)
         throw new CartError("CART_VERSION_CONFLICT");
+      assertCartLifecycleActive(current.aggregate.lifecycle, requestedAt);
       const item = current.aggregate.items.find(
         (candidate) => candidate.cartItemReference === cartItemReference,
       );
@@ -559,6 +563,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         ...current.aggregate,
         aggregateVersion: expectedVersion + 1,
         updatedAt: requestedAt,
+        lifecycle: advanceCartLifecycle(current.aggregate.lifecycle, requestedAt),
         items: current.aggregate.items.map((candidate) =>
           candidate.cartItemReference === cartItemReference ? replacement : candidate,
         ),
@@ -614,6 +619,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       if (prior !== null) return prior;
       if (current.aggregate.aggregateVersion !== expectedVersion)
         throw new CartError("CART_VERSION_CONFLICT");
+      assertCartLifecycleActive(current.aggregate.lifecycle, requestedAt);
       const item = current.aggregate.items.find(
         (candidate) => candidate.cartItemReference === cartItemReference,
       );
@@ -624,6 +630,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         ...current.aggregate,
         aggregateVersion: expectedVersion + 1,
         updatedAt: requestedAt,
+        lifecycle: advanceCartLifecycle(current.aggregate.lifecycle, requestedAt),
         items: current.aggregate.items.filter(
           (candidate) => candidate.cartItemReference !== cartItemReference,
         ),
