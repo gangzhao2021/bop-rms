@@ -11,6 +11,7 @@ import {
   type StructuredLogger,
 } from "@bop-rms/observability";
 import { createApp } from "./app.js";
+import { customerCartRoutes, type CustomerCartHandler } from "./customer-cart.js";
 import type { CustomerMenuHandler } from "./customer-menu.js";
 import { HealthReadinessController } from "./health-readiness.js";
 import { merchantCatalogRoutes, type MerchantCatalogRouterOptions } from "./merchant-catalog.js";
@@ -52,6 +53,7 @@ export interface ApiServerRuntime {
 
 export interface ApiServerRuntimeOptions {
   coreTelemetry?: CoreTelemetry;
+  customerCart?: CustomerCartHandler;
   customerMenu?: CustomerMenuHandler;
   healthReadiness?: HealthReadinessController;
   host?: string;
@@ -79,8 +81,13 @@ export function createApiCoreTelemetry(): CoreTelemetry {
     module: "api-runtime",
     routes: [
       "/__acceptance/request-command-event",
+      customerCartRoutes.current,
       "/bff/realtime",
       "/api/v1/public/stores/:store_public_id/menu",
+      customerCartRoutes.create,
+      customerCartRoutes.read,
+      customerCartRoutes.addItem,
+      customerCartRoutes.updateItem,
       ...Object.values(merchantCatalogRoutes),
       "/health",
       "/ready",
@@ -98,6 +105,7 @@ function runtimeDuration(startedAt: number, completedAt: number): number {
 
 export function createApiServerRuntime({
   coreTelemetry = createApiCoreTelemetry(),
+  customerCart,
   customerMenu,
   healthReadiness = new HealthReadinessController(),
   host = "127.0.0.1",
@@ -115,6 +123,7 @@ export function createApiServerRuntime({
     throw new Error("port must be an integer from 0 to 65535");
   const server = createServer(
     createApp({
+      ...(customerCart === undefined ? {} : { customerCart }),
       healthReadiness,
       ...(customerMenu === undefined ? {} : { customerMenu }),
       ...(merchantCatalog === undefined ? {} : { merchantCatalog }),
