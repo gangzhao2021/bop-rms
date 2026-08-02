@@ -23,6 +23,7 @@ function pickup() {
         sellableReference: id(6),
         quantity: 2,
         optionSelections: [{ optionReference: id(7), quantity: 1 }],
+        customerNote: null,
         addedByActorReference: id(4),
         addedByParticipantReference: null,
         addedAt: at,

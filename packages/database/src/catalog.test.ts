@@ -64,6 +64,7 @@ describe("migration catalog", () => {
       "1200_002_create_price_book",
       "1200_003_create_price_quote",
       "1300_001_create_cart_aggregate",
+      "1300_002_alter_cart_item_commands",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -184,6 +185,19 @@ describe("migration catalog", () => {
     expect(migration?.metadata.schema).toBe("rms_ordering");
     for (const table of ["cart", "cart_line"])
       expect(migration?.sql).toContain(`CREATE TABLE rms_ordering.${table}`);
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1201 Cart Item command migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1300_002_alter_cart_item_commands",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/ordering");
+    expect(migration?.metadata.schema).toBe("rms_ordering");
+    expect(migration?.sql).toContain("ALTER TABLE rms_ordering.cart_line");
+    expect(migration?.sql).toContain("CREATE TABLE rms_ordering.cart_operation_record");
+    expect(migration?.sql).toContain("interval '24 hours'");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });

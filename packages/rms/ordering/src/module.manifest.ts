@@ -9,18 +9,29 @@ const moduleManifestInput =
     layer: "RMS",
     lifecycle: "Phase 1",
     publicExports: ["."],
-    allowedSynchronousDependencies: [],
+    allowedSynchronousDependencies: [
+      {
+        moduleName: "audit",
+        packageName: "@bop/audit",
+        layer: "BOP",
+      },
+      {
+        moduleName: "identity",
+        packageName: "@bop/identity",
+        layer: "BOP",
+      },
+    ],
     consumedEvents: [],
     publishedEvents: [],
     ownedDatabase: {
       schema: "rms_ordering",
-      tables: ["cart", "cart_line"],
+      tables: ["cart", "cart_line", "cart_operation_record"],
     },
     ownedJobs: [],
     featureFlags: [],
     killSwitches: [],
     piiClassification: {
-      classes: ["indirect_identifier"],
+      classes: ["indirect_identifier", "personal", "health"],
       handling: {
         logs: "prohibited",
         urls: "prohibited",

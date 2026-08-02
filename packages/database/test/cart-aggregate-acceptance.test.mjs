@@ -11,17 +11,25 @@ const id = (n) => `018f5000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
 async function prove(context) {
   const admin = new Client(context.clientConfig);
-  const role = `bop_wp1200_${context.runId}`;
+  const role = `bop_wp1201_${context.runId}`;
   await admin.connect();
   try {
     const tables = await admin.query(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = 'rms_ordering' ORDER BY table_name`,
     );
-    assert.deepEqual(tables.rows, [{ table_name: "cart" }, { table_name: "cart_line" }]);
+    assert.deepEqual(tables.rows, [
+      { table_name: "cart" },
+      { table_name: "cart_line" },
+      { table_name: "cart_operation_record" },
+    ]);
     const forced = await admin.query(
       `SELECT relname, relforcerowsecurity FROM pg_class
-       WHERE oid IN ('rms_ordering.cart'::regclass, 'rms_ordering.cart_line'::regclass)
+       WHERE oid IN (
+         'rms_ordering.cart'::regclass,
+         'rms_ordering.cart_line'::regclass,
+         'rms_ordering.cart_operation_record'::regclass
+       )
        ORDER BY relname`,
     );
     assert.equal(
@@ -39,8 +47,8 @@ async function prove(context) {
     await admin.query(
       `INSERT INTO rms_ordering.cart_line
        (cart_line_id,cart_id,brand_id,store_id,sellable_id,quantity,option_selections_json,
-        added_by_actor_id,added_at)
-       VALUES ($1,$2,$3,$4,$5,2,$6::jsonb,$7,$8)`,
+        customer_note,added_by_actor_id,added_at)
+       VALUES ($1,$2,$3,$4,$5,2,$6::jsonb,'Extra napkins',$7,$8)`,
       [
         id(5),
         id(1),
@@ -51,6 +59,59 @@ async function prove(context) {
         id(4),
         "2026-08-02T14:00:00.000Z",
       ],
+    );
+    await admin.query(
+      `INSERT INTO rms_ordering.cart_operation_record
+       (operation_id,brand_id,store_id,cart_id,cart_line_id,guest_session_id,action_code,
+        intent_digest,result_aggregate_version,result_cart_snapshot_json,occurred_at,expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'Add',$7,2,$8::jsonb,$9,$10)`,
+      [
+        id(11),
+        id(2),
+        id(3),
+        id(1),
+        id(5),
+        id(4),
+        `sha256:${"a".repeat(64)}`,
+        JSON.stringify({ cartReference: id(1), aggregateVersion: 2 }),
+        "2026-08-02T14:01:00.000Z",
+        "2026-08-03T14:01:00.000Z",
+      ],
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO rms_ordering.cart_operation_record
+         (operation_id,brand_id,store_id,cart_id,cart_line_id,guest_session_id,action_code,
+          intent_digest,result_aggregate_version,result_cart_snapshot_json,occurred_at,expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'Add',$7,2,'{}'::jsonb,$8,$9)`,
+        [
+          id(12),
+          id(2),
+          id(3),
+          id(1),
+          id(5),
+          id(4),
+          `sha256:${"b".repeat(64)}`,
+          "2026-08-02T14:01:00.000Z",
+          "2026-08-03T14:00:59.999Z",
+        ],
+      ),
+      /cart_operation_retention_check/u,
+    );
+    await admin.query(
+      `UPDATE rms_ordering.cart_operation_record
+       SET result_aggregate_version = 3 WHERE operation_id = $1`,
+      [id(11)],
+    );
+    assert.equal(
+      (
+        await admin.query(
+          `SELECT result_aggregate_version FROM rms_ordering.cart_operation_record
+           WHERE operation_id = $1`,
+          [id(11)],
+        )
+      ).rows[0].result_aggregate_version,
+      2,
     );
     await assert.rejects(
       admin.query(
@@ -71,6 +132,25 @@ async function prove(context) {
         [id(9), id(1), id(2), id(3), id(6), id(4), "2026-08-02T14:00:00.000Z"],
       ),
       /cart_line_quantity_check/u,
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO rms_ordering.cart_line
+         (cart_line_id,cart_id,brand_id,store_id,sellable_id,quantity,
+          option_selections_json,customer_note,added_by_actor_id,added_at)
+         VALUES ($1,$2,$3,$4,$5,1,'[]'::jsonb,$6,$7,$8)`,
+        [
+          id(10),
+          id(1),
+          id(2),
+          id(3),
+          id(6),
+          ` ${"x".repeat(500)}`,
+          id(4),
+          "2026-08-02T14:00:00.000Z",
+        ],
+      ),
+      /cart_line_customer_note_check/u,
     );
 
     await admin.query(
@@ -93,6 +173,14 @@ async function prove(context) {
       (await admin.query(`SELECT count(*)::integer AS count FROM rms_ordering.cart`)).rows[0].count,
       1,
     );
+    assert.equal(
+      (
+        await admin.query(
+          `SELECT count(*)::integer AS count FROM rms_ordering.cart_operation_record`,
+        )
+      ).rows[0].count,
+      1,
+    );
     await admin.query("ROLLBACK");
     await admin.query("BEGIN");
     await admin.query(
@@ -101,6 +189,14 @@ async function prove(context) {
     );
     assert.equal(
       (await admin.query(`SELECT count(*)::integer AS count FROM rms_ordering.cart`)).rows[0].count,
+      0,
+    );
+    assert.equal(
+      (
+        await admin.query(
+          `SELECT count(*)::integer AS count FROM rms_ordering.cart_operation_record`,
+        )
+      ).rows[0].count,
       0,
     );
     await admin.query("ROLLBACK");
@@ -112,6 +208,6 @@ async function prove(context) {
   }
 }
 
-it("enforces the Store-scoped Cart aggregate persistence contract", async () => {
-  await withIsolatedDatabase({ caseId: "wp1200_cart", root }, prove);
+it("enforces the Store-scoped Cart aggregate and Item command persistence contract", async () => {
+  await withIsolatedDatabase({ caseId: "wp1201_cart", root }, prove);
 });

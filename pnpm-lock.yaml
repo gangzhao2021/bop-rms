@@ -373,7 +373,14 @@ importers:
         specifier: workspace:*
         version: link:../../bop/tenant
 
-  packages/rms/ordering: {}
+  packages/rms/ordering:
+    dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../../bop/audit
+      '@bop/identity':
+        specifier: workspace:*
+        version: link:../../bop/identity
 
   packages/rms/pricing:
     dependencies:

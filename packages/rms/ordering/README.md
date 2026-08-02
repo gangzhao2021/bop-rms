@@ -9,9 +9,14 @@ only opaque Sellable and selected Option references plus integer quantities; it 
 stores a client price. Dine-in Cart context must reference one Dining Session, while Pickup must not.
 Participant attribution is optional for Pickup and mandatory for Dine-in items.
 
-WP-1200 does not implement Cart creation transport, Add/Update/Remove commands, Catalog Option
-validation, Pricing Quote attachment, expiration/abandonment actions, Checkout, Order, Event,
-Projection, UI, customer note, or external evidence. Those remain owned by later Work Packages.
+WP-1201 adds Guest Session-bound Add/Update/Remove commands with exact Cart optimistic version,
+24-hour idempotency, System Audit and same-Participant enforcement for Shared Cart edits. Customer
+Note is normalized bounded plain text classified as personal/possible health data; it never enters
+telemetry, URLs, analytics, screenshots or non-synthetic fixtures.
+
+The module does not implement Cart creation transport, Catalog Option validation, Pricing Quote
+attachment, expiration/abandonment actions, Checkout, Order, Event, Projection, UI, or external
+evidence. Those remain owned by later Work Packages.
 Cart identifiers and attribution references are indirect identifiers and are prohibited from logs,
 URLs, analytics, screenshots, and non-synthetic fixtures.
 

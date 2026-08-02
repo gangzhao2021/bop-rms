@@ -1,5 +1,6 @@
 export type OrderingReference = string & { readonly __orderingReference: unique symbol };
 export type OrderingInstant = string & { readonly __orderingInstant: unique symbol };
+export type OrderingHash = string & { readonly __orderingHash: unique symbol };
 export type CartOrderType = "DineIn" | "Pickup";
 export type CartSourceChannel = "Api" | "Pos" | "Qr" | "Web";
 
@@ -14,6 +15,7 @@ export interface CartItem {
   readonly sellableReference: OrderingReference;
   readonly quantity: number;
   readonly optionSelections: readonly CartOptionSelection[];
+  readonly customerNote: string | null;
   readonly addedByActorReference: OrderingReference;
   readonly addedByParticipantReference: OrderingReference | null;
   readonly addedAt: OrderingInstant;
@@ -33,14 +35,31 @@ export interface CartAggregate {
   readonly items: readonly CartItem[];
 }
 
-export const cartErrorCodes = ["CART_INPUT_INVALID"] as const;
+export const cartErrorCodes = [
+  "CART_INPUT_INVALID",
+  "CART_UNAVAILABLE",
+  "CART_PERMISSION_DENIED",
+  "CART_VERSION_CONFLICT",
+  "CART_IDEMPOTENCY_CONFLICT",
+  "CART_ITEM_NOT_FOUND",
+  "CART_ITEM_LIMIT_REACHED",
+  "CART_DEPENDENCY_UNAVAILABLE",
+] as const;
 export type CartErrorCode = (typeof cartErrorCodes)[number];
 
 export class CartError extends Error {
   readonly code: CartErrorCode;
 
   constructor(code: CartErrorCode) {
-    super("cart input is invalid");
+    super(
+      code === "CART_INPUT_INVALID"
+        ? "cart input is invalid"
+        : code === "CART_VERSION_CONFLICT"
+          ? "cart version conflict"
+          : code === "CART_IDEMPOTENCY_CONFLICT"
+            ? "cart idempotency conflict"
+            : "cart is unavailable",
+    );
     this.name = "CartError";
     this.code = code;
   }
@@ -48,6 +67,7 @@ export class CartError extends Error {
 
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+const hashPattern = /^sha256:[0-9a-f]{64}$/u;
 
 function invalid(): never {
   throw new CartError("CART_INPUT_INVALID");
@@ -101,6 +121,33 @@ export function parseOrderingInstant(value: unknown): OrderingInstant {
   return value as OrderingInstant;
 }
 
+export function parseOrderingHash(value: unknown): OrderingHash {
+  if (typeof value !== "string" || !hashPattern.test(value)) return invalid();
+  return value as OrderingHash;
+}
+
+export function parseCustomerNote(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") return invalid();
+  const normalized = value.normalize("NFC").trim();
+  if (
+    normalized.length < 1 ||
+    normalized.length > 500 ||
+    [...normalized].some((character) => {
+      const codePoint = character.codePointAt(0) as number;
+      return (
+        codePoint <= 0x08 ||
+        codePoint === 0x0b ||
+        codePoint === 0x0c ||
+        (codePoint >= 0x0e && codePoint <= 0x1f) ||
+        codePoint === 0x7f
+      );
+    })
+  )
+    return invalid();
+  return normalized;
+}
+
 function quantity(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 999)
     return invalid();
@@ -122,6 +169,7 @@ export function parseCartItem(value: unknown): CartItem {
     "sellableReference",
     "quantity",
     "optionSelections",
+    "customerNote",
     "addedByActorReference",
     "addedByParticipantReference",
     "addedAt",
@@ -139,6 +187,7 @@ export function parseCartItem(value: unknown): CartItem {
     sellableReference: parseOrderingReference(raw.sellableReference),
     quantity: quantity(raw.quantity),
     optionSelections: Object.freeze(optionSelections),
+    customerNote: parseCustomerNote(raw.customerNote),
     addedByActorReference: parseOrderingReference(raw.addedByActorReference),
     addedByParticipantReference:
       raw.addedByParticipantReference === null
