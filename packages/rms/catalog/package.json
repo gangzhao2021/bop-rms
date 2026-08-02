@@ -18,7 +18,9 @@
   },
   "dependencies": {
     "@bop/audit": "workspace:*",
+    "@bop/effective-period": "workspace:*",
     "@bop/permission": "workspace:*",
+    "@bop/publishing": "workspace:*",
     "@bop/tenant": "workspace:*"
   }
 }

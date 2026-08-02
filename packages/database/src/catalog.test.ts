@@ -57,6 +57,7 @@ describe("migration catalog", () => {
       "1101_001_create_category_menu_structure",
       "1102_001_create_option_set_binding",
       "1103_001_create_availability_rule",
+      "1104_001_create_menu_publication",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -69,6 +70,23 @@ describe("migration catalog", () => {
     );
     expect(migration?.metadata.owner).toBe("@rms/catalog");
     expect(migration?.sql).toContain("CREATE TABLE rms_catalog.availability_rule");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1024 Menu publication migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1104_001_create_menu_publication",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/catalog");
+    for (const table of [
+      "menu_publication_revision",
+      "menu_publication_release",
+      "menu_release_effective_period",
+      "menu_publication_operation_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
+    expect(migration?.sql).toContain("reject_menu_effective_overlap");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
