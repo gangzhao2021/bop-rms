@@ -36,7 +36,10 @@ retention cleanup, Event, Projection, UI, or external evidence. WP-1220 adds fai
 validation evidence. WP-1221 consumes only current evidence to create the first immutable minimum
 `Order → Order Batch → Order Item identity` aggregate in `Submitted + Open`; transaction snapshots,
 business date/order number, durable idempotency, Payment, API and lifecycle transitions remain
-owned by later Work Packages.
+owned by later Work Packages. WP-1222 adds the pure line-level snapshot boundary that copies exact
+Catalog names/versions, selected Option configuration, final bigint Money, Price resolution and Tax
+rule/rate/amount evidence. Snapshots are closed and deeply frozen and are never reconstructed from
+current configuration; WP-1224 remains responsible for authorized atomic creation and persistence.
 Cart identifiers and attribution references are indirect identifiers and are prohibited from logs,
 URLs, analytics, screenshots, and non-synthetic fixtures.
 

@@ -16,3 +16,4 @@ export * from "./domain/checkout-validation.js";
 export * from "./application/checkout-validation-service.js";
 export * from "./application/ports/checkout-validation-ports.js";
 export * from "./contracts/order.js";
+export * from "./contracts/order-item-snapshot.js";
