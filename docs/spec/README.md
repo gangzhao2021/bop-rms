@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1103 — Quote Creation API integrated at main@5e0cde3c23e111a62d6261d6dd9a18c83cb785df`
+- Current discussion node: `WP-1104 — Quote Expiration and Requote integrated at main@4e4644e2b1c51ecb99a78ea43cb9bda0edbddecb`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,8 +14,20 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
+Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-1104 — Quote Expiration and Requote` is implemented, verified, integrated and locally
+  cleaned at squash `4e4644e2b1c51ecb99a78ea43cb9bda0edbddecb`. PR #121 exact head
+  `1df34247ee4ca7c9a0bb2e1fc1315b1f7ba75bb1` passed run/job
+  `30749169839 / 91499994605`; exact-main run/job `30749636056 / 91501249920` passed. Server UTC
+  time before expiry reuses the immutable Quote; the exact expiry instant requires a new Quote for
+  the same Brand, Store, Cart and Cart Version. Decreased or unchanged totals need no
+  reconfirmation, while an increase returns the exact signed bigint minor-unit delta and
+  `ReconfirmationRequired`. Pricing tests are `67/67`, Quote HTTP acceptance is `8/8`, complete API
+  regression is `120/120` and retained isolated PostgreSQL acceptance is `1/1`. Checkout
+  confirmation, Promotion/Fee behavior, Cart mutation, UI, scheduler, Provider behavior and
+  External Evidence remain absent. Exact results are in `docs/spec/work-packages/WP-1104.md`.
 
 - `WP-1103 — Quote Creation API` is implemented, verified, integrated and cleaned at squash
   `5e0cde3c23e111a62d6261d6dd9a18c83cb785df`. PR #119 exact head
