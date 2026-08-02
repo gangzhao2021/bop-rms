@@ -11,9 +11,16 @@ and reproducible exclusive/inclusive tax calculation. Results retain the exact r
 metadata references/digests needed to explain and replay the calculation without consulting later
 mutable configuration.
 
-This package does not contain a real Ontario rate, legal classification, Store registration,
-Price Book, price resolution, Promotion, Quote/API, Order, Payment, persistence or event. WP-1101
-owns Store Tax Configuration, WP-1102 owns price resolution, and WP-1103 owns Quote creation.
+WP-1101 adds Store-scoped, versioned `CA-ON/CAD` Tax Configuration snapshots. Published versions
+require exact registration applicability and professionally reviewed fixture evidence, resolve by
+effective time plus Catalog classification/order/charge context, preserve component order and
+compound behavior, and fail closed for missing/expired/conflicting coverage. Persistence is owned
+by `@rms/pricing`, append-only below the mutable aggregate pointer, and protected by exact Brand +
+Store forced RLS.
+
+This package does not contain a real Ontario rate, legal classification, actual Store registration,
+Price Book, price resolution, Promotion, Quote/API, Order, Payment or event. WP-1102 owns price
+resolution, and WP-1103 owns Quote creation.
 Production seed and receipt semantics remain blocked on accountant-approved evidence under
 IDR-0024. All fixtures are synthetic and External Evidence is not claimed.
 
@@ -21,6 +28,7 @@ Verification:
 
 ```bash
 pnpm pricing-money-tax:acceptance
+pnpm pricing-tax-configuration:acceptance
 pnpm module-manifest:check
 pnpm domain-layer-boundary:check
 pnpm import-boundary:check

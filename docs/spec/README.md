@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1100 — Money / Tax Calculation Domain Contract locally verified from main@6cbfae5a63a9295ba8b2496b2bdc7d2d47bb9d64`
+- Current discussion node: `WP-1101 — Store Tax Configuration locally verified from main@5a19f44837c5496770301e7033a02b6b2958ceac`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,8 +17,21 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1100 — Money / Tax Calculation Domain Contract` is locally verified from exact integrated
-  predecessor `main@6cbfae5a63a9295ba8b2496b2bdc7d2d47bb9d64`. It adds the provider-neutral
+- `WP-1101 — Store Tax Configuration` is locally verified from exact integrated predecessor
+  `main@5a19f44837c5496770301e7033a02b6b2958ceac`. It adds versioned Store-scoped `CA-ON/CAD`
+  configuration snapshots, exact effective periods, classification/order/charge rule resolution,
+  compound order, receipt presentation, exception evidence, publish evidence gates and the first
+  forced-RLS `rms_pricing` persistence. Domain tests are `37/37 PASS` and isolated PostgreSQL
+  acceptance is `1/1 PASS`. All rules are synthetic; real rates, legal conclusions, professional
+  evidence, UI and External Evidence remain absent. Exact results are in
+  `docs/spec/work-packages/WP-1101.md`.
+
+- `WP-1100 — Money / Tax Calculation Domain Contract` is implemented, verified, integrated and
+  cleaned at squash `5a19f44837c5496770301e7033a02b6b2958ceac`. PR #116 passed exact head
+  `70f72a29dd2cf85ba73acbb0332c0c75efec1448` in run/job
+  `30737685473 / 91469364024`; post-merge exact-main run/job
+  `30738085193 / 91471537512` passed on same-SHA attempt 2 after a WP-0024 Compose-start transient.
+  It adds the provider-neutral
   `@rms/pricing` contract for signed bigint minor-unit Money、version-pinned Currency metadata、
   canonical decimal Tax rates、deterministic signed rounding、exclusive/inclusive Tax calculation
   and exact stable-key allocation. Results retain replayable rule/Currency version evidence；raw

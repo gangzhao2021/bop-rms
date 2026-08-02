@@ -1,0 +1,41 @@
+const databaseAccessManifestInput = {
+  version: 1,
+  module: { moduleName: "pricing", packageName: "@rms/pricing", layer: "RMS" },
+  tables: [
+    {
+      table: "tax_configuration",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tax_configuration_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tax_configuration_rule",
+      classification: "aggregate-child-entity",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tax_configuration_operation_record",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+  ],
+  accesses: [],
+} as const;
+
+export const databaseAccessManifest = databaseAccessManifestInput;

@@ -60,6 +60,7 @@ describe("migration catalog", () => {
       "1104_001_create_menu_publication",
       "1105_001_create_published_menu_projection",
       "1106_001_create_allergen_provenance",
+      "1200_001_create_tax_configuration",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -124,6 +125,23 @@ describe("migration catalog", () => {
       "menu_sellable_allergen_disclosure",
     ])
       expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1101 Store Tax Configuration migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1200_001_create_tax_configuration",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/pricing");
+    expect(migration?.metadata.schema).toBe("rms_pricing");
+    for (const table of [
+      "tax_configuration",
+      "tax_configuration_version",
+      "tax_configuration_rule",
+      "tax_configuration_operation_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
