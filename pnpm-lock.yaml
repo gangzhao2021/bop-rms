@@ -373,6 +373,8 @@ importers:
         specifier: workspace:*
         version: link:../../bop/tenant
 
+  packages/rms/ordering: {}
+
   packages/rms/pricing:
     dependencies:
       '@bop/effective-period':
