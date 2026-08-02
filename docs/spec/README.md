@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1102 — Price Resolution locally verified from main@61f20b46463cab02b99df8307c6a1e04e81c47a1`
+- Current discussion node: `WP-1103 — Quote Creation API locally verified from main@757c48568335da5ebcf18ed4fe131cdaa52423d1`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,8 +17,21 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1102 — Price Resolution` is locally verified from exact integrated predecessor
-  `main@61f20b46463cab02b99df8307c6a1e04e81c47a1`. It adds single-Currency versioned Price Books,
+- `WP-1103 — Quote Creation API` is locally verified from exact integrated predecessor
+  `main@757c48568335da5ebcf18ed4fe131cdaa52423d1`. It composes exact Price and exclusive-tax
+  resolution into immutable, single-Currency Cart Quote snapshots with Catalog/Price/Tax/input
+  replay evidence. The public POST accepts only Cart version, Customer Session and Idempotency
+  context; client amount fields fail before the Pricing port. Responses include required totals,
+  line breakdown, evidence, expiry, promotions, warnings and blockers. Pricing tests are `60/60`,
+  Quote HTTP acceptance `6/6` and isolated PostgreSQL acceptance `1/1`. Expiration/requote,
+  Promotion/Fee behavior, Cart implementation, inclusive Pilot quoting and External Evidence remain
+  absent. Exact results are in `docs/spec/work-packages/WP-1103.md`.
+
+- `WP-1102 — Price Resolution` is implemented, verified, integrated and cleaned at squash
+  `757c48568335da5ebcf18ed4fe131cdaa52423d1`. PR #118 exact head
+  `493fb4b9c27e4a10e50875dec575fdc86bd0e0f5` passed run/job
+  `30740828380 / 91477839747`; exact-main run/job `30741320452 / 91479174923` passed. It adds
+  single-Currency versioned Price Books,
   Sellable Price Entries and the canonical eight-level Store/Store Group/Region/Brand resolution
   order. Effective periods are eligibility only; same-priority ambiguity, missing coverage,
   unpublished books and Brand/Currency mismatch fail closed. Pricing tests are `52/52 PASS` and
