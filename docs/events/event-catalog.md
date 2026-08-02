@@ -5,7 +5,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 
 ## Registered Events
 
-_No concrete Events registered._
+- `MenuPublished:v1` — owner `@rms/catalog`; stable; brand; none
 
 Registered Event identities are the only bounded Event-type metric label candidates.
 An empty catalog therefore enables no Event-type production metric label.

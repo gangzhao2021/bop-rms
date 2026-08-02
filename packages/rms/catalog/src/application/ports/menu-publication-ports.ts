@@ -1,8 +1,10 @@
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { PermissionDecision } from "@bop/permission";
 import type { TenantContext } from "@bop/tenant";
+import type { DomainEventEnvelope } from "@bop/eventing";
 import type {
   PublishingApprovalEvidence,
+  PublishingDigest,
   PublishingLifecycleRecord,
   PublishingReleaseRecord,
   PublishingValidationEvidence,
@@ -38,7 +40,7 @@ export interface MenuPublicationPorts {
       readonly menuReference: CatalogReference;
       readonly menuVersionReference: CatalogReference;
       readonly brandReference: CatalogReference;
-      readonly snapshotDigest: CatalogHash;
+      readonly snapshotDigest: PublishingDigest;
     }): Promise<PublishingLifecycleRecord | null>;
   };
   readonly evidence: {
@@ -57,10 +59,11 @@ export interface MenuPublicationPorts {
       readonly operation: MenuPublicationOperationRecord;
       readonly expectedVersion: number;
       readonly audit: AppendAuditRecordInput;
+      readonly event: DomainEventEnvelope | null;
     }): Promise<MenuPublicationOperationRecord>;
   };
   readonly references: {
-    generate(purpose: "Lifecycle" | "Release"): string;
+    generate(purpose: "Lifecycle" | "Release" | "Event"): string;
     hashIntent(value: string): CatalogHash;
     equals(left: CatalogHash, right: CatalogHash): boolean;
   };

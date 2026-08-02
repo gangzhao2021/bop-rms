@@ -1,12 +1,13 @@
 import type { EffectivePeriod } from "@bop/effective-period";
 import type {
   PublishingApprovalEvidence,
+  PublishingDigest,
   PublishingLifecycleRecord,
   PublishingReleaseRecord,
   PublishingValidationEvidence,
 } from "@bop/publishing";
 
-import type { CatalogHash, CatalogInstant, CatalogReference } from "./product.js";
+import type { CatalogInstant, CatalogReference } from "./product.js";
 
 export type MenuPublicationAction = "SubmitReview" | "Approve" | "Publish" | "Archive";
 
@@ -22,7 +23,7 @@ export interface MenuPublicationCommand {
   readonly menuReference: CatalogReference;
   readonly menuVersionReference: CatalogReference;
   readonly expectedVersion: number;
-  readonly snapshotDigest: CatalogHash;
+  readonly snapshotDigest: PublishingDigest;
   readonly requestedAt: CatalogInstant;
   readonly effectivePeriod: EffectivePeriod | null;
 }

@@ -58,6 +58,7 @@ describe("migration catalog", () => {
       "1102_001_create_option_set_binding",
       "1103_001_create_availability_rule",
       "1104_001_create_menu_publication",
+      "1105_001_create_published_menu_projection",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -89,6 +90,23 @@ describe("migration catalog", () => {
     expect(migration?.sql).toContain("reject_menu_effective_overlap");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1025 Published Menu projection migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1105_001_create_published_menu_projection",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/catalog");
+    for (const table of [
+      "published_menu_projection_generation",
+      "published_menu_projection",
+      "published_menu_projection_section",
+      "published_menu_projection_sellable",
+      "published_menu_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
+    expect(migration?.sql).toContain("enforce_published_menu_checkpoint_order");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
   });
 
   it("registers the exact WP-1022 Option Set and Product Binding migration", async () => {
