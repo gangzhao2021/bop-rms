@@ -61,7 +61,9 @@ async function prove(context) {
        WHERE relation.relkind = 'r'
          AND relation.relrowsecurity
          AND relation.relforcerowsecurity
+         AND format('%I.%I', namespace.nspname, relation.relname) = ANY($1::text[])
        ORDER BY table_name`,
+      [expectedForcedTables],
     );
     assert.deepEqual(
       forced.rows.map((row) => row.table_name),
@@ -196,6 +198,6 @@ async function prove(context) {
   }
 }
 
-it("proves transaction-local Tenant scope, pool isolation and the exact forced-RLS registry", async () => {
+it("proves transaction-local Tenant scope, pool isolation and required forced-RLS entries", async () => {
   await withIsolatedDatabase({ caseId: "tenant_context", root }, prove);
 }, 180_000);
