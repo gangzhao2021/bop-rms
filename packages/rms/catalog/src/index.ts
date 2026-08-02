@@ -21,3 +21,6 @@ export * from "./domain/published-menu-projection.js";
 export * from "./application/menu-published-event.js";
 export * from "./application/published-menu-projection-service.js";
 export * from "./application/ports/published-menu-projection-ports.js";
+export * from "./contracts/customer-menu-query.js";
+export * from "./application/customer-menu-query-service.js";
+export * from "./application/ports/customer-menu-query-ports.js";

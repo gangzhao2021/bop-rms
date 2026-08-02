@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1025 — Published Menu Projection locally verified with recorded platform boundaries from main@92800dd59735da76d108fb2d16f7b70308afe8a5`
+- Current discussion node: `WP-1026 — Customer Menu Query API locally verified with recorded platform boundaries from main@990ebeb8010c8c5cc5616d49cdc1d0aea3105874`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,8 +17,23 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1025 — Published Menu Projection` is locally verified with recorded platform boundaries from
-  exact integrated predecessor `main@92800dd59735da76d108fb2d16f7b70308afe8a5`. It registers the
+- `WP-1026 — Customer Menu Query API` is locally verified from exact integrated predecessor
+  `main@990ebeb8010c8c5cc5616d49cdc1d0aea3105874`. It adds the canonical public Store Menu REST
+  resource over a Catalog-owned public Application Query contract；requires exact Store、Channel、
+  Order Type、locale and server-current effective scope；accepts only one `Fresh` projection；and
+  excludes Hidden or configured-unavailable Sellables. The response declares projection version、
+  checkpoint、as-of、5-second freshness target、scope and partial state. Display Price and Tax
+  Display Context are explicitly unavailable pending WP-1100–1103 and never represented as zero.
+  Catalog tests are `40/40 PASS`; complete API regression is `106/106 PASS`; dedicated HTTP
+  acceptance is `5/5 PASS`; WP-1025 projection PostgreSQL regression is `1/1 PASS`. Price/tax
+  calculation、allergen disclosure、UI and External Evidence remain absent. Exact results are
+  recorded in `docs/spec/work-packages/WP-1026.md`.
+
+- `WP-1025 — Published Menu Projection` is implemented、verified、integrated and cleaned at squash
+  `990ebeb8010c8c5cc5616d49cdc1d0aea3105874`. PR #112 passed exact head
+  `ec2bf55aa52b34ddf284923899ae60d46982b6d7` in run/job
+  `30731871019 / 91453548551`；post-merge exact-main run/job
+  `30732239306 / 91454562557` passed. It registers the
   authoritative `MenuPublished.v1` fact、composes its atomic Outbox envelope with Menu publish and
   builds a Catalog-owned idempotent、version-monotonic、generation-switched projection from an
   injected public exact-snapshot contract. Projection content includes exact Menu/release/effective

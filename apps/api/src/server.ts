@@ -11,6 +11,7 @@ import {
   type StructuredLogger,
 } from "@bop-rms/observability";
 import { createApp } from "./app.js";
+import type { CustomerMenuHandler } from "./customer-menu.js";
 import { HealthReadinessController } from "./health-readiness.js";
 import type { RealtimeTransport } from "./realtime.js";
 
@@ -50,6 +51,7 @@ export interface ApiServerRuntime {
 
 export interface ApiServerRuntimeOptions {
   coreTelemetry?: CoreTelemetry;
+  customerMenu?: CustomerMenuHandler;
   healthReadiness?: HealthReadinessController;
   host?: string;
   logger?: StructuredLogger;
@@ -76,6 +78,7 @@ export function createApiCoreTelemetry(): CoreTelemetry {
     routes: [
       "/__acceptance/request-command-event",
       "/bff/realtime",
+      "/api/v1/public/stores/:store_public_id/menu",
       "/health",
       "/ready",
       "unmatched",
@@ -92,6 +95,7 @@ function runtimeDuration(startedAt: number, completedAt: number): number {
 
 export function createApiServerRuntime({
   coreTelemetry = createApiCoreTelemetry(),
+  customerMenu,
   healthReadiness = new HealthReadinessController(),
   host = "127.0.0.1",
   logger = createApiRuntimeLogger(),
@@ -108,6 +112,7 @@ export function createApiServerRuntime({
   const server = createServer(
     createApp({
       healthReadiness,
+      ...(customerMenu === undefined ? {} : { customerMenu }),
       errorLogger: logger,
       nowMilliseconds,
       ...(realtime === undefined ? {} : { realtime }),

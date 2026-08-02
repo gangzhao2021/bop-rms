@@ -65,6 +65,9 @@ importers:
       '@bop/tenant':
         specifier: workspace:*
         version: link:../../packages/bop/tenant
+      '@rms/catalog':
+        specifier: workspace:*
+        version: link:../../packages/rms/catalog
       express:
         specifier: 5.2.1
         version: 5.2.1(supports-color@8.1.1)

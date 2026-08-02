@@ -6,6 +6,7 @@ import {
   type CustomerEntryHandler,
   unavailableCustomerEntryHandler,
 } from "./customer-entry.js";
+import { type CustomerMenuHandler, unavailableCustomerMenuHandler } from "./customer-menu.js";
 import { HealthReadinessController } from "./health-readiness.js";
 import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
 import {
@@ -19,6 +20,7 @@ const routeTemplates = [
   "/__acceptance/request-command-event",
   "/bff/customer/entry",
   "/bff/realtime",
+  "/api/v1/public/stores/:store_public_id/menu",
   "/health",
   "/ready",
   "unmatched",
@@ -36,6 +38,7 @@ export interface RequestErrorLogger {
 export interface AppOptions {
   correlationAcceptanceHandler?: RequestHandler;
   customerEntry?: CustomerEntryHandler;
+  customerMenu?: CustomerMenuHandler;
   errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
   now?: () => string;
@@ -86,6 +89,7 @@ function createErrorHandler(errorLogger: RequestErrorLogger | undefined): ErrorR
 export function createApp({
   correlationAcceptanceHandler,
   customerEntry,
+  customerMenu,
   errorLogger,
   healthReadiness,
   now = () => new Date().toISOString(),
@@ -120,6 +124,10 @@ export function createApp({
   });
   app.get("/bff/realtime", realtime?.handler() ?? unavailableRealtimeHandler);
   app.post("/bff/customer/entry", customerEntry?.handler() ?? unavailableCustomerEntryHandler);
+  app.get(
+    "/api/v1/public/stores/:store_public_id/menu",
+    customerMenu?.handler() ?? unavailableCustomerMenuHandler,
+  );
   if (correlationAcceptanceHandler !== undefined)
     app.post("/__acceptance/request-command-event", correlationAcceptanceHandler);
   app.use((_request, response) =>

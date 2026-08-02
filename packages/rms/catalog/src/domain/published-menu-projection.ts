@@ -60,7 +60,7 @@ export interface PublishedMenuProjection {
   readonly sourceAggregateVersion: number;
   readonly sourceCheckpoint: CatalogReference;
   readonly lastRebuiltAt: CatalogInstant;
-  readonly freshnessStatus: "Fresh";
+  readonly freshnessStatus: "Fresh" | "Stale" | "Rebuilding" | "Failed";
   readonly snapshot: PublishedMenuSnapshot;
 }
 export interface MenuPublishedFact {
@@ -191,6 +191,31 @@ export function parsePublishedMenuSnapshot(value: PublishedMenuSnapshot): Publis
     effectiveFrom,
     effectiveUntil,
     sections,
+  });
+}
+
+export function parsePublishedMenuProjection(
+  value: PublishedMenuProjection,
+): PublishedMenuProjection {
+  const snapshot = parsePublishedMenuSnapshot(value.snapshot);
+  if (
+    value.projectionName !== "catalog_published_menu_v1" ||
+    value.projectionVersion !== 1 ||
+    !Number.isSafeInteger(value.sourceAggregateVersion) ||
+    value.sourceAggregateVersion < 1 ||
+    !["Fresh", "Stale", "Rebuilding", "Failed"].includes(value.freshnessStatus)
+  )
+    invalid();
+  return Object.freeze({
+    projectionName: value.projectionName,
+    projectionVersion: value.projectionVersion,
+    generationReference: parseCatalogReference(value.generationReference),
+    sourceEventReference: parseCatalogReference(value.sourceEventReference),
+    sourceAggregateVersion: value.sourceAggregateVersion,
+    sourceCheckpoint: parseCatalogReference(value.sourceCheckpoint),
+    lastRebuiltAt: parseCatalogInstant(value.lastRebuiltAt),
+    freshnessStatus: value.freshnessStatus,
+    snapshot,
   });
 }
 
