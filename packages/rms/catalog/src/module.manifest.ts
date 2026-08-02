@@ -16,8 +16,18 @@ const moduleManifestInput =
         layer: "BOP",
       },
       {
+        moduleName: "effective-period",
+        packageName: "@bop/effective-period",
+        layer: "BOP",
+      },
+      {
         moduleName: "permission",
         packageName: "@bop/permission",
+        layer: "BOP",
+      },
+      {
+        moduleName: "publishing",
+        packageName: "@bop/publishing",
         layer: "BOP",
       },
       {
@@ -57,6 +67,10 @@ const moduleManifestInput =
         "option_set_operation_record",
         "availability_rule",
         "availability_rule_operation_record",
+        "menu_publication_revision",
+        "menu_publication_release",
+        "menu_release_effective_period",
+        "menu_publication_operation_record",
       ],
     },
     ownedJobs: [],

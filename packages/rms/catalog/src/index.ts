@@ -12,3 +12,7 @@ export * from "./application/ports/option-set-ports.js";
 export * from "./contracts/availability.js";
 export * from "./application/availability-service.js";
 export * from "./application/ports/availability-ports.js";
+export * from "./contracts/menu-publication.js";
+export * from "./domain/menu-publication.js";
+export * from "./application/menu-publication-service.js";
+export * from "./application/ports/menu-publication-ports.js";

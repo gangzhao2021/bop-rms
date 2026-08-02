@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1023 — Store Availability Overlay locally verified with recorded platform boundaries from main@949b4218ce64409e7318df17c5846ddb8febec35`
+- Current discussion node: `WP-1024 — Menu Draft / Publish / Archive locally verified with recorded platform boundaries from main@70cce26bdc6d12f7c8f5970435f538f01c188f39`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,8 +17,20 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1023 — Store Availability Overlay` is locally verified with recorded platform boundaries
-  from exact integrated predecessor `main@949b4218ce64409e7318df17c5846ddb8febec35`. The bounded
+- `WP-1024 — Menu Draft / Publish / Archive` is locally verified with recorded platform
+  boundaries from exact integrated predecessor `main@70cce26bdc6d12f7c8f5970435f538f01c188f39`.
+  It composes the accepted Publishing and Effective Period contracts behind Catalog-owned
+  `catalog.menu.*` authorization. Exact-snapshot validation and independent approval evidence
+  guard immutable Menu Version releases; effective overlap fails closed; releases、lifecycle
+  revisions and operations are append-only under forced Brand RLS. Catalog tests are `32/32 PASS`;
+  WP-1024 and each WP-1020–1023 isolated PostgreSQL matrix are `1/1 PASS`. WP-1025 projection、
+  WP-1026 API、WP-1027 UI、Events、scheduler、real facts and External Evidence remain absent.
+  Exact results are recorded in `docs/spec/work-packages/WP-1024.md`.
+
+- `WP-1023 — Store Availability Overlay` is implemented、verified、integrated and cleaned at
+  squash `70cce26bdc6d12f7c8f5970435f538f01c188f39`. PR #110 passed exact-head run/job
+  `30728308811 / 91443965986`; post-merge exact-main run/job
+  `30728687971 / 91444943080` passed. The bounded
   candidate adds Catalog-owned Brand defaults and exact Store overlays for SKU、channel、order
   type and UTC effective scope. Resolution selects Store specificity before priority, fails closed
   on conflicting equal-priority rules, and applies fresh exact-scope Kill Switch/Inventory safety
