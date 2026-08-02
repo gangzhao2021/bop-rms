@@ -66,6 +66,7 @@ describe("migration catalog", () => {
       "1300_001_create_cart_aggregate",
       "1300_002_alter_cart_item_commands",
       "1300_003_alter_cart_selection_evidence",
+      "1300_004_create_cart_quote_attachment",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -212,6 +213,19 @@ describe("migration catalog", () => {
     expect(migration?.metadata.phase).toBe("expand");
     expect(migration?.sql).toContain("catalog_selection_evidence_json jsonb");
     expect(migration?.sql).toContain("catalog_selection_evidence_json IS NULL");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1203 Cart Quote attachment migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1300_004_create_cart_quote_attachment",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/ordering");
+    expect(migration?.metadata.schema).toBe("rms_ordering");
+    for (const table of ["cart_quote_attachment", "cart_quote_attachment_line"])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_ordering.${table}`);
+    expect(migration?.sql).toContain("interval '24 hours'");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

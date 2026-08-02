@@ -26,6 +26,22 @@ const databaseAccessManifestInput = {
       retentionCategory: "ephemeral-technical",
       piiClassification: ["indirect_identifier", "personal", "health"],
     },
+    {
+      table: "cart_quote_attachment",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "cart_quote_attachment_line",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
   ],
   accesses: [],
 } as const;

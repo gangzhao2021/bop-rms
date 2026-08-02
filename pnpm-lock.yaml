@@ -384,6 +384,9 @@ importers:
       '@rms/catalog':
         specifier: workspace:*
         version: link:../catalog
+      '@rms/pricing':
+        specifier: workspace:*
+        version: link:../pricing
 
   packages/rms/pricing:
     dependencies:

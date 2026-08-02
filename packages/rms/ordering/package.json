@@ -19,6 +19,7 @@
   "dependencies": {
     "@bop/audit": "workspace:*",
     "@bop/identity": "workspace:*",
-    "@rms/catalog": "workspace:*"
+    "@rms/catalog": "workspace:*",
+    "@rms/pricing": "workspace:*"
   }
 }
