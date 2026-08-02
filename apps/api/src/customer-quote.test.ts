@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { PriceQuoteSnapshot } from "@rms/pricing";
+import type { PriceQuoteRequoteResult, PriceQuoteSnapshot } from "@rms/pricing";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import {
@@ -80,6 +80,17 @@ function quote(): PriceQuoteSnapshot {
   } as unknown as PriceQuoteSnapshot;
 }
 
+function requote(): PriceQuoteRequoteResult {
+  return {
+    previousQuoteReference: id(99) as never,
+    replacementQuote: quote(),
+    change: "ReconfirmationRequired",
+    totalChange: { amountMinor: 100n, currencyCode: "CAD" } as never,
+    requiresReconfirmation: true,
+    evaluatedAt: at,
+  };
+}
+
 class Port implements CustomerQuotePort {
   readonly calls: QuoteCartCommand[] = [];
   result: QuoteCartResult = { status: "Created", quote: quote() };
@@ -129,7 +140,7 @@ async function post(
   });
 }
 
-describe("WP-1103 Quote Creation API", () => {
+describe("WP-1103/1104 Customer Quote API", () => {
   it("passes only authoritative Cart identity/version/session/idempotency context", async () => {
     const service = new Port();
     const response = await post(await listen(service));
@@ -150,6 +161,38 @@ describe("WP-1103 Quote Creation API", () => {
     };
     expect(body.quote.total.amountMinor).toBe("1130");
     expect(body.quote.lines).toHaveLength(1);
+  });
+
+  it("returns the exact current Quote without recalculating its snapshot", async () => {
+    const service = new Port();
+    service.result = { status: "Current", quote: quote() };
+    const response = await post(await listen(service));
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { quote: { priceChange: unknown } };
+    expect(body.quote.priceChange).toBeNull();
+  });
+
+  it("returns a replacement Quote with an explicit price-increase decision", async () => {
+    const service = new Port();
+    service.result = { status: "Requoted", requote: requote() };
+    const response = await post(await listen(service));
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      quote: {
+        priceChange: {
+          outcome: string;
+          totalChange: { amountMinor: string };
+          requiresReconfirmation: boolean;
+        };
+      };
+    };
+    expect(body.quote.priceChange).toEqual({
+      previousQuoteReference: id(99),
+      outcome: "ReconfirmationRequired",
+      totalChange: { amountMinor: "100", currency: "CAD" },
+      requiresReconfirmation: true,
+      evaluatedAt: at,
+    });
   });
 
   it("never accepts client price, tax, total or open fields", async () => {

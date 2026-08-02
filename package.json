@@ -67,6 +67,7 @@
     "pricing-tax-configuration:acceptance": "pnpm --filter @rms/pricing test && vitest run --config packages/database/vitest.tax-configuration.config.ts",
     "pricing-price-resolution:acceptance": "pnpm --filter @rms/pricing test && vitest run --config packages/database/vitest.price-resolution.config.ts",
     "pricing-quote:acceptance": "pnpm --filter @rms/pricing test && pnpm --filter @bop-rms/api customer-quote:acceptance && vitest run --config packages/database/vitest.price-quote.config.ts",
+    "pricing-quote-lifecycle:acceptance": "pnpm --filter @rms/pricing test && pnpm --filter @bop-rms/api customer-quote:acceptance && vitest run --config packages/database/vitest.price-quote.config.ts",
     "outbox:acceptance": "vitest run --config packages/database/vitest.outbox.config.ts",
     "outbox-dispatcher:acceptance": "vitest run --config packages/database/vitest.outbox-dispatcher.config.ts",
     "consumer-inbox:acceptance": "vitest run --config packages/database/vitest.consumer-inbox.config.ts",
