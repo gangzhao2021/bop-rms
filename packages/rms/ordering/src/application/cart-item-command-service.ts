@@ -4,12 +4,14 @@ import {
   CartError,
   parseCartAggregate,
   parseCartItem,
+  parseCatalogSelectionEvidence,
   parseCustomerNote,
   parseOrderingHash,
   parseOrderingInstant,
   parseOrderingReference,
   type CartAggregate,
   type CartOptionSelection,
+  type CatalogSelectionEvidence,
   type OrderingInstant,
   type OrderingReference,
 } from "../domain/cart.js";
@@ -233,6 +235,7 @@ function selections(value: unknown): readonly CartOptionSelection[] {
     quantity: 1,
     optionSelections: value,
     customerNote: null,
+    catalogSelectionEvidence: null,
     addedByActorReference: "018f5000-0000-7000-8000-000000000004",
     addedByParticipantReference: null,
     addedAt: "2026-08-02T00:00:00.000Z",
@@ -248,10 +251,107 @@ function itemQuantity(value: unknown): number {
     quantity: value,
     optionSelections: [],
     customerNote: null,
+    catalogSelectionEvidence: null,
     addedByActorReference: "018f5000-0000-7000-8000-000000000004",
     addedByParticipantReference: null,
     addedAt: "2026-08-02T00:00:00.000Z",
   }).quantity;
+}
+
+function sameSelections(
+  left: readonly CartOptionSelection[],
+  right: readonly { readonly optionReference: string; readonly quantity: number }[],
+) {
+  return (
+    left.length === right.length &&
+    left.every(
+      (item, index) =>
+        item.optionReference === right[index]?.optionReference &&
+        item.quantity === right[index]?.quantity,
+    )
+  );
+}
+
+async function catalogEvidence(
+  ports: CartItemCommandPorts,
+  cart: CartAggregate,
+  sellableReference: OrderingReference,
+  optionSelections: readonly CartOptionSelection[],
+  observedAt: OrderingInstant,
+): Promise<CatalogSelectionEvidence> {
+  let result;
+  try {
+    result = await ports.catalog.validateSelection({
+      brandReference: cart.brandReference as never,
+      storeReference: cart.storeReference as never,
+      sourceChannel: cart.sourceChannel,
+      orderType: cart.orderType,
+      sellableReference: sellableReference as never,
+      optionSelections: optionSelections as never,
+      observedAt: observedAt as never,
+    });
+  } catch {
+    throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  }
+  try {
+    const status = Object.getOwnPropertyDescriptor(result, "status");
+    if (status === undefined || !Object.hasOwn(status, "value")) throw new Error("bad result");
+    if (status.value === "Rejected") {
+      const rejected = exact(result, ["status", "reason"]);
+      if (
+        ![
+          "SELLABLE_UNAVAILABLE",
+          "OPTION_NOT_ENABLED",
+          "OPTION_QUANTITY_INVALID",
+          "RULE_UNSATISFIED",
+          "OPTION_CONFLICT",
+        ].includes(String(rejected.reason))
+      )
+        throw new Error("bad result");
+      throw new CartError("CART_SELECTION_INVALID");
+    }
+    const accepted = exact(result, [
+      "status",
+      "brandReference",
+      "storeReference",
+      "sourceChannel",
+      "orderType",
+      "sellableReference",
+      "optionSelections",
+      "observedAt",
+      "menuVersionReference",
+      "productVersionReference",
+      "catalogChannelCode",
+      "catalogOrderTypeCode",
+      "ruleEvidence",
+      "validatedAt",
+    ]);
+    if (
+      accepted.status !== "Accepted" ||
+      parseOrderingReference(accepted.brandReference) !== cart.brandReference ||
+      parseOrderingReference(accepted.storeReference) !== cart.storeReference ||
+      accepted.sourceChannel !== cart.sourceChannel ||
+      accepted.orderType !== cart.orderType ||
+      parseOrderingReference(accepted.sellableReference) !== sellableReference ||
+      parseOrderingInstant(accepted.observedAt) !== observedAt ||
+      !Array.isArray(accepted.optionSelections) ||
+      !sameSelections(optionSelections, selections(accepted.optionSelections))
+    )
+      throw new Error("bad result");
+    const evidence = parseCatalogSelectionEvidence({
+      menuVersionReference: accepted.menuVersionReference,
+      productVersionReference: accepted.productVersionReference,
+      catalogChannelCode: accepted.catalogChannelCode,
+      catalogOrderTypeCode: accepted.catalogOrderTypeCode,
+      ruleEvidence: accepted.ruleEvidence,
+      validatedAt: accepted.validatedAt,
+    });
+    if (evidence === null || evidence.validatedAt !== observedAt) throw new Error("bad result");
+    return evidence;
+  } catch (error) {
+    if (error instanceof CartError && error.code === "CART_SELECTION_INVALID") throw error;
+    throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  }
 }
 
 function canMutateItem(
@@ -319,7 +419,20 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const operationReference = parseOrderingReference(raw.operationReference);
       const requestedAt = parseOrderingInstant(raw.requestedAt);
       const expectedVersion = version(raw.expectedAggregateVersion);
-      const intent = intentHash(ports, "Add", raw);
+      const sellableReference = parseOrderingReference(raw.sellableReference);
+      const quantity = itemQuantity(raw.quantity);
+      const optionSelections = selections(raw.optionSelections);
+      const customerNote = parseCustomerNote(raw.customerNote);
+      const intent = intentHash(ports, "Add", {
+        cartReference,
+        expectedAggregateVersion: expectedVersion,
+        sellableReference,
+        quantity,
+        optionSelections,
+        customerNote,
+        operationReference,
+        requestedAt,
+      });
       const current = await context(ports, "Add", cartReference, operationReference, requestedAt);
       const prior = await replay(ports, {
         action: "Add",
@@ -333,14 +446,22 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       if (current.aggregate.aggregateVersion !== expectedVersion)
         throw new CartError("CART_VERSION_CONFLICT");
       if (current.aggregate.items.length >= 100) throw new CartError("CART_ITEM_LIMIT_REACHED");
+      const selectionEvidence = await catalogEvidence(
+        ports,
+        current.aggregate,
+        sellableReference,
+        optionSelections,
+        requestedAt,
+      );
       const cartItemReference = parseOrderingReference(ports.references.generate("CartItem"));
       const item = parseCartItem({
         cartItemReference,
         cartReference,
-        sellableReference: raw.sellableReference,
-        quantity: itemQuantity(raw.quantity),
-        optionSelections: selections(raw.optionSelections),
-        customerNote: parseCustomerNote(raw.customerNote),
+        sellableReference,
+        quantity,
+        optionSelections,
+        customerNote,
+        catalogSelectionEvidence: selectionEvidence,
         addedByActorReference: current.session.sessionReference,
         addedByParticipantReference:
           current.aggregate.orderType === "DineIn"
@@ -383,7 +504,19 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const operationReference = parseOrderingReference(raw.operationReference);
       const requestedAt = parseOrderingInstant(raw.requestedAt);
       const expectedVersion = version(raw.expectedAggregateVersion);
-      const intent = intentHash(ports, "Update", raw);
+      const quantity = itemQuantity(raw.quantity);
+      const optionSelections = selections(raw.optionSelections);
+      const customerNote = parseCustomerNote(raw.customerNote);
+      const intent = intentHash(ports, "Update", {
+        cartReference,
+        cartItemReference,
+        expectedAggregateVersion: expectedVersion,
+        quantity,
+        optionSelections,
+        customerNote,
+        operationReference,
+        requestedAt,
+      });
       const current = await context(
         ports,
         "Update",
@@ -408,11 +541,19 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       if (item === undefined) throw new CartError("CART_ITEM_NOT_FOUND");
       if (!canMutateItem(item, current.aggregate, current.session))
         throw new CartError("CART_PERMISSION_DENIED");
+      const selectionEvidence = await catalogEvidence(
+        ports,
+        current.aggregate,
+        item.sellableReference,
+        optionSelections,
+        requestedAt,
+      );
       const replacement = parseCartItem({
         ...item,
-        quantity: itemQuantity(raw.quantity),
-        optionSelections: selections(raw.optionSelections),
-        customerNote: parseCustomerNote(raw.customerNote),
+        quantity,
+        optionSelections,
+        customerNote,
+        catalogSelectionEvidence: selectionEvidence,
       });
       const aggregate = parseCartAggregate({
         ...current.aggregate,
@@ -448,7 +589,13 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const operationReference = parseOrderingReference(raw.operationReference);
       const requestedAt = parseOrderingInstant(raw.requestedAt);
       const expectedVersion = version(raw.expectedAggregateVersion);
-      const intent = intentHash(ports, "Remove", raw);
+      const intent = intentHash(ports, "Remove", {
+        cartReference,
+        cartItemReference,
+        expectedAggregateVersion: expectedVersion,
+        operationReference,
+        requestedAt,
+      });
       const current = await context(
         ports,
         "Remove",

@@ -14,9 +14,14 @@ WP-1201 adds Guest Session-bound Add/Update/Remove commands with exact Cart opti
 Note is normalized bounded plain text classified as personal/possible health data; it never enters
 telemetry, URLs, analytics, screenshots or non-synthetic fixtures.
 
-The module does not implement Cart creation transport, Catalog Option validation, Pricing Quote
-attachment, expiration/abandonment actions, Checkout, Order, Event, Projection, UI, or external
-evidence. Those remain owned by later Work Packages.
+WP-1202 requires Add and Update to obtain one exact current Catalog `Validate Selection` result.
+Accepted Cart Items retain pinned Menu, Product, Binding and Option Set version evidence. Catalog
+owns Sellable/Option validity; Ordering fails closed on rejected, unavailable, stale or mismatched
+evidence and never reads Catalog private tables.
+
+The module does not implement Cart creation transport, Pricing Quote attachment,
+expiration/abandonment actions, Checkout, Order, Event, Projection, UI, or external evidence. Those
+remain owned by later Work Packages.
 Cart identifiers and attribution references are indirect identifiers and are prohibited from logs,
 URLs, analytics, screenshots, and non-synthetic fixtures.
 

@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@bop/audit": "workspace:*",
-    "@bop/identity": "workspace:*"
+    "@bop/identity": "workspace:*",
+    "@rms/catalog": "workspace:*"
   }
 }

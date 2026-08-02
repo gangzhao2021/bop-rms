@@ -9,6 +9,9 @@ WP-1023 adds Catalog-owned Brand-default and exact-Store Availability Rule confi
 channel、order type and UTC effective scope. Store specificity wins before priority; ambiguous
 equal-priority decisions and invalid safety evidence fail closed. Fresh exact-scope Kill Switch and
 Inventory evidence can constrain resolution without becoming Catalog-owned facts.
+WP-1202 adds the public current Sellable/Option `Validate Selection` contract. It validates exact
+Brand/Store/channel/order-type/time scope, enabled Options, quantities, rule limits, triggers and
+conflicts, then returns pinned Menu/Product/Binding/Option Set evidence for Ordering.
 
 All mutations use exact Tenant/Permission/Audit evidence, Product expected version and an
 idempotent operation reference. Product/SKU codes are Brand-unique; unit quantity is canonical
@@ -17,6 +20,5 @@ positive decimal text. SKU never becomes an independent Aggregate.
 This package owns Availability configuration, not Inventory balance or downstream effective Menu
 publication. It does not publish Option Sets or own price、tax calculation、inventory、Recipe、Order
 or Payment. Draft Menu structure、Placement and Option Binding do not authorize availability or
-purchase. The package
-does not publish Catalog content or expose HTTP/UI/Projection/Event contracts. Fixtures are
-synthetic and External Evidence is not claimed.
+purchase. Catalog does not calculate price/tax, mutate Cart/Order, or expose this validation through
+HTTP/UI in WP-1202. Fixtures are synthetic and External Evidence is not claimed.

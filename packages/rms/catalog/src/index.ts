@@ -28,3 +28,6 @@ export * from "./contracts/allergen-provenance.js";
 export * from "./domain/allergen-provenance.js";
 export * from "./application/allergen-provenance-service.js";
 export * from "./application/ports/allergen-provenance-ports.js";
+export * from "./contracts/selection-validation.js";
+export * from "./application/selection-validation-service.js";
+export * from "./application/ports/selection-validation-ports.js";

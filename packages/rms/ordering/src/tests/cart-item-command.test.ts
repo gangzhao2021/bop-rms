@@ -29,6 +29,10 @@ const ids = {
   participant: id(16),
   otherParticipant: id(17),
   otherSession: id(18),
+  menuVersion: id(19),
+  productVersion: id(20),
+  binding: id(21),
+  optionSetVersion: id(22),
 };
 const createdAt = "2026-08-02T14:00:00.000Z";
 const requestedAt = "2026-08-02T14:01:00.000Z";
@@ -113,12 +117,39 @@ function fixture(
     session?: GuestSession;
     auditOverride?: Partial<AppendAuditRecordInput>;
     denied?: boolean;
+    catalogMode?: "Rejected" | "Mismatch" | "Failure";
   } = {},
 ) {
   let aggregate = options.aggregate ?? cart();
   const operations = new Map<string, CartItemOperationRecord>();
   let generated = 0;
+  let validations = 0;
   const ports: CartItemCommandPorts = {
+    catalog: {
+      async validateSelection(input) {
+        validations += 1;
+        if (options.catalogMode === "Failure") throw new Error("synthetic Catalog failure");
+        if (options.catalogMode === "Rejected")
+          return { status: "Rejected", reason: "OPTION_NOT_ENABLED" };
+        return {
+          status: "Accepted",
+          ...input,
+          storeReference:
+            options.catalogMode === "Mismatch" ? (id(90) as never) : input.storeReference,
+          menuVersionReference: ids.menuVersion as never,
+          productVersionReference: ids.productVersion as never,
+          catalogChannelCode: "PILOT_CHANNEL",
+          catalogOrderTypeCode: "PILOT_ORDER_TYPE",
+          ruleEvidence: [
+            {
+              bindingReference: ids.binding as never,
+              optionSetVersionReference: ids.optionSetVersion as never,
+            },
+          ],
+          validatedAt: input.observedAt,
+        };
+      },
+    },
     authorization: {
       async authorize(input) {
         if (options.denied) return null;
@@ -156,6 +187,7 @@ function fixture(
     service: createCartItemCommandService(ports),
     current: () => aggregate,
     generated: () => generated,
+    validations: () => validations,
   };
 }
 
@@ -183,7 +215,13 @@ describe("Cart Item Add / Update / Remove commands", () => {
     expect(retry.aggregate).toEqual(first.aggregate);
     expect(state.current()).toMatchObject({ aggregateVersion: 2 });
     expect(state.current().items).toHaveLength(1);
+    expect(state.current().items[0]?.catalogSelectionEvidence).toMatchObject({
+      menuVersionReference: ids.menuVersion,
+      productVersionReference: ids.productVersion,
+      ruleEvidence: [{ bindingReference: ids.binding }],
+    });
     expect(state.generated()).toBe(1);
+    expect(state.validations()).toBe(1);
   });
 
   it("rejects one idempotency key reused with changed intent", async () => {
@@ -274,6 +312,7 @@ describe("Cart Item Add / Update / Remove commands", () => {
       quantity: 1,
       optionSelections: [],
       customerNote: null,
+      catalogSelectionEvidence: null,
       addedByActorReference: ids.session,
       addedByParticipantReference: ids.participant,
       addedAt: createdAt,
@@ -332,5 +371,25 @@ describe("Cart Item Add / Update / Remove commands", () => {
     await expect(fixture().service.add(hostile)).rejects.toMatchObject({
       code: "CART_INPUT_INVALID",
     });
+    const hostileOption = Object.defineProperty(
+      { optionReference: ids.option, quantity: 1 },
+      "quantity",
+      { enumerable: true, get: () => 1 },
+    );
+    await expect(
+      fixture().service.add(addInput({ optionSelections: [hostileOption] })),
+    ).rejects.toMatchObject({ code: "CART_INPUT_INVALID" });
+  });
+
+  it("fails closed when Catalog rejects, mismatches or cannot validate the selection", async () => {
+    await expect(
+      fixture({ catalogMode: "Rejected" }).service.add(addInput()),
+    ).rejects.toMatchObject({ code: "CART_SELECTION_INVALID" });
+    await expect(
+      fixture({ catalogMode: "Mismatch" }).service.add(addInput()),
+    ).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
+    await expect(fixture({ catalogMode: "Failure" }).service.add(addInput())).rejects.toMatchObject(
+      { code: "CART_DEPENDENCY_UNAVAILABLE" },
+    );
   });
 });
