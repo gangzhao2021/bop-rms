@@ -194,6 +194,22 @@ const databaseAccessManifestInput = {
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
     },
+    {
+      table: "availability_rule",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "availability_rule_operation_record",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
   ],
   accesses: [],
 } as const;

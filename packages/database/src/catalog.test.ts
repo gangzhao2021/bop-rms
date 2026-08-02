@@ -56,10 +56,21 @@ describe("migration catalog", () => {
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
       "1102_001_create_option_set_binding",
+      "1103_001_create_availability_rule",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
     ).toBe(true);
+  });
+
+  it("registers the exact WP-1023 Availability Rule migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1103_001_create_availability_rule",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/catalog");
+    expect(migration?.sql).toContain("CREATE TABLE rms_catalog.availability_rule");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
   it("registers the exact WP-1022 Option Set and Product Binding migration", async () => {
