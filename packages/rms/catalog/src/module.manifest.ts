@@ -21,6 +21,11 @@ const moduleManifestInput =
         layer: "BOP",
       },
       {
+        moduleName: "eventing",
+        packageName: "@bop/eventing",
+        layer: "BOP",
+      },
+      {
         moduleName: "permission",
         packageName: "@bop/permission",
         layer: "BOP",
@@ -36,8 +41,8 @@ const moduleManifestInput =
         layer: "BOP",
       },
     ],
-    consumedEvents: [],
-    publishedEvents: [],
+    consumedEvents: ["rms.catalog.menu-published.v1"],
+    publishedEvents: ["rms.catalog.menu-published.v1"],
     ownedDatabase: {
       schema: "rms_catalog",
       tables: [
@@ -71,6 +76,11 @@ const moduleManifestInput =
         "menu_publication_release",
         "menu_release_effective_period",
         "menu_publication_operation_record",
+        "published_menu_projection_generation",
+        "published_menu_projection",
+        "published_menu_projection_section",
+        "published_menu_projection_sellable",
+        "published_menu_projection_checkpoint",
       ],
     },
     ownedJobs: [],

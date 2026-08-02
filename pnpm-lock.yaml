@@ -336,6 +336,9 @@ importers:
       '@bop/effective-period':
         specifier: workspace:*
         version: link:../../bop/effective-period
+      '@bop/eventing':
+        specifier: workspace:*
+        version: link:../../bop/eventing
       '@bop/permission':
         specifier: workspace:*
         version: link:../../bop/permission

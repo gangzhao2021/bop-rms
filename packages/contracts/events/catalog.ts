@@ -138,4 +138,31 @@ export function registeredEventMetricLabels(
   return Object.freeze(catalog.map(identity));
 }
 
-export const eventCatalog = defineEventCatalog([]);
+const menuPublishedPayload = z.strictObject({
+  menuReference: z.uuid(),
+  menuVersionReference: z.uuid(),
+  releaseReference: z.uuid(),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  effectiveFrom: z.iso.datetime({ offset: false }),
+  effectiveUntil: z.iso.datetime({ offset: false }).nullable(),
+  timeZone: z.string().min(1).max(63),
+});
+
+export const eventCatalog = defineEventCatalog([
+  {
+    eventType: "MenuPublished",
+    schemaVersion: 1,
+    ownerModule: "@rms/catalog",
+    producerModule: "@rms/catalog",
+    stability: "stable",
+    consumers: ["catalog.published-menu-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "none",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: menuPublishedPayload,
+  },
+]);

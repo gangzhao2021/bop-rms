@@ -3,6 +3,7 @@ import { revalidateTenantContext } from "@bop/permission";
 import {
   createPublishingLifecycleRecord,
   createPublishingReleaseRecord,
+  parsePublishingDigest,
   type PublishingLifecycleRecord,
 } from "@bop/publishing";
 
@@ -10,12 +11,7 @@ import type {
   MenuPublicationCommand,
   MenuPublicationRecord,
 } from "../contracts/menu-publication.js";
-import {
-  CatalogError,
-  parseCatalogHash,
-  parseCatalogInstant,
-  parseCatalogReference,
-} from "../contracts/product.js";
+import { CatalogError, parseCatalogInstant, parseCatalogReference } from "../contracts/product.js";
 import {
   transitionMenuPublication,
   validateMenuEffectivePeriod,
@@ -24,6 +20,7 @@ import type {
   MenuPublicationOperationRecord,
   MenuPublicationPorts,
 } from "./ports/menu-publication-ports.js";
+import { createMenuPublishedEnvelope } from "./menu-published-event.js";
 
 function dependency(error?: unknown): never {
   if (error instanceof CatalogError) throw error;
@@ -46,7 +43,7 @@ function parseCommand(value: MenuPublicationCommand): MenuPublicationCommand {
     menuReference: parseCatalogReference(value.menuReference),
     menuVersionReference: parseCatalogReference(value.menuVersionReference),
     expectedVersion: value.expectedVersion,
-    snapshotDigest: parseCatalogHash(value.snapshotDigest),
+    snapshotDigest: parsePublishingDigest(value.snapshotDigest),
     requestedAt: parseCatalogInstant(value.requestedAt),
     effectivePeriod: value.effectivePeriod,
   });
@@ -93,6 +90,7 @@ function verifyAuthority(
       throw new Error("denied");
     return {
       brandReference: parseCatalogReference(context.brand.brandReference),
+      actorReference: parseCatalogReference(context.actor.actorReference),
       audit,
     };
   } catch {
@@ -209,8 +207,25 @@ export function createMenuPublicationService(ports: MenuPublicationPorts) {
       )
         throw new CatalogError("CATALOG_LIFECYCLE_CONFLICT");
       const operation = Object.freeze({ command, intentHash: commandIntent, result });
+      const event =
+        command.action === "Publish"
+          ? createMenuPublishedEnvelope({
+              eventReference: ports.references.generate("Event"),
+              operationReference: command.operationReference,
+              correlationReference: authority.audit.correlationId,
+              actorReference: authority.actorReference,
+              menuReference: command.menuReference,
+              brandReference: authority.brandReference,
+              record: result,
+            })
+          : null;
       const saved = await ports.repository
-        .commit({ operation, expectedVersion: command.expectedVersion, audit: authority.audit })
+        .commit({
+          operation,
+          expectedVersion: command.expectedVersion,
+          audit: authority.audit,
+          event,
+        })
         .catch(dependency);
       return Object.freeze({
         status: "Applied" as const,

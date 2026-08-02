@@ -19,6 +19,7 @@
   "dependencies": {
     "@bop/audit": "workspace:*",
     "@bop/effective-period": "workspace:*",
+    "@bop/eventing": "workspace:*",
     "@bop/permission": "workspace:*",
     "@bop/publishing": "workspace:*",
     "@bop/tenant": "workspace:*"

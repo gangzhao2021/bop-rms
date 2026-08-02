@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1024 — Menu Draft / Publish / Archive locally verified with recorded platform boundaries from main@70cce26bdc6d12f7c8f5970435f538f01c188f39`
+- Current discussion node: `WP-1025 — Published Menu Projection locally verified with recorded platform boundaries from main@92800dd59735da76d108fb2d16f7b70308afe8a5`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,9 +17,25 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1024 — Menu Draft / Publish / Archive` is locally verified with recorded platform
-  boundaries from exact integrated predecessor `main@70cce26bdc6d12f7c8f5970435f538f01c188f39`.
-  It composes the accepted Publishing and Effective Period contracts behind Catalog-owned
+- `WP-1025 — Published Menu Projection` is locally verified with recorded platform boundaries from
+  exact integrated predecessor `main@92800dd59735da76d108fb2d16f7b70308afe8a5`. It registers the
+  authoritative `MenuPublished.v1` fact、composes its atomic Outbox envelope with Menu publish and
+  builds a Catalog-owned idempotent、version-monotonic、generation-switched projection from an
+  injected public exact-snapshot contract. Projection content includes exact Menu/release/effective
+  scope、Sections、Sellable snapshots and Option rules, with explicit checkpoint and freshness.
+  Catalog tests are `36/36 PASS`; Event Catalog tests are `13/13 PASS`; WP-1025 and each
+  WP-1020–1024 isolated PostgreSQL matrix are `1/1 PASS`; the complete 29-migration isolated
+  lifecycle passes. Customer API、price/tax、allergen disclosure、UI and External Evidence remain
+  absent. Exact results are recorded in `docs/spec/work-packages/WP-1025.md`.
+
+- `WP-1024 — Menu Draft / Publish / Archive` is implemented、verified、integrated and cleaned at
+  squash `92800dd59735da76d108fb2d16f7b70308afe8a5`. PR #111 passed final exact head
+  `228d5429da14e85af57d51e3bdba30e1dd30f651` in run/job
+  `30730513146 / 91449949118`; post-merge exact-main run/job
+  `30730913183 / 91451077151` passed. The first exact head exposed missing accepted Domain
+  dependency classifications; the next exposed the stale 27-migration WP-0024 inventory. Both
+  deterministic hard stops were corrected and the final exact head passed. The implementation
+  composes the accepted Publishing and Effective Period contracts behind Catalog-owned
   `catalog.menu.*` authorization. Exact-snapshot validation and independent approval evidence
   guard immutable Menu Version releases; effective overlap fails closed; releases、lifecycle
   revisions and operations are append-only under forced Brand RLS. Catalog tests are `32/32 PASS`;

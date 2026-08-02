@@ -39,9 +39,17 @@ const registration = (
 });
 
 describe("Event Catalog source", () => {
-  it("starts with no invented concrete Event or metric label", () => {
-    expect(eventCatalog).toEqual([]);
-    expect(registeredEventMetricLabels(eventCatalog)).toEqual([]);
+  it("registers only the authoritative MenuPublished fact and bounded metric label", () => {
+    expect(eventCatalog).toHaveLength(1);
+    expect(eventCatalog[0]).toMatchObject({
+      eventType: "MenuPublished",
+      schemaVersion: 1,
+      ownerModule: "@rms/catalog",
+      consumers: ["catalog.published-menu-projection:v1"],
+      tenantScope: "brand",
+      replaySemantics: "idempotent",
+    });
+    expect(registeredEventMetricLabels(eventCatalog)).toEqual(["MenuPublished:v1"]);
   });
 
   it("accepts one exact synthetic registration and returns a bounded label", () => {
@@ -168,13 +176,14 @@ describe("Event Catalog generation", () => {
     });
   });
 
-  it("is deterministic and contains no host, timestamp, transport or concrete Event", async () => {
+  it("is deterministic and contains no host, generation timestamp or transport", async () => {
     const first = renderCatalogArtifacts(eventCatalog);
     const second = renderCatalogArtifacts(eventCatalog);
     expect(first).toEqual(second);
     expect(first.asyncApi).toContain('"asyncapi": "3.0.0"');
     expect(first.asyncApi).not.toMatch(/server|broker|2026-|SyntheticChanged/u);
-    expect(first.markdown).toContain("No concrete Events registered");
+    expect(first.asyncApi).toContain("MenuPublished");
+    expect(first.markdown).toContain("MenuPublished");
   });
 
   it("passes the official parser with no error diagnostics", async () => {

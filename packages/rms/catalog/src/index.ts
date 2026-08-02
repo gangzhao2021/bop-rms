@@ -16,3 +16,8 @@ export * from "./contracts/menu-publication.js";
 export * from "./domain/menu-publication.js";
 export * from "./application/menu-publication-service.js";
 export * from "./application/ports/menu-publication-ports.js";
+export * from "./contracts/published-menu-projection.js";
+export * from "./domain/published-menu-projection.js";
+export * from "./application/menu-published-event.js";
+export * from "./application/published-menu-projection-service.js";
+export * from "./application/ports/published-menu-projection-ports.js";
