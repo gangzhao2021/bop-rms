@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1028 — Pilot Ingredient / Allergen Provenance、Menu Disclosure and Publish-blocking Validation locally verified with recorded platform boundaries from main@61fccc8b887781705512793f29a39e0727e40569`
+- Current discussion node: `WP-1100 — Money / Tax Calculation Domain Contract locally verified from main@6cbfae5a63a9295ba8b2496b2bdc7d2d47bb9d64`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,9 +17,23 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1100 — Money / Tax Calculation Domain Contract` is locally verified from exact integrated
+  predecessor `main@6cbfae5a63a9295ba8b2496b2bdc7d2d47bb9d64`. It adds the provider-neutral
+  `@rms/pricing` contract for signed bigint minor-unit Money、version-pinned Currency metadata、
+  canonical decimal Tax rates、deterministic signed rounding、exclusive/inclusive Tax calculation
+  and exact stable-key allocation. Results retain replayable rule/Currency version evidence；raw
+  numbers、cross-Currency arithmetic、overflow and non-canonical rates fail closed. Package
+  acceptance is `22/22 PASS`. Store Tax Configuration、Price resolution、Quote/API、real Ontario
+  rates and professional evidence remain absent. Exact results are in
+  `docs/spec/work-packages/WP-1100.md`.
+
 - `WP-1028 — Pilot Ingredient / Allergen Provenance、Menu Disclosure and Publish-blocking
-Validation` is locally verified from exact integrated predecessor
-  `main@61fccc8b887781705512793f29a39e0727e40569`. It adds version-pinned allergen registry and
+Validation` is implemented、verified、integrated and cleaned at squash
+  `6cbfae5a63a9295ba8b2496b2bdc7d2d47bb9d64`. PR #115 passed exact head
+  `003679ecaf7ba38909b19d568baa126371c08c39` in run/job
+  `30735983438 / 91464762196`；post-merge exact-main run/job
+  `30736396556 / 91466597731` passed on same-SHA attempt 2 after attempt 1 encountered an isolated
+  PostgreSQL container-start transient. It adds version-pinned allergen registry and
   source evidence contracts、base plus Option union validation、exact Menu snapshot publication
   evidence、append-only Brand-RLS persistence and safe Customer Menu disclosure. `Unverified`、
   expired、invalidated or unresolved paths fail closed；public DTOs never claim allergen absence
