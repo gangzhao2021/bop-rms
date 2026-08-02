@@ -1,4 +1,4 @@
-import type { PriceQuoteSnapshot, PricingReference } from "@rms/pricing";
+import type { PriceQuoteRequoteResult, PriceQuoteSnapshot, PricingReference } from "@rms/pricing";
 import type { Request, RequestHandler, Response } from "express";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -14,6 +14,8 @@ export interface QuoteCartCommand {
 
 export type QuoteCartResult =
   | { readonly status: "Created"; readonly quote: PriceQuoteSnapshot }
+  | { readonly status: "Current"; readonly quote: PriceQuoteSnapshot }
+  | { readonly status: "Requoted"; readonly requote: PriceQuoteRequoteResult }
   | { readonly status: "NotFound" }
   | { readonly status: "VersionConflict" }
   | { readonly status: "IdempotencyConflict" }
@@ -95,7 +97,7 @@ function parse(request: Request, now: () => string): QuoteCartCommand {
 const money = (value: PriceQuoteSnapshot["subtotal"]) =>
   Object.freeze({ amountMinor: value.amountMinor.toString(), currency: value.currencyCode });
 
-function publicQuote(quote: PriceQuoteSnapshot) {
+function publicQuote(quote: PriceQuoteSnapshot, requote?: PriceQuoteRequoteResult) {
   return {
     schemaVersion: 1,
     quote: {
@@ -143,6 +145,16 @@ function publicQuote(quote: PriceQuoteSnapshot) {
       expiresAt: quote.expiresAt,
       warnings: [...quote.warnings],
       blockingReasons: [...quote.blockingReasons],
+      priceChange:
+        requote === undefined
+          ? null
+          : {
+              previousQuoteReference: requote.previousQuoteReference,
+              outcome: requote.change,
+              totalChange: money(requote.totalChange),
+              requiresReconfirmation: requote.requiresReconfirmation,
+              evaluatedAt: requote.evaluatedAt,
+            },
     },
   };
 }
@@ -176,11 +188,19 @@ export class CustomerQuoteHandler {
         sendError(response, "quote_service_unavailable");
         return;
       }
-      if (result.status === "Created") {
+      if (
+        result.status === "Created" ||
+        result.status === "Current" ||
+        result.status === "Requoted"
+      ) {
         try {
-          response.setHeader("ETag", `"${result.quote.quoteVersion}"`);
-          response.setHeader("Location", `/api/v1/price-quotes/${result.quote.quoteReference}`);
-          response.status(201).json(publicQuote(result.quote));
+          const quote =
+            result.status === "Requoted" ? result.requote.replacementQuote : result.quote;
+          response.setHeader("ETag", `"${quote.quoteVersion}"`);
+          response.setHeader("Location", `/api/v1/price-quotes/${quote.quoteReference}`);
+          response
+            .status(result.status === "Current" ? 200 : 201)
+            .json(publicQuote(quote, result.status === "Requoted" ? result.requote : undefined));
         } catch {
           sendError(response, "quote_service_unavailable");
         }
