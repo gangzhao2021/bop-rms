@@ -8,6 +8,19 @@ import {
 
 const id = (n: number) => `018f7400-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T16:00:00.000Z";
+const allergenDisclosure = {
+  registryVersionReference: id(30) as never,
+  items: [
+    {
+      allergenReference: id(31) as never,
+      code: "MILK" as never,
+      localizedNames: { "en-CA": "Milk", "fr-CA": "Lait" },
+      classification: "Contains" as const,
+    },
+  ],
+  allergenFreeClaim: false as const,
+  assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED" as const,
+};
 
 function projection(overrides: Partial<PublishedMenuProjection> = {}): PublishedMenuProjection {
   return {
@@ -49,6 +62,7 @@ function projection(overrides: Partial<PublishedMenuProjection> = {}): Published
               sortOrder: 1,
               pinned: true,
               configuredAvailability: "Available",
+              allergenDisclosure,
               optionRules: [
                 {
                   bindingReference: id(12) as never,
@@ -69,6 +83,7 @@ function projection(overrides: Partial<PublishedMenuProjection> = {}): Published
               sortOrder: 2,
               pinned: false,
               configuredAvailability: "Available",
+              allergenDisclosure: { ...allergenDisclosure, items: [] },
               optionRules: [],
             },
             {
@@ -80,6 +95,7 @@ function projection(overrides: Partial<PublishedMenuProjection> = {}): Published
               sortOrder: 3,
               pinned: false,
               configuredAvailability: "Unavailable",
+              allergenDisclosure: { ...allergenDisclosure, items: [] },
               optionRules: [],
             },
           ],
@@ -154,6 +170,11 @@ describe("WP-1026 Customer Menu Query", () => {
               {
                 name: "Café au lait",
                 availability: "Available",
+                allergenDisclosure: {
+                  items: [{ name: "Lait", classification: "Contains" }],
+                  allergenFreeClaim: false,
+                  assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+                },
                 displayPrice: { status: "Unavailable", reason: "PRICING_NOT_INTEGRATED" },
                 taxDisplayContext: { status: "Unavailable", reason: "FINAL_QUOTE_REQUIRED" },
                 optionRules: [{}],

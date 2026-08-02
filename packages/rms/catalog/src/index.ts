@@ -24,3 +24,7 @@ export * from "./application/ports/published-menu-projection-ports.js";
 export * from "./contracts/customer-menu-query.js";
 export * from "./application/customer-menu-query-service.js";
 export * from "./application/ports/customer-menu-query-ports.js";
+export * from "./contracts/allergen-provenance.js";
+export * from "./domain/allergen-provenance.js";
+export * from "./application/allergen-provenance-service.js";
+export * from "./application/ports/allergen-provenance-ports.js";

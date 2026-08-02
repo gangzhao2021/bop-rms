@@ -9,6 +9,10 @@ import {
 import { parsePublishingDigest } from "@bop/publishing";
 import type { PublishingDigest } from "@bop/publishing";
 import type { CatalogCode, CatalogInstant, CatalogReference } from "./product.js";
+import {
+  parseSellableAllergenDisclosure,
+  type SellableAllergenDisclosure,
+} from "./allergen-provenance.js";
 
 export interface PublishedOptionRule {
   readonly bindingReference: CatalogReference;
@@ -28,6 +32,7 @@ export interface PublishedSellableSnapshot {
   readonly pinned: boolean;
   readonly configuredAvailability: "Available" | "Unavailable";
   readonly optionRules: readonly PublishedOptionRule[];
+  readonly allergenDisclosure: SellableAllergenDisclosure;
 }
 export interface PublishedMenuSectionSnapshot {
   readonly sectionReference: CatalogReference;
@@ -143,6 +148,7 @@ function sellable(value: PublishedSellableSnapshot, defaultLocale: string) {
     pinned: value.pinned,
     configuredAvailability: value.configuredAvailability,
     optionRules: Object.freeze(value.optionRules.map(optionRule)),
+    allergenDisclosure: parseSellableAllergenDisclosure(value.allergenDisclosure, defaultLocale),
   });
 }
 

@@ -150,6 +150,17 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
             enabledOptionReferences: [...rule.enabledOptionReferences],
             defaultOptionReferences: [...rule.defaultOptionReferences],
           })),
+          allergenDisclosure: {
+            registryVersionReference: sellable.allergenDisclosure.registryVersionReference,
+            items: sellable.allergenDisclosure.items.map((allergen) => ({
+              allergenReference: allergen.allergenReference,
+              code: allergen.code,
+              name: allergen.name,
+              classification: allergen.classification,
+            })),
+            allergenFreeClaim: false,
+            assistanceCode: sellable.allergenDisclosure.assistanceCode,
+          },
           displayPrice: {
             status: sellable.displayPrice.status,
             amount: sellable.displayPrice.amount,

@@ -29,6 +29,17 @@ export interface CustomerMenuSellableDto {
   readonly pinned: boolean;
   readonly availability: "Available";
   readonly optionRules: readonly CustomerMenuOptionRuleDto[];
+  readonly allergenDisclosure: {
+    readonly registryVersionReference: CatalogReference;
+    readonly items: readonly {
+      readonly allergenReference: CatalogReference;
+      readonly code: CatalogCode;
+      readonly name: string;
+      readonly classification: "Contains" | "CrossContactPossible";
+    }[];
+    readonly allergenFreeClaim: false;
+    readonly assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED";
+  };
   readonly displayPrice: {
     readonly status: "Unavailable";
     readonly amount: null;

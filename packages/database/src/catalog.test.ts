@@ -59,6 +59,7 @@ describe("migration catalog", () => {
       "1103_001_create_availability_rule",
       "1104_001_create_menu_publication",
       "1105_001_create_published_menu_projection",
+      "1106_001_create_allergen_provenance",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -107,6 +108,24 @@ describe("migration catalog", () => {
       expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
     expect(migration?.sql).toContain("enforce_published_menu_checkpoint_order");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+  });
+
+  it("registers the exact WP-1028 allergen provenance migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1106_001_create_allergen_provenance",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/catalog");
+    for (const table of [
+      "allergen_registry_version",
+      "allergen_registry_entry",
+      "allergen_source_evidence",
+      "allergen_source_assertion",
+      "menu_allergen_validation_evidence",
+      "menu_sellable_allergen_disclosure",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
   it("registers the exact WP-1022 Option Set and Product Binding migration", async () => {
