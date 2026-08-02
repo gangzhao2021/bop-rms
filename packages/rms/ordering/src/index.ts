@@ -11,3 +11,7 @@ export * from "./application/cart-quote-attachment-service.js";
 export * from "./application/ports/cart-quote-attachment-ports.js";
 export * from "./application/cart-lifecycle-command-service.js";
 export * from "./application/ports/cart-lifecycle-command-ports.js";
+export * from "./contracts/checkout-validation.js";
+export * from "./domain/checkout-validation.js";
+export * from "./application/checkout-validation-service.js";
+export * from "./application/ports/checkout-validation-ports.js";
