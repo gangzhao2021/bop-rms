@@ -46,6 +46,8 @@ const expectedForcedTables = [
   "rms_catalog.product_version",
   "rms_catalog.sellable_placement",
   "rms_catalog.sku",
+  "rms_ordering.cart",
+  "rms_ordering.cart_line",
 ];
 
 async function prove(context) {
