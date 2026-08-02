@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1022 — Option Set / Option / Binding Minimum Model locally verified with recorded platform boundaries from main@71beac64e5586be931d9a9da3c39af5cfed9bc6c`
+- Current discussion node: `WP-1023 — Store Availability Overlay locally verified with recorded platform boundaries from main@949b4218ce64409e7318df17c5846ddb8febec35`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,16 +17,33 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1022 — Option Set / Option / Binding Minimum Model` is locally verified with recorded
-  platform boundaries from exact
-  predecessor `main@71beac64e5586be931d9a9da3c39af5cfed9bc6c`. The bounded candidate adds one
+- `WP-1023 — Store Availability Overlay` is locally verified with recorded platform boundaries
+  from exact integrated predecessor `main@949b4218ce64409e7318df17c5846ddb8febec35`. The bounded
+  candidate adds Catalog-owned Brand defaults and exact Store overlays for SKU、channel、order
+  type and UTC effective scope. Resolution selects Store specificity before priority, fails closed
+  on conflicting equal-priority rules, and applies fresh exact-scope Kill Switch/Inventory safety
+  evidence without owning Inventory facts. Authoring enforces Permission、Audit、idempotency、fact
+  validation and optimistic concurrency; persistence adds forced Brand RLS and append-only
+  operation history. Local Catalog acceptance is `27/27 PASS`; WP-1023 and each WP-1020–1022
+  isolated PostgreSQL matrix are `1/1 PASS`. Publishing、customer projection/API、UI、Event、real
+  facts and External Evidence remain absent. Exact results are recorded in
+  `docs/spec/work-packages/WP-1023.md`.
+
+- `WP-1022 — Option Set / Option / Binding Minimum Model` is implemented、verified、integrated and
+  cleaned at squash `949b4218ce64409e7318df17c5846ddb8febec35`. PR
+  [#109](https://github.com/gangzhao2021/bop-rms/pull/109) passed final exact head
+  `133a88519141bdd74d30a7ea9ae4964108ab63b3` in run/job
+  `30727479920 / 91441744388` in `11m46s`; exact-main post-merge run/job
+  `30727836566 / 91442716867` passed in `12m02s`. The bounded implementation adds one
   Brand-scoped Draft Option Set Aggregate、stable Option Entities and Product Version-owned
   Bindings with strict selection、conflict、trigger、default、override、SKU-scope、idempotency、
   optimistic concurrency、forced-RLS and append-only persistence rules. Availability、Publishing、
   Pricing、Inventory/Recipe behavior、HTTP/UI/Projection/Event、real facts and External Evidence
   remain absent. Local Catalog acceptance is `19/19 PASS`; WP-1022、WP-1020 and WP-1021 isolated
-  PostgreSQL matrices are each `1/1 PASS`. Exact results and macOS platform boundaries are recorded
-  in `docs/spec/work-packages/WP-1022.md`.
+  PostgreSQL matrices are each `1/1 PASS`. A stale tenant-context whole-registry assertion found by
+  the first CI attempt was narrowed to its required forced-RLS entries and passed locally and on
+  both exact-head and exact-main CI. Exact results and macOS platform boundaries are recorded in
+  `docs/spec/work-packages/WP-1022.md`.
 
 - `WP-1021 — Category and Menu Structure` readiness PR
   [#106](https://github.com/gangzhao2021/bop-rms/pull/106) passed exact head

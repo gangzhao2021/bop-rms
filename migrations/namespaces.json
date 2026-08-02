@@ -10,6 +10,7 @@
     { "namespace": "1100", "directory": "1100-rms-catalog" },
     { "namespace": "1101", "directory": "1101-rms-catalog-category-menu" },
     { "namespace": "1102", "directory": "1102-rms-catalog-option-set" },
+    { "namespace": "1103", "directory": "1103-rms-catalog-availability" },
     { "namespace": "1200", "directory": "1200-rms-pricing" },
     { "namespace": "1300", "directory": "1300-rms-ordering" },
     { "namespace": "1400", "directory": "1400-rms-payment" },

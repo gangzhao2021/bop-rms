@@ -55,6 +55,8 @@ const moduleManifestInput =
         "product_option_binding_sku_scope",
         "product_option_binding_channel",
         "option_set_operation_record",
+        "availability_rule",
+        "availability_rule_operation_record",
       ],
     },
     ownedJobs: [],
