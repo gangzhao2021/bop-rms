@@ -7,6 +7,7 @@ import {
   unavailableCustomerEntryHandler,
 } from "./customer-entry.js";
 import { type CustomerMenuHandler, unavailableCustomerMenuHandler } from "./customer-menu.js";
+import { type CustomerQuoteHandler, unavailableCustomerQuoteHandler } from "./customer-quote.js";
 import { HealthReadinessController } from "./health-readiness.js";
 import {
   createUnavailableMerchantCatalogRouter,
@@ -27,6 +28,7 @@ const routeTemplates = [
   "/bff/customer/entry",
   "/bff/realtime",
   "/api/v1/public/stores/:store_public_id/menu",
+  "/api/v1/carts/:cart_id/quote",
   ...Object.values(merchantCatalogRoutes),
   "/health",
   "/ready",
@@ -46,6 +48,7 @@ export interface AppOptions {
   correlationAcceptanceHandler?: RequestHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
+  customerQuote?: CustomerQuoteHandler;
   errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
   merchantCatalog?: MerchantCatalogRouterOptions;
@@ -98,6 +101,7 @@ export function createApp({
   correlationAcceptanceHandler,
   customerEntry,
   customerMenu,
+  customerQuote,
   errorLogger,
   healthReadiness,
   merchantCatalog,
@@ -136,6 +140,10 @@ export function createApp({
   app.get(
     "/api/v1/public/stores/:store_public_id/menu",
     customerMenu?.handler() ?? unavailableCustomerMenuHandler,
+  );
+  app.post(
+    "/api/v1/carts/:cart_id/quote",
+    customerQuote?.handler() ?? unavailableCustomerQuoteHandler,
   );
   app.use(
     merchantCatalog === undefined

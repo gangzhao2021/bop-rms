@@ -62,6 +62,7 @@ describe("migration catalog", () => {
       "1106_001_create_allergen_provenance",
       "1200_001_create_tax_configuration",
       "1200_002_create_price_book",
+      "1200_003_create_price_quote",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -159,6 +160,17 @@ describe("migration catalog", () => {
       "price_book_operation_record",
     ])
       expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1103 Price Quote migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1200_003_create_price_quote",
+    );
+    for (const table of ["price_quote", "price_quote_line", "price_quote_tax_line"])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
+    expect(migration?.metadata.owner).toBe("@rms/pricing");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });

@@ -19,7 +19,7 @@ by `@rms/pricing`, append-only below the mutable aggregate pointer, and protecte
 Store forced RLS.
 
 This package does not contain a real Ontario rate, legal classification, actual Store registration,
-Promotion, Quote/API, Order, Payment or event. WP-1103 owns Quote creation.
+Promotion, Order, Payment or event.
 
 WP-1102 adds versioned single-Currency Price Books and Sellable Price Entries. Resolution follows
 the canonical Store qualified, Store, Store Group qualified, Store Group, Region qualified, Region,
@@ -27,6 +27,13 @@ Brand qualified, Brand default order. Effective Period controls eligibility only
 and same-priority ambiguity fail closed; every result pins the Price Book version, snapshot digest,
 Entry, scope and reason. Store Group/Region membership and Catalog Sellable validity are injected
 facts, not Pricing-owned state.
+
+WP-1103 composes authoritative Price and exclusive-tax resolution into an immutable Price Quote
+snapshot. Each Quote pins Cart/Input, Catalog Product/Menu versions, Price Book/Entry, Tax
+Configuration/rules, Currency metadata, line totals and expiry. Discount/Fee/Promotion fields are
+explicit zero/empty placeholders, never inferred. The API accepts no client amount. Inclusive Pilot
+quote composition, expiry/requote decisions and price-increase reconfirmation remain owned by later
+WP-1104/1105 work.
 Production seed and receipt semantics remain blocked on accountant-approved evidence under
 IDR-0024. All fixtures are synthetic and External Evidence is not claimed.
 
@@ -36,6 +43,7 @@ Verification:
 pnpm pricing-money-tax:acceptance
 pnpm pricing-tax-configuration:acceptance
 pnpm pricing-price-resolution:acceptance
+pnpm pricing-quote:acceptance
 pnpm module-manifest:check
 pnpm domain-layer-boundary:check
 pnpm import-boundary:check

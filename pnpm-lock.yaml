@@ -68,6 +68,9 @@ importers:
       '@rms/catalog':
         specifier: workspace:*
         version: link:../../packages/rms/catalog
+      '@rms/pricing':
+        specifier: workspace:*
+        version: link:../../packages/rms/pricing
       express:
         specifier: 5.2.1
         version: 5.2.1(supports-color@8.1.1)
