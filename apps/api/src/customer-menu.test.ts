@@ -54,7 +54,47 @@ function found(): CustomerMenuQueryResult {
       name: "All Day",
       effectiveFrom: AT as never,
       effectiveUntil: null,
-      sections: [],
+      sections: [
+        {
+          sectionReference: "018f7500-0000-7000-8000-000000000006" as never,
+          name: "Drinks",
+          sellables: [
+            {
+              sellableReference: "018f7500-0000-7000-8000-000000000007" as never,
+              productVersionReference: "018f7500-0000-7000-8000-000000000008" as never,
+              name: "Latte",
+              presentationRole: "Standard",
+              pinned: false,
+              availability: "Available",
+              optionRules: [],
+              allergenDisclosure: {
+                registryVersionReference: "018f7500-0000-7000-8000-000000000009" as never,
+                items: [
+                  {
+                    allergenReference: "018f7500-0000-7000-8000-00000000000a" as never,
+                    code: "MILK" as never,
+                    name: "Milk",
+                    classification: "Contains",
+                  },
+                ],
+                allergenFreeClaim: false,
+                assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+              },
+              displayPrice: {
+                status: "Unavailable",
+                amount: null,
+                currency: null,
+                reason: "PRICING_NOT_INTEGRATED",
+              },
+              taxDisplayContext: {
+                status: "Unavailable",
+                taxInclusive: null,
+                reason: "FINAL_QUOTE_REQUIRED",
+              },
+            },
+          ],
+        },
+      ],
     },
   };
 }

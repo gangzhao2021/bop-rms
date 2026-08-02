@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1027 — Merchant Catalog Management API locally verified with recorded platform boundaries from main@d7ab0c2931af7d4f98c5720ce88ccdea116f5076`
+- Current discussion node: `WP-1028 — Pilot Ingredient / Allergen Provenance、Menu Disclosure and Publish-blocking Validation locally verified with recorded platform boundaries from main@61fccc8b887781705512793f29a39e0727e40569`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,8 +17,22 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1027 — Merchant Catalog Management API` is locally verified from exact integrated
-  predecessor `main@d7ab0c2931af7d4f98c5720ce88ccdea116f5076`. The canonical backlog title
+- `WP-1028 — Pilot Ingredient / Allergen Provenance、Menu Disclosure and Publish-blocking
+Validation` is locally verified from exact integrated predecessor
+  `main@61fccc8b887781705512793f29a39e0727e40569`. It adds version-pinned allergen registry and
+  source evidence contracts、base plus Option union validation、exact Menu snapshot publication
+  evidence、append-only Brand-RLS persistence and safe Customer Menu disclosure. `Unverified`、
+  expired、invalidated or unresolved paths fail closed；public DTOs never claim allergen absence
+  and always expose the controlled assistance code. Catalog tests are `44/44 PASS`、Customer HTTP
+  acceptance is `5/5 PASS` and isolated PostgreSQL acceptance is `1/1 PASS`. Professional policy、
+  supplier/Recipe facts、UI and External Evidence remain gated and unclaimed. Exact results are in
+  `docs/spec/work-packages/WP-1028.md`.
+
+- `WP-1027 — Merchant Catalog Management API` is implemented、verified、integrated and cleaned at
+  squash `61fccc8b887781705512793f29a39e0727e40569`. PR #114 passed exact head
+  `36035bffe5ffafaa0e21ce952ad8fbe4d18b6012` in run/job
+  `30734163467 / 91459687321`；post-merge exact-main run/job
+  `30734545647 / 91460844495` passed. The canonical backlog title
   supersedes the older shorthand that called this a UI/publish-screen boundary. The bounded API
   adds one Brand-scoped Menu list route and explicit Submit Review、Approve、Publish and Archive
   actions behind an injected Merchant authorization chain. Mutations require a single UUIDv7

@@ -20,6 +20,7 @@ const expectedNamespaces = [
   ["1103", "1103-rms-catalog-availability"],
   ["1104", "1104-rms-catalog-menu-publishing"],
   ["1105", "1105-rms-catalog-published-menu-projection"],
+  ["1106", "1106-rms-catalog-allergen-provenance"],
   ["1200", "1200-rms-pricing"],
   ["1300", "1300-rms-ordering"],
   ["1400", "1400-rms-payment"],

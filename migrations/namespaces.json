@@ -13,6 +13,7 @@
     { "namespace": "1103", "directory": "1103-rms-catalog-availability" },
     { "namespace": "1104", "directory": "1104-rms-catalog-menu-publishing" },
     { "namespace": "1105", "directory": "1105-rms-catalog-published-menu-projection" },
+    { "namespace": "1106", "directory": "1106-rms-catalog-allergen-provenance" },
     { "namespace": "1200", "directory": "1200-rms-pricing" },
     { "namespace": "1300", "directory": "1300-rms-ordering" },
     { "namespace": "1400", "directory": "1400-rms-payment" },

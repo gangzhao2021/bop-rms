@@ -73,6 +73,19 @@ function snapshot(): PublishedMenuSnapshot {
             sortOrder: 0,
             pinned: false,
             configuredAvailability: "Available",
+            allergenDisclosure: {
+              registryVersionReference: id(19) as never,
+              items: [
+                {
+                  allergenReference: id(20) as never,
+                  code: "MILK" as never,
+                  localizedNames: { "en-CA": "Milk" },
+                  classification: "Contains",
+                },
+              ],
+              allergenFreeClaim: false,
+              assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+            },
             optionRules: [
               {
                 bindingReference: id(14) as never,

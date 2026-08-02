@@ -128,6 +128,21 @@ function publicSellable(
     pinned: item.pinned,
     availability: "Available",
     optionRules: item.optionRules,
+    allergenDisclosure: Object.freeze({
+      registryVersionReference: item.allergenDisclosure.registryVersionReference,
+      items: Object.freeze(
+        item.allergenDisclosure.items.map((allergen) =>
+          Object.freeze({
+            allergenReference: allergen.allergenReference,
+            code: allergen.code,
+            name: localized(allergen.localizedNames, locale, defaultLocale),
+            classification: allergen.classification,
+          }),
+        ),
+      ),
+      allergenFreeClaim: false,
+      assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+    }),
     displayPrice: Object.freeze({
       status: "Unavailable",
       amount: null,
