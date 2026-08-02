@@ -370,7 +370,11 @@ importers:
         specifier: workspace:*
         version: link:../../bop/tenant
 
-  packages/rms/pricing: {}
+  packages/rms/pricing:
+    dependencies:
+      '@bop/effective-period':
+        specifier: workspace:*
+        version: link:../../bop/effective-period
 
   packages/rms/store:
     dependencies:
@@ -483,7 +487,6 @@ packages:
 
   '@asyncapi/generator-hooks@0.1.0':
     resolution: {integrity: sha512-cTfwiXNrNE4Z5ZkbLyX4jCAnJEQgTXpPRhSzTpt08R3Md+2tO8CMQWo4B4C8fSSy3M4aBWePJ4bbILOEqduvUg==}
-    deprecated: 'Hooks are now part of generator repository and also out of the box integrated with the generator, so no need to set it as dependency any more: https://github.com/asyncapi/generator/releases/tag/%40asyncapi%2Fgenerator%402.5.0'
 
   '@asyncapi/generator-react-sdk@1.1.3':
     resolution: {integrity: sha512-8pO8qVqNmASdcJK+uKXHgqE6BcmEQ+c7ypYf8pKNYaXr0FLFifaQGaTkUhG4fjnzNsUro6N+GywGYHRy1PpVng==}

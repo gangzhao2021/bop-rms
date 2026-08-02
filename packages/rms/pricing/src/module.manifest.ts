@@ -9,12 +9,23 @@ const moduleManifestInput =
     layer: "RMS",
     lifecycle: "Phase 1",
     publicExports: ["."],
-    allowedSynchronousDependencies: [],
+    allowedSynchronousDependencies: [
+      {
+        moduleName: "effective-period",
+        packageName: "@bop/effective-period",
+        layer: "BOP",
+      },
+    ],
     consumedEvents: [],
     publishedEvents: [],
     ownedDatabase: {
       schema: "rms_pricing",
-      tables: [],
+      tables: [
+        "tax_configuration",
+        "tax_configuration_version",
+        "tax_configuration_rule",
+        "tax_configuration_operation_record",
+      ],
     },
     ownedJobs: [],
     featureFlags: [],
