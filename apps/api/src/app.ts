@@ -8,6 +8,12 @@ import {
 } from "./customer-entry.js";
 import { type CustomerMenuHandler, unavailableCustomerMenuHandler } from "./customer-menu.js";
 import { HealthReadinessController } from "./health-readiness.js";
+import {
+  createUnavailableMerchantCatalogRouter,
+  type MerchantCatalogRouterOptions,
+  createMerchantCatalogRouter,
+  merchantCatalogRoutes,
+} from "./merchant-catalog.js";
 import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
 import {
   createRequestCorrelationMiddleware,
@@ -21,6 +27,7 @@ const routeTemplates = [
   "/bff/customer/entry",
   "/bff/realtime",
   "/api/v1/public/stores/:store_public_id/menu",
+  ...Object.values(merchantCatalogRoutes),
   "/health",
   "/ready",
   "unmatched",
@@ -41,6 +48,7 @@ export interface AppOptions {
   customerMenu?: CustomerMenuHandler;
   errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
+  merchantCatalog?: MerchantCatalogRouterOptions;
   now?: () => string;
   nowMilliseconds?: () => number;
   realtime?: RealtimeTransport;
@@ -92,6 +100,7 @@ export function createApp({
   customerMenu,
   errorLogger,
   healthReadiness,
+  merchantCatalog,
   now = () => new Date().toISOString(),
   nowMilliseconds,
   realtime,
@@ -127,6 +136,11 @@ export function createApp({
   app.get(
     "/api/v1/public/stores/:store_public_id/menu",
     customerMenu?.handler() ?? unavailableCustomerMenuHandler,
+  );
+  app.use(
+    merchantCatalog === undefined
+      ? createUnavailableMerchantCatalogRouter()
+      : createMerchantCatalogRouter(merchantCatalog),
   );
   if (correlationAcceptanceHandler !== undefined)
     app.post("/__acceptance/request-command-event", correlationAcceptanceHandler);

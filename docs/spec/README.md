@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1026 — Customer Menu Query API locally verified with recorded platform boundaries from main@990ebeb8010c8c5cc5616d49cdc1d0aea3105874`
+- Current discussion node: `WP-1027 — Merchant Catalog Management API locally verified with recorded platform boundaries from main@d7ab0c2931af7d4f98c5720ce88ccdea116f5076`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,8 +17,21 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1026 — Customer Menu Query API` is locally verified from exact integrated predecessor
-  `main@990ebeb8010c8c5cc5616d49cdc1d0aea3105874`. It adds the canonical public Store Menu REST
+- `WP-1027 — Merchant Catalog Management API` is locally verified from exact integrated
+  predecessor `main@d7ab0c2931af7d4f98c5720ce88ccdea116f5076`. The canonical backlog title
+  supersedes the older shorthand that called this a UI/publish-screen boundary. The bounded API
+  adds one Brand-scoped Menu list route and explicit Submit Review、Approve、Publish and Archive
+  actions behind an injected Merchant authorization chain. Mutations require a single UUIDv7
+  Idempotency Key、quoted `If-Match` version and closed action-specific body；Catalog remains final
+  authority for permission、Audit and lifecycle rules. Dedicated HTTP acceptance is `6/6 PASS`；
+  full API regression is `112/112 PASS`. UI、bulk import、private-table access and External Evidence
+  remain absent. Exact results are recorded in `docs/spec/work-packages/WP-1027.md`.
+
+- `WP-1026 — Customer Menu Query API` is implemented、verified、integrated and cleaned at squash
+  `d7ab0c2931af7d4f98c5720ce88ccdea116f5076`. PR #113 passed exact head
+  `7039e330bf177fb293413a1fbaa0a14280527286` in run/job
+  `30733066503 / 91456680510`；post-merge exact-main run/job
+  `30733452236 / 91457682585` passed. It adds the canonical public Store Menu REST
   resource over a Catalog-owned public Application Query contract；requires exact Store、Channel、
   Order Type、locale and server-current effective scope；accepts only one `Fresh` projection；and
   excludes Hidden or configured-unavailable Sellables. The response declares projection version、
