@@ -6,6 +6,11 @@ import {
   type CustomerEntryHandler,
   unavailableCustomerEntryHandler,
 } from "./customer-entry.js";
+import {
+  type CustomerCartHandler,
+  customerCartRoutes,
+  unavailableCustomerCartHandler,
+} from "./customer-cart.js";
 import { type CustomerMenuHandler, unavailableCustomerMenuHandler } from "./customer-menu.js";
 import { type CustomerQuoteHandler, unavailableCustomerQuoteHandler } from "./customer-quote.js";
 import { HealthReadinessController } from "./health-readiness.js";
@@ -26,8 +31,13 @@ import {
 const routeTemplates = [
   "/__acceptance/request-command-event",
   "/bff/customer/entry",
+  customerCartRoutes.current,
   "/bff/realtime",
   "/api/v1/public/stores/:store_public_id/menu",
+  customerCartRoutes.create,
+  customerCartRoutes.read,
+  customerCartRoutes.addItem,
+  customerCartRoutes.updateItem,
   "/api/v1/carts/:cart_id/quote",
   ...Object.values(merchantCatalogRoutes),
   "/health",
@@ -46,6 +56,7 @@ export interface RequestErrorLogger {
 
 export interface AppOptions {
   correlationAcceptanceHandler?: RequestHandler;
+  customerCart?: CustomerCartHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
   customerQuote?: CustomerQuoteHandler;
@@ -99,6 +110,7 @@ function createErrorHandler(errorLogger: RequestErrorLogger | undefined): ErrorR
 
 export function createApp({
   correlationAcceptanceHandler,
+  customerCart,
   customerEntry,
   customerMenu,
   customerQuote,
@@ -137,9 +149,21 @@ export function createApp({
   });
   app.get("/bff/realtime", realtime?.handler() ?? unavailableRealtimeHandler);
   app.post("/bff/customer/entry", customerEntry?.handler() ?? unavailableCustomerEntryHandler);
+  app.get(customerCartRoutes.current, customerCart?.current() ?? unavailableCustomerCartHandler);
   app.get(
     "/api/v1/public/stores/:store_public_id/menu",
     customerMenu?.handler() ?? unavailableCustomerMenuHandler,
+  );
+  app.post(customerCartRoutes.create, customerCart?.create() ?? unavailableCustomerCartHandler);
+  app.get(customerCartRoutes.read, customerCart?.read() ?? unavailableCustomerCartHandler);
+  app.post(customerCartRoutes.addItem, customerCart?.addItem() ?? unavailableCustomerCartHandler);
+  app.patch(
+    customerCartRoutes.updateItem,
+    customerCart?.updateItem() ?? unavailableCustomerCartHandler,
+  );
+  app.delete(
+    customerCartRoutes.removeItem,
+    customerCart?.removeItem() ?? unavailableCustomerCartHandler,
   );
   app.post(
     "/api/v1/carts/:cart_id/quote",

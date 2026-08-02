@@ -25,4 +25,14 @@ describe("customer PWA shell", () => {
     expect(JSON.stringify(pkg)).not.toMatch(/vite-plugin-pwa|workbox-background-sync/i);
     expect(manifest.start_url).toBe("/");
   });
+  it("maps the canonical clean /cart route to CUST-CART loading state", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/cart"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Your cart");
+    expect(html).toContain("Loading cart");
+    expect(html).toContain('id="main-content"');
+  });
 });

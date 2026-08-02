@@ -1,0 +1,256 @@
+import { CartClientError, type CartErrorCode, type CartItemDraft, type CartView } from "./types.js";
+
+const errorCodes = new Set<CartErrorCode>([
+  "cart_request_invalid",
+  "cart_session_expired",
+  "cart_not_found",
+  "cart_version_conflict",
+  "cart_idempotency_conflict",
+  "cart_selection_invalid",
+  "cart_expired",
+  "cart_abandoned",
+  "cart_rate_limited",
+  "cart_service_unavailable",
+]);
+const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const canonicalInstant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+const currency = /^[A-Z]{3}$/u;
+
+function record(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new CartClientError("cart_service_unavailable");
+  return value as Record<string, unknown>;
+}
+
+function string(value: unknown, pattern?: RegExp): string {
+  if (typeof value !== "string" || (pattern !== undefined && !pattern.test(value)))
+    throw new CartClientError("cart_service_unavailable");
+  return value;
+}
+
+function integer(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1)
+    throw new CartClientError("cart_service_unavailable");
+  return Number(value);
+}
+
+function strings(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string"))
+    throw new CartClientError("cart_service_unavailable");
+  return Object.freeze([...value]);
+}
+
+function money(value: unknown) {
+  const raw = record(value);
+  const amountMinor = string(raw.amountMinor, /^-?(?:0|[1-9][0-9]{0,20})$/u);
+  return Object.freeze({ amountMinor, currency: string(raw.currency, currency) });
+}
+
+function view(value: unknown): CartView {
+  const root = record(value);
+  const cart = record(root.cart);
+  const context = record(cart.context);
+  const lifecycle = record(cart.lifecycle);
+  if (
+    root.schemaVersion !== 1 ||
+    !["DineIn", "Pickup"].includes(String(cart.orderType)) ||
+    !["Active", "Abandoned", "Expired"].includes(String(lifecycle.status)) ||
+    !Array.isArray(cart.items)
+  )
+    throw new CartClientError("cart_service_unavailable");
+  const items = cart.items.map((candidate) => {
+    const item = record(candidate);
+    if (!Array.isArray(item.configuration)) throw new CartClientError("cart_service_unavailable");
+    const configuration = item.configuration.map((candidateOption) => {
+      const option = record(candidateOption);
+      return Object.freeze({
+        optionReference: string(option.optionReference, uuidV7),
+        displayName: string(option.displayName),
+        quantity: integer(option.quantity),
+      });
+    });
+    const estimate = record(item.lineEstimate);
+    const lineEstimate =
+      estimate.status === "Available"
+        ? Object.freeze({ status: "Available" as const, total: money(estimate.total) })
+        : estimate.status === "Unavailable"
+          ? Object.freeze({
+              status: "Unavailable" as const,
+              reasonCode: string(estimate.reasonCode),
+            })
+          : (() => {
+              throw new CartClientError("cart_service_unavailable");
+            })();
+    return Object.freeze({
+      cartItemReference: string(item.cartItemReference, uuidV7),
+      sellableReference: string(item.sellableReference, uuidV7),
+      displayName: string(item.displayName),
+      quantity: integer(item.quantity),
+      configuration: Object.freeze(configuration),
+      customerNote: item.customerNote === null ? null : string(item.customerNote),
+      lineEstimate,
+      warnings: strings(item.warnings),
+    });
+  });
+  let quote: CartView["cart"]["quote"] = null;
+  if (cart.quote !== null) {
+    const raw = record(cart.quote);
+    quote = Object.freeze({
+      quoteReference: string(raw.quoteReference, uuidV7),
+      quoteVersion: integer(raw.quoteVersion),
+      cartVersion: integer(raw.cartVersion),
+      subtotal: money(raw.subtotal),
+      discount: money(raw.discount),
+      tax: money(raw.tax),
+      fee: money(raw.fee),
+      total: money(raw.total),
+      expiresAt: string(raw.expiresAt, canonicalInstant),
+      warnings: strings(raw.warnings),
+      blockingReasons: strings(raw.blockingReasons),
+    });
+  }
+  return Object.freeze({
+    schemaVersion: 1,
+    cart: Object.freeze({
+      cartReference: string(cart.cartReference, uuidV7),
+      version: integer(cart.version),
+      orderType: cart.orderType as "DineIn" | "Pickup",
+      serviceMode: string(cart.serviceMode),
+      context: Object.freeze({
+        brandName: string(context.brandName),
+        storeName: string(context.storeName),
+      }),
+      lifecycle: Object.freeze({
+        status: lifecycle.status as "Active" | "Abandoned" | "Expired",
+        idleExpiresAt: string(lifecycle.idleExpiresAt, canonicalInstant),
+        absoluteExpiresAt: string(lifecycle.absoluteExpiresAt, canonicalInstant),
+      }),
+      items: Object.freeze(items),
+      quote,
+      warnings: strings(cart.warnings),
+    }),
+  });
+}
+
+export interface CustomerCartClient {
+  loadCurrent(signal?: AbortSignal): Promise<CartView | null>;
+  updateItem(input: {
+    readonly cart: CartView;
+    readonly cartItemReference: string;
+    readonly draft: CartItemDraft;
+    readonly operationReference: string;
+  }): Promise<CartView>;
+  removeItem(input: {
+    readonly cart: CartView;
+    readonly cartItemReference: string;
+    readonly operationReference: string;
+  }): Promise<CartView>;
+}
+
+let csrfCredential: string | null = null;
+
+export function setCustomerCartCsrfCredential(value: string | null): void {
+  csrfCredential = value;
+}
+
+function csrf(): string {
+  if (csrfCredential === null) throw new CartClientError("cart_session_expired");
+  return csrfCredential;
+}
+
+function headers(input: { readonly operationReference: string; readonly version: number }) {
+  return {
+    "content-type": "application/json",
+    "idempotency-key": input.operationReference,
+    "if-match": `"${input.version}"`,
+    "x-csrf-token": csrf(),
+  };
+}
+
+async function parse(response: Response): Promise<CartView | null> {
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new CartClientError("cart_service_unavailable");
+  }
+  if (response.ok) return view(payload);
+  const error =
+    typeof payload === "object" && payload !== null
+      ? (payload as { error?: { code?: unknown; currentVersion?: unknown; issueCodes?: unknown } })
+          .error
+      : undefined;
+  const code = errorCodes.has(String(error?.code) as CartErrorCode)
+    ? (error?.code as CartErrorCode)
+    : "cart_service_unavailable";
+  if (code === "cart_not_found" && response.status === 404) return null;
+  if (code === "cart_session_expired") setCustomerCartCsrfCredential(null);
+  const retryHeader = response.headers.get("retry-after");
+  throw new CartClientError(code, {
+    ...(Number.isSafeInteger(error?.currentVersion)
+      ? { currentVersion: Number(error?.currentVersion) }
+      : {}),
+    ...(Array.isArray(error?.issueCodes)
+      ? {
+          issueCodes: error.issueCodes.filter(
+            (value): value is string => typeof value === "string",
+          ),
+        }
+      : {}),
+    ...(retryHeader !== null && /^[1-9][0-9]{0,3}$/u.test(retryHeader)
+      ? { retryAfterSeconds: Number(retryHeader) }
+      : {}),
+  });
+}
+
+async function request(url: string, init: RequestInit): Promise<CartView | null> {
+  try {
+    return await parse(
+      await fetch(url, {
+        ...init,
+        cache: "no-store",
+        credentials: "same-origin",
+      }),
+    );
+  } catch (error) {
+    if (error instanceof CartClientError) throw error;
+    throw new CartClientError("network_unknown");
+  }
+}
+
+export function createBrowserCustomerCartClient(): CustomerCartClient {
+  const client: CustomerCartClient = {
+    loadCurrent: (signal?: AbortSignal) =>
+      request("/bff/customer/cart", { method: "GET", ...(signal === undefined ? {} : { signal }) }),
+    async updateItem(input) {
+      const result = await request(
+        `/api/v1/carts/${input.cart.cart.cartReference}/items/${input.cartItemReference}`,
+        {
+          method: "PATCH",
+          headers: headers({
+            operationReference: input.operationReference,
+            version: input.cart.cart.version,
+          }),
+          body: JSON.stringify(input.draft),
+        },
+      );
+      if (result === null) throw new CartClientError("cart_not_found");
+      return result;
+    },
+    async removeItem(input) {
+      const result = await request(
+        `/api/v1/carts/${input.cart.cart.cartReference}/items/${input.cartItemReference}`,
+        {
+          method: "DELETE",
+          headers: headers({
+            operationReference: input.operationReference,
+            version: input.cart.cart.version,
+          }),
+        },
+      );
+      if (result === null) throw new CartClientError("cart_not_found");
+      return result;
+    },
+  };
+  return Object.freeze(client);
+}
