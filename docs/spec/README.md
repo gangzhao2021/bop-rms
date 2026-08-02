@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1103 — Quote Creation API locally verified from main@757c48568335da5ebcf18ed4fe131cdaa52423d1`
+- Current discussion node: `WP-1103 — Quote Creation API integrated at main@5e0cde3c23e111a62d6261d6dd9a18c83cb785df`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,8 +17,10 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1103 — Quote Creation API` is locally verified from exact integrated predecessor
-  `main@757c48568335da5ebcf18ed4fe131cdaa52423d1`. It composes exact Price and exclusive-tax
+- `WP-1103 — Quote Creation API` is implemented, verified, integrated and cleaned at squash
+  `5e0cde3c23e111a62d6261d6dd9a18c83cb785df`. PR #119 exact head
+  `1d78043d2cbf5b8113251dfe938a4886cd66ec3b` passed run/job
+  `30742316735 / 91481792209`; exact-main run/job `30742751626 / 91482977766` passed. It composes exact Price and exclusive-tax
   resolution into immutable, single-Currency Cart Quote snapshots with Catalog/Price/Tax/input
   replay evidence. The public POST accepts only Cart version, Customer Session and Idempotency
   context; client amount fields fail before the Pricing port. Responses include required totals,
