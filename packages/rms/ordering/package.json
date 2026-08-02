@@ -15,5 +15,9 @@
     "lint": "eslint src",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --project tsconfig.json"
+  },
+  "dependencies": {
+    "@bop/audit": "workspace:*",
+    "@bop/identity": "workspace:*"
   }
 }
