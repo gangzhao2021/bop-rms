@@ -13,6 +13,7 @@ import {
 import { createApp } from "./app.js";
 import type { CustomerMenuHandler } from "./customer-menu.js";
 import { HealthReadinessController } from "./health-readiness.js";
+import { merchantCatalogRoutes, type MerchantCatalogRouterOptions } from "./merchant-catalog.js";
 import type { RealtimeTransport } from "./realtime.js";
 
 const apiLogEvents = [
@@ -55,6 +56,7 @@ export interface ApiServerRuntimeOptions {
   healthReadiness?: HealthReadinessController;
   host?: string;
   logger?: StructuredLogger;
+  merchantCatalog?: MerchantCatalogRouterOptions;
   nodeTelemetry?: NodeTelemetryRuntime;
   nowMilliseconds?: () => number;
   port?: number;
@@ -79,6 +81,7 @@ export function createApiCoreTelemetry(): CoreTelemetry {
       "/__acceptance/request-command-event",
       "/bff/realtime",
       "/api/v1/public/stores/:store_public_id/menu",
+      ...Object.values(merchantCatalogRoutes),
       "/health",
       "/ready",
       "unmatched",
@@ -99,6 +102,7 @@ export function createApiServerRuntime({
   healthReadiness = new HealthReadinessController(),
   host = "127.0.0.1",
   logger = createApiRuntimeLogger(),
+  merchantCatalog,
   nodeTelemetry = createNodeTelemetryRuntime({
     environment: runtimeEnvironment(),
     serviceName: "bop-rms-api",
@@ -113,6 +117,7 @@ export function createApiServerRuntime({
     createApp({
       healthReadiness,
       ...(customerMenu === undefined ? {} : { customerMenu }),
+      ...(merchantCatalog === undefined ? {} : { merchantCatalog }),
       errorLogger: logger,
       nowMilliseconds,
       ...(realtime === undefined ? {} : { realtime }),
