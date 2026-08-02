@@ -68,6 +68,7 @@ describe("migration catalog", () => {
       "1300_003_alter_cart_selection_evidence",
       "1300_004_create_cart_quote_attachment",
       "1300_005_alter_cart_lifecycle",
+      "1300_006_create_order_number_allocation",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -239,6 +240,18 @@ describe("migration catalog", () => {
     expect(migration?.sql).toContain("ADD COLUMN lifecycle_status");
     expect(migration?.sql).toContain("CREATE TABLE rms_ordering.cart_lifecycle_operation_record");
     expect(migration?.sql).toContain("interval '24 hours'");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1223 Order Number allocation migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1300_006_create_order_number_allocation",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/ordering");
+    expect(migration?.metadata.schema).toBe("rms_ordering");
+    for (const table of ["order_number_counter", "order_number_allocation"])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_ordering.${table}`);
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });

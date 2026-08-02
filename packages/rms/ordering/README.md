@@ -40,10 +40,15 @@ owned by later Work Packages. WP-1222 adds the pure line-level snapshot boundary
 Catalog names/versions, selected Option configuration, final bigint Money, Price resolution and Tax
 rule/rate/amount evidence. Snapshots are closed and deeply frozen and are never reconstructed from
 current configuration; WP-1224 remains responsible for authorized atomic creation and persistence.
+WP-1223 consumes only Store-owned Business Date resolution evidence and defines canonical decimal
+Order Numbers backed by a Store + Business Date counter and append-only allocation history. DST
+gap/overlap behavior is deterministic; WP-1224 must allocate the number and create the Order in one
+authorized database transaction.
 Cart identifiers and attribution references are indirect identifiers and are prohibited from logs,
 URLs, analytics, screenshots, and non-synthetic fixtures.
 
 ```bash
 pnpm --filter @rms/ordering test
 pnpm ordering-cart:acceptance
+pnpm ordering-business-date:acceptance
 ```

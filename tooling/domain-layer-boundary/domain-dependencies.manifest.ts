@@ -23,6 +23,11 @@ const domainDependenciesManifestInput = {
       classification: "domain-safe",
       allowedSubpaths: ["."],
     },
+    {
+      packageName: "@rms/store",
+      classification: "domain-safe",
+      allowedSubpaths: ["."],
+    },
   ],
 } as const;
 

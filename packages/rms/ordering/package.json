@@ -20,6 +20,7 @@
     "@bop/audit": "workspace:*",
     "@bop/identity": "workspace:*",
     "@rms/catalog": "workspace:*",
-    "@rms/pricing": "workspace:*"
+    "@rms/pricing": "workspace:*",
+    "@rms/store": "workspace:*"
   }
 }
