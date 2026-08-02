@@ -19,7 +19,11 @@ async function prove(context) {
     const tables = await admin.query(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = 'rms_catalog'
-         AND table_name NOT IN ('product','product_operation_record','product_version','sku')
+         AND table_name IN (
+           'category','category_operation_record','menu','menu_operation_record','menu_section',
+           'menu_section_category','menu_version','menu_version_channel','menu_version_order_type',
+           'menu_version_store','sellable_placement'
+         )
        ORDER BY table_name`,
     );
     assert.deepEqual(

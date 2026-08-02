@@ -153,6 +153,11 @@ function fixture(
         return input.record;
       },
     },
+    optionSets: {
+      async resolveVersion() {
+        return null;
+      },
+    },
   };
   return { service: createCatalogProductService(ports), current: () => aggregate };
 }
@@ -327,6 +332,7 @@ describe("Product / SKU minimum aggregate", () => {
         localizedNames: { "en-CA": "Latte" },
         taxClassificationReference: null,
         skus: [],
+        optionBindings: [],
         createdAt: at,
         updatedAt: at,
       },

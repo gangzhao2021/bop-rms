@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1021 — Category and Menu Structure implemented、verified、integrated and cleaned at main@6fcc0dec66f921d347dd9a758a17adf6ad666eb5`
+- Current discussion node: `WP-1022 — Option Set / Option / Binding Minimum Model locally verified with recorded platform boundaries from main@71beac64e5586be931d9a9da3c39af5cfed9bc6c`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1021 readiness and WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-1022 — Option Set / Option / Binding Minimum Model` is locally verified with recorded
+  platform boundaries from exact
+  predecessor `main@71beac64e5586be931d9a9da3c39af5cfed9bc6c`. The bounded candidate adds one
+  Brand-scoped Draft Option Set Aggregate、stable Option Entities and Product Version-owned
+  Bindings with strict selection、conflict、trigger、default、override、SKU-scope、idempotency、
+  optimistic concurrency、forced-RLS and append-only persistence rules. Availability、Publishing、
+  Pricing、Inventory/Recipe behavior、HTTP/UI/Projection/Event、real facts and External Evidence
+  remain absent. Local Catalog acceptance is `19/19 PASS`; WP-1022、WP-1020 and WP-1021 isolated
+  PostgreSQL matrices are each `1/1 PASS`. Exact results and macOS platform boundaries are recorded
+  in `docs/spec/work-packages/WP-1022.md`.
 
 - `WP-1021 — Category and Menu Structure` readiness PR
   [#106](https://github.com/gangzhao2021/bop-rms/pull/106) passed exact head

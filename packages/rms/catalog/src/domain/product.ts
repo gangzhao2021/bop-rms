@@ -53,8 +53,30 @@ export interface ProductVersion {
   readonly localizedNames: Readonly<Record<string, string>>;
   readonly taxClassificationReference: CatalogReference | null;
   readonly skus: readonly CatalogSku[];
+  readonly optionBindings: readonly ProductOptionBinding[];
   readonly createdAt: CatalogInstant;
   readonly updatedAt: CatalogInstant;
+}
+
+export interface OptionSelectionQuantity {
+  readonly optionReference: CatalogReference;
+  readonly quantity: number;
+}
+
+export interface ProductOptionBinding {
+  readonly bindingReference: CatalogReference;
+  readonly optionSetReference: CatalogReference;
+  readonly optionSetVersionReference: CatalogReference;
+  readonly purpose: CatalogCode;
+  readonly sortOrder: number;
+  readonly enabledOptionReferences: readonly CatalogReference[];
+  readonly defaultSelections: readonly OptionSelectionQuantity[];
+  readonly minimumSelectionOverride: number | null;
+  readonly maximumSelectionOverride: number | null;
+  readonly includedSkuReferences: readonly CatalogReference[];
+  readonly excludedSkuReferences: readonly CatalogReference[];
+  readonly channelCodes: readonly CatalogCode[];
+  readonly storeOverrideAllowed: boolean;
 }
 export interface ProductAggregate {
   readonly productReference: CatalogReference;
@@ -122,6 +144,19 @@ function exact(value: unknown, keys: readonly string[]): Readonly<Record<string,
 function positive(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1) return invalid();
   return value as number;
+}
+function nonnegative(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) return invalid();
+  return value as number;
+}
+function optionalNonnegative(value: unknown): number | null {
+  return value === null ? null : nonnegative(value);
+}
+function uniqueReferences(value: unknown): readonly CatalogReference[] {
+  if (!Array.isArray(value)) return invalid();
+  const parsed = Object.freeze(value.map(parseCatalogReference));
+  if (new Set(parsed).size !== parsed.length) return invalid();
+  return parsed;
 }
 export function parseCatalogReference(value: unknown): CatalogReference {
   if (typeof value !== "string" || !uuid.test(value)) return invalid();
@@ -210,6 +245,75 @@ export function parseVariantSelections(value: unknown): readonly VariantSelectio
     return invalid();
   return selections;
 }
+export function parseProductOptionBinding(value: unknown): ProductOptionBinding {
+  const raw = exact(value, [
+    "bindingReference",
+    "optionSetReference",
+    "optionSetVersionReference",
+    "purpose",
+    "sortOrder",
+    "enabledOptionReferences",
+    "defaultSelections",
+    "minimumSelectionOverride",
+    "maximumSelectionOverride",
+    "includedSkuReferences",
+    "excludedSkuReferences",
+    "channelCodes",
+    "storeOverrideAllowed",
+  ]);
+  if (!Array.isArray(raw.defaultSelections) || !Array.isArray(raw.channelCodes)) return invalid();
+  const enabledOptionReferences = uniqueReferences(raw.enabledOptionReferences);
+  const includedSkuReferences = uniqueReferences(raw.includedSkuReferences);
+  const excludedSkuReferences = uniqueReferences(raw.excludedSkuReferences);
+  if (includedSkuReferences.some((reference) => excludedSkuReferences.includes(reference)))
+    return invalid();
+  const defaultSelections = Object.freeze(
+    raw.defaultSelections.map((candidate) => {
+      const selection = exact(candidate, ["optionReference", "quantity"]);
+      return Object.freeze({
+        optionReference: parseCatalogReference(selection.optionReference),
+        quantity: positive(selection.quantity),
+      });
+    }),
+  );
+  if (
+    new Set(defaultSelections.map((selection) => selection.optionReference)).size !==
+      defaultSelections.length ||
+    defaultSelections.some(
+      (selection) => !enabledOptionReferences.includes(selection.optionReference),
+    )
+  )
+    return invalid();
+  const minimumSelectionOverride = optionalNonnegative(raw.minimumSelectionOverride);
+  const maximumSelectionOverride = optionalNonnegative(raw.maximumSelectionOverride);
+  if (
+    maximumSelectionOverride !== null &&
+    minimumSelectionOverride !== null &&
+    maximumSelectionOverride < minimumSelectionOverride
+  )
+    return invalid();
+  const channelCodes = Object.freeze(raw.channelCodes.map(parseCatalogCode));
+  if (
+    new Set(channelCodes).size !== channelCodes.length ||
+    typeof raw.storeOverrideAllowed !== "boolean"
+  )
+    return invalid();
+  return Object.freeze({
+    bindingReference: parseCatalogReference(raw.bindingReference),
+    optionSetReference: parseCatalogReference(raw.optionSetReference),
+    optionSetVersionReference: parseCatalogReference(raw.optionSetVersionReference),
+    purpose: parseCatalogCode(raw.purpose),
+    sortOrder: nonnegative(raw.sortOrder),
+    enabledOptionReferences,
+    defaultSelections,
+    minimumSelectionOverride,
+    maximumSelectionOverride,
+    includedSkuReferences,
+    excludedSkuReferences,
+    channelCodes,
+    storeOverrideAllowed: raw.storeOverrideAllowed,
+  });
+}
 export function parseCatalogSku(value: unknown): CatalogSku {
   const raw = exact(value, [
     "skuReference",
@@ -250,6 +354,7 @@ export function parseProductVersion(value: unknown): ProductVersion {
     "localizedNames",
     "taxClassificationReference",
     "skus",
+    "optionBindings",
     "createdAt",
     "updatedAt",
   ]);
@@ -259,13 +364,24 @@ export function parseProductVersion(value: unknown): ProductVersion {
     !locale.test(raw.defaultLocale)
   )
     return invalid();
-  if (!Array.isArray(raw.skus)) return invalid();
+  if (!Array.isArray(raw.skus) || !Array.isArray(raw.optionBindings)) return invalid();
   const skus = Object.freeze(raw.skus.map(parseCatalogSku));
+  const optionBindings = Object.freeze(raw.optionBindings.map(parseProductOptionBinding));
   if (
     new Set(skus.map((sku) => sku.skuReference)).size !== skus.length ||
     new Set(skus.map((sku) => sku.skuCode)).size !== skus.length ||
     new Set(skus.map((sku) => JSON.stringify(sku.variantSelections))).size !== skus.length ||
-    skus.some((sku) => !Object.hasOwn(sku.localizedNames, raw.defaultLocale as string))
+    skus.some((sku) => !Object.hasOwn(sku.localizedNames, raw.defaultLocale as string)) ||
+    new Set(optionBindings.map((binding) => binding.bindingReference)).size !==
+      optionBindings.length ||
+    new Set(optionBindings.map((binding) => binding.sortOrder)).size !== optionBindings.length ||
+    new Set(optionBindings.map((binding) => `${binding.optionSetReference}:${binding.purpose}`))
+      .size !== optionBindings.length ||
+    optionBindings.some((binding) =>
+      [...binding.includedSkuReferences, ...binding.excludedSkuReferences].some(
+        (reference) => !skus.some((sku) => sku.skuReference === reference),
+      ),
+    )
   )
     return invalid();
   const createdAt = parseCatalogInstant(raw.createdAt);
@@ -283,6 +399,7 @@ export function parseProductVersion(value: unknown): ProductVersion {
         ? null
         : parseCatalogReference(raw.taxClassificationReference),
     skus,
+    optionBindings,
     createdAt,
     updatedAt,
   });

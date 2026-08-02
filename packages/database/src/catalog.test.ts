@@ -55,10 +55,30 @@ describe("migration catalog", () => {
       "0300_001_create_permission",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
+      "1102_001_create_option_set_binding",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
     ).toBe(true);
+  });
+
+  it("registers the exact WP-1022 Option Set and Product Binding migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1102_001_create_option_set_binding",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/catalog");
+    expect(migration?.metadata.schema).toBe("rms_catalog");
+    for (const table of [
+      "option_set",
+      "option_set_version",
+      "option",
+      "option_conflict",
+      "product_option_binding",
+      "option_set_operation_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
   it("registers the exact WP-1020 Catalog aggregate migration authority", async () => {

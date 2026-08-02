@@ -24,6 +24,7 @@ import type {
   CatalogOperationRecord,
   CatalogProductPorts,
 } from "./ports/product-ports.js";
+import { parseOptionSetAggregate, validateProductOptionBinding } from "../domain/option-set.js";
 
 function exact(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {
   if (
@@ -185,6 +186,29 @@ function verifiedRecord(
     aggregate,
   });
 }
+async function validateOptionBindings(ports: CatalogProductPorts, aggregate: ProductAggregate) {
+  await Promise.all(
+    aggregate.draft.optionBindings.map(async (binding) => {
+      const candidate = await ports.optionSets
+        .resolveVersion({
+          brandReference: aggregate.brandReference,
+          optionSetReference: binding.optionSetReference,
+          optionSetVersionReference: binding.optionSetVersionReference,
+        })
+        .catch(failure);
+      if (candidate === null) throw new CatalogError("CATALOG_UNAVAILABLE");
+      let optionSet;
+      try {
+        optionSet = parseOptionSetAggregate(candidate);
+      } catch {
+        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+      }
+      if (optionSet.brandReference !== aggregate.brandReference)
+        throw new CatalogError("CATALOG_UNAVAILABLE");
+      validateProductOptionBinding(binding, optionSet);
+    }),
+  );
+}
 
 export function createCatalogProductService(ports: CatalogProductPorts) {
   return Object.freeze({
@@ -283,6 +307,7 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
           localizedNames,
           taxClassificationReference,
           skus,
+          optionBindings: [],
           createdAt: op.requestedAt,
           updatedAt: op.requestedAt,
         },
@@ -299,6 +324,7 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
         })
         .catch(failure);
       if (!available) throw new CatalogError("CATALOG_CODE_CONFLICT");
+      await validateOptionBindings(ports, aggregate);
       const expectedRecord = record("Create", op.operationReference, intent, aggregate);
       const saved = await ports.repository
         .create({
@@ -392,6 +418,7 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
         aggregateVersion: current.aggregateVersion + 1,
         updatedAt: op.requestedAt,
       });
+      await validateOptionBindings(ports, next);
       const expectedRecord = record("ReplaceDraft", op.operationReference, intent, next);
       const saved = await ports.repository
         .commit({

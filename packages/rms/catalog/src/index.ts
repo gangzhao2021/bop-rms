@@ -6,3 +6,6 @@ export * from "./application/ports/product-ports.js";
 export * from "./contracts/category-menu.js";
 export * from "./application/category-menu-service.js";
 export * from "./application/ports/category-menu-ports.js";
+export * from "./contracts/option-set.js";
+export * from "./application/option-set-service.js";
+export * from "./application/ports/option-set-ports.js";

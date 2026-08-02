@@ -8,6 +8,7 @@ import type {
   CatalogReference,
   ProductAggregate,
 } from "../../contracts/product.js";
+import type { OptionSetAggregate } from "../../domain/option-set.js";
 
 export interface CatalogAuthorizationEvidence {
   readonly tenantContext: TenantContext;
@@ -56,4 +57,11 @@ export interface CatalogProductPorts {
   readonly authorization: CatalogAuthorizationPort;
   readonly references: CatalogReferencePort;
   readonly repository: CatalogProductRepositoryPort;
+  readonly optionSets: {
+    resolveVersion(input: {
+      readonly brandReference: CatalogReference;
+      readonly optionSetReference: CatalogReference;
+      readonly optionSetVersionReference: CatalogReference;
+    }): Promise<OptionSetAggregate | null>;
+  };
 }
