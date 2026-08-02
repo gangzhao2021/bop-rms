@@ -11,7 +11,7 @@ const id = (n) => `018f5000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
 async function prove(context) {
   const admin = new Client(context.clientConfig);
-  const role = `bop_wp1202_${context.runId}`;
+  const role = `bop_wp1203_${context.runId}`;
   const selectionEvidence = {
     menuVersionReference: id(20),
     productVersionReference: id(21),
@@ -30,13 +30,17 @@ async function prove(context) {
       { table_name: "cart" },
       { table_name: "cart_line" },
       { table_name: "cart_operation_record" },
+      { table_name: "cart_quote_attachment" },
+      { table_name: "cart_quote_attachment_line" },
     ]);
     const forced = await admin.query(
       `SELECT relname, relforcerowsecurity FROM pg_class
        WHERE oid IN (
          'rms_ordering.cart'::regclass,
          'rms_ordering.cart_line'::regclass,
-         'rms_ordering.cart_operation_record'::regclass
+         'rms_ordering.cart_operation_record'::regclass,
+         'rms_ordering.cart_quote_attachment'::regclass,
+         'rms_ordering.cart_quote_attachment_line'::regclass
        )
        ORDER BY relname`,
     );
@@ -86,6 +90,86 @@ async function prove(context) {
         "2026-08-02T14:01:00.000Z",
         "2026-08-03T14:01:00.000Z",
       ],
+    );
+    await admin.query(
+      `INSERT INTO rms_ordering.cart_quote_attachment
+       (operation_id,brand_id,store_id,cart_id,cart_version,guest_session_id,intent_digest,
+        quote_id,quote_version,quote_input_digest,currency_code,currency_metadata_version,
+        currency_metadata_version_id,subtotal_minor,discount_minor,tax_minor,fee_minor,total_minor,
+        line_count,warnings_json,quote_created_at,quote_expires_at,attached_at,idempotency_expires_at)
+       VALUES ($1,$2,$3,$4,2,$5,$6,$7,1,$8,'CAD',1,$9,2000,0,260,0,2260,1,
+        '["SYNTHETIC_WARNING"]'::jsonb,$10,$11,$10,$12)`,
+      [
+        id(26),
+        id(2),
+        id(3),
+        id(1),
+        id(4),
+        `sha256:${"c".repeat(64)}`,
+        id(27),
+        `sha256:${"d".repeat(64)}`,
+        id(28),
+        "2026-08-02T14:01:00.000Z",
+        "2026-08-02T14:06:00.000Z",
+        "2026-08-03T14:01:00.000Z",
+      ],
+    );
+    await admin.query(
+      `INSERT INTO rms_ordering.cart_quote_attachment_line
+       (operation_id,brand_id,store_id,cart_id,cart_line_id,sellable_id,
+        product_version_id,menu_version_id,quantity)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,2)`,
+      [id(26), id(2), id(3), id(1), id(5), id(6), id(21), id(20)],
+    );
+    await admin.query(`DELETE FROM rms_ordering.cart_line WHERE cart_line_id=$1`, [id(5)]);
+    assert.equal(
+      (
+        await admin.query(
+          `SELECT count(*)::integer AS count FROM rms_ordering.cart_quote_attachment_line
+           WHERE operation_id=$1`,
+          [id(26)],
+        )
+      ).rows[0].count,
+      1,
+    );
+    await admin.query(
+      `UPDATE rms_ordering.cart_quote_attachment SET total_minor=1 WHERE operation_id=$1`,
+      [id(26)],
+    );
+    assert.equal(
+      (
+        await admin.query(
+          `SELECT total_minor::text FROM rms_ordering.cart_quote_attachment WHERE operation_id=$1`,
+          [id(26)],
+        )
+      ).rows[0].total_minor,
+      "2260",
+    );
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO rms_ordering.cart_quote_attachment
+         (operation_id,brand_id,store_id,cart_id,cart_version,guest_session_id,intent_digest,
+          quote_id,quote_version,quote_input_digest,currency_code,currency_metadata_version,
+          currency_metadata_version_id,subtotal_minor,discount_minor,tax_minor,fee_minor,total_minor,
+          line_count,warnings_json,quote_created_at,quote_expires_at,attached_at,idempotency_expires_at)
+         VALUES ($1,$2,$3,$4,2,$5,$6,$7,1,$8,'CAD',1,$9,2000,0,260,0,2261,1,'[]'::jsonb,
+          $10,$11,$10,$12)`,
+        [
+          id(29),
+          id(2),
+          id(3),
+          id(1),
+          id(4),
+          `sha256:${"e".repeat(64)}`,
+          id(30),
+          `sha256:${"f".repeat(64)}`,
+          id(31),
+          "2026-08-02T14:01:00.000Z",
+          "2026-08-02T14:06:00.000Z",
+          "2026-08-03T14:01:00.000Z",
+        ],
+      ),
+      /cart_quote_attachment_total_check/u,
     );
     await assert.rejects(
       admin.query(
@@ -202,6 +286,22 @@ async function prove(context) {
     assert.equal(
       (
         await admin.query(
+          `SELECT count(*)::integer AS count FROM rms_ordering.cart_quote_attachment`,
+        )
+      ).rows[0].count,
+      1,
+    );
+    assert.equal(
+      (
+        await admin.query(
+          `SELECT count(*)::integer AS count FROM rms_ordering.cart_quote_attachment_line`,
+        )
+      ).rows[0].count,
+      1,
+    );
+    assert.equal(
+      (
+        await admin.query(
           `SELECT count(*)::integer AS count FROM rms_ordering.cart_operation_record`,
         )
       ).rows[0].count,
@@ -215,6 +315,14 @@ async function prove(context) {
     );
     assert.equal(
       (await admin.query(`SELECT count(*)::integer AS count FROM rms_ordering.cart`)).rows[0].count,
+      0,
+    );
+    assert.equal(
+      (
+        await admin.query(
+          `SELECT count(*)::integer AS count FROM rms_ordering.cart_quote_attachment`,
+        )
+      ).rows[0].count,
       0,
     );
     assert.equal(
@@ -234,6 +342,6 @@ async function prove(context) {
   }
 }
 
-it("enforces Cart command persistence and selection evidence", async () => {
-  await withIsolatedDatabase({ caseId: "wp1202_cart", root }, prove);
+it("enforces Cart command, selection and Quote attachment persistence", async () => {
+  await withIsolatedDatabase({ caseId: "wp1203_cart", root }, prove);
 });

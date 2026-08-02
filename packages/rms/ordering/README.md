@@ -19,8 +19,14 @@ Accepted Cart Items retain pinned Menu, Product, Binding and Option Set version 
 owns Sellable/Option validity; Ordering fails closed on rejected, unavailable, stale or mismatched
 evidence and never reads Catalog private tables.
 
-The module does not implement Cart creation transport, Pricing Quote attachment,
-expiration/abandonment actions, Checkout, Order, Event, Projection, UI, or external evidence. Those
+WP-1203 attaches an immutable Pricing Quote snapshot to one exact current Cart Version. The
+Ordering command derives the Pricing request from the server-owned Cart, accepts no client
+financial fields, verifies complete scope/line/Currency/total/UTC evidence, and appends the
+attachment without incrementing Cart Version. Later Item mutation invalidates eligibility through
+the pinned version; prior Quote attachments remain history.
+
+The module does not implement Cart creation transport, expiration/abandonment actions, Checkout,
+Order, Event, Projection, UI, or external evidence. Those
 remain owned by later Work Packages.
 Cart identifiers and attribution references are indirect identifiers and are prohibited from logs,
 URLs, analytics, screenshots, and non-synthetic fixtures.

@@ -59,6 +59,8 @@ export const cartErrorCodes = [
   "CART_ITEM_NOT_FOUND",
   "CART_ITEM_LIMIT_REACHED",
   "CART_SELECTION_INVALID",
+  "CART_QUOTE_INVALID",
+  "CART_QUOTE_EXPIRED",
   "CART_DEPENDENCY_UNAVAILABLE",
 ] as const;
 export type CartErrorCode = (typeof cartErrorCodes)[number];
