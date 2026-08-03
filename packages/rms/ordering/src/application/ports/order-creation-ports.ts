@@ -1,4 +1,5 @@
 import type { AppendAuditRecordInput } from "@bop/audit";
+import type { OrderCreatedEnvelope } from "../../contracts/order-created-event.js";
 import type { GuestSession } from "@bop/identity";
 import type { StoreBusinessDateResolution } from "@rms/store";
 import type { OrderingInstant, OrderingReference } from "../../domain/cart.js";
@@ -49,7 +50,9 @@ export interface OrderCreationPorts {
     }): Promise<StoreBusinessDateResolution>;
   };
   readonly references: {
-    generate(purpose: "CheckoutValidation" | "Order" | "OrderBatch" | "OrderItem"): string;
+    generate(
+      purpose: "CheckoutValidation" | "Order" | "OrderBatch" | "OrderItem" | "Event",
+    ): string;
     hashIntent(value: string): string;
     equals(left: string, right: string): boolean;
   };
@@ -59,6 +62,7 @@ export interface OrderCreationPorts {
       readonly record: Omit<OrderCreationRecord, "orderNumberAllocation">;
       readonly businessDateResolution: StoreBusinessDateResolution;
       readonly audit: AppendAuditRecordInput;
+      readonly event: OrderCreatedEnvelope;
     }): Promise<OrderCreationRecord>;
   };
 }

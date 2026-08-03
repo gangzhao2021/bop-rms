@@ -33,6 +33,7 @@ const refs = {
   order: id(13),
   batch: id(14),
   orderItem: id(15),
+  event: id(16),
 };
 
 function guest(overrides: Partial<GuestSession> = {}): GuestSession {
@@ -281,12 +282,15 @@ function ports(
   } = {},
 ) {
   let stored = options.prior ?? null;
+  let committedEvent: Parameters<OrderCreationPorts["repository"]["commit"]>[0]["event"] | null =
+    null;
   const calls: string[] = [];
   const values = {
     CheckoutValidation: [refs.validation],
     Order: [refs.order],
     OrderBatch: [refs.batch],
     OrderItem: [refs.orderItem],
+    Event: [refs.event],
   };
   const implementation: OrderCreationPorts = {
     authorization: {
@@ -342,6 +346,7 @@ function ports(
       },
       async commit(input) {
         calls.push("commit");
+        committedEvent = input.event;
         stored = parseOrderCreationRecord({
           ...input.record,
           orderNumberAllocation: createOrderNumberAllocation({
@@ -355,7 +360,7 @@ function ports(
       },
     },
   };
-  return { implementation, calls, stored: () => stored };
+  return { implementation, calls, stored: () => stored, committedEvent: () => committedEvent };
 }
 
 const command = (overrides: Record<string, unknown> = {}) => ({
@@ -384,6 +389,25 @@ describe("WP-1224 Create Order application API", () => {
     });
     expect(result.record.order.batches[0].submissionReference).toBe(refs.submission);
     expect(result.record.items[0]?.pricing.total.amountMinor).toBe(2260n);
+    expect(fixture.committedEvent()).toMatchObject({
+      eventId: refs.event,
+      eventType: "OrderCreated",
+      schemaVersion: 1,
+      tenantId: refs.brand,
+      storeId: refs.store,
+      aggregateId: refs.order,
+      aggregateVersion: 1n,
+      causationId: refs.submission,
+      actor: { type: "System" },
+      payload: {
+        orderReference: refs.order,
+        orderBatchReference: refs.batch,
+        submissionReference: refs.submission,
+        businessDate: "2026-08-02",
+        itemCount: 1,
+      },
+      redactionClassification: "indirect_identifier",
+    });
     expect(fixture.calls).toEqual([
       "authorize",
       "resolve",
@@ -405,6 +429,7 @@ describe("WP-1224 Create Order application API", () => {
     expect(result.status).toBe("AlreadyCreated");
     expect(result.record.order.orderReference).toBe(refs.order);
     expect(replay.calls).toEqual(["authorize", "resolve"]);
+    expect(replay.committedEvent()).toBeNull();
   });
 
   it("rejects changed intent under the same permanent Submission reference", async () => {

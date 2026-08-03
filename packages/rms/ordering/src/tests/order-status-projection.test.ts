@@ -8,6 +8,7 @@ import type { OrderStatusProjection } from "../domain/order-status-projection.js
 
 const id = (n: number) => `018f6300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-03T14:00:00.000Z";
+const digest = `sha256:${"a".repeat(64)}`;
 const refs = {
   order: id(1),
   brand: id(2),
@@ -17,16 +18,20 @@ const refs = {
   generation: id(6),
   batch: id(7),
   item: id(8),
+  submission: id(9),
 };
 
 function source(overrides: Record<string, unknown> = {}) {
   return {
     sourceVersion: 1,
     sourceCheckpoint: refs.checkpoint,
+    sourceDigest: digest,
     orderReference: refs.order,
     brandReference: refs.brand,
     storeReference: refs.store,
     guestSessionReference: refs.guest,
+    submissionReference: refs.submission,
+    businessDate: "2026-08-03",
     orderNumber: "42",
     orderType: "Pickup",
     sourceChannel: "Qr",

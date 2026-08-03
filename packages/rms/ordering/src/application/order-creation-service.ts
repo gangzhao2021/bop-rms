@@ -1,6 +1,7 @@
 import { validateAuditRecord } from "@bop/audit";
 import { assertGuestSessionUsable, createGuestSession, type GuestSession } from "@bop/identity";
 import type { StoreBusinessDateResolution } from "@rms/store";
+import { createOrderCreatedEnvelope } from "./order-created-event.js";
 import {
   parseCartAggregate,
   parseOrderingHash,
@@ -142,6 +143,43 @@ function intentHash(
           cartReference: input.cartReference,
           expectedCartVersion: input.expectedCartVersion,
           quoteReference: input.quoteReference,
+        })}`,
+      ),
+    );
+  } catch {
+    return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
+  }
+}
+
+function sourceSnapshotDigest(
+  ports: OrderCreationPorts,
+  record: Omit<OrderCreationRecord, "orderNumberAllocation">,
+  resolution: StoreBusinessDateResolution,
+) {
+  try {
+    const order = record.order;
+    const batch = order.batches[0];
+    return parseOrderingHash(
+      ports.references.hashIntent(
+        `OrderCreatedSource:v1:${JSON.stringify({
+          orderReference: order.orderReference,
+          brandReference: order.brandReference,
+          storeReference: order.storeReference,
+          submissionReference: record.submissionReference,
+          orderBatchReference: batch.orderBatchReference,
+          orderType: order.orderType,
+          sourceChannel: order.sourceChannel,
+          aggregateVersion: order.aggregateVersion,
+          createdAt: record.createdAt,
+          businessDate: resolution.businessDate,
+          items: record.items.map((item) => ({
+            orderItemReference: item.orderItemReference,
+            catalogSnapshotDigest: item.catalog.snapshotDigest,
+            quoteInputDigest: item.pricing.quoteInputDigest,
+            quantity: item.quantity,
+            totalAmountMinor: item.pricing.total.amountMinor.toString(),
+            currencyCode: item.pricing.total.currencyCode,
+          })),
         })}`,
       ),
     );
@@ -398,8 +436,25 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
         })
         .then((value) => audit(value, order, requestedAt))
         .catch(dependency);
+      let event;
+      try {
+        event = createOrderCreatedEnvelope({
+          eventReference: reference(ports, "Event"),
+          correlationReference: auditEvidence.correlationId,
+          sourceSnapshotDigest: sourceSnapshotDigest(ports, provisional, resolution),
+          businessDate: resolution.businessDate,
+          record: provisional,
+        });
+      } catch {
+        return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
+      }
       const saved = await ports.repository
-        .commit({ record: provisional, businessDateResolution: resolution, audit: auditEvidence })
+        .commit({
+          record: provisional,
+          businessDateResolution: resolution,
+          audit: auditEvidence,
+          event,
+        })
         .catch(dependency);
       return Object.freeze({
         status: "Created" as const,

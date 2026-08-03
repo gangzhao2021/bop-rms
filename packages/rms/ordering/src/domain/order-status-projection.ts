@@ -30,10 +30,13 @@ export interface OrderStatusBatchSummary {
 export interface OrderStatusSourceSnapshot {
   readonly sourceVersion: number;
   readonly sourceCheckpoint: OrderingReference;
+  readonly sourceDigest: string;
   readonly orderReference: OrderingReference;
   readonly brandReference: OrderingReference;
   readonly storeReference: OrderingReference;
   readonly guestSessionReference: OrderingReference;
+  readonly submissionReference: OrderingReference;
+  readonly businessDate: string;
   readonly orderNumber: string;
   readonly orderType: CartOrderType;
   readonly sourceChannel: CartSourceChannel;
@@ -163,10 +166,13 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
   const raw = exact(value, [
     "sourceVersion",
     "sourceCheckpoint",
+    "sourceDigest",
     "orderReference",
     "brandReference",
     "storeReference",
     "guestSessionReference",
+    "submissionReference",
+    "businessDate",
     "orderNumber",
     "orderType",
     "sourceChannel",
@@ -182,6 +188,10 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
   if (
     typeof raw.orderNumber !== "string" ||
     !/^[1-9][0-9]{0,18}$/u.test(raw.orderNumber) ||
+    typeof raw.sourceDigest !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/u.test(raw.sourceDigest) ||
+    typeof raw.businessDate !== "string" ||
+    !/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u.test(raw.businessDate) ||
     !["DineIn", "Pickup"].includes(String(raw.orderType)) ||
     !["Api", "Pos", "Qr", "Web"].includes(String(raw.sourceChannel)) ||
     raw.canonicalPhase !== "Submitted" ||
@@ -211,10 +221,13 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
   return Object.freeze({
     sourceVersion: positive(raw.sourceVersion),
     sourceCheckpoint: parseOrderingReference(raw.sourceCheckpoint),
+    sourceDigest: raw.sourceDigest,
     orderReference: parseOrderingReference(raw.orderReference),
     brandReference: parseOrderingReference(raw.brandReference),
     storeReference: parseOrderingReference(raw.storeReference),
     guestSessionReference: parseOrderingReference(raw.guestSessionReference),
+    submissionReference: parseOrderingReference(raw.submissionReference),
+    businessDate: raw.businessDate,
     orderNumber: raw.orderNumber,
     orderType: raw.orderType as CartOrderType,
     sourceChannel: raw.sourceChannel as CartSourceChannel,

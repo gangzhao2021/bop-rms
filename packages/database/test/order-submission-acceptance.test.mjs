@@ -20,10 +20,11 @@ async function prove(context) {
          'rms_ordering.order_header'::regclass,
          'rms_ordering.order_submission_record'::regclass,
          'rms_ordering.order_batch'::regclass,
-         'rms_ordering.order_item'::regclass
+         'rms_ordering.order_item'::regclass,
+         'platform_eventing.outbox_event'::regclass
        ) ORDER BY relname`,
     );
-    assert.equal(forced.rows.length, 4);
+    assert.equal(forced.rows.length, 5);
     assert.equal(
       forced.rows.every((row) => row.relforcerowsecurity),
       true,
@@ -90,6 +91,31 @@ async function prove(context) {
         at,
       ],
     );
+    await client.query(
+      `INSERT INTO platform_eventing.outbox_event
+       (event_id,event_type,schema_version,producer_module,brand_id,store_id,aggregate_type,
+        aggregate_id,aggregate_version,correlation_id,causation_id,actor_type,actor_id,payload_json,
+        redaction_classification,replay_metadata_json,occurred_at,available_at)
+       VALUES ($1,'OrderCreated',1,'@rms/ordering',$2,$3,'Order',$4,1,$5,$6,'System',NULL,
+        $7::jsonb,'indirect_identifier','{"replaySafe":true}'::jsonb,$8,$8)`,
+      [
+        id(70),
+        id(1),
+        id(2),
+        id(10),
+        id(71),
+        id(11),
+        JSON.stringify({
+          orderReference: id(10),
+          orderBatchReference: id(14),
+          submissionReference: id(11),
+          businessDate: "2026-08-02",
+          sourceSnapshotDigest: `sha256:${"f".repeat(64)}`,
+          itemCount: 1,
+        }),
+        at,
+      ],
+    );
     await client.query("COMMIT");
 
     const snapshot = await client.query(
@@ -103,6 +129,32 @@ async function prove(context) {
     assert.equal(snapshot.rowCount, 1);
     assert.equal(snapshot.rows[0].order_number, "1");
     assert.equal(snapshot.rows[0].transaction_snapshot_json.pricing.total.amountMinor, "1130");
+    const outbox = await client.query(
+      `SELECT event_type,schema_version,producer_module,brand_id::text,store_id::text,
+       aggregate_id::text,aggregate_version,actor_type,redaction_classification,payload_json
+       FROM platform_eventing.outbox_event WHERE event_id=$1`,
+      [id(70)],
+    );
+    assert.equal(outbox.rowCount, 1);
+    assert.deepEqual(outbox.rows[0], {
+      event_type: "OrderCreated",
+      schema_version: 1,
+      producer_module: "@rms/ordering",
+      brand_id: id(1),
+      store_id: id(2),
+      aggregate_id: id(10),
+      aggregate_version: "1",
+      actor_type: "System",
+      redaction_classification: "indirect_identifier",
+      payload_json: {
+        orderReference: id(10),
+        orderBatchReference: id(14),
+        submissionReference: id(11),
+        businessDate: "2026-08-02",
+        sourceSnapshotDigest: `sha256:${"f".repeat(64)}`,
+        itemCount: 1,
+      },
+    });
 
     await assert.rejects(
       client.query(
@@ -156,6 +208,64 @@ async function prove(context) {
         await client.query(
           `SELECT count(*)::integer AS count FROM rms_ordering.order_number_counter
            WHERE business_date='2026-08-03'`,
+        )
+      ).rows[0].count,
+      0,
+    );
+
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO rms_ordering.order_number_counter
+       (brand_id,store_id,business_date,next_sequence,updated_at)
+       VALUES ($1,$2,'2026-08-04',2,$3)`,
+      [id(1), id(2), at],
+    );
+    await client.query(
+      `INSERT INTO rms_ordering.order_number_allocation
+       (order_id,brand_id,store_id,business_date,sequence,order_number,allocated_at,
+        business_date_configuration_id,business_date_configuration_version,
+        business_date_content_digest,time_zone,business_day_start,business_date_boundary_at,
+        boundary_disambiguation)
+       VALUES ($1,$2,$3,'2026-08-04',1,'1',$4,$5,1,$6,
+        'America/Toronto','04:00:00','2026-08-04T08:00:00.000Z','Exact')`,
+      [id(80), id(1), id(2), at, id(3), `sha256:${"a".repeat(64)}`],
+    );
+    await client.query(
+      `INSERT INTO rms_ordering.order_header
+       (order_id,brand_id,store_id,business_date,order_number,order_type,source_channel,
+        created_by_actor_id,submitted_by_actor_id,aggregate_version,canonical_phase,
+        closure_status,payment_status,created_at)
+       VALUES ($1,$2,$3,'2026-08-04','1','Pickup','Qr',$4,$4,1,'Submitted','Open',
+        'NotReported',$5)`,
+      [id(80), id(1), id(2), id(4), at],
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO platform_eventing.outbox_event
+         (event_id,event_type,schema_version,producer_module,brand_id,store_id,aggregate_type,
+          aggregate_id,aggregate_version,correlation_id,causation_id,actor_type,actor_id,payload_json,
+          redaction_classification,replay_metadata_json,occurred_at,available_at)
+         VALUES ($1,'OrderCreated',1,'@rms/ordering',$2,$3,'Order',$4,1,$5,$6,'System',NULL,
+          '{}'::jsonb,'indirect_identifier','{"replaySafe":true}'::jsonb,$7,$7)`,
+        [id(70), id(1), id(2), id(80), id(71), id(81), at],
+      ),
+      /outbox_event_pkey/u,
+    );
+    await client.query("ROLLBACK");
+    assert.equal(
+      (
+        await client.query(
+          `SELECT count(*)::integer AS count FROM rms_ordering.order_header WHERE order_id=$1`,
+          [id(80)],
+        )
+      ).rows[0].count,
+      0,
+    );
+    assert.equal(
+      (
+        await client.query(
+          `SELECT count(*)::integer AS count FROM rms_ordering.order_number_allocation WHERE order_id=$1`,
+          [id(80)],
         )
       ).rows[0].count,
       0,
