@@ -116,9 +116,9 @@ async function insertFact(client, value, outcome, transaction, event) {
       webhook_receipt_id,provider_event_id,provider_account_id,provider_environment,
       provider_intent_reference,
       provider_observation_id,authoritative_source,terminal_outcome,amount_minor,currency_code,
-      failure_reason,retry_disposition,occurred_at,recorded_at,evidence_digest,event_id)
+      failure_reason,retry_disposition,occurred_at,recorded_at,evidence_digest,event_id,causation_id)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Test',$10,$11,'VerifiedWebhook',$12,$13,$14,$15,$16,
-      $17,$17,$18,$19)`,
+      $17,$17,$18,$19,$20)`,
     [
       transaction,
       value.brand,
@@ -139,6 +139,7 @@ async function insertFact(client, value, outcome, transaction, event) {
       occurredAt,
       sha("f"),
       event,
+      value.receipt,
     ],
   );
 }
@@ -190,9 +191,9 @@ async function prove(context) {
           webhook_receipt_id,provider_event_id,provider_account_id,provider_environment,
           provider_intent_reference,
           provider_observation_id,authoritative_source,terminal_outcome,amount_minor,currency_code,
-          occurred_at,recorded_at,evidence_digest,event_id)
+          occurred_at,recorded_at,evidence_digest,event_id,causation_id)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Test','pi_SYNTHETIC_100',$10,'VerifiedWebhook',
-          'Succeeded',1249,'CAD',$11,$11,$12,$13)`,
+          'Succeeded',1249,'CAD',$11,$11,$12,$13,$7)`,
         [
           id(144),
           success.brand,

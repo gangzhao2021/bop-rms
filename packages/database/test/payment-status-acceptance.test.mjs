@@ -72,9 +72,9 @@ async function seedTerminalFact(client) {
      (payment_transaction_id,brand_id,store_id,payment_intent_id,payment_attempt_id,order_id,
       webhook_receipt_id,provider_event_id,provider_account_id,provider_environment,
       provider_intent_reference,provider_observation_id,authoritative_source,terminal_outcome,
-      amount_minor,currency_code,occurred_at,recorded_at,evidence_digest,event_id)
+      amount_minor,currency_code,occurred_at,recorded_at,evidence_digest,event_id,causation_id)
      VALUES ($1,$2,$3,$4,$5,$6,$7,'evt_SYNTHETIC13060000',$8,'Test','pi_SYNTHETIC_1306',
-      $9,'VerifiedWebhook','Succeeded',1250,'CAD',$10,$10,$11,$12)`,
+      $9,'VerifiedWebhook','Succeeded',1250,'CAD',$10,$10,$11,$12,$7)`,
     [id(30), id(1), id(2), id(10), id(20), id(4), id(22), id(23), id(21), at, sha("f"), id(31)],
   );
 }

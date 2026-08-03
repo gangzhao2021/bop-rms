@@ -19,3 +19,7 @@ export * from "./application/ports/payment-terminal-ports.js";
 export * from "./application/payment-status-projection.js";
 export * from "./application/payment-status-projection-service.js";
 export * from "./application/ports/payment-status-projection-ports.js";
+export * from "./application/payment-reconciliation.js";
+export * from "./application/payment-reconciliation-service.js";
+export * from "./application/payment-reconciliation-query-service.js";
+export * from "./application/ports/payment-reconciliation-ports.js";

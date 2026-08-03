@@ -40,6 +40,9 @@ const moduleManifestInput =
         "payment_attempt",
         "payment_intent_operation_record",
         "payment_provider_observation",
+        "payment_reconciliation_exception",
+        "payment_reconciliation_record",
+        "payment_reconciliation_run",
         "payment_terminal_fact",
         "payment_status_projection",
         "provider_webhook_record",
@@ -47,7 +50,7 @@ const moduleManifestInput =
         "provider_webhook_processing_record",
       ],
     },
-    ownedJobs: [],
+    ownedJobs: ["payment-reconciliation"],
     featureFlags: [],
     killSwitches: [],
     piiClassification: {

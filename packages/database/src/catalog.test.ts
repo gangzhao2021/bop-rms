@@ -75,6 +75,7 @@ describe("migration catalog", () => {
       "1400_002_create_provider_webhook_inbox",
       "1400_003_create_payment_terminal_fact",
       "1400_004_create_payment_status_projection",
+      "1400_005_create_payment_reconciliation",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -346,6 +347,24 @@ describe("migration catalog", () => {
     expect(migration?.sql).toContain("CREATE TABLE rms_payment.payment_status_projection");
     expect(migration?.sql).toContain("payment_status_projection_active_intent_unique");
     expect(migration?.sql).toContain("enforce_payment_status_projection_update");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1307 Payment reconciliation migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1400_005_create_payment_reconciliation",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/payment");
+    expect(migration?.metadata.schema).toBe("rms_payment");
+    for (const table of [
+      "payment_reconciliation_run",
+      "payment_reconciliation_exception",
+      "payment_reconciliation_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_payment.${table}`);
+    expect(migration?.sql).toContain("payment_terminal_fact_authoritative_source_shape_check");
+    expect(migration?.sql).toContain("payment_reconciliation_exception_stable_unique");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
