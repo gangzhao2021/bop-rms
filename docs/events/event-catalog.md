@@ -7,6 +7,8 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 
 - `MenuPublished:v1` — owner `@rms/catalog`; stable; brand; none
 - `OrderCreated:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
+- `PaymentFailed:v1` — owner `@rms/payment`; stable; store; payment
+- `PaymentSucceeded:v1` — owner `@rms/payment`; stable; store; payment
 
 Registered Event identities are the only bounded Event-type metric label candidates.
 An empty catalog therefore enables no Event-type production metric label.

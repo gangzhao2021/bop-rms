@@ -58,6 +58,14 @@ const databaseAccessManifestInput = {
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier", "payment"],
     },
+    {
+      table: "payment_terminal_fact",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
   ],
   accesses: [],
 } as const;
