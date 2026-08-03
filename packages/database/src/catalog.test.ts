@@ -70,6 +70,7 @@ describe("migration catalog", () => {
       "1300_005_alter_cart_lifecycle",
       "1300_006_create_order_number_allocation",
       "1300_007_create_order_submission",
+      "1300_008_create_order_status_projection",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -266,6 +267,19 @@ describe("migration catalog", () => {
     for (const table of ["order_header", "order_submission_record", "order_batch", "order_item"])
       expect(migration?.sql).toContain(`CREATE TABLE rms_ordering.${table}`);
     expect(migration?.sql).toContain("order_header_number_allocation_fk");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1225 Order status projection migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1300_008_create_order_status_projection",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/ordering");
+    for (const table of ["order_status_projection_generation", "order_status_projection"])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_ordering.${table}`);
+    expect(migration?.sql).toContain("order_status_projection_generation_store_scope_policy");
+    expect(migration?.sql).toContain("enforce_order_status_projection_advance");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });

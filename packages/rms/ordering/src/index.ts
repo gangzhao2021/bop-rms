@@ -22,3 +22,6 @@ export * from "./domain/order-number.js";
 export * from "./contracts/order-creation.js";
 export * from "./application/order-creation-service.js";
 export * from "./application/ports/order-creation-ports.js";
+export * from "./contracts/order-status-projection.js";
+export * from "./application/order-status-projection-service.js";
+export * from "./application/ports/order-status-projection-ports.js";
