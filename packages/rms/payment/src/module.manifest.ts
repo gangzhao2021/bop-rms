@@ -11,6 +11,16 @@ const moduleManifestInput =
     publicExports: ["."],
     allowedSynchronousDependencies: [
       {
+        moduleName: "audit",
+        packageName: "@bop/audit",
+        layer: "BOP",
+      },
+      {
+        moduleName: "ordering",
+        packageName: "@rms/ordering",
+        layer: "RMS",
+      },
+      {
         moduleName: "pricing",
         packageName: "@rms/pricing",
         layer: "RMS",
@@ -20,7 +30,12 @@ const moduleManifestInput =
     publishedEvents: [],
     ownedDatabase: {
       schema: "rms_payment",
-      tables: [],
+      tables: [
+        "payment_intent",
+        "payment_attempt",
+        "payment_intent_operation_record",
+        "payment_provider_observation",
+      ],
     },
     ownedJobs: [],
     featureFlags: [],

@@ -29,3 +29,4 @@ export * from "./application/ports/order-created-event-ports.js";
 export * from "./contracts/order-status-projection.js";
 export * from "./application/order-status-projection-service.js";
 export * from "./application/ports/order-status-projection-ports.js";
+export * from "./contracts/order-payment-preparation.js";
