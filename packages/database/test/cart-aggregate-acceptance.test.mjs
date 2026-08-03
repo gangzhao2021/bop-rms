@@ -33,8 +33,12 @@ async function prove(context) {
       { table_name: "cart_operation_record" },
       { table_name: "cart_quote_attachment" },
       { table_name: "cart_quote_attachment_line" },
+      { table_name: "order_batch" },
+      { table_name: "order_header" },
+      { table_name: "order_item" },
       { table_name: "order_number_allocation" },
       { table_name: "order_number_counter" },
+      { table_name: "order_submission_record" },
     ]);
     const forced = await admin.query(
       `SELECT relname, relforcerowsecurity FROM pg_class

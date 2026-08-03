@@ -49,8 +49,12 @@ const expectedForcedTables = [
   "rms_ordering.cart",
   "rms_ordering.cart_line",
   "rms_ordering.cart_operation_record",
+  "rms_ordering.order_batch",
+  "rms_ordering.order_header",
+  "rms_ordering.order_item",
   "rms_ordering.order_number_allocation",
   "rms_ordering.order_number_counter",
+  "rms_ordering.order_submission_record",
 ];
 
 async function prove(context) {

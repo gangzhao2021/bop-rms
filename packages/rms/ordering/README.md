@@ -43,7 +43,11 @@ current configuration; WP-1224 remains responsible for authorized atomic creatio
 WP-1223 consumes only Store-owned Business Date resolution evidence and defines canonical decimal
 Order Numbers backed by a Store + Business Date counter and append-only allocation history. DST
 gap/overlap behavior is deterministic; WP-1224 must allocate the number and create the Order in one
-authorized database transaction.
+authorized database transaction. WP-1224 provides that public internal application API: it
+authorizes before reads, permanently binds one Submission reference to the exact Cart Version and
+Quote intent, revalidates all immutable source snapshots, and requires atomic persistence of the
+Order, first Batch, Items, allocation and Audit. Exact replay returns the first result. The later
+Payment command owns public HTTP transport and Provider interaction under Section 87.
 Cart identifiers and attribution references are indirect identifiers and are prohibited from logs,
 URLs, analytics, screenshots, and non-synthetic fixtures.
 
@@ -51,4 +55,5 @@ URLs, analytics, screenshots, and non-synthetic fixtures.
 pnpm --filter @rms/ordering test
 pnpm ordering-cart:acceptance
 pnpm ordering-business-date:acceptance
+pnpm ordering-create-order:acceptance
 ```

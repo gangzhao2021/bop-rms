@@ -19,3 +19,6 @@ export * from "./contracts/order.js";
 export * from "./contracts/order-item-snapshot.js";
 export * from "./contracts/order-number.js";
 export * from "./domain/order-number.js";
+export * from "./contracts/order-creation.js";
+export * from "./application/order-creation-service.js";
+export * from "./application/ports/order-creation-ports.js";

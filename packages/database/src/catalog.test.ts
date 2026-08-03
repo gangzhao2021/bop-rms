@@ -69,6 +69,7 @@ describe("migration catalog", () => {
       "1300_004_create_cart_quote_attachment",
       "1300_005_alter_cart_lifecycle",
       "1300_006_create_order_number_allocation",
+      "1300_007_create_order_submission",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -252,6 +253,19 @@ describe("migration catalog", () => {
     expect(migration?.metadata.schema).toBe("rms_ordering");
     for (const table of ["order_number_counter", "order_number_allocation"])
       expect(migration?.sql).toContain(`CREATE TABLE rms_ordering.${table}`);
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1224 atomic Order submission migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1300_007_create_order_submission",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/ordering");
+    expect(migration?.metadata.schema).toBe("rms_ordering");
+    for (const table of ["order_header", "order_submission_record", "order_batch", "order_item"])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_ordering.${table}`);
+    expect(migration?.sql).toContain("order_header_number_allocation_fk");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
