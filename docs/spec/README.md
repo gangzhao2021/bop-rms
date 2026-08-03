@@ -20,7 +20,9 @@ older historical snapshots retained later in this index.
 - `WP-1303 — Provider Webhook Verification` is active from exact integrated and exact-main verified
   `main@30c2bf1ffa8f57cd440f945a360cc42599ad0660`. It owns the raw-byte Stripe signature,
   timestamp and bounded secret-rotation verification contract described in
-  `docs/spec/work-packages/WP-1303.md`.
+  `docs/spec/work-packages/WP-1303.md`. Exact implementation head
+  `f2eadd48f453cba0568be5bb5e55b91c927db36c` passed run/job
+  `30832016180 / 91748019626`; final-head and exact-main verification remain pending.
 
 - `WP-1302 — Payment Intent Creation` is implemented and integrated at squash
   `30c2bf1ffa8f57cd440f945a360cc42599ad0660` via PR #139. Final head
