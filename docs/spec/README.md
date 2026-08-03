@@ -19,7 +19,9 @@ older historical snapshots retained later in this index.
 
 - `WP-1302 — Payment Intent Creation` is active from exact integrated and exact-main verified
   `main@9f67ed006b8cff4aa2f317905f90025a9ee1195c`. It owns the Payment Intent/Attempt creation
-  contract described in `docs/spec/work-packages/WP-1302.md`.
+  contract described in `docs/spec/work-packages/WP-1302.md`. Exact implementation head
+  `52353320b71d7a81dc89bd812e2c29e2013f1690` passed run/job
+  `30827377847 / 91732371426`; final-head and exact-main verification remain pending.
 
 - `WP-1301 — Payment Adapter Interface` is active from exact integrated and exact-main verified
   squash `9f67ed006b8cff4aa2f317905f90025a9ee1195c`. It owns the Payment Provider
