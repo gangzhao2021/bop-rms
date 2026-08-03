@@ -20,7 +20,9 @@ older historical snapshots retained later in this index.
 - `WP-1304 — Payment Webhook Idempotency` is active from exact integrated and exact-main verified
   `main@8b4d330c9abe6a0809041c999b000cc419183225`. It owns durable webhook acceptance,
   Provider Account + Event ID dedupe, bounded raw-evidence retention and transactional replay
-  coordination described in `docs/spec/work-packages/WP-1304.md`.
+  coordination described in `docs/spec/work-packages/WP-1304.md`. Exact implementation head
+  `5010828e56651f649743993475d51b08f111c39c` passed run/job
+  `30838619668 / 91769898206`; final-head and exact-main verification remain pending.
 
 - `WP-1303 — Provider Webhook Verification` is implemented and integrated at squash
   `8b4d330c9abe6a0809041c999b000cc419183225` via PR #140. Final head
