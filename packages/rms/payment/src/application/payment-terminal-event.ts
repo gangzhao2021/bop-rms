@@ -118,7 +118,7 @@ export function createPaymentTerminalEnvelope(input: {
     aggregateId: fact.paymentIntentReference,
     aggregateVersion: 2n,
     correlationId: parsePaymentReference(input.correlationReference),
-    causationId: fact.webhookReceiptReference,
+    causationId: fact.causationReference,
     actor: { type: "System" },
     redactionClassification: "payment",
     replayMetadata: { replaySafe: true },

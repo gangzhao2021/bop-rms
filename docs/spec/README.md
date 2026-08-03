@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1306 — Payment Status Projection candidate on codex/wp-1306`
+- Current discussion node: `WP-1307 — Payment Reconciliation Job Baseline candidate on codex/wp-1307`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,12 +17,20 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1306 — Payment Status Projection` is active from exact integrated and exact-main verified
-  `main@89bab93d6c9ca8d88d0ebb83240f94a2aa3d1103`. It owns the Payment terminal-status
-  read model, event consumer and bounded authorized queries described in
-  `docs/spec/work-packages/WP-1306.md`. Exact implementation head
-  `66d8bc81fa56a2c4e0aa538c6c92630544c90209` passed run/job
-  `30849205200 / 91804857791`; final-head and exact-main verification remain pending.
+- `WP-1307 — Payment Reconciliation Job Baseline` is active from exact integrated and exact-main
+  verified `main@a18584c93595ea3b51608e3c56c78f1d92cad79c`. It owns the bounded operational and
+  daily-settlement reconciliation job/check/exception baseline described in
+  `docs/spec/work-packages/WP-1307.md`. Exact implementation head
+  `d7782636b69521b3dd176832d1ece019bb8ebf9a` passed run/job
+  `30855342589 / 91824930149`; final-head CI, integration and exact-main verification remain
+  pending.
+
+- `WP-1306 — Payment Status Projection` is implemented and integrated at squash
+  `a18584c93595ea3b51608e3c56c78f1d92cad79c` via PR #143. Final head
+  `6fc0fb7abda98148a7e485cdc9595b869f21691f` passed run/job
+  `30850388200 / 91808685897`; exact-main run/job `30851543840 / 91812488627` passed. It owns the
+  Payment terminal-status read model, event consumer and bounded authorized queries described in
+  `docs/spec/work-packages/WP-1306.md`.
 
 - `WP-1305 — PaymentSucceeded / Failed Event` is implemented and integrated at squash
   `89bab93d6c9ca8d88d0ebb83240f94a2aa3d1103` via PR #142. Final head

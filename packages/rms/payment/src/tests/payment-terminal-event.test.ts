@@ -35,6 +35,7 @@ function observation(
 ): PaymentTerminalObservation {
   return {
     observationReference: ids.observation,
+    causationReference: ids.receipt,
     webhookReceiptReference: ids.receipt,
     providerEventReference: "evt_synthetic123",
     providerAccountReference: ids.account,
@@ -181,6 +182,25 @@ describe("WP-1305 Payment terminal facts and Events", () => {
       orderReference: ids.order,
     });
     expect(event.payload).not.toHaveProperty("amountMinor");
+  });
+
+  it("records authoritative Provider retrieval with independent causation and no fake webhook", async () => {
+    const { service } = fixture();
+    const result = await service.record(
+      observation({
+        source: "ProviderRetrieval",
+        causationReference: parsePaymentReference(ids.audit),
+        webhookReceiptReference: null,
+        providerEventReference: null,
+      }),
+    );
+    expect(result.fact).toMatchObject({
+      source: "ProviderRetrieval",
+      causationReference: ids.audit,
+      webhookReceiptReference: null,
+      providerEventReference: null,
+      event: { causationId: ids.audit },
+    });
   });
 
   it("rejects non-terminal Provider states before any dependency", async () => {

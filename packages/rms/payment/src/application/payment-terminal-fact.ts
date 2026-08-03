@@ -87,8 +87,9 @@ function money(value: unknown): Money {
 
 export type PaymentTerminalObservation = Readonly<{
   observationReference: PaymentReference;
-  webhookReceiptReference: PaymentReference;
-  providerEventReference: StripeEventReference;
+  causationReference: PaymentReference;
+  webhookReceiptReference: PaymentReference | null;
+  providerEventReference: StripeEventReference | null;
   providerAccountReference: PaymentReference;
   providerIntentReference: ProviderReference;
   environment: "Test" | "Live";
@@ -108,6 +109,7 @@ export type PaymentTerminalObservation = Readonly<{
 export function parsePaymentTerminalObservation(value: unknown): PaymentTerminalObservation {
   const raw = exact(value, [
     "observationReference",
+    "causationReference",
     "webhookReceiptReference",
     "providerEventReference",
     "providerAccountReference",
@@ -130,6 +132,14 @@ export function parsePaymentTerminalObservation(value: unknown): PaymentTerminal
     (raw.source !== "VerifiedWebhook" && raw.source !== "ProviderRetrieval")
   )
     return invalid();
+  if (
+    raw.source === "VerifiedWebhook"
+      ? raw.webhookReceiptReference === null ||
+        raw.providerEventReference === null ||
+        raw.causationReference !== raw.webhookReceiptReference
+      : raw.webhookReceiptReference !== null || raw.providerEventReference !== null
+  )
+    return invalid();
   if (raw.status !== "Captured" && raw.status !== "Failed")
     return invalid("PAYMENT_TERMINAL_STATE_NOT_TERMINAL");
   const success = raw.status === "Captured";
@@ -143,8 +153,15 @@ export function parsePaymentTerminalObservation(value: unknown): PaymentTerminal
     return invalid();
   return Object.freeze({
     observationReference: parsePaymentReference(raw.observationReference),
-    webhookReceiptReference: parsePaymentReference(raw.webhookReceiptReference),
-    providerEventReference: parseStripeEventReference(raw.providerEventReference),
+    causationReference: parsePaymentReference(raw.causationReference),
+    webhookReceiptReference:
+      raw.webhookReceiptReference === null
+        ? null
+        : parsePaymentReference(raw.webhookReceiptReference),
+    providerEventReference:
+      raw.providerEventReference === null
+        ? null
+        : parseStripeEventReference(raw.providerEventReference),
     providerAccountReference: parsePaymentReference(raw.providerAccountReference),
     providerIntentReference: parseProviderReference(raw.providerIntentReference),
     environment: raw.environment,
@@ -169,8 +186,9 @@ export type PaymentTerminalFact = Readonly<{
   orderReference: PaymentReference;
   brandReference: PaymentReference;
   storeReference: PaymentReference;
-  webhookReceiptReference: PaymentReference;
-  providerEventReference: StripeEventReference;
+  causationReference: PaymentReference;
+  webhookReceiptReference: PaymentReference | null;
+  providerEventReference: StripeEventReference | null;
   providerAccountReference: PaymentReference;
   providerIntentReference: ProviderReference;
   environment: "Test" | "Live";

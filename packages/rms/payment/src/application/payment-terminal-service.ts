@@ -42,6 +42,10 @@ function sameFact(left: PaymentTerminalFact, right: PaymentTerminalFact): boolea
     left.paymentIntentReference === right.paymentIntentReference &&
     left.paymentAttemptReference === right.paymentAttemptReference &&
     left.observationReference === right.observationReference &&
+    left.causationReference === right.causationReference &&
+    left.webhookReceiptReference === right.webhookReceiptReference &&
+    left.providerEventReference === right.providerEventReference &&
+    left.source === right.source &&
     left.outcome === right.outcome &&
     left.occurredAt === right.occurredAt &&
     left.evidenceDigest === right.evidenceDigest &&
@@ -86,6 +90,7 @@ export function createPaymentTerminalService(ports: PaymentTerminalPorts) {
           orderReference: parsePaymentReference(source.orderReference),
           brandReference: observation.brandReference,
           storeReference: observation.storeReference,
+          causationReference: observation.causationReference,
           webhookReceiptReference: observation.webhookReceiptReference,
           providerEventReference: observation.providerEventReference,
           providerAccountReference: observation.providerAccountReference,
