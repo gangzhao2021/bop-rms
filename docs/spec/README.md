@@ -20,7 +20,9 @@ older historical snapshots retained later in this index.
 - `WP-1305 — PaymentSucceeded / Failed Event` is active from exact integrated and exact-main
   verified `main@8f9db4355efff6b0935df1507ab786d09c811966`. It owns the authoritative,
   append-only Payment success/failure fact mapping and atomic public Outbox events described in
-  `docs/spec/work-packages/WP-1305.md`.
+  `docs/spec/work-packages/WP-1305.md`. Exact implementation head
+  `526553e304dc58b90dd103d7618ec807d52b93ad` passed run/job
+  `30844532484 / 91789481855`; final-head and exact-main verification remain pending.
 
 - `WP-1304 — Payment Webhook Idempotency` is implemented and integrated at squash
   `8f9db4355efff6b0935df1507ab786d09c811966` via PR #141. Final head
