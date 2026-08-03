@@ -38,6 +38,8 @@ async function prove(context) {
       { table_name: "order_item" },
       { table_name: "order_number_allocation" },
       { table_name: "order_number_counter" },
+      { table_name: "order_status_projection" },
+      { table_name: "order_status_projection_generation" },
       { table_name: "order_submission_record" },
     ]);
     const forced = await admin.query(

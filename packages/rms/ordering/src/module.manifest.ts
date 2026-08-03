@@ -53,6 +53,8 @@ const moduleManifestInput =
         "order_submission_record",
         "order_batch",
         "order_item",
+        "order_status_projection_generation",
+        "order_status_projection",
       ],
     },
     ownedJobs: [],

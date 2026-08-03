@@ -98,6 +98,22 @@ const databaseAccessManifestInput = {
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier", "personal", "health"],
     },
+    {
+      table: "order_status_projection_generation",
+      classification: "projection-read-model",
+      writeOwner: { kind: "projection-builder", id: "@rms/ordering.order-status.v1" },
+      allowedReadPatterns: ["public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "order_status_projection",
+      classification: "projection-read-model",
+      writeOwner: { kind: "projection-builder", id: "@rms/ordering.order-status.v1" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
   ],
   accesses: [],
 } as const;

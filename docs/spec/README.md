@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1224 — Create Order API candidate on codex/wp-1224`
+- Current discussion node: `WP-1225 — Order Status Projection candidate on codex/wp-1225`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,8 +17,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1224 — Create Order API` is active from exact integrated
-  `main@17580ba9f8c02d57869aa4573f86543670d428a9`. It composes authorized permanent Submission
+- `WP-1225 — Order Status Projection` is active from exact integrated
+  `main@9deb14fff9603c729a77275f13844a7d6738d4bc`. It owns the bounded Ordering projection and
+  customer/merchant public query contracts described in `docs/spec/work-packages/WP-1225.md`.
+  Implementation is complete and locally verified on `codex/wp-1225`; exact-head and exact-main CI
+  remain pending.
+
+- `WP-1224 — Create Order API` is implemented and integrated at squash
+  `9deb14fff9603c729a77275f13844a7d6738d4bc`. It composes authorized permanent Submission
   idempotency, current Checkout evidence, immutable Order/Batch/Item snapshots and Store Business
   Date allocation behind one atomic Ordering repository contract. Section 87 reserves public
   Payment transport for later Payment WPs, so no conflicting standalone HTTP route or Provider call
