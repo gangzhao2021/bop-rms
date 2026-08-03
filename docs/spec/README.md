@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1303 — Provider Webhook Verification candidate on codex/wp-1303`
+- Current discussion node: `WP-1304 — Payment Webhook Idempotency candidate on codex/wp-1304`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,12 +17,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1303 — Provider Webhook Verification` is active from exact integrated and exact-main verified
-  `main@30c2bf1ffa8f57cd440f945a360cc42599ad0660`. It owns the raw-byte Stripe signature,
-  timestamp and bounded secret-rotation verification contract described in
-  `docs/spec/work-packages/WP-1303.md`. Exact implementation head
-  `f2eadd48f453cba0568be5bb5e55b91c927db36c` passed run/job
-  `30832016180 / 91748019626`; final-head and exact-main verification remain pending.
+- `WP-1304 — Payment Webhook Idempotency` is active from exact integrated and exact-main verified
+  `main@8b4d330c9abe6a0809041c999b000cc419183225`. It owns durable webhook acceptance,
+  Provider Account + Event ID dedupe, bounded raw-evidence retention and transactional replay
+  coordination described in `docs/spec/work-packages/WP-1304.md`.
+
+- `WP-1303 — Provider Webhook Verification` is implemented and integrated at squash
+  `8b4d330c9abe6a0809041c999b000cc419183225` via PR #140. Final head
+  `52c2bbda649d81d7a95ce25f4cf811acc1db3711` passed run/job
+  `30833204624 / 91751942336`; exact-main run/job `30834393051 / 91755894978` passed. It owns the
+  raw-byte Stripe signature, timestamp and bounded secret-rotation verification contract described
+  in `docs/spec/work-packages/WP-1303.md`.
 
 - `WP-1302 — Payment Intent Creation` is implemented and integrated at squash
   `30c2bf1ffa8f57cd440f945a360cc42599ad0660` via PR #139. Final head

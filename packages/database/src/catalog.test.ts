@@ -72,6 +72,7 @@ describe("migration catalog", () => {
       "1300_007_create_order_submission",
       "1300_008_create_order_status_projection",
       "1400_001_create_payment_intent",
+      "1400_002_create_provider_webhook_inbox",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -299,6 +300,24 @@ describe("migration catalog", () => {
     ])
       expect(migration?.sql).toContain(`CREATE TABLE rms_payment.${table}`);
     expect(migration?.sql).toContain("payment_provider_observation_shape_check");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1304 Payment webhook Inbox migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1400_002_create_provider_webhook_inbox",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/payment");
+    expect(migration?.metadata.schema).toBe("rms_payment");
+    for (const table of [
+      "provider_webhook_record",
+      "provider_webhook_raw_evidence",
+      "provider_webhook_processing_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_payment.${table}`);
+    expect(migration?.sql).toContain("provider_webhook_record_provider_event_unique");
+    expect(migration?.sql).toContain("provider_webhook_raw_evidence_no_early_delete");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
