@@ -20,7 +20,9 @@ older historical snapshots retained later in this index.
 - `WP-1306 — Payment Status Projection` is active from exact integrated and exact-main verified
   `main@89bab93d6c9ca8d88d0ebb83240f94a2aa3d1103`. It owns the Payment terminal-status
   read model, event consumer and bounded authorized queries described in
-  `docs/spec/work-packages/WP-1306.md`.
+  `docs/spec/work-packages/WP-1306.md`. Exact implementation head
+  `66d8bc81fa56a2c4e0aa538c6c92630544c90209` passed run/job
+  `30849205200 / 91804857791`; final-head and exact-main verification remain pending.
 
 - `WP-1305 — PaymentSucceeded / Failed Event` is implemented and integrated at squash
   `89bab93d6c9ca8d88d0ebb83240f94a2aa3d1103` via PR #142. Final head
