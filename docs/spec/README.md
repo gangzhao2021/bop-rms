@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1302 — Payment Intent Creation candidate on codex/wp-1302`
+- Current discussion node: `WP-1303 — Provider Webhook Verification candidate on codex/wp-1303`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,11 +17,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1302 — Payment Intent Creation` is active from exact integrated and exact-main verified
-  `main@9f67ed006b8cff4aa2f317905f90025a9ee1195c`. It owns the Payment Intent/Attempt creation
-  contract described in `docs/spec/work-packages/WP-1302.md`. Exact implementation head
-  `52353320b71d7a81dc89bd812e2c29e2013f1690` passed run/job
-  `30827377847 / 91732371426`; final-head and exact-main verification remain pending.
+- `WP-1303 — Provider Webhook Verification` is active from exact integrated and exact-main verified
+  `main@30c2bf1ffa8f57cd440f945a360cc42599ad0660`. It owns the raw-byte Stripe signature,
+  timestamp and bounded secret-rotation verification contract described in
+  `docs/spec/work-packages/WP-1303.md`.
+
+- `WP-1302 — Payment Intent Creation` is implemented and integrated at squash
+  `30c2bf1ffa8f57cd440f945a360cc42599ad0660` via PR #139. Final head
+  `f7a4dd7e4f6f36fb4d3c6635738dc91a25af7be5` passed run/job
+  `30828682054 / 91736810091`; exact-main run/job `30829884741 / 91740891272` passed. It owns the
+  Payment Intent/Attempt creation contract described in `docs/spec/work-packages/WP-1302.md`.
 
 - `WP-1301 — Payment Adapter Interface` is active from exact integrated and exact-main verified
   squash `9f67ed006b8cff4aa2f317905f90025a9ee1195c`. It owns the Payment Provider
