@@ -157,6 +157,27 @@ const orderCreatedPayload = z.strictObject({
   itemCount: z.int().min(1).max(100),
 });
 
+const paymentSucceededPayload = z.strictObject({
+  paymentTransactionReference: z.uuid(),
+  paymentIntentReference: z.uuid(),
+  paymentAttemptReference: z.uuid(),
+  orderReference: z.uuid(),
+  amountMinor: z.string().regex(/^[1-9][0-9]*$/u),
+  currencyCode: z.literal("CAD"),
+  evidenceKind: z.literal("Captured"),
+  terminalOccurredAt: z.iso.datetime({ offset: false }),
+});
+
+const paymentFailedPayload = z.strictObject({
+  paymentTransactionReference: z.uuid(),
+  paymentIntentReference: z.uuid(),
+  paymentAttemptReference: z.uuid(),
+  orderReference: z.uuid(),
+  reason: z.enum(["Declined", "AuthenticationRequired", "Cancelled", "ProviderRejected"]),
+  retryDisposition: z.enum(["Never", "SameOperation", "NewOperation", "Unknown"]),
+  terminalOccurredAt: z.iso.datetime({ offset: false }),
+});
+
 export const eventCatalog = defineEventCatalog([
   {
     eventType: "MenuPublished",
@@ -189,5 +210,37 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: orderCreatedPayload,
+  },
+  {
+    eventType: "PaymentFailed",
+    schemaVersion: 1,
+    ownerModule: "@rms/payment",
+    producerModule: "@rms/payment",
+    stability: "stable",
+    consumers: ["ordering.payment-outcome:v1", "payment.status-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "payment",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: paymentFailedPayload,
+  },
+  {
+    eventType: "PaymentSucceeded",
+    schemaVersion: 1,
+    ownerModule: "@rms/payment",
+    producerModule: "@rms/payment",
+    stability: "stable",
+    consumers: ["ordering.payment-outcome:v1", "payment.status-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "payment",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: paymentSucceededPayload,
   },
 ]);

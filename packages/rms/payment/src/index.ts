@@ -11,3 +11,8 @@ export * from "./application/payment-webhook-inbox-service.js";
 export * from "./application/ports/payment-webhook-inbox-ports.js";
 export * from "./application/ports/provider-webhook-verification-ports.js";
 export * from "./infrastructure/stripe/stripe-webhook-signature.js";
+export * from "./contracts/payment-terminal-event.js";
+export * from "./application/payment-terminal-fact.js";
+export * from "./application/payment-terminal-event.js";
+export * from "./application/payment-terminal-service.js";
+export * from "./application/ports/payment-terminal-ports.js";

@@ -61,6 +61,7 @@ const expectedForcedTables = [
   "rms_payment.payment_intent",
   "rms_payment.payment_intent_operation_record",
   "rms_payment.payment_provider_observation",
+  "rms_payment.payment_terminal_fact",
   "rms_payment.provider_webhook_processing_record",
   "rms_payment.provider_webhook_raw_evidence",
   "rms_payment.provider_webhook_record",

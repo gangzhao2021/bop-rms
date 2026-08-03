@@ -16,6 +16,11 @@ const moduleManifestInput =
         layer: "BOP",
       },
       {
+        moduleName: "eventing",
+        packageName: "@bop/eventing",
+        layer: "BOP",
+      },
+      {
         moduleName: "ordering",
         packageName: "@rms/ordering",
         layer: "RMS",
@@ -27,7 +32,7 @@ const moduleManifestInput =
       },
     ],
     consumedEvents: [],
-    publishedEvents: [],
+    publishedEvents: ["rms.payment.payment-failed.v1", "rms.payment.payment-succeeded.v1"],
     ownedDatabase: {
       schema: "rms_payment",
       tables: [
@@ -35,6 +40,7 @@ const moduleManifestInput =
         "payment_attempt",
         "payment_intent_operation_record",
         "payment_provider_observation",
+        "payment_terminal_fact",
         "provider_webhook_record",
         "provider_webhook_raw_evidence",
         "provider_webhook_processing_record",

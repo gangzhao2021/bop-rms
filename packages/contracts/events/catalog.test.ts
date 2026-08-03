@@ -40,7 +40,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(2);
+    expect(eventCatalog).toHaveLength(4);
     expect(eventCatalog[0]).toMatchObject({
       eventType: "MenuPublished",
       schemaVersion: 1,
@@ -58,9 +58,23 @@ describe("Event Catalog source", () => {
       dataClassification: "indirect_identifier",
       replaySemantics: "idempotent",
     });
+    expect(eventCatalog[2]).toMatchObject({
+      eventType: "PaymentFailed",
+      ownerModule: "@rms/payment",
+      tenantScope: "store",
+      dataClassification: "payment",
+    });
+    expect(eventCatalog[3]).toMatchObject({
+      eventType: "PaymentSucceeded",
+      ownerModule: "@rms/payment",
+      tenantScope: "store",
+      dataClassification: "payment",
+    });
     expect(registeredEventMetricLabels(eventCatalog)).toEqual([
       "MenuPublished:v1",
       "OrderCreated:v1",
+      "PaymentFailed:v1",
+      "PaymentSucceeded:v1",
     ]);
   });
 
@@ -196,8 +210,12 @@ describe("Event Catalog generation", () => {
     expect(first.asyncApi).not.toMatch(/server|broker|2026-|SyntheticChanged/u);
     expect(first.asyncApi).toContain("MenuPublished");
     expect(first.asyncApi).toContain("OrderCreated");
+    expect(first.asyncApi).toContain("PaymentFailed");
+    expect(first.asyncApi).toContain("PaymentSucceeded");
     expect(first.markdown).toContain("MenuPublished");
     expect(first.markdown).toContain("OrderCreated");
+    expect(first.markdown).toContain("PaymentFailed");
+    expect(first.markdown).toContain("PaymentSucceeded");
   });
 
   it("passes the official parser with no error diagnostics", async () => {

@@ -7,13 +7,14 @@ Payment-owned, Provider-neutral contracts for intent, attempt and transaction in
 - Module Name: `payment`
 - Package Name: `@rms/payment`
 - Layer / Domain: `RMS / Payment`
-- Phase / owning Work Package: `Phase 1 / WP-1301–1304`
+- Phase / owning Work Package: `Phase 1 / WP-1301–1305`
 - Owner role: `Payment Engineering Owner`
 - Status: `active contract surface`
 - Responsibility: strict Provider adapter normalization, authorized/idempotent online Payment Intent
-  creation, Stripe raw-byte webhook verification and durable Payment Webhook Inbox idempotency.
-- Explicit non-goals: Provider API SDK/public HTTP deployment, authoritative Payment
-  success/Transaction state, Order advancement and refund approval/allocation.
+  creation, Stripe raw-byte webhook verification, durable Payment Webhook Inbox idempotency and
+  authoritative append-only Payment success/failure facts.
+- Explicit non-goals: Provider API SDK/public HTTP deployment, Order advancement, Payment status
+  Projection and refund approval/allocation.
 
 ## Public contract
 
@@ -38,12 +39,18 @@ digest conflict fails closed. Its stable Consumer transaction couples a syntheti
 effect to one append-only completion marker, so failed work can replay but committed work cannot
 run twice. Receipt acceptance remains distinct from Payment success.
 
+`createPaymentTerminalService` accepts only a closed normalized terminal observation from that
+transaction-owned mapper, resolves its exact Intent/Attempt/Provider account scope and requires
+exact CAD minor units for captured success. It atomically commits one append-only terminal fact,
+Restricted Audit input and `PaymentSucceeded.v1` or `PaymentFailed.v1` Outbox event. Unknown,
+Processing, amount/scope mismatch and a conflicting second terminal outcome fail closed.
+
 Private paths, Domain entities, ORM models, Provider payloads, and database fields are not public contracts.
 
 ## Dependencies
 
 - Allowed synchronous dependencies: public `@rms/pricing` Money, `@rms/ordering`
-  payment-preparation evidence and `@bop/audit` record contracts.
+  payment-preparation evidence, `@bop/audit` record contracts and `@bop/eventing` envelopes.
 - Allowed asynchronous dependencies: authorized Ordering preparation, Restricted audit construction,
   Payment-owned repository claim and the Payment Provider adapter through explicit application ports.
 - Forbidden dependencies: private paths, foreign persistence, HTTP/ORM/Provider API SDK and raw
@@ -53,7 +60,8 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 ## Data ownership and lifecycle
 
 - Owned Aggregates / Entities / records / Projections: Payment Intent root, canonical Attempt 1,
-  permanent operation record and append-only normalized Provider observation; no Projection yet.
+  permanent operation record, append-only normalized Provider observation and terminal Payment
+  fact; no Projection yet.
 - Write owner and allowed read patterns: `@rms/payment` owner repositories only until later public
   query contracts.
 - Tenant / Brand / Store scope: Brand and Store are explicit in every adapter operation.
@@ -61,7 +69,8 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 - Time / Business Date: normalized observations use UTC instants; Business Date is not owned here.
 - Concurrency / idempotency / audit: WP-1302 permanently binds Payment operation intent and claims
   one Attempt before Provider invocation. WP-1304 atomically deduplicates concurrent Provider
-  deliveries and transactionally binds a mapper effect to one Consumer completion.
+  deliveries and transactionally binds a mapper effect to one Consumer completion. WP-1305 commits
+  at most one terminal fact/Audit/Outbox set per Intent and rejects conflicting outcomes.
 - Data classification / retention / redaction: payment and indirect identifiers; synthetic fixtures
   only; logs, URLs and analytics prohibited. Restricted raw webhook evidence expires after 30 days;
   the immutable receipt/dedupe record remains at least 90 days.
@@ -71,9 +80,10 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 
 `rms_payment` owns `payment_intent`, `payment_attempt`,
 `payment_intent_operation_record`, `payment_provider_observation`, `provider_webhook_record`,
-`provider_webhook_raw_evidence` and `provider_webhook_processing_record`. Tables force Store RLS,
-grant no PUBLIC access and preserve receipt/completion history. Only expired raw evidence is
-erasable; repository adapters remain explicit ports.
+`provider_webhook_raw_evidence`, `provider_webhook_processing_record` and
+`payment_terminal_fact`. Tables force Store RLS, grant no PUBLIC access and preserve
+receipt/completion/financial history. Only expired raw evidence is erasable; repository adapters
+remain explicit ports.
 
 ## Security and privacy
 
@@ -93,7 +103,7 @@ Evidence.
   configuration may carry current plus one next secret during an explicit overlap of at most seven
   days; it is never business configuration or public input.
 - Health/readiness: Provider API, HTTP deployment and operational retention scheduler are not
-  implemented in WP-1304.
+  implemented in WP-1305.
 - Logs/metrics/traces: not implemented; adapter values are prohibited from general telemetry.
 - Failure/recovery/disable: closed retry dispositions inform later orchestration.
 
@@ -104,6 +114,7 @@ pnpm payment-adapter:acceptance
 pnpm payment-intent:acceptance
 pnpm payment-webhook-verification:acceptance
 pnpm payment-webhook-inbox:acceptance
+pnpm payment-terminal:acceptance
 pnpm --filter @rms/payment lint
 pnpm --filter @rms/payment typecheck
 pnpm --filter @rms/payment test
@@ -113,11 +124,11 @@ pnpm --filter @rms/payment build
 Tests cover operation closure, method/capture policy, authorization ordering, Ordering durability,
 permanent replay/conflict behavior, one-attempt Provider invocation, safe Unknown handling, strict
 runtime shapes, immutable results, SQL constraints/RLS and sensitive/raw field rejection. Actual
-evidence is recorded in `docs/spec/work-packages/WP-1301.md` through `WP-1304.md`.
+evidence is recorded in `docs/spec/work-packages/WP-1301.md` through `WP-1305.md`.
 
 ## Decisions and follow-up
 
 - ADR / IDR references: Handoff Sections 28 and 58.25–58.26; SPIKE-1300.
 - External Evidence: real account/contract, privacy/data-residency, PCI, reader and Interac tests.
 - Revisit triggers: first infrastructure adapter must pin/revalidate exact Stripe API/SDK versions.
-- Next allowed Work Package: `WP-1305` after WP-1304 is integrated and exact-main verified.
+- Next allowed Work Package: `WP-1306` after WP-1305 is integrated and exact-main verified.

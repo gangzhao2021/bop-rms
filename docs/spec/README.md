@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1304 — Payment Webhook Idempotency candidate on codex/wp-1304`
+- Current discussion node: `WP-1305 — PaymentSucceeded / Failed Event candidate on codex/wp-1305`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,12 +17,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1304 — Payment Webhook Idempotency` is active from exact integrated and exact-main verified
-  `main@8b4d330c9abe6a0809041c999b000cc419183225`. It owns durable webhook acceptance,
-  Provider Account + Event ID dedupe, bounded raw-evidence retention and transactional replay
-  coordination described in `docs/spec/work-packages/WP-1304.md`. Exact implementation head
-  `5010828e56651f649743993475d51b08f111c39c` passed run/job
-  `30838619668 / 91769898206`; final-head and exact-main verification remain pending.
+- `WP-1305 — PaymentSucceeded / Failed Event` is active from exact integrated and exact-main
+  verified `main@8f9db4355efff6b0935df1507ab786d09c811966`. It owns the authoritative,
+  append-only Payment success/failure fact mapping and atomic public Outbox events described in
+  `docs/spec/work-packages/WP-1305.md`.
+
+- `WP-1304 — Payment Webhook Idempotency` is implemented and integrated at squash
+  `8f9db4355efff6b0935df1507ab786d09c811966` via PR #141. Final head
+  `6f414830a40b3e7fc7691dd7ace0a68fc2b61188` passed run/job
+  `30839915019 / 91774162017`; exact-main run/job `30841156112 / 91778238167` passed. It owns
+  durable webhook acceptance, Provider Account + Event ID dedupe, bounded raw-evidence retention
+  and transactional replay coordination described in `docs/spec/work-packages/WP-1304.md`.
 
 - `WP-1303 — Provider Webhook Verification` is implemented and integrated at squash
   `8b4d330c9abe6a0809041c999b000cc419183225` via PR #140. Final head

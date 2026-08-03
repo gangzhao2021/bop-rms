@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@bop/audit": "workspace:*",
+    "@bop/eventing": "workspace:*",
     "@rms/ordering": "workspace:*",
     "@rms/pricing": "workspace:*"
   }
