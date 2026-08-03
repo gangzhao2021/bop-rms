@@ -17,6 +17,8 @@
     "typecheck": "tsc --project tsconfig.json"
   },
   "dependencies": {
+    "@bop/audit": "workspace:*",
+    "@rms/ordering": "workspace:*",
     "@rms/pricing": "workspace:*"
   }
 }

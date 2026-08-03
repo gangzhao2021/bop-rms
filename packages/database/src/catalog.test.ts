@@ -71,6 +71,7 @@ describe("migration catalog", () => {
       "1300_006_create_order_number_allocation",
       "1300_007_create_order_submission",
       "1300_008_create_order_status_projection",
+      "1400_001_create_payment_intent",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -280,6 +281,24 @@ describe("migration catalog", () => {
       expect(migration?.sql).toContain(`CREATE TABLE rms_ordering.${table}`);
     expect(migration?.sql).toContain("order_status_projection_generation_store_scope_policy");
     expect(migration?.sql).toContain("enforce_order_status_projection_advance");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1302 Payment Intent creation migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1400_001_create_payment_intent",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/payment");
+    expect(migration?.metadata.schema).toBe("rms_payment");
+    for (const table of [
+      "payment_intent",
+      "payment_attempt",
+      "payment_intent_operation_record",
+      "payment_provider_observation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_payment.${table}`);
+    expect(migration?.sql).toContain("payment_provider_observation_shape_check");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });

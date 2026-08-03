@@ -57,6 +57,10 @@ const expectedForcedTables = [
   "rms_ordering.order_status_projection",
   "rms_ordering.order_status_projection_generation",
   "rms_ordering.order_submission_record",
+  "rms_payment.payment_attempt",
+  "rms_payment.payment_intent",
+  "rms_payment.payment_intent_operation_record",
+  "rms_payment.payment_provider_observation",
 ];
 
 async function prove(context) {

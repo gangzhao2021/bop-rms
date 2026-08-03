@@ -396,6 +396,12 @@ importers:
 
   packages/rms/payment:
     dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../../bop/audit
+      '@rms/ordering':
+        specifier: workspace:*
+        version: link:../ordering
       '@rms/pricing':
         specifier: workspace:*
         version: link:../pricing
