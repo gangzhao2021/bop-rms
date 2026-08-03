@@ -66,6 +66,14 @@ const databaseAccessManifestInput = {
       retentionCategory: "financial-compliance",
       piiClassification: ["indirect_identifier", "payment"],
     },
+    {
+      table: "payment_status_projection",
+      classification: "projection-read-model",
+      writeOwner: { kind: "projection-builder", id: "@rms/payment.status.v1" },
+      allowedReadPatterns: ["public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
   ],
   accesses: [],
 } as const;

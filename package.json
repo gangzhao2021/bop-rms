@@ -58,6 +58,7 @@
     "payment-webhook-verification:acceptance": "pnpm --filter @rms/payment test",
     "payment-webhook-inbox:acceptance": "pnpm --filter @rms/payment test && vitest run --config packages/database/vitest.payment-webhook-inbox.config.ts",
     "payment-terminal:acceptance": "pnpm --filter @bop-rms/contracts-events test && pnpm --filter @rms/payment test && vitest run --config packages/database/vitest.payment-terminal.config.ts",
+    "payment-status:acceptance": "pnpm --filter @bop-rms/contracts-events test && pnpm --filter @rms/payment test && vitest run --config packages/database/vitest.payment-status.config.ts",
     "module-manifest:check": "node tooling/module-manifest/validate.mjs",
     "migration:check": "vitest run packages/database/src/catalog.test.ts packages/database/src/config.test.ts && node packages/database/src/check.ts",
     "notification:acceptance": "pnpm --filter @bop/notification test",
