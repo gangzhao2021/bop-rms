@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `SPIKE-1300 — Payment Provider Capability / Cost / Region candidate on codex/spike-1300`
+- Current discussion node: `WP-1301 — Payment Adapter Interface candidate on codex/wp-1301`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,11 +17,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `SPIKE-1300 — Payment Provider Capability / Cost / Region` is active from exact integrated and
-  exact-main verified `main@f31b086ad46d6a347e3a08c7a9f1a358007b11c6`. It resolves the public
+- `WP-1301 — Payment Adapter Interface` is active from exact integrated and exact-main verified
+  `main@70cb012ed0bd30a87408cf5197dc7f5cf4a24218`. It owns the Payment Provider
+  anti-corruption contract described in `docs/spec/work-packages/WP-1301.md`.
+
+- `SPIKE-1300 — Payment Provider Capability / Cost / Region` is implemented and integrated at
+  squash `70cb012ed0bd30a87408cf5197dc7f5cf4a24218`. It resolves the public
   Stripe Canada capability, dated list-price and regional feasibility baseline while retaining
   account, contract, privacy, PCI and real-reader External Evidence gates in
-  `docs/spec/work-packages/SPIKE-1300.md`.
+  `docs/spec/work-packages/SPIKE-1300.md`. Final PR #137 head
+  `263072580e8d8a64fba20eff026e5179f76c79df` passed run/job
+  `30817709426 / 91699469986`; exact-main run/job `30818902520 / 91703502013` passed.
 
 - `WP-1226 — OrderCreated Event` is implemented and integrated at squash
   `f31b086ad46d6a347e3a08c7a9f1a358007b11c6`. It owns the stable Store-scoped

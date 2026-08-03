@@ -53,6 +53,7 @@
     "local:stop": "node tooling/environment/local.mjs stop",
     "module-generator": "node tooling/module-generator/generate.mjs",
     "module-generator:check": "vitest run tooling/module-generator/generate.test.mjs",
+    "payment-adapter:acceptance": "pnpm --filter @rms/payment test",
     "module-manifest:check": "node tooling/module-manifest/validate.mjs",
     "migration:check": "vitest run packages/database/src/catalog.test.ts packages/database/src/config.test.ts && node packages/database/src/check.ts",
     "notification:acceptance": "pnpm --filter @bop/notification test",
