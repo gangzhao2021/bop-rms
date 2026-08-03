@@ -109,4 +109,7 @@ Providers or weakening controls.
 - Local verification: frozen install passed all 28 workspace projects with the lockfile unchanged;
   all first-party evidence links resolved through their official Stripe pages; root Prettier plus
   all `27/27` workspace format checks passed; diff and secret/credential scans passed.
-- GitHub exact-head and exact-main CI: pending.
+- Implementation-head GitHub CI: `PASS` on
+  `15bf0e349e7305c55ccbfdcf2dcdf487257507b0` (`bootstrap` run `30816490737`, `verify`
+  job `91695430970`, `14m17s`).
+- Final-head and exact-main GitHub CI: pending.
