@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1223 — Store Business Date Resolution and Order Number Generation candidate on codex/wp-1223`
+- Current discussion node: `WP-1224 — Create Order API candidate on codex/wp-1224`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,12 +17,20 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1223 — Store Business Date Resolution and Order Number Generation` is active on its candidate
-  branch from exact `main@225392e931d01408c0d1ceafbf43632db3ae7ef1`. Store owns deterministic
-  version-pinned IANA-zone plus local Business Day Start resolution, including `04:00` default and
-  explicit DST gap/overlap rules. Ordering owns forced-RLS concurrent Store + Business Date decimal
-  sequence allocation and append-only evidence. WP-1224 remains owner of authorization and atomic
-  Order creation. Exact scope and current evidence are in `docs/spec/work-packages/WP-1223.md`.
+- `WP-1224 — Create Order API` is active from exact integrated
+  `main@17580ba9f8c02d57869aa4573f86543670d428a9`. It composes authorized permanent Submission
+  idempotency, current Checkout evidence, immutable Order/Batch/Item snapshots and Store Business
+  Date allocation behind one atomic Ordering repository contract. Section 87 reserves public
+  Payment transport for later Payment WPs, so no conflicting standalone HTTP route or Provider call
+  is introduced. Exact scope and current evidence are in `docs/spec/work-packages/WP-1224.md`.
+
+- `WP-1223 — Store Business Date Resolution and Order Number Generation` is implemented, verified
+  and integrated at squash `17580ba9f8c02d57869aa4573f86543670d428a9`. PR #133 exact-head CI
+  passed run/job `30772978057 / 91563248163`; exact-main CI passed
+  `30773532804 / 91564731709`. Store owns deterministic version-pinned IANA-zone plus local Business
+  Day Start resolution, including `04:00` default and explicit DST gap/overlap rules. Ordering owns
+  forced-RLS concurrent Store + Business Date decimal allocation and append-only evidence. Exact
+  results are in `docs/spec/work-packages/WP-1223.md`.
 
 - `WP-1222 — Order Item Immutable Snapshot` is implemented, verified and integrated at squash
   `225392e931d01408c0d1ceafbf43632db3ae7ef1`. PR #132 exact-head and exact-main CI passed. It

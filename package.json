@@ -63,6 +63,7 @@
     "organization-aggregate:acceptance": "pnpm --filter @bop/tenant test && pnpm --filter @bop/operating-entity test && vitest run --config packages/database/vitest.organization-aggregate.config.ts",
     "ordering-cart:acceptance": "pnpm --filter @rms/ordering test && vitest run --config packages/database/vitest.cart-aggregate.config.ts",
     "ordering-business-date:acceptance": "pnpm --filter @rms/store test && pnpm --filter @rms/ordering test && vitest run --config packages/database/vitest.order-number-allocation.config.ts",
+    "ordering-create-order:acceptance": "pnpm --filter @rms/ordering test && vitest run --config packages/database/vitest.order-submission.config.ts",
     "permission-evaluation:acceptance": "pnpm --filter @bop/permission test",
     "permission-policy:acceptance": "pnpm --filter @bop/permission test && vitest run --config packages/database/vitest.permission-policy.config.ts",
     "pricing-money-tax:acceptance": "pnpm --filter @rms/pricing test",
