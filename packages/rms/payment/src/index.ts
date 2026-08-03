@@ -16,3 +16,6 @@ export * from "./application/payment-terminal-fact.js";
 export * from "./application/payment-terminal-event.js";
 export * from "./application/payment-terminal-service.js";
 export * from "./application/ports/payment-terminal-ports.js";
+export * from "./application/payment-status-projection.js";
+export * from "./application/payment-status-projection-service.js";
+export * from "./application/ports/payment-status-projection-ports.js";

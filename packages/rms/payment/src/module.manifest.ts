@@ -31,7 +31,7 @@ const moduleManifestInput =
         layer: "RMS",
       },
     ],
-    consumedEvents: [],
+    consumedEvents: ["rms.payment.payment-failed.v1", "rms.payment.payment-succeeded.v1"],
     publishedEvents: ["rms.payment.payment-failed.v1", "rms.payment.payment-succeeded.v1"],
     ownedDatabase: {
       schema: "rms_payment",
@@ -41,6 +41,7 @@ const moduleManifestInput =
         "payment_intent_operation_record",
         "payment_provider_observation",
         "payment_terminal_fact",
+        "payment_status_projection",
         "provider_webhook_record",
         "provider_webhook_raw_evidence",
         "provider_webhook_processing_record",
