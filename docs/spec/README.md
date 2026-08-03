@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1226 — OrderCreated Event candidate on codex/wp-1226`
+- Current discussion node: `SPIKE-1300 — Payment Provider Capability / Cost / Region candidate on codex/spike-1300`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,10 +17,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1226 — OrderCreated Event` is active from exact integrated and exact-main verified
-  `main@6c54effc6b9338340d75713fecb51a5cfb4a81d1`. It owns the stable Store-scoped
+- `SPIKE-1300 — Payment Provider Capability / Cost / Region` is active from exact integrated and
+  exact-main verified `main@f31b086ad46d6a347e3a08c7a9f1a358007b11c6`. It resolves the public
+  Stripe Canada capability, dated list-price and regional feasibility baseline while retaining
+  account, contract, privacy, PCI and real-reader External Evidence gates in
+  `docs/spec/work-packages/SPIKE-1300.md`.
+
+- `WP-1226 — OrderCreated Event` is implemented and integrated at squash
+  `f31b086ad46d6a347e3a08c7a9f1a358007b11c6`. It owns the stable Store-scoped
   `OrderCreated.v1` fact, atomic CreateOrder Outbox composition and idempotent Ordering status
-  projection intake described in `docs/spec/work-packages/WP-1226.md`.
+  projection intake described in `docs/spec/work-packages/WP-1226.md`. Final PR #136 head
+  `08422a7b5caae8a78dd6da040c1378c0f490755a` passed run/job
+  `30813792159 / 91686515055`; exact-main run/job `30814882933 / 91690050281` passed.
 
 - `WP-1225 — Order Status Projection` is implemented and integrated at squash
   `6c54effc6b9338340d75713fecb51a5cfb4a81d1`. Final PR #135 head
