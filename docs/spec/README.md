@@ -20,7 +20,10 @@ older historical snapshots retained later in this index.
 - `WP-1307 — Payment Reconciliation Job Baseline` is active from exact integrated and exact-main
   verified `main@a18584c93595ea3b51608e3c56c78f1d92cad79c`. It owns the bounded operational and
   daily-settlement reconciliation job/check/exception baseline described in
-  `docs/spec/work-packages/WP-1307.md`.
+  `docs/spec/work-packages/WP-1307.md`. Exact implementation head
+  `d7782636b69521b3dd176832d1ece019bb8ebf9a` passed run/job
+  `30855342589 / 91824930149`; final-head CI, integration and exact-main verification remain
+  pending.
 
 - `WP-1306 — Payment Status Projection` is implemented and integrated at squash
   `a18584c93595ea3b51608e3c56c78f1d92cad79c` via PR #143. Final head
