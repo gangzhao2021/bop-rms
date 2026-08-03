@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1222 — Order Item Immutable Snapshot candidate on codex/wp-1222`
+- Current discussion node: `WP-1223 — Store Business Date Resolution and Order Number Generation candidate on codex/wp-1223`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,11 +17,19 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1222 — Order Item Immutable Snapshot` is implemented and locally verified on its candidate
-  branch. It copies exact Catalog names/versions、selected Option configuration、final bigint Money、
+- `WP-1223 — Store Business Date Resolution and Order Number Generation` is active on its candidate
+  branch from exact `main@225392e931d01408c0d1ceafbf43632db3ae7ef1`. Store owns deterministic
+  version-pinned IANA-zone plus local Business Day Start resolution, including `04:00` default and
+  explicit DST gap/overlap rules. Ordering owns forced-RLS concurrent Store + Business Date decimal
+  sequence allocation and append-only evidence. WP-1224 remains owner of authorization and atomic
+  Order creation. Exact scope and current evidence are in `docs/spec/work-packages/WP-1223.md`.
+
+- `WP-1222 — Order Item Immutable Snapshot` is implemented, verified and integrated at squash
+  `225392e931d01408c0d1ceafbf43632db3ae7ef1`. PR #132 exact-head and exact-main CI passed. It
+  copies exact Catalog names/versions、selected Option configuration、final bigint Money、
   Price resolution and Tax rule/rate/amount evidence into closed deeply frozen line snapshots；it
   never recalculates amounts or reads current Catalog/Pricing configuration. Ordering tests are
-  `75/75`; retained isolated PostgreSQL passed `1/1` and exact GitHub CI remains pending. Exact boundaries and
+  `75/75`; retained isolated PostgreSQL passed `1/1`. Exact boundaries and
   evidence are recorded in `docs/spec/work-packages/WP-1222.md`.
 
 - `WP-1221 — Order Aggregate Minimum Model` is implemented and locally verified on its candidate

@@ -50,6 +50,22 @@ const databaseAccessManifestInput = {
       retentionCategory: "ephemeral-technical",
       piiClassification: ["indirect_identifier", "personal", "health"],
     },
+    {
+      table: "order_number_counter",
+      classification: "technical-control-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "order_number_allocation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
   ],
   accesses: [],
 } as const;

@@ -33,6 +33,8 @@ async function prove(context) {
       { table_name: "cart_operation_record" },
       { table_name: "cart_quote_attachment" },
       { table_name: "cart_quote_attachment_line" },
+      { table_name: "order_number_allocation" },
+      { table_name: "order_number_counter" },
     ]);
     const forced = await admin.query(
       `SELECT relname, relforcerowsecurity FROM pg_class
@@ -43,6 +45,8 @@ async function prove(context) {
          'rms_ordering.cart_operation_record'::regclass,
          'rms_ordering.cart_quote_attachment'::regclass,
          'rms_ordering.cart_quote_attachment_line'::regclass
+         ,'rms_ordering.order_number_allocation'::regclass
+         ,'rms_ordering.order_number_counter'::regclass
        )
        ORDER BY relname`,
     );
