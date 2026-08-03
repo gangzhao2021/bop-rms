@@ -39,8 +39,8 @@ const registration = (
 });
 
 describe("Event Catalog source", () => {
-  it("registers only the authoritative MenuPublished fact and bounded metric label", () => {
-    expect(eventCatalog).toHaveLength(1);
+  it("registers the authoritative bounded Event facts and metric labels", () => {
+    expect(eventCatalog).toHaveLength(2);
     expect(eventCatalog[0]).toMatchObject({
       eventType: "MenuPublished",
       schemaVersion: 1,
@@ -49,7 +49,19 @@ describe("Event Catalog source", () => {
       tenantScope: "brand",
       replaySemantics: "idempotent",
     });
-    expect(registeredEventMetricLabels(eventCatalog)).toEqual(["MenuPublished:v1"]);
+    expect(eventCatalog[1]).toMatchObject({
+      eventType: "OrderCreated",
+      schemaVersion: 1,
+      ownerModule: "@rms/ordering",
+      consumers: ["ordering.order-status-projection:v1"],
+      tenantScope: "store",
+      dataClassification: "indirect_identifier",
+      replaySemantics: "idempotent",
+    });
+    expect(registeredEventMetricLabels(eventCatalog)).toEqual([
+      "MenuPublished:v1",
+      "OrderCreated:v1",
+    ]);
   });
 
   it("accepts one exact synthetic registration and returns a bounded label", () => {
@@ -183,7 +195,9 @@ describe("Event Catalog generation", () => {
     expect(first.asyncApi).toContain('"asyncapi": "3.0.0"');
     expect(first.asyncApi).not.toMatch(/server|broker|2026-|SyntheticChanged/u);
     expect(first.asyncApi).toContain("MenuPublished");
+    expect(first.asyncApi).toContain("OrderCreated");
     expect(first.markdown).toContain("MenuPublished");
+    expect(first.markdown).toContain("OrderCreated");
   });
 
   it("passes the official parser with no error diagnostics", async () => {

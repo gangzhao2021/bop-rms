@@ -75,6 +75,66 @@
         "x-bop-retention-category": "business_record",
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
+      },
+      "OrderCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OrderCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "businessDate": {
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+              "type": "string"
+            },
+            "itemCount": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "orderBatchReference": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            },
+            "orderReference": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            },
+            "sourceSnapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "submissionReference": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "orderReference",
+            "orderBatchReference",
+            "submissionReference",
+            "businessDate",
+            "sourceSnapshotDigest",
+            "itemCount"
+          ],
+          "type": "object"
+        },
+        "title": "OrderCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["ordering.order-status-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OrderCreated",
+        "x-bop-owner-module": "@rms/ordering",
+        "x-bop-producer-module": "@rms/ordering",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
       }
     }
   },

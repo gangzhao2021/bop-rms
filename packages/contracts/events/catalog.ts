@@ -148,6 +148,15 @@ const menuPublishedPayload = z.strictObject({
   timeZone: z.string().min(1).max(63),
 });
 
+const orderCreatedPayload = z.strictObject({
+  orderReference: z.uuid(),
+  orderBatchReference: z.uuid(),
+  submissionReference: z.uuid(),
+  businessDate: z.iso.date(),
+  sourceSnapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  itemCount: z.int().min(1).max(100),
+});
+
 export const eventCatalog = defineEventCatalog([
   {
     eventType: "MenuPublished",
@@ -164,5 +173,21 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: menuPublishedPayload,
+  },
+  {
+    eventType: "OrderCreated",
+    schemaVersion: 1,
+    ownerModule: "@rms/ordering",
+    producerModule: "@rms/ordering",
+    stability: "stable",
+    consumers: ["ordering.order-status-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: orderCreatedPayload,
   },
 ]);

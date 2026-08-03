@@ -16,6 +16,11 @@ const moduleManifestInput =
         layer: "BOP",
       },
       {
+        moduleName: "eventing",
+        packageName: "@bop/eventing",
+        layer: "BOP",
+      },
+      {
         moduleName: "identity",
         packageName: "@bop/identity",
         layer: "BOP",
@@ -36,8 +41,8 @@ const moduleManifestInput =
         layer: "RMS",
       },
     ],
-    consumedEvents: [],
-    publishedEvents: [],
+    consumedEvents: ["rms.ordering.order-created.v1"],
+    publishedEvents: ["rms.ordering.order-created.v1"],
     ownedDatabase: {
       schema: "rms_ordering",
       tables: [

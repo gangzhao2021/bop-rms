@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1225 — Order Status Projection candidate on codex/wp-1225`
+- Current discussion node: `WP-1226 — OrderCreated Event candidate on codex/wp-1226`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,11 +17,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1225 — Order Status Projection` is active from exact integrated
-  `main@9deb14fff9603c729a77275f13844a7d6738d4bc`. It owns the bounded Ordering projection and
-  customer/merchant public query contracts described in `docs/spec/work-packages/WP-1225.md`.
-  Implementation is complete and locally verified on `codex/wp-1225`; exact-head and exact-main CI
-  remain pending.
+- `WP-1226 — OrderCreated Event` is active from exact integrated and exact-main verified
+  `main@6c54effc6b9338340d75713fecb51a5cfb4a81d1`. It owns the stable Store-scoped
+  `OrderCreated.v1` fact, atomic CreateOrder Outbox composition and idempotent Ordering status
+  projection intake described in `docs/spec/work-packages/WP-1226.md`.
+
+- `WP-1225 — Order Status Projection` is implemented and integrated at squash
+  `6c54effc6b9338340d75713fecb51a5cfb4a81d1`. Final PR #135 head
+  `63e4068c0e14e36928b4bbeed685db08ecabbffb` passed run/job
+  `30809113871 / 91671347110`; exact-main run/job `30810137798 / 91674678101` passed. It owns the
+  bounded Ordering projection and customer/merchant public query contracts described in
+  `docs/spec/work-packages/WP-1225.md`.
 
 - `WP-1224 — Create Order API` is implemented and integrated at squash
   `9deb14fff9603c729a77275f13844a7d6738d4bc`. It composes authorized permanent Submission
