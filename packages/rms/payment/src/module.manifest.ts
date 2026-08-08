@@ -42,7 +42,11 @@ const moduleManifestInput =
       },
     ],
     consumedEvents: ["rms.payment.payment-failed.v1", "rms.payment.payment-succeeded.v1"],
-    publishedEvents: ["rms.payment.payment-failed.v1", "rms.payment.payment-succeeded.v1"],
+    publishedEvents: [
+      "rms.payment.payment-failed.v1",
+      "rms.payment.payment-refunded.v1",
+      "rms.payment.payment-succeeded.v1",
+    ],
     ownedDatabase: {
       schema: "rms_payment",
       tables: [
@@ -60,7 +64,11 @@ const moduleManifestInput =
         "provider_webhook_processing_record",
       ],
     },
-    ownedJobs: ["payment-reconciliation", "payment-terminal-capture-watchdog"],
+    ownedJobs: [
+      "payment-paid-without-fulfillable-compensation",
+      "payment-reconciliation",
+      "payment-terminal-capture-watchdog",
+    ],
     featureFlags: [],
     killSwitches: ["payment.provider.admission"],
     piiClassification: {

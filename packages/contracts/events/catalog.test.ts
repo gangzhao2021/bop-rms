@@ -7,6 +7,7 @@ import {
   defineEventCatalog,
   eventCatalog,
   InvalidEventCatalogError,
+  payloadJsonSchema,
   registeredEventMetricLabels,
   type EventCatalogRegistration,
 } from "./catalog.ts";
@@ -40,7 +41,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(4);
+    expect(eventCatalog).toHaveLength(6);
     expect(eventCatalog[0]).toMatchObject({
       eventType: "MenuPublished",
       schemaVersion: 1,
@@ -50,6 +51,21 @@ describe("Event Catalog source", () => {
       replaySemantics: "idempotent",
     });
     expect(eventCatalog[1]).toMatchObject({
+      eventType: "OrderConfirmed",
+      schemaVersion: 1,
+      ownerModule: "@rms/ordering",
+      producerModule: "@rms/ordering",
+      stability: "stable",
+      consumers: ["fulfillment.confirmed-order:v1", "kitchen.confirmed-order:v1"],
+      tenantScope: "store",
+      dataClassification: "indirect_identifier",
+      compatibility: "additive",
+      retentionCategory: "business_record",
+      replaySemantics: "idempotent",
+      deprecated: false,
+      replacement: null,
+    });
+    expect(eventCatalog[2]).toMatchObject({
       eventType: "OrderCreated",
       schemaVersion: 1,
       ownerModule: "@rms/ordering",
@@ -58,13 +74,28 @@ describe("Event Catalog source", () => {
       dataClassification: "indirect_identifier",
       replaySemantics: "idempotent",
     });
-    expect(eventCatalog[2]).toMatchObject({
+    expect(eventCatalog[3]).toMatchObject({
       eventType: "PaymentFailed",
       ownerModule: "@rms/payment",
       tenantScope: "store",
       dataClassification: "payment",
     });
-    expect(eventCatalog[3]).toMatchObject({
+    expect(eventCatalog[4]).toMatchObject({
+      eventType: "PaymentRefunded",
+      schemaVersion: 1,
+      ownerModule: "@rms/payment",
+      producerModule: "@rms/payment",
+      stability: "stable",
+      consumers: ["operations.order-exception:v1", "payment.status-projection:v1"],
+      tenantScope: "store",
+      dataClassification: "payment",
+      compatibility: "additive",
+      retentionCategory: "business_record",
+      replaySemantics: "idempotent",
+      deprecated: false,
+      replacement: null,
+    });
+    expect(eventCatalog[5]).toMatchObject({
       eventType: "PaymentSucceeded",
       ownerModule: "@rms/payment",
       tenantScope: "store",
@@ -72,10 +103,93 @@ describe("Event Catalog source", () => {
     });
     expect(registeredEventMetricLabels(eventCatalog)).toEqual([
       "MenuPublished:v1",
+      "OrderConfirmed:v1",
       "OrderCreated:v1",
       "PaymentFailed:v1",
+      "PaymentRefunded:v1",
       "PaymentSucceeded:v1",
     ]);
+  });
+
+  it("keeps OrderConfirmed and PaymentRefunded payloads exact and closed", () => {
+    const orderConfirmed = eventCatalog[1];
+    const paymentRefunded = eventCatalog[4];
+    if (orderConfirmed === undefined || paymentRefunded === undefined)
+      throw new Error("EVENT_CATALOG_REGISTRATION_MISSING");
+
+    const orderConfirmedSchema = payloadJsonSchema(orderConfirmed.payloadSchema);
+    const paymentRefundedSchema = payloadJsonSchema(paymentRefunded.payloadSchema);
+
+    expect(orderConfirmedSchema).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        confirmationReference: { format: "uuid", type: "string" },
+        orderReference: { format: "uuid", type: "string" },
+        orderBatchReference: { format: "uuid", type: "string" },
+        sourceSnapshotDigest: { pattern: "^sha256:[0-9a-f]{64}$", type: "string" },
+        confirmedAt: { format: "date-time", type: "string" },
+      },
+      required: [
+        "confirmationReference",
+        "orderReference",
+        "orderBatchReference",
+        "sourceSnapshotDigest",
+        "confirmedAt",
+      ],
+      type: "object",
+    });
+    expect(Object.keys(orderConfirmedSchema.properties as Record<string, unknown>).sort()).toEqual(
+      [
+        "confirmationReference",
+        "orderReference",
+        "orderBatchReference",
+        "sourceSnapshotDigest",
+        "confirmedAt",
+      ].sort(),
+    );
+
+    expect(paymentRefundedSchema).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        refundReference: { format: "uuid", type: "string" },
+        compensationCaseReference: { format: "uuid", type: "string" },
+        paymentTransactionReference: { format: "uuid", type: "string" },
+        paymentIntentReference: { format: "uuid", type: "string" },
+        paymentAttemptReference: { format: "uuid", type: "string" },
+        orderReference: { format: "uuid", type: "string" },
+        amountMinor: { pattern: "^[1-9][0-9]*$", type: "string" },
+        currencyCode: { const: "CAD", type: "string" },
+        refundKind: { const: "PaidWithoutFulfillableOrderCompensation", type: "string" },
+        providerConfirmedAt: { format: "date-time", type: "string" },
+      },
+      required: [
+        "refundReference",
+        "compensationCaseReference",
+        "paymentTransactionReference",
+        "paymentIntentReference",
+        "paymentAttemptReference",
+        "orderReference",
+        "amountMinor",
+        "currencyCode",
+        "refundKind",
+        "providerConfirmedAt",
+      ],
+      type: "object",
+    });
+    expect(Object.keys(paymentRefundedSchema.properties as Record<string, unknown>).sort()).toEqual(
+      [
+        "refundReference",
+        "compensationCaseReference",
+        "paymentTransactionReference",
+        "paymentIntentReference",
+        "paymentAttemptReference",
+        "orderReference",
+        "amountMinor",
+        "currencyCode",
+        "refundKind",
+        "providerConfirmedAt",
+      ].sort(),
+    );
   });
 
   it("accepts one exact synthetic registration and returns a bounded label", () => {
@@ -209,12 +323,16 @@ describe("Event Catalog generation", () => {
     expect(first.asyncApi).toContain('"asyncapi": "3.0.0"');
     expect(first.asyncApi).not.toMatch(/server|broker|2026-|SyntheticChanged/u);
     expect(first.asyncApi).toContain("MenuPublished");
+    expect(first.asyncApi).toContain("OrderConfirmed");
     expect(first.asyncApi).toContain("OrderCreated");
     expect(first.asyncApi).toContain("PaymentFailed");
+    expect(first.asyncApi).toContain("PaymentRefunded");
     expect(first.asyncApi).toContain("PaymentSucceeded");
     expect(first.markdown).toContain("MenuPublished");
+    expect(first.markdown).toContain("OrderConfirmed");
     expect(first.markdown).toContain("OrderCreated");
     expect(first.markdown).toContain("PaymentFailed");
+    expect(first.markdown).toContain("PaymentRefunded");
     expect(first.markdown).toContain("PaymentSucceeded");
   });
 

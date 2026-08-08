@@ -157,6 +157,14 @@ const orderCreatedPayload = z.strictObject({
   itemCount: z.int().min(1).max(100),
 });
 
+const orderConfirmedPayload = z.strictObject({
+  confirmationReference: z.uuid(),
+  orderReference: z.uuid(),
+  orderBatchReference: z.uuid(),
+  sourceSnapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  confirmedAt: z.iso.datetime({ offset: false }),
+});
+
 const paymentSucceededPayload = z.strictObject({
   paymentTransactionReference: z.uuid(),
   paymentIntentReference: z.uuid(),
@@ -178,6 +186,19 @@ const paymentFailedPayload = z.strictObject({
   terminalOccurredAt: z.iso.datetime({ offset: false }),
 });
 
+const paymentRefundedPayload = z.strictObject({
+  refundReference: z.uuid(),
+  compensationCaseReference: z.uuid(),
+  paymentTransactionReference: z.uuid(),
+  paymentIntentReference: z.uuid(),
+  paymentAttemptReference: z.uuid(),
+  orderReference: z.uuid(),
+  amountMinor: z.string().regex(/^[1-9][0-9]*$/u),
+  currencyCode: z.literal("CAD"),
+  refundKind: z.literal("PaidWithoutFulfillableOrderCompensation"),
+  providerConfirmedAt: z.iso.datetime({ offset: false }),
+});
+
 export const eventCatalog = defineEventCatalog([
   {
     eventType: "MenuPublished",
@@ -194,6 +215,22 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: menuPublishedPayload,
+  },
+  {
+    eventType: "OrderConfirmed",
+    schemaVersion: 1,
+    ownerModule: "@rms/ordering",
+    producerModule: "@rms/ordering",
+    stability: "stable",
+    consumers: ["kitchen.confirmed-order:v1", "fulfillment.confirmed-order:v1"],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: orderConfirmedPayload,
   },
   {
     eventType: "OrderCreated",
@@ -226,6 +263,22 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: paymentFailedPayload,
+  },
+  {
+    eventType: "PaymentRefunded",
+    schemaVersion: 1,
+    ownerModule: "@rms/payment",
+    producerModule: "@rms/payment",
+    stability: "stable",
+    consumers: ["payment.status-projection:v1", "operations.order-exception:v1"],
+    tenantScope: "store",
+    dataClassification: "payment",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: paymentRefundedPayload,
   },
   {
     eventType: "PaymentSucceeded",

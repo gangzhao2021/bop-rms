@@ -41,8 +41,12 @@ const moduleManifestInput =
         layer: "RMS",
       },
     ],
-    consumedEvents: ["rms.ordering.order-created.v1"],
-    publishedEvents: ["rms.ordering.order-created.v1"],
+    consumedEvents: [
+      "rms.ordering.order-created.v1",
+      "rms.payment.payment-failed.v1",
+      "rms.payment.payment-succeeded.v1",
+    ],
+    publishedEvents: ["rms.ordering.order-confirmed.v1", "rms.ordering.order-created.v1"],
     ownedDatabase: {
       schema: "rms_ordering",
       tables: [
