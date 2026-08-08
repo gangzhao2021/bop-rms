@@ -405,6 +405,9 @@ importers:
       '@bop/feature-control':
         specifier: workspace:*
         version: link:../../bop/feature-control
+      '@bop/task':
+        specifier: workspace:*
+        version: link:../../bop/task
       '@rms/ordering':
         specifier: workspace:*
         version: link:../ordering
