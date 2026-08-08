@@ -20,6 +20,7 @@
     "@bop/audit": "workspace:*",
     "@bop/eventing": "workspace:*",
     "@bop/feature-control": "workspace:*",
+    "@bop/task": "workspace:*",
     "@rms/ordering": "workspace:*",
     "@rms/pricing": "workspace:*"
   }

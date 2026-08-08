@@ -7,16 +7,17 @@ Payment-owned, Provider-neutral contracts for intent, attempt and transaction in
 - Module Name: `payment`
 - Package Name: `@rms/payment`
 - Layer / Domain: `RMS / Payment`
-- Phase / owning Work Package: `Phase 1 / WP-1301–1308`
+- Phase / owning Work Package: `Phase 1 / WP-1301–1309`
 - Owner role: `Payment Engineering Owner`
 - Status: `active contract surface`
 - Responsibility: strict Provider adapter normalization, authorized/idempotent online Payment Intent
   creation, Stripe raw-byte webhook verification, durable Payment Webhook Inbox idempotency and
   authoritative append-only Payment success/failure facts, a rebuildable status projection and
-  bounded operational/daily-settlement reconciliation and fail-closed admission of new Provider
-  work through Feature Control.
+  bounded operational/daily-settlement reconciliation, fail-closed admission of new Provider work
+  through Feature Control and the contract-first Terminal authorization capture watchdog.
 - Explicit non-goals: Provider API SDK/public HTTP deployment, Order advancement, Feature Control
-  ownership/persistence/activation, capture watchdog, compensation and refund approval/allocation.
+  ownership/persistence/activation, production Terminal/Order-acceptance producers, compensation
+  and refund approval/allocation.
 
 ## Public contract
 
@@ -66,6 +67,20 @@ atomically records immutable checks/Open exceptions. Its query service authorize
 safe list reads. Provider retrieval uses an independent causation reference and never invents a
 webhook receipt/Event.
 
+`createPaymentTerminalCaptureWatchdogService` owns the contract-first
+`payment-terminal-capture-watchdog:v1` orchestration. It accepts only exact Payment-owned
+`TerminalCard + ManualPreferred + Authorized` evidence or already-captured single-message Interac,
+and it consumes only Ordering's public immutable `OrderAcceptanceEvidence`. Non-Interac capture is
+eligible only after exact acceptance and before the authorization-age hard deadline. The service
+uses one authoritative clock, a fenced Attempt lease and permanent action identities; it retrieves
+Provider truth before decisions and again after every capture/cancel return or unknown outcome.
+Ten-, fifteen- and twenty-minute thresholds share the authorization instant, with a verified
+shorter Provider deadline taking precedence. An overdue unresolved Attempt requests an opaque
+Critical Task and the injected `CaptureDeadlineExceeded` composition receipt. Provider mutation
+responses and Task state are never terminal Payment truth. The current package provides no
+Terminal authorization producer, Ordering acceptance producer, scheduler, persistence adapter or
+Stripe implementation and makes no runtime activation claim.
+
 The new-work switch is deliberately absent from webhook verification/acceptance, terminal truth,
 status projection and reconciliation services. Those paths preserve authoritative Provider truth
 and recovery for existing `Processing | Unknown` work.
@@ -75,8 +90,9 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 ## Dependencies
 
 - Allowed synchronous dependencies: public `@rms/pricing` Money, `@rms/ordering`
-  payment-preparation evidence, `@bop/audit` record contracts, `@bop/eventing` envelopes and the
-  public `@bop/feature-control` evaluation contract.
+  payment-preparation and order-acceptance evidence, `@bop/audit` record contracts,
+  `@bop/eventing` envelopes and the public `@bop/feature-control` evaluation and `@bop/task`
+  record contracts.
 - Allowed asynchronous dependencies: authorized Ordering preparation, Restricted audit construction,
   Payment-owned repository claim and the Payment Provider adapter through explicit application ports.
 - Forbidden dependencies: private paths, foreign persistence, HTTP/ORM/Provider API SDK and raw
@@ -99,7 +115,9 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
   the WP-1308 new-work gate, so current control state never hides an exact committed replay.
   WP-1304 atomically deduplicates concurrent Provider
   deliveries and transactionally binds a mapper effect to one Consumer completion. WP-1305 commits
-  at most one terminal fact/Audit/Outbox set per Intent and rejects conflicting outcomes.
+  at most one terminal fact/Audit/Outbox set per Intent and rejects conflicting outcomes. WP-1309
+  requires a fenced Attempt lease and stable capture/cancel/Task/exception identities through
+  injected durability ports; their production adapters remain gated.
 - Data classification / retention / redaction: payment and indirect identifiers; synthetic fixtures
   only; logs, URLs and analytics prohibited. Restricted raw webhook evidence expires after 30 days;
   the immutable receipt/dedupe record remains at least 90 days.
@@ -136,8 +154,9 @@ Evidence.
 - Configuration: the server selects validated `Test` or `Live` direct-account scope. Webhook
   configuration may carry current plus one next secret during an explicit overlap of at most seven
   days; it is never business configuration or public input.
-- Health/readiness: Provider API, HTTP deployment and operational retention scheduler are not
-  implemented in WP-1308.
+- Health/readiness: Provider API, HTTP deployment, Terminal authorization and Order acceptance
+  producers, watchdog scheduler/worker and operational persistence adapters are not implemented in
+  WP-1309.
 - Logs/metrics/traces: not implemented; adapter values are prohibited from general telemetry.
 - Failure/recovery/disable: closed retry dispositions inform later orchestration.
   `payment.provider.admission` blocks only fresh Payment Intent admission; active mode and dependency
@@ -152,6 +171,7 @@ pnpm payment-kill-switch:acceptance
 pnpm payment-webhook-verification:acceptance
 pnpm payment-webhook-inbox:acceptance
 pnpm payment-terminal:acceptance
+pnpm payment-terminal-watchdog:acceptance
 pnpm payment-status:acceptance
 pnpm payment-reconciliation:acceptance
 pnpm --filter @rms/payment lint
@@ -164,11 +184,11 @@ Tests cover operation closure, method/capture policy, authorization ordering, Or
 permanent replay/conflict behavior, one-attempt Provider invocation, safe Unknown handling, strict
 runtime shapes, immutable results, fixed-key/scope Kill Switch admission, SQL constraints/RLS and
 sensitive/raw field rejection. Actual evidence is recorded in `docs/spec/work-packages/WP-1301.md`
-through `WP-1308.md`.
+through `WP-1309.md`.
 
 ## Decisions and follow-up
 
 - ADR / IDR references: Handoff Sections 28 and 58.25–58.26; SPIKE-1300.
 - External Evidence: real account/contract, privacy/data-residency, PCI, reader and Interac tests.
 - Revisit triggers: first infrastructure adapter must pin/revalidate exact Stripe API/SDK versions.
-- Next allowed Work Package: `WP-1309` after WP-1308 is integrated and exact-main verified.
+- Next allowed Work Package: `WP-1310` after WP-1309 is integrated and exact-main verified.

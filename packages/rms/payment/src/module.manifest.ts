@@ -26,6 +26,11 @@ const moduleManifestInput =
         layer: "BOP",
       },
       {
+        moduleName: "task",
+        packageName: "@bop/task",
+        layer: "BOP",
+      },
+      {
         moduleName: "ordering",
         packageName: "@rms/ordering",
         layer: "RMS",
@@ -55,7 +60,7 @@ const moduleManifestInput =
         "provider_webhook_processing_record",
       ],
     },
-    ownedJobs: ["payment-reconciliation"],
+    ownedJobs: ["payment-reconciliation", "payment-terminal-capture-watchdog"],
     featureFlags: [],
     killSwitches: ["payment.provider.admission"],
     piiClassification: {

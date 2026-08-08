@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1308 — Payment Kill Switch candidate on codex/wp-1308`
+- Current discussion node: `WP-1309 — Terminal Authorization Capture Watchdog on codex/wp-1309`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,11 +17,21 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1308 — Payment Kill Switch` is active from exact integrated and exact-main verified
-  `main@7e1a27e0aaa259bbb444805757ffa81c52d8c965`. It applies WP-0120's exact
+- `WP-1309 — Terminal Authorization Capture Watchdog` is a locally verified candidate from exact
+  integrated and exact-main verified `main@e1c043bfebfc05b027d513c013094290d5f2fabb`. It defines the
+  contract-first per-Attempt non-Interac capture, ten/fifteen/twenty-minute timing, verified shorter
+  Provider deadline, Critical Task and reconciliation-exception boundaries without inventing the
+  currently absent Terminal or Order-acceptance producers. Exact candidate-head CI, authorized
+  squash integration and exact-main verification remain pending. Exact scope and local evidence are in
+  `docs/spec/work-packages/WP-1309.md`.
+
+- `WP-1308 — Payment Kill Switch` is implemented and integrated at squash
+  `e1c043bfebfc05b027d513c013094290d5f2fabb` via PR #145. It applies WP-0120's exact
   `payment.provider.admission` Kill Switch decision to new Payment Intent admission while retaining
   exact idempotent replay and all authoritative webhook, terminal and reconciliation recovery paths.
-  Exact scope and current evidence are in `docs/spec/work-packages/WP-1308.md`.
+  Exact implementation head `44ec863cdfab03fe85ec89e6400261c0c914ed91` passed run/job
+  `31267763955 / 93128581280`; exact-main run/job `31268495066 / 93130384219` passed. Exact scope
+  and evidence are in `docs/spec/work-packages/WP-1308.md`.
 
 - `WP-1307 — Payment Reconciliation Job Baseline` is implemented and integrated at squash
   `7e1a27e0aaa259bbb444805757ffa81c52d8c965` via PR #144. It owns the bounded operational and
@@ -696,14 +706,14 @@ Agents must read the root `AGENTS.md`, this index, and the active Work Package b
 
 ## Current repository stage
 
-WP-0120 implementation is locally verified from exact
-`origin/main@d319e144589e277bc3d335b1a0521e6f1e51e4de` on the sole active branch
-`codex/wp-0120`. Readiness PR #74 exact-head CI、Section 91 solo self-review、authorized squash
-merge、post-merge exact-main CI and readiness branch cleanup are complete. Implementation remains
-limited to the exact WP-0120 allowlist; exact-head pinned-Linux CI、Section 91 implementation
-self-review、authorized squash merge、post-merge exact-main CI and branch/resource cleanup remain
-pending. Database/migration、production route/UI、real Tenant/operational-control fact、Provider、
-credential、external-resource and deployment changes remain gated.
+WP-1309 contract-first implementation is locally complete from exact integrated and exact-main verified
+`origin/main@e1c043bfebfc05b027d513c013094290d5f2fabb` on the sole active branch
+`codex/wp-1309`. WP-1308 exact-head CI, Section 91 self-review, authorized squash merge,
+post-merge exact-main CI and remote branch cleanup are complete. WP-1309 is limited to its exact
+seventeen-file allowlist; its exact candidate-head CI, squash integration and exact-main verification
+remain pending. Current Terminal authorization and Ordering acceptance producers,
+production scheduler/lease and persistence adapters, real Task/reconciliation runtime, Stripe
+account/reader evidence, credentials, deployment and non-local actions remain gated and unclaimed.
 This paragraph supersedes the historical active-stage snapshots below.
 
 WP-0047 documentation-only readiness is active from exact `origin/main@3f3af5dcee496997bf0ee842ee24726bb3e614b4` on the sole active branch `codex/wp-0047-readiness`. WP-0044 readiness is integrated；its uncommitted in-allowlist implementation is parked in a local named stash and must not resume until WP-0047 completes readiness、implementation、exact-head CI、merge、post-merge exact-main verification and cleanup. This paragraph supersedes the historical WP-0044 readiness snapshot retained below.
