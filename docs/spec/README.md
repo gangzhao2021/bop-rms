@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1307 — Payment Reconciliation Job Baseline candidate on codex/wp-1307`
+- Current discussion node: `WP-1308 — Payment Kill Switch candidate on codex/wp-1308`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,13 +17,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1307 — Payment Reconciliation Job Baseline` is active from exact integrated and exact-main
-  verified `main@a18584c93595ea3b51608e3c56c78f1d92cad79c`. It owns the bounded operational and
+- `WP-1308 — Payment Kill Switch` is active from exact integrated and exact-main verified
+  `main@7e1a27e0aaa259bbb444805757ffa81c52d8c965`. It applies WP-0120's exact
+  `payment.provider.admission` Kill Switch decision to new Payment Intent admission while retaining
+  exact idempotent replay and all authoritative webhook, terminal and reconciliation recovery paths.
+  Exact scope and current evidence are in `docs/spec/work-packages/WP-1308.md`.
+
+- `WP-1307 — Payment Reconciliation Job Baseline` is implemented and integrated at squash
+  `7e1a27e0aaa259bbb444805757ffa81c52d8c965` via PR #144. It owns the bounded operational and
   daily-settlement reconciliation job/check/exception baseline described in
   `docs/spec/work-packages/WP-1307.md`. Exact implementation head
   `d7782636b69521b3dd176832d1ece019bb8ebf9a` passed run/job
-  `30855342589 / 91824930149`; final-head CI, integration and exact-main verification remain
-  pending.
+  `30855342589 / 91824930149`; exact-main run/job `30857572070 / 91832047607` passed.
 
 - `WP-1306 — Payment Status Projection` is implemented and integrated at squash
   `a18584c93595ea3b51608e3c56c78f1d92cad79c` via PR #143. Final head

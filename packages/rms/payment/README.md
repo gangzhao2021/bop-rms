@@ -7,15 +7,16 @@ Payment-owned, Provider-neutral contracts for intent, attempt and transaction in
 - Module Name: `payment`
 - Package Name: `@rms/payment`
 - Layer / Domain: `RMS / Payment`
-- Phase / owning Work Package: `Phase 1 / WP-1301–1307`
+- Phase / owning Work Package: `Phase 1 / WP-1301–1308`
 - Owner role: `Payment Engineering Owner`
 - Status: `active contract surface`
 - Responsibility: strict Provider adapter normalization, authorized/idempotent online Payment Intent
   creation, Stripe raw-byte webhook verification, durable Payment Webhook Inbox idempotency and
   authoritative append-only Payment success/failure facts, a rebuildable status projection and
-  bounded operational/daily-settlement reconciliation.
-- Explicit non-goals: Provider API SDK/public HTTP deployment, Order advancement, kill switch,
-  capture watchdog, compensation and refund approval/allocation.
+  bounded operational/daily-settlement reconciliation and fail-closed admission of new Provider
+  work through Feature Control.
+- Explicit non-goals: Provider API SDK/public HTTP deployment, Order advancement, Feature Control
+  ownership/persistence/activation, capture watchdog, compensation and refund approval/allocation.
 
 ## Public contract
 
@@ -23,9 +24,15 @@ Payment-owned, Provider-neutral contracts for intent, attempt and transaction in
 Payment application services. Runtime constructors require Brand/Store, Attempt and operation scope;
 mutations additionally require purpose and a deterministic Provider idempotency key. Failures are
 closed safe data. `createPaymentIntentCreationService` accepts the internal WP-1302 command, proves
-authorization and Ordering's atomically committed Payment Pending/capacity boundary, persists one
-Intent/Attempt claim, then invokes `createIntent`. It exports no HTTP route, Event, Projection or
-Provider implementation.
+authorization, and resolves an exact permanent replay before any new-work control evaluation. A
+genuinely new operation requires one authoritative `payment.provider.admission` Kill Switch
+evaluation at a server-clock instant read after exact replay resolution and before Ordering's
+atomically committed Payment Pending/capacity boundary. Caller-carried request time cannot select an
+older control state. Only an exact immutable `KILL_INACTIVE` or `KILL_RECOVERY_ALLOWED` backend
+decision admits the new Intent; every active, unavailable, malformed or inconsistent result returns the single bounded
+`PAYMENT_INTENT_PROVIDER_DISABLED` error before Ordering, Audit, Payment claim or Provider work. The
+service then persists one Intent/Attempt claim and invokes `createIntent`. It exports no HTTP route,
+Event, Projection or Provider implementation.
 
 `createProviderWebhookVerificationService` resolves server-owned direct-account scope before using
 the Stripe HMAC adapter. The adapter verifies the bounded `Stripe-Signature` header against untouched
@@ -59,12 +66,17 @@ atomically records immutable checks/Open exceptions. Its query service authorize
 safe list reads. Provider retrieval uses an independent causation reference and never invents a
 webhook receipt/Event.
 
+The new-work switch is deliberately absent from webhook verification/acceptance, terminal truth,
+status projection and reconciliation services. Those paths preserve authoritative Provider truth
+and recovery for existing `Processing | Unknown` work.
+
 Private paths, Domain entities, ORM models, Provider payloads, and database fields are not public contracts.
 
 ## Dependencies
 
 - Allowed synchronous dependencies: public `@rms/pricing` Money, `@rms/ordering`
-  payment-preparation evidence, `@bop/audit` record contracts and `@bop/eventing` envelopes.
+  payment-preparation evidence, `@bop/audit` record contracts, `@bop/eventing` envelopes and the
+  public `@bop/feature-control` evaluation contract.
 - Allowed asynchronous dependencies: authorized Ordering preparation, Restricted audit construction,
   Payment-owned repository claim and the Payment Provider adapter through explicit application ports.
 - Forbidden dependencies: private paths, foreign persistence, HTTP/ORM/Provider API SDK and raw
@@ -83,7 +95,9 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 - Money representation: Pricing `Money` in CAD integer minor units; binary floating point rejected.
 - Time / Business Date: normalized observations use UTC instants; Business Date is not owned here.
 - Concurrency / idempotency / audit: WP-1302 permanently binds Payment operation intent and claims
-  one Attempt before Provider invocation. WP-1304 atomically deduplicates concurrent Provider
+  one Attempt before Provider invocation. Authorization and permanent replay resolution precede
+  the WP-1308 new-work gate, so current control state never hides an exact committed replay.
+  WP-1304 atomically deduplicates concurrent Provider
   deliveries and transactionally binds a mapper effect to one Consumer completion. WP-1305 commits
   at most one terminal fact/Audit/Outbox set per Intent and rejects conflicting outcomes.
 - Data classification / retention / redaction: payment and indirect identifiers; synthetic fixtures
@@ -104,8 +118,11 @@ remain explicit ports.
 
 ## Security and privacy
 
-The creation service authorizes the scoped operation before business reads, then verifies that
-Ordering evidence carries the same Guest Session, Brand and Store. This contract accepts no secret,
+The creation service authorizes the scoped operation before business reads and submits only the
+fixed server-owned key, action, exact Brand/Store and an authoritative current UTC instant for
+evaluation. The evaluation request contains no operation, Guest, Actor or rollout identity, and the
+command accepts no client control field. Ordering evidence then carries the same Guest Session,
+Brand and Store. This contract accepts no secret,
 credential, client secret, PAN/CVV, fingerprint, unrestricted metadata, raw Provider object or
 Provider message. Public failure reasons are bounded codes.
 
@@ -120,15 +137,18 @@ Evidence.
   configuration may carry current plus one next secret during an explicit overlap of at most seven
   days; it is never business configuration or public input.
 - Health/readiness: Provider API, HTTP deployment and operational retention scheduler are not
-  implemented in WP-1305.
+  implemented in WP-1308.
 - Logs/metrics/traces: not implemented; adapter values are prohibited from general telemetry.
 - Failure/recovery/disable: closed retry dispositions inform later orchestration.
+  `payment.provider.admission` blocks only fresh Payment Intent admission; active mode and dependency
+  failure share one public error and never rewrite an existing Payment fact.
 
 ## Development and verification
 
 ```bash
 pnpm payment-adapter:acceptance
 pnpm payment-intent:acceptance
+pnpm payment-kill-switch:acceptance
 pnpm payment-webhook-verification:acceptance
 pnpm payment-webhook-inbox:acceptance
 pnpm payment-terminal:acceptance
@@ -142,12 +162,13 @@ pnpm --filter @rms/payment build
 
 Tests cover operation closure, method/capture policy, authorization ordering, Ordering durability,
 permanent replay/conflict behavior, one-attempt Provider invocation, safe Unknown handling, strict
-runtime shapes, immutable results, SQL constraints/RLS and sensitive/raw field rejection. Actual
-evidence is recorded in `docs/spec/work-packages/WP-1301.md` through `WP-1307.md`.
+runtime shapes, immutable results, fixed-key/scope Kill Switch admission, SQL constraints/RLS and
+sensitive/raw field rejection. Actual evidence is recorded in `docs/spec/work-packages/WP-1301.md`
+through `WP-1308.md`.
 
 ## Decisions and follow-up
 
 - ADR / IDR references: Handoff Sections 28 and 58.25–58.26; SPIKE-1300.
 - External Evidence: real account/contract, privacy/data-residency, PCI, reader and Interac tests.
 - Revisit triggers: first infrastructure adapter must pin/revalidate exact Stripe API/SDK versions.
-- Next allowed Work Package: `WP-1308` after WP-1307 is integrated and exact-main verified.
+- Next allowed Work Package: `WP-1309` after WP-1308 is integrated and exact-main verified.

@@ -6,6 +6,7 @@ import {
   createPaymentIntentCreationService,
   createPaymentProviderSnapshot,
   PaymentIntentCreationError,
+  paymentProviderAdmissionKillSwitchKey,
   type PaymentIntentCreationPorts,
   type PaymentIntentCreationRecord,
 } from "../index.js";
@@ -27,7 +28,46 @@ const refs = {
   capacity: id(11),
   intent: id(12),
   attempt: id(13),
+  control: id(14),
 };
+
+function killSwitchEvaluation(
+  options: {
+    reason?: "KILL_INACTIVE" | "KILL_ACTIVE" | "KILL_RECOVERY_ALLOWED" | "KILL_RECOVERY_BLOCKED";
+    killMode?: "BlockNew" | "SafePause" | "Terminate";
+    evaluatedAt?: string;
+  } = {},
+) {
+  const reason = options.reason ?? "KILL_INACTIVE";
+  const backendExecution =
+    reason === "KILL_INACTIVE" || reason === "KILL_RECOVERY_ALLOWED" ? "Allow" : "Deny";
+  const frontendVisibility = backendExecution === "Allow" ? "Show" : "Hide";
+  const killMode = options.killMode ?? "BlockNew";
+  const scope = Object.freeze({
+    kind: "Store" as const,
+    brandReference: refs.brand,
+    storeReference: refs.store,
+  });
+  return Object.freeze({
+    effectiveControl: Object.freeze({ controlId: refs.control, version: 1, scope }),
+    backendExecution,
+    frontendVisibility,
+    reason,
+    killMode,
+    inFlightPolicy: "AllowToComplete" as const,
+    record: Object.freeze({
+      key: paymentProviderAdmissionKillSwitchKey,
+      kind: "KillSwitch" as const,
+      version: 1,
+      scopeKind: "Store" as const,
+      backendExecution,
+      frontendVisibility,
+      reason,
+      killMode,
+      evaluatedAt: options.evaluatedAt ?? at,
+    }),
+  });
+}
 
 function preparation(overrides: Record<string, unknown> = {}) {
   return {
@@ -95,6 +135,10 @@ function harness(
     claimExisting?: PaymentIntentCreationRecord;
     providerThrows?: boolean;
     providerScopeMismatch?: boolean;
+    killSwitchEvaluation?: unknown;
+    killSwitchThrows?: boolean;
+    clockNow?: string;
+    authorizationResult?: unknown;
   } = {},
 ) {
   let stored = options.prior ?? null;
@@ -102,11 +146,32 @@ function harness(
   let providerCalls = 0;
   let referenceIndex = 0;
   const generated = [refs.intent, refs.attempt];
+  const killSwitchInputs: unknown[] = [];
   const ports: PaymentIntentCreationPorts = {
     providerEnvironment: "Test",
+    clock: {
+      now() {
+        calls.push("read-clock");
+        return options.clockNow ?? at;
+      },
+    },
+    killSwitch: {
+      async evaluate(input) {
+        calls.push("evaluate-kill-switch");
+        killSwitchInputs.push(input);
+        if (options.killSwitchThrows) throw new Error("synthetic control dependency failure");
+        return (
+          options.killSwitchEvaluation === undefined
+            ? killSwitchEvaluation({ evaluatedAt: input.evaluatedAt })
+            : options.killSwitchEvaluation
+        ) as never;
+      },
+    },
     authorization: {
       async authorize() {
         calls.push("authorize");
+        if (Object.hasOwn(options, "authorizationResult"))
+          return options.authorizationResult as never;
         return options.denied
           ? null
           : {
@@ -205,6 +270,7 @@ function harness(
     calls,
     ports,
     providerCalls: () => providerCalls,
+    killSwitchInputs,
     stored: () => stored,
   };
 }
@@ -223,11 +289,22 @@ describe("Payment Intent creation service", () => {
     expect(test.calls).toEqual([
       "authorize",
       "resolve-operation",
+      "read-clock",
+      "evaluate-kill-switch",
       "prepare-order",
       "audit",
       "claim",
       "provider-create",
       "record-observation",
+    ]);
+    expect(test.killSwitchInputs).toEqual([
+      {
+        key: "payment.provider.admission",
+        action: "CreatePaymentIntent",
+        brandReference: refs.brand,
+        storeReference: refs.store,
+        evaluatedAt: at,
+      },
     ]);
     expect(Object.isFrozen(result.record)).toBe(true);
   });
@@ -241,6 +318,25 @@ describe("Payment Intent creation service", () => {
     expect(test.calls).toEqual(["authorize"]);
   });
 
+  it("rejects malformed authorization evidence before clock, control, or Domain reads", async () => {
+    const test = harness({
+      authorizationResult: {
+        action: "CreatePaymentIntent",
+        guestSessionReference: refs.session,
+        brandReference: refs.brand,
+        storeReference: refs.store,
+        injectedAuthority: true,
+      },
+    });
+    await expectCode(
+      () => createPaymentIntentCreationService(test.ports).create(command()),
+      "PAYMENT_INTENT_PERMISSION_DENIED",
+    );
+    expect(test.calls).toEqual(["authorize"]);
+    expect(test.killSwitchInputs).toHaveLength(0);
+    expect(test.providerCalls()).toBe(0);
+  });
+
   it("returns exact replay without another preparation, Attempt, or Provider call", async () => {
     const first = harness();
     const initial = await createPaymentIntentCreationService(first.ports).create(command());
@@ -249,6 +345,20 @@ describe("Payment Intent creation service", () => {
     expect(result.status).toBe("AlreadyCreated");
     expect(replay.providerCalls()).toBe(0);
     expect(replay.calls).toEqual(["authorize", "resolve-operation"]);
+  });
+
+  it("keeps an exact replay visible while the new-work switch is active", async () => {
+    const first = harness();
+    const initial = await createPaymentIntentCreationService(first.ports).create(command());
+    const replay = harness({
+      prior: initial.record,
+      killSwitchEvaluation: killSwitchEvaluation({ reason: "KILL_ACTIVE" }),
+    });
+    const result = await createPaymentIntentCreationService(replay.ports).create(command());
+    expect(result.status).toBe("AlreadyCreated");
+    expect(replay.calls).toEqual(["authorize", "resolve-operation"]);
+    expect(replay.killSwitchInputs).toHaveLength(0);
+    expect(replay.providerCalls()).toBe(0);
   });
 
   it("rejects changed replay intent under the permanent operation reference", async () => {
@@ -263,6 +373,76 @@ describe("Payment Intent creation service", () => {
       "PAYMENT_INTENT_IDEMPOTENCY_CONFLICT",
     );
     expect(replay.providerCalls()).toBe(0);
+    expect(replay.killSwitchInputs).toHaveLength(0);
+  });
+
+  it("maps active, recovery-blocked and unavailable evaluation to one disabled error", async () => {
+    for (const evaluation of [
+      killSwitchEvaluation({ reason: "KILL_ACTIVE", killMode: "BlockNew" }),
+      killSwitchEvaluation({ reason: "KILL_ACTIVE", killMode: "SafePause" }),
+      killSwitchEvaluation({ reason: "KILL_ACTIVE", killMode: "Terminate" }),
+      killSwitchEvaluation({ reason: "KILL_RECOVERY_BLOCKED" }),
+      null,
+    ]) {
+      const test = harness({ killSwitchEvaluation: evaluation });
+      await expectCode(
+        () => createPaymentIntentCreationService(test.ports).create(command()),
+        "PAYMENT_INTENT_PROVIDER_DISABLED",
+      );
+      expect(test.calls).toEqual([
+        "authorize",
+        "resolve-operation",
+        "read-clock",
+        "evaluate-kill-switch",
+      ]);
+      expect(test.calls).not.toContain("prepare-order");
+      expect(test.calls).not.toContain("claim");
+      expect(test.providerCalls()).toBe(0);
+    }
+
+    const unavailable = harness({ killSwitchThrows: true });
+    await expect(
+      createPaymentIntentCreationService(unavailable.ports).create(command()),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_INTENT_PROVIDER_DISABLED",
+      message: "payment intent creation is unavailable",
+    });
+    await expect(
+      createPaymentIntentCreationService(
+        harness({ killSwitchEvaluation: killSwitchEvaluation({ reason: "KILL_ACTIVE" }) }).ports,
+      ).create(command()),
+    ).rejects.toBeInstanceOf(PaymentIntentCreationError);
+  });
+
+  it("uses a current server instant when a new operation was submitted before activation", async () => {
+    const afterActivation = "2026-08-03T15:05:00.000Z";
+    const test = harness({
+      clockNow: afterActivation,
+      killSwitchEvaluation: killSwitchEvaluation({
+        reason: "KILL_ACTIVE",
+        evaluatedAt: afterActivation,
+      }),
+    });
+    await expectCode(
+      () => createPaymentIntentCreationService(test.ports).create(command({ requestedAt: at })),
+      "PAYMENT_INTENT_PROVIDER_DISABLED",
+    );
+    expect(test.killSwitchInputs).toEqual([
+      {
+        key: "payment.provider.admission",
+        action: "CreatePaymentIntent",
+        brandReference: refs.brand,
+        storeReference: refs.store,
+        evaluatedAt: afterActivation,
+      },
+    ]);
+    expect(test.calls).toEqual([
+      "authorize",
+      "resolve-operation",
+      "read-clock",
+      "evaluate-kill-switch",
+    ]);
+    expect(test.providerCalls()).toBe(0);
   });
 
   it("stops malformed, scope-mismatched, or expired Ordering evidence before claim/Provider", async () => {
@@ -309,6 +489,7 @@ describe("Payment Intent creation service", () => {
       command({ amount: 2_200 }),
       command({ status: "Captured" }),
       command({ providerPayload: { id: "pi_raw" } }),
+      command({ killSwitchKey: "attacker.control.override" }),
       Object.create(command()),
     ]) {
       const test = harness();

@@ -402,6 +402,9 @@ importers:
       '@bop/eventing':
         specifier: workspace:*
         version: link:../../bop/eventing
+      '@bop/feature-control':
+        specifier: workspace:*
+        version: link:../../bop/feature-control
       '@rms/ordering':
         specifier: workspace:*
         version: link:../ordering
