@@ -6,8 +6,10 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 ## Registered Events
 
 - `MenuPublished:v1` — owner `@rms/catalog`; stable; brand; none
+- `OrderConfirmed:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderCreated:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `PaymentFailed:v1` — owner `@rms/payment`; stable; store; payment
+- `PaymentRefunded:v1` — owner `@rms/payment`; stable; store; payment
 - `PaymentSucceeded:v1` — owner `@rms/payment`; stable; store; payment
 
 Registered Event identities are the only bounded Event-type metric label candidates.

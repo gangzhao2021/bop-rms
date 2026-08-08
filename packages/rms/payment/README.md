@@ -7,17 +7,18 @@ Payment-owned, Provider-neutral contracts for intent, attempt and transaction in
 - Module Name: `payment`
 - Package Name: `@rms/payment`
 - Layer / Domain: `RMS / Payment`
-- Phase / owning Work Package: `Phase 1 / WP-1301–1309`
+- Phase / owning Work Package: `Phase 1 / WP-1301–1310`
 - Owner role: `Payment Engineering Owner`
 - Status: `active contract surface`
 - Responsibility: strict Provider adapter normalization, authorized/idempotent online Payment Intent
   creation, Stripe raw-byte webhook verification, durable Payment Webhook Inbox idempotency and
   authoritative append-only Payment success/failure facts, a rebuildable status projection and
   bounded operational/daily-settlement reconciliation, fail-closed admission of new Provider work
-  through Feature Control and the contract-first Terminal authorization capture watchdog.
+  through Feature Control, the contract-first Terminal authorization capture watchdog and the
+  paid-without-fulfillable compensation/reconciliation boundary.
 - Explicit non-goals: Provider API SDK/public HTTP deployment, Order advancement, Feature Control
-  ownership/persistence/activation, production Terminal/Order-acceptance producers, compensation
-  and refund approval/allocation.
+  ownership/persistence/activation, production Terminal/Order-acceptance producers, real
+  Stripe/Interac reader execution and runtime compensation persistence.
 
 ## Public contract
 
@@ -80,6 +81,18 @@ Critical Task and the injected `CaptureDeadlineExceeded` composition receipt. Pr
 responses and Task state are never terminal Payment truth. The current package provides no
 Terminal authorization producer, Ordering acceptance producer, scheduler, persistence adapter or
 Stripe implementation and makes no runtime activation claim.
+
+`createPaidWithoutFulfillableOrderService` consumes only Ordering's strict public
+`PaidWithoutFulfillableOrder` disposition. It authorizes and resolves permanent replay before a
+fenced Attempt lease, creates one Critical Open case, retrieves Provider truth before every refund
+decision and reconciles again after every possible mutation. Online and Terminal Card use one
+stable claim for the server-derived remaining balance through the original method; Terminal Interac
+never calls the generic background refund port and remains in-person/provider-confirmation gated. A
+mutation reply is not refund truth. Only Provider retrieval or verified webhook evidence proving
+the cumulative full refund can append `PaymentRefunded.v1`; closure additionally requires an
+independently authorized Operations receipt bound to that exact refund evidence. The injected
+source, repository, lease, reader and Provider ports do not claim runtime adapters or live F13.1
+activation.
 
 The new-work switch is deliberately absent from webhook verification/acceptance, terminal truth,
 status projection and reconciliation services. Those paths preserve authoritative Provider truth
@@ -174,6 +187,7 @@ pnpm payment-terminal:acceptance
 pnpm payment-terminal-watchdog:acceptance
 pnpm payment-status:acceptance
 pnpm payment-reconciliation:acceptance
+pnpm payment-compensation:acceptance
 pnpm --filter @rms/payment lint
 pnpm --filter @rms/payment typecheck
 pnpm --filter @rms/payment test

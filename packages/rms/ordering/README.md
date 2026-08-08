@@ -51,6 +51,14 @@ Payment command owns public HTTP transport and Provider interaction under Sectio
 Cart identifiers and attribution references are indirect identifiers and are prohibited from logs,
 URLs, analytics, screenshots, and non-synthetic fixtures.
 
+WP-1310 adds the contract-first `ordering.payment-outcome:v1` consumer. It strictly consumes
+Store-scoped Payment success or failure facts, authorizes before Ordering reads and uses the caller's
+local Inbox transaction for the one replayable result. Only an exact Ordering-owned `Confirmed`
+source appends `OrderConfirmed.v1`; `AwaitingAcceptance` retries, paid-without-fulfillable exposes a
+blocked public compensation disposition, and Payment failure records a no-confirmation result. The
+injected source and repository ports do not claim a durable runtime adapter, acceptance producer,
+Kitchen release, Provider action or live F13.1 activation.
+
 ```bash
 pnpm --filter @rms/ordering test
 pnpm ordering-cart:acceptance
