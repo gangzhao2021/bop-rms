@@ -45,6 +45,7 @@
     "helpers:verify": "node packages/database/src/helpers-cli.ts",
     "identity-session:acceptance": "pnpm --filter @bop/identity identity-session:acceptance",
     "isolated-database:acceptance": "node packages/database/test/isolated-database-acceptance.mjs",
+    "kitchen-confirmed-order:acceptance": "pnpm --filter @bop/eventing test && pnpm --filter @bop-rms/contracts-events test && pnpm --filter @rms/ordering test && pnpm --filter @rms/kitchen test",
     "format": "prettier --write .",
     "format:check": "prettier --check . && turbo run format:check",
     "import-boundary:check": "vitest run tooling/import-boundary/validate.test.mjs && node tooling/import-boundary/validate.mjs",

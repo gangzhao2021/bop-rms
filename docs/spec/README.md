@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1310 — PaidWithoutFulfillableOrder Compensation、Refund Reconciliation 与 Exception Projection Source on codex/wp-1310`
+- Current discussion node: `WP-1400 — Confirmed Order Consumer on codex/wp-1400`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,14 +17,28 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1400 — Confirmed Order Consumer` is implemented and locally verified on
+  `codex/wp-1400` from exact integrated and exact-main verified
+  `main@7683b8a39b0d7d65e2e550d02e945e1120a7e744`. It owns only the contract-first,
+  runtime-inactive `@rms/kitchen` consumer and immutable confirmed-order intake boundary over the
+  frozen Ordering-owned `OrderConfirmed.v1`; Kitchen Ticket / Work Item、Station routing、migration、
+  Worker registration and live Payment-to-Kitchen activation remain excluded. WP-2045 is not
+  represented as complete and remains a mandatory live / Phase-1 gate. Focused acceptance passes
+  Eventing `52/52`、Event Catalog `14/14`、Ordering `114/114` and Kitchen `42/42`; affected package
+  and repository architecture/security gates pass. The unchanged local macOS migration fixtures
+  remain `53/57` and Docker-backed Audit acceptance remains blocked at Docker exit `125`;
+  pinned-Linux exact-head CI、Section 91 review、merge and exact-main CI are pending. Exact scope and local
+  evidence are in `docs/spec/work-packages/WP-1400.md`.
+
 - `WP-1310 — PaidWithoutFulfillableOrder Compensation、Refund Reconciliation 与 Exception
-Projection Source` is implemented as a local candidate on `codex/wp-1310` from exact integrated and
-  exact-main verified `main@d0acdd1ffbeb7dd47cad7c5a3f0acab605448a36`; exact candidate-head CI,
-  integration and exact-main verification remain pending. It closes the contract-first Ordering
-  payment-outcome / OrderConfirmed and Payment paid-without-fulfillable compensation,
-  Provider-confirmed refund and two-evidence Case boundary without inventing absent runtime
-  producers, persistence adapters or Provider evidence. Exact scope is in
-  `docs/spec/work-packages/WP-1310.md`.
+Projection Source` is implemented and integrated at squash
+  `7683b8a39b0d7d65e2e550d02e945e1120a7e744` via PR #147. Exact implementation head
+  `92fb7270952cbd7b423faa9dd343f978199d0503` passed run/job
+  `31279425814 / 93158240437`; exact-main run/job `31280120046 / 93159958955` passed. It closes the
+  contract-first Ordering payment-outcome / `OrderConfirmed.v1` and Payment
+  paid-without-fulfillable compensation、Provider-confirmed refund and two-evidence Case boundary
+  without inventing absent runtime producers、persistence adapters or Provider evidence. Exact
+  scope and evidence are in `docs/spec/work-packages/WP-1310.md`.
 
 - `WP-1309 — Terminal Authorization Capture Watchdog` is implemented and integrated at squash
   `d0acdd1ffbeb7dd47cad7c5a3f0acab605448a36` via PR #146. It defines the contract-first per-Attempt
@@ -716,15 +730,18 @@ Agents must read the root `AGENTS.md`, this index, and the active Work Package b
 
 ## Current repository stage
 
-WP-1310 contract-first implementation is active from exact integrated and exact-main verified
-`origin/main@d0acdd1ffbeb7dd47cad7c5a3f0acab605448a36` on the sole active branch
-`codex/wp-1310`. WP-1309 exact-head CI, Section 91 self-review, authorized squash merge,
-post-merge exact-main CI and remote branch cleanup are complete. WP-1310 is limited to its exact
-twenty-seven-file allowlist; its local verification, exact candidate-head CI, squash integration and
-exact-main verification remain pending. Current Ordering acceptance/cancellation/capacity-finality
-producers, durable Inbox/Outbox/disposition/case/refund adapters, production scheduler/lease,
-real Stripe/Interac reader evidence, credentials, deployment and non-local actions remain gated and
-unclaimed.
+WP-1400 contract-first candidate is implemented and locally verified from exact integrated and
+exact-main verified
+`origin/main@7683b8a39b0d7d65e2e550d02e945e1120a7e744` on the sole active branch
+`codex/wp-1400`. WP-1310 exact-head CI, Process-enforced / GitHub Free solo self-review, authorized
+squash merge and post-merge exact-main CI are complete. WP-1400 is limited to the exact sixteen-file
+candidate allowlist in its brief and may create only a runtime-inactive `@rms/kitchen`
+consumer/intake contract. Kitchen Ticket / Work Item、Station routing、Kitchen persistence/migration、Worker
+registration、Ordering private-table access and a second release Event remain prohibited. WP-2045
+has no repository closeout and remains a mandatory live Payment / Phase-1 gate; real Store、Order、
+Payment、Provider、runtime adapter、credential、deployment and non-local evidence remain gated and
+unclaimed. Exact-head pinned-Linux CI、Section 91 solo self-review、squash integration and
+post-merge exact-main CI remain pending before WP-1401.
 This paragraph supersedes the historical active-stage snapshots below.
 
 WP-0047 documentation-only readiness is active from exact `origin/main@3f3af5dcee496997bf0ee842ee24726bb3e614b4` on the sole active branch `codex/wp-0047-readiness`. WP-0044 readiness is integrated；its uncommitted in-allowlist implementation is parked in a local named stash and must not resume until WP-0047 completes readiness、implementation、exact-head CI、merge、post-merge exact-main verification and cleanup. This paragraph supersedes the historical WP-0044 readiness snapshot retained below.
