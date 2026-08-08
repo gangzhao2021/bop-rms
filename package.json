@@ -54,6 +54,7 @@
     "module-generator": "node tooling/module-generator/generate.mjs",
     "module-generator:check": "vitest run tooling/module-generator/generate.test.mjs",
     "payment-adapter:acceptance": "pnpm --filter @rms/payment test",
+    "payment-kill-switch:acceptance": "pnpm --filter @bop/feature-control test && pnpm --filter @rms/payment test",
     "payment-intent:acceptance": "pnpm --filter @rms/ordering test && pnpm --filter @rms/payment test && vitest run --config packages/database/vitest.payment-intent.config.ts",
     "payment-webhook-verification:acceptance": "pnpm --filter @rms/payment test",
     "payment-webhook-inbox:acceptance": "pnpm --filter @rms/payment test && vitest run --config packages/database/vitest.payment-webhook-inbox.config.ts",

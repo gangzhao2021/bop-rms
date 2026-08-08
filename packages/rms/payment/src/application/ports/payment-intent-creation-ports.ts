@@ -3,9 +3,14 @@ import type { OrderPaymentPreparationEvidence } from "@rms/ordering";
 
 import type { PaymentProviderAdapter } from "../../contracts/payment-provider-adapter.js";
 import type { PaymentInstant, PaymentIntentCreationRecord } from "../payment-intent-creation.js";
+import type { PaymentKillSwitchPort } from "./payment-kill-switch-ports.js";
 
 export interface PaymentIntentCreationPorts {
   readonly providerEnvironment: "Test" | "Live";
+  readonly clock: {
+    now(): string;
+  };
+  readonly killSwitch: PaymentKillSwitchPort;
   readonly authorization: {
     authorize(input: {
       readonly action: "CreatePaymentIntent";

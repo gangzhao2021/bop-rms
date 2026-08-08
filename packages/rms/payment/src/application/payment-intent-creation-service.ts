@@ -17,6 +17,10 @@ import type {
   PaymentReference,
 } from "../contracts/payment-provider-adapter.js";
 import {
+  paymentProviderAdmissionKillSwitchKey,
+  verifyPaymentProviderAdmission,
+} from "./payment-kill-switch.js";
+import {
   exactPaymentObject,
   parsePaymentDigest,
   parsePaymentInstant,
@@ -282,6 +286,33 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
           record,
         });
       }
+      let evaluatedAt: PaymentInstant;
+      try {
+        evaluatedAt = parsePaymentInstant(ports.clock.now());
+      } catch {
+        return fail("PAYMENT_INTENT_PROVIDER_DISABLED");
+      }
+      let killSwitchEvaluation: unknown;
+      try {
+        killSwitchEvaluation = await ports.killSwitch.evaluate({
+          key: paymentProviderAdmissionKillSwitchKey,
+          action: "CreatePaymentIntent",
+          brandReference: authorized.brandReference,
+          storeReference: authorized.storeReference,
+          evaluatedAt,
+        });
+      } catch {
+        return fail("PAYMENT_INTENT_PROVIDER_DISABLED");
+      }
+      if (
+        verifyPaymentProviderAdmission(killSwitchEvaluation, {
+          action: "CreatePaymentIntent",
+          brandReference: authorized.brandReference,
+          storeReference: authorized.storeReference,
+          evaluatedAt,
+        }) === null
+      )
+        return fail("PAYMENT_INTENT_PROVIDER_DISABLED");
       const preparedValue = await ports.ordering
         .preparePayment({
           submissionReference,

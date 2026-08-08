@@ -21,6 +21,11 @@ const moduleManifestInput =
         layer: "BOP",
       },
       {
+        moduleName: "feature-control",
+        packageName: "@bop/feature-control",
+        layer: "BOP",
+      },
+      {
         moduleName: "ordering",
         packageName: "@rms/ordering",
         layer: "RMS",
@@ -52,7 +57,7 @@ const moduleManifestInput =
     },
     ownedJobs: ["payment-reconciliation"],
     featureFlags: [],
-    killSwitches: [],
+    killSwitches: ["payment.provider.admission"],
     piiClassification: {
       classes: ["indirect_identifier", "payment"],
       handling: {
