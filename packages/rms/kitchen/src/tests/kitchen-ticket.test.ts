@@ -12,13 +12,18 @@ import { describe, expect, it } from "vitest";
 import {
   type ConfirmedOrderIntakeReceipt,
   type KitchenPlanningSource,
+  type KitchenWorkPlanPorts,
   type KitchenTicketCreationEffect,
   type KitchenTicketCreationPorts,
   type KitchenStableReferencePurpose,
   createKitchenExecutionSnapshotDigestBinding,
+  createKitchenPreparationEvidenceSetDigestBinding,
+  createKitchenRoutingRuleDigestBinding,
+  createKitchenStationRoutingCandidateSetDigestBinding,
   createKitchenTicketCreationService,
   createKitchenTicketIntakeAdapter,
   createKitchenWorkPlanDigestBinding,
+  createKitchenWorkPlanService,
   parseConfirmedOrderIntakeReceipt,
   parseKitchenCustomerNote,
   parseKitchenTicket,
@@ -200,6 +205,152 @@ function planFor(source: KitchenPlanningSource, input: ConfirmedOrderIntakeRecei
   });
 }
 
+type RealPlannerOutcome = "Allow" | "Deny" | "Throw" | "Ambiguous";
+
+interface RealPlannerOptions {
+  readonly stationOutcome?: RealPlannerOutcome;
+  readonly preparationOutcome?: Exclude<RealPlannerOutcome, "Ambiguous">;
+}
+
+function realPlanner(options: RealPlannerOptions = {}) {
+  const calls = {
+    station: 0,
+    stationSourceReads: 0,
+    preparation: 0,
+    preparationSourceReads: 0,
+    reference: 0,
+    digest: 0,
+    stationRequests: [] as unknown[],
+    preparationRequests: [] as unknown[],
+  };
+  const ports: KitchenWorkPlanPorts = {
+    stationRouting: {
+      resolve: async (request) => {
+        calls.station += 1;
+        calls.stationRequests.push(request);
+        if (options.stationOutcome === "Deny") return null;
+        if (options.stationOutcome === "Throw")
+          throw new Error("private Station owner detail must not escape");
+        calls.stationSourceReads += 1;
+        const candidate = {
+          stationReference: id(400),
+          stationVersion: 3,
+          stationStatus: "Active",
+          stationCapabilityReferences: [id(403)],
+          routingRuleReference: id(401),
+          routingRuleVersion: 5,
+          routingRuleStatus: "Active",
+          selector: { kind: "AllPreparedItems" },
+          targetStationReference: id(400),
+          routingRuleDigest: sha256("placeholder-rule"),
+        };
+        const signedCandidate = {
+          ...candidate,
+          routingRuleDigest: sha256(
+            createKitchenRoutingRuleDigestBinding({
+              brandReference: request.brandReference,
+              storeReference: request.storeReference,
+              effectiveAt: request.effectiveAt,
+              candidate,
+            }),
+          ),
+        };
+        const candidates =
+          options.stationOutcome === "Ambiguous"
+            ? [
+                signedCandidate,
+                {
+                  ...signedCandidate,
+                  stationReference: id(410),
+                  targetStationReference: id(410),
+                  routingRuleReference: id(411),
+                  routingRuleDigest: sha256(
+                    createKitchenRoutingRuleDigestBinding({
+                      brandReference: request.brandReference,
+                      storeReference: request.storeReference,
+                      effectiveAt: request.effectiveAt,
+                      candidate: {
+                        ...signedCandidate,
+                        stationReference: id(410),
+                        targetStationReference: id(410),
+                        routingRuleReference: id(411),
+                        routingRuleDigest: sha256("placeholder-second-rule"),
+                      },
+                    }),
+                  ),
+                },
+              ]
+            : [signedCandidate];
+        const draft = {
+          evidenceReference: id(402),
+          evidenceVersion: 7,
+          evidenceDigest: sha256("placeholder-station-evidence"),
+          brandReference: request.brandReference,
+          storeReference: request.storeReference,
+          effectiveAt: request.effectiveAt,
+          candidates,
+        };
+        return {
+          ...draft,
+          evidenceDigest: sha256(createKitchenStationRoutingCandidateSetDigestBinding(draft)),
+        };
+      },
+    },
+    preparations: {
+      resolve: async (request) => {
+        calls.preparation += 1;
+        calls.preparationRequests.push(request);
+        if (options.preparationOutcome === "Deny") return null;
+        if (options.preparationOutcome === "Throw")
+          throw new Error("private Recipe owner detail must not escape");
+        calls.preparationSourceReads += 1;
+        const draft = {
+          evidenceReference: id(404),
+          evidenceVersion: 9,
+          evidenceDigest: sha256("placeholder-preparation-evidence"),
+          brandReference: request.brandReference,
+          storeReference: request.storeReference,
+          effectiveAt: request.effectiveAt,
+          items: request.items.map((item, index) => ({
+            orderItemReference: item.orderItemReference,
+            ordinal: item.ordinal,
+            quantity: item.quantity,
+            productReference: item.productReference,
+            productVersionReference: item.productVersionReference,
+            skuReference: item.skuReference,
+            menuVersionReference: item.menuVersionReference,
+            selectedOptions: item.selectedOptions,
+            sourceLineDigest: item.sourceLineDigest,
+            preparationReference: id(420 + index),
+            preparationVersion: 11,
+            preparationDigest: sha256(`opaque-Recipe-preparation-${index}`),
+            instructions: ["Prepare synthetic execution", "Plate synthetic execution"],
+            requiredStationCapabilityReferences: [id(403)],
+          })),
+        };
+        return {
+          ...draft,
+          evidenceDigest: sha256(createKitchenPreparationEvidenceSetDigestBinding(draft)),
+        };
+      },
+    },
+    references: {
+      derive: () => {
+        calls.reference += 1;
+        return id(405);
+      },
+    },
+    digests: {
+      sha256: (binding) => {
+        calls.digest += 1;
+        return sha256(binding);
+      },
+    },
+  };
+  const service = createKitchenWorkPlanService(ports);
+  return { calls, resolve: (value: unknown) => service.resolve(value) };
+}
+
 function changeSource(
   source: ConfirmedOrderKitchenSourceEvidence,
   input: {
@@ -304,6 +455,10 @@ interface HarnessOptions {
   readonly now?: string;
   readonly observePlanningSource?: (source: KitchenPlanningSource) => void;
   readonly mutateSource?: (source: ConfirmedOrderKitchenSourceEvidence) => unknown;
+  readonly resolvePlan?: (value: {
+    readonly receipt: ConfirmedOrderIntakeReceipt;
+    readonly source: KitchenPlanningSource;
+  }) => Promise<unknown | null>;
   readonly mutatePlan?: (
     plan: ReturnType<typeof planFor>,
     source: KitchenPlanningSource,
@@ -323,9 +478,11 @@ function harness(inputReceipt: ConfirmedOrderIntakeReceipt, options: HarnessOpti
       },
     },
     plans: {
-      resolve: async ({ source }) => {
+      resolve: async (value) => {
         calls.plan += 1;
+        const { source } = value;
         options.observePlanningSource?.(source);
+        if (options.resolvePlan !== undefined) return options.resolvePlan(value);
         const plan = planFor(source, inputReceipt);
         const mutated = options.mutatePlan?.(plan, source);
         return mutated === undefined ? plan : mutated;
@@ -534,6 +691,132 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     expect(Object.isFrozen(effect?.ticket.workItems)).toBe(true);
     expect(Object.isFrozen(effect?.ticket.workItems[0]?.preparation.instructions)).toBe(true);
     expect(test.calls).toEqual({ source: 1, plan: 1, clock: 1, resolve: 1, commit: 1 });
+  });
+
+  it("composes the real deterministic planner into WP-1401 and replays durably with zero plan dependency", async () => {
+    const input = receipt();
+    const planner = realPlanner();
+    const test = harness(input, { resolvePlan: planner.resolve });
+    const result = await test.service.create({ receipt: input, transaction });
+    const effect = test.durable();
+    const item = effect?.ticket.workItems[0];
+
+    expect(result.status).toBe("Created");
+    expect(effect?.ticket).toMatchObject({
+      planReference: id(405),
+      planVersion: 1,
+      planGeneratedAt: input.confirmedAt,
+      sourceEvidenceDigest: sourceFor(input).evidenceDigest,
+    });
+    expect(item?.stationRouting).toEqual({
+      stationReference: id(400),
+      routingRuleReference: id(401),
+      routingRuleVersion: 5,
+      routingRuleDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+    });
+    expect(item?.preparation).toEqual({
+      preparationReference: id(420),
+      preparationVersion: 11,
+      preparationDigest: sha256("opaque-Recipe-preparation-0"),
+      instructions: ["Prepare synthetic execution", "Plate synthetic execution"],
+    });
+    expect(planner.calls).toMatchObject({
+      station: 1,
+      stationSourceReads: 1,
+      preparation: 1,
+      preparationSourceReads: 1,
+      reference: 1,
+      digest: 4,
+    });
+    expect(JSON.stringify(planner.calls.stationRequests)).not.toMatch(
+      /customerNote|localizedDisplayNames|correlationReference|sourceSnapshotDigest/u,
+    );
+    expect(JSON.stringify(planner.calls.preparationRequests)).not.toMatch(
+      /customerNote|localizedDisplayNames|correlationReference|sourceSnapshotDigest/u,
+    );
+
+    if (effect === undefined) throw new Error("fixture effect missing");
+    const replayPlanner = realPlanner({ stationOutcome: "Throw", preparationOutcome: "Throw" });
+    const replay = harness(input, {
+      initialEffect: effect,
+      resolvePlan: replayPlanner.resolve,
+    });
+    const replayResult = await replay.service.create({ receipt: input, transaction });
+    expect(replayResult.status).toBe("AlreadyCreated");
+    expect(replay.durable()).toBe(effect);
+    expect(replay.calls).toEqual({ source: 0, plan: 0, clock: 0, resolve: 1, commit: 0 });
+    expect(replayPlanner.calls).toEqual({
+      station: 0,
+      stationSourceReads: 0,
+      preparation: 0,
+      preparationSourceReads: 0,
+      reference: 0,
+      digest: 0,
+      stationRequests: [],
+      preparationRequests: [],
+    });
+  });
+
+  it("maps real-planner owner denial, owner failure and ambiguity to zero durable WP-1401 effect", async () => {
+    const scenarios: readonly {
+      readonly name: string;
+      readonly options: RealPlannerOptions;
+      readonly expected: Partial<ReturnType<typeof realPlanner>["calls"]>;
+    }[] = [
+      {
+        name: "Station deny",
+        options: { stationOutcome: "Deny" },
+        expected: { station: 1, stationSourceReads: 0, preparation: 0 },
+      },
+      {
+        name: "Recipe deny",
+        options: { preparationOutcome: "Deny" },
+        expected: {
+          station: 1,
+          stationSourceReads: 1,
+          preparation: 1,
+          preparationSourceReads: 0,
+        },
+      },
+      {
+        name: "Station throw",
+        options: { stationOutcome: "Throw" },
+        expected: { station: 1, stationSourceReads: 0, preparation: 0 },
+      },
+      {
+        name: "Recipe throw",
+        options: { preparationOutcome: "Throw" },
+        expected: {
+          station: 1,
+          stationSourceReads: 1,
+          preparation: 1,
+          preparationSourceReads: 0,
+        },
+      },
+      {
+        name: "ambiguous routing",
+        options: { stationOutcome: "Ambiguous" },
+        expected: { station: 1, stationSourceReads: 1, preparation: 0 },
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const input = receipt();
+      const planner = realPlanner(scenario.options);
+      const test = harness(input, { resolvePlan: planner.resolve });
+      const promise = test.service.create({ receipt: input, transaction });
+      await expect(promise, scenario.name).rejects.toSatisfy(
+        (error: unknown) =>
+          code(error) === "KITCHEN_TICKET_DEPENDENCY_UNAVAILABLE" &&
+          (error as Error).message === "kitchen ticket creation is unavailable" &&
+          !String(error).includes("private"),
+      );
+      expect(test.durable(), scenario.name).toBeUndefined();
+      expect(test.calls.clock, scenario.name).toBe(0);
+      expect(test.calls.commit, scenario.name).toBe(0);
+      expect(planner.calls, scenario.name).toMatchObject(scenario.expected);
+      expect(planner.calls.reference, scenario.name).toBe(0);
+    }
   });
 
   it("passes only a strict note-free evidence projection to the execution-plan port", async () => {

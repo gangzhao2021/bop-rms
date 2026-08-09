@@ -85,3 +85,26 @@ export type {
   KitchenTicketIdentityResolution,
   KitchenTicketSemanticIdentity,
 } from "./application/ports/kitchen-ticket-ports.js";
+export {
+  type KitchenConfigurationStatus,
+  type KitchenPreparationEvidenceItem,
+  type KitchenPreparationEvidenceOption,
+  type KitchenPreparationEvidenceSet,
+  type KitchenStationRoutingCandidate,
+  type KitchenStationRoutingCandidateSetEvidence,
+  type KitchenStationRoutingSelector,
+  createKitchenPreparationEvidenceSetDigestBinding,
+  createKitchenRoutingRuleDigestBinding,
+  createKitchenStationRoutingCandidateSetDigestBinding,
+  parseKitchenPreparationEvidenceSet,
+  parseKitchenStationRoutingCandidateSetEvidence,
+} from "./contracts/station-routing.js";
+export {
+  createKitchenWorkPlanReferenceBinding,
+  createKitchenWorkPlanService,
+} from "./application/kitchen-work-plan.js";
+export type {
+  KitchenWorkPlanPorts,
+  ResolveKitchenStationRoutingEvidenceInput,
+  ResolveRecipePreparationEvidenceInput,
+} from "./application/ports/kitchen-work-plan-ports.js";
