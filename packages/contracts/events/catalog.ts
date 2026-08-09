@@ -138,6 +138,16 @@ export function registeredEventMetricLabels(
   return Object.freeze(catalog.map(identity));
 }
 
+const kitchenWorkCreatedPayload = z.strictObject({
+  kitchenTicketReference: z.uuid(),
+  orderReference: z.uuid(),
+  orderBatchReference: z.uuid(),
+  confirmationReference: z.uuid(),
+  workItemCount: z.int().min(1).max(100),
+  aggregateVersion: z.literal(1),
+  createdAt: z.iso.datetime({ offset: false }),
+});
+
 const menuPublishedPayload = z.strictObject({
   menuReference: z.uuid(),
   menuVersionReference: z.uuid(),
@@ -200,6 +210,22 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  {
+    eventType: "KitchenWorkCreated",
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen",
+    producerModule: "@rms/kitchen",
+    stability: "stable",
+    consumers: ["kitchen.queue-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: kitchenWorkCreatedPayload,
+  },
   {
     eventType: "MenuPublished",
     schemaVersion: 1,

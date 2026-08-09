@@ -375,6 +375,9 @@ importers:
 
   packages/rms/kitchen:
     dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../../bop/audit
       '@bop/eventing':
         specifier: workspace:*
         version: link:../../bop/eventing
