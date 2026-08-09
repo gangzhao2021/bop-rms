@@ -26,6 +26,22 @@ const databaseAccessManifestInput = {
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier", "personal", "health"],
     },
+    {
+      table: "kitchen_work_queue_projection",
+      classification: "projection-read-model",
+      writeOwner: { kind: "projection-builder", id: "@rms/kitchen.queue.v1" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "kitchen_work_queue_projection_generation",
+      classification: "projection-read-model",
+      writeOwner: { kind: "projection-builder", id: "@rms/kitchen.queue.v1" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
   ],
   accesses: [],
 } as const;
