@@ -196,22 +196,30 @@ async function prove(context) {
     );
     assert.deepEqual(
       inventory.rows.map((row) => row.table_name),
-      ["kitchen_action_record", "kitchen_ticket", "kitchen_work_item"],
+      [
+        "kitchen_action_record",
+        "kitchen_ticket",
+        "kitchen_work_item",
+        "kitchen_work_queue_projection",
+        "kitchen_work_queue_projection_generation",
+      ],
     );
     const migrationCount = await client.query(
       "SELECT count(*)::integer AS count FROM platform_core.migration_history",
     );
-    assert.equal(migrationCount.rows[0].count, 47);
+    assert.equal(migrationCount.rows[0].count, 48);
 
     const forced = await client.query(
       `SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class
        WHERE oid IN (
          'rms_kitchen.kitchen_action_record'::regclass,
          'rms_kitchen.kitchen_ticket'::regclass,
-         'rms_kitchen.kitchen_work_item'::regclass
+         'rms_kitchen.kitchen_work_item'::regclass,
+         'rms_kitchen.kitchen_work_queue_projection'::regclass,
+         'rms_kitchen.kitchen_work_queue_projection_generation'::regclass
        ) ORDER BY relname`,
     );
-    assert.equal(forced.rows.length, 3);
+    assert.equal(forced.rows.length, 5);
     assert.equal(
       forced.rows.every((row) => row.relrowsecurity && row.relforcerowsecurity),
       true,
@@ -234,6 +242,14 @@ async function prove(context) {
       {
         event_object_table: "kitchen_work_item",
         trigger_name: "kitchen_work_item_immutable_fields_trigger",
+      },
+      {
+        event_object_table: "kitchen_work_queue_projection",
+        trigger_name: "kitchen_work_queue_projection_no_update_trigger",
+      },
+      {
+        event_object_table: "kitchen_work_queue_projection_generation",
+        trigger_name: "kitchen_work_queue_generation_transition_trigger",
       },
     ]);
     const updateRules = await client.query(
@@ -262,7 +278,17 @@ async function prove(context) {
         proconfig: ["search_path=pg_catalog"],
       },
       {
+        proname: "enforce_kitchen_work_queue_generation_transition",
+        prosecdef: false,
+        proconfig: ["search_path=pg_catalog"],
+      },
+      {
         proname: "reject_kitchen_action_record_update",
+        prosecdef: false,
+        proconfig: ["search_path=pg_catalog"],
+      },
+      {
+        proname: "reject_kitchen_work_queue_projection_update",
         prosecdef: false,
         proconfig: ["search_path=pg_catalog"],
       },
@@ -279,12 +305,16 @@ async function prove(context) {
        WHERE contype='f' AND connamespace='rms_kitchen'::regnamespace
        ORDER BY target`,
     );
-    assert.deepEqual(foreignTargets.rows, [{ target: "rms_kitchen.kitchen_ticket" }]);
+    assert.deepEqual(foreignTargets.rows, [
+      { target: "rms_kitchen.kitchen_ticket" },
+      { target: "rms_kitchen.kitchen_work_item" },
+      { target: "rms_kitchen.kitchen_work_queue_projection_generation" },
+    ]);
     const indexes = await client.query(
       `SELECT indexname,indexdef FROM pg_indexes
        WHERE schemaname='rms_kitchen' ORDER BY indexname`,
     );
-    assert.equal(indexes.rows.length >= 12, true);
+    assert.equal(indexes.rows.length >= 22, true);
     assert.equal(
       indexes.rows.every(
         (row) =>

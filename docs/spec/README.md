@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1402 — Station Routing Minimum Rule on codex/wp-1402`
+- Current discussion node: `WP-1403 — Kitchen Queue Projection on codex/wp-1403`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,19 +17,35 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1402 — Station Routing Minimum Rule` is the current bounded local candidate on
-  `codex/wp-1402` from exact integrated and exact-main verified
-  `main@a77ab41058a068adaea02b00393aab7a78a50660`. Its closed F14.1 contract is a deterministic,
-  runtime-inactive Kitchen planner over strict injected Recipe preparation and Kitchen
-  Station/routing evidence. Phase 1 uses exactly one active Store Station and the closed
-  `AllPreparedItems` selector; capability mismatch or missing、ambiguous、malformed、stale or
-  cross-scope evidence produces no plan and no Ticket effect. Plan identity and time are stable:
-  the reference derives only from the exact business identity, version is `1` and `generatedAt`
-  equals the accepted `OrderConfirmed` instant. No migration、table、Event、Audit、dependency、
-  lockfile、Recipe implementation、API/UI/Worker or runtime composition is included. The exact
-  twelve-file implementation allowlist, local verification evidence and platform boundaries are in
-  `docs/spec/work-packages/WP-1402.md`. Candidate commit、exact-head CI、Section 91 review、squash
-  integration and exact-main CI remain pending.
+- `WP-1403 — Kitchen Queue Projection` is the current bounded local implementation candidate on
+  `codex/wp-1403` from exact integrated and exact-main verified
+  `main@0075813084cf2d0a2cb0e459ea05704838816e85`. Its closed F14.1 contract is a
+  runtime-inactive, Kitchen-owned and Store-scoped `kitchen_work_queue_v1` read model over the
+  already registered `kitchen.queue-projection:v1` consumer and strict Kitchen Ticket / Work Item
+  source snapshots. Per-generation Store headers plus Work Item rows preserve initialized-empty,
+  a database-enforced single Active generation, checkpoint/as-of/freshness, atomic shadow
+  switching, two independent aggregate anchors and a row Event-semantic digest that never reuse
+  Customer-note-derived evidence. Authorized reads use the canonical
+  `kitchen.operate` permission and never turn stale projection data into Command authority. No
+  lifecycle/Ready Command or Event、Customer/health field、API/UI/SSE/Worker、dependency/lockfile or
+  runtime composition is included. The implementation is confined to the exact twenty-file
+  allowlist in `docs/spec/work-packages/WP-1403.md`, including one migration with the two projection
+  tables. Frozen install, Kitchen `141/141`, affected package and architecture gates, root format /
+  lint / typecheck / build and the production audit pass locally. The dedicated projection body
+  also passes against a disposable PostgreSQL 15 instance; official PostgreSQL 18 / Docker and
+  exact-head pinned-Linux CI remain pending and are not inferred from that supplemental evidence.
+
+- `WP-1402 — Station Routing Minimum Rule` is implemented and integrated at squash
+  `0075813084cf2d0a2cb0e459ea05704838816e85` via PR #150. Exact implementation head
+  `a33fb9cf36c708ce3eed270010243dabe42fcb99` passed run/job
+  `31294969596 / 93198467590`; exact-main run/job `31295607069 / 93200094777` passed. Section 91
+  Process-enforced / GitHub Free self-review is recorded in the PR process comment；GitHub reported
+  zero reviews、zero review requests、zero unresolved threads/comments and `CLEAN / MERGEABLE`,
+  without claiming independent approval or server-side Branch Protection / Rulesets. Its closed
+  F14.1 increment is a deterministic, runtime-inactive Kitchen planner over strict injected Recipe
+  preparation and Kitchen Station/routing evidence. Phase 1 uses exactly one active Store Station
+  and the closed `AllPreparedItems` selector；the exact twelve-file scope、local platform boundaries
+  and final evidence are in `docs/spec/work-packages/WP-1402.md`.
 
 - `WP-1401 — Kitchen Ticket / Item Minimum Aggregate` is implemented and integrated at squash
   `a77ab41058a068adaea02b00393aab7a78a50660` via PR #149. Exact implementation head
@@ -752,19 +768,27 @@ Agents must read the root `AGENTS.md`, this index, and the active Work Package b
 
 ## Current repository stage
 
-WP-1402 bounded implementation is a locally verified candidate from exact integrated and exact-main verified
-`origin/main@a77ab41058a068adaea02b00393aab7a78a50660` on the sole active branch
-`codex/wp-1402`. WP-1401 exact-head CI, Process-enforced / GitHub Free solo self-review, authorized
-squash merge and post-merge exact-main CI are complete through PR #149. WP-1402 is limited to the
-exact twelve-file allowlist in its brief and implements only a pure deterministic single-Station
-Kitchen planner over strict injected Station/routing and Recipe preparation evidence.
-Migration/table、Event、Audit、dependency/lockfile、Recipe business implementation、API/UI/Worker
-and runtime-composition changes remain prohibited. Local package、architecture and non-platform
-repository gates pass；the exact macOS and Docker blocks are recorded in the brief without being
-represented as pinned-Linux evidence. WP-2045 remains a mandatory live Payment / Phase-1 gate；real
-Store、Order、Station、Recipe、Payment、Provider、runtime identity/adapter、credential、deployment
-and non-local evidence remain gated and unclaimed. Candidate commit、exact-head CI、Section 91
-review、squash integration and exact-main CI remain pending.
+WP-1403 bounded local implementation is a candidate from exact integrated and exact-main verified
+`origin/main@0075813084cf2d0a2cb0e459ea05704838816e85` on the sole active branch
+`codex/wp-1403`. WP-1402 exact implementation head
+`a33fb9cf36c708ce3eed270010243dabe42fcb99`、PR #150 exact-head run/job
+`31294969596 / 93198467590`、the explicit Section 91 Process-enforced / GitHub Free self-review、
+authorized squash integration and exact-main run/job `31295607069 / 93200094777` are complete.
+The exact twenty-file implementation is a runtime-inactive Kitchen-owned Store queue projection
+with per-generation Store
+headers and Work Item rows in one migration、initialized-empty state、a database-enforced single
+Active generation、atomic generation switching、safe independent source-event-binding and
+queue-snapshot aggregate anchors、a row Event-semantic digest and `kitchen.operate` read
+authorization. It does not add lifecycle/Ready behavior、Customer/health data、API/UI/SSE/Worker、
+dependency/lockfile or runtime composition. Frozen install, Kitchen `141/141`, affected Eventing /
+Event Contracts / Ordering / Audit regressions, architecture checks, root format / lint / typecheck /
+build and the production audit pass locally. The changed migration and dedicated projection body
+pass against disposable PostgreSQL 15; Docker-backed PostgreSQL 18 is blocked because the local
+daemon is unavailable, and four unchanged macOS APFS / `/tmp` fixture cases remain the only local
+repository-test stop. Candidate commit, exact-head pinned-Linux CI, Section 91 review, squash
+integration and exact-main CI remain pending. WP-2045 remains a mandatory live Payment / Phase-1
+gate；real Store、Order、Station、Recipe、Payment、Provider、runtime identity/adapter、credential、
+deployment and non-local evidence remain gated and unclaimed.
 This paragraph supersedes the historical active-stage snapshots below.
 
 WP-0047 documentation-only readiness is active from exact `origin/main@3f3af5dcee496997bf0ee842ee24726bb3e614b4` on the sole active branch `codex/wp-0047-readiness`. WP-0044 readiness is integrated；its uncommitted in-allowlist implementation is parked in a local named stash and must not resume until WP-0047 completes readiness、implementation、exact-head CI、merge、post-merge exact-main verification and cleanup. This paragraph supersedes the historical WP-0044 readiness snapshot retained below.
