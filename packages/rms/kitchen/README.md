@@ -7,14 +7,16 @@ Kitchen-owned, runtime-inactive confirmed-order intake and minimum Ticket / Work
 - Module Name: `kitchen`
 - Package Name: `@rms/kitchen`
 - Layer / Domain: `RMS / Kitchen`
-- Phase / owning Work Package: `Phase 1 / WP-1400–1401`
+- Phase / owning Work Package: `Phase 1 / WP-1400–1402`
 - Owner role: `Kitchen Engineering Owner`
 - Status: `active contract surface and persistence boundary; runtime inactive`
 - Responsibility: consume Ordering-owned `OrderConfirmed.v1`, resolve exact public Ordering source
-  evidence plus an injected Kitchen work plan, then create one Store-scoped Ticket and one initial
-  Work Item per exact source item.
-- Explicit non-goals: live Worker wiring, real Station/Recipe plan production, queue projection,
-  Accept/Start/Complete/Cancel/Ready transitions, API/UI, Provider calls and production activation.
+  evidence, deterministically compose the Phase-1 single-Station work plan from strict injected
+  Kitchen-routing and Recipe-preparation evidence, then create one Store-scoped Ticket and one
+  initial Work Item per exact source item.
+- Explicit non-goals: live Worker wiring, Station/Rule persistence or authoring, Recipe business
+  logic/persistence, multi-Station routing, queue projection, Accept/Start/Complete/Cancel/Ready
+  transitions, API/UI, Provider calls and production activation.
 
 ## Public contract
 
@@ -30,6 +32,16 @@ injected `KitchenWorkPlan` must bind the exact source-evidence digest and item s
 ordinal-1 item per source item, one opaque Station/routing snapshot and one Recipe/Preparation
 snapshot. Kitchen alone computes the final execution digest from the complete source plus plan.
 Missing, placeholder, extra, stale or changed data fails before any effect.
+
+`createKitchenWorkPlanService` implements that existing internal plan port. It resolves evidence at
+the exact confirmed instant, accepts only one active `AllPreparedItems` Station/rule candidate,
+requires every Recipe-owned preparation capability to be covered, and returns `null` for any
+missing, ambiguous, malformed, cross-scope or incapable evidence. Station and Recipe owner adapters
+receive distinct least-privilege System authorization intents and remain final authorization
+authorities before reading their sources. The planner never receives Customer notes or localized
+display narrative, reads a clock, generates random identity or mutates state. Its stable plan
+reference binds Brand、Store、Order、Batch and confirmation; version is `1` and `generatedAt` is the
+confirmed instant, so identical evidence is byte-stable across retry and concurrency.
 
 ## Dependencies
 
@@ -81,7 +93,8 @@ non-synthetic fixture. WP-1407 remains mandatory before Kitchen Start or any foo
 
 ## Operations
 
-- Configuration: none; the real plan producer belongs to WP-1402.
+- Configuration: strict injected, owner-authorized Station/routing and Recipe-preparation evidence
+  only. No configuration table, authoring command or runtime adapter is included.
 - Health/readiness: runtime inactive; no Worker or infrastructure readiness is claimed.
 - Telemetry: no implementation in this increment. Future metrics may use bounded outcome/reason
   labels only; all Tenant and object references, notes and digests are prohibited labels.
@@ -92,6 +105,7 @@ non-synthetic fixture. WP-1407 remains mandatory before Kitchen Start or any foo
 
 ```bash
 pnpm kitchen-ticket:acceptance
+pnpm kitchen-station-routing:acceptance
 pnpm --filter @rms/kitchen format:check
 pnpm --filter @rms/kitchen lint
 pnpm --filter @rms/kitchen typecheck
@@ -106,9 +120,10 @@ minimal Event privacy.
 
 ## Decisions and follow-up
 
-- Authority: WP-0030, WP-0032, WP-0035, WP-1310, WP-1400 and WP-1401.
-- External Evidence: real Ordering persistence/source adapter, WP-1402 plan producer, WP-2045 live
-  Payment gate, WP-1407 allergen acknowledgement, runtime roles/RLS, real Store/Order/Station facts,
-  load/replay/restore evidence and deployment remain gated and unclaimed.
-- Revisit triggers: live Worker composition, Station-routing producer, any Work Item transition or
-  a new Customer/health field.
+- Authority: WP-0030, WP-0032, WP-0035, WP-1310, WP-1400, WP-1401 and WP-1402.
+- External Evidence: real Ordering persistence/source adapter, real Kitchen Station/routing and
+  Recipe-preparation adapters/facts, WP-2045 live Payment gate, WP-1407 allergen acknowledgement,
+  runtime roles/RLS, real Store/Order facts, load/replay/restore evidence and deployment remain
+  gated and unclaimed.
+- Revisit triggers: live Worker composition, Station/Rule authoring or persistence, Recipe module,
+  multi-Station routing, any Work Item transition or a new Customer/health field.
