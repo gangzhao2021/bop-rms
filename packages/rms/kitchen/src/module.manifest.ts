@@ -11,6 +11,11 @@ const moduleManifestInput =
     publicExports: ["."],
     allowedSynchronousDependencies: [
       {
+        moduleName: "audit",
+        packageName: "@bop/audit",
+        layer: "BOP",
+      },
+      {
         moduleName: "eventing",
         packageName: "@bop/eventing",
         layer: "BOP",
@@ -22,16 +27,16 @@ const moduleManifestInput =
       },
     ],
     consumedEvents: ["rms.ordering.order-confirmed.v1"],
-    publishedEvents: [],
+    publishedEvents: ["rms.kitchen.kitchen-work-created.v1"],
     ownedDatabase: {
       schema: "rms_kitchen",
-      tables: [],
+      tables: ["kitchen_action_record", "kitchen_ticket", "kitchen_work_item"],
     },
     ownedJobs: [],
     featureFlags: [],
     killSwitches: [],
     piiClassification: {
-      classes: ["indirect_identifier"],
+      classes: ["indirect_identifier", "personal", "health"],
       handling: {
         logs: "prohibited",
         urls: "prohibited",

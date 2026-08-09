@@ -26,3 +26,62 @@ export type {
   ConfirmedOrderIntakeCommit,
   ConfirmedOrderIntakeResolution,
 } from "./application/ports/confirmed-order-consumer-ports.js";
+export {
+  kitchenTicketAuditRetentionPolicyCode,
+  kitchenTicketAuditRetentionPolicyVersion,
+  kitchenTicketCreationErrorCodes,
+  KitchenTicketCreationError,
+  type KitchenLocalizedNamesSnapshot,
+  type KitchenPlanningSource,
+  type KitchenPlanningSourceItem,
+  type KitchenPlanningSourceOption,
+  type KitchenPreparationSnapshot,
+  type KitchenSelectedOptionSnapshot,
+  type KitchenStationRoutingSnapshot,
+  type KitchenTicket,
+  type KitchenTicketCreationAction,
+  type KitchenTicketCreationErrorCode,
+  type KitchenTicketCreationResult,
+  type KitchenTicketStatus,
+  type KitchenWorkItem,
+  type KitchenWorkItemStatus,
+  type KitchenWorkPlan,
+  type KitchenWorkPlanItem,
+} from "./contracts/kitchen-ticket.js";
+export {
+  kitchenWorkCreatedEventConsumer,
+  kitchenWorkCreatedEventType,
+  KitchenWorkCreatedEventError,
+  type KitchenWorkCreatedEnvelope,
+  type KitchenWorkCreatedPayload,
+} from "./contracts/kitchen-work-created-event.js";
+export {
+  createKitchenWorkPlanDigestBinding,
+  parseKitchenCustomerNote,
+  parseKitchenPlanningSource,
+  parseKitchenTicket,
+  parseKitchenTicketCreationAction,
+  parseKitchenTicketCreationResult,
+  parseKitchenTicketDigest,
+  parseKitchenTicketInstant,
+  parseKitchenTicketReference,
+  parseKitchenWorkPlan,
+  receiptFromKitchenTicket,
+} from "./domain/kitchen-ticket.js";
+export {
+  createKitchenExecutionSnapshotDigestBinding,
+  createKitchenTicketCreationService,
+} from "./application/kitchen-ticket-creation.js";
+export {
+  createKitchenWorkCreatedEnvelope,
+  parseKitchenWorkCreatedEnvelope,
+} from "./application/kitchen-work-created-event.js";
+export { createKitchenTicketIntakeAdapter } from "./application/kitchen-ticket-intake-adapter.js";
+export type {
+  KitchenStableReferencePurpose,
+  KitchenTicketCommitResult,
+  KitchenTicketCreationEffect,
+  KitchenTicketCreationPorts,
+  KitchenTicketIdentityResolution,
+  KitchenTicketSemanticIdentity,
+} from "./application/ports/kitchen-ticket-ports.js";

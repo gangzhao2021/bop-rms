@@ -76,6 +76,7 @@ describe("migration catalog", () => {
       "1400_003_create_payment_terminal_fact",
       "1400_004_create_payment_status_projection",
       "1400_005_create_payment_reconciliation",
+      "1500_001_create_kitchen_ticket_aggregate",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -366,6 +367,29 @@ describe("migration catalog", () => {
     expect(migration?.sql).toContain("payment_terminal_fact_authoritative_source_shape_check");
     expect(migration?.sql).toContain("payment_reconciliation_exception_stable_unique");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1401 Kitchen Ticket aggregate migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1500_001_create_kitchen_ticket_aggregate",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/kitchen");
+    expect(migration?.metadata.schema).toBe("rms_kitchen");
+    for (const table of ["kitchen_ticket", "kitchen_work_item", "kitchen_action_record"])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_kitchen.${table}`);
+    expect(migration?.sql).toContain("kitchen_work_item_ticket_fk");
+    expect(migration?.sql).toContain("kitchen_action_record_ticket_fk");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql.match(/SECURITY INVOKER/gu)).toHaveLength(3);
+    expect(migration?.sql.match(/SET search_path = pg_catalog/gu)).toHaveLength(3);
+    expect(migration?.sql.match(/REVOKE ALL ON FUNCTION rms_kitchen\./gu)).toHaveLength(3);
+    expect(migration?.sql).toContain("source_evidence_captured_at <= confirmed_at");
+    expect(migration?.sql).toContain("kitchen_action_record_actor_shape_check");
+    expect(migration?.sql).not.toMatch(/CREATE RULE\s+\w+no_update/iu);
+    expect(migration?.sql).not.toMatch(
+      /station_configuration|recipe_id|recipe_version|routing_rule_version_id/iu,
+    );
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

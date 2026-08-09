@@ -59,6 +59,21 @@ blocked public compensation disposition, and Payment failure records a no-confir
 injected source and repository ports do not claim a durable runtime adapter, acceptance producer,
 Kitchen release, Provider action or live F13.1 activation.
 
+WP-1401 adds Ordering's public `ConfirmedOrderKitchenSourceEvidence` query boundary. The query
+strictly parses its exact Brand, Store, Order, Batch, confirmation, source Event, aggregate-version
+and snapshot-digest identity, authorizes `ResolveConfirmedOrderKitchenSource` for the
+`CreateKitchenWork` purpose, and only then reads its injected Ordering-owned source. It returns one
+to 100 lossy, deeply frozen Item snapshots and recomputes every line digest plus the evidence
+digest. Missing, malformed, stale, cross-scope, ambiguous or changed evidence fails closed. This is
+not a Kitchen runtime adapter and it exposes no Ordering persistence.
+
+The lossy snapshot intentionally excludes prices, tax, Money, Quote, Cart, Customer/Guest,
+contact, Staff/Actor/Participant and Payment/Provider fields. Customer Note is opaque
+personal/possible-health text: NFC normalized, limited to 240 Unicode code points and four lines,
+and rejected when it contains control or bidirectional-override characters. Ordering and Kitchen
+must not infer allergy truth from it or emit it in Events, Audit, errors, logs, URLs, analytics,
+screenshots or non-synthetic fixtures.
+
 ```bash
 pnpm --filter @rms/ordering test
 pnpm ordering-cart:acceptance

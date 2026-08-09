@@ -59,6 +59,7 @@ const businessOwners = new Map([
   ["rms_pricing", "@rms/pricing"],
   ["rms_ordering", "@rms/ordering"],
   ["rms_payment", "@rms/payment"],
+  ["rms_kitchen", "@rms/kitchen"],
 ]);
 const metadataKeys = [
   "bop-rms-migration",
@@ -302,6 +303,7 @@ function validateSql(
           "bop_tenant",
           "bop_operating_entity",
           "rms_catalog",
+          "rms_kitchen",
           "rms_pricing",
           "rms_ordering",
           "rms_payment",
