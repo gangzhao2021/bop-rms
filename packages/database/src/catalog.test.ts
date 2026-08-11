@@ -85,10 +85,26 @@ describe("migration catalog", () => {
       "1700_001_create_pickup_fulfillment",
       "1700_002_create_fulfillment_readiness",
       "1700_003_create_pickup_proof",
+      "1700_004_create_pickup_handoff",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
     ).toBe(true);
+  });
+
+  it("registers the exact WP-1603 Pickup Handoff migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1700_004_create_pickup_handoff",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/fulfillment");
+    for (const table of [
+      "pickup_handoff_record",
+      "pickup_handoff_item",
+      "pickup_handoff_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_fulfillment.${table}`);
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
   it("registers the exact WP-1023 Availability Rule migration", async () => {

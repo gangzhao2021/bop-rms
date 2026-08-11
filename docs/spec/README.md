@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1602 — Pickup Proof on codex/wp-1602`
+- Current discussion node: `WP-1603 — Complete Pickup Handoff on codex/wp-1603`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,7 +17,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1602 — Pickup Proof` is active for bounded implementation from exact integrated and
+- `WP-1603 — Complete Pickup Handoff` is active from exact integrated and exact-main verified
+  `main@3466e32e4f6391b3da920777701a8a2454b14044`. It owns only the authorized, append-only
+  Handoff Record, exact cumulative handed-over quantity and partial/Completed derivation described
+  in `docs/spec/work-packages/WP-1603.md`; public Events remain reserved to WP-1604.
+
+- `WP-1602 — Pickup Proof` is implemented and integrated at squash
+  `3466e32e4f6391b3da920777701a8a2454b14044` via PR #159. Exact implementation head
+  `4e75c4c0637118f04c10534a013c72d2b6c54dcf` passed run/job
+  `31527917267 / 93900655037`; exact-main run/job `31529393368 / 93905487273` passed. It began from
+  exact integrated and
   exact-main verified `main@2ce33ded7c90b90466236d53121dbbecc4af2765` on
   `codex/wp-1602`. It composes WP-1005's strict 60-minute Pickup Proof capability with an exact
   Fulfillment-owned Ready source, append-only generation/regeneration/invalidation and successful
