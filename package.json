@@ -53,6 +53,7 @@
     "kds-continuity:acceptance": "pnpm --filter @rms/kitchen test && vitest run --config packages/database/vitest.kds-continuity.config.ts",
     "pickup-fulfillment:acceptance": "pnpm --filter @rms/ordering test && pnpm --filter @rms/fulfillment test && vitest run --config packages/database/vitest.pickup-fulfillment.config.ts",
     "fulfillment-readiness:acceptance": "pnpm --filter @rms/fulfillment test && vitest run --config packages/database/vitest.fulfillment-readiness.config.ts",
+    "pickup-proof:acceptance": "pnpm --filter @bop/public-capability test && pnpm --filter @rms/fulfillment test && vitest run --config packages/database/vitest.pickup-proof.config.ts",
     "kitchen-station-routing:acceptance": "pnpm --filter @rms/kitchen test",
     "kitchen-ticket:acceptance": "pnpm --filter @bop/audit test && pnpm --filter @bop/eventing test && pnpm --filter @bop-rms/contracts-events test && pnpm --filter @rms/ordering test && pnpm --filter @rms/kitchen test && vitest run --config packages/database/vitest.kitchen-ticket.config.ts",
     "kitchen-work-lifecycle:acceptance": "pnpm --filter @bop/audit test && pnpm --filter @bop/eventing test && pnpm --filter @bop-rms/contracts-events test && pnpm --filter @rms/kitchen test && vitest run --config packages/database/vitest.kitchen-work-lifecycle.config.ts",

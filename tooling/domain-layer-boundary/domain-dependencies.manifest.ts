@@ -19,6 +19,11 @@ const domainDependenciesManifestInput = {
       allowedSubpaths: ["."],
     },
     {
+      packageName: "@bop/public-capability",
+      classification: "domain-safe",
+      allowedSubpaths: ["."],
+    },
+    {
       packageName: "@bop/tenant",
       classification: "domain-safe",
       allowedSubpaths: ["."],
