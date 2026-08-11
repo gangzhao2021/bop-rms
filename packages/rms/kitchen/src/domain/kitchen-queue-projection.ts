@@ -12,6 +12,7 @@ export const kitchenQueueProjectionVersion = 1 as const;
 export const kitchenQueueConsumerName = "kitchen.queue-projection:v1" as const;
 export const kitchenQueueConsumerVersion = 1 as const;
 export const kitchenQueuePermission = "kitchen.operate" as const;
+export const kitchenQueueSnapshotBindingVersion = 2 as const;
 
 export const kitchenQueueProjectionErrorCodes = [
   "KITCHEN_QUEUE_INPUT_INVALID",
@@ -78,15 +79,17 @@ export interface KitchenQueueSourceItem {
   readonly orderBatchReference: KitchenReference;
   readonly orderItemReference: KitchenReference;
   readonly sourceItemOrdinal: number;
-  readonly ticketAggregateVersion: 1n;
-  readonly workItemVersion: 1n;
-  readonly status: "Queued";
+  readonly ticketAggregateVersion: bigint;
+  readonly workItemVersion: bigint;
+  readonly status: KitchenQueueWorkItemStatus;
   readonly requiredQuantity: number;
-  readonly completedQuantity: 0;
+  readonly completedQuantity: number;
   readonly localizedDisplayNames: KitchenQueueLocalizedNames;
   readonly selectedOptions: readonly KitchenQueueSelectedOption[];
   readonly stationReference: KitchenReference;
   readonly workItemCreatedAt: KitchenInstant;
+  readonly acceptedAt: KitchenInstant | null;
+  readonly orderItemReadyAt: KitchenInstant | null;
   readonly catalogSnapshotControlled: true;
 }
 
@@ -96,7 +99,7 @@ export interface KitchenQueueSourceTicket {
   readonly ticketReference: KitchenReference;
   readonly orderReference: KitchenReference;
   readonly orderBatchReference: KitchenReference;
-  readonly ticketAggregateVersion: 1n;
+  readonly ticketAggregateVersion: bigint;
   readonly ticketStatus: "Open";
   readonly sourceEvent: KitchenQueueSourceEvent;
   readonly items: readonly KitchenQueueSourceItem[];
@@ -111,6 +114,140 @@ export interface KitchenQueueSourceFeed {
   readonly tickets: readonly KitchenQueueSourceTicket[];
 }
 
+export type KitchenQueueLifecycleEventType =
+  | "KitchenWorkAccepted"
+  | "KitchenWorkStarted"
+  | "KitchenItemProgressRecorded"
+  | "KitchenItemCompleted";
+
+export interface KitchenQueueLifecycleEventProof {
+  readonly kind: "Event";
+  readonly eventType: KitchenQueueLifecycleEventType;
+  readonly brandReference: KitchenReference;
+  readonly storeReference: KitchenReference;
+  readonly ticketReference: KitchenReference;
+  readonly workItemReference: KitchenReference;
+  readonly orderItemReference: KitchenReference;
+  readonly operationReference: KitchenReference;
+  readonly actionCode:
+    | "KITCHEN_WORK_ITEM_ACCEPTED"
+    | "KITCHEN_WORK_ITEM_STARTED"
+    | "KITCHEN_WORK_ITEM_COMPLETION_RECORDED";
+  readonly purpose: "KitchenWorkExecution";
+  readonly reasonCode: "WORK_ITEM_ACCEPTED" | "WORK_ITEM_STARTED" | "COMPLETION_QUANTITY_RECORDED";
+  readonly sourceChannel: "KDS_COMMAND";
+  readonly actor: Readonly<{ readonly type: "User"; readonly actorReference: KitchenReference }>;
+  readonly expectedTicketVersion: bigint;
+  readonly committedTicketVersion: bigint;
+  readonly expectedWorkItemVersion: bigint;
+  readonly committedWorkItemVersion: bigint;
+  readonly beforeStatus: "Queued" | "In Progress";
+  readonly afterStatus: "Queued" | "In Progress" | "Completed";
+  readonly quantityDelta: number | null;
+  readonly completedQuantity: number | null;
+  readonly requiredQuantity: number | null;
+  readonly occurredAt: KitchenInstant;
+  readonly auditReference: KitchenReference;
+  readonly auditSemanticDigest: KitchenDigest;
+  readonly effectDigest: KitchenDigest;
+  readonly eventReference: KitchenReference;
+  readonly eventSemanticDigest: KitchenDigest;
+  readonly projectionProofDigest: KitchenDigest;
+}
+
+export interface KitchenQueueManualReadyProof {
+  readonly kind: "ManualReady";
+  readonly brandReference: KitchenReference;
+  readonly storeReference: KitchenReference;
+  readonly ticketReference: KitchenReference;
+  readonly workItemReference: KitchenReference;
+  readonly orderItemReference: KitchenReference;
+  readonly operationReference: KitchenReference;
+  readonly actionCode: "KITCHEN_ORDER_ITEM_READY";
+  readonly purpose: "KitchenExpoCoordination";
+  readonly reasonCode: "EXPO_MARKED_READY";
+  readonly sourceChannel: "KDS_COMMAND";
+  readonly actor: Readonly<{ readonly type: "User"; readonly actorReference: KitchenReference }>;
+  readonly expectedTicketVersion: bigint;
+  readonly committedTicketVersion: bigint;
+  readonly workItemVersion: bigint;
+  readonly workItemStatus: "Completed";
+  readonly workItems: readonly Readonly<{
+    readonly workItemReference: KitchenReference;
+    readonly workItemVersion: bigint;
+  }>[];
+  readonly workItemsDigest: KitchenDigest;
+  readonly readyResultReference: KitchenReference;
+  readonly readyQuantity: number;
+  readonly requiredQuantity: number;
+  readonly readyAt: KitchenInstant;
+  readonly auditReference: KitchenReference;
+  readonly auditSemanticDigest: KitchenDigest;
+  readonly effectDigest: KitchenDigest;
+  readonly eventReference: null;
+  readonly eventSemanticDigest: null;
+  readonly projectionProofDigest: KitchenDigest;
+}
+
+export interface KitchenQueueAutomaticReadyProof {
+  readonly kind: "AutomaticReady";
+  readonly brandReference: KitchenReference;
+  readonly storeReference: KitchenReference;
+  readonly ticketReference: KitchenReference;
+  readonly workItemReference: KitchenReference;
+  readonly orderItemReference: KitchenReference;
+  readonly operationReference: KitchenReference;
+  readonly parentOperationReference: KitchenReference;
+  readonly committedTicketVersion: bigint;
+  readonly workItemVersion: bigint;
+  readonly workItemStatus: "Completed";
+  readonly actionCode: "KITCHEN_ORDER_ITEM_READY";
+  readonly purpose: "KitchenExpoCoordination";
+  readonly reasonCode: "ALL_WORK_ITEMS_COMPLETED";
+  readonly sourceChannel: "KITCHEN_AUTOMATION";
+  readonly actor: Readonly<{ readonly type: "System"; readonly actorReference: null }>;
+  readonly workItems: readonly Readonly<{
+    readonly workItemReference: KitchenReference;
+    readonly workItemVersion: bigint;
+  }>[];
+  readonly workItemsDigest: KitchenDigest;
+  readonly readyResultReference: KitchenReference;
+  readonly readyQuantity: number;
+  readonly requiredQuantity: number;
+  readonly readyAt: KitchenInstant;
+  readonly auditReference: KitchenReference;
+  readonly auditSemanticDigest: KitchenDigest;
+  readonly effectDigest: KitchenDigest;
+  readonly eventReference: null;
+  readonly eventSemanticDigest: null;
+  readonly readyCausalBundleDigest: KitchenDigest;
+  readonly projectionProofDigest: KitchenDigest;
+}
+
+export type KitchenQueueLifecycleProjectionProof =
+  KitchenQueueLifecycleEventProof | KitchenQueueManualReadyProof | KitchenQueueAutomaticReadyProof;
+
+export interface KitchenQueueLifecycleProofBundle {
+  readonly ticketReference: KitchenReference;
+  readonly operationCount: number;
+  readonly readyResultCount: number;
+  readonly lifecycleProofSetDigest: KitchenDigest;
+  readonly proofs: readonly KitchenQueueLifecycleProjectionProof[];
+}
+
+export interface KitchenQueueLifecycleSourceTicket extends KitchenQueueSourceTicket {
+  readonly updatedAt: KitchenInstant;
+}
+
+export interface KitchenQueueLifecycleQueueFeed extends Omit<KitchenQueueSourceFeed, "tickets"> {
+  readonly tickets: readonly KitchenQueueLifecycleSourceTicket[];
+}
+
+export interface KitchenQueueLifecycleSourceFeed {
+  readonly queueFeed: KitchenQueueLifecycleQueueFeed;
+  readonly proofBundles: readonly KitchenQueueLifecycleProofBundle[];
+}
+
 export interface KitchenQueueRow {
   readonly projectionGenerationReference: KitchenReference;
   readonly brandReference: KitchenReference;
@@ -121,8 +258,8 @@ export interface KitchenQueueRow {
   readonly orderBatchReference: KitchenReference;
   readonly orderItemReference: KitchenReference;
   readonly sourceItemOrdinal: number;
-  readonly ticketAggregateVersion: 1n;
-  readonly workItemVersion: 1n;
+  readonly ticketAggregateVersion: bigint;
+  readonly workItemVersion: bigint;
   readonly status: KitchenQueueWorkItemStatus;
   readonly requiredQuantity: number;
   readonly completedQuantity: number;
@@ -133,6 +270,8 @@ export interface KitchenQueueRow {
   readonly sourceEventSemanticDigest: KitchenDigest;
   readonly sourceEventOccurredAt: KitchenInstant;
   readonly workItemCreatedAt: KitchenInstant;
+  readonly acceptedAt: KitchenInstant | null;
+  readonly orderItemReadyAt: KitchenInstant | null;
 }
 
 export interface KitchenQueueGeneration {
@@ -159,8 +298,17 @@ export interface KitchenQueueGeneration {
   readonly expectedPriorGenerationReference: KitchenReference | null;
 }
 
+export interface KitchenQueueStoredGeneration extends KitchenQueueGeneration {
+  readonly snapshotBindingVersion: 1 | 2;
+}
+
 export interface KitchenQueueProjectionBundle {
   readonly generation: KitchenQueueGeneration;
+  readonly rows: readonly KitchenQueueRow[];
+}
+
+export interface KitchenQueueStoredProjectionBundle {
+  readonly generation: KitchenQueueStoredGeneration;
   readonly rows: readonly KitchenQueueRow[];
 }
 
@@ -216,8 +364,8 @@ export interface KitchenQueueItemView {
   readonly orderBatchReference: KitchenReference;
   readonly orderItemReference: KitchenReference;
   readonly sourceItemOrdinal: number;
-  readonly ticketAggregateVersion: 1n;
-  readonly workItemVersion: 1n;
+  readonly ticketAggregateVersion: bigint;
+  readonly workItemVersion: bigint;
   readonly status: KitchenQueueWorkItemStatus;
   readonly requiredQuantity: number;
   readonly completedQuantity: number;
@@ -225,6 +373,8 @@ export interface KitchenQueueItemView {
   readonly selectedOptions: readonly KitchenQueueSelectedOption[];
   readonly stationReference: KitchenReference;
   readonly workItemCreatedAt: KitchenInstant;
+  readonly acceptedAt: KitchenInstant | null;
+  readonly orderItemReadyAt: KitchenInstant | null;
 }
 
 export interface KitchenQueueFutureCapabilities {
@@ -303,6 +453,44 @@ function exact(value: unknown, fields: readonly string[]): Readonly<Record<strin
       )
         return invalid();
       result[field] = descriptor.value;
+    }
+    return Object.freeze(result);
+  } catch (error) {
+    if (error instanceof KitchenQueueProjectionError) throw error;
+    return invalid();
+  }
+}
+
+function descriptorSnapshot(value: unknown): Readonly<Record<string, unknown>> {
+  try {
+    if (
+      value === null ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Object.prototype
+    )
+      return invalid();
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      keys.some((key) => typeof key !== "string") ||
+      keys.some((key) => {
+        if (typeof key !== "string") return true;
+        const descriptor = descriptors[key];
+        return (
+          descriptor === undefined ||
+          !("value" in descriptor) ||
+          descriptor.get !== undefined ||
+          descriptor.set !== undefined ||
+          !descriptor.enumerable
+        );
+      })
+    )
+      return invalid();
+    const result: Record<string, unknown> = {};
+    for (const key of keys) {
+      if (typeof key !== "string") return invalid();
+      result[key] = descriptors[key]?.value;
     }
     return Object.freeze(result);
   } catch (error) {
@@ -390,6 +578,11 @@ function integer(value: unknown, minimum: number, maximum: number): number {
   if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum)
     return invalid();
   return value as number;
+}
+
+function positiveBigint(value: unknown): bigint {
+  if (typeof value !== "bigint" || value < 1n) return invalid();
+  return value;
 }
 
 function compareAscii(left: string, right: string): number {
@@ -500,6 +693,17 @@ function workItemStatus(value: unknown): KitchenQueueWorkItemStatus {
   return value as KitchenQueueWorkItemStatus;
 }
 
+function validQuantityStatus(
+  status: KitchenQueueWorkItemStatus,
+  completedQuantity: number,
+  requiredQuantity: number,
+): boolean {
+  if (status === "Queued") return completedQuantity === 0;
+  if (status === "In Progress") return completedQuantity < requiredQuantity;
+  if (status === "Completed") return completedQuantity === requiredQuantity;
+  return completedQuantity <= requiredQuantity;
+}
+
 export function parseKitchenQueueSourceEvent(value: unknown): KitchenQueueSourceEvent {
   const raw = exact(value, [
     "eventId",
@@ -600,14 +804,24 @@ function parseSourceItem(value: unknown): KitchenQueueSourceItem {
     "selectedOptions",
     "stationReference",
     "workItemCreatedAt",
+    "acceptedAt",
+    "orderItemReadyAt",
     "catalogSnapshotControlled",
   ]);
+  if (raw.catalogSnapshotControlled !== true) return invalid();
+  const requiredQuantity = integer(raw.requiredQuantity, 1, 999);
+  const completedQuantity = integer(raw.completedQuantity, 0, requiredQuantity);
+  const status = workItemStatus(raw.status);
+  const workItemCreatedAt = instant(raw.workItemCreatedAt);
+  const acceptedAt = optionalInstant(raw.acceptedAt);
+  const orderItemReadyAt = optionalInstant(raw.orderItemReadyAt);
   if (
-    raw.ticketAggregateVersion !== 1n ||
-    raw.workItemVersion !== 1n ||
-    raw.status !== "Queued" ||
-    raw.completedQuantity !== 0 ||
-    raw.catalogSnapshotControlled !== true
+    !validQuantityStatus(status, completedQuantity, requiredQuantity) ||
+    (acceptedAt !== null && Date.parse(acceptedAt) < Date.parse(workItemCreatedAt)) ||
+    (orderItemReadyAt !== null &&
+      (status !== "Completed" ||
+        acceptedAt === null ||
+        Date.parse(orderItemReadyAt) < Date.parse(acceptedAt)))
   )
     return invalid();
   return Object.freeze({
@@ -617,15 +831,17 @@ function parseSourceItem(value: unknown): KitchenQueueSourceItem {
     orderBatchReference: reference(raw.orderBatchReference),
     orderItemReference: reference(raw.orderItemReference),
     sourceItemOrdinal: integer(raw.sourceItemOrdinal, 1, 100),
-    ticketAggregateVersion: 1n as const,
-    workItemVersion: 1n as const,
-    status: "Queued" as const,
-    requiredQuantity: integer(raw.requiredQuantity, 1, 999),
-    completedQuantity: 0 as const,
+    ticketAggregateVersion: positiveBigint(raw.ticketAggregateVersion),
+    workItemVersion: positiveBigint(raw.workItemVersion),
+    status,
+    requiredQuantity,
+    completedQuantity,
     localizedDisplayNames: localizedNames(raw.localizedDisplayNames),
     selectedOptions: selectedOptions(raw.selectedOptions),
     stationReference: reference(raw.stationReference),
-    workItemCreatedAt: instant(raw.workItemCreatedAt),
+    workItemCreatedAt,
+    acceptedAt,
+    orderItemReadyAt,
     catalogSnapshotControlled: true as const,
   });
 }
@@ -642,7 +858,7 @@ export function parseKitchenQueueSourceTicket(value: unknown): KitchenQueueSourc
     "sourceEvent",
     "items",
   ]);
-  if (raw.ticketAggregateVersion !== 1n || raw.ticketStatus !== "Open") return invalid();
+  if (raw.ticketStatus !== "Open") return invalid();
   const brandReference = reference(raw.brandReference);
   const storeReference = reference(raw.storeReference);
   const ticketReference = reference(raw.ticketReference);
@@ -668,7 +884,8 @@ export function parseKitchenQueueSourceTicket(value: unknown): KitchenQueueSourc
         item.ticketReference !== ticketReference ||
         item.orderReference !== orderReference ||
         item.orderBatchReference !== orderBatchReference ||
-        item.workItemCreatedAt !== sourceEvent.payload.createdAt,
+        item.workItemCreatedAt !== sourceEvent.payload.createdAt ||
+        item.ticketAggregateVersion !== positiveBigint(raw.ticketAggregateVersion),
     )
   )
     return invalid();
@@ -678,7 +895,7 @@ export function parseKitchenQueueSourceTicket(value: unknown): KitchenQueueSourc
     ticketReference,
     orderReference,
     orderBatchReference,
-    ticketAggregateVersion: 1n as const,
+    ticketAggregateVersion: positiveBigint(raw.ticketAggregateVersion),
     ticketStatus: "Open" as const,
     sourceEvent,
     items: Object.freeze(items),
@@ -707,7 +924,14 @@ export function parseKitchenQueueSourceFeed(value: unknown): KitchenQueueSourceF
       (ticket) =>
         ticket.brandReference !== brandReference ||
         ticket.storeReference !== storeReference ||
-        Date.parse(ticket.sourceEvent.occurredAt) > Date.parse(asOfUtc),
+        Date.parse(ticket.sourceEvent.occurredAt) > Date.parse(asOfUtc) ||
+        ticket.items.some(
+          (item) =>
+            Date.parse(item.workItemCreatedAt) > Date.parse(asOfUtc) ||
+            (item.acceptedAt !== null && Date.parse(item.acceptedAt) > Date.parse(asOfUtc)) ||
+            (item.orderItemReadyAt !== null &&
+              Date.parse(item.orderItemReadyAt) > Date.parse(asOfUtc)),
+        ),
     ) ||
     new Set(tickets.map((ticket) => ticket.ticketReference)).size !== tickets.length ||
     new Set(tickets.map((ticket) => ticket.sourceEvent.eventId)).size !== tickets.length ||
@@ -722,6 +946,880 @@ export function parseKitchenQueueSourceFeed(value: unknown): KitchenQueueSourceF
     coverageStatus: "CompleteThroughCheckpoint" as const,
     tickets: Object.freeze(tickets),
   });
+}
+
+function proofWorkItems(value: unknown): KitchenQueueManualReadyProof["workItems"] {
+  const values = exactArray(value, 1, 1).map((item) => {
+    const raw = exact(item, ["workItemReference", "workItemVersion"]);
+    return Object.freeze({
+      workItemReference: reference(raw.workItemReference),
+      workItemVersion: positiveBigint(raw.workItemVersion),
+    });
+  });
+  return Object.freeze(values);
+}
+
+function proofActor(value: unknown, expectedType: "User" | "System") {
+  const raw = exact(value, ["type", "actorReference"]);
+  if (raw.type !== expectedType) return invalid();
+  return expectedType === "User"
+    ? Object.freeze({ type: "User" as const, actorReference: reference(raw.actorReference) })
+    : raw.actorReference === null
+      ? Object.freeze({ type: "System" as const, actorReference: null })
+      : invalid();
+}
+
+function normalizedProofValue(
+  proof: KitchenQueueLifecycleProjectionProof,
+): Readonly<Record<string, unknown>> {
+  const entries = Object.entries(proof)
+    .filter(([key]) => key !== "projectionProofDigest" && key !== "readyCausalBundleDigest")
+    .map(([key, value]) => {
+      if (typeof value === "bigint") return [key, value.toString(10)] as const;
+      if (key === "workItems") {
+        return [
+          key,
+          (value as KitchenQueueManualReadyProof["workItems"]).map((item) =>
+            Object.freeze({
+              workItemReference: item.workItemReference,
+              workItemVersion: item.workItemVersion.toString(10),
+            }),
+          ),
+        ] as const;
+      }
+      return [key, value] as const;
+    });
+  return Object.freeze(Object.fromEntries(entries));
+}
+
+function parseLifecycleEventProof(
+  value: unknown,
+  sha256: KitchenQueueDigestPort,
+): KitchenQueueLifecycleEventProof {
+  const raw = exact(value, [
+    "kind",
+    "eventType",
+    "brandReference",
+    "storeReference",
+    "ticketReference",
+    "workItemReference",
+    "orderItemReference",
+    "operationReference",
+    "actionCode",
+    "purpose",
+    "reasonCode",
+    "sourceChannel",
+    "actor",
+    "expectedTicketVersion",
+    "committedTicketVersion",
+    "expectedWorkItemVersion",
+    "committedWorkItemVersion",
+    "beforeStatus",
+    "afterStatus",
+    "quantityDelta",
+    "completedQuantity",
+    "requiredQuantity",
+    "occurredAt",
+    "auditReference",
+    "auditSemanticDigest",
+    "effectDigest",
+    "eventReference",
+    "eventSemanticDigest",
+    "projectionProofDigest",
+  ]);
+  if (
+    raw.kind !== "Event" ||
+    typeof raw.eventType !== "string" ||
+    ![
+      "KitchenWorkAccepted",
+      "KitchenWorkStarted",
+      "KitchenItemProgressRecorded",
+      "KitchenItemCompleted",
+    ].includes(raw.eventType) ||
+    raw.purpose !== "KitchenWorkExecution" ||
+    raw.sourceChannel !== "KDS_COMMAND"
+  )
+    return invalid();
+  const expectedTicketVersion = positiveBigint(raw.expectedTicketVersion);
+  const committedTicketVersion = positiveBigint(raw.committedTicketVersion);
+  const expectedWorkItemVersion = positiveBigint(raw.expectedWorkItemVersion);
+  const committedWorkItemVersion = positiveBigint(raw.committedWorkItemVersion);
+  if (
+    committedTicketVersion !== expectedTicketVersion + 1n ||
+    committedWorkItemVersion !== expectedWorkItemVersion + 1n
+  )
+    return invalid();
+  const eventType = raw.eventType as KitchenQueueLifecycleEventType;
+  const quantityDelta = raw.quantityDelta === null ? null : integer(raw.quantityDelta, 1, 999);
+  const completedQuantity =
+    raw.completedQuantity === null ? null : integer(raw.completedQuantity, 0, 999);
+  const requiredQuantity =
+    raw.requiredQuantity === null ? null : integer(raw.requiredQuantity, 1, 999);
+  const literalValid =
+    eventType === "KitchenWorkAccepted"
+      ? raw.actionCode === "KITCHEN_WORK_ITEM_ACCEPTED" &&
+        raw.reasonCode === "WORK_ITEM_ACCEPTED" &&
+        raw.beforeStatus === "Queued" &&
+        raw.afterStatus === "Queued" &&
+        quantityDelta === null &&
+        completedQuantity === null &&
+        requiredQuantity === null
+      : eventType === "KitchenWorkStarted"
+        ? raw.actionCode === "KITCHEN_WORK_ITEM_STARTED" &&
+          raw.reasonCode === "WORK_ITEM_STARTED" &&
+          raw.beforeStatus === "Queued" &&
+          raw.afterStatus === "In Progress" &&
+          quantityDelta === null &&
+          completedQuantity === null &&
+          requiredQuantity === null
+        : eventType === "KitchenItemProgressRecorded"
+          ? raw.actionCode === "KITCHEN_WORK_ITEM_COMPLETION_RECORDED" &&
+            raw.reasonCode === "COMPLETION_QUANTITY_RECORDED" &&
+            raw.beforeStatus === "In Progress" &&
+            raw.afterStatus === "In Progress" &&
+            quantityDelta !== null &&
+            completedQuantity !== null &&
+            requiredQuantity !== null &&
+            completedQuantity < requiredQuantity &&
+            quantityDelta <= completedQuantity
+          : raw.actionCode === "KITCHEN_WORK_ITEM_COMPLETION_RECORDED" &&
+            raw.reasonCode === "COMPLETION_QUANTITY_RECORDED" &&
+            raw.beforeStatus === "In Progress" &&
+            raw.afterStatus === "Completed" &&
+            quantityDelta !== null &&
+            completedQuantity !== null &&
+            requiredQuantity !== null &&
+            completedQuantity === requiredQuantity &&
+            quantityDelta <= completedQuantity;
+  if (!literalValid) return invalid();
+  const proof = Object.freeze({
+    kind: "Event" as const,
+    eventType,
+    brandReference: reference(raw.brandReference),
+    storeReference: reference(raw.storeReference),
+    ticketReference: reference(raw.ticketReference),
+    workItemReference: reference(raw.workItemReference),
+    orderItemReference: reference(raw.orderItemReference),
+    operationReference: reference(raw.operationReference),
+    actionCode: raw.actionCode as KitchenQueueLifecycleEventProof["actionCode"],
+    purpose: "KitchenWorkExecution" as const,
+    reasonCode: raw.reasonCode as KitchenQueueLifecycleEventProof["reasonCode"],
+    sourceChannel: "KDS_COMMAND" as const,
+    actor: proofActor(raw.actor, "User") as KitchenQueueLifecycleEventProof["actor"],
+    expectedTicketVersion,
+    committedTicketVersion,
+    expectedWorkItemVersion,
+    committedWorkItemVersion,
+    beforeStatus: raw.beforeStatus as KitchenQueueLifecycleEventProof["beforeStatus"],
+    afterStatus: raw.afterStatus as KitchenQueueLifecycleEventProof["afterStatus"],
+    quantityDelta,
+    completedQuantity,
+    requiredQuantity,
+    occurredAt: instant(raw.occurredAt),
+    auditReference: reference(raw.auditReference),
+    auditSemanticDigest: digest(raw.auditSemanticDigest),
+    effectDigest: digest(raw.effectDigest),
+    eventReference: reference(raw.eventReference),
+    eventSemanticDigest: digest(raw.eventSemanticDigest),
+    projectionProofDigest: digest(raw.projectionProofDigest),
+  });
+  if (
+    new Set([proof.operationReference, proof.auditReference, proof.eventReference]).size !== 3 ||
+    proof.projectionProofDigest !== canonicalDigest(sha256, normalizedProofValue(proof))
+  )
+    return invalid();
+  return proof;
+}
+
+function parseManualReadyProof(
+  value: unknown,
+  sha256: KitchenQueueDigestPort,
+): KitchenQueueManualReadyProof {
+  const raw = exact(value, [
+    "kind",
+    "brandReference",
+    "storeReference",
+    "ticketReference",
+    "workItemReference",
+    "orderItemReference",
+    "operationReference",
+    "actionCode",
+    "purpose",
+    "reasonCode",
+    "sourceChannel",
+    "actor",
+    "expectedTicketVersion",
+    "committedTicketVersion",
+    "workItemVersion",
+    "workItemStatus",
+    "workItems",
+    "workItemsDigest",
+    "readyResultReference",
+    "readyQuantity",
+    "requiredQuantity",
+    "readyAt",
+    "auditReference",
+    "auditSemanticDigest",
+    "effectDigest",
+    "eventReference",
+    "eventSemanticDigest",
+    "projectionProofDigest",
+  ]);
+  if (
+    raw.kind !== "ManualReady" ||
+    raw.actionCode !== "KITCHEN_ORDER_ITEM_READY" ||
+    raw.purpose !== "KitchenExpoCoordination" ||
+    raw.reasonCode !== "EXPO_MARKED_READY" ||
+    raw.sourceChannel !== "KDS_COMMAND" ||
+    raw.workItemStatus !== "Completed" ||
+    raw.eventReference !== null ||
+    raw.eventSemanticDigest !== null
+  )
+    return invalid();
+  const workItemReference = reference(raw.workItemReference);
+  const workItemVersion = positiveBigint(raw.workItemVersion);
+  const workItems = proofWorkItems(raw.workItems);
+  const expectedTicketVersion = positiveBigint(raw.expectedTicketVersion);
+  const committedTicketVersion = positiveBigint(raw.committedTicketVersion);
+  const readyQuantity = integer(raw.readyQuantity, 1, 999);
+  const requiredQuantity = integer(raw.requiredQuantity, 1, 999);
+  if (
+    committedTicketVersion !== expectedTicketVersion + 1n ||
+    workItems[0]?.workItemReference !== workItemReference ||
+    workItems[0]?.workItemVersion !== workItemVersion ||
+    readyQuantity !== requiredQuantity
+  )
+    return invalid();
+  const workItemsDigest = digest(raw.workItemsDigest);
+  if (
+    workItemsDigest !==
+    canonicalDigest(
+      sha256,
+      Object.freeze(
+        workItems.map((item) =>
+          Object.freeze({
+            workItemReference: item.workItemReference,
+            workItemVersion: item.workItemVersion.toString(10),
+          }),
+        ),
+      ),
+    )
+  )
+    return invalid();
+  const proof = Object.freeze({
+    kind: "ManualReady" as const,
+    brandReference: reference(raw.brandReference),
+    storeReference: reference(raw.storeReference),
+    ticketReference: reference(raw.ticketReference),
+    workItemReference,
+    orderItemReference: reference(raw.orderItemReference),
+    operationReference: reference(raw.operationReference),
+    actionCode: "KITCHEN_ORDER_ITEM_READY" as const,
+    purpose: "KitchenExpoCoordination" as const,
+    reasonCode: "EXPO_MARKED_READY" as const,
+    sourceChannel: "KDS_COMMAND" as const,
+    actor: proofActor(raw.actor, "User") as KitchenQueueManualReadyProof["actor"],
+    expectedTicketVersion,
+    committedTicketVersion,
+    workItemVersion,
+    workItemStatus: "Completed" as const,
+    workItems,
+    workItemsDigest,
+    readyResultReference: reference(raw.readyResultReference),
+    readyQuantity,
+    requiredQuantity,
+    readyAt: instant(raw.readyAt),
+    auditReference: reference(raw.auditReference),
+    auditSemanticDigest: digest(raw.auditSemanticDigest),
+    effectDigest: digest(raw.effectDigest),
+    eventReference: null,
+    eventSemanticDigest: null,
+    projectionProofDigest: digest(raw.projectionProofDigest),
+  });
+  if (
+    new Set([proof.operationReference, proof.readyResultReference, proof.auditReference]).size !==
+      3 ||
+    proof.projectionProofDigest !== canonicalDigest(sha256, normalizedProofValue(proof))
+  )
+    return invalid();
+  return proof;
+}
+
+function parseAutomaticReadyProof(
+  value: unknown,
+  sha256: KitchenQueueDigestPort,
+): KitchenQueueAutomaticReadyProof {
+  const raw = exact(value, [
+    "kind",
+    "brandReference",
+    "storeReference",
+    "ticketReference",
+    "workItemReference",
+    "orderItemReference",
+    "operationReference",
+    "parentOperationReference",
+    "committedTicketVersion",
+    "workItemVersion",
+    "workItemStatus",
+    "actionCode",
+    "purpose",
+    "reasonCode",
+    "sourceChannel",
+    "actor",
+    "workItems",
+    "workItemsDigest",
+    "readyResultReference",
+    "readyQuantity",
+    "requiredQuantity",
+    "readyAt",
+    "auditReference",
+    "auditSemanticDigest",
+    "effectDigest",
+    "eventReference",
+    "eventSemanticDigest",
+    "readyCausalBundleDigest",
+    "projectionProofDigest",
+  ]);
+  if (
+    raw.kind !== "AutomaticReady" ||
+    raw.actionCode !== "KITCHEN_ORDER_ITEM_READY" ||
+    raw.purpose !== "KitchenExpoCoordination" ||
+    raw.reasonCode !== "ALL_WORK_ITEMS_COMPLETED" ||
+    raw.sourceChannel !== "KITCHEN_AUTOMATION" ||
+    raw.workItemStatus !== "Completed" ||
+    raw.eventReference !== null ||
+    raw.eventSemanticDigest !== null
+  )
+    return invalid();
+  const workItemReference = reference(raw.workItemReference);
+  const workItemVersion = positiveBigint(raw.workItemVersion);
+  const workItems = proofWorkItems(raw.workItems);
+  const readyQuantity = integer(raw.readyQuantity, 1, 999);
+  const requiredQuantity = integer(raw.requiredQuantity, 1, 999);
+  if (
+    workItems[0]?.workItemReference !== workItemReference ||
+    workItems[0]?.workItemVersion !== workItemVersion ||
+    readyQuantity !== requiredQuantity
+  )
+    return invalid();
+  const workItemsDigest = digest(raw.workItemsDigest);
+  if (
+    workItemsDigest !==
+    canonicalDigest(
+      sha256,
+      Object.freeze(
+        workItems.map((item) =>
+          Object.freeze({
+            workItemReference: item.workItemReference,
+            workItemVersion: item.workItemVersion.toString(10),
+          }),
+        ),
+      ),
+    )
+  )
+    return invalid();
+  const proof = Object.freeze({
+    kind: "AutomaticReady" as const,
+    brandReference: reference(raw.brandReference),
+    storeReference: reference(raw.storeReference),
+    ticketReference: reference(raw.ticketReference),
+    workItemReference,
+    orderItemReference: reference(raw.orderItemReference),
+    operationReference: reference(raw.operationReference),
+    parentOperationReference: reference(raw.parentOperationReference),
+    committedTicketVersion: positiveBigint(raw.committedTicketVersion),
+    workItemVersion,
+    workItemStatus: "Completed" as const,
+    actionCode: "KITCHEN_ORDER_ITEM_READY" as const,
+    purpose: "KitchenExpoCoordination" as const,
+    reasonCode: "ALL_WORK_ITEMS_COMPLETED" as const,
+    sourceChannel: "KITCHEN_AUTOMATION" as const,
+    actor: proofActor(raw.actor, "System") as KitchenQueueAutomaticReadyProof["actor"],
+    workItems,
+    workItemsDigest,
+    readyResultReference: reference(raw.readyResultReference),
+    readyQuantity,
+    requiredQuantity,
+    readyAt: instant(raw.readyAt),
+    auditReference: reference(raw.auditReference),
+    auditSemanticDigest: digest(raw.auditSemanticDigest),
+    effectDigest: digest(raw.effectDigest),
+    eventReference: null,
+    eventSemanticDigest: null,
+    readyCausalBundleDigest: digest(raw.readyCausalBundleDigest),
+    projectionProofDigest: digest(raw.projectionProofDigest),
+  });
+  if (
+    new Set([
+      proof.operationReference,
+      proof.parentOperationReference,
+      proof.readyResultReference,
+      proof.auditReference,
+    ]).size !== 4 ||
+    proof.projectionProofDigest !== canonicalDigest(sha256, normalizedProofValue(proof))
+  )
+    return invalid();
+  return proof;
+}
+
+function parseLifecycleProof(
+  value: unknown,
+  sha256: KitchenQueueDigestPort,
+): KitchenQueueLifecycleProjectionProof {
+  const snapshot = descriptorSnapshot(value);
+  return snapshot.kind === "Event"
+    ? parseLifecycleEventProof(value, sha256)
+    : snapshot.kind === "ManualReady"
+      ? parseManualReadyProof(value, sha256)
+      : snapshot.kind === "AutomaticReady"
+        ? parseAutomaticReadyProof(value, sha256)
+        : invalid();
+}
+
+function lifecycleProofOccurredAt(proof: KitchenQueueLifecycleProjectionProof): KitchenInstant {
+  return proof.kind === "Event" ? proof.occurredAt : proof.readyAt;
+}
+
+function parseLifecycleProofBundle(
+  value: unknown,
+  sha256: KitchenQueueDigestPort,
+): KitchenQueueLifecycleProofBundle {
+  const raw = exact(value, [
+    "ticketReference",
+    "operationCount",
+    "readyResultCount",
+    "lifecycleProofSetDigest",
+    "proofs",
+  ]);
+  const ticketReference = reference(raw.ticketReference);
+  const proofs = exactArray(raw.proofs, 0, Number.MAX_SAFE_INTEGER)
+    .map((proof) => parseLifecycleProof(proof, sha256))
+    .sort((left, right) => {
+      const leftVersion = left.committedTicketVersion;
+      const rightVersion = right.committedTicketVersion;
+      return leftVersion < rightVersion
+        ? -1
+        : leftVersion > rightVersion
+          ? 1
+          : compareAscii(left.operationReference, right.operationReference);
+    });
+  const operationCount = integer(raw.operationCount, 0, Number.MAX_SAFE_INTEGER);
+  const readyResultCount = integer(raw.readyResultCount, 0, Number.MAX_SAFE_INTEGER);
+  if (
+    operationCount !== proofs.length ||
+    readyResultCount !== proofs.filter((proof) => proof.kind !== "Event").length ||
+    proofs.some((proof) => proof.ticketReference !== ticketReference) ||
+    new Set(proofs.map((proof) => proof.operationReference)).size !== proofs.length ||
+    new Set(
+      proofs.map((proof) => `${proof.committedTicketVersion.toString(10)}:${proof.actionCode}`),
+    ).size !== proofs.length
+  )
+    return invalid();
+  const ownedReferences = proofs.flatMap((proof) => [
+    proof.operationReference,
+    proof.auditReference,
+    ...(proof.eventReference === null ? [] : [proof.eventReference]),
+    ...(proof.kind === "Event" ? [] : [proof.readyResultReference]),
+  ]);
+  if (new Set(ownedReferences).size !== ownedReferences.length) return invalid();
+  const primary = proofs.filter((proof) => proof.kind !== "AutomaticReady");
+  if (
+    primary.some((proof, index) => {
+      const previous = primary[index - 1];
+      return (
+        proof.committedTicketVersion !== BigInt(index + 2) ||
+        ("expectedTicketVersion" in proof && proof.expectedTicketVersion !== BigInt(index + 1)) ||
+        (previous !== undefined &&
+          Date.parse(lifecycleProofOccurredAt(proof)) <
+            Date.parse(lifecycleProofOccurredAt(previous)))
+      );
+    })
+  )
+    return invalid();
+  for (const proof of proofs) {
+    if (proof.kind !== "AutomaticReady") continue;
+    const parent = proofs.find(
+      (candidate): candidate is KitchenQueueLifecycleEventProof =>
+        candidate.kind === "Event" &&
+        candidate.eventType === "KitchenItemCompleted" &&
+        candidate.operationReference === proof.parentOperationReference,
+    );
+    if (
+      parent === undefined ||
+      parent.committedTicketVersion !== proof.committedTicketVersion ||
+      parent.workItemReference !== proof.workItemReference ||
+      parent.orderItemReference !== proof.orderItemReference ||
+      parent.committedWorkItemVersion !== proof.workItemVersion ||
+      parent.occurredAt !== proof.readyAt ||
+      proof.readyCausalBundleDigest !==
+        canonicalDigest(
+          sha256,
+          Object.freeze({
+            parentProjectionProofDigest: parent.projectionProofDigest,
+            childProjectionProofDigest: proof.projectionProofDigest,
+            readyResultReference: proof.readyResultReference,
+            workItems: proof.workItems.map((item) =>
+              Object.freeze({
+                workItemReference: item.workItemReference,
+                workItemVersion: item.workItemVersion.toString(10),
+              }),
+            ),
+            workItemsDigest: proof.workItemsDigest,
+            readyQuantity: proof.readyQuantity,
+            requiredQuantity: proof.requiredQuantity,
+            readyAt: proof.readyAt,
+          }),
+        )
+    )
+      return invalid();
+  }
+  const lifecycleProofSetDigest = digest(raw.lifecycleProofSetDigest);
+  if (
+    lifecycleProofSetDigest !==
+    canonicalDigest(
+      sha256,
+      Object.freeze({
+        normalizedProjectionProofs: proofs.map((proof) =>
+          Object.freeze({
+            committedTicketVersion: proof.committedTicketVersion.toString(10),
+            operationReference: proof.operationReference,
+            projectionProofDigest: proof.projectionProofDigest,
+          }),
+        ),
+      }),
+    )
+  )
+    return invalid();
+  return Object.freeze({
+    ticketReference,
+    operationCount,
+    readyResultCount,
+    lifecycleProofSetDigest,
+    proofs: Object.freeze(proofs),
+  });
+}
+
+function parseLifecycleSourceItem(value: unknown, includeReady: boolean): KitchenQueueSourceItem {
+  const fields = [
+    "ticketReference",
+    "workItemReference",
+    "orderReference",
+    "orderBatchReference",
+    "orderItemReference",
+    "sourceItemOrdinal",
+    "ticketAggregateVersion",
+    "workItemVersion",
+    "status",
+    "requiredQuantity",
+    "completedQuantity",
+    "localizedDisplayNames",
+    "selectedOptions",
+    "stationReference",
+    "workItemCreatedAt",
+    "acceptedAt",
+    ...(includeReady ? ["orderItemReadyAt"] : []),
+    "catalogSnapshotControlled",
+  ];
+  const raw = exact(value, fields);
+  return parseSourceItem({
+    ...raw,
+    orderItemReadyAt: includeReady ? raw.orderItemReadyAt : null,
+  });
+}
+
+function reconcileLifecycleTicket(
+  ticket: KitchenQueueLifecycleSourceTicket,
+  bundle: KitchenQueueLifecycleProofBundle,
+  includeReady: boolean,
+): void {
+  if (bundle.ticketReference !== ticket.ticketReference) return invalid();
+  const primary = bundle.proofs.filter((proof) => proof.kind !== "AutomaticReady");
+  const expectedTicketVersion = BigInt(primary.length + 1);
+  const latestPrimary = primary.at(-1);
+  const observedReferences = new Set([
+    ticket.brandReference,
+    ticket.storeReference,
+    ticket.ticketReference,
+    ticket.orderReference,
+    ticket.orderBatchReference,
+    ticket.sourceEvent.eventId,
+    ticket.sourceEvent.correlationId,
+    ticket.sourceEvent.causationId,
+    ticket.sourceEvent.payload.confirmationReference,
+    ...ticket.items.flatMap((item) => [
+      item.workItemReference,
+      item.orderItemReference,
+      item.stationReference,
+    ]),
+    ...bundle.proofs.flatMap((proof) =>
+      proof.actor.actorReference === null ? [] : [proof.actor.actorReference],
+    ),
+  ]);
+  if (
+    ticket.ticketAggregateVersion !== expectedTicketVersion ||
+    ticket.updatedAt !==
+      (latestPrimary === undefined
+        ? ticket.sourceEvent.occurredAt
+        : lifecycleProofOccurredAt(latestPrimary)) ||
+    bundle.proofs.some(
+      (proof) =>
+        proof.brandReference !== ticket.brandReference ||
+        proof.storeReference !== ticket.storeReference ||
+        !ticket.items.some(
+          (item) =>
+            item.workItemReference === proof.workItemReference &&
+            item.orderItemReference === proof.orderItemReference,
+        ) ||
+        observedReferences.has(proof.operationReference) ||
+        observedReferences.has(proof.auditReference) ||
+        (proof.eventReference !== null && observedReferences.has(proof.eventReference)) ||
+        (proof.kind !== "Event" && observedReferences.has(proof.readyResultReference)),
+    )
+  )
+    return invalid();
+  for (const item of ticket.items) {
+    const eventProofs = bundle.proofs.filter(
+      (proof): proof is KitchenQueueLifecycleEventProof =>
+        proof.kind === "Event" && proof.workItemReference === item.workItemReference,
+    );
+    const readyProofs = bundle.proofs.filter(
+      (proof): proof is KitchenQueueManualReadyProof | KitchenQueueAutomaticReadyProof =>
+        proof.kind !== "Event" && proof.orderItemReference === item.orderItemReference,
+    );
+    const accept = eventProofs.filter((proof) => proof.eventType === "KitchenWorkAccepted");
+    let expectedStatus: KitchenQueueWorkItemStatus = "Queued";
+    let expectedCompletedQuantity = 0;
+    let expectedAcceptedAt: KitchenInstant | null = null;
+    let acceptingActorReference: KitchenReference | null = null;
+    let priorFactAt: KitchenInstant = item.workItemCreatedAt;
+    for (const proof of eventProofs) {
+      if (
+        proof.beforeStatus !== expectedStatus ||
+        Date.parse(proof.occurredAt) < Date.parse(priorFactAt) ||
+        Date.parse(proof.occurredAt) > Date.parse(ticket.updatedAt)
+      )
+        return invalid();
+      if (proof.eventType === "KitchenWorkAccepted") {
+        if (expectedAcceptedAt !== null) return invalid();
+        expectedAcceptedAt = proof.occurredAt;
+        acceptingActorReference = proof.actor.actorReference;
+      } else if (proof.eventType === "KitchenWorkStarted") {
+        if (
+          expectedAcceptedAt === null ||
+          expectedStatus !== "Queued" ||
+          proof.actor.actorReference !== acceptingActorReference
+        )
+          return invalid();
+        expectedStatus = "In Progress";
+      } else {
+        if (
+          expectedStatus !== "In Progress" ||
+          proof.actor.actorReference !== acceptingActorReference ||
+          proof.quantityDelta === null ||
+          proof.completedQuantity === null ||
+          proof.requiredQuantity !== item.requiredQuantity ||
+          proof.completedQuantity !== expectedCompletedQuantity + proof.quantityDelta
+        )
+          return invalid();
+        expectedCompletedQuantity = proof.completedQuantity;
+        if (proof.eventType === "KitchenItemCompleted") expectedStatus = "Completed";
+      }
+      priorFactAt = proof.occurredAt;
+    }
+    if (
+      accept.length > 1 ||
+      readyProofs.length > 1 ||
+      item.workItemVersion !== BigInt(eventProofs.length + 1) ||
+      item.acceptedAt !== expectedAcceptedAt ||
+      (includeReady && item.orderItemReadyAt !== (readyProofs[0]?.readyAt ?? null)) ||
+      item.status !== expectedStatus ||
+      item.completedQuantity !== expectedCompletedQuantity ||
+      eventProofs.some(
+        (proof, index) =>
+          proof.expectedWorkItemVersion !== BigInt(index + 1) ||
+          proof.committedWorkItemVersion !== BigInt(index + 2) ||
+          proof.brandReference !== ticket.brandReference ||
+          proof.storeReference !== ticket.storeReference ||
+          proof.orderItemReference !== item.orderItemReference,
+      )
+    )
+      return invalid();
+    if (
+      readyProofs.some(
+        (proof) =>
+          proof.brandReference !== ticket.brandReference ||
+          proof.storeReference !== ticket.storeReference ||
+          proof.workItemReference !== item.workItemReference ||
+          proof.workItemVersion !== item.workItemVersion ||
+          proof.readyQuantity !== item.requiredQuantity ||
+          Date.parse(proof.readyAt) < Date.parse(item.workItemCreatedAt) ||
+          Date.parse(proof.readyAt) > Date.parse(ticket.updatedAt),
+      )
+    )
+      return invalid();
+  }
+}
+
+function parseKitchenQueueLifecycleSourceFeed(
+  value: unknown,
+  includeReady: boolean,
+  sha256: KitchenQueueDigestPort,
+): KitchenQueueLifecycleSourceFeed {
+  const raw = exact(value, [
+    "brandReference",
+    "storeReference",
+    "sourceCheckpointReference",
+    "asOfUtc",
+    "coverageStatus",
+    "tickets",
+  ]);
+  if (raw.coverageStatus !== "CompleteThroughCheckpoint") return invalid();
+  const rawTickets = exactArray(
+    raw.tickets,
+    includeReady ? 0 : 1,
+    includeReady ? Number.MAX_SAFE_INTEGER : 1,
+  );
+  const proofBundles: KitchenQueueLifecycleProofBundle[] = [];
+  const baseTickets: KitchenQueueSourceTicket[] = [];
+  const tickets = rawTickets.map((value) => {
+    const ticketRaw = exact(value, [
+      "brandReference",
+      "storeReference",
+      "ticketReference",
+      "orderReference",
+      "orderBatchReference",
+      "ticketAggregateVersion",
+      "ticketStatus",
+      "updatedAt",
+      "sourceEvent",
+      "items",
+      "proofBundle",
+    ]);
+    const bundle = parseLifecycleProofBundle(ticketRaw.proofBundle, sha256);
+    const items = exactArray(ticketRaw.items, 1, Number.MAX_SAFE_INTEGER).map((item) =>
+      parseLifecycleSourceItem(item, includeReady),
+    );
+    const baseTicket = parseKitchenQueueSourceTicket({
+      brandReference: ticketRaw.brandReference,
+      storeReference: ticketRaw.storeReference,
+      ticketReference: ticketRaw.ticketReference,
+      orderReference: ticketRaw.orderReference,
+      orderBatchReference: ticketRaw.orderBatchReference,
+      ticketAggregateVersion: ticketRaw.ticketAggregateVersion,
+      ticketStatus: ticketRaw.ticketStatus,
+      sourceEvent: ticketRaw.sourceEvent,
+      items,
+    });
+    const updatedAt = instant(ticketRaw.updatedAt);
+    if (
+      Date.parse(updatedAt) < Date.parse(baseTicket.sourceEvent.occurredAt) ||
+      baseTicket.items.some(
+        (item) =>
+          Date.parse(item.workItemCreatedAt) > Date.parse(updatedAt) ||
+          (item.acceptedAt !== null && Date.parse(item.acceptedAt) > Date.parse(updatedAt)) ||
+          (item.orderItemReadyAt !== null &&
+            Date.parse(item.orderItemReadyAt) > Date.parse(updatedAt)),
+      )
+    )
+      return invalid();
+    const ticket: KitchenQueueLifecycleSourceTicket = Object.freeze({
+      ...baseTicket,
+      updatedAt,
+    });
+    reconcileLifecycleTicket(ticket, bundle, includeReady);
+    proofBundles.push(bundle);
+    baseTickets.push(baseTicket);
+    return ticket;
+  });
+  const baseQueueFeed = parseKitchenQueueSourceFeed({
+    brandReference: raw.brandReference,
+    storeReference: raw.storeReference,
+    sourceCheckpointReference: raw.sourceCheckpointReference,
+    asOfUtc: raw.asOfUtc,
+    coverageStatus: raw.coverageStatus,
+    tickets: baseTickets,
+  });
+  if (
+    tickets.some((ticket) => Date.parse(ticket.updatedAt) > Date.parse(baseQueueFeed.asOfUtc)) ||
+    proofBundles.some((bundle) =>
+      bundle.proofs.some(
+        (proof) =>
+          Date.parse(proof.kind === "Event" ? proof.occurredAt : proof.readyAt) >
+          Date.parse(baseQueueFeed.asOfUtc),
+      ),
+    )
+  )
+    return invalid();
+  const orderedTickets = tickets
+    .map((ticket, index) => {
+      const proofBundle = proofBundles[index];
+      if (proofBundle === undefined || proofBundle.ticketReference !== ticket.ticketReference)
+        return invalid();
+      return Object.freeze({ ticket, proofBundle });
+    })
+    .sort((left, right) => compareAscii(left.ticket.ticketReference, right.ticket.ticketReference));
+  const allProofs = orderedTickets.flatMap(({ proofBundle }) => proofBundle.proofs);
+  const ownedReferences = allProofs.flatMap((proof) => [
+    proof.operationReference,
+    proof.auditReference,
+    ...(proof.eventReference === null ? [] : [proof.eventReference]),
+    ...(proof.kind === "Event" ? [] : [proof.readyResultReference]),
+  ]);
+  const observedReferences = new Set(
+    orderedTickets.flatMap(({ ticket, proofBundle }) => [
+      ticket.brandReference,
+      ticket.storeReference,
+      ticket.ticketReference,
+      ticket.orderReference,
+      ticket.orderBatchReference,
+      ticket.sourceEvent.eventId,
+      ticket.sourceEvent.correlationId,
+      ticket.sourceEvent.causationId,
+      ticket.sourceEvent.payload.confirmationReference,
+      ...ticket.items.flatMap((item) => [
+        item.workItemReference,
+        item.orderItemReference,
+        item.stationReference,
+      ]),
+      ...proofBundle.proofs.flatMap((proof) =>
+        proof.actor.actorReference === null ? [] : [proof.actor.actorReference],
+      ),
+    ]),
+  );
+  if (
+    new Set(ownedReferences).size !== ownedReferences.length ||
+    ownedReferences.some((reference) => observedReferences.has(reference))
+  )
+    return invalid();
+  const queueFeed: KitchenQueueLifecycleQueueFeed = Object.freeze({
+    ...baseQueueFeed,
+    tickets: Object.freeze(orderedTickets.map(({ ticket }) => ticket)),
+  });
+  return Object.freeze({
+    queueFeed,
+    proofBundles: Object.freeze(orderedTickets.map(({ proofBundle }) => proofBundle)),
+  });
+}
+
+export function parseKitchenQueueLifecycleIncrementalSourceFeed(
+  value: unknown,
+  sha256: KitchenQueueDigestPort,
+): KitchenQueueLifecycleSourceFeed {
+  const source = parseKitchenQueueLifecycleSourceFeed(value, false, sha256);
+  if (
+    source.queueFeed.tickets.length !== 1 ||
+    source.proofBundles.length !== 1 ||
+    source.proofBundles[0]?.proofs.length === 0
+  )
+    return invalid();
+  return source;
+}
+
+export function parseKitchenQueueLifecycleRebuildSourceFeed(
+  value: unknown,
+  sha256: KitchenQueueDigestPort,
+): KitchenQueueLifecycleSourceFeed {
+  return parseKitchenQueueLifecycleSourceFeed(value, true, sha256);
 }
 
 export function parseKitchenQueueRow(value: unknown): KitchenQueueRow {
@@ -747,16 +1845,24 @@ export function parseKitchenQueueRow(value: unknown): KitchenQueueRow {
     "sourceEventSemanticDigest",
     "sourceEventOccurredAt",
     "workItemCreatedAt",
+    "acceptedAt",
+    "orderItemReadyAt",
   ]);
-  if (raw.ticketAggregateVersion !== 1n || raw.workItemVersion !== 1n) return invalid();
   const requiredQuantity = integer(raw.requiredQuantity, 1, 999);
   const completedQuantity = integer(raw.completedQuantity, 0, requiredQuantity);
   const status = workItemStatus(raw.status);
   const sourceEventOccurredAt = instant(raw.sourceEventOccurredAt);
   const workItemCreatedAt = instant(raw.workItemCreatedAt);
+  const acceptedAt = optionalInstant(raw.acceptedAt);
+  const orderItemReadyAt = optionalInstant(raw.orderItemReadyAt);
   if (
-    (status === "Queued" && completedQuantity !== 0) ||
-    sourceEventOccurredAt !== workItemCreatedAt
+    !validQuantityStatus(status, completedQuantity, requiredQuantity) ||
+    sourceEventOccurredAt !== workItemCreatedAt ||
+    (acceptedAt !== null && Date.parse(acceptedAt) < Date.parse(workItemCreatedAt)) ||
+    (orderItemReadyAt !== null &&
+      (status !== "Completed" ||
+        acceptedAt === null ||
+        Date.parse(orderItemReadyAt) < Date.parse(acceptedAt)))
   )
     return invalid();
   return Object.freeze({
@@ -769,8 +1875,8 @@ export function parseKitchenQueueRow(value: unknown): KitchenQueueRow {
     orderBatchReference: reference(raw.orderBatchReference),
     orderItemReference: reference(raw.orderItemReference),
     sourceItemOrdinal: integer(raw.sourceItemOrdinal, 1, 100),
-    ticketAggregateVersion: 1n as const,
-    workItemVersion: 1n as const,
+    ticketAggregateVersion: positiveBigint(raw.ticketAggregateVersion),
+    workItemVersion: positiveBigint(raw.workItemVersion),
     status,
     requiredQuantity,
     completedQuantity,
@@ -781,6 +1887,8 @@ export function parseKitchenQueueRow(value: unknown): KitchenQueueRow {
     sourceEventSemanticDigest: digest(raw.sourceEventSemanticDigest),
     sourceEventOccurredAt,
     workItemCreatedAt,
+    acceptedAt,
+    orderItemReadyAt,
   });
 }
 
@@ -789,13 +1897,14 @@ export function parseKitchenQueueRows(value: unknown): readonly KitchenQueueRow[
   return Object.freeze(rows);
 }
 
-export function parseKitchenQueueGeneration(value: unknown): KitchenQueueGeneration {
+export function parseKitchenQueueStoredGeneration(value: unknown): KitchenQueueStoredGeneration {
   const raw = exact(value, [
     "projectionGenerationReference",
     "brandReference",
     "storeReference",
     "projectionName",
     "projectionVersion",
+    "snapshotBindingVersion",
     "generationStatus",
     "sourceCheckpointReference",
     "sourceEventBindingDigest",
@@ -825,6 +1934,7 @@ export function parseKitchenQueueGeneration(value: unknown): KitchenQueueGenerat
     return invalid();
   const ticketCount = integer(raw.ticketCount, 0, Number.MAX_SAFE_INTEGER);
   const workItemCount = integer(raw.workItemCount, 0, Number.MAX_SAFE_INTEGER);
+  const snapshotBindingVersion = integer(raw.snapshotBindingVersion, 1, 2) as 1 | 2;
   const asOfUtc = instant(raw.asOfUtc);
   const projectedAt = instant(raw.projectedAt);
   const activationLagMs = integer(raw.activationLagMs, 0, Number.MAX_SAFE_INTEGER);
@@ -857,6 +1967,7 @@ export function parseKitchenQueueGeneration(value: unknown): KitchenQueueGenerat
     storeReference: reference(raw.storeReference),
     projectionName: kitchenQueueProjectionName,
     projectionVersion: kitchenQueueProjectionVersion,
+    snapshotBindingVersion,
     generationStatus: raw.generationStatus as KitchenQueueGenerationStatus,
     sourceCheckpointReference: reference(raw.sourceCheckpointReference),
     sourceEventBindingDigest: digest(raw.sourceEventBindingDigest),
@@ -874,6 +1985,63 @@ export function parseKitchenQueueGeneration(value: unknown): KitchenQueueGenerat
     rebuildRequestedAt,
     expectedPriorGenerationReference,
   });
+}
+
+function publicGeneration(generation: KitchenQueueStoredGeneration): KitchenQueueGeneration {
+  return Object.freeze({
+    projectionGenerationReference: generation.projectionGenerationReference,
+    brandReference: generation.brandReference,
+    storeReference: generation.storeReference,
+    projectionName: generation.projectionName,
+    projectionVersion: generation.projectionVersion,
+    generationStatus: generation.generationStatus,
+    sourceCheckpointReference: generation.sourceCheckpointReference,
+    sourceEventBindingDigest: generation.sourceEventBindingDigest,
+    queueSnapshotDigest: generation.queueSnapshotDigest,
+    ticketCount: generation.ticketCount,
+    workItemCount: generation.workItemCount,
+    initializedEmpty: generation.initializedEmpty,
+    asOfUtc: generation.asOfUtc,
+    projectedAt: generation.projectedAt,
+    activationLagMs: generation.activationLagMs,
+    lastRebuiltAt: generation.lastRebuiltAt,
+    freshnessStatus: generation.freshnessStatus,
+    rebuildReference: generation.rebuildReference,
+    rebuildRequestDigest: generation.rebuildRequestDigest,
+    rebuildRequestedAt: generation.rebuildRequestedAt,
+    expectedPriorGenerationReference: generation.expectedPriorGenerationReference,
+  });
+}
+
+export function parseKitchenQueueGeneration(value: unknown): KitchenQueueGeneration {
+  const raw = exact(value, [
+    "projectionGenerationReference",
+    "brandReference",
+    "storeReference",
+    "projectionName",
+    "projectionVersion",
+    "generationStatus",
+    "sourceCheckpointReference",
+    "sourceEventBindingDigest",
+    "queueSnapshotDigest",
+    "ticketCount",
+    "workItemCount",
+    "initializedEmpty",
+    "asOfUtc",
+    "projectedAt",
+    "activationLagMs",
+    "lastRebuiltAt",
+    "freshnessStatus",
+    "rebuildReference",
+    "rebuildRequestDigest",
+    "rebuildRequestedAt",
+    "expectedPriorGenerationReference",
+  ]);
+  return publicGeneration(parseKitchenQueueStoredGeneration({ ...raw, snapshotBindingVersion: 2 }));
+}
+
+export function stripKitchenQueueStoredGeneration(value: unknown): KitchenQueueGeneration {
+  return publicGeneration(parseKitchenQueueStoredGeneration(value));
 }
 
 export function parseKitchenQueueRebuildRequest(value: unknown): KitchenQueueRebuildRequest {
@@ -1060,11 +2228,16 @@ export function computeKitchenQueueSnapshotDigest(
     readonly brandReference: unknown;
     readonly storeReference: unknown;
     readonly rows: readonly unknown[];
+    readonly snapshotBindingVersion?: unknown;
   },
   port: KitchenQueueDigestPort,
 ): KitchenDigest {
   const brandReference = reference(input.brandReference);
   const storeReference = reference(input.storeReference);
+  const snapshotBindingVersion =
+    input.snapshotBindingVersion === undefined
+      ? kitchenQueueSnapshotBindingVersion
+      : (integer(input.snapshotBindingVersion, 1, 2) as 1 | 2);
   const rows = exactArray(input.rows, 0, Number.MAX_SAFE_INTEGER)
     .map(parseKitchenQueueRow)
     .sort((left, right) => compareAscii(left.workItemReference, right.workItemReference));
@@ -1076,8 +2249,8 @@ export function computeKitchenQueueSnapshotDigest(
   )
     return invalid();
   const ticketCount = new Set(rows.map((row) => row.ticketReference)).size;
-  const normalizedSafeRows = rows.map((row) =>
-    Object.freeze({
+  const normalizedSafeRows = rows.map((row) => {
+    const common = {
       ticketReference: row.ticketReference,
       workItemReference: row.workItemReference,
       orderReference: row.orderReference,
@@ -1093,13 +2266,21 @@ export function computeKitchenQueueSnapshotDigest(
       selectedOptions: row.selectedOptions,
       stationReference: row.stationReference,
       workItemCreatedAt: row.workItemCreatedAt,
-    }),
-  );
+    };
+    return snapshotBindingVersion === 1
+      ? Object.freeze(common)
+      : Object.freeze({
+          ...common,
+          acceptedAt: row.acceptedAt,
+          orderItemReadyAt: row.orderItemReadyAt,
+        });
+  });
   return canonicalDigest(
     port,
     Object.freeze({
       projectionName: kitchenQueueProjectionName,
       projectionVersion: kitchenQueueProjectionVersion,
+      ...(snapshotBindingVersion === 2 ? { snapshotBindingVersion } : {}),
       brandReference,
       storeReference,
       ticketCount,
@@ -1109,14 +2290,14 @@ export function computeKitchenQueueSnapshotDigest(
   );
 }
 
-export function reconcileKitchenQueueProjectionBundle(
+export function reconcileKitchenQueueStoredProjectionBundle(
   input: {
     readonly generation: unknown;
     readonly rows: unknown;
   },
   port: KitchenQueueDigestPort,
-): KitchenQueueProjectionBundle {
-  const generation = parseKitchenQueueGeneration(input.generation);
+): KitchenQueueStoredProjectionBundle {
+  const generation = parseKitchenQueueStoredGeneration(input.generation);
   const rows = parseKitchenQueueRows(input.rows);
   const tickets = new Map<string, KitchenQueueRow[]>();
   for (const row of rows) {
@@ -1124,7 +2305,13 @@ export function reconcileKitchenQueueProjectionBundle(
       row.projectionGenerationReference !== generation.projectionGenerationReference ||
       row.brandReference !== generation.brandReference ||
       row.storeReference !== generation.storeReference ||
-      Date.parse(row.sourceEventOccurredAt) > Date.parse(generation.asOfUtc)
+      Date.parse(row.sourceEventOccurredAt) > Date.parse(generation.asOfUtc) ||
+      Date.parse(row.workItemCreatedAt) > Date.parse(generation.asOfUtc) ||
+      (row.acceptedAt !== null && Date.parse(row.acceptedAt) > Date.parse(generation.asOfUtc)) ||
+      (row.orderItemReadyAt !== null &&
+        Date.parse(row.orderItemReadyAt) > Date.parse(generation.asOfUtc)) ||
+      (generation.snapshotBindingVersion === 1 &&
+        (row.acceptedAt !== null || row.orderItemReadyAt !== null))
     )
       return invalid();
     const group = tickets.get(row.ticketReference) ?? [];
@@ -1143,6 +2330,7 @@ export function reconcileKitchenQueueProjectionBundle(
           brandReference: generation.brandReference,
           storeReference: generation.storeReference,
           rows,
+          snapshotBindingVersion: generation.snapshotBindingVersion,
         },
         port,
       )
@@ -1168,6 +2356,42 @@ export function reconcileKitchenQueueProjectionBundle(
       return invalid();
   }
   return Object.freeze({ generation, rows: Object.freeze(rows) });
+}
+
+export function reconcileKitchenQueueProjectionBundle(
+  input: {
+    readonly generation: unknown;
+    readonly rows: unknown;
+  },
+  port: KitchenQueueDigestPort,
+): KitchenQueueProjectionBundle {
+  const generation = parseKitchenQueueGeneration(input.generation);
+  let lastInputError: KitchenQueueProjectionError | null = null;
+  for (const snapshotBindingVersion of [2, 1] as const) {
+    try {
+      const stored = reconcileKitchenQueueStoredProjectionBundle(
+        {
+          generation: { ...generation, snapshotBindingVersion },
+          rows: input.rows,
+        },
+        port,
+      );
+      return Object.freeze({
+        generation: publicGeneration(stored.generation),
+        rows: stored.rows,
+      });
+    } catch (error) {
+      if (
+        error instanceof KitchenQueueProjectionError &&
+        error.code === "KITCHEN_QUEUE_INPUT_INVALID"
+      ) {
+        lastInputError = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastInputError ?? new KitchenQueueProjectionError("KITCHEN_QUEUE_INPUT_INVALID");
 }
 
 export function computeKitchenQueueRebuildRequestDigest(
@@ -1256,6 +2480,8 @@ export function buildKitchenQueueRows(input: {
         sourceEventSemanticDigest: semanticDigest,
         sourceEventOccurredAt: ticket.sourceEvent.occurredAt,
         workItemCreatedAt: item.workItemCreatedAt,
+        acceptedAt: item.acceptedAt,
+        orderItemReadyAt: item.orderItemReadyAt,
       }),
     );
   });
@@ -1317,11 +2543,13 @@ function sameKitchenQueueRow(left: KitchenQueueRow, right: KitchenQueueRow): boo
     left.originalSourceEventReference === right.originalSourceEventReference &&
     left.sourceEventSemanticDigest === right.sourceEventSemanticDigest &&
     left.sourceEventOccurredAt === right.sourceEventOccurredAt &&
-    left.workItemCreatedAt === right.workItemCreatedAt
+    left.workItemCreatedAt === right.workItemCreatedAt &&
+    left.acceptedAt === right.acceptedAt &&
+    left.orderItemReadyAt === right.orderItemReadyAt
   );
 }
 
-export function buildKitchenQueueGeneration(input: {
+export function buildKitchenQueueStoredGeneration(input: {
   readonly generationReference: unknown;
   readonly generationStatus: "Building" | "Active";
   readonly feed: unknown;
@@ -1330,7 +2558,7 @@ export function buildKitchenQueueGeneration(input: {
   readonly lastRebuiltAt: unknown;
   readonly rebuildRequest: unknown | null;
   readonly sha256: KitchenQueueDigestPort;
-}): KitchenQueueGeneration {
+}): KitchenQueueStoredGeneration {
   const feed = parseKitchenQueueSourceFeed(input.feed);
   const rows = exactArray(input.rows, 0, Number.MAX_SAFE_INTEGER).map(parseKitchenQueueRow);
   const generationReference = reference(input.generationReference);
@@ -1359,17 +2587,23 @@ export function buildKitchenQueueGeneration(input: {
   )
     return invalid();
   if (rows.length === 0 && rebuildRequest === null) return invalid();
-  return parseKitchenQueueGeneration({
+  return parseKitchenQueueStoredGeneration({
     projectionGenerationReference: generationReference,
     brandReference: feed.brandReference,
     storeReference: feed.storeReference,
     projectionName: kitchenQueueProjectionName,
     projectionVersion: kitchenQueueProjectionVersion,
+    snapshotBindingVersion: kitchenQueueSnapshotBindingVersion,
     generationStatus: input.generationStatus,
     sourceCheckpointReference: feed.sourceCheckpointReference,
     sourceEventBindingDigest: computeKitchenQueueSourceEventBindingDigest(rows, input.sha256),
     queueSnapshotDigest: computeKitchenQueueSnapshotDigest(
-      { brandReference: feed.brandReference, storeReference: feed.storeReference, rows },
+      {
+        brandReference: feed.brandReference,
+        storeReference: feed.storeReference,
+        rows,
+        snapshotBindingVersion: kitchenQueueSnapshotBindingVersion,
+      },
       input.sha256,
     ),
     ticketCount: feed.tickets.length,
@@ -1390,6 +2624,19 @@ export function buildKitchenQueueGeneration(input: {
   });
 }
 
+export function buildKitchenQueueGeneration(input: {
+  readonly generationReference: unknown;
+  readonly generationStatus: "Building" | "Active";
+  readonly feed: unknown;
+  readonly rows: readonly unknown[];
+  readonly projectedAt: unknown;
+  readonly lastRebuiltAt: unknown;
+  readonly rebuildRequest: unknown | null;
+  readonly sha256: KitchenQueueDigestPort;
+}): KitchenQueueGeneration {
+  return publicGeneration(buildKitchenQueueStoredGeneration(input));
+}
+
 export function createKitchenQueueItemView(value: unknown): KitchenQueueItemView {
   const row = parseKitchenQueueRow(value);
   return Object.freeze({
@@ -1408,6 +2655,8 @@ export function createKitchenQueueItemView(value: unknown): KitchenQueueItemView
     selectedOptions: row.selectedOptions,
     stationReference: row.stationReference,
     workItemCreatedAt: row.workItemCreatedAt,
+    acceptedAt: row.acceptedAt,
+    orderItemReadyAt: row.orderItemReadyAt,
   });
 }
 

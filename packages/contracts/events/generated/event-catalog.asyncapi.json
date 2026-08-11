@@ -3,6 +3,235 @@
   "channels": {},
   "components": {
     "messages": {
+      "KitchenItemCompletedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "KitchenItemCompletedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "completedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "completedQuantity": {
+              "maximum": 999,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "fromStatus": {
+              "const": "In Progress",
+              "type": "string"
+            },
+            "kitchenTicketReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "kitchenWorkItemReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderItemReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "quantityDelta": {
+              "maximum": 999,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "requiredQuantity": {
+              "maximum": 999,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "ticketVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "toStatus": {
+              "const": "Completed",
+              "type": "string"
+            },
+            "workItemVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kitchenTicketReference",
+            "kitchenWorkItemReference",
+            "orderItemReference",
+            "ticketVersion",
+            "workItemVersion",
+            "quantityDelta",
+            "completedQuantity",
+            "requiredQuantity",
+            "fromStatus",
+            "toStatus",
+            "completedAt"
+          ],
+          "type": "object"
+        },
+        "title": "KitchenItemCompleted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["kitchen.queue-item-completed-projection:v1"],
+        "x-bop-data-classification": "personal",
+        "x-bop-event-type": "KitchenItemCompleted",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "KitchenItemProgressRecordedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "KitchenItemProgressRecordedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "completedQuantity": {
+              "maximum": 998,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "fromStatus": {
+              "const": "In Progress",
+              "type": "string"
+            },
+            "kitchenTicketReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "kitchenWorkItemReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderItemReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "quantityDelta": {
+              "maximum": 999,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "recordedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "requiredQuantity": {
+              "maximum": 999,
+              "minimum": 2,
+              "type": "integer"
+            },
+            "ticketVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "toStatus": {
+              "const": "In Progress",
+              "type": "string"
+            },
+            "workItemVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kitchenTicketReference",
+            "kitchenWorkItemReference",
+            "orderItemReference",
+            "ticketVersion",
+            "workItemVersion",
+            "quantityDelta",
+            "completedQuantity",
+            "requiredQuantity",
+            "fromStatus",
+            "toStatus",
+            "recordedAt"
+          ],
+          "type": "object"
+        },
+        "title": "KitchenItemProgressRecorded v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["kitchen.queue-item-progress-projection:v1"],
+        "x-bop-data-classification": "personal",
+        "x-bop-event-type": "KitchenItemProgressRecorded",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "KitchenWorkAcceptedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "KitchenWorkAcceptedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "acceptedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "kitchenTicketReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "kitchenWorkItemReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderItemReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "ticketVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "workItemStatus": {
+              "const": "Queued",
+              "type": "string"
+            },
+            "workItemVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kitchenTicketReference",
+            "kitchenWorkItemReference",
+            "orderItemReference",
+            "ticketVersion",
+            "workItemVersion",
+            "workItemStatus",
+            "acceptedAt"
+          ],
+          "type": "object"
+        },
+        "title": "KitchenWorkAccepted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["kitchen.queue-work-accepted-projection:v1"],
+        "x-bop-data-classification": "personal",
+        "x-bop-event-type": "KitchenWorkAccepted",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
       "KitchenWorkCreatedV1": {
         "contentType": "application/json",
         "deprecated": false,
@@ -62,6 +291,72 @@
         "x-bop-consumers": ["kitchen.queue-projection:v1"],
         "x-bop-data-classification": "indirect_identifier",
         "x-bop-event-type": "KitchenWorkCreated",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "KitchenWorkStartedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "KitchenWorkStartedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "fromStatus": {
+              "const": "Queued",
+              "type": "string"
+            },
+            "kitchenTicketReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "kitchenWorkItemReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderItemReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "startedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "ticketVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "toStatus": {
+              "const": "In Progress",
+              "type": "string"
+            },
+            "workItemVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kitchenTicketReference",
+            "kitchenWorkItemReference",
+            "orderItemReference",
+            "ticketVersion",
+            "workItemVersion",
+            "fromStatus",
+            "toStatus",
+            "startedAt"
+          ],
+          "type": "object"
+        },
+        "title": "KitchenWorkStarted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["kitchen.queue-work-started-projection:v1"],
+        "x-bop-data-classification": "personal",
+        "x-bop-event-type": "KitchenWorkStarted",
         "x-bop-owner-module": "@rms/kitchen",
         "x-bop-producer-module": "@rms/kitchen",
         "x-bop-replay-semantics": "idempotent",

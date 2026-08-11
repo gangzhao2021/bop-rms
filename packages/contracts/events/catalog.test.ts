@@ -41,8 +41,9 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(7);
-    expect(eventCatalog[0]).toMatchObject({
+    expect(eventCatalog).toHaveLength(11);
+    const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
+    expect(byType.get("KitchenWorkCreated")).toMatchObject({
       eventType: "KitchenWorkCreated",
       schemaVersion: 1,
       ownerModule: "@rms/kitchen",
@@ -57,7 +58,29 @@ describe("Event Catalog source", () => {
       deprecated: false,
       replacement: null,
     });
-    expect(eventCatalog[1]).toMatchObject({
+    for (const [eventType, consumer] of [
+      ["KitchenItemCompleted", "kitchen.queue-item-completed-projection:v1"],
+      ["KitchenItemProgressRecorded", "kitchen.queue-item-progress-projection:v1"],
+      ["KitchenWorkAccepted", "kitchen.queue-work-accepted-projection:v1"],
+      ["KitchenWorkStarted", "kitchen.queue-work-started-projection:v1"],
+    ] as const) {
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/kitchen",
+        producerModule: "@rms/kitchen",
+        stability: "stable",
+        consumers: [consumer],
+        tenantScope: "store",
+        dataClassification: "personal",
+        compatibility: "additive",
+        retentionCategory: "business_record",
+        replaySemantics: "idempotent",
+        deprecated: false,
+        replacement: null,
+      });
+    }
+    expect(byType.get("MenuPublished")).toMatchObject({
       eventType: "MenuPublished",
       schemaVersion: 1,
       ownerModule: "@rms/catalog",
@@ -65,7 +88,7 @@ describe("Event Catalog source", () => {
       tenantScope: "brand",
       replaySemantics: "idempotent",
     });
-    expect(eventCatalog[2]).toMatchObject({
+    expect(byType.get("OrderConfirmed")).toMatchObject({
       eventType: "OrderConfirmed",
       schemaVersion: 1,
       ownerModule: "@rms/ordering",
@@ -80,7 +103,7 @@ describe("Event Catalog source", () => {
       deprecated: false,
       replacement: null,
     });
-    expect(eventCatalog[3]).toMatchObject({
+    expect(byType.get("OrderCreated")).toMatchObject({
       eventType: "OrderCreated",
       schemaVersion: 1,
       ownerModule: "@rms/ordering",
@@ -89,13 +112,13 @@ describe("Event Catalog source", () => {
       dataClassification: "indirect_identifier",
       replaySemantics: "idempotent",
     });
-    expect(eventCatalog[4]).toMatchObject({
+    expect(byType.get("PaymentFailed")).toMatchObject({
       eventType: "PaymentFailed",
       ownerModule: "@rms/payment",
       tenantScope: "store",
       dataClassification: "payment",
     });
-    expect(eventCatalog[5]).toMatchObject({
+    expect(byType.get("PaymentRefunded")).toMatchObject({
       eventType: "PaymentRefunded",
       schemaVersion: 1,
       ownerModule: "@rms/payment",
@@ -110,14 +133,18 @@ describe("Event Catalog source", () => {
       deprecated: false,
       replacement: null,
     });
-    expect(eventCatalog[6]).toMatchObject({
+    expect(byType.get("PaymentSucceeded")).toMatchObject({
       eventType: "PaymentSucceeded",
       ownerModule: "@rms/payment",
       tenantScope: "store",
       dataClassification: "payment",
     });
     expect(registeredEventMetricLabels(eventCatalog)).toEqual([
+      "KitchenItemCompleted:v1",
+      "KitchenItemProgressRecorded:v1",
+      "KitchenWorkAccepted:v1",
       "KitchenWorkCreated:v1",
+      "KitchenWorkStarted:v1",
       "MenuPublished:v1",
       "OrderConfirmed:v1",
       "OrderCreated:v1",
@@ -125,6 +152,157 @@ describe("Event Catalog source", () => {
       "PaymentRefunded:v1",
       "PaymentSucceeded:v1",
     ]);
+  });
+
+  it("keeps lifecycle payloads truthful, minimal and closed", () => {
+    const schemaFor = (eventType: string) => {
+      const entry = eventCatalog.find((candidate) => candidate.eventType === eventType);
+      if (entry === undefined) throw new Error("EVENT_CATALOG_REGISTRATION_MISSING");
+      return payloadJsonSchema(entry.payloadSchema);
+    };
+    const expected = {
+      KitchenWorkAccepted: [
+        "kitchenTicketReference",
+        "kitchenWorkItemReference",
+        "orderItemReference",
+        "ticketVersion",
+        "workItemVersion",
+        "workItemStatus",
+        "acceptedAt",
+      ],
+      KitchenWorkStarted: [
+        "kitchenTicketReference",
+        "kitchenWorkItemReference",
+        "orderItemReference",
+        "ticketVersion",
+        "workItemVersion",
+        "fromStatus",
+        "toStatus",
+        "startedAt",
+      ],
+      KitchenItemProgressRecorded: [
+        "kitchenTicketReference",
+        "kitchenWorkItemReference",
+        "orderItemReference",
+        "ticketVersion",
+        "workItemVersion",
+        "quantityDelta",
+        "completedQuantity",
+        "requiredQuantity",
+        "fromStatus",
+        "toStatus",
+        "recordedAt",
+      ],
+      KitchenItemCompleted: [
+        "kitchenTicketReference",
+        "kitchenWorkItemReference",
+        "orderItemReference",
+        "ticketVersion",
+        "workItemVersion",
+        "quantityDelta",
+        "completedQuantity",
+        "requiredQuantity",
+        "fromStatus",
+        "toStatus",
+        "completedAt",
+      ],
+    } as const;
+    for (const [eventType, fields] of Object.entries(expected)) {
+      const schema = schemaFor(eventType);
+      expect(schema).toMatchObject({ additionalProperties: false, type: "object" });
+      expect(Object.keys(schema.properties as Record<string, unknown>).sort()).toEqual(
+        [...fields].sort(),
+      );
+      expect([...(schema.required as string[])].sort()).toEqual([...fields].sort());
+      expect(JSON.stringify(schema)).not.toMatch(
+        /actor|customer|note|health|allergen|admission|expo/iu,
+      );
+      expect(schema).toMatchObject({
+        properties: {
+          kitchenTicketReference: {
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            type: "string",
+          },
+          kitchenWorkItemReference: {
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            type: "string",
+          },
+          orderItemReference: {
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            type: "string",
+          },
+        },
+      });
+    }
+    expect(schemaFor("KitchenItemProgressRecorded")).toMatchObject({
+      properties: {
+        completedQuantity: { maximum: 998, minimum: 1, type: "integer" },
+        fromStatus: { const: "In Progress", type: "string" },
+        toStatus: { const: "In Progress", type: "string" },
+      },
+    });
+    expect(schemaFor("KitchenItemCompleted")).toMatchObject({
+      properties: {
+        fromStatus: { const: "In Progress", type: "string" },
+        toStatus: { const: "Completed", type: "string" },
+      },
+    });
+
+    const progress = eventCatalog.find(
+      (entry) => entry.eventType === "KitchenItemProgressRecorded",
+    );
+    const completed = eventCatalog.find((entry) => entry.eventType === "KitchenItemCompleted");
+    if (progress === undefined || completed === undefined)
+      throw new Error("EVENT_CATALOG_REGISTRATION_MISSING");
+    const common = {
+      kitchenTicketReference: "018f3000-0000-7000-8000-000000000001",
+      kitchenWorkItemReference: "018f3000-0000-7000-8000-000000000002",
+      orderItemReference: "018f3000-0000-7000-8000-000000000003",
+      ticketVersion: "4",
+      workItemVersion: "4",
+      quantityDelta: 1,
+      completedQuantity: 1,
+      requiredQuantity: 2,
+      fromStatus: "In Progress",
+    } as const;
+    expect(
+      progress.payloadSchema.safeParse({
+        ...common,
+        toStatus: "In Progress",
+        recordedAt: "2026-08-08T16:00:04.000Z",
+      }).success,
+    ).toBe(true);
+    expect(
+      progress.payloadSchema.safeParse({
+        ...common,
+        kitchenTicketReference: "018f3000-0000-4000-8000-000000000001",
+        toStatus: "In Progress",
+        recordedAt: "2026-08-08T16:00:04.000Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      progress.payloadSchema.safeParse({
+        ...common,
+        quantityDelta: 2,
+        toStatus: "In Progress",
+        recordedAt: "2026-08-08T16:00:04.000Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      completed.payloadSchema.safeParse({
+        ...common,
+        completedQuantity: 2,
+        toStatus: "Completed",
+        completedAt: "2026-08-08T16:00:05.000Z",
+      }).success,
+    ).toBe(true);
+    expect(
+      completed.payloadSchema.safeParse({
+        ...common,
+        toStatus: "Completed",
+        completedAt: "2026-08-08T16:00:05.000Z",
+      }).success,
+    ).toBe(false);
   });
 
   it("keeps KitchenWorkCreated, OrderConfirmed and PaymentRefunded payloads exact and closed", () => {
@@ -382,7 +560,11 @@ describe("Event Catalog generation", () => {
     expect(first).toEqual(second);
     expect(first.asyncApi).toContain('"asyncapi": "3.0.0"');
     expect(first.asyncApi).not.toMatch(/server|broker|2026-|SyntheticChanged/u);
+    expect(first.asyncApi).toContain("KitchenItemCompleted");
+    expect(first.asyncApi).toContain("KitchenItemProgressRecorded");
+    expect(first.asyncApi).toContain("KitchenWorkAccepted");
     expect(first.asyncApi).toContain("KitchenWorkCreated");
+    expect(first.asyncApi).toContain("KitchenWorkStarted");
     expect(first.asyncApi).toContain("MenuPublished");
     expect(first.asyncApi).toContain("OrderConfirmed");
     expect(first.asyncApi).toContain("OrderCreated");
@@ -390,6 +572,10 @@ describe("Event Catalog generation", () => {
     expect(first.asyncApi).toContain("PaymentRefunded");
     expect(first.asyncApi).toContain("PaymentSucceeded");
     expect(first.markdown).toContain("KitchenWorkCreated");
+    expect(first.markdown).toContain("KitchenItemCompleted");
+    expect(first.markdown).toContain("KitchenItemProgressRecorded");
+    expect(first.markdown).toContain("KitchenWorkAccepted");
+    expect(first.markdown).toContain("KitchenWorkStarted");
     expect(first.markdown).toContain("MenuPublished");
     expect(first.markdown).toContain("OrderConfirmed");
     expect(first.markdown).toContain("OrderCreated");

@@ -4,6 +4,7 @@ const eventType = /^[A-Z][A-Za-z0-9]{0,127}$/u;
 const moduleName = /^@(bop|rms)\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const consumerName = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*:v[1-9][0-9]*$/u;
 const replacementIdentity = /^[A-Z][A-Za-z0-9]{0,127}:v[1-9][0-9]*$/u;
+const canonicalUuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export const eventCatalogMetadataSchema = z.strictObject({
   eventType: z.string().regex(eventType),
@@ -148,6 +149,67 @@ const kitchenWorkCreatedPayload = z.strictObject({
   createdAt: z.iso.datetime({ offset: false }),
 });
 
+const kitchenWorkAcceptedPayload = z.strictObject({
+  kitchenTicketReference: z.string().regex(canonicalUuidV7),
+  kitchenWorkItemReference: z.string().regex(canonicalUuidV7),
+  orderItemReference: z.string().regex(canonicalUuidV7),
+  ticketVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  workItemVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  workItemStatus: z.literal("Queued"),
+  acceptedAt: z.iso.datetime({ offset: false }),
+});
+
+const kitchenWorkStartedPayload = z.strictObject({
+  kitchenTicketReference: z.string().regex(canonicalUuidV7),
+  kitchenWorkItemReference: z.string().regex(canonicalUuidV7),
+  orderItemReference: z.string().regex(canonicalUuidV7),
+  ticketVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  workItemVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  fromStatus: z.literal("Queued"),
+  toStatus: z.literal("In Progress"),
+  startedAt: z.iso.datetime({ offset: false }),
+});
+
+const kitchenItemProgressRecordedPayload = z
+  .strictObject({
+    kitchenTicketReference: z.string().regex(canonicalUuidV7),
+    kitchenWorkItemReference: z.string().regex(canonicalUuidV7),
+    orderItemReference: z.string().regex(canonicalUuidV7),
+    ticketVersion: z.string().regex(/^[1-9][0-9]*$/u),
+    workItemVersion: z.string().regex(/^[1-9][0-9]*$/u),
+    quantityDelta: z.int().min(1).max(999),
+    completedQuantity: z.int().min(1).max(998),
+    requiredQuantity: z.int().min(2).max(999),
+    fromStatus: z.literal("In Progress"),
+    toStatus: z.literal("In Progress"),
+    recordedAt: z.iso.datetime({ offset: false }),
+  })
+  .refine(
+    (payload) =>
+      payload.quantityDelta <= payload.completedQuantity &&
+      payload.completedQuantity < payload.requiredQuantity,
+  );
+
+const kitchenItemCompletedPayload = z
+  .strictObject({
+    kitchenTicketReference: z.string().regex(canonicalUuidV7),
+    kitchenWorkItemReference: z.string().regex(canonicalUuidV7),
+    orderItemReference: z.string().regex(canonicalUuidV7),
+    ticketVersion: z.string().regex(/^[1-9][0-9]*$/u),
+    workItemVersion: z.string().regex(/^[1-9][0-9]*$/u),
+    quantityDelta: z.int().min(1).max(999),
+    completedQuantity: z.int().min(1).max(999),
+    requiredQuantity: z.int().min(1).max(999),
+    fromStatus: z.literal("In Progress"),
+    toStatus: z.literal("Completed"),
+    completedAt: z.iso.datetime({ offset: false }),
+  })
+  .refine(
+    (payload) =>
+      payload.quantityDelta <= payload.completedQuantity &&
+      payload.completedQuantity === payload.requiredQuantity,
+  );
+
 const menuPublishedPayload = z.strictObject({
   menuReference: z.uuid(),
   menuVersionReference: z.uuid(),
@@ -211,6 +273,54 @@ const paymentRefundedPayload = z.strictObject({
 
 export const eventCatalog = defineEventCatalog([
   {
+    eventType: "KitchenItemCompleted",
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen",
+    producerModule: "@rms/kitchen",
+    stability: "stable",
+    consumers: ["kitchen.queue-item-completed-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "personal",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: kitchenItemCompletedPayload,
+  },
+  {
+    eventType: "KitchenItemProgressRecorded",
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen",
+    producerModule: "@rms/kitchen",
+    stability: "stable",
+    consumers: ["kitchen.queue-item-progress-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "personal",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: kitchenItemProgressRecordedPayload,
+  },
+  {
+    eventType: "KitchenWorkAccepted",
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen",
+    producerModule: "@rms/kitchen",
+    stability: "stable",
+    consumers: ["kitchen.queue-work-accepted-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "personal",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: kitchenWorkAcceptedPayload,
+  },
+  {
     eventType: "KitchenWorkCreated",
     schemaVersion: 1,
     ownerModule: "@rms/kitchen",
@@ -225,6 +335,22 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: kitchenWorkCreatedPayload,
+  },
+  {
+    eventType: "KitchenWorkStarted",
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen",
+    producerModule: "@rms/kitchen",
+    stability: "stable",
+    consumers: ["kitchen.queue-work-started-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "personal",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: kitchenWorkStartedPayload,
   },
   {
     eventType: "MenuPublished",
