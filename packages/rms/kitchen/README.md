@@ -1,14 +1,15 @@
 # `kitchen`
 
 Kitchen-owned, runtime-inactive confirmed-order intake, minimum Ticket / Work Item aggregate,
-deterministic Station plan, lifecycle execution, Store queue projection and minimal realtime hint.
+deterministic Station plan, lifecycle execution, Store queue projection, minimal realtime hint and
+named-operator KDS continuity records.
 
 ## Identity and responsibility
 
 - Module Name: `kitchen`
 - Package Name: `@rms/kitchen`
 - Layer / Domain: `RMS / Kitchen`
-- Phase / owning Work Package: `Phase 1 / WP-1400–1405`
+- Phase / owning Work Package: `Phase 1 / WP-1400–1408`
 - Owner role: `Kitchen Engineering Owner`
 - Status: `active contract surface and persistence boundary; runtime inactive`
 - Responsibility: consume Ordering-owned `OrderConfirmed.v1`, resolve exact public Ordering source
@@ -18,6 +19,9 @@ deterministic Station plan, lifecycle execution, Store queue projection and mini
   Ready commands; and consume Kitchen lifecycle Events into a safe Store queue read model.
   After a queue generation transaction commits, the runtime-inactive realtime service may emit one
   minimal lossy Store-scoped generation hint that requires a canonical authorized queue requery.
+  The continuity contract additionally composes queue freshness, connection, named Session and
+  recovery evidence; records lock-before-handover and post-outage reconciliation without replaying
+  a Command.
 - Explicit non-goals: live Worker wiring, Station/Rule persistence or authoring, Recipe business
   logic/persistence, multi-Station routing, Hold/Resume/Cancel/Rework, Ticket or Work Item Ready,
   partial Ready, API/UI/SSE/live Worker wiring, distributed fan-out, Provider calls and production
@@ -73,6 +77,17 @@ strict-parses an already active `kitchen_work_queue_v1` generation and emits onl
 projection version. It carries no row snapshot or `data` bag. Delivery, no subscribers and loss do
 not mutate or retry Kitchen state; every hint requires the client to run the canonical queue Query.
 WP-0036 remains owner of SSE authorization, transport, reconnect and fan-out.
+
+`buildKdsContinuityState` exposes a strict, runtime-inactive `KIT-KITCHEN-QUEUE` /
+`KIT-WORK-ITEM` state contract. Only Online + Fresh + active exact-scope named KDS Session + no
+pending recovery is `Live`; every other accepted condition is explicit read-only. Offline and
+recovery-required states expose the bounded manual-continuity code, no state ever queues a browser
+Command, and a locked Session hides even the otherwise safe snapshot. `createKdsOperatorHandover`
+requires the prior named Session to be Locked or Ended before a distinct active operator Session.
+`createKdsRecoveryReconciliation` compares the captured snapshot/checkpoint with a newly loaded
+Source and emits either `ConvergedNoAction` or `RequiresAuthorizedResolution`, always with zero
+Command replay. The append-only forced-RLS records contain controlled references, statuses,
+timestamps and digests only.
 
 ## Dependencies
 
@@ -203,6 +218,7 @@ pnpm kitchen-station-routing:acceptance
 pnpm kitchen-queue:acceptance
 pnpm kitchen-work-lifecycle:acceptance
 pnpm kitchen-ready-event:acceptance
+pnpm kds-continuity:acceptance
 pnpm --filter @rms/kitchen format:check
 pnpm --filter @rms/kitchen lint
 pnpm --filter @rms/kitchen typecheck
@@ -223,11 +239,11 @@ Progress/Completed Events and atomic rollback.
 ## Decisions and follow-up
 
 - Authority: WP-0023, WP-0030, WP-0032, WP-0034, WP-0035, WP-0042, WP-1310 and
-  WP-1400–WP-1406.
+  WP-1400–WP-1408.
 - External Evidence: real Ordering persistence/source adapter, real Kitchen Station/routing and
-  Recipe-preparation adapters/facts, WP-2045 live Payment gate, WP-1407 allergen acknowledgement,
-  runtime roles/RLS, real Store/Order facts, load/replay/restore evidence and deployment remain
-  gated and unclaimed.
+  Recipe-preparation adapters/facts, WP-2045 live Payment gate, runtime roles/RLS, real Store/Order
+  facts, browser/managed-device and network/power continuity, approved manual runbook, trained
+  operator UAT, load/replay/restore evidence and deployment remain gated and unclaimed.
 - Revisit triggers: live Worker composition, Station/Rule authoring or persistence, Recipe module,
   multi-Station routing, Hold/Resume/Cancel/Rework, partial Ready, Ticket lifecycle, Ready Event /
   realtime activation, export or a new Customer/health field.

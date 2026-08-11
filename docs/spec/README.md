@@ -6,8 +6,8 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1407 — Structured Allergen-assistance Review、KDS Cue /
-Acknowledgement 与 Incident Link on codex/wp-1407`
+- Current discussion node: `WP-1408 — KDS Stale / Read-only Continuity、Operator Lock /
+Handover 与 Recovery Reconciliation on codex/wp-1408`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -18,12 +18,22 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1408 — KDS Stale / Read-only Continuity、Operator Lock / Handover 与 Recovery
+Reconciliation` is active for bounded implementation from exact integrated and exact-main
+  verified `main@77e0e629f33e4e0b51babd1b58db8a215770b26f` on `codex/wp-1408`. It owns the
+  runtime-inactive named-operator KDS continuity state, explicit stale/reconnecting/offline
+  read-only behavior without a browser Command queue, lock-before-handover evidence and fresh
+  Source recovery reconciliation. External device, network, power, runbook and UAT evidence remain
+  gated and unclaimed. Exact boundaries are in `docs/spec/work-packages/WP-1408.md`.
+
 - `WP-1407 — Structured Allergen-assistance Review、KDS Cue / Acknowledgement 与 Incident Link`
-  is active for bounded implementation from exact integrated and exact-main verified
-  `main@fc0fea2f70c0912b2132cf82f7a691430d5b4738` on `codex/wp-1407`. It owns Kitchen's
+  is implemented and integrated at squash `77e0e629f33e4e0b51babd1b58db8a215770b26f`
+  via PR #155. Exact implementation head `0aa58adbe815e3128a72789284edef612f40518b`
+  passed run/job `31509580304 / 93839700256`; exact-main run/job
+  `31511103924 / 93844831219` passed. It owns Kitchen's
   Restricted configuration-specific review, two-stage named-operator acknowledgement, existing
   WP-1404 Start-admission composition, persistent non-color cue and immutable Compliance Case +
-  availability Kill Switch incident link. Exact boundaries and evidence are in
+  availability Kill Switch incident link. Exact boundaries and verification evidence are in
   `docs/spec/work-packages/WP-1407.md`.
 
 - `WP-1406 — ItemReady / OrderReady Event` is implemented and integrated at squash
