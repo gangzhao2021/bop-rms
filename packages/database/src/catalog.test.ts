@@ -81,6 +81,7 @@ describe("migration catalog", () => {
       "1500_003_create_kitchen_work_lifecycle",
       "1500_004_create_kitchen_ready_publication",
       "1500_005_create_kitchen_allergen_safety",
+      "1500_006_create_kds_continuity",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -482,6 +483,25 @@ describe("migration catalog", () => {
       3,
     );
     expect(migration?.sql).not.toMatch(/medical|symptom|customer_note|free_text/iu);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1408 KDS continuity migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1500_006_create_kds_continuity",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/kitchen");
+    expect(migration?.metadata.schema).toBe("rms_kitchen");
+    expect(migration?.sql).toContain("CREATE TABLE rms_kitchen.kds_operator_handover");
+    expect(migration?.sql).toContain("CREATE TABLE rms_kitchen.kds_recovery_reconciliation");
+    expect(migration?.sql).toContain("command_replay_count = 0");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(2);
+    expect(migration?.sql.match(/reject_kitchen_work_lifecycle_append_only_update/gu)).toHaveLength(
+      2,
+    );
+    expect(migration?.sql).not.toMatch(
+      /\b(?:credential|token|pan|cvv|customer|health|payment|provider)\b/iu,
+    );
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

@@ -3,6 +3,22 @@ const databaseAccessManifestInput = {
   module: { moduleName: "kitchen", packageName: "@rms/kitchen", layer: "RMS" },
   tables: [
     {
+      table: "kds_operator_handover",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
+      table: "kds_recovery_reconciliation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
       table: "kitchen_allergen_acknowledgement",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/kitchen" },

@@ -1,5 +1,22 @@
 export { moduleManifest } from "./module.manifest.js";
 export {
+  buildKdsContinuityState,
+  createKdsOperatorHandover,
+  createKdsRecoveryReconciliation,
+  kdsContinuityErrorCodes,
+  kdsContinuityPermission,
+  kdsManualRunbookCode,
+  KdsContinuityError,
+  parseKdsOperatorSessionEvidence,
+  parseKdsProjectionEvidence,
+  type KdsContinuityErrorCode,
+  type KdsContinuityState,
+  type KdsOperatorHandoverRecord,
+  type KdsOperatorSessionEvidence,
+  type KdsProjectionEvidence,
+  type KdsRecoveryReconciliationRecord,
+} from "./contracts/kds-continuity.js";
+export {
   buildKitchenAllergenKdsCue,
   createKitchenAllergenAcknowledgement,
   createKitchenAllergenIncidentLink,
