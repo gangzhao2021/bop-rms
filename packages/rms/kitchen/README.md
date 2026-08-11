@@ -1,14 +1,14 @@
 # `kitchen`
 
 Kitchen-owned, runtime-inactive confirmed-order intake, minimum Ticket / Work Item aggregate,
-deterministic Station plan, lifecycle execution and Store queue projection.
+deterministic Station plan, lifecycle execution, Store queue projection and minimal realtime hint.
 
 ## Identity and responsibility
 
 - Module Name: `kitchen`
 - Package Name: `@rms/kitchen`
 - Layer / Domain: `RMS / Kitchen`
-- Phase / owning Work Package: `Phase 1 / WP-1400–1404`
+- Phase / owning Work Package: `Phase 1 / WP-1400–1405`
 - Owner role: `Kitchen Engineering Owner`
 - Status: `active contract surface and persistence boundary; runtime inactive`
 - Responsibility: consume Ordering-owned `OrderConfirmed.v1`, resolve exact public Ordering source
@@ -16,9 +16,12 @@ deterministic Station plan, lifecycle execution and Store queue projection.
   Kitchen-routing and Recipe-preparation evidence, create one Store-scoped Ticket and one initial
   Work Item per exact source item; execute exact Accept, Start, quantity-completion and OrderItem
   Ready commands; and consume Kitchen lifecycle Events into a safe Store queue read model.
+  After a queue generation transaction commits, the runtime-inactive realtime service may emit one
+  minimal lossy Store-scoped generation hint that requires a canonical authorized queue requery.
 - Explicit non-goals: live Worker wiring, Station/Rule persistence or authoring, Recipe business
   logic/persistence, multi-Station routing, Hold/Resume/Cancel/Rework, Ticket or Work Item Ready,
-  partial Ready, API/UI/SSE/live Worker wiring, Provider calls and production activation.
+  partial Ready, API/UI/SSE/live Worker wiring, distributed fan-out, Provider calls and production
+  activation.
 
 ## Public contract
 
@@ -63,6 +66,13 @@ none is represented as absent, false or safe. Operational projection health is s
 `NotAvailable` because this bounded runtime-inactive slice does not claim `Rebuilding` or `Failed`.
 The public error contract is bounded and never reveals existence, source dependencies or
 identifiers.
+
+`createKitchenRealtimeService` exposes one post-commit, runtime-inactive publisher boundary. It
+strict-parses an already active `kitchen_work_queue_v1` generation and emits only
+`kitchen.work-queue.updated.v1` with Brand/Store scope, the generation reference and static
+projection version. It carries no row snapshot or `data` bag. Delivery, no subscribers and loss do
+not mutate or retry Kitchen state; every hint requires the client to run the canonical queue Query.
+WP-0036 remains owner of SSE authorization, transport, reconnect and fan-out.
 
 ## Dependencies
 

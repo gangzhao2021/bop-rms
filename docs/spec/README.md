@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1404 — Accept / Start / Ready Command on codex/wp-1404`
+- Current discussion node: `WP-1405 — Kitchen Realtime Message on codex/wp-1405`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,27 +17,23 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1404 — Accept / Start / Ready Command` is the current local implementation candidate on
-  `codex/wp-1404` from exact integrated and exact-main verified
-  `main@2cbc0be35980e8245eeda486d60730004bc5ce8f`. Its bounded F14.1 brief closes four
-  Kitchen-owned command semantics: per-Work-Item Accept, Start and quantity-aware Complete, plus
-  OrderItem-grained Mark Ready. Accept is an append-only named-operator claim fact and does not
-  invent an `Accepted` status; Ready is not a Work Item or Ticket status. The Ticket remains
-  `Open` in this WP, partial completion remains `In Progress`, and Ready is a unique append-only
-  OrderItem result. Final-authorized commands use `kitchen.operate`, named User Actor, exact
-  trusted Workforce Actor / Brand / Store, command-appropriate exact Ticket / Work Item or sibling-vector version bindings, durable idempotency, mandatory
-  Audit and atomic lifecycle Outbox. `KitchenItemProgressRecorded.v1` is the truthful partial-
-  quantity fact required by Sections 26.1 and 26.6, while `KitchenItemCompleted.v1` is emitted only
-  when cumulative quantity reaches required quantity. WP-1406 retains every Ready Event. Strict
-  opaque Start-admission and Expo-policy evidence keep missing real safety / Store facts fail
-  closed without copying health narrative or Store private configuration. The candidate is confined
-  to the exact 31-file allowlist in `docs/spec/work-packages/WP-1404.md`; it adds no dependency or
-  lockfile change and no API / UI / SSE / Worker or runtime activation. Frozen install, Kitchen
-  `188/188`, Contracts `15/15`, affected format / lint / typecheck / build, Event Catalog and
-  architecture gates pass locally. Supplemental PostgreSQL 15 evidence applies all 49 migrations
-  and passes the dedicated lifecycle, queue, ticket and Tenant / RLS bodies; the official pinned
-  PostgreSQL 18 acceptance remains blocked before assertions because no Docker daemon is available.
-  Commit, push, PR, exact-head CI, merge and exact-main CI remain pending.
+- `WP-1405 — Kitchen Realtime Message` is the current bounded implementation candidate from exact
+  integrated and exact-main verified `main@c071587b5a6c3d3ed1842caaf90a19d3105c1d14` on
+  `codex/wp-1405`. It owns only the strict Store-scoped
+  `kitchen.work-queue.updated.v1` lossy hint over a successfully committed
+  `kitchen_work_queue_v1` generation. The hint identifies the complete active generation and
+  contains no row snapshot or open data bag; every connect/reconnect/message requires a canonical
+  authorized queue Query and never replays a Command. WP-0036 retains SSE transport, Session/scope
+  authorization, fan-out and reconnect ownership. Exact scope, security/privacy findings,
+  verification and External Evidence gates are in `docs/spec/work-packages/WP-1405.md`.
+
+- `WP-1404 — Accept / Start / Ready Command` is implemented and integrated at squash
+  `c071587b5a6c3d3ed1842caaf90a19d3105c1d14` via PR #152. Exact implementation head
+  `0ef49f00cac9b3b3c0aeeb93fbd1da6323302340` passed run/job
+  `31493420612 / 93785137658`; exact-main run/job `31494903047 / 93790057647` passed. The Section 91
+  Process-enforced / GitHub Free self-review records zero findings, reviews, review requests and
+  unresolved threads without claiming independent approval or server-side Branch Protection /
+  Rulesets. Exact scope and evidence are in `docs/spec/work-packages/WP-1404.md`.
 
 - `WP-1403 — Kitchen Queue Projection` is implemented and integrated at squash
   `2cbc0be35980e8245eeda486d60730004bc5ce8f` via PR #151. Exact implementation head

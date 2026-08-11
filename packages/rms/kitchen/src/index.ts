@@ -264,3 +264,20 @@ export type {
   KitchenWorkLifecycleResolution,
   KitchenWorkLifecycleStableReferencePurpose,
 } from "./application/ports/kitchen-work-lifecycle-ports.js";
+export {
+  kitchenRealtimeMessageType,
+  kitchenRealtimeMessageVersion,
+  kitchenRealtimeReferencePurpose,
+  kitchenRealtimeResourceType,
+  type KitchenRealtimeHint,
+  type KitchenRealtimeMetric,
+  type KitchenRealtimePublishOutcome,
+  type KitchenRealtimePublishResult,
+} from "./contracts/kitchen-realtime.js";
+export {
+  createKitchenRealtimeHint,
+  createKitchenRealtimePublishResult,
+  parseKitchenRealtimeHint,
+} from "./domain/kitchen-realtime.js";
+export { createKitchenRealtimeService } from "./application/kitchen-realtime-service.js";
+export type { KitchenRealtimePorts } from "./application/ports/kitchen-realtime-ports.js";
