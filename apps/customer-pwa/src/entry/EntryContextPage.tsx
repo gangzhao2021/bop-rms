@@ -1,6 +1,11 @@
 import { AppFrame } from "@bop-rms/ui";
 import { useEffect, useRef, useState } from "react";
-import type { CustomerEntryClient, CustomerEntryScreenState } from "./types.js";
+import { useNavigate } from "react-router";
+import type {
+  CustomerEntryClient,
+  CustomerEntryEstablishedContext,
+  CustomerEntryScreenState,
+} from "./types.js";
 
 const serviceModeLabels = Object.freeze({
   DineIn: "Dine in",
@@ -20,23 +25,31 @@ const unavailableClient: CustomerEntryClient = Object.freeze({
 
 export interface EntryContextPageProps {
   readonly client?: CustomerEntryClient | undefined;
+  readonly onEstablished?: ((context: CustomerEntryEstablishedContext) => void) | undefined;
 }
 
-export function EntryContextPage({ client = unavailableClient }: EntryContextPageProps) {
+export function EntryContextPage({
+  client = unavailableClient,
+  onEstablished,
+}: EntryContextPageProps) {
   const [state, setState] = useState<CustomerEntryScreenState>(
     client.hasEntry ? Object.freeze({ kind: "Loading" }) : Object.freeze({ kind: "Missing" }),
   );
   const heading = useRef<HTMLHeadingElement>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let current = true;
     void client.start().then((next) => {
-      if (current) setState(next);
+      if (current) {
+        if (next.kind === "Established") onEstablished?.(next.context);
+        setState(next);
+      }
     });
     return () => {
       current = false;
     };
-  }, [client]);
+  }, [client, onEstablished]);
 
   useEffect(() => {
     if (state.kind !== "Loading") heading.current?.focus();
@@ -44,19 +57,35 @@ export function EntryContextPage({ client = unavailableClient }: EntryContextPag
 
   const retry = (): void => {
     setState(Object.freeze({ kind: "Loading" }));
-    void client.retry().then(setState);
+    void client.retry().then((next) => {
+      if (next.kind === "Established") onEstablished?.(next.context);
+      setState(next);
+    });
   };
 
-  return <EntryContextView headingRef={heading} onRetry={retry} state={state} />;
+  return (
+    <EntryContextView
+      headingRef={heading}
+      onContinue={() => navigate("/menu")}
+      onRetry={retry}
+      state={state}
+    />
+  );
 }
 
 export interface EntryContextViewProps {
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
+  readonly onContinue?: (() => void) | undefined;
   readonly onRetry?: (() => void) | undefined;
   readonly state: CustomerEntryScreenState;
 }
 
-export function EntryContextView({ headingRef, onRetry, state }: EntryContextViewProps) {
+export function EntryContextView({
+  headingRef,
+  onContinue,
+  onRetry,
+  state,
+}: EntryContextViewProps) {
   const established = state.kind === "Established" ? state.context : null;
   const title = established?.brandDisplayName ?? "Start your order";
   const description = established
@@ -66,7 +95,12 @@ export function EntryContextView({ headingRef, onRetry, state }: EntryContextVie
   return (
     <AppFrame title={title} description={description}>
       <section className="entry-card" aria-live="polite" aria-busy={state.kind === "Loading"}>
-        <EntryState headingRef={headingRef} onRetry={onRetry} state={state} />
+        <EntryState
+          headingRef={headingRef}
+          onContinue={onContinue}
+          onRetry={onRetry}
+          state={state}
+        />
       </section>
       <aside className="entry-help" aria-labelledby="entry-help-heading">
         <h2 id="entry-help-heading">Need help?</h2>
@@ -101,7 +135,7 @@ function RetryAction({ onRetry }: Readonly<{ onRetry?: (() => void) | undefined 
   ) : null;
 }
 
-function EntryState({ headingRef, onRetry, state }: Readonly<EntryContextViewProps>) {
+function EntryState({ headingRef, onContinue, onRetry, state }: Readonly<EntryContextViewProps>) {
   if (state.kind === "Loading")
     return (
       <div role="status">
@@ -181,9 +215,13 @@ function EntryState({ headingRef, onRetry, state }: Readonly<EntryContextViewPro
         </div>
       </dl>
       {locationOpen ? (
-        <a className="entry-action" href="/menu">
-          Continue to menu
-        </a>
+        onContinue ? (
+          <button className="entry-action" type="button" onClick={onContinue}>
+            Continue to menu
+          </button>
+        ) : (
+          <p role="status">Menu navigation is unavailable. Scan the location QR code again.</p>
+        )
       ) : (
         <p className="entry-closed" role="status">
           This location is not accepting orders. Ask staff about current hours or alternatives.
