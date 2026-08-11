@@ -47,6 +47,9 @@ const expectedForcedTables = [
   "rms_catalog.sellable_placement",
   "rms_catalog.sku",
   "rms_kitchen.kitchen_action_record",
+  "rms_kitchen.kitchen_allergen_acknowledgement",
+  "rms_kitchen.kitchen_allergen_incident_link",
+  "rms_kitchen.kitchen_allergen_review",
   "rms_kitchen.kitchen_order_item_ready_result",
   "rms_kitchen.kitchen_ticket",
   "rms_kitchen.kitchen_work_item",
@@ -84,7 +87,7 @@ async function prove(context) {
   const pool = new Pool({ ...context.clientConfig, max: 1 });
   await admin.connect();
   try {
-    assert.equal(expectedForcedTables.length, 66);
+    assert.equal(expectedForcedTables.length, 69);
     const forced = await admin.query(
       `SELECT format('%I.%I', namespace.nspname, relation.relname) AS table_name
        FROM pg_class AS relation

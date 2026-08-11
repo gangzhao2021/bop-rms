@@ -46,6 +46,9 @@ const moduleManifestInput =
     ownedDatabase: {
       schema: "rms_kitchen",
       tables: [
+        "kitchen_allergen_acknowledgement",
+        "kitchen_allergen_incident_link",
+        "kitchen_allergen_review",
         "kitchen_action_record",
         "kitchen_order_item_ready_result",
         "kitchen_ready_publication",

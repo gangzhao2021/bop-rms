@@ -165,7 +165,10 @@ contain a Customer note that is possible-health data. Notes are NFC plain text, 
 code points and four lines, with control and bidirectional-override characters rejected. A note is
 never interpreted as allergy accommodation, ingredient deletion or safety approval, and never
 enters Event, Audit summary, error, log, URL, metric label, analytic payload, screenshot or
-non-synthetic fixture. WP-1407 remains mandatory before Kitchen Start or any food-safety claim.
+non-synthetic fixture. WP-1407 now supplies the runtime-inactive structured review, named
+BeforeStart / BeforeHandoff acknowledgement, persistent non-color cue and immutable Incident link
+contract. Professional policy, Store training, full Payment / Pickup / Compliance orchestration and
+non-synthetic evidence remain mandatory before any live food-safety claim.
 The queue projection itself is `indirect_identifier` only: its dedicated source DTO and rows exclude
 Customer note, health/allergen values, preparation instructions, note-derived digests and all
 Payment/Provider data. Public queue results also exclude internal Event references and integrity

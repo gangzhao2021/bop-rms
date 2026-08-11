@@ -6,7 +6,8 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1406 — ItemReady / OrderReady Event on codex/wp-1406`
+- Current discussion node: `WP-1407 — Structured Allergen-assistance Review、KDS Cue /
+Acknowledgement 与 Incident Link on codex/wp-1407`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,12 +18,21 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1406 — ItemReady / OrderReady Event` is closed for bounded implementation from exact
-  integrated and exact-main verified `main@6c39c00dd6c6b27198c45cdf7b1d04407f3d57a5` on
-  `codex/wp-1406`. It owns the atomic, minimal `KitchenItemReady.v1` and conditional
-  `KitchenOrderReady.v1` public facts over an immutable WP-1404 Ready result. Exact source-vector,
-  persistence, privacy, verification and later-runtime gates are in
-  `docs/spec/work-packages/WP-1406.md`.
+- `WP-1407 — Structured Allergen-assistance Review、KDS Cue / Acknowledgement 与 Incident Link`
+  is active for bounded implementation from exact integrated and exact-main verified
+  `main@fc0fea2f70c0912b2132cf82f7a691430d5b4738` on `codex/wp-1407`. It owns Kitchen's
+  Restricted configuration-specific review, two-stage named-operator acknowledgement, existing
+  WP-1404 Start-admission composition, persistent non-color cue and immutable Compliance Case +
+  availability Kill Switch incident link. Exact boundaries and evidence are in
+  `docs/spec/work-packages/WP-1407.md`.
+
+- `WP-1406 — ItemReady / OrderReady Event` is implemented and integrated at squash
+  `fc0fea2f70c0912b2132cf82f7a691430d5b4738` via PR #154. Exact implementation head
+  `0bf958f6cef3cc5c40aa583fdcf00de1224eaee6` passed run/job
+  `31504821343 / 93823604190`; exact-main run/job `31506296583 / 93828608769` passed. It owns the
+  atomic, minimal `KitchenItemReady.v1` and conditional `KitchenOrderReady.v1` public facts over an
+  immutable WP-1404 Ready result. Exact source-vector, persistence, privacy, verification and
+  later-runtime gates are in `docs/spec/work-packages/WP-1406.md`.
 
 - `WP-1405 — Kitchen Realtime Message` is implemented and integrated at squash
   `6c39c00dd6c6b27198c45cdf7b1d04407f3d57a5` via PR #153. Exact implementation head
