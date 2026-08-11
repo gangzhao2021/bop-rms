@@ -6,8 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1408 — KDS Stale / Read-only Continuity、Operator Lock /
-Handover 与 Recovery Reconciliation on codex/wp-1408`
+- Current discussion node: `WP-1600 — Pickup Fulfillment Aggregate on codex/wp-1600`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -18,13 +17,23 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1600 — Pickup Fulfillment Aggregate` is active for bounded implementation from exact
+  integrated and exact-main verified `main@c0177d9e2d75efcd6d03fa75113dc2494b5a1d66`
+  on `codex/wp-1600`. It owns the new Fulfillment Module, the idempotent one-per-Order Pending
+  Pickup Aggregate and Item set, and the strict Ordering-owned public Fulfillment source Query.
+  F15 physical output remains a disabled Future Trigger under IDR-0039 and was not scheduled or
+  installed. Exact boundaries are in `docs/spec/work-packages/WP-1600.md`.
+
 - `WP-1408 — KDS Stale / Read-only Continuity、Operator Lock / Handover 与 Recovery
-Reconciliation` is active for bounded implementation from exact integrated and exact-main
-  verified `main@77e0e629f33e4e0b51babd1b58db8a215770b26f` on `codex/wp-1408`. It owns the
+Reconciliation` is implemented and integrated at squash
+  `c0177d9e2d75efcd6d03fa75113dc2494b5a1d66` via PR #156. Exact implementation head
+  `9b99fbaffdcfe58787364e2227eb7b4f3fe7158d` passed run/job
+  `31513705556 / 93853526510`; exact-main run/job `31515105116 / 93858178095` passed. It owns the
   runtime-inactive named-operator KDS continuity state, explicit stale/reconnecting/offline
   read-only behavior without a browser Command queue, lock-before-handover evidence and fresh
   Source recovery reconciliation. External device, network, power, runbook and UAT evidence remain
-  gated and unclaimed. Exact boundaries are in `docs/spec/work-packages/WP-1408.md`.
+  gated and unclaimed. Exact boundaries and verification evidence are in
+  `docs/spec/work-packages/WP-1408.md`.
 
 - `WP-1407 — Structured Allergen-assistance Review、KDS Cue / Acknowledgement 与 Incident Link`
   is implemented and integrated at squash `77e0e629f33e4e0b51babd1b58db8a215770b26f`

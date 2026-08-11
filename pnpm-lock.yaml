@@ -373,6 +373,18 @@ importers:
         specifier: workspace:*
         version: link:../../bop/tenant
 
+  packages/rms/fulfillment:
+    dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../../bop/audit
+      '@bop/eventing':
+        specifier: workspace:*
+        version: link:../../bop/eventing
+      '@rms/ordering':
+        specifier: workspace:*
+        version: link:../ordering
+
   packages/rms/kitchen:
     dependencies:
       '@bop/audit':
