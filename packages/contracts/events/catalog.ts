@@ -139,6 +139,15 @@ export function registeredEventMetricLabels(
   return Object.freeze(catalog.map(identity));
 }
 
+const fulfillmentCompletedPayload = z.strictObject({
+  fulfillmentReference: z.string().regex(canonicalUuidV7),
+  orderReference: z.string().regex(canonicalUuidV7),
+  handoffRecordReference: z.string().regex(canonicalUuidV7),
+  storeReference: z.string().regex(canonicalUuidV7),
+  verificationMethod: z.enum(["Opaque", "HumanCode"]),
+  completedAt: z.iso.datetime({ offset: false }),
+});
+
 const kitchenWorkCreatedPayload = z.strictObject({
   kitchenTicketReference: z.uuid(),
   orderReference: z.uuid(),
@@ -296,6 +305,22 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  {
+    eventType: "FulfillmentCompleted",
+    schemaVersion: 1,
+    ownerModule: "@rms/fulfillment",
+    producerModule: "@rms/fulfillment",
+    stability: "stable",
+    consumers: ["ordering.fulfillment-completed:v1"],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: fulfillmentCompletedPayload,
+  },
   {
     eventType: "KitchenItemCompleted",
     schemaVersion: 1,

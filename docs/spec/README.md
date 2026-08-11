@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1603 — Complete Pickup Handoff on codex/wp-1603`
+- Current discussion node: `WP-1604 — FulfillmentCompleted Event on codex/wp-1604`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,7 +17,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1603 — Complete Pickup Handoff` is active from exact integrated and exact-main verified
+- `WP-1604 — FulfillmentCompleted Event` is active from exact integrated and exact-main verified
+  `main@e7a03a312674ca83cea9dc8f25e0d9f718038dcb`. It owns only the stable minimal
+  `FulfillmentCompleted.v1` fact, Event Catalog contract and append-only publication described in
+  `docs/spec/work-packages/WP-1604.md`; the Ordering consumer/projection remains WP-1605.
+
+- `WP-1603 — Complete Pickup Handoff` is implemented and integrated at squash
+  `e7a03a312674ca83cea9dc8f25e0d9f718038dcb` via PR #160. Exact implementation head
+  `9fa7c6e0fce91f455adadb7ecb361162859fa5e3` passed run/job
+  `31531849582 / 93913528455`; exact-main run/job `31533351896 / 93918465257` passed. It began from
+  exact integrated and exact-main verified
   `main@3466e32e4f6391b3da920777701a8a2454b14044`. It owns only the authorized, append-only
   Handoff Record, exact cumulative handed-over quantity and partial/Completed derivation described
   in `docs/spec/work-packages/WP-1603.md`; public Events remain reserved to WP-1604.

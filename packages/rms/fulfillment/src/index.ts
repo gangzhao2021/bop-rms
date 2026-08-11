@@ -9,3 +9,5 @@ export * from "./application/ports/fulfillment-readiness-ports.js";
 export * from "./application/fulfillment-readiness-service.js";
 export * from "./contracts/pickup-proof.js";
 export * from "./contracts/pickup-handoff.js";
+export * from "./contracts/fulfillment-completed-event.js";
+export * from "./application/fulfillment-completed-event.js";

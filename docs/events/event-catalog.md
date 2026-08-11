@@ -5,6 +5,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 
 ## Registered Events
 
+- `FulfillmentCompleted:v1` — owner `@rms/fulfillment`; stable; store; indirect_identifier
 - `KitchenItemCompleted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenItemProgressRecorded:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenItemReady:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
