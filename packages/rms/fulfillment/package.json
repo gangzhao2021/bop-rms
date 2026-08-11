@@ -19,6 +19,7 @@
   "dependencies": {
     "@bop/audit": "workspace:*",
     "@bop/eventing": "workspace:*",
+    "@rms/kitchen": "workspace:*",
     "@rms/ordering": "workspace:*"
   }
 }
