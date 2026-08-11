@@ -3,6 +3,30 @@ const databaseAccessManifestInput = {
   module: { moduleName: "kitchen", packageName: "@rms/kitchen", layer: "RMS" },
   tables: [
     {
+      table: "kitchen_allergen_acknowledgement",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "personal", "health"],
+    },
+    {
+      table: "kitchen_allergen_incident_link",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "personal", "health"],
+    },
+    {
+      table: "kitchen_allergen_review",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "personal", "health"],
+    },
+    {
       table: "kitchen_action_record",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/kitchen" },

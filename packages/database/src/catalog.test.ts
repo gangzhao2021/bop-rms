@@ -80,6 +80,7 @@ describe("migration catalog", () => {
       "1500_002_create_kitchen_work_queue_projection",
       "1500_003_create_kitchen_work_lifecycle",
       "1500_004_create_kitchen_ready_publication",
+      "1500_005_create_kitchen_allergen_safety",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -460,6 +461,27 @@ describe("migration catalog", () => {
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).toContain("reject_kitchen_work_lifecycle_append_only_update");
     expect(migration?.sql).not.toMatch(/customer|note|allergen|health|payment|provider/iu);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1407 Kitchen allergen safety migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1500_005_create_kitchen_allergen_safety",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/kitchen");
+    expect(migration?.metadata.schema).toBe("rms_kitchen");
+    for (const table of [
+      "kitchen_allergen_review",
+      "kitchen_allergen_acknowledgement",
+      "kitchen_allergen_incident_link",
+    ]) {
+      expect(migration?.sql).toContain(`CREATE TABLE rms_kitchen.${table}`);
+    }
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
+    expect(migration?.sql.match(/reject_kitchen_work_lifecycle_append_only_update/gu)).toHaveLength(
+      3,
+    );
+    expect(migration?.sql).not.toMatch(/medical|symptom|customer_note|free_text/iu);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

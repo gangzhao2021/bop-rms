@@ -1,5 +1,26 @@
 export { moduleManifest } from "./module.manifest.js";
 export {
+  buildKitchenAllergenKdsCue,
+  createKitchenAllergenAcknowledgement,
+  createKitchenAllergenIncidentLink,
+  createKitchenAllergenReviewDigestBinding,
+  createKitchenAllergenStartAdmission,
+  kitchenAllergenSafetyClassification,
+  kitchenAllergenSafetyErrorCodes,
+  kitchenAllergenSafetyPermission,
+  kitchenAllergenSafetyRetentionMonths,
+  KitchenAllergenSafetyError,
+  parseKitchenAllergenAcknowledgement,
+  parseKitchenAllergenIncidentLink,
+  parseKitchenAllergenReview,
+  type KitchenAllergenAcknowledgement,
+  type KitchenAllergenDigestPort,
+  type KitchenAllergenIncidentLink,
+  type KitchenAllergenKdsCue,
+  type KitchenAllergenReview,
+  type KitchenAllergenSafetyErrorCode,
+} from "./contracts/kitchen-allergen-safety.js";
+export {
   confirmedOrderConsumerName,
   confirmedOrderConsumerVersion,
   confirmedOrderIntakeErrorCodes,
