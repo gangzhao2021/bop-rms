@@ -51,6 +51,9 @@ const expectedForcedTables = [
   "rms_fulfillment.fulfillment_item",
   "rms_fulfillment.fulfillment_item_ready_result",
   "rms_fulfillment.fulfillment_ready_operation",
+  "rms_fulfillment.pickup_handoff_item",
+  "rms_fulfillment.pickup_handoff_operation",
+  "rms_fulfillment.pickup_handoff_record",
   "rms_fulfillment.pickup_proof_generation",
   "rms_fulfillment.pickup_proof_invalidation",
   "rms_fulfillment.pickup_proof_operation",
@@ -98,7 +101,7 @@ async function prove(context) {
   const pool = new Pool({ ...context.clientConfig, max: 1 });
   await admin.connect();
   try {
-    assert.equal(expectedForcedTables.length, 80);
+    assert.equal(expectedForcedTables.length, 83);
     const forced = await admin.query(
       `SELECT format('%I.%I', namespace.nspname, relation.relname) AS table_name
        FROM pg_class AS relation
