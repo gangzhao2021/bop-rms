@@ -8,6 +8,13 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  kitchenItemCompletedEventConsumer,
+  kitchenItemProgressRecordedEventConsumer,
+  kitchenWorkAcceptedEventConsumer,
+  kitchenWorkStartedEventConsumer,
+  type KitchenWorkLifecycleEnvelope,
+} from "../contracts/kitchen-work-lifecycle-events.js";
+import {
   buildKitchenQueueGeneration,
   buildKitchenQueueRows,
   computeKitchenQueueFilterSortDigest,
@@ -26,13 +33,22 @@ import {
   parseKitchenQueueSourceEvent,
   parseKitchenQueueSourceFeed,
   reconcileKitchenQueueProjectionBundle,
-  type KitchenQueueGeneration,
   type KitchenQueueProjectionBundle,
   type KitchenQueueRow,
   type KitchenQueueSourceEvent,
   type KitchenQueueSourceFeed,
 } from "../contracts/kitchen-queue-projection.js";
 import { createKitchenQueueProjectionService } from "../application/kitchen-queue-projection-service.js";
+import { parseKitchenWorkLifecycleEnvelope } from "../application/kitchen-work-lifecycle-events.js";
+import {
+  buildKitchenQueueStoredGeneration,
+  parseKitchenQueueLifecycleIncrementalSourceFeed,
+  parseKitchenQueueLifecycleRebuildSourceFeed,
+  parseKitchenQueueStoredGeneration,
+  reconcileKitchenQueueStoredProjectionBundle,
+  stripKitchenQueueStoredGeneration,
+  type KitchenQueueStoredProjectionBundle,
+} from "../domain/kitchen-queue-projection.js";
 import type {
   KitchenQueueCheckpointComparison,
   KitchenQueueGetRead,
@@ -52,6 +68,10 @@ function sha256(value: string): string {
 
 const createdAt = "2026-08-08T16:00:00.000Z";
 const projectedAt = "2026-08-08T16:00:01.000Z";
+const acceptedAt = "2026-08-08T16:00:02.000Z";
+const startedAt = "2026-08-08T16:00:03.000Z";
+const progressAt = "2026-08-08T16:00:04.000Z";
+const completedAt = "2026-08-08T16:00:05.000Z";
 
 function sourceEvent(overrides: Readonly<Record<string, unknown>> = {}): KitchenQueueSourceEvent {
   const eventId = (overrides.eventId as string | undefined) ?? id(1);
@@ -92,13 +112,17 @@ function sourceTicket(
   overrides: Readonly<Record<string, unknown>> = {},
 ) {
   const displayName = (overrides.displayName as string | undefined) ?? "Burger";
+  const ticketAggregateVersion = (overrides.ticketAggregateVersion as bigint | undefined) ?? 1n;
+  const workItemVersion = (overrides.workItemVersion as bigint | undefined) ?? 1n;
+  const status = (overrides.status as string | undefined) ?? "Queued";
+  const completedQuantity = (overrides.completedQuantity as number | undefined) ?? 0;
   return {
     brandReference: event.tenantId,
     storeReference: event.storeId,
     ticketReference: event.aggregateId,
     orderReference: event.payload.orderReference,
     orderBatchReference: event.payload.orderBatchReference,
-    ticketAggregateVersion: 1n,
+    ticketAggregateVersion,
     ticketStatus: "Open",
     sourceEvent: event,
     items: [
@@ -109,11 +133,11 @@ function sourceTicket(
         orderBatchReference: event.payload.orderBatchReference,
         orderItemReference: (overrides.orderItemReference as string | undefined) ?? id(21),
         sourceItemOrdinal: 1,
-        ticketAggregateVersion: 1n,
-        workItemVersion: 1n,
-        status: "Queued",
+        ticketAggregateVersion,
+        workItemVersion,
+        status,
         requiredQuantity: (overrides.requiredQuantity as number | undefined) ?? 2,
-        completedQuantity: 0,
+        completedQuantity,
         localizedDisplayNames: { "en-CA": displayName },
         selectedOptions: [
           {
@@ -125,6 +149,8 @@ function sourceTicket(
         stationReference: (overrides.stationReference as string | undefined) ?? id(23),
         workItemCreatedAt:
           (overrides.workItemCreatedAt as string | undefined) ?? event.payload.createdAt,
+        acceptedAt: (overrides.acceptedAt as string | null | undefined) ?? null,
+        orderItemReadyAt: (overrides.orderItemReadyAt as string | null | undefined) ?? null,
         catalogSnapshotControlled: true,
       },
     ],
@@ -151,17 +177,506 @@ function sourceFeed(
   });
 }
 
+function lifecycleEvent(
+  eventType: KitchenWorkLifecycleEnvelope["eventType"],
+  input: {
+    readonly eventReference?: string;
+    readonly operationReference?: string;
+    readonly actorReference?: string;
+    readonly correlationReference?: string;
+  } = {},
+): KitchenWorkLifecycleEnvelope {
+  const facts =
+    eventType === "KitchenWorkAccepted"
+      ? { version: 2, occurredAt: acceptedAt }
+      : eventType === "KitchenWorkStarted"
+        ? { version: 3, occurredAt: startedAt }
+        : eventType === "KitchenItemProgressRecorded"
+          ? { version: 4, occurredAt: progressAt }
+          : { version: 5, occurredAt: completedAt };
+  const common = {
+    kitchenTicketReference: id(10),
+    kitchenWorkItemReference: id(20),
+    orderItemReference: id(21),
+    ticketVersion: String(facts.version),
+    workItemVersion: String(facts.version),
+  };
+  const payload =
+    eventType === "KitchenWorkAccepted"
+      ? { ...common, workItemStatus: "Queued", acceptedAt: facts.occurredAt }
+      : eventType === "KitchenWorkStarted"
+        ? {
+            ...common,
+            fromStatus: "Queued",
+            toStatus: "In Progress",
+            startedAt: facts.occurredAt,
+          }
+        : eventType === "KitchenItemProgressRecorded"
+          ? {
+              ...common,
+              quantityDelta: 1,
+              completedQuantity: 1,
+              requiredQuantity: 2,
+              fromStatus: "In Progress",
+              toStatus: "In Progress",
+              recordedAt: facts.occurredAt,
+            }
+          : {
+              ...common,
+              quantityDelta: 1,
+              completedQuantity: 2,
+              requiredQuantity: 2,
+              fromStatus: "In Progress",
+              toStatus: "Completed",
+              completedAt: facts.occurredAt,
+            };
+  return parseKitchenWorkLifecycleEnvelope({
+    eventId: input.eventReference ?? id(200 + facts.version),
+    eventType,
+    schemaVersion: 1,
+    occurredAt: facts.occurredAt,
+    producerModule: "@rms/kitchen",
+    tenantId: id(2),
+    storeId: id(3),
+    aggregateType: "KitchenTicket",
+    aggregateId: id(10),
+    aggregateVersion: BigInt(facts.version),
+    correlationId: input.correlationReference ?? id(220 + facts.version),
+    causationId: input.operationReference ?? id(210 + facts.version),
+    actor: { type: "Actor", actorId: input.actorReference ?? id(80) },
+    payload,
+    redactionClassification: "personal",
+    replayMetadata: { replaySafe: true },
+  });
+}
+
+function lifecyclePayloadValue(
+  event: KitchenWorkLifecycleEnvelope,
+): Readonly<Record<string, unknown>> {
+  const common = {
+    kitchenTicketReference: event.payload.kitchenTicketReference,
+    kitchenWorkItemReference: event.payload.kitchenWorkItemReference,
+    orderItemReference: event.payload.orderItemReference,
+    ticketVersion: event.payload.ticketVersion,
+    workItemVersion: event.payload.workItemVersion,
+  };
+  if (event.eventType === "KitchenWorkAccepted")
+    return {
+      ...common,
+      workItemStatus: event.payload.workItemStatus,
+      acceptedAt: event.payload.acceptedAt,
+    };
+  if (event.eventType === "KitchenWorkStarted")
+    return {
+      ...common,
+      fromStatus: event.payload.fromStatus,
+      toStatus: event.payload.toStatus,
+      startedAt: event.payload.startedAt,
+    };
+  if (event.eventType === "KitchenItemProgressRecorded")
+    return {
+      ...common,
+      quantityDelta: event.payload.quantityDelta,
+      completedQuantity: event.payload.completedQuantity,
+      requiredQuantity: event.payload.requiredQuantity,
+      fromStatus: event.payload.fromStatus,
+      toStatus: event.payload.toStatus,
+      recordedAt: event.payload.recordedAt,
+    };
+  return {
+    ...common,
+    quantityDelta: event.payload.quantityDelta,
+    completedQuantity: event.payload.completedQuantity,
+    requiredQuantity: event.payload.requiredQuantity,
+    fromStatus: event.payload.fromStatus,
+    toStatus: event.payload.toStatus,
+    completedAt: event.payload.completedAt,
+  };
+}
+
+function lifecycleSemanticDigest(event: KitchenWorkLifecycleEnvelope): string {
+  return sha256(
+    JSON.stringify({
+      eventType: event.eventType,
+      schemaVersion: event.schemaVersion,
+      occurredAt: event.occurredAt,
+      producerModule: event.producerModule,
+      tenantId: event.tenantId,
+      storeId: event.storeId,
+      aggregateType: event.aggregateType,
+      aggregateId: event.aggregateId,
+      aggregateVersion: event.aggregateVersion.toString(10),
+      correlationId: event.correlationId,
+      causationId: event.causationId,
+      actor: { type: event.actor.type, actorId: event.actor.actorId },
+      payload: lifecyclePayloadValue(event),
+      redactionClassification: event.redactionClassification,
+      replayMetadata: { replaySafe: event.replayMetadata.replaySafe },
+    }),
+  );
+}
+
+function normalizedProofValue(proof: Readonly<Record<string, unknown>>): unknown {
+  return Object.fromEntries(
+    Object.entries(proof)
+      .filter(([key]) => key !== "projectionProofDigest" && key !== "readyCausalBundleDigest")
+      .map(([key, value]) => [
+        key,
+        typeof value === "bigint"
+          ? value.toString(10)
+          : key === "workItems"
+            ? (value as readonly Readonly<Record<string, unknown>>[]).map((item) => ({
+                workItemReference: item.workItemReference,
+                workItemVersion:
+                  typeof item.workItemVersion === "bigint"
+                    ? item.workItemVersion.toString(10)
+                    : item.workItemVersion,
+              }))
+            : value,
+      ]),
+  );
+}
+
+function lifecycleEventProof(
+  event: KitchenWorkLifecycleEnvelope,
+  input: { readonly auditReference?: string; readonly eventReference?: string } = {},
+): Readonly<Record<string, unknown>> {
+  const expectedTicketVersion = event.aggregateVersion - 1n;
+  const committedWorkItemVersion = BigInt(event.payload.workItemVersion);
+  const literals =
+    event.eventType === "KitchenWorkAccepted"
+      ? {
+          actionCode: "KITCHEN_WORK_ITEM_ACCEPTED",
+          reasonCode: "WORK_ITEM_ACCEPTED",
+          beforeStatus: "Queued",
+          afterStatus: "Queued",
+          quantityDelta: null,
+          completedQuantity: null,
+          requiredQuantity: null,
+        }
+      : event.eventType === "KitchenWorkStarted"
+        ? {
+            actionCode: "KITCHEN_WORK_ITEM_STARTED",
+            reasonCode: "WORK_ITEM_STARTED",
+            beforeStatus: "Queued",
+            afterStatus: "In Progress",
+            quantityDelta: null,
+            completedQuantity: null,
+            requiredQuantity: null,
+          }
+        : {
+            actionCode: "KITCHEN_WORK_ITEM_COMPLETION_RECORDED",
+            reasonCode: "COMPLETION_QUANTITY_RECORDED",
+            beforeStatus: event.payload.fromStatus,
+            afterStatus: event.payload.toStatus,
+            quantityDelta: event.payload.quantityDelta,
+            completedQuantity: event.payload.completedQuantity,
+            requiredQuantity: event.payload.requiredQuantity,
+          };
+  const proof = {
+    kind: "Event",
+    eventType: event.eventType,
+    brandReference: event.tenantId,
+    storeReference: event.storeId,
+    ticketReference: event.aggregateId,
+    workItemReference: event.payload.kitchenWorkItemReference,
+    orderItemReference: event.payload.orderItemReference,
+    operationReference: event.causationId,
+    actionCode: literals.actionCode,
+    purpose: "KitchenWorkExecution",
+    reasonCode: literals.reasonCode,
+    sourceChannel: "KDS_COMMAND",
+    actor: { type: "User", actorReference: event.actor.actorId },
+    expectedTicketVersion,
+    committedTicketVersion: event.aggregateVersion,
+    expectedWorkItemVersion: committedWorkItemVersion - 1n,
+    committedWorkItemVersion,
+    beforeStatus: literals.beforeStatus,
+    afterStatus: literals.afterStatus,
+    quantityDelta: literals.quantityDelta,
+    completedQuantity: literals.completedQuantity,
+    requiredQuantity: literals.requiredQuantity,
+    occurredAt: event.occurredAt,
+    auditReference: input.auditReference ?? id(300 + Number(event.aggregateVersion)),
+    auditSemanticDigest: sha256(`audit:${event.eventType}`),
+    effectDigest: sha256(`effect:${event.eventType}`),
+    eventReference: input.eventReference ?? event.eventId,
+    eventSemanticDigest: lifecycleSemanticDigest(event),
+  };
+  return {
+    ...proof,
+    projectionProofDigest: sha256(JSON.stringify(normalizedProofValue(proof))),
+  };
+}
+
+function automaticReadyProof(
+  completedEvent: KitchenWorkLifecycleEnvelope,
+  parent: Readonly<Record<string, unknown>>,
+  wrappedWorkItemsDigest = false,
+  operationReference = id(350),
+  readyResultReference = id(351),
+): Readonly<Record<string, unknown>> {
+  const workItems = [
+    {
+      workItemReference: completedEvent.payload.kitchenWorkItemReference,
+      workItemVersion: BigInt(completedEvent.payload.workItemVersion),
+    },
+  ];
+  const workItemsDigest = sha256(
+    JSON.stringify(
+      wrappedWorkItemsDigest
+        ? {
+            workItems: workItems.map((item) => ({
+              workItemReference: item.workItemReference,
+              workItemVersion: item.workItemVersion.toString(10),
+            })),
+          }
+        : workItems.map((item) => ({
+            workItemReference: item.workItemReference,
+            workItemVersion: item.workItemVersion.toString(10),
+          })),
+    ),
+  );
+  const proof = {
+    kind: "AutomaticReady",
+    brandReference: completedEvent.tenantId,
+    storeReference: completedEvent.storeId,
+    ticketReference: completedEvent.aggregateId,
+    workItemReference: completedEvent.payload.kitchenWorkItemReference,
+    orderItemReference: completedEvent.payload.orderItemReference,
+    operationReference,
+    parentOperationReference: completedEvent.causationId,
+    committedTicketVersion: completedEvent.aggregateVersion,
+    workItemVersion: BigInt(completedEvent.payload.workItemVersion),
+    workItemStatus: "Completed",
+    actionCode: "KITCHEN_ORDER_ITEM_READY",
+    purpose: "KitchenExpoCoordination",
+    reasonCode: "ALL_WORK_ITEMS_COMPLETED",
+    sourceChannel: "KITCHEN_AUTOMATION",
+    actor: { type: "System", actorReference: null },
+    workItems,
+    workItemsDigest,
+    readyResultReference,
+    readyQuantity: completedEvent.payload.requiredQuantity,
+    requiredQuantity: completedEvent.payload.requiredQuantity,
+    readyAt: completedEvent.occurredAt,
+    auditReference: id(352),
+    auditSemanticDigest: sha256("audit:automatic-ready"),
+    effectDigest: sha256("effect:automatic-ready"),
+    eventReference: null,
+    eventSemanticDigest: null,
+  };
+  const projectionProofDigest = sha256(JSON.stringify(normalizedProofValue(proof)));
+  return {
+    ...proof,
+    readyCausalBundleDigest: sha256(
+      JSON.stringify({
+        parentProjectionProofDigest: parent.projectionProofDigest,
+        childProjectionProofDigest: projectionProofDigest,
+        readyResultReference: proof.readyResultReference,
+        workItems: workItems.map((item) => ({
+          workItemReference: item.workItemReference,
+          workItemVersion: item.workItemVersion.toString(10),
+        })),
+        workItemsDigest,
+        readyQuantity: proof.readyQuantity,
+        requiredQuantity: proof.requiredQuantity,
+        readyAt: proof.readyAt,
+      }),
+    ),
+    projectionProofDigest,
+  };
+}
+
+function lifecycleSourceFeed(input: {
+  readonly events: readonly KitchenWorkLifecycleEnvelope[];
+  readonly includeReady: boolean;
+  readonly automaticReady?: boolean;
+  readonly checkpoint?: string;
+  readonly asOfUtc?: string;
+  readonly updatedAt?: string;
+  readonly auditReferences?: readonly string[];
+  readonly proofEventReferences?: readonly string[];
+  readonly wrappedReadyWorkItemsDigest?: boolean;
+  readonly automaticOperationReference?: string;
+  readonly readyResultReference?: string;
+}): unknown {
+  const creation = sourceEvent();
+  const ticket = sourceTicket(creation);
+  const eventProofs = input.events.map((event, index) => {
+    const auditReference = input.auditReferences?.[index];
+    const eventReference = input.proofEventReferences?.[index];
+    return lifecycleEventProof(event, {
+      ...(auditReference === undefined ? {} : { auditReference }),
+      ...(eventReference === undefined ? {} : { eventReference }),
+    });
+  });
+  const completed = input.events.find((event) => event.eventType === "KitchenItemCompleted");
+  const completedProof = eventProofs.find((proof) => proof.eventType === "KitchenItemCompleted");
+  const readyProof =
+    input.automaticReady === true && completed !== undefined && completedProof !== undefined
+      ? automaticReadyProof(
+          completed,
+          completedProof,
+          input.wrappedReadyWorkItemsDigest,
+          input.automaticOperationReference,
+          input.readyResultReference,
+        )
+      : null;
+  const proofs = [...eventProofs, ...(readyProof === null ? [] : [readyProof])].sort(
+    (left, right) => {
+      const leftVersion = left.committedTicketVersion as bigint;
+      const rightVersion = right.committedTicketVersion as bigint;
+      return leftVersion < rightVersion
+        ? -1
+        : leftVersion > rightVersion
+          ? 1
+          : String(left.operationReference).localeCompare(String(right.operationReference));
+    },
+  );
+  const primaryProofs = proofs.filter((proof) => proof.kind !== "AutomaticReady");
+  const latestEvent = input.events.at(-1);
+  const accepted = input.events.find((event) => event.eventType === "KitchenWorkAccepted");
+  const status =
+    latestEvent?.eventType === "KitchenItemCompleted"
+      ? "Completed"
+      : latestEvent?.eventType === "KitchenItemProgressRecorded" ||
+          latestEvent?.eventType === "KitchenWorkStarted"
+        ? "In Progress"
+        : "Queued";
+  const completedQuantity =
+    latestEvent?.eventType === "KitchenItemProgressRecorded" ||
+    latestEvent?.eventType === "KitchenItemCompleted"
+      ? latestEvent.payload.completedQuantity
+      : 0;
+  const latestFactAt =
+    readyProof === null
+      ? (latestEvent?.occurredAt ?? creation.occurredAt)
+      : String(readyProof.readyAt);
+  const item = ticket.items[0];
+  if (item === undefined) throw new Error("test lifecycle source item is missing");
+  const sourceItem = {
+    ticketReference: item.ticketReference,
+    workItemReference: item.workItemReference,
+    orderReference: item.orderReference,
+    orderBatchReference: item.orderBatchReference,
+    orderItemReference: item.orderItemReference,
+    sourceItemOrdinal: item.sourceItemOrdinal,
+    ticketAggregateVersion: BigInt(primaryProofs.length + 1),
+    workItemVersion: BigInt(eventProofs.length + 1),
+    status,
+    requiredQuantity: item.requiredQuantity,
+    completedQuantity,
+    localizedDisplayNames: item.localizedDisplayNames,
+    selectedOptions: item.selectedOptions,
+    stationReference: item.stationReference,
+    workItemCreatedAt: item.workItemCreatedAt,
+    acceptedAt: accepted?.occurredAt ?? null,
+    ...(input.includeReady
+      ? { orderItemReadyAt: readyProof === null ? null : readyProof.readyAt }
+      : {}),
+    catalogSnapshotControlled: true,
+  };
+  const lifecycleProofSetDigest = sha256(
+    JSON.stringify({
+      normalizedProjectionProofs: proofs.map((proof) => ({
+        committedTicketVersion: String(proof.committedTicketVersion),
+        operationReference: proof.operationReference,
+        projectionProofDigest: proof.projectionProofDigest,
+      })),
+    }),
+  );
+  return {
+    brandReference: creation.tenantId,
+    storeReference: creation.storeId,
+    sourceCheckpointReference: input.checkpoint ?? id(31),
+    asOfUtc: input.asOfUtc ?? latestFactAt,
+    coverageStatus: "CompleteThroughCheckpoint",
+    tickets: [
+      {
+        brandReference: ticket.brandReference,
+        storeReference: ticket.storeReference,
+        ticketReference: ticket.ticketReference,
+        orderReference: ticket.orderReference,
+        orderBatchReference: ticket.orderBatchReference,
+        ticketAggregateVersion: BigInt(primaryProofs.length + 1),
+        ticketStatus: ticket.ticketStatus,
+        updatedAt: input.updatedAt ?? latestFactAt,
+        sourceEvent: ticket.sourceEvent,
+        items: [sourceItem],
+        proofBundle: {
+          ticketReference: ticket.ticketReference,
+          operationCount: proofs.length,
+          readyResultCount: readyProof === null ? 0 : 1,
+          lifecycleProofSetDigest,
+          proofs,
+        },
+      },
+    ],
+  };
+}
+
+function lifecycleRebuildFeed(feed: KitchenQueueSourceFeed = sourceFeed()): unknown {
+  const lifecycleProofSetDigest = sha256(JSON.stringify({ normalizedProjectionProofs: [] }));
+  return {
+    brandReference: feed.brandReference,
+    storeReference: feed.storeReference,
+    sourceCheckpointReference: feed.sourceCheckpointReference,
+    asOfUtc: feed.asOfUtc,
+    coverageStatus: "CompleteThroughCheckpoint",
+    tickets: feed.tickets.map((ticket) => ({
+      brandReference: ticket.brandReference,
+      storeReference: ticket.storeReference,
+      ticketReference: ticket.ticketReference,
+      orderReference: ticket.orderReference,
+      orderBatchReference: ticket.orderBatchReference,
+      ticketAggregateVersion: ticket.ticketAggregateVersion,
+      ticketStatus: ticket.ticketStatus,
+      updatedAt: feed.asOfUtc,
+      sourceEvent: ticket.sourceEvent,
+      items: ticket.items.map((item) => ({
+        ticketReference: item.ticketReference,
+        workItemReference: item.workItemReference,
+        orderReference: item.orderReference,
+        orderBatchReference: item.orderBatchReference,
+        orderItemReference: item.orderItemReference,
+        sourceItemOrdinal: item.sourceItemOrdinal,
+        ticketAggregateVersion: item.ticketAggregateVersion,
+        workItemVersion: item.workItemVersion,
+        status: item.status,
+        requiredQuantity: item.requiredQuantity,
+        completedQuantity: item.completedQuantity,
+        localizedDisplayNames: item.localizedDisplayNames,
+        selectedOptions: item.selectedOptions,
+        stationReference: item.stationReference,
+        workItemCreatedAt: item.workItemCreatedAt,
+        acceptedAt: item.acceptedAt,
+        orderItemReadyAt: item.orderItemReadyAt,
+        catalogSnapshotControlled: item.catalogSnapshotControlled,
+      })),
+      proofBundle: {
+        ticketReference: ticket.ticketReference,
+        operationCount: 0,
+        readyResultCount: 0,
+        lifecycleProofSetDigest,
+        proofs: [],
+      },
+    })),
+  };
+}
+
 function bundle(
   feed: KitchenQueueSourceFeed = sourceFeed(),
   generationReference = id(40),
-): KitchenQueueProjectionBundle {
+  generationProjectedAt = projectedAt,
+): KitchenQueueStoredProjectionBundle {
   const rows = buildKitchenQueueRows({ generationReference, feed, sha256 });
-  const generation = buildKitchenQueueGeneration({
+  const generation = buildKitchenQueueStoredGeneration({
     generationReference,
     generationStatus: "Active",
     feed,
     rows,
-    projectedAt,
+    projectedAt: generationProjectedAt,
     lastRebuiltAt: null,
     rebuildRequest: null,
     sha256,
@@ -192,6 +707,8 @@ function rowValue(row: KitchenQueueRow, overrides: Readonly<Record<string, unkno
     sourceEventSemanticDigest: row.sourceEventSemanticDigest,
     sourceEventOccurredAt: row.sourceEventOccurredAt,
     workItemCreatedAt: row.workItemCreatedAt,
+    acceptedAt: row.acceptedAt,
+    orderItemReadyAt: row.orderItemReadyAt,
     ...overrides,
   };
 }
@@ -203,7 +720,7 @@ function firstRow(rows: readonly KitchenQueueRow[]): KitchenQueueRow {
 }
 
 function generationValue(
-  generation: KitchenQueueGeneration,
+  generation: KitchenQueueStoredProjectionBundle["generation"],
   overrides: Readonly<Record<string, unknown>> = {},
 ) {
   return {
@@ -212,6 +729,7 @@ function generationValue(
     storeReference: generation.storeReference,
     projectionName: generation.projectionName,
     projectionVersion: generation.projectionVersion,
+    snapshotBindingVersion: generation.snapshotBindingVersion,
     generationStatus: generation.generationStatus,
     sourceCheckpointReference: generation.sourceCheckpointReference,
     sourceEventBindingDigest: generation.sourceEventBindingDigest,
@@ -304,12 +822,13 @@ describe("Kitchen queue projection domain", () => {
   it("requires coherent generation counts and rebuild timing", () => {
     const built = bundle();
     expectCode(
-      () => parseKitchenQueueGeneration(generationValue(built.generation, { ticketCount: 2 })),
+      () =>
+        parseKitchenQueueStoredGeneration(generationValue(built.generation, { ticketCount: 2 })),
       "KITCHEN_QUEUE_INPUT_INVALID",
     );
     expectCode(
       () =>
-        parseKitchenQueueGeneration(
+        parseKitchenQueueStoredGeneration(
           generationValue(built.generation, {
             rebuildReference: id(60),
             rebuildRequestDigest: sha256("request"),
@@ -351,7 +870,7 @@ describe("Kitchen queue projection domain", () => {
     ];
     expectCode(
       () =>
-        buildKitchenQueueGeneration({
+        buildKitchenQueueStoredGeneration({
           generationReference: id(40),
           generationStatus: "Active",
           feed,
@@ -389,7 +908,7 @@ describe("Kitchen queue projection domain", () => {
       }),
     );
     const rows = [first, duplicate];
-    const generation = parseKitchenQueueGeneration(
+    const generation = parseKitchenQueueStoredGeneration(
       generationValue(original.generation, {
         workItemCount: 2,
         sourceEventBindingDigest: computeKitchenQueueSourceEventBindingDigest(rows, sha256),
@@ -404,7 +923,7 @@ describe("Kitchen queue projection domain", () => {
       }),
     );
     expectCode(
-      () => reconcileKitchenQueueProjectionBundle({ generation, rows }, sha256),
+      () => reconcileKitchenQueueStoredProjectionBundle({ generation, rows }, sha256),
       "KITCHEN_QUEUE_INPUT_INVALID",
     );
   });
@@ -418,7 +937,7 @@ describe("Kitchen queue projection domain", () => {
     ][] = [
       [parseKitchenQueueSourceFeed, { ...sourceFeed(), extra: true }],
       [parseKitchenQueueRow, { ...rowValue(firstRow(active.rows)), extra: true }],
-      [parseKitchenQueueGeneration, { ...generationValue(active.generation), extra: true }],
+      [parseKitchenQueueStoredGeneration, { ...generationValue(active.generation), extra: true }],
       [parseKitchenQueueRebuildRequest, { ...request, extra: true }],
       [parseKitchenQueueListQuery, { ...queryInput(), extra: true }],
       [parseKitchenQueueGetQuery, { ...getInput(), extra: true }],
@@ -470,6 +989,352 @@ describe("Kitchen queue projection domain", () => {
       expect(value === undefined ? false : Object.isFrozen(value)).toBe(true);
     }
   });
+
+  it("reconciles complete lifecycle history and keeps Ready rebuild-only", () => {
+    const events = [
+      lifecycleEvent("KitchenWorkAccepted"),
+      lifecycleEvent("KitchenWorkStarted"),
+      lifecycleEvent("KitchenItemProgressRecorded"),
+      lifecycleEvent("KitchenItemCompleted"),
+    ] as const;
+    const incremental = parseKitchenQueueLifecycleIncrementalSourceFeed(
+      lifecycleSourceFeed({ events, includeReady: false, automaticReady: true }),
+      sha256,
+    );
+    const incrementalItem = incremental.queueFeed.tickets[0]?.items[0];
+    expect(incrementalItem).toMatchObject({
+      acceptedAt,
+      orderItemReadyAt: null,
+      status: "Completed",
+      completedQuantity: 2,
+    });
+    expect(incremental.proofBundles[0]).toMatchObject({ operationCount: 5, readyResultCount: 1 });
+
+    const rebuild = parseKitchenQueueLifecycleRebuildSourceFeed(
+      lifecycleSourceFeed({ events, includeReady: true, automaticReady: true }),
+      sha256,
+    );
+    expect(rebuild.queueFeed.tickets[0]?.items[0]?.orderItemReadyAt).toBe(completedAt);
+    expect(Object.isFrozen(rebuild.proofBundles[0]?.proofs)).toBe(true);
+  });
+
+  it("rejects broken lifecycle ownership, chronology and globally reused proof identities", () => {
+    const accepted = lifecycleEvent("KitchenWorkAccepted");
+    const wrongOperatorStart = lifecycleEvent("KitchenWorkStarted", { actorReference: id(81) });
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: [accepted, wrongOperatorStart],
+            includeReady: false,
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+    for (const identityOverrides of [
+      { auditReferences: [id(80)] },
+      { auditReferences: [id(2)] },
+      { proofEventReferences: [id(20)] },
+      { proofEventReferences: [id(4)] },
+    ]) {
+      expectCode(
+        () =>
+          parseKitchenQueueLifecycleIncrementalSourceFeed(
+            lifecycleSourceFeed({
+              events: [accepted],
+              includeReady: false,
+              ...identityOverrides,
+            }),
+            sha256,
+          ),
+        "KITCHEN_QUEUE_INPUT_INVALID",
+      );
+    }
+
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: [
+              accepted,
+              lifecycleEvent("KitchenWorkStarted"),
+              lifecycleEvent("KitchenItemProgressRecorded"),
+              lifecycleEvent("KitchenItemCompleted", { actorReference: id(81) }),
+            ],
+            includeReady: false,
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: [accepted],
+            includeReady: false,
+            updatedAt: startedAt,
+            asOfUtc: startedAt,
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+
+    const reusedEventReference = id(390);
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: [
+              lifecycleEvent("KitchenWorkAccepted", { eventReference: reusedEventReference }),
+              lifecycleEvent("KitchenWorkStarted", { eventReference: reusedEventReference }),
+            ],
+            includeReady: false,
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: [accepted, lifecycleEvent("KitchenWorkStarted")],
+            includeReady: false,
+            auditReferences: [id(391), id(391)],
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: [lifecycleEvent("KitchenWorkAccepted", { eventReference: id(1) })],
+            includeReady: false,
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+    const completeHistory = [
+      accepted,
+      lifecycleEvent("KitchenWorkStarted"),
+      lifecycleEvent("KitchenItemProgressRecorded"),
+      lifecycleEvent("KitchenItemCompleted"),
+    ] as const;
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: completeHistory,
+            includeReady: false,
+            automaticReady: true,
+            automaticOperationReference: id(10),
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: completeHistory,
+            includeReady: false,
+            automaticReady: true,
+            readyResultReference: id(21),
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: [
+              lifecycleEvent("KitchenWorkAccepted", { eventReference: id(351) }),
+              ...completeHistory.slice(1),
+            ],
+            includeReady: false,
+            automaticReady: true,
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: completeHistory,
+            includeReady: false,
+            automaticReady: true,
+            auditReferences: [id(352), id(303), id(304), id(305)],
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleIncrementalSourceFeed(
+          lifecycleSourceFeed({
+            events: completeHistory,
+            includeReady: false,
+            automaticReady: true,
+            wrappedReadyWorkItemsDigest: true,
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+  });
+
+  it("requires one exact Ticket for incremental lifecycle source", () => {
+    const source = lifecycleSourceFeed({
+      events: [lifecycleEvent("KitchenWorkAccepted")],
+      includeReady: false,
+    }) as Readonly<Record<string, unknown>> & { readonly tickets: readonly unknown[] };
+    const ticket = source.tickets[0];
+    if (ticket === undefined) throw new Error("test lifecycle source ticket is missing");
+    for (const tickets of [[], [ticket, ticket]]) {
+      expectCode(
+        () => parseKitchenQueueLifecycleIncrementalSourceFeed({ ...source, tickets }, sha256),
+        "KITCHEN_QUEUE_INPUT_INVALID",
+      );
+    }
+  });
+
+  it("requires creation time as Ticket updatedAt when rebuild history has no operation", () => {
+    expectCode(
+      () =>
+        parseKitchenQueueLifecycleRebuildSourceFeed(
+          lifecycleSourceFeed({
+            events: [],
+            includeReady: true,
+            updatedAt: acceptedAt,
+            asOfUtc: acceptedAt,
+          }),
+          sha256,
+        ),
+      "KITCHEN_QUEUE_INPUT_INVALID",
+    );
+  });
+
+  it("rejects Ready timestamps without a prior Accept or before that Accept", () => {
+    const invalidTickets = [
+      sourceTicket(sourceEvent(), {
+        ticketAggregateVersion: 5n,
+        workItemVersion: 5n,
+        status: "Completed",
+        completedQuantity: 2,
+        acceptedAt: null,
+        orderItemReadyAt: completedAt,
+      }),
+      sourceTicket(sourceEvent(), {
+        ticketAggregateVersion: 5n,
+        workItemVersion: 5n,
+        status: "Completed",
+        completedQuantity: 2,
+        acceptedAt: completedAt,
+        orderItemReadyAt: startedAt,
+      }),
+    ];
+    for (const ticket of invalidTickets) {
+      expectCode(
+        () =>
+          parseKitchenQueueSourceFeed({
+            brandReference: id(2),
+            storeReference: id(3),
+            sourceCheckpointReference: id(30),
+            asOfUtc: completedAt,
+            coverageStatus: "CompleteThroughCheckpoint",
+            tickets: [ticket],
+          }),
+        "KITCHEN_QUEUE_INPUT_INVALID",
+      );
+    }
+
+    const row = firstRow(bundle().rows);
+    for (const timestamps of [
+      { acceptedAt: null, orderItemReadyAt: completedAt },
+      { acceptedAt: completedAt, orderItemReadyAt: startedAt },
+    ]) {
+      expectCode(
+        () =>
+          parseKitchenQueueRow(
+            rowValue(row, {
+              ticketAggregateVersion: 5n,
+              workItemVersion: 5n,
+              status: "Completed",
+              completedQuantity: 2,
+              ...timestamps,
+            }),
+          ),
+        "KITCHEN_QUEUE_INPUT_INVALID",
+      );
+    }
+  });
+
+  it("keeps the binding marker repository-internal while reading exact legacy bytes", () => {
+    const stored = bundle();
+    const publicGeneration = stripKitchenQueueStoredGeneration(stored.generation);
+    expect("snapshotBindingVersion" in publicGeneration).toBe(false);
+    expect(parseKitchenQueueGeneration(publicGeneration)).toEqual(publicGeneration);
+    expectCode(() => parseKitchenQueueGeneration(stored.generation), "KITCHEN_QUEUE_INPUT_INVALID");
+
+    const newlyBuilt = buildKitchenQueueGeneration({
+      generationReference: id(41),
+      generationStatus: "Active",
+      feed: sourceFeed(),
+      rows: buildKitchenQueueRows({ generationReference: id(41), feed: sourceFeed(), sha256 }),
+      projectedAt,
+      lastRebuiltAt: null,
+      rebuildRequest: null,
+      sha256,
+    });
+    expect("snapshotBindingVersion" in newlyBuilt).toBe(false);
+    const currentPublic: KitchenQueueProjectionBundle = reconcileKitchenQueueProjectionBundle(
+      {
+        generation: newlyBuilt,
+        rows: buildKitchenQueueRows({ generationReference: id(41), feed: sourceFeed(), sha256 }),
+      },
+      sha256,
+    );
+    expect(currentPublic.generation).toEqual(newlyBuilt);
+
+    const legacyDigest = computeKitchenQueueSnapshotDigest(
+      {
+        brandReference: stored.generation.brandReference,
+        storeReference: stored.generation.storeReference,
+        rows: stored.rows,
+        snapshotBindingVersion: 1,
+      },
+      sha256,
+    );
+    const legacy = parseKitchenQueueStoredGeneration(
+      generationValue(stored.generation, {
+        snapshotBindingVersion: 1,
+        queueSnapshotDigest: legacyDigest,
+      }),
+    );
+    expect(
+      reconcileKitchenQueueStoredProjectionBundle({ generation: legacy, rows: stored.rows }, sha256)
+        .generation.snapshotBindingVersion,
+    ).toBe(1);
+    expect(
+      reconcileKitchenQueueProjectionBundle(
+        { generation: stripKitchenQueueStoredGeneration(legacy), rows: stored.rows },
+        sha256,
+      ).generation,
+    ).toEqual(stripKitchenQueueStoredGeneration(legacy));
+  });
 });
 
 const transaction: ConsumerTransaction = {
@@ -485,7 +1350,9 @@ interface HarnessOptions {
   readonly rebuildFeed?: unknown;
   readonly comparison?: KitchenQueueCheckpointComparison;
   readonly rebuildComparison?: KitchenQueueCheckpointComparison;
-  readonly authorized?: boolean;
+  readonly lifecycleComparison?: "Current" | "Successor" | "RetryRequired";
+  readonly lifecycleIncrementalFeed?: unknown;
+  readonly authorized?: unknown;
   readonly trustedAuthority?: unknown;
   readonly listRead?: KitchenQueueListRead;
   readonly getRead?: KitchenQueueGetRead;
@@ -497,8 +1364,9 @@ interface HarnessOptions {
 
 function harness(options: HarnessOptions = {}) {
   const defaultFeed = sourceFeed();
+  const defaultRebuildFeed = lifecycleRebuildFeed(defaultFeed);
   const authorize: KitchenQueueProjectionPorts["authorization"]["authorize"] = vi.fn(
-    async () => options.authorized ?? true,
+    async () => (options.authorized === undefined ? true : options.authorized) as boolean,
   );
   const resolveQueryAuthority: KitchenQueueProjectionPorts["trustedContext"]["resolveQueryAuthority"] =
     vi.fn(async () =>
@@ -521,12 +1389,18 @@ function harness(options: HarnessOptions = {}) {
   const compareRebuild: KitchenQueueProjectionPorts["checkpoints"]["compareRebuild"] = vi.fn(
     async () => options.rebuildComparison ?? options.comparison ?? "Initial",
   );
+  const compareLifecycleIncremental: KitchenQueueProjectionPorts["checkpoints"]["compareLifecycleIncremental"] =
+    vi.fn(async () => options.lifecycleComparison ?? "Successor");
   const loadIncremental: KitchenQueueProjectionPorts["sources"]["loadIncremental"] = vi.fn(
     async () => (options.incrementalFeed === undefined ? defaultFeed : options.incrementalFeed),
   );
   const loadRebuild: KitchenQueueProjectionPorts["sources"]["loadRebuild"] = vi.fn(async () =>
-    options.rebuildFeed === undefined ? defaultFeed : options.rebuildFeed,
+    options.rebuildFeed === undefined ? defaultRebuildFeed : options.rebuildFeed,
   );
+  const loadLifecycleIncremental: KitchenQueueProjectionPorts["sources"]["loadLifecycleIncremental"] =
+    vi.fn(async () =>
+      options.lifecycleIncrementalFeed === undefined ? null : options.lifecycleIncrementalFeed,
+    );
   const loadActive: KitchenQueueProjectionPorts["projections"]["loadActive"] = vi.fn(async () =>
     options.active === undefined ? ({ status: "NotFound" } as const) : options.active,
   );
@@ -570,8 +1444,8 @@ function harness(options: HarnessOptions = {}) {
     transactions: { withTransaction },
     tenantContext: { install },
     locks: { acquireStoreProjection },
-    checkpoints: { compareIncremental, compareRebuild },
-    sources: { loadIncremental, loadRebuild },
+    checkpoints: { compareIncremental, compareRebuild, compareLifecycleIncremental },
+    sources: { loadIncremental, loadRebuild, loadLifecycleIncremental },
     projections: { loadActive, loadByRebuildReference, replaceActive },
     queries: { list, get },
     references: { nextGenerationReference },
@@ -587,8 +1461,10 @@ function harness(options: HarnessOptions = {}) {
       acquireStoreProjection,
       compareIncremental,
       compareRebuild,
+      compareLifecycleIncremental,
       loadIncremental,
       loadRebuild,
+      loadLifecycleIncremental,
       loadActive,
       loadByRebuildReference,
       replaceActive,
@@ -602,6 +1478,10 @@ function harness(options: HarnessOptions = {}) {
 }
 
 function asEnvelope(event: KitchenQueueSourceEvent): DomainEventEnvelope {
+  return event as unknown as DomainEventEnvelope;
+}
+
+function asLifecycleEnvelope(event: KitchenWorkLifecycleEnvelope): DomainEventEnvelope {
   return event as unknown as DomainEventEnvelope;
 }
 
@@ -652,6 +1532,522 @@ describe("Kitchen queue projection service", () => {
       }),
     );
     expect(Object.isFrozen(service.registration)).toBe(true);
+    expect(
+      service.lifecycleRegistrations.map((registration) => ({
+        consumerName: registration.consumerName,
+        eventType: registration.eventType,
+        schemaVersions: registration.schemaVersions,
+        consumerVersion: registration.consumerVersion,
+        ownerModule: registration.ownerModule,
+        tenantScope: registration.tenantScope,
+        ordering: registration.ordering,
+        sideEffect: registration.sideEffect,
+        replaySafe: registration.replaySafe,
+      })),
+    ).toEqual([
+      {
+        consumerName: kitchenWorkAcceptedEventConsumer,
+        eventType: "KitchenWorkAccepted",
+        schemaVersions: [1],
+        consumerVersion: 1,
+        ownerModule: "@rms/kitchen",
+        tenantScope: "store",
+        ordering: "none",
+        sideEffect: "replace_kitchen_queue_projection",
+        replaySafe: true,
+      },
+      {
+        consumerName: kitchenWorkStartedEventConsumer,
+        eventType: "KitchenWorkStarted",
+        schemaVersions: [1],
+        consumerVersion: 1,
+        ownerModule: "@rms/kitchen",
+        tenantScope: "store",
+        ordering: "none",
+        sideEffect: "replace_kitchen_queue_projection",
+        replaySafe: true,
+      },
+      {
+        consumerName: kitchenItemProgressRecordedEventConsumer,
+        eventType: "KitchenItemProgressRecorded",
+        schemaVersions: [1],
+        consumerVersion: 1,
+        ownerModule: "@rms/kitchen",
+        tenantScope: "store",
+        ordering: "none",
+        sideEffect: "replace_kitchen_queue_projection",
+        replaySafe: true,
+      },
+      {
+        consumerName: kitchenItemCompletedEventConsumer,
+        eventType: "KitchenItemCompleted",
+        schemaVersions: [1],
+        consumerVersion: 1,
+        ownerModule: "@rms/kitchen",
+        tenantScope: "store",
+        ordering: "none",
+        sideEffect: "replace_kitchen_queue_projection",
+        replaySafe: true,
+      },
+    ]);
+    expect(service.lifecycleRegistrations).toHaveLength(4);
+    expect(Object.isFrozen(service.lifecycleRegistrations)).toBe(true);
+    for (const lifecycleRegistration of service.lifecycleRegistrations) {
+      expect(Object.isFrozen(lifecycleRegistration)).toBe(true);
+      expect(Object.isFrozen(lifecycleRegistration.schemaVersions)).toBe(true);
+    }
+  });
+
+  it("projects a lifecycle successor with immutable authorization and checkpoint evidence", async () => {
+    const active = bundle();
+    const event = lifecycleEvent("KitchenWorkAccepted");
+    const source = lifecycleSourceFeed({ events: [event], includeReady: false });
+    const { ports, spies } = harness({
+      active: { status: "Found", generation: active.generation, rows: active.rows },
+      lifecycleIncrementalFeed: source,
+      lifecycleComparison: "Successor",
+      clockValues: [acceptedAt, acceptedAt],
+    });
+    const service = createKitchenQueueProjectionService(ports);
+    const registration = service.lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenWorkAcceptedEventConsumer,
+    );
+    if (registration === undefined) throw new Error("lifecycle registration missing");
+    await expect(
+      registration.handler({ envelope: asLifecycleEnvelope(event), transaction }),
+    ).resolves.toEqual({ status: "completed" });
+    expect(spies.authorize).toHaveBeenCalledWith({
+      action: "ProjectKitchenQueue",
+      purpose: "MaintainKitchenQueueProjection",
+      actorType: "System",
+      actorReference: null,
+      brandReference: id(2),
+      storeReference: id(3),
+      sourceEventReference: event.eventId,
+      observedAt: acceptedAt,
+    });
+    expect(Object.isFrozen(vi.mocked(spies.authorize).mock.calls[0]?.[0])).toBe(true);
+    const comparison = vi.mocked(spies.compareLifecycleIncremental).mock.calls[0]?.[0];
+    expect(comparison).toMatchObject({
+      current: {
+        sourceCheckpointReference: active.generation.sourceCheckpointReference,
+        asOfUtc: active.generation.asOfUtc,
+      },
+      candidate: {
+        sourceCheckpointReference: id(31),
+        asOfUtc: acceptedAt,
+        sourceEventReference: event.eventId,
+        sourceEventSemanticDigest: lifecycleSemanticDigest(event),
+        coverageStatus: "CompleteThroughCheckpoint",
+      },
+    });
+    expect(Object.isFrozen(comparison)).toBe(true);
+    expect(Object.isFrozen(comparison?.current)).toBe(true);
+    expect(Object.isFrozen(comparison?.candidate)).toBe(true);
+    const commit = vi.mocked(spies.replaceActive).mock.calls[0]?.[0];
+    expect(commit?.generation.snapshotBindingVersion).toBe(2);
+    expect(commit?.rows[0]).toMatchObject({
+      acceptedAt,
+      orderItemReadyAt: null,
+      originalSourceEventReference: id(1),
+      sourceEventOccurredAt: createdAt,
+    });
+  });
+
+  it("converges Completed-before-Accept delivery and makes the old Event Current", async () => {
+    const events = [
+      lifecycleEvent("KitchenWorkAccepted"),
+      lifecycleEvent("KitchenWorkStarted"),
+      lifecycleEvent("KitchenItemProgressRecorded"),
+      lifecycleEvent("KitchenItemCompleted"),
+    ] as const;
+    const source = lifecycleSourceFeed({
+      events,
+      includeReady: false,
+      automaticReady: true,
+    });
+    const initial = bundle();
+    const first = harness({
+      active: { status: "Found", generation: initial.generation, rows: initial.rows },
+      lifecycleIncrementalFeed: source,
+      lifecycleComparison: "Successor",
+      clockValues: [completedAt, completedAt],
+    });
+    const firstService = createKitchenQueueProjectionService(first.ports);
+    const completedRegistration = firstService.lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenItemCompletedEventConsumer,
+    );
+    if (completedRegistration === undefined) throw new Error("completed registration missing");
+    await expect(
+      completedRegistration.handler({
+        envelope: asLifecycleEnvelope(events[3]),
+        transaction,
+      }),
+    ).resolves.toEqual({ status: "completed" });
+    const firstCommit = vi.mocked(first.spies.replaceActive).mock.calls[0]?.[0];
+    expect(firstCommit?.rows[0]).toMatchObject({
+      acceptedAt,
+      orderItemReadyAt: null,
+      status: "Completed",
+      completedQuantity: 2,
+    });
+    if (firstCommit === undefined) throw new Error("lifecycle successor missing");
+
+    const current = harness({
+      active: {
+        status: "Found",
+        generation: firstCommit.generation,
+        rows: firstCommit.rows,
+      },
+      lifecycleIncrementalFeed: source,
+      lifecycleComparison: "Current",
+      clockValues: [completedAt],
+    });
+    const currentService = createKitchenQueueProjectionService(current.ports);
+    const acceptedRegistration = currentService.lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenWorkAcceptedEventConsumer,
+    );
+    if (acceptedRegistration === undefined) throw new Error("accepted registration missing");
+    await expect(
+      acceptedRegistration.handler({
+        envelope: asLifecycleEnvelope(events[0]),
+        transaction,
+      }),
+    ).resolves.toEqual({ status: "completed" });
+    expect(current.spies.replaceActive).not.toHaveBeenCalled();
+    expect(current.spies.nextGenerationReference).not.toHaveBeenCalled();
+    expect(current.spies.now).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves prior Ready on lifecycle increments and introduces it only on rebuild", async () => {
+    const events = [
+      lifecycleEvent("KitchenWorkAccepted"),
+      lifecycleEvent("KitchenWorkStarted"),
+      lifecycleEvent("KitchenItemProgressRecorded"),
+      lifecycleEvent("KitchenItemCompleted"),
+    ] as const;
+    const readyActive = bundle(
+      sourceFeed({
+        checkpoint: id(31),
+        asOfUtc: completedAt,
+        ticketOverrides: {
+          ticketAggregateVersion: 5n,
+          workItemVersion: 5n,
+          status: "Completed",
+          completedQuantity: 2,
+          acceptedAt,
+          orderItemReadyAt: completedAt,
+        },
+      }),
+      id(40),
+      completedAt,
+    );
+    const incremental = harness({
+      active: {
+        status: "Found",
+        generation: readyActive.generation,
+        rows: readyActive.rows,
+      },
+      lifecycleIncrementalFeed: lifecycleSourceFeed({
+        events,
+        includeReady: false,
+        automaticReady: true,
+        checkpoint: id(32),
+      }),
+      lifecycleComparison: "Successor",
+      clockValues: [completedAt, completedAt],
+    });
+    const incrementalService = createKitchenQueueProjectionService(incremental.ports);
+    const completedRegistration = incrementalService.lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenItemCompletedEventConsumer,
+    );
+    if (completedRegistration === undefined) throw new Error("completed registration missing");
+    await completedRegistration.handler({
+      envelope: asLifecycleEnvelope(events[3]),
+      transaction,
+    });
+    expect(
+      vi.mocked(incremental.spies.replaceActive).mock.calls[0]?.[0].rows[0]?.orderItemReadyAt,
+    ).toBe(completedAt);
+
+    const creationActive = bundle();
+    const request = rebuildRequest({
+      expectedActiveGenerationReference: creationActive.generation.projectionGenerationReference,
+    });
+    const rebuild = harness({
+      active: {
+        status: "Found",
+        generation: creationActive.generation,
+        rows: creationActive.rows,
+      },
+      rebuildFeed: lifecycleSourceFeed({
+        events,
+        includeReady: true,
+        automaticReady: true,
+        checkpoint: id(32),
+      }),
+      rebuildComparison: "Successor",
+      clockValues: [completedAt, completedAt],
+    });
+    const rebuilt = await createKitchenQueueProjectionService(rebuild.ports).rebuild(request);
+    expect("snapshotBindingVersion" in rebuilt).toBe(false);
+    expect(vi.mocked(rebuild.spies.replaceActive).mock.calls[0]?.[0].rows[0]).toMatchObject({
+      acceptedAt,
+      orderItemReadyAt: completedAt,
+    });
+  });
+
+  it("retries absent committed proof but parks changed semantics for the same operation", async () => {
+    const original = lifecycleEvent("KitchenWorkAccepted");
+    const originalOperationReference = original.causationId;
+    if (originalOperationReference === undefined) {
+      throw new Error("Expected lifecycle operation reference");
+    }
+    const active = bundle();
+    const source = lifecycleSourceFeed({ events: [original], includeReady: false });
+    const missing = lifecycleEvent("KitchenWorkAccepted", { operationReference: id(399) });
+    const missingHarness = harness({
+      active: { status: "Found", generation: active.generation, rows: active.rows },
+      lifecycleIncrementalFeed: source,
+      clockValues: [acceptedAt],
+    });
+    const missingRegistration = createKitchenQueueProjectionService(
+      missingHarness.ports,
+    ).lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenWorkAcceptedEventConsumer,
+    );
+    if (missingRegistration === undefined) throw new Error("accepted registration missing");
+    await expect(
+      missingRegistration.handler({ envelope: asLifecycleEnvelope(missing), transaction }),
+    ).resolves.toEqual({
+      status: "retry_required",
+      errorCode: "CONSUMER_TEMPORARY_FAILURE",
+    });
+    expect(missingHarness.spies.compareLifecycleIncremental).not.toHaveBeenCalled();
+
+    const changed = lifecycleEvent("KitchenWorkAccepted", {
+      operationReference: originalOperationReference,
+      correlationReference: id(398),
+    });
+    const changedHarness = harness({
+      active: { status: "Found", generation: active.generation, rows: active.rows },
+      lifecycleIncrementalFeed: source,
+      clockValues: [acceptedAt],
+    });
+    const changedRegistration = createKitchenQueueProjectionService(
+      changedHarness.ports,
+    ).lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenWorkAcceptedEventConsumer,
+    );
+    if (changedRegistration === undefined) throw new Error("accepted registration missing");
+    await expect(
+      changedRegistration.handler({ envelope: asLifecycleEnvelope(changed), transaction }),
+    ).resolves.toEqual({ status: "rejected", errorCode: "CONSUMER_REJECTED" });
+    expect(changedHarness.spies.compareLifecycleIncremental).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before lifecycle source on denial, dependency or registration drift", async () => {
+    const event = lifecycleEvent("KitchenWorkAccepted");
+    const source = lifecycleSourceFeed({ events: [event], includeReady: false });
+    const active = bundle();
+
+    const denied = harness({
+      active: { status: "Found", generation: active.generation, rows: active.rows },
+      lifecycleIncrementalFeed: source,
+      authorized: false,
+      clockValues: [acceptedAt],
+    });
+    const deniedRegistration = createKitchenQueueProjectionService(
+      denied.ports,
+    ).lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenWorkAcceptedEventConsumer,
+    );
+    if (deniedRegistration === undefined) throw new Error("accepted registration missing");
+    await expect(
+      deniedRegistration.handler({ envelope: asLifecycleEnvelope(event), transaction }),
+    ).resolves.toEqual({ status: "rejected", errorCode: "CONSUMER_REJECTED" });
+    expect(denied.spies.install).not.toHaveBeenCalled();
+    expect(denied.spies.loadActive).not.toHaveBeenCalled();
+    expect(denied.spies.loadLifecycleIncremental).not.toHaveBeenCalled();
+
+    const malformed = harness({
+      active: { status: "Found", generation: active.generation, rows: active.rows },
+      lifecycleIncrementalFeed: source,
+      authorized: Object.freeze({ allowed: true }),
+      clockValues: [acceptedAt],
+    });
+    const malformedRegistration = createKitchenQueueProjectionService(
+      malformed.ports,
+    ).lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenWorkAcceptedEventConsumer,
+    );
+    if (malformedRegistration === undefined) throw new Error("accepted registration missing");
+    await expect(
+      malformedRegistration.handler({ envelope: asLifecycleEnvelope(event), transaction }),
+    ).resolves.toEqual({
+      status: "retry_required",
+      errorCode: "CONSUMER_TEMPORARY_FAILURE",
+    });
+    expect(malformed.spies.install).not.toHaveBeenCalled();
+    expect(malformed.spies.loadActive).not.toHaveBeenCalled();
+    expect(malformed.spies.loadLifecycleIncremental).not.toHaveBeenCalled();
+
+    const unavailable = harness({
+      active: { status: "Found", generation: active.generation, rows: active.rows },
+      lifecycleIncrementalFeed: source,
+      clockValues: [acceptedAt],
+    });
+    vi.mocked(unavailable.spies.install).mockRejectedValueOnce(new Error("scope unavailable"));
+    const unavailableRegistration = createKitchenQueueProjectionService(
+      unavailable.ports,
+    ).lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenWorkAcceptedEventConsumer,
+    );
+    if (unavailableRegistration === undefined) throw new Error("accepted registration missing");
+    await expect(
+      unavailableRegistration.handler({ envelope: asLifecycleEnvelope(event), transaction }),
+    ).resolves.toEqual({
+      status: "retry_required",
+      errorCode: "CONSUMER_TEMPORARY_FAILURE",
+    });
+    expect(unavailable.spies.loadActive).not.toHaveBeenCalled();
+    expect(unavailable.spies.loadLifecycleIncremental).not.toHaveBeenCalled();
+
+    const mismatched = harness();
+    const mismatchedRegistration = createKitchenQueueProjectionService(
+      mismatched.ports,
+    ).lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenWorkAcceptedEventConsumer,
+    );
+    if (mismatchedRegistration === undefined) throw new Error("accepted registration missing");
+    await expect(
+      mismatchedRegistration.handler({
+        envelope: asLifecycleEnvelope(lifecycleEvent("KitchenWorkStarted")),
+        transaction,
+      }),
+    ).resolves.toEqual({ status: "rejected", errorCode: "CONSUMER_REJECTED" });
+    expect(mismatched.spies.authorize).not.toHaveBeenCalled();
+  });
+
+  it("rejects lifecycle source proxies and accessors without executing their traps", async () => {
+    const event = lifecycleEvent("KitchenWorkAccepted");
+    const active = bundle();
+    let proxyTrapCalls = 0;
+    const proxySource = new Proxy(
+      {},
+      {
+        ownKeys() {
+          proxyTrapCalls += 1;
+          throw new Error("source proxy trap executed");
+        },
+      },
+    );
+    const proxied = harness({
+      active: { status: "Found", generation: active.generation, rows: active.rows },
+      lifecycleIncrementalFeed: proxySource,
+      clockValues: [acceptedAt],
+    });
+    const registration = createKitchenQueueProjectionService(
+      proxied.ports,
+    ).lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenWorkAcceptedEventConsumer,
+    );
+    if (registration === undefined) throw new Error("accepted registration missing");
+    await expect(
+      registration.handler({ envelope: asLifecycleEnvelope(event), transaction }),
+    ).resolves.toEqual({
+      status: "retry_required",
+      errorCode: "CONSUMER_TEMPORARY_FAILURE",
+    });
+    expect(proxyTrapCalls).toBe(0);
+    expect(proxied.spies.compareLifecycleIncremental).not.toHaveBeenCalled();
+    expect(proxied.spies.replaceActive).not.toHaveBeenCalled();
+
+    let accessorCalls = 0;
+    const accessorSource = {};
+    Object.defineProperty(accessorSource, "tickets", {
+      enumerable: true,
+      get() {
+        accessorCalls += 1;
+        throw new Error("source accessor executed");
+      },
+    });
+    const accessor = harness({
+      active: { status: "Found", generation: active.generation, rows: active.rows },
+      lifecycleIncrementalFeed: accessorSource,
+      clockValues: [acceptedAt],
+    });
+    const accessorRegistration = createKitchenQueueProjectionService(
+      accessor.ports,
+    ).lifecycleRegistrations.find(
+      (candidate) => candidate.consumerName === kitchenWorkAcceptedEventConsumer,
+    );
+    if (accessorRegistration === undefined) throw new Error("accepted registration missing");
+    await expect(
+      accessorRegistration.handler({ envelope: asLifecycleEnvelope(event), transaction }),
+    ).resolves.toEqual({
+      status: "retry_required",
+      errorCode: "CONSUMER_TEMPORARY_FAILURE",
+    });
+    expect(accessorCalls).toBe(0);
+    expect(accessor.spies.compareLifecycleIncremental).not.toHaveBeenCalled();
+    expect(accessor.spies.replaceActive).not.toHaveBeenCalled();
+
+    let nestedProxyTrapCalls = 0;
+    const nestedTickets = new Proxy([], {
+      getPrototypeOf() {
+        nestedProxyTrapCalls += 1;
+        throw new Error("nested source proxy trap executed");
+      },
+    });
+    const validRebuildSource = lifecycleRebuildFeed(sourceFeed()) as Readonly<
+      Record<string, unknown>
+    >;
+    const rebuild = harness({
+      rebuildFeed: { ...validRebuildSource, tickets: nestedTickets },
+    });
+    await expect(
+      createKitchenQueueProjectionService(rebuild.ports).rebuild(rebuildRequest()),
+    ).rejects.toMatchObject({ code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE" });
+    expect(nestedProxyTrapCalls).toBe(0);
+    expect(rebuild.spies.compareRebuild).not.toHaveBeenCalled();
+    expect(rebuild.spies.replaceActive).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes exact denial from malformed rebuild and query authorization replies", async () => {
+    const malformedReply = Object.freeze({ allowed: true });
+    const malformedRebuild = harness({ authorized: malformedReply });
+    await expect(
+      createKitchenQueueProjectionService(malformedRebuild.ports).rebuild(rebuildRequest()),
+    ).rejects.toMatchObject({ code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE" });
+    expect(malformedRebuild.spies.install).not.toHaveBeenCalled();
+    expect(malformedRebuild.spies.loadRebuild).not.toHaveBeenCalled();
+
+    const deniedRebuild = harness({ authorized: false });
+    await expect(
+      createKitchenQueueProjectionService(deniedRebuild.ports).rebuild(rebuildRequest()),
+    ).rejects.toMatchObject({ code: "KITCHEN_QUEUE_PERMISSION_DENIED" });
+    expect(deniedRebuild.spies.install).not.toHaveBeenCalled();
+    expect(deniedRebuild.spies.loadRebuild).not.toHaveBeenCalled();
+
+    const malformedQueries = harness({ authorized: malformedReply });
+    const malformedQueryService = createKitchenQueueProjectionService(malformedQueries.ports);
+    await expect(malformedQueryService.list(queryInput())).rejects.toMatchObject({
+      code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE",
+    });
+    await expect(malformedQueryService.get(getInput())).rejects.toMatchObject({
+      code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(malformedQueries.spies.install).not.toHaveBeenCalled();
+    expect(malformedQueries.spies.list).not.toHaveBeenCalled();
+    expect(malformedQueries.spies.get).not.toHaveBeenCalled();
+
+    const deniedGet = harness({ authorized: false });
+    await expect(
+      createKitchenQueueProjectionService(deniedGet.ports).get(getInput()),
+    ).rejects.toMatchObject({ code: "KITCHEN_QUEUE_PERMISSION_DENIED" });
+    expect(deniedGet.spies.install).not.toHaveBeenCalled();
+    expect(deniedGet.spies.get).not.toHaveBeenCalled();
   });
 
   it("strict-parses, System-authorizes, locks and activates the first Event", async () => {
@@ -838,6 +2234,7 @@ describe("Kitchen queue projection service", () => {
     expect(result.items[0]).not.toHaveProperty("sourceEventSemanticDigest");
     expect(result).not.toHaveProperty("sourceEventBindingDigest");
     expect(result).not.toHaveProperty("queueSnapshotDigest");
+    expect(result).not.toHaveProperty("snapshotBindingVersion");
   });
 
   it("rejects claimed observed time drift before authorization or query access", async () => {
@@ -873,6 +2270,79 @@ describe("Kitchen queue projection service", () => {
     ).rejects.toMatchObject({
       code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE",
     });
+  });
+
+  it("rejects future lifecycle times and lifecycle values under a legacy bounded header", async () => {
+    const active = bundle();
+    const row = firstRow(active.rows);
+    const futureAccepted = parseKitchenQueueRow(
+      rowValue(row, {
+        acceptedAt: projectedAt,
+      }),
+    );
+    const futureReady = parseKitchenQueueRow(
+      rowValue(row, {
+        ticketAggregateVersion: 5n,
+        workItemVersion: 5n,
+        status: "Completed",
+        completedQuantity: 2,
+        acceptedAt: createdAt,
+        orderItemReadyAt: projectedAt,
+      }),
+    );
+    const legacyGeneration = parseKitchenQueueStoredGeneration(
+      generationValue(active.generation, {
+        snapshotBindingVersion: 1,
+        queueSnapshotDigest: computeKitchenQueueSnapshotDigest(
+          {
+            brandReference: active.generation.brandReference,
+            storeReference: active.generation.storeReference,
+            rows: active.rows,
+            snapshotBindingVersion: 1,
+          },
+          sha256,
+        ),
+      }),
+    );
+    const legacyAccepted = parseKitchenQueueRow(rowValue(row, { acceptedAt: createdAt }));
+    const legacyReady = parseKitchenQueueRow(
+      rowValue(row, {
+        ticketAggregateVersion: 5n,
+        workItemVersion: 5n,
+        status: "Completed",
+        completedQuantity: 2,
+        acceptedAt: createdAt,
+        orderItemReadyAt: createdAt,
+      }),
+    );
+    for (const candidate of [
+      { generation: active.generation, row: futureAccepted },
+      { generation: active.generation, row: futureReady },
+      { generation: legacyGeneration, row: legacyAccepted },
+      { generation: legacyGeneration, row: legacyReady },
+    ]) {
+      const test = harness({
+        listRead: {
+          status: "Found",
+          generation: candidate.generation,
+          rows: [candidate.row],
+          returnedCount: 1,
+          hasMore: false,
+        },
+        getRead: {
+          status: "Found",
+          generation: candidate.generation,
+          row: candidate.row,
+        },
+      });
+      const service = createKitchenQueueProjectionService(test.ports);
+      await expect(service.list(queryInput())).rejects.toMatchObject({
+        code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE",
+      });
+      await expect(service.get(getInput())).rejects.toMatchObject({
+        code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE",
+      });
+    }
   });
 
   it("returns authorized Get not-found without exposing repository detail", async () => {
@@ -976,7 +2446,7 @@ function rebuiltBundle(
     readonly feed?: KitchenQueueSourceFeed;
     readonly status?: "Building" | "Active" | "Retired";
   } = {},
-): KitchenQueueProjectionBundle {
+): KitchenQueueStoredProjectionBundle {
   const request = input.request ?? rebuildRequest();
   const feed =
     input.feed ??
@@ -987,7 +2457,7 @@ function rebuiltBundle(
       }),
     });
   const rows = buildKitchenQueueRows({ generationReference: id(101), feed, sha256 });
-  const generation = buildKitchenQueueGeneration({
+  const generation = buildKitchenQueueStoredGeneration({
     generationReference: id(101),
     generationStatus: input.status === "Building" ? "Building" : "Active",
     feed,
@@ -1000,7 +2470,9 @@ function rebuiltBundle(
   return Object.freeze({
     generation:
       input.status === "Retired"
-        ? parseKitchenQueueGeneration(generationValue(generation, { generationStatus: "Retired" }))
+        ? parseKitchenQueueStoredGeneration(
+            generationValue(generation, { generationStatus: "Retired" }),
+          )
         : generation,
     rows,
   });
@@ -1029,6 +2501,44 @@ describe("Kitchen queue Inbox, rebuild and negative boundaries", () => {
     ).resolves.toEqual({ status: "duplicate_completed" });
     expect(spies.authorize).toHaveBeenCalledTimes(1);
     expect(spies.loadIncremental).toHaveBeenCalledTimes(1);
+    expect([...database.rows.values()][0]).toMatchObject({
+      status: "completed",
+      result_hash: null,
+    });
+  });
+
+  it("short-circuits a lifecycle duplicate in generic Inbox before parsing or authorization", async () => {
+    const database = new SyntheticInbox();
+    const active = bundle();
+    const event = lifecycleEvent("KitchenWorkAccepted");
+    const { ports, spies } = harness({
+      active: { status: "Found", generation: active.generation, rows: active.rows },
+      lifecycleIncrementalFeed: lifecycleSourceFeed({ events: [event], includeReady: false }),
+      lifecycleComparison: "Successor",
+      clockValues: [acceptedAt, acceptedAt],
+    });
+    const service = createKitchenQueueProjectionService(ports);
+    await expect(
+      database.run((value) =>
+        service.consumeLifecycle(
+          value,
+          kitchenWorkAcceptedEventConsumer,
+          asLifecycleEnvelope(event),
+        ),
+      ),
+    ).resolves.toEqual({ status: "processed" });
+    await expect(
+      database.run((value) =>
+        service.consumeLifecycle(
+          value,
+          kitchenWorkAcceptedEventConsumer,
+          asLifecycleEnvelope(event),
+        ),
+      ),
+    ).resolves.toEqual({ status: "duplicate_completed" });
+    expect(spies.authorize).toHaveBeenCalledTimes(1);
+    expect(spies.loadLifecycleIncremental).toHaveBeenCalledTimes(1);
+    expect(spies.replaceActive).toHaveBeenCalledTimes(1);
     expect([...database.rows.values()][0]).toMatchObject({
       status: "completed",
       result_hash: null,
@@ -1099,7 +2609,7 @@ describe("Kitchen queue Inbox, rebuild and negative boundaries", () => {
 
   it("retries stored Active corruption and digest outages", async () => {
     const active = bundle();
-    const corrupt = parseKitchenQueueGeneration(
+    const corrupt = parseKitchenQueueStoredGeneration(
       generationValue(active.generation, { queueSnapshotDigest: sha256("wrong") }),
     );
     const stored = harness({
@@ -1186,7 +2696,7 @@ describe("Kitchen queue Inbox, rebuild and negative boundaries", () => {
     });
     await expect(
       createKitchenQueueProjectionService(repeat.ports).rebuild(request),
-    ).resolves.toEqual(retained.generation);
+    ).resolves.toEqual(stripKitchenQueueStoredGeneration(retained.generation));
     expect(repeat.spies.loadRebuild).not.toHaveBeenCalled();
     expect(repeat.spies.replaceActive).not.toHaveBeenCalled();
 
@@ -1312,6 +2822,7 @@ describe("Kitchen queue Inbox, rebuild and negative boundaries", () => {
     });
     const result = await createKitchenQueueProjectionService(ports).get(getInput());
     expect(result.projectionHealth).toBe("NotAvailable");
+    expect(result).not.toHaveProperty("snapshotBindingVersion");
     expect(result.futureCapabilities).toEqual({
       course: "NotAvailable",
       priority: "NotAvailable",

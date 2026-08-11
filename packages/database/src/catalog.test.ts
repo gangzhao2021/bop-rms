@@ -78,6 +78,7 @@ describe("migration catalog", () => {
       "1400_005_create_payment_reconciliation",
       "1500_001_create_kitchen_ticket_aggregate",
       "1500_002_create_kitchen_work_queue_projection",
+      "1500_003_create_kitchen_work_lifecycle",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -419,6 +420,29 @@ describe("migration catalog", () => {
     expect(migration?.sql).not.toMatch(
       /customer_note|allergen|health|preparation|routing|source_line|execution|work_plan/iu,
     );
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1404 Kitchen work lifecycle migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1500_003_create_kitchen_work_lifecycle",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/kitchen");
+    expect(migration?.metadata.schema).toBe("rms_kitchen");
+    for (const table of ["kitchen_work_lifecycle_operation", "kitchen_order_item_ready_result"])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_kitchen.${table}`);
+    expect(migration?.sql).toContain("snapshot_binding_version");
+    expect(migration?.sql).toContain("accepted_at");
+    expect(migration?.sql).toContain("order_item_ready_at");
+    expect(migration?.sql).toContain("kitchen_work_item_lifecycle_quantity_check");
+    expect(migration?.sql).toContain("kitchen_work_queue_projection_lifecycle_quantity_check");
+    expect(migration?.sql).toContain("kitchen_work_lifecycle_operation_idempotency_unique");
+    expect(migration?.sql).toContain("kitchen_order_item_ready_result_causal_operation_fk");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(2);
+    expect(migration?.sql.match(/SECURITY INVOKER/gu)).toHaveLength(2);
+    expect(migration?.sql.match(/SET search_path = pg_catalog/gu)).toHaveLength(2);
+    expect(migration?.sql).not.toMatch(/CREATE RULE\s+\w+no_update/iu);
+    expect(migration?.sql).not.toMatch(/customer_note|allergen|health|payment|provider/iu);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

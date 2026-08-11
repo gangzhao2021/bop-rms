@@ -59,6 +59,7 @@ function generation(overrides = {}) {
     rebuild_request_digest: null,
     rebuild_requested_at: null,
     expected_prior_generation_id: null,
+    snapshot_binding_version: 2,
     ...overrides,
   };
 }
@@ -92,6 +93,8 @@ function queueRow(source, generationRow, overrides = {}) {
     source_event_semantic_digest: sha("c"),
     source_event_occurred_at: source.createdAt,
     work_item_created_at: source.createdAt,
+    accepted_at: null,
+    order_item_ready_at: null,
     ...overrides,
   };
 }
@@ -205,7 +208,7 @@ async function prove(context) {
     const migrationCount = await client.query(
       "SELECT count(*)::integer AS count FROM platform_core.migration_history",
     );
-    assert.equal(migrationCount.rows[0].count, 48);
+    assert.equal(migrationCount.rows[0].count, 49);
 
     const inventory = await client.query(
       `SELECT table_name FROM information_schema.tables
@@ -216,8 +219,10 @@ async function prove(context) {
       inventory.rows.map((row) => row.table_name),
       [
         "kitchen_action_record",
+        "kitchen_order_item_ready_result",
         "kitchen_ticket",
         "kitchen_work_item",
+        "kitchen_work_lifecycle_operation",
         "kitchen_work_queue_projection",
         "kitchen_work_queue_projection_generation",
       ],
@@ -252,6 +257,7 @@ async function prove(context) {
         "rebuild_request_digest",
         "rebuild_requested_at",
         "expected_prior_generation_id",
+        "snapshot_binding_version",
       ],
     );
     const rowColumns = await client.query(
@@ -283,6 +289,8 @@ async function prove(context) {
         "source_event_semantic_digest",
         "source_event_occurred_at",
         "work_item_created_at",
+        "accepted_at",
+        "order_item_ready_at",
       ],
     );
     const forbiddenProjectionColumns = [
@@ -411,6 +419,29 @@ async function prove(context) {
       ],
     );
 
+    const { snapshot_binding_version: omittedBindingVersion, ...missingBindingVersion } =
+      generation({
+        projection_generation_id: id(199),
+        generation_status: "Building",
+      });
+    assert.equal(omittedBindingVersion, 2);
+    await assert.rejects(
+      insertRow(client, "kitchen_work_queue_projection_generation", missingBindingVersion),
+      /snapshot_binding_version/u,
+    );
+    await assert.rejects(
+      insertRow(
+        client,
+        "kitchen_work_queue_projection_generation",
+        generation({
+          projection_generation_id: id(198),
+          generation_status: "Building",
+          snapshot_binding_version: 3,
+        }),
+      ),
+      /kitchen_work_queue_generation_snapshot_binding_version_check/u,
+    );
+
     await assert.rejects(
       insertRow(
         client,
@@ -491,6 +522,46 @@ async function prove(context) {
     await assert.rejects(
       insertRow(client, "kitchen_work_queue_projection", {
         ...item,
+        status: "In Progress",
+        completed_quantity: item.required_quantity,
+      }),
+      /kitchen_work_queue_projection_lifecycle_quantity_check/u,
+    );
+    await assert.rejects(
+      insertRow(client, "kitchen_work_queue_projection", {
+        ...item,
+        accepted_at: "2026-08-09T13:59:59.999Z",
+      }),
+      /kitchen_work_queue_projection_lifecycle_time_check/u,
+    );
+    await assert.rejects(
+      insertRow(client, "kitchen_work_queue_projection", {
+        ...item,
+        order_item_ready_at: projectedAt,
+      }),
+      /kitchen_work_queue_projection_lifecycle_time_check/u,
+    );
+    await assert.rejects(
+      insertRow(client, "kitchen_work_queue_projection", {
+        ...item,
+        accepted_at: asOf,
+        order_item_ready_at: projectedAt,
+      }),
+      /kitchen_work_queue_projection_lifecycle_time_check/u,
+    );
+    await assert.rejects(
+      insertRow(client, "kitchen_work_queue_projection", {
+        ...item,
+        status: "Completed",
+        completed_quantity: item.required_quantity,
+        accepted_at: projectedAt,
+        order_item_ready_at: asOf,
+      }),
+      /kitchen_work_queue_projection_lifecycle_time_check/u,
+    );
+    await assert.rejects(
+      insertRow(client, "kitchen_work_queue_projection", {
+        ...item,
         source_event_semantic_digest: `sha256:${"C".repeat(64)}`,
       }),
       /source_event_semantic_digest/u,
@@ -537,6 +608,15 @@ async function prove(context) {
          SET queue_snapshot_digest=$1
          WHERE brand_id=$2 AND store_id=$3 AND projection_generation_id=$4`,
         [sha("9"), shadow.brand_id, shadow.store_id, shadow.projection_generation_id],
+      ),
+      /permits only immutable Building to Active to Retired transitions/u,
+    );
+    await assert.rejects(
+      client.query(
+        `UPDATE rms_kitchen.kitchen_work_queue_projection_generation
+         SET snapshot_binding_version=1
+         WHERE brand_id=$1 AND store_id=$2 AND projection_generation_id=$3`,
+        [shadow.brand_id, shadow.store_id, shadow.projection_generation_id],
       ),
       /permits only immutable Building to Active to Retired transitions/u,
     );

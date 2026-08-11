@@ -11,6 +11,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "personal", "health"],
     },
     {
+      table: "kitchen_order_item_ready_result",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
       table: "kitchen_ticket",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@rms/kitchen" },
@@ -25,6 +33,14 @@ const databaseAccessManifestInput = {
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier", "personal", "health"],
+    },
+    {
+      table: "kitchen_work_lifecycle_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "personal"],
     },
     {
       table: "kitchen_work_queue_projection",

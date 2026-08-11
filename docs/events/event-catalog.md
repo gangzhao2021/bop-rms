@@ -5,7 +5,11 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 
 ## Registered Events
 
+- `KitchenItemCompleted:v1` — owner `@rms/kitchen`; stable; store; personal
+- `KitchenItemProgressRecorded:v1` — owner `@rms/kitchen`; stable; store; personal
+- `KitchenWorkAccepted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenWorkCreated:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
+- `KitchenWorkStarted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `MenuPublished:v1` — owner `@rms/catalog`; stable; brand; none
 - `OrderConfirmed:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderCreated:v1` — owner `@rms/ordering`; stable; store; indirect_identifier

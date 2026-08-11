@@ -1,7 +1,8 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 
+import type { KitchenWorkLifecycleEnvelope } from "../../contracts/kitchen-work-lifecycle-events.js";
+
 import type {
-  KitchenQueueGeneration,
   KitchenQueueGetQuery,
   KitchenQueueListQuery,
   KitchenQueueRebuildRequest,
@@ -9,9 +10,14 @@ import type {
   KitchenQueueSourceEvent,
   KitchenQueueSourceFeed,
 } from "../../contracts/kitchen-queue-projection.js";
+import type {
+  KitchenQueueLifecycleSourceFeed,
+  KitchenQueueStoredGeneration,
+} from "../../domain/kitchen-queue-projection.js";
 
 export type KitchenQueueCheckpointComparison =
   "Initial" | "Exact" | "Successor" | "Gap" | "Regression" | "ChangedAsOf" | "Unknown";
+export type KitchenQueueLifecycleCheckpointComparison = "Current" | "Successor" | "RetryRequired";
 
 export type KitchenQueueStoredProjection =
   | { readonly status: "NotFound" }
@@ -154,10 +160,29 @@ export interface KitchenQueueProjectionPorts {
         readonly sourceCheckpointReference: string;
         readonly asOfUtc: string;
         readonly coverageStatus: "CompleteThroughCheckpoint";
-        readonly completeSourceFeed: KitchenQueueSourceFeed;
+        readonly completeSourceFeed: KitchenQueueLifecycleSourceFeed;
       };
       readonly transaction: ConsumerTransaction;
     }): Promise<KitchenQueueCheckpointComparison>;
+    compareLifecycleIncremental(input: {
+      readonly brandReference: string;
+      readonly storeReference: string;
+      readonly current: {
+        readonly sourceCheckpointReference: string;
+        readonly asOfUtc: string;
+        readonly generation: KitchenQueueStoredGeneration;
+        readonly rows: readonly KitchenQueueRow[];
+      };
+      readonly candidate: {
+        readonly sourceCheckpointReference: string;
+        readonly asOfUtc: string;
+        readonly sourceEventReference: string;
+        readonly sourceEventSemanticDigest: string;
+        readonly coverageStatus: "CompleteThroughCheckpoint";
+        readonly lifecycleSource: KitchenQueueLifecycleSourceFeed;
+      };
+      readonly transaction: ConsumerTransaction;
+    }): Promise<KitchenQueueLifecycleCheckpointComparison>;
   };
   readonly sources: {
     loadIncremental(input: {
@@ -166,6 +191,10 @@ export interface KitchenQueueProjectionPorts {
     }): Promise<unknown>;
     loadRebuild(input: {
       readonly request: KitchenQueueRebuildRequest;
+      readonly transaction: ConsumerTransaction;
+    }): Promise<unknown>;
+    loadLifecycleIncremental(input: {
+      readonly event: KitchenWorkLifecycleEnvelope;
       readonly transaction: ConsumerTransaction;
     }): Promise<unknown>;
   };
@@ -184,7 +213,7 @@ export interface KitchenQueueProjectionPorts {
     }): Promise<KitchenQueueStoredRebuild>;
     replaceActive(input: {
       readonly expectedActiveGenerationReference: string | null;
-      readonly generation: KitchenQueueGeneration;
+      readonly generation: KitchenQueueStoredGeneration;
       readonly rows: readonly KitchenQueueRow[];
       readonly transaction: ConsumerTransaction;
     }): Promise<KitchenQueueProjectionCommit>;
