@@ -381,6 +381,9 @@ importers:
       '@bop/eventing':
         specifier: workspace:*
         version: link:../../bop/eventing
+      '@rms/kitchen':
+        specifier: workspace:*
+        version: link:../kitchen
       '@rms/ordering':
         specifier: workspace:*
         version: link:../ordering

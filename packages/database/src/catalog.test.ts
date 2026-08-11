@@ -83,6 +83,7 @@ describe("migration catalog", () => {
       "1500_005_create_kitchen_allergen_safety",
       "1500_006_create_kds_continuity",
       "1700_001_create_pickup_fulfillment",
+      "1700_002_create_fulfillment_readiness",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -518,6 +519,23 @@ describe("migration catalog", () => {
     expect(migration?.sql).toContain("fulfillment_order_unique");
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
     expect(migration?.sql.match(/reject_fulfillment_append_only_update/gu)).toHaveLength(5);
+    expect(migration?.sql).not.toMatch(
+      /\b(?:customer|note|price|payment|provider|credential|token|pan|cvv|health)\b/iu,
+    );
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1601 Fulfillment readiness migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1700_002_create_fulfillment_readiness",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/fulfillment");
+    expect(migration?.metadata.schema).toBe("rms_fulfillment");
+    expect(migration?.sql).toContain("CREATE TABLE rms_fulfillment.fulfillment_item_ready_result");
+    expect(migration?.sql).toContain("CREATE TABLE rms_fulfillment.fulfillment_ready_operation");
+    expect(migration?.sql).toContain("fulfillment_ready_operation_version_unique");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(2);
+    expect(migration?.sql.match(/reject_fulfillment_append_only_update/gu)).toHaveLength(2);
     expect(migration?.sql).not.toMatch(
       /\b(?:customer|note|price|payment|provider|credential|token|pan|cvv|health)\b/iu,
     );
