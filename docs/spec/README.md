@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1605 — Order Completion Projection on codex/wp-1605`
+- Current discussion node: `WP-1700 — QR Entry and Store Context Screen on codex/wp-1700`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,10 +17,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1605 — Order Completion Projection` is active from exact integrated
-  `main@bcfdba72122b34318ddafddb44c71944c6cb2131`. It owns Ordering's strict Store-scoped
-  `FulfillmentCompleted.v1` consumer and the bounded `Fulfilled + Open` projection advance described
-  in `docs/spec/work-packages/WP-1605.md`; Order close/reopen and Customer UI remain later work.
+- `WP-1700 — QR Entry and Store Context Screen` is active from exact integrated and exact-main
+  verified `main@5af7e926e0315cb508e9fafb6e04fed6b3d8cc1c`. It owns only the contextual
+  `CUST-ENTRY-CONTEXT` browser fragment handoff, strict public Store context rendering and bounded
+  Customer-entry success-contract extension described in `docs/spec/work-packages/WP-1700.md`.
+
+- `WP-1605 — Order Completion Projection` is implemented and integrated at squash
+  `5af7e926e0315cb508e9fafb6e04fed6b3d8cc1c` via PR #162. Exact implementation head
+  `1a51ae720de1cfa6e9ac8881eb040f93be147e7e` passed run/job
+  `31539866969 / 93939591779`; exact-main run/job `31540989791 / 93943079444` passed.
+  It owns Ordering's strict Store-scoped `FulfillmentCompleted.v1` consumer and bounded
+  `Fulfilled + Open` projection advance.
 
 - `WP-1604 — FulfillmentCompleted Event` is implemented and integrated at squash
   `bcfdba72122b34318ddafddb44c71944c6cb2131` via PR #161. It began from exact integrated and exact-main verified

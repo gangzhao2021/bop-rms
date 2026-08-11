@@ -25,6 +25,100 @@
   font-weight: 600;
 }
 
+.entry-card,
+.entry-help {
+  padding: var(--bop-space-5);
+  border: 1px solid var(--bop-color-border);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface);
+}
+
+.entry-card h2,
+.entry-help h2,
+.entry-card p,
+.entry-help p {
+  margin-block-start: 0;
+}
+
+.entry-help {
+  margin-top: var(--bop-space-5);
+  color: var(--bop-color-text-muted);
+}
+
+.entry-context {
+  color: var(--bop-color-text-muted);
+  font-weight: 600;
+}
+
+.entry-details {
+  margin-block: var(--bop-space-5);
+}
+
+.entry-details div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(0, 2fr);
+  gap: var(--bop-space-3);
+  padding-block: var(--bop-space-3);
+  border-top: 1px solid var(--bop-color-border);
+}
+
+.entry-details dt {
+  font-weight: 700;
+}
+
+.entry-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.entry-action {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: var(--bop-space-2) var(--bop-space-4);
+  border: 1px solid var(--bop-color-brand-primary);
+  border-radius: var(--bop-radius-surface);
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-brand-primary);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.entry-action:focus-visible,
+#entry-heading:focus-visible {
+  outline: 3px solid var(--bop-color-brand-primary);
+  outline-offset: 3px;
+}
+
+.entry-state,
+.entry-closed {
+  padding: var(--bop-space-4);
+  border-inline-start: 4px solid currentColor;
+  background: var(--bop-color-surface-muted);
+}
+
+.entry-state--warning,
+.entry-closed {
+  border-color: var(--bop-color-status-warning, #8a5a00);
+}
+
+.entry-state--error {
+  border-color: var(--bop-color-status-danger, #a32929);
+}
+
+@media (max-width: 31.999rem) {
+  .entry-details div {
+    grid-template-columns: 1fr;
+    gap: var(--bop-space-1);
+  }
+
+  .entry-action {
+    width: 100%;
+  }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
