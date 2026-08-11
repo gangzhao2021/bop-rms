@@ -47,6 +47,9 @@ async function prove(context) {
       paymentStatus: "NotReported",
       kitchenStatus: "Unavailable",
       fulfillmentStatus: "Unavailable",
+      fulfillmentReference: null,
+      fulfillmentCompletionEventReference: null,
+      fulfillmentCompletedAt: null,
       batches: [],
     });
     await client.query(

@@ -40,11 +40,14 @@ export interface OrderStatusSourceSnapshot {
   readonly orderNumber: string;
   readonly orderType: CartOrderType;
   readonly sourceChannel: CartSourceChannel;
-  readonly canonicalPhase: "Submitted";
+  readonly canonicalPhase: "Submitted" | "Fulfilled";
   readonly closureStatus: "Open";
   readonly paymentStatus: "NotReported";
   readonly kitchenStatus: "Unavailable";
-  readonly fulfillmentStatus: "Unavailable";
+  readonly fulfillmentStatus: "Unavailable" | "Completed";
+  readonly fulfillmentReference: OrderingReference | null;
+  readonly fulfillmentCompletionEventReference: OrderingReference | null;
+  readonly fulfillmentCompletedAt: OrderingInstant | null;
   readonly eta: null;
   readonly submittedAt: OrderingInstant;
   readonly batches: readonly OrderStatusBatchSummary[];
@@ -181,6 +184,9 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
     "paymentStatus",
     "kitchenStatus",
     "fulfillmentStatus",
+    "fulfillmentReference",
+    "fulfillmentCompletionEventReference",
+    "fulfillmentCompletedAt",
     "eta",
     "submittedAt",
     "batches",
@@ -194,11 +200,11 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
     !/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u.test(raw.businessDate) ||
     !["DineIn", "Pickup"].includes(String(raw.orderType)) ||
     !["Api", "Pos", "Qr", "Web"].includes(String(raw.sourceChannel)) ||
-    raw.canonicalPhase !== "Submitted" ||
+    !["Submitted", "Fulfilled"].includes(String(raw.canonicalPhase)) ||
     raw.closureStatus !== "Open" ||
     raw.paymentStatus !== "NotReported" ||
     raw.kitchenStatus !== "Unavailable" ||
-    raw.fulfillmentStatus !== "Unavailable" ||
+    !["Unavailable", "Completed"].includes(String(raw.fulfillmentStatus)) ||
     raw.eta !== null ||
     !Array.isArray(raw.batches) ||
     raw.batches.length < 1 ||
@@ -206,6 +212,14 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
   )
     return invalid();
   const submittedAt = parseOrderingInstant(raw.submittedAt);
+  const fulfillmentReference =
+    raw.fulfillmentReference === null ? null : parseOrderingReference(raw.fulfillmentReference);
+  const fulfillmentCompletionEventReference =
+    raw.fulfillmentCompletionEventReference === null
+      ? null
+      : parseOrderingReference(raw.fulfillmentCompletionEventReference);
+  const fulfillmentCompletedAt =
+    raw.fulfillmentCompletedAt === null ? null : parseOrderingInstant(raw.fulfillmentCompletedAt);
   const batches = Object.freeze(raw.batches.map(batch));
   const currencies = new Set(
     batches.flatMap((candidate) =>
@@ -215,7 +229,18 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
   if (
     new Set(batches.map((candidate) => candidate.orderBatchReference)).size !== batches.length ||
     batches.some((candidate) => Date.parse(candidate.submittedAt) < Date.parse(submittedAt)) ||
-    currencies.size !== 1
+    currencies.size !== 1 ||
+    (raw.fulfillmentStatus === "Unavailable" &&
+      (raw.canonicalPhase === "Fulfilled" ||
+        fulfillmentReference !== null ||
+        fulfillmentCompletionEventReference !== null ||
+        fulfillmentCompletedAt !== null)) ||
+    (raw.fulfillmentStatus === "Completed" &&
+      (raw.canonicalPhase !== "Fulfilled" ||
+        fulfillmentReference === null ||
+        fulfillmentCompletionEventReference === null ||
+        fulfillmentCompletedAt === null ||
+        Date.parse(fulfillmentCompletedAt) < Date.parse(submittedAt)))
   )
     return invalid();
   return Object.freeze({
@@ -231,11 +256,14 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
     orderNumber: raw.orderNumber,
     orderType: raw.orderType as CartOrderType,
     sourceChannel: raw.sourceChannel as CartSourceChannel,
-    canonicalPhase: "Submitted",
+    canonicalPhase: raw.canonicalPhase as "Submitted" | "Fulfilled",
     closureStatus: "Open",
     paymentStatus: "NotReported",
     kitchenStatus: "Unavailable",
-    fulfillmentStatus: "Unavailable",
+    fulfillmentStatus: raw.fulfillmentStatus as "Unavailable" | "Completed",
+    fulfillmentReference,
+    fulfillmentCompletionEventReference,
+    fulfillmentCompletedAt,
     eta: null,
     submittedAt,
     batches,

@@ -171,6 +171,7 @@ function customerView(projection: ReturnType<typeof parseOrderStatusProjection>)
       paymentStatus: snapshot.paymentStatus,
       kitchenStatus: snapshot.kitchenStatus,
       fulfillmentStatus: snapshot.fulfillmentStatus,
+      fulfilledAt: snapshot.fulfillmentCompletedAt,
       eta: snapshot.eta,
       submittedAt: snapshot.submittedAt,
       batches: snapshot.batches,
@@ -234,7 +235,10 @@ export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
       const exactReferenceOrNumberValue = exactReferenceOrNumber(raw.exactReferenceOrNumber);
       const orderType = optionalChoice(raw.orderType, ["DineIn", "Pickup"] as const);
       const sourceChannel = optionalChoice(raw.sourceChannel, ["Api", "Pos", "Qr", "Web"] as const);
-      const canonicalPhase = optionalChoice(raw.canonicalPhase, ["Submitted"] as const);
+      const canonicalPhase = optionalChoice(raw.canonicalPhase, [
+        "Submitted",
+        "Fulfilled",
+      ] as const);
       const closureStatus = optionalChoice(raw.closureStatus, ["Open"] as const);
       const paymentStatus = optionalChoice(raw.paymentStatus, ["NotReported"] as const);
       const limit = raw.limit;
