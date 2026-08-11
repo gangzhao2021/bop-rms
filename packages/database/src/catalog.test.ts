@@ -84,6 +84,7 @@ describe("migration catalog", () => {
       "1500_006_create_kds_continuity",
       "1700_001_create_pickup_fulfillment",
       "1700_002_create_fulfillment_readiness",
+      "1700_003_create_pickup_proof",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -539,6 +540,27 @@ describe("migration catalog", () => {
     expect(migration?.sql).not.toMatch(
       /\b(?:customer|note|price|payment|provider|credential|token|pan|cvv|health)\b/iu,
     );
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1602 Pickup Proof migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1700_003_create_pickup_proof",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/fulfillment");
+    expect(migration?.metadata.schema).toBe("rms_fulfillment");
+    for (const table of [
+      "pickup_proof_generation",
+      "pickup_proof_invalidation",
+      "pickup_proof_verification",
+      "pickup_proof_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_fulfillment.${table}`);
+    expect(migration?.sql).toContain("expires_at <= ready_at + interval '60 minutes'");
+    expect(migration?.sql).toContain("selector_hash ~ '^[0-9a-f]{64}$'");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(4);
+    expect(migration?.sql.match(/reject_fulfillment_append_only_update/gu)).toHaveLength(4);
+    expect(migration?.sql).not.toMatch(/\b(?:raw_proof|human_code|opaque_proof|pin|otp)\b/iu);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

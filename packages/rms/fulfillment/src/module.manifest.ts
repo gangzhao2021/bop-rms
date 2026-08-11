@@ -21,6 +21,11 @@ const moduleManifestInput =
         layer: "BOP",
       },
       {
+        moduleName: "public-capability",
+        packageName: "@bop/public-capability",
+        layer: "BOP",
+      },
+      {
         moduleName: "kitchen",
         packageName: "@rms/kitchen",
         layer: "RMS",
@@ -40,6 +45,10 @@ const moduleManifestInput =
         "fulfillment_creation_operation",
         "fulfillment_item",
         "fulfillment_item_ready_result",
+        "pickup_proof_generation",
+        "pickup_proof_invalidation",
+        "pickup_proof_operation",
+        "pickup_proof_verification",
         "fulfillment_ready_operation",
       ],
     },
@@ -47,7 +56,7 @@ const moduleManifestInput =
     featureFlags: [],
     killSwitches: [],
     piiClassification: {
-      classes: ["indirect_identifier"],
+      classes: ["indirect_identifier", "credential"],
       handling: {
         logs: "prohibited",
         urls: "prohibited",

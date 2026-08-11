@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1601 — Kitchen Ready Intake and Pickup Ready Transition on codex/wp-1601`
+- Current discussion node: `WP-1602 — Pickup Proof on codex/wp-1602`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,12 +17,21 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1601 — Kitchen Ready Intake and Pickup Ready Transition` is active for bounded
-  implementation from exact integrated and exact-main verified
-  `main@145971060fc68221e31f0b1f176a012dff09bc10` on `codex/wp-1601`. It owns the
+- `WP-1602 — Pickup Proof` is active for bounded implementation from exact integrated and
+  exact-main verified `main@2ce33ded7c90b90466236d53121dbbecc4af2765` on
+  `codex/wp-1602`. It composes WP-1005's strict 60-minute Pickup Proof capability with an exact
+  Fulfillment-owned Ready source, append-only generation/regeneration/invalidation and successful
+  verification evidence. Raw proofs, handoff, completion, Manager Override, UI/runtime activation
+  and External Evidence remain excluded. Exact boundaries are in
+  `docs/spec/work-packages/WP-1602.md`.
+
+- `WP-1601 — Kitchen Ready Intake and Pickup Ready Transition` is implemented and integrated at
+  squash `2ce33ded7c90b90466236d53121dbbecc4af2765` via PR #158. Exact implementation head
+  `e3485a24bb7e146ca782db3ad6ede9c51771f06d` passed run/job
+  `31523361280 / 93885631865`; exact-main run/job `31524817125 / 93890428853` passed. It owns the
   append-only Fulfillment Item Ready result, exact Kitchen Item Ready intake and backend aggregate
-  Ready derivation. It does not treat Kitchen Order Ready as Fulfillment completion and creates no
-  UI/runtime activation. Exact boundaries are in `docs/spec/work-packages/WP-1601.md`.
+  Ready derivation without treating Kitchen Order Ready as completion. Exact boundaries are in
+  `docs/spec/work-packages/WP-1601.md`.
 
 - `WP-1600 — Pickup Fulfillment Aggregate` is active for bounded implementation from exact
   integrated at squash `145971060fc68221e31f0b1f176a012dff09bc10` via PR #157. Exact
