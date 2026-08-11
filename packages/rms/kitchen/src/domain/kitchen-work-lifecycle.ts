@@ -158,6 +158,14 @@ export interface KitchenOrderItemReadyResultProof {
   readonly readyAt: KitchenInstant;
 }
 
+export interface KitchenTicketReadinessEntry {
+  readonly orderItemReference: KitchenReference;
+  readonly requiredQuantity: number;
+  readonly readyResultReference: KitchenReference | null;
+  readonly readyQuantity: number | null;
+  readonly readyAt: KitchenInstant | null;
+}
+
 export interface KitchenCapturedExpoDecision {
   readonly sourceOperationReference: KitchenReference;
   readonly sourceActionCode: "KITCHEN_WORK_ITEM_COMPLETION_RECORDED";
@@ -191,6 +199,8 @@ export interface KitchenWorkLifecycleSource {
   readonly brandReference: KitchenReference;
   readonly storeReference: KitchenReference;
   readonly ticketReference: KitchenReference;
+  readonly orderReference: KitchenReference;
+  readonly orderBatchReference: KitchenReference;
   readonly ticketStatus: "Open";
   readonly ticketVersion: bigint;
   readonly ticketUpdatedAt: KitchenInstant;
@@ -200,6 +210,7 @@ export interface KitchenWorkLifecycleSource {
   readonly startedOperation: KitchenLifecyclePredecessorOperation | null;
   readonly readyResult: KitchenOrderItemReadyResultProof | null;
   readonly capturedExpo: KitchenCapturedExpoDecision | null;
+  readonly ticketReadiness: readonly KitchenTicketReadinessEntry[];
 }
 
 export interface KitchenWorkLifecycleAuthority {
@@ -330,6 +341,16 @@ function exactArray(value: unknown, length: number, onInvalid: () => never): rea
     if (error instanceof KitchenWorkLifecycleError) throw error;
     return onInvalid();
   }
+}
+
+function boundedExactArray(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  onInvalid: () => never,
+): readonly unknown[] {
+  if (!Array.isArray(value) || value.length < minimum || value.length > maximum) return onInvalid();
+  return exactArray(value, value.length, onInvalid);
 }
 
 function reference(value: unknown, onInvalid: () => never): KitchenReference {
@@ -635,6 +656,35 @@ function parseReadyResultProof(value: unknown): KitchenOrderItemReadyResultProof
   });
 }
 
+function parseTicketReadinessEntry(value: unknown): KitchenTicketReadinessEntry {
+  const raw = exact(
+    value,
+    ["orderItemReference", "requiredQuantity", "readyResultReference", "readyQuantity", "readyAt"],
+    corrupt,
+  );
+  const requiredQuantity = boundedInteger(raw.requiredQuantity, 1, 999, corrupt);
+  const readyResultReference =
+    raw.readyResultReference === null ? null : reference(raw.readyResultReference, corrupt);
+  const readyQuantity =
+    raw.readyQuantity === null
+      ? null
+      : boundedInteger(raw.readyQuantity, 1, requiredQuantity, corrupt);
+  const readyAt = raw.readyAt === null ? null : instant(raw.readyAt, corrupt);
+  if (
+    (readyResultReference === null) !== (readyQuantity === null) ||
+    (readyResultReference === null) !== (readyAt === null) ||
+    (readyQuantity !== null && readyQuantity !== requiredQuantity)
+  )
+    return corrupt();
+  return Object.freeze({
+    orderItemReference: reference(raw.orderItemReference, corrupt),
+    requiredQuantity,
+    readyResultReference,
+    readyQuantity,
+    readyAt,
+  });
+}
+
 export function parseKitchenCapturedExpoDecision(value: unknown): KitchenCapturedExpoDecision {
   const raw = exact(
     value,
@@ -733,6 +783,8 @@ export function parseKitchenWorkLifecycleSource(value: unknown): KitchenWorkLife
       "brandReference",
       "storeReference",
       "ticketReference",
+      "orderReference",
+      "orderBatchReference",
       "ticketStatus",
       "ticketVersion",
       "ticketUpdatedAt",
@@ -742,6 +794,7 @@ export function parseKitchenWorkLifecycleSource(value: unknown): KitchenWorkLife
       "startedOperation",
       "readyResult",
       "capturedExpo",
+      "ticketReadiness",
     ],
     corrupt,
   );
@@ -775,6 +828,8 @@ export function parseKitchenWorkLifecycleSource(value: unknown): KitchenWorkLife
   const ticketReference = reference(raw.ticketReference, corrupt);
   const brandReference = reference(raw.brandReference, corrupt);
   const storeReference = reference(raw.storeReference, corrupt);
+  const orderReference = reference(raw.orderReference, corrupt);
+  const orderBatchReference = reference(raw.orderBatchReference, corrupt);
   const ticketVersion = positiveBigint(raw.ticketVersion, corrupt);
   const ticketUpdatedAt = instant(raw.ticketUpdatedAt, corrupt);
   if (
@@ -797,10 +852,51 @@ export function parseKitchenWorkLifecycleSource(value: unknown): KitchenWorkLife
       readyResult.orderItemReference !== target.orderItemReference)
   )
     return corrupt();
+  const ticketReadiness = boundedExactArray(raw.ticketReadiness, 1, 100, corrupt).map(
+    parseTicketReadinessEntry,
+  );
+  const readinessItems = ticketReadiness.map((entry) => entry.orderItemReference);
+  const targetReadiness = ticketReadiness.find(
+    (entry) => entry.orderItemReference === target.orderItemReference,
+  );
+  if (
+    targetReadiness === undefined ||
+    new Set(readinessItems).size !== readinessItems.length ||
+    readinessItems.some(
+      (value, index) => index > 0 && value <= (readinessItems[index - 1] as string),
+    ) ||
+    targetReadiness.requiredQuantity !== target.requiredQuantity ||
+    targetReadiness.readyResultReference !== (readyResult?.readyResultReference ?? null) ||
+    targetReadiness.readyQuantity !== (readyResult?.readyQuantity ?? null) ||
+    targetReadiness.readyAt !== (readyResult?.readyAt ?? null) ||
+    ticketReadiness.some(
+      (entry) => entry.readyAt !== null && Date.parse(entry.readyAt) > Date.parse(ticketUpdatedAt),
+    )
+  )
+    return corrupt();
+  const ownerReferences = [
+    brandReference,
+    storeReference,
+    ticketReference,
+    orderReference,
+    orderBatchReference,
+    ...readinessItems,
+  ];
+  const readinessProofReferences = ticketReadiness.flatMap((entry) =>
+    entry.readyResultReference === null ? [] : [entry.readyResultReference],
+  );
+  if (
+    new Set(ownerReferences).size !== ownerReferences.length ||
+    new Set(readinessProofReferences).size !== readinessProofReferences.length ||
+    readinessProofReferences.some((proofReference) => ownerReferences.includes(proofReference))
+  )
+    return corrupt();
   return Object.freeze({
     brandReference,
     storeReference,
     ticketReference,
+    orderReference,
+    orderBatchReference,
     ticketStatus: "Open",
     ticketVersion,
     ticketUpdatedAt,
@@ -810,6 +906,7 @@ export function parseKitchenWorkLifecycleSource(value: unknown): KitchenWorkLife
     startedOperation,
     readyResult,
     capturedExpo,
+    ticketReadiness: Object.freeze(ticketReadiness),
   });
 }
 

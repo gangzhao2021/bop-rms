@@ -24,6 +24,10 @@ import {
   parseKitchenWorkStartedEnvelope,
 } from "../application/kitchen-work-lifecycle-events.js";
 import {
+  parseKitchenItemReadyEnvelope,
+  parseKitchenOrderReadyEnvelope,
+} from "../application/kitchen-ready-events.js";
+import {
   createKitchenWorkLifecycleAuditSemanticBinding,
   createKitchenWorkLifecycleService,
 } from "../application/kitchen-work-lifecycle-service.js";
@@ -54,6 +58,9 @@ const refs = Object.freeze({
   startedOperation: id(11),
   admission: id(12),
   expo: id(13),
+  order: id(14),
+  batch: id(15),
+  otherOrderItem: id(16),
 });
 
 const createdAt = "2026-08-09T11:00:00.000Z";
@@ -114,6 +121,8 @@ function source(
     brandReference: refs.brand,
     storeReference: refs.store,
     ticketReference: refs.ticket,
+    orderReference: refs.order,
+    orderBatchReference: refs.batch,
     ticketStatus: "Open",
     ticketVersion: version,
     ticketUpdatedAt: updatedAt,
@@ -126,6 +135,15 @@ function source(
         : null,
     readyResult: null,
     capturedExpo,
+    ticketReadiness: [
+      {
+        orderItemReference: refs.orderItem,
+        requiredQuantity: 3,
+        readyResultReference: null,
+        readyQuantity: null,
+        readyAt: null,
+      },
+    ],
   };
 }
 
@@ -875,6 +893,23 @@ describe("Kitchen work lifecycle service", () => {
       sha256(createKitchenWorkLifecycleAuditSemanticBinding(effect.audits[1])),
     );
     expect(effect.automaticReadyOperation.eventSemanticDigest).toBeNull();
+    expect(parseKitchenItemReadyEnvelope(effect.readyPublication?.itemEvent)).toMatchObject({
+      aggregateId: effect.readyResult?.readyResultReference,
+      causationId: effect.automaticReadyOperation.operationReference,
+      actor: { type: "System" },
+      payload: {
+        orderReference: refs.order,
+        orderBatchReference: refs.batch,
+        orderItemReference: refs.orderItem,
+        readyQuantity: 3,
+        requiredQuantity: 3,
+      },
+    });
+    expect(parseKitchenOrderReadyEnvelope(effect.readyPublication?.orderEvent)).toMatchObject({
+      aggregateId: refs.ticket,
+      aggregateVersion: 4n,
+      payload: { readyItemCount: 1, itemCount: 1 },
+    });
   });
 
   it("allows a different authorized Expo operator to Mark Ready without a current Expo call", async () => {
@@ -907,6 +942,13 @@ describe("Kitchen work lifecycle service", () => {
     expect(readyTest.resolveExpo).not.toHaveBeenCalled();
     expect(readyTest.effect()?.event).toBeNull();
     expect(readyTest.effect()?.operation.actorReference).toBe(refs.expoActor);
+    expect(readyTest.effect()?.readyPublication).toMatchObject({
+      orderReference: refs.order,
+      orderBatchReference: refs.batch,
+      causationReference: readyTest.effect()?.operation.operationReference,
+      itemCount: 1,
+    });
+    expect(readyTest.effect()?.readyPublication?.itemEvent.actor).toEqual({ type: "System" });
 
     const advancedReady = command("MarkKitchenOrderItemReady", {
       expectedTicketVersion: "7",
@@ -947,6 +989,33 @@ describe("Kitchen work lifecycle service", () => {
     );
     expect(futureCaptured.effect()).toBeNull();
     expect(futureCaptured.now).not.toHaveBeenCalled();
+  });
+
+  it("publishes Item Ready but not Order Ready while another Ticket Item remains unready", async () => {
+    const complete = command("CompleteKitchenWorkItem", { quantityDelta: 3 });
+    const base = source("Complete");
+    const test = harness({
+      command: complete,
+      expoMode: "Disabled",
+      source: {
+        ...base,
+        ticketReadiness: [
+          base.ticketReadiness[0],
+          {
+            orderItemReference: refs.otherOrderItem,
+            requiredQuantity: 2,
+            readyResultReference: null,
+            readyQuantity: null,
+            readyAt: null,
+          },
+        ],
+      },
+    });
+    await test.service.execute(complete);
+    expect(test.effect()?.readyPublication?.itemEvent.eventType).toBe("KitchenItemReady");
+    expect(test.effect()?.readyPublication?.orderEvent).toBeNull();
+    expect(test.effect()?.readyPublication?.orderEventSemanticDigest).toBeNull();
+    expect(test.effect()?.readyPublication?.itemCount).toBe(2);
   });
 
   it("replays under a fresh trusted correlation while preserving original durable lineage", async () => {
@@ -1316,9 +1385,27 @@ describe("Kitchen work lifecycle service", () => {
       requiredQuantity: 3,
       readyAt: actionAt,
     } as const;
+    const readinessFor = (proof: {
+      readonly readyResultReference: string;
+      readonly readyQuantity: number;
+      readonly requiredQuantity: number;
+      readonly readyAt: string;
+    }) => [
+      {
+        orderItemReference: refs.orderItem,
+        requiredQuantity: proof.requiredQuantity,
+        readyResultReference: proof.readyResultReference,
+        readyQuantity: proof.readyQuantity,
+        readyAt: proof.readyAt,
+      },
+    ];
     const duplicate = harness({
       command: ready,
-      source: { ...baseSource, readyResult: readyProof },
+      source: {
+        ...baseSource,
+        readyResult: readyProof,
+        ticketReadiness: readinessFor(readyProof),
+      },
       referenceSeed: 200,
     });
     duplicate.setObservedAt("2026-08-09T12:10:00.000Z");
@@ -1336,7 +1423,11 @@ describe("Kitchen work lifecycle service", () => {
     for (const corruptProof of corruptProofs) {
       const corrupt = harness({
         command: ready,
-        source: { ...baseSource, readyResult: corruptProof },
+        source: {
+          ...baseSource,
+          readyResult: corruptProof,
+          ticketReadiness: readinessFor(corruptProof),
+        },
         referenceSeed: 200,
       });
       corrupt.setObservedAt("2026-08-09T12:10:00.000Z");
@@ -1366,6 +1457,7 @@ describe("Kitchen work lifecycle service", () => {
       ticketVersion: 5n,
       ticketUpdatedAt: priorReadyAt,
       readyResult: { ...readyProof, readyAt: priorReadyAt },
+      ticketReadiness: readinessFor({ ...readyProof, readyAt: priorReadyAt }),
     };
     const validCaptured = harness({
       command: readyAfterManual,

@@ -210,6 +210,30 @@ const kitchenItemCompletedPayload = z
       payload.completedQuantity === payload.requiredQuantity,
   );
 
+const kitchenItemReadyPayload = z
+  .strictObject({
+    kitchenTicketReference: z.string().regex(canonicalUuidV7),
+    orderReference: z.string().regex(canonicalUuidV7),
+    orderBatchReference: z.string().regex(canonicalUuidV7),
+    orderItemReference: z.string().regex(canonicalUuidV7),
+    readyResultReference: z.string().regex(canonicalUuidV7),
+    readyQuantity: z.int().min(1).max(999),
+    requiredQuantity: z.int().min(1).max(999),
+    readyAt: z.iso.datetime({ offset: false }),
+  })
+  .refine((payload) => payload.readyQuantity === payload.requiredQuantity);
+
+const kitchenOrderReadyPayload = z
+  .strictObject({
+    kitchenTicketReference: z.string().regex(canonicalUuidV7),
+    orderReference: z.string().regex(canonicalUuidV7),
+    orderBatchReference: z.string().regex(canonicalUuidV7),
+    readyItemCount: z.int().min(1).max(100),
+    itemCount: z.int().min(1).max(100),
+    readyAt: z.iso.datetime({ offset: false }),
+  })
+  .refine((payload) => payload.readyItemCount === payload.itemCount);
+
 const menuPublishedPayload = z.strictObject({
   menuReference: z.uuid(),
   menuVersionReference: z.uuid(),
@@ -303,6 +327,38 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: kitchenItemProgressRecordedPayload,
+  },
+  {
+    eventType: "KitchenItemReady",
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen",
+    producerModule: "@rms/kitchen",
+    stability: "stable",
+    consumers: ["fulfillment.kitchen-item-ready:v1"],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: kitchenItemReadyPayload,
+  },
+  {
+    eventType: "KitchenOrderReady",
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen",
+    producerModule: "@rms/kitchen",
+    stability: "stable",
+    consumers: ["fulfillment.kitchen-order-ready:v1"],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: kitchenOrderReadyPayload,
   },
   {
     eventType: "KitchenWorkAccepted",

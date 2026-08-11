@@ -19,6 +19,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "personal"],
     },
     {
+      table: "kitchen_ready_publication",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "kitchen_ticket",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@rms/kitchen" },

@@ -3,6 +3,10 @@ import type { ConsumerTransaction } from "@bop/eventing";
 
 import type { KitchenWorkLifecycleEnvelope } from "../../contracts/kitchen-work-lifecycle-events.js";
 import type {
+  KitchenItemReadyEnvelope,
+  KitchenOrderReadyEnvelope,
+} from "../../contracts/kitchen-ready-events.js";
+import type {
   KitchenCapturedExpoDecision,
   KitchenExpoPolicyDecision,
   KitchenLifecycleWorkItemStatus,
@@ -114,8 +118,31 @@ export interface KitchenWorkLifecycleEffect {
   readonly automaticReadyEffectDigest: string | null;
   readonly audits: readonly AppendAuditRecordInput[];
   readonly event: KitchenWorkLifecycleEnvelope | null;
+  readonly readyPublication: KitchenReadyPublication | null;
   readonly result: KitchenWorkLifecycleResult;
   readonly effectDigest: string;
+}
+
+export interface KitchenReadyPublication {
+  readonly publicationReference: string;
+  readonly brandReference: string;
+  readonly storeReference: string;
+  readonly ticketReference: string;
+  readonly orderReference: string;
+  readonly orderBatchReference: string;
+  readonly orderItemReference: string;
+  readonly readyResultReference: string;
+  readonly ticketVersion: bigint;
+  readonly readyQuantity: number;
+  readonly requiredQuantity: number;
+  readonly itemCount: number;
+  readonly itemEvent: KitchenItemReadyEnvelope;
+  readonly itemEventSemanticDigest: string;
+  readonly orderEvent: KitchenOrderReadyEnvelope | null;
+  readonly orderEventSemanticDigest: string | null;
+  readonly correlationReference: string;
+  readonly causationReference: string;
+  readonly occurredAt: string;
 }
 
 export type KitchenWorkLifecycleResolution =
@@ -125,7 +152,11 @@ export type KitchenWorkLifecycleCommit =
   { readonly status: "Committed"; readonly effect: unknown } | { readonly status: "Conflict" };
 
 export type KitchenWorkLifecycleReferencePurpose =
-  "KitchenWorkLifecycleOperation" | "KitchenWorkLifecycleAudit" | "KitchenWorkLifecycleEvent";
+  | "KitchenWorkLifecycleOperation"
+  | "KitchenWorkLifecycleAudit"
+  | "KitchenWorkLifecycleEvent"
+  | "KitchenReadyPublication"
+  | "KitchenReadyEvent";
 
 export type KitchenWorkLifecycleStableReferencePurpose =
   "KitchenAutomaticOrderItemReadyOperation" | "KitchenOrderItemReadyResult";

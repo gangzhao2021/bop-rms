@@ -48,6 +48,7 @@
     "kitchen-confirmed-order:acceptance": "pnpm --filter @bop/eventing test && pnpm --filter @bop-rms/contracts-events test && pnpm --filter @rms/ordering test && pnpm --filter @rms/kitchen test",
     "kitchen-queue:acceptance": "pnpm --filter @bop/eventing test && pnpm --filter @bop-rms/contracts-events test && pnpm --filter @rms/kitchen test && vitest run --config packages/database/vitest.kitchen-queue-projection.config.ts",
     "kitchen-realtime:acceptance": "pnpm --filter @rms/kitchen test && pnpm realtime:acceptance",
+    "kitchen-ready-event:acceptance": "pnpm --filter @bop-rms/contracts-events test && pnpm --filter @rms/kitchen test && vitest run --config packages/database/vitest.kitchen-ready-event.config.ts",
     "kitchen-station-routing:acceptance": "pnpm --filter @rms/kitchen test",
     "kitchen-ticket:acceptance": "pnpm --filter @bop/audit test && pnpm --filter @bop/eventing test && pnpm --filter @bop-rms/contracts-events test && pnpm --filter @rms/ordering test && pnpm --filter @rms/kitchen test && vitest run --config packages/database/vitest.kitchen-ticket.config.ts",
     "kitchen-work-lifecycle:acceptance": "pnpm --filter @bop/audit test && pnpm --filter @bop/eventing test && pnpm --filter @bop-rms/contracts-events test && pnpm --filter @rms/kitchen test && vitest run --config packages/database/vitest.kitchen-work-lifecycle.config.ts",

@@ -171,6 +171,132 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "store"
       },
+      "KitchenItemReadyV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "KitchenItemReadyV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "kitchenTicketReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderBatchReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderItemReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "readyAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "readyQuantity": {
+              "maximum": 999,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "readyResultReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "requiredQuantity": {
+              "maximum": 999,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kitchenTicketReference",
+            "orderReference",
+            "orderBatchReference",
+            "orderItemReference",
+            "readyResultReference",
+            "readyQuantity",
+            "requiredQuantity",
+            "readyAt"
+          ],
+          "type": "object"
+        },
+        "title": "KitchenItemReady v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["fulfillment.kitchen-item-ready:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "KitchenItemReady",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "KitchenOrderReadyV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "KitchenOrderReadyV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "itemCount": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kitchenTicketReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderBatchReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "readyAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "readyItemCount": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kitchenTicketReference",
+            "orderReference",
+            "orderBatchReference",
+            "readyItemCount",
+            "itemCount",
+            "readyAt"
+          ],
+          "type": "object"
+        },
+        "title": "KitchenOrderReady v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["fulfillment.kitchen-order-ready:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "KitchenOrderReady",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
       "KitchenWorkAcceptedV1": {
         "contentType": "application/json",
         "deprecated": false,

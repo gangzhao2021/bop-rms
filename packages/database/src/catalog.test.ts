@@ -79,6 +79,7 @@ describe("migration catalog", () => {
       "1500_001_create_kitchen_ticket_aggregate",
       "1500_002_create_kitchen_work_queue_projection",
       "1500_003_create_kitchen_work_lifecycle",
+      "1500_004_create_kitchen_ready_publication",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -443,6 +444,22 @@ describe("migration catalog", () => {
     expect(migration?.sql.match(/SET search_path = pg_catalog/gu)).toHaveLength(2);
     expect(migration?.sql).not.toMatch(/CREATE RULE\s+\w+no_update/iu);
     expect(migration?.sql).not.toMatch(/customer_note|allergen|health|payment|provider/iu);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1406 Kitchen Ready publication migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1500_004_create_kitchen_ready_publication",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/kitchen");
+    expect(migration?.metadata.schema).toBe("rms_kitchen");
+    expect(migration?.sql).toContain("CREATE TABLE rms_kitchen.kitchen_ready_publication");
+    expect(migration?.sql).toContain("kitchen_ready_publication_ready_result_fk");
+    expect(migration?.sql).toContain("kitchen_ready_publication_causation_fk");
+    expect(migration?.sql).toContain("kitchen_ready_publication_order_event_shape_check");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).toContain("reject_kitchen_work_lifecycle_append_only_update");
+    expect(migration?.sql).not.toMatch(/customer|note|allergen|health|payment|provider/iu);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
