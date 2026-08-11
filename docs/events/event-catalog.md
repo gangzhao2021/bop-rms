@@ -7,6 +7,8 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 
 - `KitchenItemCompleted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenItemProgressRecorded:v1` — owner `@rms/kitchen`; stable; store; personal
+- `KitchenItemReady:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
+- `KitchenOrderReady:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `KitchenWorkAccepted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenWorkCreated:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `KitchenWorkStarted:v1` — owner `@rms/kitchen`; stable; store; personal

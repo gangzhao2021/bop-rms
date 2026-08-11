@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1405 — Kitchen Realtime Message on codex/wp-1405`
+- Current discussion node: `WP-1406 — ItemReady / OrderReady Event on codex/wp-1406`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,15 +17,26 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1405 — Kitchen Realtime Message` is the current bounded implementation candidate from exact
-  integrated and exact-main verified `main@c071587b5a6c3d3ed1842caaf90a19d3105c1d14` on
-  `codex/wp-1405`. It owns only the strict Store-scoped
+- `WP-1406 — ItemReady / OrderReady Event` is closed for bounded implementation from exact
+  integrated and exact-main verified `main@6c39c00dd6c6b27198c45cdf7b1d04407f3d57a5` on
+  `codex/wp-1406`. It owns the atomic, minimal `KitchenItemReady.v1` and conditional
+  `KitchenOrderReady.v1` public facts over an immutable WP-1404 Ready result. Exact source-vector,
+  persistence, privacy, verification and later-runtime gates are in
+  `docs/spec/work-packages/WP-1406.md`.
+
+- `WP-1405 — Kitchen Realtime Message` is implemented and integrated at squash
+  `6c39c00dd6c6b27198c45cdf7b1d04407f3d57a5` via PR #153. Exact implementation head
+  `92577e761bf2b3090bae315c4ae3fc551a6b19b5` passed run/job
+  `31497911551 / 93800157977`; exact-main run/job `31499382695 / 93805098353` passed. It owns only
+  the strict Store-scoped
   `kitchen.work-queue.updated.v1` lossy hint over a successfully committed
   `kitchen_work_queue_v1` generation. The hint identifies the complete active generation and
   contains no row snapshot or open data bag; every connect/reconnect/message requires a canonical
   authorized queue Query and never replays a Command. WP-0036 retains SSE transport, Session/scope
-  authorization, fan-out and reconnect ownership. Exact scope, security/privacy findings,
-  verification and External Evidence gates are in `docs/spec/work-packages/WP-1405.md`.
+  authorization, fan-out and reconnect ownership. Its Section 91 self-review records zero findings,
+  reviews, review requests and unresolved threads without claiming independent approval or
+  server-side Branch Protection / Rulesets. Exact evidence is in
+  `docs/spec/work-packages/WP-1405.md`.
 
 - `WP-1404 — Accept / Start / Ready Command` is implemented and integrated at squash
   `c071587b5a6c3d3ed1842caaf90a19d3105c1d14` via PR #152. Exact implementation head

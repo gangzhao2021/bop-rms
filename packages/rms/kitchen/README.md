@@ -138,9 +138,14 @@ intake and caused by `OrderConfirmed`. It contains no item snapshot, Customer no
 preparation narrative, Money, Payment, Provider or health data.
 
 Accept and Start publish `KitchenWorkAccepted.v1` and `KitchenWorkStarted.v1`. A partial positive
-completion publishes only `KitchenItemProgressRecorded.v1`; the exact final quantity publishes only
-`KitchenItemCompleted.v1`. Named Actor remains in the personal-classified envelope and never enters
-the payload or queue row. WP-1404 publishes no Ready Event; WP-1406 owns that trigger.
+completion publishes only `KitchenItemProgressRecorded.v1`; the exact final quantity publishes
+`KitchenItemCompleted.v1`. A committed manual or automatic Ready result also publishes one minimal
+System-envelope `KitchenItemReady.v1`; `KitchenOrderReady.v1` is added only when the locked, exact
+Ticket readiness vector is complete after that transition. Order Ready means Kitchen preparation
+only, never Ordering or Fulfillment completion. The Ready result, append-only publication binding,
+Audit, lifecycle operation and one or two Outbox Events share the repository transaction. Named
+operator accountability stays in the personal-classified Audit and is not copied to either public
+Ready payload or queue row.
 
 The queue keeps `kitchen.queue-projection:v1` for Created and adds four distinct `ordering: "none"`
 lifecycle registrations. Generic Inbox short-circuits a completed Event before parsing; a first
@@ -194,6 +199,7 @@ pnpm kitchen-ticket:acceptance
 pnpm kitchen-station-routing:acceptance
 pnpm kitchen-queue:acceptance
 pnpm kitchen-work-lifecycle:acceptance
+pnpm kitchen-ready-event:acceptance
 pnpm --filter @rms/kitchen format:check
 pnpm --filter @rms/kitchen lint
 pnpm --filter @rms/kitchen typecheck
@@ -214,7 +220,7 @@ Progress/Completed Events and atomic rollback.
 ## Decisions and follow-up
 
 - Authority: WP-0023, WP-0030, WP-0032, WP-0034, WP-0035, WP-0042, WP-1310 and
-  WP-1400–WP-1404.
+  WP-1400–WP-1406.
 - External Evidence: real Ordering persistence/source adapter, real Kitchen Station/routing and
   Recipe-preparation adapters/facts, WP-2045 live Payment gate, WP-1407 allergen acknowledgement,
   runtime roles/RLS, real Store/Order facts, load/replay/restore evidence and deployment remain

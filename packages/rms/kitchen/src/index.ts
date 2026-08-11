@@ -281,3 +281,23 @@ export {
 } from "./domain/kitchen-realtime.js";
 export { createKitchenRealtimeService } from "./application/kitchen-realtime-service.js";
 export type { KitchenRealtimePorts } from "./application/ports/kitchen-realtime-ports.js";
+export {
+  kitchenItemReadyEventConsumer,
+  kitchenItemReadyEventType,
+  kitchenOrderReadyEventConsumer,
+  kitchenOrderReadyEventType,
+  KitchenReadyEventError,
+  type KitchenItemReadyEnvelope,
+  type KitchenItemReadyPayload,
+  type KitchenOrderReadyEnvelope,
+  type KitchenOrderReadyPayload,
+  type KitchenReadyEnvelope,
+  type KitchenReadyEventBundle,
+} from "./contracts/kitchen-ready-events.js";
+export {
+  createKitchenReadyEventBundle,
+  createKitchenReadyEventSemanticBinding,
+  parseKitchenItemReadyEnvelope,
+  parseKitchenOrderReadyEnvelope,
+  parseKitchenReadyEnvelope,
+} from "./application/kitchen-ready-events.js";

@@ -39,12 +39,19 @@ import {
   parseKitchenTicketReference,
 } from "../domain/kitchen-ticket.js";
 import {
+  createKitchenReadyEventBundle,
+  createKitchenReadyEventSemanticBinding,
+  parseKitchenItemReadyEnvelope,
+  parseKitchenOrderReadyEnvelope,
+} from "./kitchen-ready-events.js";
+import {
   createKitchenWorkLifecycleEventSemanticBinding,
   createKitchenWorkLifecycleEnvelope,
   parseKitchenWorkLifecycleEnvelope,
 } from "./kitchen-work-lifecycle-events.js";
 import type {
   KitchenOrderItemReadyResult,
+  KitchenReadyPublication,
   KitchenWorkLifecycleActionCode,
   KitchenWorkLifecycleCommit,
   KitchenWorkLifecycleEffect,
@@ -722,6 +729,100 @@ function parseReadyResult(value: unknown): KitchenOrderItemReadyResult {
   });
 }
 
+function parseReadyPublication(
+  value: unknown,
+  ports: KitchenWorkLifecyclePorts,
+): KitchenReadyPublication {
+  const raw = exact(value, [
+    "publicationReference",
+    "brandReference",
+    "storeReference",
+    "ticketReference",
+    "orderReference",
+    "orderBatchReference",
+    "orderItemReference",
+    "readyResultReference",
+    "ticketVersion",
+    "readyQuantity",
+    "requiredQuantity",
+    "itemCount",
+    "itemEvent",
+    "itemEventSemanticDigest",
+    "orderEvent",
+    "orderEventSemanticDigest",
+    "correlationReference",
+    "causationReference",
+    "occurredAt",
+  ]);
+  let itemEvent;
+  let orderEvent;
+  try {
+    itemEvent = parseKitchenItemReadyEnvelope(raw.itemEvent);
+    orderEvent = raw.orderEvent === null ? null : parseKitchenOrderReadyEnvelope(raw.orderEvent);
+  } catch {
+    return dependency();
+  }
+  const requiredQuantity = parseQuantity(raw.requiredQuantity, 1, 999);
+  const readyQuantity = parseQuantity(raw.readyQuantity, 1, requiredQuantity);
+  const itemCount = parseQuantity(raw.itemCount, 1, 100);
+  const publication = Object.freeze({
+    publicationReference: parseReference(raw.publicationReference),
+    brandReference: parseReference(raw.brandReference),
+    storeReference: parseReference(raw.storeReference),
+    ticketReference: parseReference(raw.ticketReference),
+    orderReference: parseReference(raw.orderReference),
+    orderBatchReference: parseReference(raw.orderBatchReference),
+    orderItemReference: parseReference(raw.orderItemReference),
+    readyResultReference: parseReference(raw.readyResultReference),
+    ticketVersion: parseBigint(raw.ticketVersion),
+    readyQuantity,
+    requiredQuantity,
+    itemCount,
+    itemEvent,
+    itemEventSemanticDigest: parseDigest(raw.itemEventSemanticDigest),
+    orderEvent,
+    orderEventSemanticDigest:
+      raw.orderEventSemanticDigest === null ? null : parseDigest(raw.orderEventSemanticDigest),
+    correlationReference: parseReference(raw.correlationReference),
+    causationReference: parseReference(raw.causationReference),
+    occurredAt: parseInstant(raw.occurredAt),
+  });
+  if (
+    readyQuantity !== requiredQuantity ||
+    (orderEvent === null) !== (publication.orderEventSemanticDigest === null) ||
+    itemEvent.tenantId !== publication.brandReference ||
+    itemEvent.storeId !== publication.storeReference ||
+    itemEvent.payload.kitchenTicketReference !== publication.ticketReference ||
+    itemEvent.payload.orderReference !== publication.orderReference ||
+    itemEvent.payload.orderBatchReference !== publication.orderBatchReference ||
+    itemEvent.payload.orderItemReference !== publication.orderItemReference ||
+    itemEvent.payload.readyResultReference !== publication.readyResultReference ||
+    itemEvent.payload.readyQuantity !== publication.readyQuantity ||
+    itemEvent.payload.requiredQuantity !== publication.requiredQuantity ||
+    itemEvent.correlationId !== publication.correlationReference ||
+    itemEvent.causationId !== publication.causationReference ||
+    itemEvent.occurredAt !== publication.occurredAt ||
+    publication.itemEventSemanticDigest !==
+      digest(ports, createKitchenReadyEventSemanticBinding(itemEvent)) ||
+    (orderEvent !== null &&
+      (orderEvent.tenantId !== publication.brandReference ||
+        orderEvent.storeId !== publication.storeReference ||
+        orderEvent.aggregateId !== publication.ticketReference ||
+        orderEvent.aggregateVersion !== publication.ticketVersion ||
+        orderEvent.payload.orderReference !== publication.orderReference ||
+        orderEvent.payload.orderBatchReference !== publication.orderBatchReference ||
+        orderEvent.payload.itemCount !== publication.itemCount ||
+        orderEvent.payload.readyItemCount !== publication.itemCount ||
+        orderEvent.correlationId !== publication.correlationReference ||
+        orderEvent.causationId !== publication.causationReference ||
+        orderEvent.occurredAt !== publication.occurredAt ||
+        publication.orderEventSemanticDigest !==
+          digest(ports, createKitchenReadyEventSemanticBinding(orderEvent))))
+  )
+    return dependency();
+  return publication;
+}
+
 function parseAudit(value: unknown): AppendAuditRecordInput {
   const raw = exact(value, [
     "auditId",
@@ -836,6 +937,7 @@ function effectSemantics(
       automaticReadyEffectDigest,
       audits,
       event,
+      readyPublication,
       result,
     } = effect;
     const parentAudit = audits[0];
@@ -905,6 +1007,7 @@ function effectSemantics(
       result.workItemReference !== commandWorkItemReference ||
       result.orderItemReference !== command.orderItemReference ||
       anyReady !== (readyResult !== null) ||
+      anyReady !== (readyPublication !== null) ||
       automatic !== (automaticReadyOperation !== null) ||
       automatic !== (automaticReadyEffectDigest !== null) ||
       audits.length !== (automatic ? 2 : 1)
@@ -1125,6 +1228,23 @@ function effectSemantics(
         return false;
     }
 
+    if (
+      readyPublication !== null &&
+      (readyResult === null ||
+        readyPublication.brandReference !== command.brandReference ||
+        readyPublication.storeReference !== command.storeReference ||
+        readyPublication.ticketReference !== command.ticketReference ||
+        readyPublication.orderItemReference !== command.orderItemReference ||
+        readyPublication.readyResultReference !== readyResult.readyResultReference ||
+        readyPublication.ticketVersion !== mutation.resultTicketVersion ||
+        readyPublication.readyQuantity !== readyResult.readyQuantity ||
+        readyPublication.requiredQuantity !== readyResult.requiredQuantity ||
+        readyPublication.correlationReference !== command.correlationReference ||
+        readyPublication.causationReference !== readyResult.causalOperationReference ||
+        readyPublication.occurredAt !== readyResult.readyAt)
+    )
+      return false;
+
     if (automaticReadyOperation !== null) {
       const childAudit = audits[1];
       if (
@@ -1181,6 +1301,13 @@ function effectSemantics(
       operation.auditReference,
       ...(operation.eventReference === null ? [] : [operation.eventReference]),
       ...(readyResult === null ? [] : [readyResult.readyResultReference]),
+      ...(readyPublication === null
+        ? []
+        : [
+            readyPublication.publicationReference,
+            readyPublication.itemEvent.eventId,
+            ...(readyPublication.orderEvent === null ? [] : [readyPublication.orderEvent.eventId]),
+          ]),
       ...(automaticReadyOperation === null
         ? []
         : [automaticReadyOperation.operationReference, automaticReadyOperation.auditReference]),
@@ -1234,6 +1361,7 @@ function parseEffect(value: unknown, ports: KitchenWorkLifecyclePorts): KitchenW
     "automaticReadyEffectDigest",
     "audits",
     "event",
+    "readyPublication",
     "result",
     "effectDigest",
   ]);
@@ -1261,6 +1389,8 @@ function parseEffect(value: unknown, ports: KitchenWorkLifecyclePorts): KitchenW
   } catch {
     return dependency();
   }
+  const readyPublication =
+    raw.readyPublication === null ? null : parseReadyPublication(raw.readyPublication, ports);
   const effectDigest = parseDigest(raw.effectDigest);
   const withoutDigest = Object.freeze({
     command,
@@ -1272,6 +1402,7 @@ function parseEffect(value: unknown, ports: KitchenWorkLifecyclePorts): KitchenW
     automaticReadyEffectDigest,
     audits,
     event,
+    readyPublication,
     result,
   });
   const childAudit = audits[1] ?? null;
@@ -1924,6 +2055,18 @@ async function buildEffect(
     command.action === "MarkKitchenOrderItemReady"
       ? null
       : nextReference(ports, "KitchenWorkLifecycleEvent");
+  const readyPublicationReference = ready ? nextReference(ports, "KitchenReadyPublication") : null;
+  const itemReadyEventReference = ready ? nextReference(ports, "KitchenReadyEvent") : null;
+  const allTicketItemsReady =
+    ready &&
+    source.ticketReadiness.every(
+      (entry) =>
+        entry.orderItemReference === command.orderItemReference ||
+        entry.readyResultReference !== null,
+    );
+  const orderReadyEventReference = allTicketItemsReady
+    ? nextReference(ports, "KitchenReadyEvent")
+    : null;
   const generated = [
     operationReference,
     auditReference,
@@ -1931,6 +2074,9 @@ async function buildEffect(
     ...(readyResultReference === null ? [] : [readyResultReference]),
     ...(automaticAuditReference === null ? [] : [automaticAuditReference]),
     ...(eventReference === null ? [] : [eventReference]),
+    ...(readyPublicationReference === null ? [] : [readyPublicationReference]),
+    ...(itemReadyEventReference === null ? [] : [itemReadyEventReference]),
+    ...(orderReadyEventReference === null ? [] : [orderReadyEventReference]),
   ];
   ensureDistinct(generated, [
     command.actorReference,
@@ -1940,6 +2086,8 @@ async function buildEffect(
     command.orderItemReference,
     command.correlationReference,
     source.target.workItemReference,
+    source.orderReference,
+    source.orderBatchReference,
     ...(source.acceptedOperation === null ? [] : [source.acceptedOperation.operationReference]),
     ...(source.startedOperation === null ? [] : [source.startedOperation.operationReference]),
     ...(admission === null ? [] : [admission.decisionReference]),
@@ -2038,6 +2186,70 @@ async function buildEffect(
           capturedExpo,
           readyAt: occurredAt,
         });
+  const readyPublication =
+    readyResult === null || readyPublicationReference === null || itemReadyEventReference === null
+      ? null
+      : (() => {
+          const causationReference = automaticReadyOperationReference ?? operationReference;
+          const readiness = Object.freeze(
+            source.ticketReadiness.map((entry) =>
+              entry.orderItemReference === command.orderItemReference
+                ? Object.freeze({
+                    orderItemReference: entry.orderItemReference,
+                    requiredQuantity: entry.requiredQuantity,
+                    readyResultReference: readyResult.readyResultReference,
+                    readyQuantity: readyResult.readyQuantity,
+                    readyAt: readyResult.readyAt,
+                  })
+                : entry,
+            ),
+          );
+          const bundle = createKitchenReadyEventBundle({
+            itemEventReference: itemReadyEventReference,
+            orderEventReference: orderReadyEventReference,
+            brandReference: command.brandReference,
+            storeReference: command.storeReference,
+            ticketReference: command.ticketReference,
+            ticketVersion: mutation.resultTicketVersion,
+            orderReference: source.orderReference,
+            orderBatchReference: source.orderBatchReference,
+            orderItemReference: command.orderItemReference,
+            readyResultReference: readyResult.readyResultReference,
+            readyQuantity: readyResult.readyQuantity,
+            requiredQuantity: readyResult.requiredQuantity,
+            readyAt: readyResult.readyAt,
+            correlationReference: command.correlationReference,
+            causationReference,
+            readiness,
+          });
+          return Object.freeze({
+            publicationReference: readyPublicationReference,
+            brandReference: command.brandReference,
+            storeReference: command.storeReference,
+            ticketReference: command.ticketReference,
+            orderReference: source.orderReference,
+            orderBatchReference: source.orderBatchReference,
+            orderItemReference: command.orderItemReference,
+            readyResultReference: readyResult.readyResultReference,
+            ticketVersion: mutation.resultTicketVersion,
+            readyQuantity: readyResult.readyQuantity,
+            requiredQuantity: readyResult.requiredQuantity,
+            itemCount: readiness.length,
+            itemEvent: bundle.itemEvent,
+            itemEventSemanticDigest: digest(
+              ports,
+              createKitchenReadyEventSemanticBinding(bundle.itemEvent),
+            ),
+            orderEvent: bundle.orderEvent,
+            orderEventSemanticDigest:
+              bundle.orderEvent === null
+                ? null
+                : digest(ports, createKitchenReadyEventSemanticBinding(bundle.orderEvent)),
+            correlationReference: command.correlationReference,
+            causationReference,
+            occurredAt,
+          });
+        })();
   const automaticAudit =
     automaticAuditReference === null
       ? null
@@ -2142,6 +2354,7 @@ async function buildEffect(
     automaticReadyEffectDigest,
     audits: Object.freeze(automaticAudit === null ? [parentAudit] : [parentAudit, automaticAudit]),
     event,
+    readyPublication,
     result,
   });
   const effect = Object.freeze({

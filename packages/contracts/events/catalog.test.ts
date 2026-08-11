@@ -41,7 +41,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(11);
+    expect(eventCatalog).toHaveLength(13);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("KitchenWorkCreated")).toMatchObject({
       eventType: "KitchenWorkCreated",
@@ -73,6 +73,26 @@ describe("Event Catalog source", () => {
         consumers: [consumer],
         tenantScope: "store",
         dataClassification: "personal",
+        compatibility: "additive",
+        retentionCategory: "business_record",
+        replaySemantics: "idempotent",
+        deprecated: false,
+        replacement: null,
+      });
+    }
+    for (const [eventType, consumer] of [
+      ["KitchenItemReady", "fulfillment.kitchen-item-ready:v1"],
+      ["KitchenOrderReady", "fulfillment.kitchen-order-ready:v1"],
+    ] as const) {
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/kitchen",
+        producerModule: "@rms/kitchen",
+        stability: "stable",
+        consumers: [consumer],
+        tenantScope: "store",
+        dataClassification: "indirect_identifier",
         compatibility: "additive",
         retentionCategory: "business_record",
         replaySemantics: "idempotent",
@@ -142,6 +162,8 @@ describe("Event Catalog source", () => {
     expect(registeredEventMetricLabels(eventCatalog)).toEqual([
       "KitchenItemCompleted:v1",
       "KitchenItemProgressRecorded:v1",
+      "KitchenItemReady:v1",
+      "KitchenOrderReady:v1",
       "KitchenWorkAccepted:v1",
       "KitchenWorkCreated:v1",
       "KitchenWorkStarted:v1",

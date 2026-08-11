@@ -34,6 +34,7 @@ export {
   type KitchenOrderItemReadyResultProof,
   type KitchenReadyWorkItemVersion,
   type KitchenStartAdmissionDecision,
+  type KitchenTicketReadinessEntry,
   type KitchenWorkLifecycleAction,
   type KitchenWorkLifecycleAuthority,
   type KitchenWorkLifecycleCommand,
