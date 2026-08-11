@@ -17,7 +17,9 @@ const context: CustomerEntryEstablishedContext = Object.freeze({
 });
 
 function render(state: CustomerEntryScreenState): string {
-  return renderToStaticMarkup(<EntryContextView onRetry={vi.fn()} state={state} />);
+  return renderToStaticMarkup(
+    <EntryContextView onContinue={vi.fn()} onRetry={vi.fn()} state={state} />,
+  );
 }
 
 describe("CUST-ENTRY-CONTEXT", () => {

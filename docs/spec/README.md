@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1700 — QR Entry and Store Context Screen on codex/wp-1700`
+- Current discussion node: `WP-1701 — Menu Browse / Product Detail on codex/wp-1701`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,8 +17,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1700 — QR Entry and Store Context Screen` is active from exact integrated and exact-main
-  verified `main@5af7e926e0315cb508e9fafb6e04fed6b3d8cc1c`. It owns only the contextual
+- `WP-1701 — Menu Browse / Product Detail` is active from exact integrated and exact-main verified
+  `main@9f02df243534a7be8926a1244ae192f5af404f62`. It owns only the Customer PWA rendering of the
+  existing Published Menu DTO for `CUST-MENU`, `CUST-MENU-SEARCH` and
+  `CUST-SELLABLE-DETAIL` described in `docs/spec/work-packages/WP-1701.md`.
+
+- `WP-1700 — QR Entry and Store Context Screen` is implemented and integrated at squash
+  `9f02df243534a7be8926a1244ae192f5af404f62` via PR #163. Exact implementation head
+  `d2fb316da61e25061077c21b48c8cbf0b77be529` passed run/job
+  `31543193187 / 93949965114`; exact-main run/job `31544372393 / 93953594626` passed. It owns only the contextual
   `CUST-ENTRY-CONTEXT` browser fragment handoff, strict public Store context rendering and bounded
   Customer-entry success-contract extension described in `docs/spec/work-packages/WP-1700.md`.
 
