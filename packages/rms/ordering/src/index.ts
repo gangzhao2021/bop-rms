@@ -38,4 +38,6 @@ export * from "./application/order-confirmed-event.js";
 export * from "./application/order-payment-outcome-consumer-service.js";
 export * from "./application/ports/order-payment-outcome-ports.js";
 export * from "./contracts/order-kitchen-source.js";
+export * from "./contracts/order-fulfillment-source.js";
 export * from "./application/order-kitchen-source.js";
+export * from "./application/order-fulfillment-source.js";
