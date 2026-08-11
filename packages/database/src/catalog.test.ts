@@ -86,6 +86,7 @@ describe("migration catalog", () => {
       "1700_002_create_fulfillment_readiness",
       "1700_003_create_pickup_proof",
       "1700_004_create_pickup_handoff",
+      "1700_005_create_fulfillment_completion_publication",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -103,6 +104,18 @@ describe("migration catalog", () => {
       "pickup_handoff_operation",
     ])
       expect(migration?.sql).toContain(`CREATE TABLE rms_fulfillment.${table}`);
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-1604 Fulfillment completion publication migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1700_005_create_fulfillment_completion_publication",
+    );
+    expect(migration?.metadata.owner).toBe("@rms/fulfillment");
+    expect(migration?.sql).toContain(
+      "CREATE TABLE rms_fulfillment.fulfillment_completion_publication",
+    );
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });

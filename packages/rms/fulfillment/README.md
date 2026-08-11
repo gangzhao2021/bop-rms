@@ -8,15 +8,16 @@ source.
 - Module Name: `fulfillment`
 - Package Name: `@rms/fulfillment`
 - Layer / Domain: `RMS / Delivery & Fulfillment`
-- Phase / owning Work Package: `Phase 1 / WP-1600–WP-1603`
+- Phase / owning Work Package: `Phase 1 / WP-1600–WP-1604`
 - Owner role: `Fulfillment Engineering Owner`
 - Status: `active contract and persistence boundary; runtime inactive`
 - Responsibility: create one Store-scoped Pending Pickup Fulfillment from `OrderConfirmed.v1`,
   consume exact `KitchenItemReady.v1` facts into append-only Item Ready results, derive the
   Aggregate Ready phase, issue/regenerate/validate Ready-bound Pickup Proof evidence, and plan an
   authorized append-only Pickup Handoff with exact cumulative quantity and completion derivation.
+  A strict `FulfillmentCompleted.v1` publication exposes the minimal completed business fact.
 - Explicit non-goals: private Ordering/Kitchen reads, Delivery, non-Kitchen Ready, raw proof
-  generation/hashing, public handoff Event, cancellation, Queue/Detail Projection, API/UI/SSE, live
+  generation/hashing, other handoff Events, cancellation, Queue/Detail Projection, API/UI/SSE, live
   grants and production activation.
 
 ## Public contract
@@ -47,6 +48,10 @@ Aggregate version and current validated proof. It appends actual quantities with
 Ready remainder, leaves partial pickup `InProgress`, and derives `Completed` only when every Item is
 fully handed over. It produces no public Event; WP-1604 retains that boundary.
 
+`createFulfillmentCompletionPublication` accepts only a final Completed effect and produces the
+strict Store-scoped, System-actor `FulfillmentCompleted.v1` event plus a stable semantic binding.
+The payload excludes proof material, recipient/customer data, actor/device and free text.
+
 ## Dependencies
 
 - Allowed synchronous dependencies: public `@bop/audit`, `@bop/eventing`,
@@ -75,7 +80,7 @@ fully handed over. It produces no public Event; WP-1604 retains that boundary.
 Migration `1700_001` creates `rms_fulfillment.fulfillment`, `fulfillment_item` and
 `fulfillment_creation_operation`; `1700_002` adds `fulfillment_item_ready_result` and
 `fulfillment_ready_operation`; `1700_003` adds four Pickup Proof tables; `1700_004` adds three
-append-only Pickup Handoff tables.
+Pickup Handoff tables; `1700_005` adds the append-only completion publication.
 PUBLIC access is revoked and all tables use forced RLS. Current readiness/proof generation are
 derived from append-only facts and ordered Aggregate versions. Generic Inbox completion, result,
 operation and Audit share the caller transaction. WP-1600–WP-1602 publish no Domain Event.
@@ -106,4 +111,4 @@ pnpm --filter @rms/fulfillment build
   WP-1310, WP-1400–WP-1408 and IDR-0031 / IDR-0039.
 - External Evidence: real Store/Pickup facts, Session/roles, managed-device continuity, accessibility,
   abuse, load, training and UAT remain gated and unclaimed.
-- Next allowed Work Package: `WP-1604 — Fulfillment Completion Event` after WP-1603 integration.
+- Next allowed Work Package: `WP-1605 — Order Completion Projection` after WP-1604 integration.

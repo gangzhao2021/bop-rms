@@ -41,8 +41,18 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(13);
+    expect(eventCatalog).toHaveLength(14);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
+    expect(byType.get("FulfillmentCompleted")).toMatchObject({
+      eventType: "FulfillmentCompleted",
+      schemaVersion: 1,
+      ownerModule: "@rms/fulfillment",
+      producerModule: "@rms/fulfillment",
+      consumers: ["ordering.fulfillment-completed:v1"],
+      tenantScope: "store",
+      dataClassification: "indirect_identifier",
+      replaySemantics: "idempotent",
+    });
     expect(byType.get("KitchenWorkCreated")).toMatchObject({
       eventType: "KitchenWorkCreated",
       schemaVersion: 1,
@@ -160,6 +170,7 @@ describe("Event Catalog source", () => {
       dataClassification: "payment",
     });
     expect(registeredEventMetricLabels(eventCatalog)).toEqual([
+      "FulfillmentCompleted:v1",
       "KitchenItemCompleted:v1",
       "KitchenItemProgressRecorded:v1",
       "KitchenItemReady:v1",

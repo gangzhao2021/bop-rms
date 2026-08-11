@@ -3,6 +3,62 @@
   "channels": {},
   "components": {
     "messages": {
+      "FulfillmentCompletedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "FulfillmentCompletedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "completedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "fulfillmentReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "handoffRecordReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "storeReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "verificationMethod": {
+              "enum": ["Opaque", "HumanCode"],
+              "type": "string"
+            }
+          },
+          "required": [
+            "fulfillmentReference",
+            "orderReference",
+            "handoffRecordReference",
+            "storeReference",
+            "verificationMethod",
+            "completedAt"
+          ],
+          "type": "object"
+        },
+        "title": "FulfillmentCompleted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["ordering.fulfillment-completed:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "FulfillmentCompleted",
+        "x-bop-owner-module": "@rms/fulfillment",
+        "x-bop-producer-module": "@rms/fulfillment",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
       "KitchenItemCompletedV1": {
         "contentType": "application/json",
         "deprecated": false,
