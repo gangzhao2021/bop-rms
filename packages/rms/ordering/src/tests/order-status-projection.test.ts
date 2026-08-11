@@ -40,6 +40,9 @@ function source(overrides: Record<string, unknown> = {}) {
     paymentStatus: "NotReported",
     kitchenStatus: "Unavailable",
     fulfillmentStatus: "Unavailable",
+    fulfillmentReference: null,
+    fulfillmentCompletionEventReference: null,
+    fulfillmentCompletedAt: null,
     eta: null,
     submittedAt: at,
     batches: [
@@ -182,6 +185,39 @@ describe("Order status projection", () => {
     expect(result.order).not.toHaveProperty("brandReference");
     expect(result.order).not.toHaveProperty("storeReference");
     expect(result.order).toMatchObject({ orderNumber: "42", kitchenStatus: "Unavailable" });
+  });
+
+  it("exposes only the safe completion time from a fulfilled projection", async () => {
+    const completed = await createOrderStatusProjector({
+      references: { generateGeneration: () => refs.generation, now: () => at },
+      source: {
+        loadExact: async () =>
+          source({
+            canonicalPhase: "Fulfilled",
+            fulfillmentStatus: "Completed",
+            fulfillmentReference: id(30),
+            fulfillmentCompletionEventReference: id(31),
+            fulfillmentCompletedAt: at,
+          }),
+      },
+      projections: { load: async () => null, replace: async (projection) => projection },
+    }).project(refs.order);
+    const service = createOrderStatusQueryService({
+      authorization: {
+        authorizeCustomer: async () => ({ guestSession: guest() }),
+        authorizeMerchant: async () => ({ actorReference: id(40) as never }),
+      },
+      projections: { load: async () => completed, list: async () => [completed] },
+    });
+    const result = await service.getCustomer({ orderReference: refs.order, observedAt: at });
+    expect(result.order).toMatchObject({
+      canonicalPhase: "Fulfilled",
+      fulfillmentStatus: "Completed",
+      fulfilledAt: at,
+    });
+    expect(result.order).not.toHaveProperty("closureStatus");
+    expect(result.order).not.toHaveProperty("fulfillmentReference");
+    expect(result.order).not.toHaveProperty("fulfillmentCompletionEventReference");
   });
 
   it("denies before a customer or merchant projection read and fails closed on cross-Store rows", async () => {

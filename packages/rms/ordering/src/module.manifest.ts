@@ -42,6 +42,7 @@ const moduleManifestInput =
       },
     ],
     consumedEvents: [
+      "rms.fulfillment.fulfillment-completed.v1",
       "rms.ordering.order-created.v1",
       "rms.payment.payment-failed.v1",
       "rms.payment.payment-succeeded.v1",

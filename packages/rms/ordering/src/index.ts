@@ -41,3 +41,7 @@ export * from "./contracts/order-kitchen-source.js";
 export * from "./contracts/order-fulfillment-source.js";
 export * from "./application/order-kitchen-source.js";
 export * from "./application/order-fulfillment-source.js";
+export * from "./contracts/fulfillment-completed-event.js";
+export * from "./application/fulfillment-completed-event.js";
+export * from "./application/fulfillment-completed-event-consumer-service.js";
+export * from "./application/ports/fulfillment-completed-event-ports.js";

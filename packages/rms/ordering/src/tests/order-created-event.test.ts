@@ -71,6 +71,9 @@ function source(overrides: Record<string, unknown> = {}) {
     paymentStatus: "NotReported",
     kitchenStatus: "Unavailable",
     fulfillmentStatus: "Unavailable",
+    fulfillmentReference: null,
+    fulfillmentCompletionEventReference: null,
+    fulfillmentCompletedAt: null,
     eta: null,
     submittedAt: at,
     batches: [

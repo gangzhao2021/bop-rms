@@ -16,10 +16,11 @@ export interface CustomerOrderStatusView {
     readonly orderReference: OrderingReference;
     readonly orderNumber: string;
     readonly orderType: "DineIn" | "Pickup";
-    readonly canonicalPhase: "Submitted";
+    readonly canonicalPhase: "Submitted" | "Fulfilled";
     readonly paymentStatus: "NotReported";
     readonly kitchenStatus: "Unavailable";
-    readonly fulfillmentStatus: "Unavailable";
+    readonly fulfillmentStatus: "Unavailable" | "Completed";
+    readonly fulfilledAt: OrderingInstant | null;
     readonly eta: null;
     readonly submittedAt: OrderingInstant;
     readonly batches: readonly OrderStatusBatchSummary[];
@@ -42,7 +43,7 @@ export interface MerchantOrderStatusQuery {
   readonly exactReferenceOrNumber: OrderingReference | string | null;
   readonly orderType: "DineIn" | "Pickup" | null;
   readonly sourceChannel: "Api" | "Pos" | "Qr" | "Web" | null;
-  readonly canonicalPhase: "Submitted" | null;
+  readonly canonicalPhase: "Submitted" | "Fulfilled" | null;
   readonly closureStatus: "Open" | null;
   readonly paymentStatus: "NotReported" | null;
   readonly limit: number;
