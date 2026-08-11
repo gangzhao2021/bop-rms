@@ -25,9 +25,13 @@ export interface CustomerEntryPortInput {
 
 export interface CustomerEntryEstablished {
   readonly status: "Established";
+  readonly brandDisplayName: string;
+  readonly storeDisplayName: string;
   readonly publicStoreReference: string;
   readonly publicTableReference: string | null;
   readonly channel: "DineIn" | "Pickup";
+  readonly operatingState: "Open" | "Closed" | "TemporarilyClosed";
+  readonly availableServiceModes: readonly ("DineIn" | "Pickup" | "Delivery")[];
   readonly locale: string;
   readonly contextExpiresAt: string;
   readonly sessionCredential: GuestRawCredential;
@@ -200,9 +204,13 @@ function parseEstablished(
 ): Omit<CustomerEntryEstablished, "status"> {
   const result = closedRecord(value, [
     "status",
+    "brandDisplayName",
+    "storeDisplayName",
     "publicStoreReference",
     "publicTableReference",
     "channel",
+    "operatingState",
+    "availableServiceModes",
     "locale",
     "contextExpiresAt",
     "sessionCredential",
@@ -212,25 +220,63 @@ function parseEstablished(
   if (
     result.status !== "Established" ||
     (result.channel !== "DineIn" && result.channel !== "Pickup") ||
+    !["Open", "Closed", "TemporarilyClosed"].includes(String(result.operatingState)) ||
     typeof result.locale !== "string" ||
     !localePattern.test(result.locale)
   ) {
     throw new TypeError("malformed established result");
   }
   const publicStoreReference = parseUuidV7(result.publicStoreReference);
+  const publicLabel = (value: unknown): string => {
+    if (
+      typeof value !== "string" ||
+      value.length < 1 ||
+      value.length > 120 ||
+      value !== value.normalize("NFC") ||
+      value !== value.trim() ||
+      /[\p{Cc}\p{Cf}<>{}[\]`*_#]/u.test(value)
+    ) {
+      throw new TypeError("public Store label required");
+    }
+    return value;
+  };
+  const brandDisplayName = publicLabel(result.brandDisplayName);
+  const storeDisplayName = publicLabel(result.storeDisplayName);
   const publicTableReference =
     result.publicTableReference === null ? null : parseUuidV7(result.publicTableReference);
   if ((result.channel === "DineIn") !== (publicTableReference !== null)) {
     throw new TypeError("channel and Table context mismatch");
+  }
+  if (!Array.isArray(result.availableServiceModes)) {
+    throw new TypeError("available service modes required");
+  }
+  const availableServiceModes = Object.freeze(
+    result.availableServiceModes.map((mode) => {
+      if (!(["DineIn", "Pickup", "Delivery"] as const).includes(mode as never)) {
+        throw new TypeError("unknown service mode");
+      }
+      return mode as "DineIn" | "Pickup" | "Delivery";
+    }),
+  );
+  if (
+    new Set(availableServiceModes).size !== availableServiceModes.length ||
+    (result.operatingState === "Open") !== availableServiceModes.includes(result.channel) ||
+    (result.operatingState !== "Open" && availableServiceModes.length !== 0)
+  ) {
+    throw new TypeError("operating state and service modes conflict");
   }
   const contextExpiresAt = parseCanonicalInstant(result.contextExpiresAt);
   if (Date.parse(contextExpiresAt) <= Date.parse(requestedAt)) {
     throw new TypeError("expired context result");
   }
   return Object.freeze({
+    brandDisplayName,
+    storeDisplayName,
     publicStoreReference,
     publicTableReference,
     channel: result.channel,
+    operatingState: result.operatingState as "Open" | "Closed" | "TemporarilyClosed",
+    availableServiceModes,
     locale: result.locale,
     contextExpiresAt,
     sessionCredential: parseGuestRawCredential(result.sessionCredential),
@@ -346,11 +392,15 @@ export class CustomerEntryHandler {
         }
         response.setHeader("Set-Cookie", serializeCookie(result.sessionCredential));
         response.status(201).json({
-          schemaVersion: 1,
+          schemaVersion: 2,
           status: "Established",
+          brandDisplayName: result.brandDisplayName,
+          storeDisplayName: result.storeDisplayName,
           publicStoreReference: result.publicStoreReference,
           publicTableReference: result.publicTableReference,
           channel: result.channel,
+          operatingState: result.operatingState,
+          availableServiceModes: result.availableServiceModes,
           locale: result.locale,
           contextExpiresAt: result.contextExpiresAt,
           csrfToken: result.csrfCredential,
