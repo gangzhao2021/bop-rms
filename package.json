@@ -112,6 +112,7 @@
     "e2e:projection-rebuild": "pnpm --filter @bop/projection exec vitest run --config vitest.config.ts src/tests/projection-rebuild.test.ts -t WP-2025",
     "e2e:concurrent-update": "pnpm --filter @rms/ordering exec vitest run --config vitest.config.ts src/tests/cart-item-command.test.ts -t WP-2026",
     "e2e:allergen-safety": "vitest run tooling/e2e/allergen-safety/allergen-safety.test.ts",
+    "e2e:receipt-resume-email": "vitest run tooling/e2e/receipt-resume-email/receipt-resume-email.test.ts",
     "public-capability:acceptance": "pnpm --filter @bop/public-capability public-capability:acceptance",
     "retry-dead-letter:acceptance": "vitest run --config packages/database/vitest.retry-dead-letter.config.ts",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
