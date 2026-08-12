@@ -17,6 +17,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1805 — Pickup Completion Screen` is locally implemented and verified on top of WP-1804 head
+  `0df9ee5`. It adds the canonical Pickup Queue, strict browser DTO, deterministic wait/overdue and
+  explicit proof-plus-target handoff gating described in `docs/spec/work-packages/WP-1805.md`.
+  Merchant HTTP/Command/proof/device composition remains unavailable and unclaimed; GitHub
+  publication/integration is deferred by explicit Owner direction.
+
 - `WP-1804 — Kitchen Board` is locally implemented and verified on top of WP-1803 head `3836365`.
   It adds the canonical Kitchen queue/work-item routes, strict closed browser DTOs, deterministic
   projection-time age and explicit Fresh + named-operator action gating described in
