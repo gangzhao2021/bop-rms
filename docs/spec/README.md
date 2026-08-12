@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1905 — Basic Merchant Dashboard Query on codex/wp-1905`
+- Current discussion node: `WP-2000 — OpenAPI Schema Validation on codex/wp-2000`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2000 — OpenAPI Schema Validation` is locally implemented and verified on top of WP-1905 head
+  `9e6bd6c`. The Contract package now owns deterministic Zod-first OpenAPI 3.1 generation and parser,
+  drift, operation, Error Contract and mutation-header validation for the currently composed public
+  REST routes only. Exact boundaries are in `docs/spec/work-packages/WP-2000.md`; GitHub
+  publication/integration is deferred by Owner direction.
 
 - `WP-1905 — Basic Merchant Dashboard Query` is locally implemented and verified on top of WP-1904
   head `5afc46a`. `@bop/projection` adds the strict `reporting_operations_dashboard_v1` Query with

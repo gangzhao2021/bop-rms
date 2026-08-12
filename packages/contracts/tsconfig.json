@@ -5,5 +5,5 @@
     "rewriteRelativeImportExtensions": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["events/**/*.ts", "vitest.config.ts"]
+  "include": ["events/**/*.ts", "rest/**/*.ts", "vitest.config.ts"]
 }
