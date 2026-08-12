@@ -106,6 +106,7 @@
     "customer-entry:acceptance": "pnpm --filter @bop/identity build && pnpm --filter @bop-rms/api customer-entry:acceptance",
     "customer-menu:acceptance": "pnpm --filter @rms/catalog test && pnpm --filter @bop-rms/api customer-menu:acceptance",
     "e2e:qr-menu-cart-order": "vitest run tooling/e2e/qr-menu-cart-order/qr-menu-cart-order.test.ts",
+    "e2e:payment-success": "vitest run tooling/e2e/payment-success/payment-success.test.ts",
     "public-capability:acceptance": "pnpm --filter @bop/public-capability public-capability:acceptance",
     "retry-dead-letter:acceptance": "vitest run --config packages/database/vitest.retry-dead-letter.config.ts",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
