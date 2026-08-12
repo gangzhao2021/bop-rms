@@ -13,6 +13,7 @@
     "authentication-threat-model:check": "vitest run tooling/security/authentication-threat-model.test.mjs",
     "audit-integrity:acceptance": "pnpm --filter @bop/audit audit-integrity:acceptance",
     "build": "turbo run build",
+    "break-glass-runbook:check": "vitest run tooling/security/break-glass-runbook.test.mjs",
     "browser-session:acceptance": "pnpm --filter @bop/identity browser-session:acceptance",
     "catalog-product:acceptance": "pnpm --filter @rms/catalog test && vitest run --config packages/database/vitest.catalog-product-aggregate.config.ts",
     "catalog-category-menu:acceptance": "pnpm --filter @rms/catalog test && vitest run --config packages/database/vitest.category-menu-structure.config.ts",
