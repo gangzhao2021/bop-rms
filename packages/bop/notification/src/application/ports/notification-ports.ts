@@ -20,6 +20,7 @@ export interface AppendNotificationAttemptInput {
   readonly request: NotificationRequest;
   readonly previousAttempt: NotificationDeliveryAttempt | null;
   readonly attempt: NotificationDeliveryAttempt;
+  readonly resendAuthorizationReference: NotificationReference | null;
 }
 
 export interface NotificationUnitOfWorkPort {
@@ -92,6 +93,13 @@ export interface NotificationPorts {
   readonly providerReadiness: {
     readonly environment: SesEnvironment;
     loadSesEvidence(): Promise<SesReadinessEvidence | null>;
+  };
+  readonly resendAuthorization: {
+    authorize(input: {
+      readonly requestReference: NotificationReference;
+      readonly previousAttemptReference: NotificationReference;
+      readonly attemptedAt: string;
+    }): Promise<{ readonly authorizationReference: NotificationReference } | null>;
   };
 }
 
