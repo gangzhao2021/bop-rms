@@ -157,6 +157,7 @@ catalogs:
     - WP-1724
     - WP-1800
     - WP-1801
+    - WP-1802
     - WP-1807
     - WP-1808
     - WP-1900
@@ -832,6 +833,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1024
+      - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-MENU-BUILDER /app/commerce/menus/:id/edit
     navigation_targets: []
@@ -879,6 +881,7 @@ screens:
       - WP-1025
       - WP-1026
       - WP-1027
+      - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-MENU-LIST /app/commerce/menus
     navigation_targets: []
@@ -974,6 +977,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1024
+      - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-MENU-PUBLISH contextual
     navigation_targets:

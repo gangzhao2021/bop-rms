@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1801 — Store Setup Minimum Screen on codex/wp-1801`
+- Current discussion node: `WP-1802 — Catalog Authoring / Publish Screen on codex/wp-1802`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-1802 — Catalog Authoring / Publish Screen` is locally implemented and verified on top of
+  WP-1801 head `e6645c1`. It adds the canonical Menu list and builder routes, strict closed browser
+  DTOs, safe projection-gap labels, keyboard-visible section controls and a contextual publish
+  rail described in `docs/spec/work-packages/WP-1802.md`. The existing WP-1027 summary lacks the
+  authoritative digest, effective period, evidence and browser scope envelope required for safe
+  lifecycle mutations, so authoring/publish actions remain unavailable rather than fabricated.
+  GitHub publication/integration is deferred by explicit Owner direction.
 
 - `WP-1801 — Store Setup Minimum Screen` is locally implemented and verified on top of WP-1800
   head `29d20cb`. It adds the canonical Store list/detail/setup routes, strict closed browser DTOs,

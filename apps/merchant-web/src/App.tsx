@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { MerchantShell } from "./MerchantShell.js";
+import { MenuBuilderPage, MenuListPage } from "./CatalogMenuPages.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
 import {
   createMerchantWorkspaceClient,
@@ -83,6 +84,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/organization/stores" element={<StoreListPage />} />
       <Route path="/app/organization/stores/:id/setup" element={<StoreSetupPage />} />
       <Route path="/app/organization/stores/:id" element={<StoreDetailPage />} />
+      <Route path="/app/commerce/menus" element={<MenuListPage />} />
+      <Route path="/app/commerce/menus/:id/edit" element={<MenuBuilderPage />} />
       <Route path="*" element={<Navigate replace to="/app" />} />
     </Routes>
   );
