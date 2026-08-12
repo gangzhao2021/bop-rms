@@ -26,6 +26,14 @@ const workspace: MerchantWorkspaceSnapshot = Object.freeze({
   storeStatus: "Open",
   freshness: "Stale",
   dashboardAvailability: "UnavailableUntilWP1905",
+  navigation: Object.freeze([
+    Object.freeze({
+      screenId: "HOME-OVERVIEW",
+      label: "Overview",
+      href: "/app",
+      permission: "merchant.access",
+    }),
+  ]),
 });
 
 describe("HOME-OVERVIEW Merchant shell", () => {
@@ -61,6 +69,9 @@ describe("HOME-OVERVIEW Merchant shell", () => {
     expect(html.match(/Unavailable until the WP-1905/g)).toHaveLength(3);
     expect(html).toContain("Stale data");
     expect(html).toContain('aria-label="Primary"');
+    expect(html).toContain('aria-label="Authorized Merchant navigation"');
+    expect(html).toContain('href="/app"');
+    expect(html).not.toContain('href="/operations/kitchen"');
   });
 
   it("keeps the previous scope visible on a non-color-only switch failure", () => {

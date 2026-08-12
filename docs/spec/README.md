@@ -17,6 +17,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1807 — Permission-aware Navigation` is locally implemented and verified on top of WP-1806
+  head `aa8b13e`. The same-origin Session now supplies a closed exact Screen/route/Permission
+  navigation array; unknown, mismatched and duplicate destinations fail closed, and Store switch
+  rotates into a fresh array. Visibility never grants direct-route or Command authority. Exact
+  boundaries are in `docs/spec/work-packages/WP-1807.md`; GitHub publication/integration is deferred
+  by explicit Owner direction.
+
 - `WP-1806 — Device / Output Failure View` is locally resolved on top of WP-1805 head `185ebaa` as
   a no-code closeout. Later accepted Sections 88.17/88.21 and IDR-0039 assign managed KDS Device UI
   and UAT to WP-1808/2180/2181 and keep physical Output behind WP-1500–1506 Future Triggers; Section

@@ -55,7 +55,17 @@ export function MerchantShell({ state, onSwitchStore }: MerchantShellProps) {
     <AppFrame
       title="Merchant overview"
       description="Permission-trimmed Store workspace"
-      navigation={ready ? <a href="#overview">Overview</a> : undefined}
+      navigation={
+        ready ? (
+          <nav aria-label="Authorized Merchant navigation">
+            {ready.workspace.navigation.map((item) => (
+              <a key={item.screenId} href={item.href}>
+                {item.label}
+              </a>
+            ))}
+          </nav>
+        ) : undefined
+      }
     >
       {ready === null ? (
         <StateView state={state as Exclude<MerchantShellState, { kind: "Ready" }>} />

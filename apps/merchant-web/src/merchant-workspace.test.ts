@@ -20,6 +20,20 @@ const workspace = Object.freeze({
   storeStatus: "Open",
   freshness: "Current",
   dashboardAvailability: "UnavailableUntilWP1905",
+  navigation: Object.freeze([
+    Object.freeze({
+      screenId: "HOME-OVERVIEW",
+      label: "Overview",
+      href: "/app",
+      permission: "merchant.access",
+    }),
+    Object.freeze({
+      screenId: "KIT-KITCHEN-QUEUE",
+      label: "Kitchen",
+      href: "/operations/kitchen",
+      permission: "kitchen.operate",
+    }),
+  ]),
 });
 
 describe("Merchant workspace client boundary", () => {
@@ -34,6 +48,19 @@ describe("Merchant workspace client boundary", () => {
     expect(() => parseMerchantWorkspace({ ...workspace, businessDate: "2026-99-99" })).toThrow(
       "MERCHANT_WORKSPACE_INVALID",
     );
+    expect(() =>
+      parseMerchantWorkspace({
+        ...workspace,
+        navigation: [
+          {
+            screenId: "KIT-KITCHEN-QUEUE",
+            label: "Kitchen",
+            href: "/operations/orders",
+            permission: "kitchen.operate",
+          },
+        ],
+      }),
+    ).toThrow("MERCHANT_WORKSPACE_INVALID");
   });
 
   it("treats closed authentication denial as signed out and leaks no error body", async () => {
