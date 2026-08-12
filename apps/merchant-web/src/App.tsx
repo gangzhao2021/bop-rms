@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { MerchantShell } from "./MerchantShell.js";
+import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
 import {
   createMerchantWorkspaceClient,
   type MerchantWorkspaceClient,
@@ -79,6 +80,9 @@ export function App({ client: injectedClient }: AppProps = {}) {
   return (
     <Routes>
       <Route path="/app" element={<MerchantShell state={state} onSwitchStore={switchStore} />} />
+      <Route path="/app/organization/stores" element={<StoreListPage />} />
+      <Route path="/app/organization/stores/:id/setup" element={<StoreSetupPage />} />
+      <Route path="/app/organization/stores/:id" element={<StoreDetailPage />} />
       <Route path="*" element={<Navigate replace to="/app" />} />
     </Routes>
   );

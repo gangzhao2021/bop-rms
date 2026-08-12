@@ -230,6 +230,7 @@ catalogs:
     - WP-2183
     - WP-2190
     - WP-2191
+    - WP-2192
     - WP-2193
     - WP-2194
     - WP-2196
@@ -9396,6 +9397,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1801
+      - WP-2192
     handoff_section: "88.7"
     route_intent: STORE-DETAIL /app/organization/stores/:id
     navigation_targets: []
@@ -9489,6 +9491,8 @@ screens:
     work_packages:
       - WP-1000
       - WP-1001
+      - WP-1801
+      - WP-2192
     handoff_section: "88.7"
     route_intent: STORE-LIST /app/organization/stores
     navigation_targets: []
@@ -9583,6 +9587,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1801
+      - WP-2192
     handoff_section: "88.7"
     route_intent: STORE-SETUP /app/organization/stores/:id/setup
     navigation_targets: []

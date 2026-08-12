@@ -74,3 +74,103 @@
     min-width: 0;
   }
 }
+.screen-heading,
+.store-card header,
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+}
+.screen-heading {
+  margin-bottom: var(--bop-space-6);
+}
+.screen-heading h2,
+.store-card h3,
+.setup-steps p {
+  margin-block: var(--bop-space-1);
+}
+.list-filters {
+  display: grid;
+  grid-template-columns: minmax(16rem, 2fr) minmax(10rem, 1fr);
+  gap: var(--bop-space-4);
+  margin-bottom: var(--bop-space-6);
+}
+.list-filters label {
+  display: grid;
+  gap: var(--bop-space-2);
+  font-weight: 600;
+}
+.list-filters input,
+.list-filters select,
+.screen-heading button,
+.card-actions button {
+  min-height: 44px;
+  padding: var(--bop-space-2) var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+}
+.store-card-grid,
+.detail-section-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
+  gap: var(--bop-space-4);
+}
+.store-card {
+  padding: var(--bop-space-6);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.store-card dl {
+  display: grid;
+  gap: var(--bop-space-2);
+}
+.store-card dl div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.6fr) 1fr;
+  gap: var(--bop-space-3);
+}
+.store-card dt {
+  color: var(--bop-color-text-muted);
+}
+.store-card dd {
+  margin: 0;
+}
+.setup-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--bop-space-3);
+  padding: 0;
+  list-style: none;
+}
+.setup-steps li {
+  display: flex;
+  gap: var(--bop-space-3);
+  min-height: 6rem;
+  padding: var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-default);
+  border-left: 6px solid var(--bop-color-info);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface-default);
+}
+.setup-steps li[data-status="Blocked"] {
+  border-left-color: var(--bop-color-danger);
+}
+.setup-steps li > span {
+  font-family: var(--bop-font-mono);
+  font-weight: 700;
+}
+@media (max-width: 767px) {
+  .list-filters {
+    grid-template-columns: 1fr;
+  }
+  .store-card dl div {
+    grid-template-columns: 1fr;
+    gap: var(--bop-space-1);
+  }
+}
