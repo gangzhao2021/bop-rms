@@ -17,6 +17,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1721 — Localized Escaped Transactional Template, Minimal Receipt Body and No-tracking
+Contract` is locally implemented and verified on top of WP-1720 head `714c2da`. It owns the
+  strict React DOM Server transactional-receipt renderer described in
+  `docs/spec/work-packages/WP-1721.md`; send orchestration and resume links remain WP-1722–1723.
+  GitHub publication/integration is deferred by explicit Owner direction.
+
 - `WP-1720 — SES Domain Identity, Authentication, Sandbox Exit and Regional Evidence` is locally
   implemented and verified on top of WP-1709 head `9afea90`. It owns Notification's strict
   `ca-central-1` readiness-evidence admission described in `docs/spec/work-packages/WP-1720.md`.

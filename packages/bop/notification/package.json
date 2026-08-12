@@ -19,6 +19,12 @@
   "dependencies": {
     "@bop/eventing": "workspace:*",
     "@bop/publishing": "workspace:*",
-    "@bop/tenant": "workspace:*"
+    "@bop/tenant": "workspace:*",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3"
   }
 }
