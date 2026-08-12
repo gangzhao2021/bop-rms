@@ -4,4 +4,5 @@ export * from "./order-operational.js";
 export * from "./payment-operational.js";
 export * from "./kitchen-operational.js";
 export * from "./fulfillment-operational.js";
+export * from "./projection-rebuild.js";
 export { OperationalProjectionError } from "./projection-contract.js";

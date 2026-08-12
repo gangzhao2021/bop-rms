@@ -22,6 +22,9 @@ WP-1901 exports `payment_operations_v1` using exact CAD minor-unit strings and r
 Unknown/reconciliation gaps. WP-1902 exports `kitchen_operations_v1` without replacing the
 Kitchen-owned board projection and without client-derived completion. WP-1903 exports
 `fulfillment_operations_v1` with minimized proof readiness and source-only Handoff completion.
+WP-1904 adds the authorized, idempotent Projection Rebuild Command contract. It reads a fixed source
+checkpoint in bounded batches, writes only a shadow generation, validates that generation and asks
+the persistence adapter to atomically switch it under the expected active-generation guard.
 
 ## Boundaries
 
@@ -31,6 +34,8 @@ Kitchen-owned board projection and without client-derived completion. WP-1903 ex
   text are excluded.
 - Projection rows are disposable and replayable; source facts and append-only evidence are not.
 - No persistence, migration, worker, external Provider or production composition exists yet.
+- A failed rebuild abandons its shadow generation; it never clears or partially replaces the active
+  generation. The adapter owns durable lease, checkpoint and atomic-switch enforcement.
 
 ## Verification
 
