@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { consumeCustomerQrFragment, createCustomerEntryClient } from "./entry-client.js";
+import { getCustomerCsrfCredential } from "../session/customer-transaction-context.js";
 
 const established = Object.freeze({
   schemaVersion: 2,
@@ -71,6 +72,7 @@ describe("customer entry browser boundary", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(first).toEqual(second);
     expect(first.kind).toBe("Established");
+    expect(getCustomerCsrfCredential()).toBe(established.csrfToken);
   });
 
   it("maps closed error contracts without exposing an oracle", async () => {

@@ -1,4 +1,8 @@
 import { CartClientError, type CartErrorCode, type CartItemDraft, type CartView } from "./types.js";
+import {
+  getCustomerCsrfCredential,
+  setCustomerCsrfCredential,
+} from "../session/customer-transaction-context.js";
 
 const errorCodes = new Set<CartErrorCode>([
   "cart_request_invalid",
@@ -154,15 +158,14 @@ export interface CustomerCartClient {
   }): Promise<CartView>;
 }
 
-let csrfCredential: string | null = null;
-
 export function setCustomerCartCsrfCredential(value: string | null): void {
-  csrfCredential = value;
+  setCustomerCsrfCredential(value);
 }
 
 function csrf(): string {
-  if (csrfCredential === null) throw new CartClientError("cart_session_expired");
-  return csrfCredential;
+  const value = getCustomerCsrfCredential();
+  if (value === null) throw new CartClientError("cart_session_expired");
+  return value;
 }
 
 function headers(input: { readonly operationReference: string; readonly version: number }) {

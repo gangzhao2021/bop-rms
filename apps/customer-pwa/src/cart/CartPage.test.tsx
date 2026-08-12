@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { CartPage } from "./CartPage.js";
 import type { CartState, CartStateController } from "./cart-state.js";
@@ -65,11 +66,17 @@ function controller(state: CartState): CartStateController {
   };
 }
 
+function renderPage(state: CartState): string {
+  return renderToStaticMarkup(
+    <MemoryRouter>
+      <CartPage controller={controller(state)} />
+    </MemoryRouter>,
+  );
+}
+
 describe("CUST-CART page contract", () => {
   it("renders exact Cart fields, Quote, boundaries and accessible controls", () => {
-    const html = renderToStaticMarkup(
-      <CartPage controller={controller({ status: "ready", cart: cart() })} />,
-    );
+    const html = renderPage({ status: "ready", cart: cart() });
     expect(html).toContain("Your cart");
     expect(html).toContain("Synthetic Brand");
     expect(html).toContain("Synthetic Store");
@@ -79,9 +86,9 @@ describe("CUST-CART page contract", () => {
     expect(html).toContain("Cart version 3");
     expect(html).toContain("Continue shopping");
     expect(html).toContain("Clear cart");
-    expect(html).toContain("Checkout");
+    expect(html).toContain("Review checkout");
     expect(html).toContain("Clear cart requires an atomic server command and is unavailable.");
-    expect(html).toContain("Checkout is implemented by WP-1220 and later packages.");
+    expect(html).toContain("Payment remains unavailable until WP-1704.");
     expect(html).toContain("disabled");
     expect(html).toContain('aria-label="Increase Synthetic tea quantity"');
     expect(html).toContain('href="#cart-content"');
@@ -89,9 +96,7 @@ describe("CUST-CART page contract", () => {
   });
 
   it("renders offline as explicit read-only with no enabled mutation", () => {
-    const html = renderToStaticMarkup(
-      <CartPage controller={controller({ status: "offline-readonly", cart: cart() })} />,
-    );
+    const html = renderPage({ status: "offline-readonly", cart: cart() });
     expect(html).toContain("Offline read-only");
     expect(html).toContain("nothing will replay on reconnect");
     expect(html).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
@@ -101,25 +106,17 @@ describe("CUST-CART page contract", () => {
   it("renders explicit Feature-disabled and Quote-expired states", () => {
     const disabled = cart();
     expect(
-      renderToStaticMarkup(
-        <CartPage
-          controller={controller({
-            status: "ready",
-            cart: { ...disabled, cart: { ...disabled.cart, warnings: ["FEATURE_DISABLED"] } },
-          })}
-        />,
-      ),
+      renderPage({
+        status: "ready",
+        cart: { ...disabled, cart: { ...disabled.cart, warnings: ["FEATURE_DISABLED"] } },
+      }),
     ).toContain("Cart ordering is not enabled");
     const expired = cart();
     expect(
-      renderToStaticMarkup(
-        <CartPage
-          controller={controller({
-            status: "ready",
-            cart: { ...expired, cart: { ...expired.cart, warnings: ["QUOTE_EXPIRED"] } },
-          })}
-        />,
-      ),
+      renderPage({
+        status: "ready",
+        cart: { ...expired, cart: { ...expired.cart, warnings: ["QUOTE_EXPIRED"] } },
+      }),
     ).toContain("Quote expired");
   });
 
@@ -146,6 +143,6 @@ describe("CUST-CART page contract", () => {
             retryAfterSeconds: status === "rate-limited" ? 5 : null,
             canRetrySameOperation: status === "command-failed",
           };
-    expect(renderToStaticMarkup(<CartPage controller={controller(state)} />)).toContain(message);
+    expect(renderPage(state)).toContain(message);
   });
 });

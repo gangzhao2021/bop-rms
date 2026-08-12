@@ -3,11 +3,14 @@ import type { Request, RequestHandler, Response } from "express";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+const credential = /^[A-Za-z0-9_-]{43}$/u;
+const guestCookieName = "__Host-bop-guest";
 
 export interface QuoteCartCommand {
   readonly cartReference: PricingReference;
   readonly expectedCartVersion: number;
-  readonly customerSessionReference: PricingReference;
+  readonly guestCredential: string;
+  readonly csrfCredential: string;
   readonly idempotencyKey: string;
   readonly requestedAt: string;
 }
@@ -51,12 +54,29 @@ function sendError(response: Response, code: ErrorCode): void {
     .json({ schemaVersion: 1, error: { code, messageKey: contract.messageKey } });
 }
 
+function protectResponse(response: Response): void {
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Referrer-Policy", "no-referrer");
+}
+
 function oneHeader(value: string | string[] | undefined): string {
   if (typeof value !== "string" || !uuidV7.test(value)) throw new TypeError("invalid header");
   return value;
 }
 
-function parse(request: Request, now: () => string): QuoteCartCommand {
+function guestCredential(request: Request): string {
+  const header = request.headers.cookie;
+  if (typeof header !== "string") throw new TypeError("guest cookie required");
+  const values = header
+    .split(";")
+    .map((part) => part.trim().split("="))
+    .filter(([name]) => name === guestCookieName);
+  if (values.length !== 1 || values[0]?.length !== 2 || !credential.test(values[0]?.[1] ?? ""))
+    throw new TypeError("guest cookie required");
+  return values[0]?.[1] as string;
+}
+
+function parse(request: Request, now: () => string, allowedOrigin: string): QuoteCartCommand {
   const body = request.body as unknown;
   if (
     body === null ||
@@ -77,6 +97,9 @@ function parse(request: Request, now: () => string): QuoteCartCommand {
   const cartReference = request.params.cart_id;
   const requestedAt = now();
   if (
+    request.get("origin") !== allowedOrigin ||
+    request.get("sec-fetch-site") !== "same-origin" ||
+    request.is("application/json") !== "application/json" ||
     typeof cartReference !== "string" ||
     !uuidV7.test(cartReference) ||
     !instant.test(requestedAt) ||
@@ -86,9 +109,13 @@ function parse(request: Request, now: () => string): QuoteCartCommand {
   return Object.freeze({
     cartReference: cartReference as PricingReference,
     expectedCartVersion: Number(cartVersion),
-    customerSessionReference: oneHeader(
-      request.headers["x-customer-session-id"],
-    ) as PricingReference,
+    guestCredential: guestCredential(request),
+    csrfCredential: (() => {
+      const value = request.headers["x-csrf-token"];
+      if (typeof value !== "string" || !credential.test(value))
+        throw new TypeError("csrf required");
+      return value;
+    })(),
     idempotencyKey: oneHeader(request.headers["idempotency-key"]),
     requestedAt,
   });
@@ -103,7 +130,6 @@ function publicQuote(quote: PriceQuoteSnapshot, requote?: PriceQuoteRequoteResul
     quote: {
       quoteReference: quote.quoteReference,
       quoteVersion: quote.quoteVersion,
-      cartReference: quote.cartReference,
       cartVersion: quote.cartVersion,
       currency: quote.currencyMetadata.currencyCode,
       subtotal: money(quote.subtotal),
@@ -111,37 +137,6 @@ function publicQuote(quote: PriceQuoteSnapshot, requote?: PriceQuoteRequoteResul
       tax: money(quote.tax),
       fee: money(quote.fee),
       total: money(quote.total),
-      lines: quote.lines.map((line) => ({
-        lineReference: line.lineReference,
-        sellableReference: line.sellableReference,
-        productVersionReference: line.productVersionReference,
-        menuVersionReference: line.menuVersionReference,
-        quantity: line.quantity,
-        unitPrice: money(line.unitPrice),
-        subtotal: money(line.subtotal),
-        discount: money(line.discount),
-        tax: money(line.tax),
-        fee: money(line.fee),
-        total: money(line.total),
-        priceEvidence: {
-          priceBookReference: line.resolvedPrice.priceBookReference,
-          versionReference: line.resolvedPrice.versionReference,
-          snapshotDigest: line.resolvedPrice.snapshotDigest,
-          entryReference: line.resolvedPrice.entryReference,
-        },
-        taxEvidence: {
-          configurationReference: line.taxResolution.configurationReference,
-          versionReference: line.taxResolution.versionReference,
-          snapshotDigest: line.taxResolution.snapshotDigest,
-          components: line.taxLines.map((taxLine) => ({
-            ruleReference: taxLine.ruleReference,
-            taxAmount: money(taxLine.taxAmount),
-            calculationOrder: taxLine.calculationOrder,
-            compoundOnPriorTax: taxLine.compoundOnPriorTax,
-          })),
-        },
-      })),
-      appliedPromotionReferences: [...quote.appliedPromotionReferences],
       expiresAt: quote.expiresAt,
       warnings: [...quote.warnings],
       blockingReasons: [...quote.blockingReasons],
@@ -160,23 +155,28 @@ function publicQuote(quote: PriceQuoteSnapshot, requote?: PriceQuoteRequoteResul
 }
 
 export class CustomerQuoteHandler {
+  readonly #allowedOrigin: string;
   readonly #now: () => string;
   readonly #port: CustomerQuotePort;
   constructor({
     now = () => new Date().toISOString(),
     port,
+    allowedOrigin,
   }: {
     now?: () => string;
     port: CustomerQuotePort;
+    allowedOrigin: string;
   }) {
+    this.#allowedOrigin = new URL(allowedOrigin).origin;
     this.#now = now;
     this.#port = port;
   }
   handler(): RequestHandler {
     return async (request, response) => {
+      protectResponse(response);
       let command: QuoteCartCommand;
       try {
-        command = parse(request, this.#now);
+        command = parse(request, this.#now, this.#allowedOrigin);
       } catch {
         sendError(response, "quote_request_invalid");
         return;
@@ -218,5 +218,7 @@ export class CustomerQuoteHandler {
   }
 }
 
-export const unavailableCustomerQuoteHandler: RequestHandler = (_request, response) =>
+export const unavailableCustomerQuoteHandler: RequestHandler = (_request, response) => {
+  protectResponse(response);
   sendError(response, "quote_service_unavailable");
+};
