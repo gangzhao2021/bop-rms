@@ -17,8 +17,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1720 — SES Domain Identity, Authentication, Sandbox Exit and Regional Evidence` is locally
+  implemented and verified on top of WP-1709 head `9afea90`. It owns Notification's strict
+  `ca-central-1` readiness-evidence admission described in `docs/spec/work-packages/WP-1720.md`.
+  Real SES, DNS, DMARC, account and Production Access evidence remains externally gated and
+  unclaimed; GitHub publication/integration is deferred by explicit Owner direction.
+
 - `WP-1709 — Accessible Immutable Digital Receipt, Correction / Reissue and Guest-authorized
-  Retrieval` is locally implemented and verified on top of WP-1708 head `e7328ea`. It owns the
+Retrieval` is locally implemented and verified on top of WP-1708 head `e7328ea`. It owns the
   bounded Ordering receipt-chain contract and `CUST-RECEIPT-SUPPORT` runtime-inactive Customer
   screen described in `docs/spec/work-packages/WP-1709.md`. SES delivery and resume-token minting
   remain WP-1720–1724; GitHub publication/integration is deferred by explicit Owner direction.

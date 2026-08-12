@@ -6,6 +6,7 @@ import type {
   NotificationRequest,
   NotificationSuppressionEvidence,
 } from "../../contracts/notification.js";
+import type { SesEnvironment, SesReadinessEvidence } from "../../contracts/ses-readiness.js";
 
 export interface RegisterNotificationRequestInput {
   readonly idempotencyKey: NotificationReference;
@@ -88,6 +89,10 @@ export interface NotificationPorts {
   readonly unitOfWork: NotificationUnitOfWorkPort;
   readonly destinations: NotificationDestinationPort;
   readonly adapters: Readonly<Record<NotificationChannel, NotificationDeliveryAdapter>>;
+  readonly providerReadiness: {
+    readonly environment: SesEnvironment;
+    loadSesEvidence(): Promise<SesReadinessEvidence | null>;
+  };
 }
 
 export interface NotificationEvidenceBundle {

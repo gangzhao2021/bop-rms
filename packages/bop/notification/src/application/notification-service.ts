@@ -16,6 +16,7 @@ import {
   type NotificationSuppressionEvidence,
 } from "../contracts/notification.js";
 import { evaluateNotificationRoute } from "../domain/evaluate-delivery.js";
+import { assertSesReady } from "../contracts/ses-readiness.js";
 import type {
   DeliverNotificationAdapterResult,
   NotificationDestinationResolution,
@@ -29,6 +30,7 @@ export const notificationServiceErrorCodes = [
   "NOTIFICATION_DELIVERY_DENIED",
   "NOTIFICATION_DESTINATION_UNAVAILABLE",
   "NOTIFICATION_ATTEMPT_COMMIT_FAILED",
+  "NOTIFICATION_PROVIDER_NOT_READY",
 ] as const;
 export type NotificationServiceErrorCode = (typeof notificationServiceErrorCodes)[number];
 
@@ -294,6 +296,20 @@ export async function executeNotificationDelivery(
     (previousAttempt !== null && Date.parse(attemptedAt) < Date.parse(previousAttempt.attemptedAt))
   )
     fail("NOTIFICATION_DELIVERY_DENIED");
+
+  if (input.channel === "Email") {
+    try {
+      const evidence = await ports.providerReadiness.loadSesEvidence();
+      if (evidence === null) fail("NOTIFICATION_PROVIDER_NOT_READY");
+      assertSesReady({
+        evidence,
+        environment: ports.providerReadiness.environment,
+        evaluatedAt: attemptedAt,
+      });
+    } catch {
+      return fail("NOTIFICATION_PROVIDER_NOT_READY");
+    }
+  }
 
   let destination: NotificationDestinationResolution;
   try {

@@ -21,6 +21,7 @@ import {
   parseNotificationVersion,
   registerNotificationRequest,
   resolveNotificationDeliveryStatus,
+  parseSesReadinessEvidence,
   NotificationContractError,
   NotificationServiceError,
   type NotificationChannel,
@@ -52,6 +53,8 @@ const ids = {
   attempt2: "018f4000-0000-7000-8000-000000000011",
   destination: "018f4000-0000-7000-8000-000000000012",
   providerAttempt: "018f4000-0000-7000-8000-000000000013",
+  sesEvidence: "018f4000-0000-7000-8000-000000000014",
+  sesIdentity: "018f4000-0000-7000-8000-000000000015",
 } as const;
 
 const before = parseNotificationInstant("2026-07-29T19:55:00.000Z");
@@ -189,6 +192,7 @@ function ports(options?: {
   appendFailure?: boolean;
   adapter?: "Accepted" | "Rejected" | "Unknown" | "Throw" | "Extra";
   destination?: "Resolved" | "Unavailable";
+  readiness?: "Ready" | "Missing" | "Expired";
 }) {
   const registrations: unknown[] = [];
   const attempts: NotificationDeliveryAttempt[] = [];
@@ -232,6 +236,25 @@ function ports(options?: {
       ),
     },
     adapters: { Email: adapter, SMS: adapter, Push: adapter },
+    providerReadiness: {
+      environment: "Staging",
+      loadSesEvidence: vi.fn(async () =>
+        options?.readiness === "Missing"
+          ? null
+          : parseSesReadinessEvidence({
+              evidenceReference: ids.sesEvidence,
+              identityReference: ids.sesIdentity,
+              environment: "Staging",
+              region: "ca-central-1",
+              dkimStatus: "Verified",
+              spfStatus: "Aligned",
+              dmarcStatus: "ReportingActive",
+              productionAccessStatus: "Granted",
+              reviewedAt: before,
+              validUntil: options?.readiness === "Expired" ? at : "2026-07-30T20:00:00.000Z",
+            }),
+      ),
+    },
   };
   return { value, registrations, attempts, adapter };
 }
@@ -405,6 +428,27 @@ describe("Notification request and routing", () => {
 });
 
 describe("Notification delivery attempts", () => {
+  it.each(["Missing", "Expired"] as const)(
+    "fails closed before destination and adapter when SES evidence is %s",
+    async (readiness) => {
+      const fixture = request();
+      const adapter = ports({ readiness });
+      await expect(
+        executeNotificationDelivery(
+          {
+            request: fixture.record,
+            attemptReference: parseNotificationReference(ids.attempt1),
+            channel: "Email",
+            previousAttempt: null,
+            idempotencyKey: parseNotificationReference(ids.idempotency),
+            attemptedAt: at,
+          },
+          adapter.value,
+        ),
+      ).rejects.toMatchObject({ code: "NOTIFICATION_PROVIDER_NOT_READY" });
+      expect(adapter.adapter.deliver).not.toHaveBeenCalled();
+    },
+  );
   it("submits only opaque normalized adapter input and appends Accepted", async () => {
     const fixture = request();
     const adapter = ports();
