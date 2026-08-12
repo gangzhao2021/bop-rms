@@ -60,6 +60,7 @@ describe("migration catalog", () => {
       "1104_001_create_menu_publication",
       "1105_001_create_published_menu_projection",
       "1106_001_create_allergen_provenance",
+      "1106_002_alter_catalog_function_permissions",
       "1200_001_create_tax_configuration",
       "1200_002_create_price_book",
       "1200_003_create_price_quote",
@@ -91,6 +92,15 @@ describe("migration catalog", () => {
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
     ).toBe(true);
+  });
+
+  it("registers the WP-2005 Catalog function PUBLIC-execute revocation", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1106_002_alter_catalog_function_permissions",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/catalog", schema: "rms_catalog" });
+    expect(migration?.sql.match(/REVOKE ALL ON FUNCTION rms_catalog\./gu)).toHaveLength(4);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
   it("registers the exact WP-1603 Pickup Handoff migration", async () => {

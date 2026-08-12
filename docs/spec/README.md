@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2004 — Module Dependency Test on codex/wp-2004`
+- Current discussion node: `WP-2005 — Database Permission Test on codex/wp-2005`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2005 — Database Permission Test` is locally implemented and verified on top of WP-2004 head
+  `ed82c82`. A new migration-permission gate enforces complete
+  Brand/Store RLS, PUBLIC revocation and no privilege weakening; its first full scan found four
+  historical Catalog trigger functions with default PUBLIC execute, corrected through ordered
+  forward migration `1106_002`. Exact boundaries are in `docs/spec/work-packages/WP-2005.md`;
+  GitHub publication/integration is deferred by Owner direction.
 
 - `WP-2004 — Module Dependency Test` is locally implemented and verified on top of WP-2003 head
   `c328583`. The Import Boundary architecture gate now validates exact
