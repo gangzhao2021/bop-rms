@@ -20,8 +20,8 @@ permission/version/idempotency-bound action intent routing. WP-1900 exports
 `merchant_order_queue_v1` with explicit collaborating-domain gaps and a 2-second freshness target.
 WP-1901 exports `payment_operations_v1` using exact CAD minor-unit strings and retaining Provider
 Unknown/reconciliation gaps. WP-1902 exports `kitchen_operations_v1` without replacing the
-Kitchen-owned board projection and without client-derived completion. WP-1903 remains the next
-Fulfillment contract.
+Kitchen-owned board projection and without client-derived completion. WP-1903 exports
+`fulfillment_operations_v1` with minimized proof readiness and source-only Handoff completion.
 
 ## Boundaries
 

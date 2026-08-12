@@ -17,6 +17,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1903 — Fulfillment Operational Projection` is locally implemented and verified on top of
+  WP-1902 head `6ce1c12`. `@bop/projection` now exports `fulfillment_operations_v1` with exact
+  Store/Business-Date scope, phase/readiness/handoff-quantity invariants, minimized proof readiness,
+  deterministic rebuild metadata and a 2-second Fresh/Stale target. No Pickup Proof, recipient,
+  Customer/contact or device identifier enters the Projection. Persistence/API/proof/device
+  composition remains unavailable and unclaimed. Exact boundaries are in
+  `docs/spec/work-packages/WP-1903.md`; GitHub publication/integration is deferred by Owner direction.
+
 - `WP-1902 — Kitchen Operational Projection` is locally implemented and verified on top of WP-1901
   head `419dd28`. `@bop/projection` now exports `kitchen_operations_v1` with exact Store/station
   scope, lifecycle/quantity/Ready invariants, a structured non-medical safety cue, deterministic
