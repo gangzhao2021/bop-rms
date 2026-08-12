@@ -3,6 +3,7 @@ import {
   executeProjectionRebuild,
   ProjectionRebuildError,
   type ProjectionRebuildPorts,
+  type ProjectionRebuildResult,
 } from "../index.js";
 
 const r = (n: number) => `018f0f58-767a-7f3b-a1d0-${String(n).padStart(12, "0")}`;
@@ -138,6 +139,100 @@ describe("WP-1904 projection rebuild command", () => {
     await expect(executeProjectionRebuild(command(), adapter)).rejects.toEqual(
       new ProjectionRebuildError("SOURCE_PAGINATION_INVALID"),
     );
+    expect(adapter.abandonShadow).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("WP-2025 projection rebuild failure and recovery scenario", () => {
+  it("retains the active generation, recovers with a fresh shadow and replays completion", async () => {
+    const digest = `sha256:${"b".repeat(64)}`;
+    let activeGenerationReference: string | null = r(5);
+    let completed: ProjectionRebuildResult | null = null;
+    let nextShadow = 20;
+    let validationAttempt = 0;
+    const shadowStates = new Map<string, "Open" | "Abandoned" | "Active">();
+
+    const adapter: ProjectionRebuildPorts = {
+      authorize: vi.fn().mockResolvedValue(true),
+      findCompleted: vi.fn().mockImplementation(async () => completed),
+      openShadow: vi.fn().mockImplementation(async () => {
+        const reference = r(nextShadow);
+        nextShadow += 1;
+        shadowStates.set(reference, "Open");
+        return reference;
+      }),
+      loadSourceBatch: vi.fn().mockResolvedValue({
+        records: [{ source: 1 }, { source: 2 }],
+        nextCursor: null,
+        sourceCheckpoint: r(6),
+      }),
+      writeShadowBatch: vi.fn().mockResolvedValue(undefined),
+      validateShadow: vi.fn().mockImplementation(async () => {
+        validationAttempt += 1;
+        return {
+          rowCount: 2,
+          summaryDigest: digest,
+          sourceCheckpoint: validationAttempt === 1 ? r(99) : r(6),
+        };
+      }),
+      activateShadow: vi.fn().mockImplementation(async (input) => {
+        if (activeGenerationReference !== input.command.expectedActiveGenerationReference)
+          throw new Error("synthetic active generation conflict");
+        const replacedGenerationReference = activeGenerationReference;
+        activeGenerationReference = input.shadowGenerationReference;
+        shadowStates.set(input.shadowGenerationReference, "Active");
+        const activation = {
+          replacedGenerationReference,
+          rebuiltAt: "2026-08-12T20:00:02.000Z",
+          auditReference: r(10),
+        };
+        completed = {
+          projectionName: input.command.projectionName,
+          projectionVersion: input.command.targetProjectionVersion,
+          commandReference: input.command.commandReference,
+          tenantReference: input.command.tenantReference,
+          brandReference: input.command.brandReference,
+          storeReference: input.command.storeReference,
+          businessDate: input.command.businessDate,
+          shadowGenerationReference: input.shadowGenerationReference,
+          replacedGenerationReference,
+          sourceCheckpoint: input.command.sourceCheckpoint,
+          sourceCutoffAt: input.command.sourceCutoffAt,
+          rowCount: input.rowCount,
+          summaryDigest: input.summaryDigest,
+          rebuiltAt: activation.rebuiltAt,
+          auditReference: activation.auditReference,
+          status: "Completed",
+        };
+        return activation;
+      }),
+      abandonShadow: vi.fn().mockImplementation(async ({ shadowGenerationReference }) => {
+        shadowStates.set(shadowGenerationReference, "Abandoned");
+      }),
+    };
+
+    await expect(executeProjectionRebuild(command(), adapter)).rejects.toEqual(
+      new ProjectionRebuildError("SHADOW_VALIDATION_FAILED"),
+    );
+    expect(activeGenerationReference).toBe(r(5));
+    expect(shadowStates.get(r(20))).toBe("Abandoned");
+    expect(adapter.activateShadow).not.toHaveBeenCalled();
+
+    const recovered = await executeProjectionRebuild(command(), adapter);
+    expect(recovered).toMatchObject({
+      shadowGenerationReference: r(21),
+      replacedGenerationReference: r(5),
+      sourceCheckpoint: r(6),
+      rowCount: 2,
+      summaryDigest: digest,
+      status: "Completed",
+    });
+    expect(activeGenerationReference).toBe(r(21));
+    expect(shadowStates.get(r(21))).toBe("Active");
+
+    await expect(executeProjectionRebuild(command(), adapter)).resolves.toEqual(recovered);
+    expect(adapter.openShadow).toHaveBeenCalledTimes(2);
+    expect(adapter.activateShadow).toHaveBeenCalledTimes(1);
     expect(adapter.abandonShadow).toHaveBeenCalledTimes(1);
   });
 });

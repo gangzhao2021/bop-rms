@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2024 — Printer Offline Scenario on codex/wp-2024`
+- Current discussion node: `WP-2025 — Projection Rebuild Scenario on codex/wp-2025`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2025 — Projection Rebuild Scenario` is locally implemented and verified on top of WP-2024
+  head `08aa0b6`. Its stateful failure injection proves validation failure abandons only the shadow,
+  retry uses a fresh shadow to atomically replace the expected active generation, and completion
+  replay opens no further shadow. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2025.md`; GitHub publication/integration is deferred by Owner direction.
 
 - `WP-2024 — Printer Offline Scenario` is resolved as a no-code Future Trigger closeout on top of
   WP-2023 head `d1dc7d4`. Later accepted IDR-0039 disables physical printers, Store Gateway and
