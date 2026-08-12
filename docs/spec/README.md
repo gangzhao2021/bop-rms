@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1705 — Customer Order Status / Realtime Refresh on codex/wp-1705`
+- Current discussion node: `WP-1706 — Pickup Ready / Confirmation Screen on codex/wp-1706`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,11 +17,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1705 — Customer Order Status / Realtime Refresh` is active on a sequential local stack from
-  locally verified WP-1704 head `520c212a52594ff9e9aeb033e3b1b72a11c6d3fc`. It owns only the
-  bounded `CUST-ORDER-STATUS` browser contract described in
-  `docs/spec/work-packages/WP-1705.md`. GitHub publication/integration is deferred by explicit
-  Owner direction while the account-level Actions billing hard stop remains unresolved.
+- `WP-1706 — Pickup Ready / Confirmation Screen` is active on a sequential local stack from
+  locally verified WP-1705 head `669256d`. It owns only the bounded contextual
+  `CUST-PICKUP-CODE` browser contract described in `docs/spec/work-packages/WP-1706.md`. GitHub
+  publication/integration is deferred by explicit Owner direction.
+
+- `WP-1705 — Customer Order Status / Realtime Refresh` is locally implemented and verified at
+  `669256d` on top of locally verified WP-1704 head
+  `520c212a52594ff9e9aeb033e3b1b72a11c6d3fc`. It owns only the bounded
+  `CUST-ORDER-STATUS` browser contract described in `docs/spec/work-packages/WP-1705.md`; GitHub
+  publication/integration is deferred by Owner direction.
 
 - `WP-1704 — Payment Redirect / Result Handling` is locally implemented and verified at
   `520c212a52594ff9e9aeb033e3b1b72a11c6d3fc`; PR #167 remains open and all GitHub follow-up is

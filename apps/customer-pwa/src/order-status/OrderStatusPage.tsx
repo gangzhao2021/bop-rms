@@ -6,6 +6,8 @@ import {
   type OrderStatusController,
 } from "./order-status-controller.js";
 import type { OrderStatusView } from "./types.js";
+import { PickupCodePanel } from "../pickup-code/PickupCodePanel.js";
+import type { PickupCodeController } from "../pickup-code/pickup-code-controller.js";
 
 function money(amountMinor: bigint, currencyCode: string): string {
   const negative = amountMinor < 0n;
@@ -15,7 +17,13 @@ function money(amountMinor: bigint, currencyCode: string): string {
     .padStart(2, "0")}`;
 }
 
-function StatusContent({ view }: { readonly view: OrderStatusView }) {
+function StatusContent({
+  view,
+  pickupController,
+}: {
+  readonly view: OrderStatusView;
+  readonly pickupController?: PickupCodeController | undefined;
+}) {
   const complete = view.order.fulfillmentStatus === "Completed";
   return (
     <>
@@ -72,14 +80,23 @@ function StatusContent({ view }: { readonly view: OrderStatusView }) {
           </article>
         ))}
       </section>
+      {view.order.orderType === "Pickup" && !complete ? (
+        <PickupCodePanel
+          orderReference={view.order.orderReference}
+          orderNumber={view.order.orderNumber}
+          controller={pickupController}
+        />
+      ) : null}
     </>
   );
 }
 
 export function OrderStatusPage({
   controller: provided,
+  pickupController,
 }: {
   readonly controller?: OrderStatusController;
+  readonly pickupController?: PickupCodeController | undefined;
 }) {
   const { orderReference = "" } = useParams();
   const [controller] = useState(
@@ -157,7 +174,7 @@ export function OrderStatusPage({
           </p>
         </section>
       ) : null}
-      {view ? <StatusContent view={view} /> : null}
+      {view ? <StatusContent view={view} pickupController={pickupController} /> : null}
       {state.status === "ready" ? (
         <section className="order-status__actions">
           <h2>Updates</h2>
@@ -179,7 +196,7 @@ export function OrderStatusPage({
       ) : null}
       <section className="order-status__boundary">
         <h2>Later actions</h2>
-        <p>Pickup proof, receipt and support actions are not available in this package.</p>
+        <p>Receipt and support actions are not available in this package.</p>
       </section>
       <Link to="/menu">Back to menu</Link>
     </main>

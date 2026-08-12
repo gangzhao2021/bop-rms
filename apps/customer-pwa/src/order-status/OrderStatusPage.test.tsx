@@ -81,7 +81,8 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     expect(html).toContain("Kitchen status");
     expect(html).toContain("Not available yet");
     expect(html).toContain("Payment status");
-    expect(html).toContain("Pickup proof, receipt and support actions are not available");
+    expect(html).toContain("Check pickup readiness");
+    expect(html).toContain("Receipt and support actions are not available");
     expect(html).not.toContain("Ready for pickup");
   });
 
