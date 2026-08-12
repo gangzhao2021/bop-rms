@@ -158,6 +158,7 @@ catalogs:
     - WP-1800
     - WP-1801
     - WP-1802
+    - WP-1803
     - WP-1807
     - WP-1808
     - WP-1900
@@ -6983,6 +6984,7 @@ screens:
       - WP-1224
       - WP-1225
       - WP-1226
+      - WP-1803
     handoff_section: "88.10"
     route_intent: OPS-ORDER-DETAIL /operations/orders/:id
     navigation_targets: []
@@ -7120,6 +7122,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1225
+      - WP-1803
     handoff_section: "88.10"
     route_intent: OPS-ORDER-QUEUE /operations/orders
     navigation_targets: []
