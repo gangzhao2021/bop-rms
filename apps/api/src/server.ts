@@ -126,6 +126,7 @@ export function createApiServerRuntime({
       ...(customerCart === undefined ? {} : { customerCart }),
       healthReadiness,
       ...(customerMenu === undefined ? {} : { customerMenu }),
+      deploymentEnvironment: runtimeEnvironment(),
       ...(merchantCatalog === undefined ? {} : { merchantCatalog }),
       errorLogger: logger,
       nowMilliseconds,

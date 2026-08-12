@@ -1,5 +1,4 @@
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
-import helmet from "helmet";
 import type { CoreTelemetry } from "@bop-rms/observability";
 import {
   sendInvalidCustomerEntryRequest,
@@ -14,6 +13,11 @@ import {
 import { type CustomerMenuHandler, unavailableCustomerMenuHandler } from "./customer-menu.js";
 import { type CustomerQuoteHandler, unavailableCustomerQuoteHandler } from "./customer-quote.js";
 import { HealthReadinessController } from "./health-readiness.js";
+import {
+  createHttpRequestLimitMiddleware,
+  createHttpSecurityHeadersMiddleware,
+  type DeploymentEnvironment,
+} from "./http-security.js";
 import {
   createUnavailableMerchantCatalogRouter,
   type MerchantCatalogRouterOptions,
@@ -66,6 +70,7 @@ export interface AppOptions {
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
   customerQuote?: CustomerQuoteHandler;
+  deploymentEnvironment?: DeploymentEnvironment;
   errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
   merchantCatalog?: MerchantCatalogRouterOptions;
@@ -121,6 +126,7 @@ export function createApp({
   customerEntry,
   customerMenu,
   customerQuote,
+  deploymentEnvironment = "development",
   errorLogger,
   healthReadiness,
   merchantCatalog,
@@ -144,7 +150,8 @@ export function createApp({
       ...(uuidV7Factory === undefined ? {} : { uuidV7Factory }),
     }),
   );
-  app.use(helmet());
+  app.use(...createHttpSecurityHeadersMiddleware(deploymentEnvironment));
+  app.use(createHttpRequestLimitMiddleware());
   if (merchantBff !== undefined) app.use("/merchant", createMerchantBffRouter(merchantBff));
   app.use(express.json({ limit: "64kb", strict: true }));
   app.use((_request, response, next) => {

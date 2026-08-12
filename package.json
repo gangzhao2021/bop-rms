@@ -44,6 +44,7 @@
     "foundation:verify": "node packages/database/src/foundation-cli.ts",
     "guest-session:acceptance": "pnpm --filter @bop/identity guest-session:acceptance && vitest run --config packages/database/vitest.identity-session-store.config.ts",
     "health-readiness:acceptance": "pnpm --filter @bop/eventing build && pnpm --filter @bop-rms/observability build && pnpm --filter @bop-rms/api health-readiness:acceptance",
+    "http-security:acceptance": "pnpm --filter @bop-rms/api http-security:acceptance",
     "helpers:check": "vitest run packages/database/src/helpers.test.ts && node packages/database/src/helpers-cli.ts --help",
     "helpers:verify": "node packages/database/src/helpers-cli.ts",
     "identity-session:acceptance": "pnpm --filter @bop/identity identity-session:acceptance",
