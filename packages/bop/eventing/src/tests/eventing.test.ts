@@ -54,6 +54,21 @@ describe("Domain Event Envelope", () => {
     }
   });
 
+  it("rejects unknown envelope and Actor fields without inspecting their values", () => {
+    expect(() =>
+      validateDomainEventEnvelope({
+        ...envelope,
+        credential: "synthetic-forbidden",
+      } as DomainEventEnvelope),
+    ).toThrowError(new InvalidDomainEventEnvelopeError("envelope"));
+    expect(() =>
+      validateDomainEventEnvelope({
+        ...envelope,
+        actor: { type: "System", actorId: id("5") },
+      } as DomainEventEnvelope),
+    ).toThrowError(new InvalidDomainEventEnvelopeError("actor"));
+  });
+
   it("uses one parameterized insert and leaves transaction control to the caller", async () => {
     const query = vi.fn().mockResolvedValue({ rowCount: 1 });
     await appendEventInTransaction({ query }, envelope);

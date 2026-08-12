@@ -12,6 +12,24 @@ const classifications = new Set([
   "health",
   "credential",
 ]);
+const envelopeFields = new Set([
+  "eventId",
+  "eventType",
+  "schemaVersion",
+  "occurredAt",
+  "producerModule",
+  "tenantId",
+  "storeId",
+  "aggregateType",
+  "aggregateId",
+  "aggregateVersion",
+  "correlationId",
+  "causationId",
+  "actor",
+  "payload",
+  "redactionClassification",
+  "replayMetadata",
+]);
 
 export class InvalidDomainEventEnvelopeError extends Error {
   readonly code = "INVALID_DOMAIN_EVENT_ENVELOPE";
@@ -62,6 +80,14 @@ function requireUtcInstant(field: string, value: unknown): void {
 }
 
 export function validateDomainEventEnvelope(envelope: DomainEventEnvelope): DomainEventEnvelope {
+  if (
+    envelope === null ||
+    typeof envelope !== "object" ||
+    Array.isArray(envelope) ||
+    Object.getPrototypeOf(envelope) !== Object.prototype ||
+    Reflect.ownKeys(envelope).some((key) => typeof key !== "string" || !envelopeFields.has(key))
+  )
+    throw new InvalidDomainEventEnvelopeError("envelope");
   requireUuidV7("eventId", envelope.eventId);
   if (!pascalCase.test(envelope.eventType)) throw new InvalidDomainEventEnvelopeError("eventType");
   if (!Number.isSafeInteger(envelope.schemaVersion) || envelope.schemaVersion <= 0)
@@ -78,7 +104,15 @@ export function validateDomainEventEnvelope(envelope: DomainEventEnvelope): Doma
     throw new InvalidDomainEventEnvelopeError("aggregateVersion");
   requireUuidV7("correlationId", envelope.correlationId);
   if (envelope.causationId !== undefined) requireUuidV7("causationId", envelope.causationId);
-  if (!envelope.actor || typeof envelope.actor !== "object")
+  if (
+    !envelope.actor ||
+    typeof envelope.actor !== "object" ||
+    Array.isArray(envelope.actor) ||
+    Object.getPrototypeOf(envelope.actor) !== Object.prototype ||
+    (envelope.actor.type === "Actor"
+      ? Reflect.ownKeys(envelope.actor).length !== 2 || !Object.hasOwn(envelope.actor, "actorId")
+      : Reflect.ownKeys(envelope.actor).length !== 1)
+  )
     throw new InvalidDomainEventEnvelopeError("actor");
   if (envelope.actor.type === "Actor") requireUuidV7("actor.actorId", envelope.actor.actorId);
   else if (envelope.actor.type !== "System")
