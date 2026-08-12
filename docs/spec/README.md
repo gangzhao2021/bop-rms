@@ -17,6 +17,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1901 — Payment Operational Projection` is locally implemented and verified on top of WP-1900
+  head `eb38d71`. `@bop/projection` now exports `payment_operations_v1` with exact CAD minor-unit
+  strings, cumulative amount invariants, retained Provider Unknown/reconciliation gaps,
+  deterministic rebuild metadata and a 5-second Fresh/Stale target. Durable persistence/API and
+  Provider composition remain unavailable and unclaimed. Exact boundaries are in
+  `docs/spec/work-packages/WP-1901.md`; GitHub publication/integration is deferred by Owner direction.
+
 - `WP-1900 — Order Operational Projection` is locally implemented and verified on top of WP-1809
   head `d239359`. `@bop/projection` now exports the strict Store/Business-Date-scoped
   `merchant_order_queue_v1` contract over Ordering plus authorized Payment/Kitchen/Fulfillment

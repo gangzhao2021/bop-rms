@@ -7530,6 +7530,7 @@ screens:
       - WP-1306
       - WP-1307
       - WP-1308
+      - WP-1901
     handoff_section: "88.10"
     route_intent: PAY-PAYMENT-LIST /app/operations/payments
     navigation_targets: []
@@ -7576,6 +7577,8 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1307
+      - WP-1310
+      - WP-1901
     handoff_section: "88.10"
     route_intent: PAY-RECONCILIATION /app/operations/payment-reconciliation
     navigation_targets: []
