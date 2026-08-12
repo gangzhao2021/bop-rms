@@ -107,6 +107,7 @@
     "customer-menu:acceptance": "pnpm --filter @rms/catalog test && pnpm --filter @bop-rms/api customer-menu:acceptance",
     "e2e:qr-menu-cart-order": "vitest run tooling/e2e/qr-menu-cart-order/qr-menu-cart-order.test.ts",
     "e2e:payment-success": "vitest run tooling/e2e/payment-success/payment-success.test.ts",
+    "e2e:duplicate-webhook": "pnpm --filter @rms/payment exec vitest run --config vitest.config.ts src/tests/payment-webhook-inbox.test.ts -t WP-2022",
     "public-capability:acceptance": "pnpm --filter @bop/public-capability public-capability:acceptance",
     "retry-dead-letter:acceptance": "vitest run --config packages/database/vitest.retry-dead-letter.config.ts",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
