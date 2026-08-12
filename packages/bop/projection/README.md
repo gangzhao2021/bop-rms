@@ -16,8 +16,9 @@ Fulfillment or Task source facts and cannot authorize their lifecycle or financi
 ## Public contract
 
 WP-1809 exports `merchant_order_exception_v1`, strict source parsing, deterministic rebuild and
-permission/version/idempotency-bound action intent routing. Later WP-1900–1903 own Order, Payment,
-Kitchen and Fulfillment operational Projections.
+permission/version/idempotency-bound action intent routing. WP-1900 exports
+`merchant_order_queue_v1` with explicit collaborating-domain gaps and a 2-second freshness target.
+Later WP-1901–1903 own Payment, Kitchen and Fulfillment operational Projections.
 
 ## Boundaries
 

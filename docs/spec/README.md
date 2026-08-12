@@ -17,6 +17,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1900 — Order Operational Projection` is locally implemented and verified on top of WP-1809
+  head `d239359`. `@bop/projection` now exports the strict Store/Business-Date-scoped
+  `merchant_order_queue_v1` contract over Ordering plus authorized Payment/Kitchen/Fulfillment
+  summaries, with explicit gaps, retained Payment Unknown, deterministic rebuild metadata and a
+  2-second Fresh/Stale target. Durable persistence/API/realtime composition remains unavailable and
+  unclaimed. Exact boundaries are in `docs/spec/work-packages/WP-1900.md`; GitHub
+  publication/integration is deferred by explicit Owner direction.
+
 - `WP-1809 — Order Exception Workbench, merchant_order_exception_v1 Projection and Authorized
 Compensation Actions` is locally implemented and verified on top of WP-1808 head `22b1888`. It
   introduces the schema-less technical contract module `@bop/projection`, a strict Store-scoped
