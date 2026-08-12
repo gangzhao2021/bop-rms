@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "decision": "IDR-0031",
+  "rawBucketRetentionHours": 24,
+  "securityCaseRetentionDays": 365,
+  "identifierClassification": "Confidential",
+  "identifierHandling": "trusted-proxy canonical IP or IPv6 /64 plus scoped identifiers, keyed-hashed before persistence",
+  "loweringPolicy": "Security approval and expiring risk record required",
+  "enforcement": {
+    "coarse": "AWS WAF owns IP/path burst control",
+    "atomic": "PostgreSQL security.abuse_bucket owns scoped time buckets in WP-2048",
+    "advisoryOnly": "in-memory counters",
+    "redis": "disabled"
+  },
+  "endpointClasses": [
+    {
+      "id": "public-read",
+      "budget": "120/1m/IP;600/1m/Store;burst=30",
+      "recovery": "429+Retry-After;cached-public-read-may-remain",
+      "dependencyFailure": "bounded-degraded-behind-WAF"
+    },
+    {
+      "id": "qr-resolve",
+      "budget": "60/5m/IP;600/5m/Store;burst=20",
+      "recovery": "uniform-invalid-expired;no-identifier-oracle",
+      "dependencyFailure": "fail-closed"
+    },
+    {
+      "id": "guest-session-create-rotate",
+      "budget": "20/10m/IP;300/10m/Store",
+      "recovery": "progressive-delay-then-429",
+      "dependencyFailure": "fail-closed"
+    },
+    {
+      "id": "dine-in-join-failures",
+      "budget": "5/10m/Session;20/10m/IP-device",
+      "recovery": "invalidate-or-cooldown;staff-regenerate-after-check",
+      "dependencyFailure": "fail-closed"
+    },
+    {
+      "id": "cart-quote",
+      "budget": "60/1m/GuestSession;300/1m/IP",
+      "recovery": "idempotent-retry;invalid-session-fails-closed",
+      "dependencyFailure": "fail-closed"
+    },
+    {
+      "id": "checkout-order-payment",
+      "budget": "10/10m/GuestSession;50/10m/IP",
+      "recovery": "retain-original-idempotency-and-operation;kill-switch-on-anomaly",
+      "dependencyFailure": "fail-closed"
+    },
+    {
+      "id": "order-resume",
+      "budget": "5/1h/Order-contact-IP",
+      "recovery": "generic-response-for-existing-or-absent",
+      "dependencyFailure": "fail-closed"
+    },
+    {
+      "id": "pickup-proof-failures",
+      "budget": "5/10m/Fulfillment;20/10m/device-IP",
+      "recovery": "15m-cooldown;audited-manager-recovery",
+      "dependencyFailure": "fail-closed"
+    },
+    {
+      "id": "merchant-login-failures",
+      "budget": "10/15m/Account-IP-risk",
+      "recovery": "generic-error;progressive-delay;security-alert",
+      "dependencyFailure": "fail-closed"
+    },
+    {
+      "id": "signed-provider-webhook",
+      "budget": "size-signature-timestamp-account-backpressure",
+      "recovery": "valid-signed-event-not-dropped-for-shared-IP;inbox-alert-reconcile",
+      "dependencyFailure": "signature-and-backpressure-policy"
+    }
+  ]
+}
