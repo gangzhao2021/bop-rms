@@ -47,7 +47,18 @@ async function writeModule(
   );
   await writeFile(
     join(moduleRoot, "package.json"),
-    `${JSON.stringify({ name: manifest.packageName, type: "module", exports }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        name: manifest.packageName,
+        type: "module",
+        exports,
+        dependencies: Object.fromEntries(
+          dependencies.map((dependency) => [dependency.packageName, "workspace:*"]),
+        ),
+      },
+      null,
+      2,
+    )}\n`,
   );
   for (const target of Object.values(exports)) {
     const targetPath = join(moduleRoot, target);
@@ -156,6 +167,29 @@ describe("Import Boundary Architecture Test", () => {
     const context = await fixture();
     await source(context.bop, 'import "@bop/Synthetic-Kernel";');
     expect(await codes(context.root)).toContain("PACKAGE_CASE_CONFLICT");
+  });
+  it("rejects a declared dependency that is not a discovered Module", async () => {
+    const context = await fixture();
+    await writeModule(context.root, "BOP", "synthetic-unknown-caller", [
+      identity("BOP", "missing-module"),
+    ]);
+    expect(await codes(context.root)).toContain("UNKNOWN_DECLARED_MODULE_DEPENDENCY");
+  });
+  it("requires package and Manifest runtime dependencies to match in both directions", async () => {
+    const context = await fixture();
+    const file = join(context.bop, "package.json");
+    const value = JSON.parse(await readFile(file));
+    delete value.dependencies["@bop/synthetic-kernel"];
+    value.dependencies["@bop/undeclared-runtime"] = "workspace:*";
+    await writeFile(file, JSON.stringify(value));
+    const result = await codes(context.root);
+    expect(result).toContain("MANIFEST_DEPENDENCY_MISSING_FROM_PACKAGE");
+    expect(result).toContain("PACKAGE_DEPENDENCY_UNDECLARED");
+  });
+  it("rejects synchronous Module dependency cycles", async () => {
+    const context = await fixture();
+    await writeModule(context.root, "RMS", "synthetic-peer", [identity("RMS", "synthetic-caller")]);
+    expect(await codes(context.root)).toContain("MODULE_DEPENDENCY_CYCLE");
   });
   it("sorts violations and repeats identical output", async () => {
     const context = await fixture();

@@ -243,6 +243,11 @@ export async function discoverModules(root, diagnostics) {
           packageName,
           manifest,
           exports: new Set(packageExports),
+          packageDependencies: new Set(
+            Object.keys(packageJson.dependencies ?? {}).filter((name) =>
+              /^@(bop|rms)\//u.test(name),
+            ),
+          ),
         });
       } catch (error) {
         diagnostics.push(
@@ -266,6 +271,101 @@ export async function discoverModules(root, diagnostics) {
     else identities.set(key, module.packageName);
   }
   return modules;
+}
+
+export function inspectModuleDependencyGraph(root, modules, diagnostics) {
+  const byPackage = new Map(modules.map((module) => [module.packageName, module]));
+  for (const module of modules) {
+    const declared = new Set(
+      module.manifest.allowedSynchronousDependencies.map((dependency) => dependency.packageName),
+    );
+    for (const dependency of module.manifest.allowedSynchronousDependencies) {
+      if (!byPackage.has(dependency.packageName))
+        diagnostics.push(
+          diagnostic(
+            "UNKNOWN_DECLARED_MODULE_DEPENDENCY",
+            relative(root, join(module.root, "src/module.manifest.ts")),
+            1,
+            `${dependency.packageName} is not a discovered Module`,
+          ),
+        );
+      if (!module.packageDependencies.has(dependency.packageName))
+        diagnostics.push(
+          diagnostic(
+            "MANIFEST_DEPENDENCY_MISSING_FROM_PACKAGE",
+            relative(root, join(module.root, "package.json")),
+            1,
+            `${dependency.packageName} is declared synchronously but missing from dependencies`,
+          ),
+        );
+    }
+    for (const dependency of module.packageDependencies)
+      if (!declared.has(dependency))
+        diagnostics.push(
+          diagnostic(
+            "PACKAGE_DEPENDENCY_UNDECLARED",
+            relative(root, join(module.root, "package.json")),
+            1,
+            `${dependency} is an internal runtime dependency not declared by the Manifest`,
+          ),
+        );
+  }
+
+  let index = 0;
+  const indices = new Map();
+  const lowLinks = new Map();
+  const stack = [];
+  const stacked = new Set();
+  const visit = (module) => {
+    indices.set(module.packageName, index);
+    lowLinks.set(module.packageName, index);
+    index += 1;
+    stack.push(module);
+    stacked.add(module.packageName);
+    const targets = module.manifest.allowedSynchronousDependencies
+      .map((dependency) => byPackage.get(dependency.packageName))
+      .filter(Boolean)
+      .sort((left, right) => left.packageName.localeCompare(right.packageName, "en"));
+    for (const target of targets) {
+      if (!indices.has(target.packageName)) {
+        visit(target);
+        lowLinks.set(
+          module.packageName,
+          Math.min(lowLinks.get(module.packageName), lowLinks.get(target.packageName)),
+        );
+      } else if (stacked.has(target.packageName)) {
+        lowLinks.set(
+          module.packageName,
+          Math.min(lowLinks.get(module.packageName), indices.get(target.packageName)),
+        );
+      }
+    }
+    if (lowLinks.get(module.packageName) !== indices.get(module.packageName)) return;
+    const component = [];
+    let member;
+    do {
+      member = stack.pop();
+      stacked.delete(member.packageName);
+      component.push(member);
+    } while (member !== module);
+    if (component.length > 1) {
+      const names = component
+        .map((item) => item.packageName)
+        .sort((left, right) => left.localeCompare(right, "en"));
+      diagnostics.push(
+        diagnostic(
+          "MODULE_DEPENDENCY_CYCLE",
+          relative(root, join(component[0].root, "src/module.manifest.ts")),
+          1,
+          `${names.join(" -> ")} form a synchronous dependency cycle`,
+        ),
+      );
+    }
+  };
+  for (const module of [...modules].sort((left, right) =>
+    left.packageName.localeCompare(right.packageName, "en"),
+  ))
+    if (!indices.has(module.packageName)) visit(module);
 }
 
 export async function discoverSourceFiles(root, repositoryRoot, diagnostics) {
@@ -505,6 +605,7 @@ export async function validateImportBoundaries({ root = process.cwd() } = {}) {
   root = await realpath(root);
   const diagnostics = [];
   const modules = await discoverModules(root, diagnostics);
+  inspectModuleDependencyGraph(root, modules, diagnostics);
   const byPackage = new Map(modules.map((module) => [module.packageName, module]));
   for (const module of modules.sort((a, b) => a.packageName.localeCompare(b.packageName, "en")))
     for (const file of await discoverSourceFiles(module.root, root, diagnostics))
