@@ -450,6 +450,59 @@
   background: var(--bop-color-surface-subtle, var(--bop-color-surface));
 }
 
+.order-status {
+  display: grid;
+  width: min(100%, 52rem);
+  gap: var(--bop-space-5);
+  margin-inline: auto;
+  padding: var(--bop-space-6) var(--bop-space-4);
+}
+
+.order-status > section,
+.order-status__batch {
+  padding: var(--bop-space-4);
+  border: 1px solid var(--bop-color-border);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface);
+}
+
+.order-status dl div,
+.order-status__batch li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+  padding-block: var(--bop-space-2);
+}
+
+.order-status dd {
+  margin: 0;
+  text-align: end;
+}
+
+.order-status__batch + .order-status__batch {
+  margin-top: var(--bop-space-3);
+}
+
+.order-status__batch ul {
+  padding: 0;
+  list-style: none;
+}
+
+.order-status__warning {
+  border-inline-start: 4px solid var(--bop-color-status-warning, #8a5a00) !important;
+}
+
+.order-status__actions button {
+  min-height: 44px;
+  padding: var(--bop-space-2) var(--bop-space-4);
+  font: inherit;
+  font-weight: 700;
+}
+
+.order-status__boundary {
+  color: var(--bop-color-text-muted);
+}
+
 .sellable-configurator {
   display: grid;
   gap: var(--bop-space-3);
