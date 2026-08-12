@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { MerchantShell } from "./MerchantShell.js";
+import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { OrderDetailPage, OrderQueuePage } from "./OrderQueuePages.js";
 import { MenuBuilderPage, MenuListPage } from "./CatalogMenuPages.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
@@ -89,6 +90,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/commerce/menus/:id/edit" element={<MenuBuilderPage />} />
       <Route path="/operations/orders" element={<OrderQueuePage />} />
       <Route path="/operations/orders/:id" element={<OrderDetailPage />} />
+      <Route path="/operations/kitchen" element={<KitchenBoardPage />} />
+      <Route path="/operations/kitchen/work-items/:id" element={<KitchenWorkItemPage />} />
       <Route path="*" element={<Navigate replace to="/app" />} />
     </Routes>
   );

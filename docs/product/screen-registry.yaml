@@ -159,6 +159,7 @@ catalogs:
     - WP-1801
     - WP-1802
     - WP-1803
+    - WP-1804
     - WP-1807
     - WP-1808
     - WP-1900
@@ -6456,6 +6457,7 @@ screens:
       - WP-1406
       - WP-1407
       - WP-1408
+      - WP-1804
     handoff_section: "88.10"
     route_intent: KIT-EXCEPTION contextual / queue
     navigation_targets:
@@ -6510,6 +6512,7 @@ screens:
       - WP-1406
       - WP-1407
       - WP-1408
+      - WP-1804
     handoff_section: "88.10"
     route_intent: KIT-KITCHEN-QUEUE /operations/kitchen
     navigation_targets: []
@@ -6611,6 +6614,7 @@ screens:
       - WP-1406
       - WP-1407
       - WP-1408
+      - WP-1804
     handoff_section: "88.10"
     route_intent: KIT-WORK-ITEM /operations/kitchen/work-items/:id full-screen child route
     navigation_targets: []
