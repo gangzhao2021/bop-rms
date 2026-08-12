@@ -25,6 +25,9 @@ Kitchen-owned board projection and without client-derived completion. WP-1903 ex
 WP-1904 adds the authorized, idempotent Projection Rebuild Command contract. It reads a fixed source
 checkpoint in bounded batches, writes only a shadow generation, validates that generation and asks
 the persistence adapter to atomically switch it under the expected active-generation guard.
+WP-1905 exports the permission- and scope-bound `reporting_operations_dashboard_v1` Query. It
+aggregates exact CAD minor-unit summaries and operational counts while preserving per-source
+freshness, completeness and checkpoint lineage; a missing source yields `null`, never a false zero.
 
 ## Boundaries
 

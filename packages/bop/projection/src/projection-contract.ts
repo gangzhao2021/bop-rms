@@ -4,7 +4,12 @@ export const projectionDigestPattern = /^sha256:[0-9a-f]{64}$/u;
 export const projectionInstantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 export class OperationalProjectionError extends Error {
   constructor(
-    readonly code: "INPUT_INVALID" | "SCOPE_MISMATCH" | "DUPLICATE_SOURCE" | "SOURCE_CONFLICT",
+    readonly code:
+      | "INPUT_INVALID"
+      | "PERMISSION_DENIED"
+      | "SCOPE_MISMATCH"
+      | "DUPLICATE_SOURCE"
+      | "SOURCE_CONFLICT",
   ) {
     super("operational projection is unavailable");
     this.name = "OperationalProjectionError";
