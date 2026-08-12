@@ -99,6 +99,7 @@ describe("CUST-CART page contract", () => {
     const html = renderPage({ status: "offline-readonly", cart: cart() });
     expect(html).toContain("Offline read-only");
     expect(html).toContain("nothing will replay on reconnect");
+    expect(html).toContain("Refresh after reconnecting");
     expect(html).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
     expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
   });

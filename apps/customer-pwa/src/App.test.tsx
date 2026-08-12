@@ -40,6 +40,17 @@ describe("customer PWA shell", () => {
     expect(JSON.stringify(pkg)).not.toMatch(/vite-plugin-pwa|workbox-background-sync/i);
     expect(manifest.start_url).toBe("/");
   });
+  it("keeps WP-1707 separate from Workbox and private caching", () => {
+    const connectivity = readFileSync(
+      new URL("./connectivity/connectivity-controller.ts", import.meta.url),
+      "utf8",
+    );
+    const pkg = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+    expect(connectivity).not.toMatch(/fetch|retry\(|submit\(|observe\(|load\(/u);
+    expect(`${connectivity}\n${pkg}`).not.toMatch(
+      /serviceWorker|workbox|background.?sync|CacheStorage|localStorage|sessionStorage|indexedDB/u,
+    );
+  });
   it("maps the canonical clean /cart route to CUST-CART loading state", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/cart"]}>

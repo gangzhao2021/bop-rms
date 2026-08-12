@@ -1,5 +1,40 @@
 @import "tailwindcss";
 @import "@bop-rms/ui/tokens.css";
+.connectivity-banner {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--bop-space-4);
+  padding: var(--bop-space-3) var(--bop-space-4);
+  border-bottom: 1px solid currentColor;
+  color: var(--bop-color-text);
+  background: var(--bop-color-surface-muted);
+}
+
+.connectivity-banner--offline {
+  border-color: var(--bop-color-status-warning, #8a5a00);
+}
+
+.connectivity-banner--restored {
+  border-color: var(--bop-color-status-success, #246b3c);
+}
+
+.connectivity-banner button {
+  min-height: 44px;
+  padding-inline: var(--bop-space-4);
+  font: inherit;
+  font-weight: 700;
+}
+
+@media (max-width: 31.999rem) {
+  .connectivity-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .shell-intro {
   margin-block: 0 var(--bop-space-6);
 }
@@ -720,6 +755,13 @@
 
 .cart-state--error {
   border-color: var(--bop-color-status-danger, #a32929);
+}
+
+.cart-offline button {
+  min-height: 44px;
+  margin-inline-start: var(--bop-space-3);
+  padding-inline: var(--bop-space-3);
+  font: inherit;
 }
 
 .cart-summary dl {
