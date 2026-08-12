@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2022 — Duplicate Webhook Scenario on codex/wp-2022`
+- Current discussion node: `WP-2023 — Outbox Dispatcher Failure Scenario on codex/wp-2023`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2023 — Outbox Dispatcher Failure Scenario` is locally implemented and verified on top of
+  WP-2022 head `4dbf85e`. Its isolated PostgreSQL acceptance proves exact rejected-event state,
+  no immediate reclaim, crash lease expiry, stale-worker fencing and replacement completion without
+  inventing WP-0033 retry behavior. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2023.md`; GitHub publication/integration is deferred by Owner direction.
 
 - `WP-2022 — Duplicate Webhook Scenario` is locally implemented and verified on top of WP-2021
   head `c8b535c`. Its Payment Webhook Inbox scenario proves concurrent delivery plus processing and
