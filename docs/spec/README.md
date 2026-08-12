@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2023 — Outbox Dispatcher Failure Scenario on codex/wp-2023`
+- Current discussion node: `WP-2024 — Printer Offline Scenario on codex/wp-2024`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2024 — Printer Offline Scenario` is resolved as a no-code Future Trigger closeout on top of
+  WP-2023 head `d1dc7d4`. Later accepted IDR-0039 disables physical printers, Store Gateway and
+  application Offline Queue for the first Pilot; without the required Store evidence and IDR
+  revision, no adapter, Output Job, retry queue or device fact may be fabricated. Exact authority
+  and verification are in `docs/spec/work-packages/WP-2024.md`; GitHub publication/integration is
+  deferred by Owner direction.
 
 - `WP-2023 — Outbox Dispatcher Failure Scenario` is locally implemented and verified on top of
   WP-2022 head `4dbf85e`. Its isolated PostgreSQL acceptance proves exact rejected-event state,
