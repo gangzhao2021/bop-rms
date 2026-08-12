@@ -1,16 +1,57 @@
 @import "tailwindcss";
 @import "@bop-rms/ui/tokens.css";
-.shell-intro {
-  margin-block: 0 var(--bop-space-6);
-}
-.shell-intro h2 {
-  margin-bottom: var(--bop-space-2);
-}
-.shell-actions {
+.overview-heading {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--bop-space-3);
-  margin-top: var(--bop-space-6);
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--bop-space-6);
+  margin-bottom: var(--bop-space-6);
+}
+.overview-heading h2,
+.overview-heading p {
+  margin-block: var(--bop-space-1);
+}
+.bop-eyebrow {
+  color: var(--bop-color-text-muted);
+  font-family: var(--bop-font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+.scope-switcher {
+  display: grid;
+  min-width: min(24rem, 100%);
+  gap: var(--bop-space-2);
+}
+.scope-switcher select,
+.scope-switcher button {
+  min-height: 44px;
+  padding: var(--bop-space-2) var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+}
+.scope-switcher button,
+.shell-action {
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-brand-primary);
+  font-weight: 600;
+}
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--bop-space-4);
+}
+.command-error,
+.stale-warning {
+  padding: var(--bop-space-3) var(--bop-space-4);
+  border-left: 6px solid var(--bop-color-danger);
+  background: var(--bop-color-surface-default);
+}
+.stale-warning {
+  border-left-color: var(--bop-color-warning);
 }
 .shell-action {
   display: inline-flex;
@@ -23,4 +64,13 @@
   background: var(--bop-color-brand-primary);
   font: inherit;
   font-weight: 600;
+}
+@media (max-width: 767px) {
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+  .scope-switcher {
+    width: 100%;
+    min-width: 0;
+  }
 }

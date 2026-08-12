@@ -20,6 +20,7 @@ import {
   createMerchantCatalogRouter,
   merchantCatalogRoutes,
 } from "./merchant-catalog.js";
+import { createMerchantBffRouter, type MerchantBffRouterOptions } from "./merchant-bff.js";
 import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
 import {
   createRequestCorrelationMiddleware,
@@ -40,6 +41,11 @@ const routeTemplates = [
   customerCartRoutes.updateItem,
   "/api/v1/carts/:cart_id/quote",
   ...Object.values(merchantCatalogRoutes),
+  "/merchant/login",
+  "/merchant/callback",
+  "/merchant/session",
+  "/merchant/store-context",
+  "/merchant/logout",
   "/health",
   "/ready",
   "unmatched",
@@ -63,6 +69,7 @@ export interface AppOptions {
   errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
   merchantCatalog?: MerchantCatalogRouterOptions;
+  merchantBff?: MerchantBffRouterOptions;
   now?: () => string;
   nowMilliseconds?: () => number;
   realtime?: RealtimeTransport;
@@ -117,6 +124,7 @@ export function createApp({
   errorLogger,
   healthReadiness,
   merchantCatalog,
+  merchantBff,
   now = () => new Date().toISOString(),
   nowMilliseconds,
   realtime,
@@ -137,6 +145,7 @@ export function createApp({
     }),
   );
   app.use(helmet());
+  if (merchantBff !== undefined) app.use("/merchant", createMerchantBffRouter(merchantBff));
   app.use(express.json({ limit: "64kb", strict: true }));
   app.use((_request, response, next) => {
     response.setHeader("Cache-Control", "no-store");

@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1724 — SES Event Authentication, Recipient Privacy, Retention and Deliverability Runbook on codex/wp-1724`
+- Current discussion node: `WP-1800 — Merchant Sign-in and Store Switch on codex/wp-1800`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-1800 — Merchant Sign-in and Store Switch` is locally implemented and verified on top of
+  WP-1724 head `c510b4f`. It connects the accepted same-origin Merchant BFF and Session-rotating
+  Store-switch contract to the canonical `HOME-OVERVIEW /app` screen, with a closed
+  permission-trimmed workspace DTO and explicit WP-1905 dashboard unavailability described in
+  `docs/spec/work-packages/WP-1800.md`. Real Cognito, workforce/Store facts and dashboard
+  projection evidence remain externally gated and unclaimed; GitHub publication/integration is
+  deferred by explicit Owner direction.
 
 - `WP-1724 — SES Event Authentication, Recipient Privacy, Retention and Deliverability Runbook` is
   locally implemented and verified on top of WP-1723 head `bdc6ccf`. It owns the strict SNS
