@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2047 — HTTP Security Baseline on codex/wp-2047`
+- Current discussion node: `WP-2048 — Public Capability Security Test on codex/wp-2048`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2048 — Public Capability Token, Enumeration and Pickup Attempt Security Test` is locally
+  implemented and verified on top of WP-2047 head `3127b13`. It adds the accepted atomic PostgreSQL
+  `security.abuse_bucket`, keyed-hash-only scope, concurrent budget admission, execute-only runtime
+  boundary and 24-hour cleanup while retaining WAF/trusted-proxy/pepper/load facts as External
+  Evidence. Exact scope is in `docs/spec/work-packages/WP-2048.md`; GitHub publication/integration
+  is deferred by Owner direction.
 
 - `WP-2047 — HTTP Security Header, CSP, CORS and Request Limit Baseline` is locally implemented and
   verified on top of WP-2046 head `19740d4`. It centralizes environment-aware CSP/HSTS, exact

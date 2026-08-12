@@ -45,6 +45,7 @@ describe("migration catalog", () => {
       "0000_013_create_retry_dead_letter",
       "0000_014_create_audit_record",
       "0000_015_alter_audit_hash_chain",
+      "0000_016_create_security_abuse_bucket",
       "0200_001_create_tenant_organization",
       "0200_002_create_operating_entity",
       "0200_003_create_membership",

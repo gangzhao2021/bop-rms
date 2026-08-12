@@ -48,6 +48,7 @@ const platformOwners = new Map([
   ["platform_helpers", "shared-infrastructure/helpers"],
   ["platform_jobs", "shared-infrastructure/jobs"],
   ["platform_projection", "shared-infrastructure/projection"],
+  ["security", "shared-infrastructure/security"],
 ]);
 const businessOwners = new Map([
   ["bop_identity", "@bop/identity"],

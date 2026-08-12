@@ -111,6 +111,11 @@ export const canonicalPlatformDatabaseManifest = {
       technicalOwner: "shared-infrastructure/projection",
       allowedWriteAuthority: "projection-builder",
     },
+    {
+      schema: "security",
+      technicalOwner: "shared-infrastructure/security",
+      allowedWriteAuthority: "security-infrastructure",
+    },
     { schema: "public", technicalOwner: null, allowedWriteAuthority: "wp-0020-bootstrap-ddl-only" },
   ],
 } as const;
