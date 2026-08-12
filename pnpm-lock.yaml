@@ -292,6 +292,8 @@ importers:
         specifier: workspace:*
         version: link:../tenant
 
+  packages/bop/projection: {}
+
   packages/bop/public-capability: {}
 
   packages/bop/publishing:

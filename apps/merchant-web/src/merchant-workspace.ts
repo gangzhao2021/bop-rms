@@ -21,6 +21,7 @@ export interface MerchantNavigationItem {
     | "ORG-STORE-LIST"
     | "CAT-MENU-LIST"
     | "OPS-ORDER-QUEUE"
+    | "OPS-ORDER-EXCEPTION"
     | "KIT-KITCHEN-QUEUE"
     | "FUL-PICKUP-QUEUE"
     | "DEV-KDS-PROFILE"
@@ -43,6 +44,7 @@ const NAVIGATION = Object.freeze({
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
   "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.read"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.read"],
+  "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],

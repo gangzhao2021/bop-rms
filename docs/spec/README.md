@@ -17,6 +17,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1809 — Order Exception Workbench, merchant_order_exception_v1 Projection and Authorized
+Compensation Actions` is locally implemented and verified on top of WP-1808 head `22b1888`. It
+  introduces the schema-less technical contract module `@bop/projection`, a strict Store-scoped
+  rebuildable exception contract with a
+  15-minute Critical visibility gate, the canonical workbench and permission/version/idempotency-
+  bound owning-Domain action intents. Projection/UI state never supplies Provider or financial
+  finality. Durable consumers/persistence and real actions remain unavailable and unclaimed. Exact
+  boundaries are in `docs/spec/work-packages/WP-1809.md`; GitHub publication/integration is deferred
+  by explicit Owner direction.
+
 - `WP-1808 — Managed KDS Browser Profile, Named Operator Session, Auto-lock / Handover and Device
 UAT` is locally implemented and verified on top of WP-1807 head `479563f`. It adds the canonical
   strict KDS Profile view with mandatory visibility lock, bounded auto-lock, lock-before-handover,

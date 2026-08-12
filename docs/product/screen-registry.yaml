@@ -163,6 +163,7 @@ catalogs:
     - WP-1805
     - WP-1807
     - WP-1808
+    - WP-1809
     - WP-1900
     - WP-1901
     - WP-1902
@@ -7086,6 +7087,8 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1007
+      - WP-1310
+      - WP-1809
     handoff_section: "88.10"
     route_intent: OPS-ORDER-EXCEPTION /operations/order-exceptions
     navigation_targets:

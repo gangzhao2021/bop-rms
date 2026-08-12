@@ -4,6 +4,7 @@ import { MerchantShell } from "./MerchantShell.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { PickupQueuePage } from "./PickupPages.js";
 import { KdsProfilePage } from "./KdsProfilePage.js";
+import { OrderExceptionPage } from "./OrderExceptionPage.js";
 import { OrderDetailPage, OrderQueuePage } from "./OrderQueuePages.js";
 import { MenuBuilderPage, MenuListPage } from "./CatalogMenuPages.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
@@ -96,6 +97,7 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/operations/kitchen/work-items/:id" element={<KitchenWorkItemPage />} />
       <Route path="/operations/pickup" element={<PickupQueuePage />} />
       <Route path="/app/integrations/kds-profiles" element={<KdsProfilePage />} />
+      <Route path="/operations/order-exceptions" element={<OrderExceptionPage />} />
       <Route path="*" element={<Navigate replace to="/app" />} />
     </Routes>
   );
