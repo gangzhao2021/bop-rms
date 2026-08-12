@@ -6,3 +6,4 @@ export * from "./application/ports/notification-ports.js";
 export * from "./contracts/ses-readiness.js";
 export * from "./application/receipt-email-renderer.js";
 export * from "./application/delivery-orchestration.js";
+export * from "./application/resume-token-service.js";

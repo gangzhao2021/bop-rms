@@ -17,6 +17,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1723 — Worker-minted Resume Token, Fragment-link Delivery and Clean Recovery E2E` is locally
+  implemented and verified on top of WP-1722 head `0ed8eaf`. It owns the bounded hash-only token
+  lifecycle and clean Customer fragment handoff described in `docs/spec/work-packages/WP-1723.md`;
+  production crypto/persistence/API composition remains gated. GitHub publication/integration is
+  deferred by explicit Owner direction.
+
 - `WP-1722 — Idempotent Delivery, Suppression, Retry / Dead-letter and Delivery Observability` is
   locally implemented and verified on top of WP-1721 head `3c04058`. It owns the bounded resend
   authorization, retry/backoff/exhaustion and privacy-safe operational summary described in
