@@ -6,6 +6,7 @@ import { BrowserRouter } from "react-router";
 import { App } from "./App.js";
 import { createCustomerEntryClient } from "./entry/entry-client.js";
 import "./styles.css";
+import { startCustomerServiceWorker } from "./pwa/register-service-worker.js";
 const root = document.getElementById("root");
 if (!root) throw new Error("Application root is missing");
 const entryClient =
@@ -26,3 +27,4 @@ createRoot(root).render(
     </BrowserRouter>
   </StrictMode>,
 );
+startCustomerServiceWorker();

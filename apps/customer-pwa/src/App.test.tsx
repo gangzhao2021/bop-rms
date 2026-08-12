@@ -24,7 +24,7 @@ describe("customer PWA shell", () => {
     expect(html).toContain("Order at BOP");
     expect(html).toContain("No cached menu is enabled");
   });
-  it("does not enable a Service Worker or background replay", () => {
+  it("registers only the bounded Customer Service Worker without persistence code in entry clients", () => {
     const source = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
     const entrySource = readFileSync(new URL("./entry/entry-client.ts", import.meta.url), "utf8");
     const menuSource = readFileSync(new URL("./menu/menu-client.ts", import.meta.url), "utf8");
@@ -33,11 +33,11 @@ describe("customer PWA shell", () => {
       readFileSync(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"),
     );
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-    expect(source).not.toMatch(/serviceWorker|registerSW|workbox/i);
+    expect(source).toContain("startCustomerServiceWorker");
     expect(entrySource).not.toMatch(/localStorage|sessionStorage|indexedDB|CacheStorage/i);
     expect(menuSource).not.toMatch(/localStorage|sessionStorage|indexedDB|CacheStorage/i);
     expect(appSource).not.toMatch(/csrfToken|publicTableReference|contextExpiresAt/);
-    expect(JSON.stringify(pkg)).not.toMatch(/vite-plugin-pwa|workbox-background-sync/i);
+    expect(JSON.stringify(pkg)).not.toMatch(/workbox-background-sync/i);
     expect(manifest.start_url).toBe("/");
   });
   it("keeps WP-1707 separate from Workbox and private caching", () => {
@@ -45,11 +45,23 @@ describe("customer PWA shell", () => {
       new URL("./connectivity/connectivity-controller.ts", import.meta.url),
       "utf8",
     );
-    const pkg = readFileSync(new URL("../package.json", import.meta.url), "utf8");
     expect(connectivity).not.toMatch(/fetch|retry\(|submit\(|observe\(|load\(/u);
-    expect(`${connectivity}\n${pkg}`).not.toMatch(
+    expect(connectivity).not.toMatch(
       /serviceWorker|workbox|background.?sync|CacheStorage|localStorage|sessionStorage|indexedDB/u,
     );
+  });
+  it("keeps mutation replay and private client storage absent from the WP-1708 runtime", () => {
+    const serviceWorker = readFileSync(new URL("./service-worker.ts", import.meta.url), "utf8");
+    const registration = readFileSync(
+      new URL("./pwa/register-service-worker.ts", import.meta.url),
+      "utf8",
+    );
+    expect(`${serviceWorker}\n${registration}`).not.toMatch(
+      /workbox-background-sync|BackgroundSyncPlugin|Queue\(|localStorage|sessionStorage|indexedDB/u,
+    );
+    expect(serviceWorker).toContain("NetworkOnly");
+    expect(serviceWorker).toContain('request.method === "POST"');
+    expect(serviceWorker).toContain('response.headers.get("X-BOP-Cache-Class") === "public"');
   });
   it("maps the canonical clean /cart route to CUST-CART loading state", () => {
     const html = renderToStaticMarkup(

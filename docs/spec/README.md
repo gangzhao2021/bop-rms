@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1707 — PWA Offline Shell / Retry UX Baseline on codex/wp-1707`
+- Current discussion node: `WP-1708 — Workbox Cache Allowlist / NetworkOnly / Safe Update on codex/wp-1708`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,10 +17,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1707 — PWA Offline Shell / Retry UX Baseline` is active on a sequential local stack from
-  locally verified WP-1706 head `185633f`. It owns only the bounded Customer PWA connectivity and
-  explicit foreground-recovery contract described in `docs/spec/work-packages/WP-1707.md`.
-  GitHub publication/integration is deferred by explicit Owner direction.
+- `WP-1708 — Workbox Cache Allowlist / NetworkOnly / Safe Update` is locally implemented and
+  verified on a sequential local stack from WP-1707 head `3a39269`. It owns only the bounded
+  Customer PWA cache routing and safe-update contract described in
+  `docs/spec/work-packages/WP-1708.md`. GitHub publication/integration is deferred by explicit Owner
+  direction.
+
+- `WP-1707 — PWA Offline Shell / Retry UX Baseline` is locally implemented and verified at
+  `3a39269` on top of WP-1706. It owns only the bounded Customer PWA connectivity and explicit
+  foreground-recovery contract described in `docs/spec/work-packages/WP-1707.md`; GitHub
+  publication/integration is deferred by Owner direction.
 
 - `WP-1706 — Pickup Ready / Confirmation Screen` is locally implemented and verified at
   `185633f` on top of WP-1705. It owns only the bounded contextual `CUST-PICKUP-CODE` browser

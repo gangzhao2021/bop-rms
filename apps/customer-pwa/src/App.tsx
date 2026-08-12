@@ -10,6 +10,7 @@ import type { MenuJourneyContext } from "./menu/types.js";
 import { PaymentPage } from "./payment/PaymentPage.js";
 import { OrderStatusPage } from "./order-status/OrderStatusPage.js";
 import { ConnectivityBanner } from "./connectivity/ConnectivityBanner.js";
+import { PwaUpdateBanner } from "./pwa/PwaUpdateBanner.js";
 
 export function App({
   entryClient,
@@ -35,6 +36,7 @@ export function App({
   return (
     <>
       <ConnectivityBanner />
+      <PwaUpdateBanner />
       <Routes>
         <Route
           path="/"

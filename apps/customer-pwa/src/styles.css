@@ -28,8 +28,31 @@
   font-weight: 700;
 }
 
+.pwa-update {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--bop-space-4);
+  padding: var(--bop-space-3) var(--bop-space-4);
+  border-bottom: 1px solid var(--bop-color-brand-primary);
+  background: var(--bop-color-surface);
+}
+
+.pwa-update button,
+.pwa-update a {
+  min-height: 44px;
+  padding: var(--bop-space-2) var(--bop-space-4);
+  font: inherit;
+  font-weight: 700;
+}
+
 @media (max-width: 31.999rem) {
   .connectivity-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pwa-update {
     align-items: stretch;
     flex-direction: column;
   }
