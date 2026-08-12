@@ -13,7 +13,9 @@ import {
 const id = (n: number) => `018fc000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T16:00:00.000Z";
 const key = id(90);
-const session = id(91);
+const guest = "g".repeat(43);
+const csrf = "c".repeat(43);
+const origin = "https://customer.example";
 const servers: Server[] = [];
 
 function quote(): PriceQuoteSnapshot {
@@ -116,7 +118,9 @@ afterEach(async () => {
 
 async function listen(port?: Port): Promise<number> {
   const customerQuote =
-    port === undefined ? undefined : new CustomerQuoteHandler({ now: () => at, port });
+    port === undefined
+      ? undefined
+      : new CustomerQuoteHandler({ now: () => at, port, allowedOrigin: origin });
   const server = createServer(createApp(customerQuote === undefined ? {} : { customerQuote }));
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -133,7 +137,10 @@ async function post(
     headers: {
       "content-type": "application/json",
       "idempotency-key": key,
-      "x-customer-session-id": session,
+      "x-csrf-token": csrf,
+      origin,
+      "sec-fetch-site": "same-origin",
+      cookie: `__Host-bop-guest=${guest}`,
       ...headers,
     },
     body: JSON.stringify(body),
@@ -145,22 +152,25 @@ describe("WP-1103/1104 Customer Quote API", () => {
     const service = new Port();
     const response = await post(await listen(service));
     expect(response.status).toBe(201);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(response.headers.get("etag")).toBe('"1"');
     expect(response.headers.get("location")).toBe(`/api/v1/price-quotes/${id(1)}`);
     expect(service.calls).toEqual([
       {
         cartReference: id(4),
         expectedCartVersion: 7,
-        customerSessionReference: session,
+        guestCredential: guest,
+        csrfCredential: csrf,
         idempotencyKey: key,
         requestedAt: at,
       },
     ]);
     const body = (await response.json()) as {
-      quote: { total: { amountMinor: string }; lines: unknown[] };
+      quote: { total: { amountMinor: string }; lines?: unknown[] };
     };
     expect(body.quote.total.amountMinor).toBe("1130");
-    expect(body.quote.lines).toHaveLength(1);
+    expect(body.quote.lines).toBeUndefined();
   });
 
   it("returns the exact current Quote without recalculating its snapshot", async () => {
@@ -213,7 +223,7 @@ describe("WP-1103/1104 Customer Quote API", () => {
     const port = await listen(service);
     const missing = await fetch(`http://127.0.0.1:${port}/api/v1/carts/${id(4)}/quote`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin, "sec-fetch-site": "same-origin" },
       body: '{"cartVersion":7}',
     });
     const malformed = await post(port, undefined, { "idempotency-key": "raw-secret" });

@@ -518,6 +518,39 @@
   min-height: 44px;
 }
 
+.checkout-page {
+  display: grid;
+  width: min(100%, 68rem);
+  min-height: 100vh;
+  gap: var(--bop-space-5);
+  margin-inline: auto;
+  padding: var(--bop-space-4);
+}
+
+.checkout-page > section {
+  padding: var(--bop-space-4);
+  border: 1px solid var(--bop-color-border);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface);
+}
+
+.checkout-page dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+  padding-block: var(--bop-space-2);
+}
+
+.checkout-page dd {
+  margin: 0;
+  text-align: end;
+}
+
+.checkout-page button,
+.checkout-page a {
+  min-height: 44px;
+}
+
 .cart-boundaries {
   color: var(--bop-color-text-muted);
   font-size: 0.875rem;

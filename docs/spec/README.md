@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1702 — Cart UI on codex/wp-1702`
+- Current discussion node: `WP-1703 — Checkout / Quote Review on codex/wp-1703`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,10 +17,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1702 — Cart UI` is active from exact integrated and exact-main verified
-  `main@20ec3ba759b9c74a4a4822491c4d01c817965bcd` (`31547487467 / 93962977526`). It owns only
-  `CUST-SELLABLE-CONFIGURE`, safe default/configuration selection and the existing Customer Cart
-  create/add transport integration described in `docs/spec/work-packages/WP-1702.md`.
+- `WP-1703 — Checkout / Quote Review` is active from exact integrated and exact-main verified
+  `main@2bacc889105e131616f113cefdd211cae548c2cd` (`31550601942 / 93972290641`). It owns only
+  the bounded `CUST-CHECKOUT` Quote review and recovery UI described in
+  `docs/spec/work-packages/WP-1703.md`.
+
+- `WP-1702 — Cart UI` is implemented and integrated at squash
+  `2bacc889105e131616f113cefdd211cae548c2cd` via PR #165. Exact implementation head
+  `9a6c8bea18a6e73a2c03bc0976c6ae7fa2eb4ab3` passed run/job
+  `31549618049 / 93969261349`; exact-main run/job `31550601942 / 93972290641` passed.
 
 - `WP-1701 — Menu Browse / Product Detail` is implemented and integrated at squash
   `20ec3ba759b9c74a4a4822491c4d01c817965bcd` via PR #164. Exact implementation head

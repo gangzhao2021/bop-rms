@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router";
 import { useCallback, useState } from "react";
 import { CartPage } from "./cart/CartPage.js";
+import { CheckoutPage } from "./checkout/CheckoutPage.js";
 import { CustomerShell } from "./CustomerShell.js";
 import { EntryContextPage } from "./entry/EntryContextPage.js";
 import type { CustomerEntryClient } from "./entry/types.js";
@@ -41,6 +42,7 @@ export function App({
         element={<SellableDetailPage context={menuContext} />}
       />
       <Route path="/cart" element={<CartPage />} />
+      <Route path="/checkout" element={<CheckoutPage />} />
       <Route path="*" element={<CustomerShell />} />
     </Routes>
   );

@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { Link } from "react-router";
 import { createBrowserCustomerCartClient } from "./cart-client.js";
 import {
   createCartStateController,
@@ -319,13 +320,11 @@ function CartContent({
         <button type="button" disabled aria-describedby="clear-boundary">
           Clear cart
         </button>
-        <button type="button" disabled aria-describedby="checkout-boundary">
-          Checkout
-        </button>
+        <Link to="/checkout">Review checkout</Link>
       </section>
       <div className="cart-boundaries">
         <p id="clear-boundary">Clear cart requires an atomic server command and is unavailable.</p>
-        <p id="checkout-boundary">Checkout is implemented by WP-1220 and later packages.</p>
+        <p id="checkout-boundary">Payment remains unavailable until WP-1704.</p>
       </div>
       <p className="cart-version">
         Cart version {cart.cart.version} · {cart.cart.serviceMode}

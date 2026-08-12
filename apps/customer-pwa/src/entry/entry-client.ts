@@ -4,6 +4,7 @@ import type {
   CustomerEntryScreenState,
   CustomerEntryServiceMode,
 } from "./types.js";
+import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
 
 const compactTokenPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -190,6 +191,7 @@ export function createCustomerEntryClient(
   let settled: Promise<CustomerEntryScreenState> | null = null;
 
   const execute = async (): Promise<CustomerEntryScreenState> => {
+    setCustomerCsrfCredential(null);
     if (token === null) return Object.freeze({ kind: "Missing" });
     if (!boundary.online()) return Object.freeze({ kind: "Offline" });
     try {
@@ -202,8 +204,11 @@ export function createCustomerEntryClient(
         body: JSON.stringify({ qrToken: token }),
       });
       const body: unknown = await response.json();
-      if (response.status === 201)
-        return Object.freeze({ kind: "Established", context: parseSuccess(body) });
+      if (response.status === 201) {
+        const context = parseSuccess(body);
+        setCustomerCsrfCredential(context.csrfToken);
+        return Object.freeze({ kind: "Established", context });
+      }
       return parseError(body);
     } catch {
       return Object.freeze({ kind: boundary.online() ? "CommandFailed" : "Offline" });

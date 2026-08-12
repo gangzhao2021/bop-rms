@@ -50,6 +50,17 @@ describe("customer PWA shell", () => {
     expect(html).toContain("Loading cart");
     expect(html).toContain('id="main-content"');
   });
+  it("maps /checkout to the bounded CUST-CHECKOUT review state", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/checkout"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Review your order");
+    expect(html).toContain("Loading checkout");
+    expect(html).toContain("Continue to payment");
+    expect(html).toContain("Payment handoff is owned by WP-1704");
+  });
   it("fails a direct /menu navigation closed without page-memory Store context", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/menu"]}>
