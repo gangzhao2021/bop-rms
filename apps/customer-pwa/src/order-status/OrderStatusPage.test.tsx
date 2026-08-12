@@ -73,7 +73,7 @@ function render(state: OrderStatusState): string {
 }
 
 describe("CUST-ORDER-STATUS screen contract", () => {
-  it("renders only admitted status facts and the missing later boundaries", () => {
+  it("renders only admitted status facts and links to the authorized receipt route", () => {
     const html = render(readyState());
     expect(html).toContain("Order submitted");
     expect(html).toContain("2 × Synthetic bowl");
@@ -82,7 +82,7 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     expect(html).toContain("Not available yet");
     expect(html).toContain("Payment status");
     expect(html).toContain("Check pickup readiness");
-    expect(html).toContain("Receipt and support actions are not available");
+    expect(html).toContain("View receipt and support");
     expect(html).not.toContain("Ready for pickup");
   });
 

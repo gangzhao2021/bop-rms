@@ -194,10 +194,9 @@ export function OrderStatusPage({
           </button>
         </section>
       ) : null}
-      <section className="order-status__boundary">
-        <h2>Later actions</h2>
-        <p>Receipt and support actions are not available in this package.</p>
-      </section>
+      {view ? (
+        <Link to={`/orders/${view.order.orderReference}/receipt`}>View receipt and support</Link>
+      ) : null}
       <Link to="/menu">Back to menu</Link>
     </main>
   );

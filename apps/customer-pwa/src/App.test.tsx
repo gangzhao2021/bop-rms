@@ -112,7 +112,18 @@ describe("customer PWA shell", () => {
     expect(html).toContain("Track your order");
     expect(html).toContain("Loading order status");
     expect(html).toContain("Your Guest Session authorizes access");
-    expect(html).not.toContain(reference);
+    expect(html).not.toContain(`>${reference}<`);
+  });
+  it("maps the canonical Receipt route without treating the reference as authority", () => {
+    const reference = "018f7a00-0000-7000-8000-000000000001";
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={[`/orders/${reference}/receipt`]}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Your receipt");
+    expect(html).toContain("Loading receipt");
+    expect(html).not.toContain(`>${reference}<`);
   });
   it("fails a direct /menu navigation closed without page-memory Store context", () => {
     const html = renderToStaticMarkup(
