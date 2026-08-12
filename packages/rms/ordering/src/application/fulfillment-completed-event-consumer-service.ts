@@ -43,7 +43,7 @@ export function createFulfillmentCompletedEventConsumerService(
   ports: FulfillmentCompletedEventConsumerPorts,
 ) {
   const registration: ConsumerRegistration = {
-    consumerName: "ordering.fulfillment-completed",
+    consumerName: "ordering.fulfillment-completed:v1",
     consumerVersion: 1,
     eventType: "FulfillmentCompleted",
     schemaVersions: [1],

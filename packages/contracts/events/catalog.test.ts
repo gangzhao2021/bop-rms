@@ -16,6 +16,12 @@ import {
   createEventCatalogSnapshot,
   EventCatalogCompatibilityError,
 } from "./compatibility.ts";
+import {
+  assertEventConsumerCompatibility,
+  defineEventConsumerContracts,
+  EventConsumerCompatibilityError,
+  eventConsumerContracts,
+} from "./consumer-compatibility.ts";
 import { renderCatalogArtifacts } from "./render.ts";
 
 const registration = (
@@ -575,6 +581,82 @@ describe("Event Catalog compatibility", () => {
         createEventCatalogSnapshot(next),
       ),
     ).toThrow(code);
+  });
+});
+
+describe("Event consumer compatibility", () => {
+  const firstConsumer = eventConsumerContracts[0];
+  if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
+
+  it("covers every accepted producer-to-consumer relation exactly", () => {
+    expect(eventConsumerContracts).toHaveLength(18);
+    expect(() =>
+      assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
+    ).not.toThrow();
+  });
+
+  it.each([
+    [
+      "missing registration",
+      eventConsumerContracts.filter(
+        (contract) =>
+          contract.consumerName !== "ordering.order-status-projection:v1" ||
+          contract.eventType !== "OrderCreated",
+      ),
+      "CONSUMER_CONTRACT_MISSING",
+    ],
+    [
+      "unsupported schema version",
+      eventConsumerContracts.map((contract) =>
+        contract.consumerName === "ordering.order-status-projection:v1"
+          ? { ...contract, schemaVersions: [2] }
+          : contract,
+      ),
+      "CONSUMER_EVENT_INCOMPATIBLE",
+    ],
+    [
+      "scope mismatch",
+      eventConsumerContracts.map((contract) =>
+        contract.consumerName === "catalog.published-menu-projection:v1"
+          ? { ...contract, tenantScope: "store" as const }
+          : contract,
+      ),
+      "CONSUMER_EVENT_INCOMPATIBLE",
+    ],
+    [
+      "unsafe replay declaration",
+      eventConsumerContracts.map((contract) =>
+        contract.consumerName === "fulfillment.confirmed-order:v1"
+          ? { ...contract, replaySafe: false }
+          : contract,
+      ),
+      "CONSUMER_EVENT_INCOMPATIBLE",
+    ],
+  ])("blocks %s", (_label, contracts, code) => {
+    expect(() => assertEventConsumerCompatibility(eventCatalog, contracts)).toThrow(
+      EventConsumerCompatibilityError,
+    );
+    expect(() => assertEventConsumerCompatibility(eventCatalog, contracts)).toThrow(code);
+  });
+
+  it("rejects invalid, duplicate and orphaned declarations", () => {
+    expect(() =>
+      defineEventConsumerContracts([{ ...firstConsumer, consumerName: "catalog.projection" }]),
+    ).toThrow("CONSUMER_CONTRACT_INVALID");
+    expect(() => defineEventConsumerContracts([firstConsumer, firstConsumer])).toThrow(
+      "CONSUMER_CONTRACT_DUPLICATE",
+    );
+    const orphan = defineEventConsumerContracts([
+      ...eventConsumerContracts,
+      {
+        ...firstConsumer,
+        consumerName: "catalog.synthetic-projection:v1",
+        eventType: "SyntheticChanged",
+      },
+    ]);
+    expect(() => assertEventConsumerCompatibility(eventCatalog, orphan)).toThrow(
+      "CONSUMER_CONTRACT_ORPHANED",
+    );
   });
 });
 
