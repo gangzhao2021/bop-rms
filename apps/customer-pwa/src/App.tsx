@@ -7,6 +7,7 @@ import { EntryContextPage } from "./entry/EntryContextPage.js";
 import type { CustomerEntryClient } from "./entry/types.js";
 import { MenuBrowsePage, MenuSearchPage, SellableDetailPage } from "./menu/MenuPage.js";
 import type { MenuJourneyContext } from "./menu/types.js";
+import { PaymentPage } from "./payment/PaymentPage.js";
 
 export function App({
   entryClient,
@@ -43,6 +44,8 @@ export function App({
       />
       <Route path="/cart" element={<CartPage />} />
       <Route path="/checkout" element={<CheckoutPage />} />
+      <Route path="/checkout/payment" element={<PaymentPage mode="handoff" />} />
+      <Route path="/checkout/result" element={<PaymentPage mode="result" />} />
       <Route path="*" element={<CustomerShell />} />
     </Routes>
   );

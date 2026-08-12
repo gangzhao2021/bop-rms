@@ -59,7 +59,25 @@ describe("customer PWA shell", () => {
     expect(html).toContain("Review your order");
     expect(html).toContain("Loading checkout");
     expect(html).toContain("Continue to payment");
-    expect(html).toContain("Payment handoff is owned by WP-1704");
+    expect(html).toContain("Payment remains gated until an approved Provider");
+  });
+  it("maps the canonical clean Payment routes without trusting callback state", () => {
+    const payment = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/checkout/payment"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    const result = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/checkout/result?payment=success#provider-secret"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(payment).toContain("Continue to payment");
+    expect(payment).toContain("Loading payment");
+    expect(result).toContain("Verify your payment");
+    expect(result).toContain("Verifying payment");
+    expect(result).not.toContain("Payment confirmed");
+    expect(result).not.toContain("provider-secret");
   });
   it("fails a direct /menu navigation closed without page-memory Store context", () => {
     const html = renderToStaticMarkup(

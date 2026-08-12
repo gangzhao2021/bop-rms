@@ -88,7 +88,7 @@ describe("CUST-CART page contract", () => {
     expect(html).toContain("Clear cart");
     expect(html).toContain("Review checkout");
     expect(html).toContain("Clear cart requires an atomic server command and is unavailable.");
-    expect(html).toContain("Payment remains unavailable until WP-1704.");
+    expect(html).toContain("Payment remains unavailable until the Provider gate is closed.");
     expect(html).toContain("disabled");
     expect(html).toContain('aria-label="Increase Synthetic tea quantity"');
     expect(html).toContain('href="#cart-content"');

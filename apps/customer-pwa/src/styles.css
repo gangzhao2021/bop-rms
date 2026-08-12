@@ -432,6 +432,24 @@
   margin-top: var(--bop-space-4);
 }
 
+.payment-page {
+  display: grid;
+  gap: var(--bop-space-5);
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: var(--bop-space-6) var(--bop-space-4);
+}
+
+.payment-page section {
+  padding: var(--bop-space-4);
+  border: 1px solid var(--bop-color-border);
+  border-radius: var(--bop-radius-surface);
+}
+
+.payment-page__boundary {
+  background: var(--bop-color-surface-subtle, var(--bop-color-surface));
+}
+
 .sellable-configurator {
   display: grid;
   gap: var(--bop-space-3);

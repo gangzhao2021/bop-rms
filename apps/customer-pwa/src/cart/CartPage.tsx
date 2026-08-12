@@ -324,7 +324,7 @@ function CartContent({
       </section>
       <div className="cart-boundaries">
         <p id="clear-boundary">Clear cart requires an atomic server command and is unavailable.</p>
-        <p id="checkout-boundary">Payment remains unavailable until WP-1704.</p>
+        <p id="checkout-boundary">Payment remains unavailable until the Provider gate is closed.</p>
       </div>
       <p className="cart-version">
         Cart version {cart.cart.version} · {cart.cart.serviceMode}

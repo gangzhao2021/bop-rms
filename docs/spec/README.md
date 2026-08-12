@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1703 — Checkout / Quote Review on codex/wp-1703`
+- Current discussion node: `WP-1704 — Payment Redirect / Result Handling on codex/wp-1704`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,10 +17,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1703 — Checkout / Quote Review` is active from exact integrated and exact-main verified
-  `main@2bacc889105e131616f113cefdd211cae548c2cd` (`31550601942 / 93972290641`). It owns only
-  the bounded `CUST-CHECKOUT` Quote review and recovery UI described in
-  `docs/spec/work-packages/WP-1703.md`.
+- `WP-1704 — Payment Redirect / Result Handling` is active from exact integrated and exact-main
+  verified `main@3ce5966960dd860acc8f41fb804b01f468d992c0`
+  (`31553442340 / 93980838403`). It owns only the Provider-gated `CUST-PAYMENT` and clean
+  `CUST-CHECKOUT-RESULT` browser contract described in `docs/spec/work-packages/WP-1704.md`.
+
+- `WP-1703 — Checkout / Quote Review` is implemented and integrated at squash
+  `3ce5966960dd860acc8f41fb804b01f468d992c0` via PR #166. Exact implementation head
+  `ad0431b468999cea45c86b23860b3f88065d5ec1` passed run/job
+  `31552575689 / 93978219025`; exact-main run/job `31553442340 / 93980838403` passed.
 
 - `WP-1702 — Cart UI` is implemented and integrated at squash
   `2bacc889105e131616f113cefdd211cae548c2cd` via PR #165. Exact implementation head
