@@ -7,3 +7,4 @@ export * from "./contracts/ses-readiness.js";
 export * from "./application/receipt-email-renderer.js";
 export * from "./application/delivery-orchestration.js";
 export * from "./application/resume-token-service.js";
+export * from "./application/ses-sns-event-service.js";

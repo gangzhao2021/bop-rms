@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1708 — Workbox Cache Allowlist / NetworkOnly / Safe Update on codex/wp-1708`
+- Current discussion node: `WP-1724 — SES Event Authentication, Recipient Privacy, Retention and Deliverability Runbook on codex/wp-1724`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-1724 — SES Event Authentication, Recipient Privacy, Retention and Deliverability Runbook` is
+  locally implemented and verified on top of WP-1723 head `bdc6ccf`. It owns the strict SNS
+  Signature Version 2 envelope admission, exact `ca-central-1` Topic/certificate allowlist,
+  privacy-minimized SES event normalization, atomic Inbox/suppression intent and scoped
+  subscription-confirmation contract described in `docs/spec/work-packages/WP-1724.md`. AWS SDK,
+  persistence/IaC and real Provider/deliverability evidence remain externally gated and unclaimed;
+  GitHub publication/integration is deferred by explicit Owner direction.
 
 - `WP-1723 — Worker-minted Resume Token, Fragment-link Delivery and Clean Recovery E2E` is locally
   implemented and verified on top of WP-1722 head `0ed8eaf`. It owns the bounded hash-only token
