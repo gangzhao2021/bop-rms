@@ -119,6 +119,7 @@
     "e2e:receipt-resume-email": "vitest run tooling/e2e/receipt-resume-email/receipt-resume-email.test.ts",
     "public-capability:acceptance": "pnpm --filter @bop/public-capability public-capability:acceptance",
     "public-capability-security:acceptance": "pnpm --filter @bop/public-capability public-capability:acceptance && vitest run --config packages/database/vitest.abuse-bucket.config.ts",
+    "pwa-security:acceptance": "pnpm --filter @bop-rms/customer-pwa pwa-security:acceptance",
     "retry-dead-letter:acceptance": "vitest run --config packages/database/vitest.retry-dead-letter.config.ts",
     "rate-limit-abuse-baseline:check": "vitest run tooling/security/rate-limit-abuse-baseline.test.mjs",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
