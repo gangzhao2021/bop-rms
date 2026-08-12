@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2002 — Consumer Compatibility Test on codex/wp-2002`
+- Current discussion node: `WP-2003 — Provider Adapter Contract Test on codex/wp-2003`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2003 — Provider Adapter Contract Test` is locally implemented and verified on top of WP-2002
+  head `94fcf6f`. Payment now owns one executable validation
+  boundary for all five Provider operations; it binds normalized outcomes to exact request scope and
+  converts thrown, malformed or mismatched Provider results into bounded safe Unknown data. Exact
+  boundaries are in `docs/spec/work-packages/WP-2003.md`; GitHub publication/integration is deferred
+  by Owner direction.
 
 - `WP-2002 — Consumer Compatibility Test` is locally implemented and verified on top of WP-2001
   head `fbb4107`. The Event Contract package now owns an
