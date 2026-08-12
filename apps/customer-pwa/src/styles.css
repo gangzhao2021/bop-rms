@@ -432,6 +432,92 @@
   margin-top: var(--bop-space-4);
 }
 
+.sellable-configurator {
+  display: grid;
+  gap: var(--bop-space-3);
+  margin-top: var(--bop-space-5);
+  padding: var(--bop-space-4);
+  border: 1px solid var(--bop-color-border);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface-muted);
+}
+
+.sellable-configurator h3,
+.sellable-configurator p {
+  margin: 0;
+}
+
+.sellable-configurator fieldset {
+  display: grid;
+  gap: var(--bop-space-2);
+  min-width: 0;
+  margin: 0;
+  padding: var(--bop-space-3);
+  border: 1px solid var(--bop-color-border);
+}
+
+.sellable-configurator fieldset label {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  gap: var(--bop-space-2);
+}
+
+.configure-option {
+  display: grid;
+  gap: var(--bop-space-2);
+  padding-block: var(--bop-space-2);
+}
+
+.configure-option + .configure-option {
+  border-top: 1px solid var(--bop-color-border);
+}
+
+.configure-option span {
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
+
+.sellable-configurator input[type="number"],
+.sellable-configurator textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: var(--bop-space-2);
+  border: 1px solid var(--bop-color-border);
+  border-radius: var(--bop-radius-surface);
+  color: inherit;
+  background: var(--bop-color-surface);
+  font: inherit;
+}
+
+.sellable-configurator textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.configure-issues,
+.configure-status {
+  padding: var(--bop-space-3);
+  border-inline-start: 4px solid currentColor;
+  background: var(--bop-color-surface);
+}
+
+.configure-status--error,
+.configure-issues {
+  color: var(--bop-color-status-danger, #a32929);
+}
+
+.configure-status--success {
+  color: var(--bop-color-status-success, #246b3c);
+}
+
+.configure-status button,
+.configure-status a,
+.sellable-configurator > button {
+  min-height: 44px;
+}
+
 .cart-boundaries {
   color: var(--bop-color-text-muted);
   font-size: 0.875rem;

@@ -134,6 +134,13 @@ function view(value: unknown): CartView {
 
 export interface CustomerCartClient {
   loadCurrent(signal?: AbortSignal): Promise<CartView | null>;
+  createCart(input: { readonly operationReference: string }): Promise<CartView>;
+  addItem(input: {
+    readonly cart: CartView;
+    readonly sellableReference: string;
+    readonly draft: CartItemDraft;
+    readonly operationReference: string;
+  }): Promise<CartView>;
   updateItem(input: {
     readonly cart: CartView;
     readonly cartItemReference: string;
@@ -163,6 +170,14 @@ function headers(input: { readonly operationReference: string; readonly version:
     "content-type": "application/json",
     "idempotency-key": input.operationReference,
     "if-match": `"${input.version}"`,
+    "x-csrf-token": csrf(),
+  };
+}
+
+function createHeaders(operationReference: string) {
+  return {
+    "content-type": "application/json",
+    "idempotency-key": operationReference,
     "x-csrf-token": csrf(),
   };
 }
@@ -222,6 +237,30 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
   const client: CustomerCartClient = {
     loadCurrent: (signal?: AbortSignal) =>
       request("/bff/customer/cart", { method: "GET", ...(signal === undefined ? {} : { signal }) }),
+    async createCart(input) {
+      const result = await request("/api/v1/carts", {
+        method: "POST",
+        headers: createHeaders(input.operationReference),
+        body: "{}",
+      });
+      if (result === null) throw new CartClientError("cart_not_found");
+      return result;
+    },
+    async addItem(input) {
+      const result = await request(`/api/v1/carts/${input.cart.cart.cartReference}/items`, {
+        method: "POST",
+        headers: headers({
+          operationReference: input.operationReference,
+          version: input.cart.cart.version,
+        }),
+        body: JSON.stringify({
+          sellableReference: input.sellableReference,
+          ...input.draft,
+        }),
+      });
+      if (result === null) throw new CartClientError("cart_not_found");
+      return result;
+    },
     async updateItem(input) {
       const result = await request(
         `/api/v1/carts/${input.cart.cart.cartReference}/items/${input.cartItemReference}`,

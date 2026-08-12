@@ -127,7 +127,30 @@ function publicSellable(
     presentationRole: item.presentationRole as CustomerMenuSellableDto["presentationRole"],
     pinned: item.pinned,
     availability: "Available",
-    optionRules: item.optionRules,
+    optionRules: Object.freeze(
+      item.optionRules.map((rule) =>
+        Object.freeze({
+          ...rule,
+          options: Object.freeze(
+            rule.options.map((option) =>
+              Object.freeze({
+                optionReference: option.optionReference,
+                name: localized(option.localizedNames, locale, defaultLocale),
+                maximumQuantity: option.maximumQuantity,
+                conflictOptionReferences: option.conflictOptionReferences,
+                selectedByDefault: option.selectedByDefault,
+                incrementalPrice: Object.freeze({
+                  status: "Unavailable" as const,
+                  amount: null,
+                  currency: null,
+                  reason: "PRICING_NOT_INTEGRATED" as const,
+                }),
+              }),
+            ),
+          ),
+        }),
+      ),
+    ),
     allergenDisclosure: Object.freeze({
       registryVersionReference: item.allergenDisclosure.registryVersionReference,
       items: Object.freeze(

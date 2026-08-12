@@ -149,6 +149,19 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
             maximumSelections: rule.maximumSelections,
             enabledOptionReferences: [...rule.enabledOptionReferences],
             defaultOptionReferences: [...rule.defaultOptionReferences],
+            options: rule.options.map((option) => ({
+              optionReference: option.optionReference,
+              name: option.name,
+              maximumQuantity: option.maximumQuantity,
+              conflictOptionReferences: [...option.conflictOptionReferences],
+              selectedByDefault: option.selectedByDefault,
+              incrementalPrice: {
+                status: option.incrementalPrice.status,
+                amount: option.incrementalPrice.amount,
+                currency: option.incrementalPrice.currency,
+                reason: option.incrementalPrice.reason,
+              },
+            })),
           })),
           allergenDisclosure: {
             registryVersionReference: sellable.allergenDisclosure.registryVersionReference,

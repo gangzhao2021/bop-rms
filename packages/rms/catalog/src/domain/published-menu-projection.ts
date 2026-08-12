@@ -21,6 +21,13 @@ export interface PublishedOptionRule {
   readonly maximumSelections: number;
   readonly enabledOptionReferences: readonly CatalogReference[];
   readonly defaultOptionReferences: readonly CatalogReference[];
+  readonly options: readonly {
+    readonly optionReference: CatalogReference;
+    readonly localizedNames: Readonly<Record<string, string>>;
+    readonly maximumQuantity: number;
+    readonly conflictOptionReferences: readonly CatalogReference[];
+    readonly selectedByDefault: boolean;
+  }[];
 }
 export interface PublishedSellableSnapshot {
   readonly placementReference: CatalogReference;
@@ -107,15 +114,46 @@ function codes(value: unknown) {
   if (new Set(parsed).size !== parsed.length) invalid();
   return parsed;
 }
-function optionRule(value: PublishedOptionRule): PublishedOptionRule {
+function optionRule(value: PublishedOptionRule, defaultLocale: string): PublishedOptionRule {
   const minimumSelections = nonnegative(value.minimumSelections);
   const maximumSelections = nonnegative(value.maximumSelections);
   const enabledOptionReferences = references(value.enabledOptionReferences);
   const defaultOptionReferences = references(value.defaultOptionReferences);
+  if (!Array.isArray(value.options)) invalid();
+  const options = Object.freeze(
+    value.options.map((option) => {
+      const optionReference = parseCatalogReference(option.optionReference);
+      const conflictOptionReferences = references(option.conflictOptionReferences);
+      if (
+        !Number.isSafeInteger(option.maximumQuantity) ||
+        option.maximumQuantity < 1 ||
+        option.maximumQuantity > 999 ||
+        typeof option.selectedByDefault !== "boolean" ||
+        conflictOptionReferences.includes(optionReference)
+      )
+        invalid();
+      return Object.freeze({
+        optionReference,
+        localizedNames: parseLocalizedNames(option.localizedNames, defaultLocale),
+        maximumQuantity: option.maximumQuantity,
+        conflictOptionReferences,
+        selectedByDefault: option.selectedByDefault,
+      });
+    }),
+  );
   if (
     minimumSelections > maximumSelections ||
     maximumSelections > enabledOptionReferences.length ||
-    defaultOptionReferences.some((reference) => !enabledOptionReferences.includes(reference))
+    defaultOptionReferences.some((reference) => !enabledOptionReferences.includes(reference)) ||
+    options.length !== enabledOptionReferences.length ||
+    options.some(
+      (option, index) =>
+        option.optionReference !== enabledOptionReferences[index] ||
+        option.selectedByDefault !== defaultOptionReferences.includes(option.optionReference) ||
+        option.conflictOptionReferences.some(
+          (reference) => !enabledOptionReferences.includes(reference),
+        ),
+    )
   )
     invalid();
   return Object.freeze({
@@ -125,6 +163,7 @@ function optionRule(value: PublishedOptionRule): PublishedOptionRule {
     maximumSelections,
     enabledOptionReferences,
     defaultOptionReferences,
+    options,
   });
 }
 function sellable(value: PublishedSellableSnapshot, defaultLocale: string) {
@@ -147,7 +186,7 @@ function sellable(value: PublishedSellableSnapshot, defaultLocale: string) {
     sortOrder: nonnegative(value.sortOrder),
     pinned: value.pinned,
     configuredAvailability: value.configuredAvailability,
-    optionRules: Object.freeze(value.optionRules.map(optionRule)),
+    optionRules: Object.freeze(value.optionRules.map((rule) => optionRule(rule, defaultLocale))),
     allergenDisclosure: parseSellableAllergenDisclosure(value.allergenDisclosure, defaultLocale),
   });
 }

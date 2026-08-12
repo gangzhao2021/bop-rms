@@ -75,6 +75,21 @@ function found() {
                   maximumSelections: 1,
                   enabledOptionReferences: [references.option],
                   defaultOptionReferences: [],
+                  options: [
+                    {
+                      optionReference: references.option,
+                      name: "Oat beverage",
+                      maximumQuantity: 1,
+                      conflictOptionReferences: [],
+                      selectedByDefault: false,
+                      incrementalPrice: {
+                        status: "Unavailable",
+                        amount: null,
+                        currency: null,
+                        reason: "PRICING_NOT_INTEGRATED",
+                      },
+                    },
+                  ],
                 },
               ],
               allergenDisclosure: {
@@ -150,8 +165,15 @@ describe("Customer Menu client", () => {
                   {
                     minimumSelections: 0,
                     maximumSelections: 1,
-                    enabledOptionCount: 1,
-                    defaultOptionCount: 0,
+                    options: [
+                      {
+                        optionReference: references.option,
+                        name: "Oat beverage",
+                        maximumQuantity: 1,
+                        conflictOptionReferences: [],
+                        selectedByDefault: false,
+                      },
+                    ],
                   },
                 ],
               },

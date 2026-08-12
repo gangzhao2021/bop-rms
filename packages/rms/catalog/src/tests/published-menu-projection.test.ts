@@ -94,6 +94,15 @@ function snapshot(): PublishedMenuSnapshot {
                 maximumSelections: 1,
                 enabledOptionReferences: [id(16) as never],
                 defaultOptionReferences: [],
+                options: [
+                  {
+                    optionReference: id(16) as never,
+                    localizedNames: { "en-CA": "Oat beverage" },
+                    maximumQuantity: 1,
+                    conflictOptionReferences: [],
+                    selectedByDefault: false,
+                  },
+                ],
               },
             ],
           },

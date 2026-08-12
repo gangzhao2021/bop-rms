@@ -67,6 +67,57 @@ describe("Customer Cart browser client", () => {
     expect(String(init.body)).not.toMatch(/price|tax|amount|brand|store/iu);
   });
 
+  it("creates and adds with separate exact operation keys and server Cart version", async () => {
+    const created = cart();
+    const added = {
+      ...cart(),
+      cart: {
+        ...cart().cart,
+        version: 4,
+        items: [
+          {
+            cartItemReference: id(30),
+            sellableReference: id(3),
+            displayName: "Synthetic tea",
+            quantity: 1,
+            configuration: [],
+            customerNote: null,
+            lineEstimate: { status: "Unavailable", reasonCode: "FINAL_QUOTE_REQUIRED" },
+            warnings: [],
+          },
+        ],
+      },
+    } satisfies CartView;
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(created), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(added), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCartCsrfCredential("c".repeat(43));
+    const client = createBrowserCustomerCartClient();
+    await client.createCart({ operationReference: id(20) });
+    await client.addItem({
+      cart: created,
+      sellableReference: id(3),
+      operationReference: id(21),
+      draft: { quantity: 1, optionSelections: [], customerNote: null },
+    });
+    expect(fetch.mock.calls[0]?.[0]).toBe("/api/v1/carts");
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      headers: { "idempotency-key": id(20), "x-csrf-token": "c".repeat(43) },
+      body: "{}",
+    });
+    expect(fetch.mock.calls[1]?.[0]).toBe(`/api/v1/carts/${id(1)}/items`);
+    expect(fetch.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      headers: { "idempotency-key": id(21), "if-match": '"3"' },
+    });
+    expect(String(fetch.mock.calls[1]?.[1]?.body)).toBe(
+      `{"sellableReference":"${id(3)}","quantity":1,"optionSelections":[],"customerNote":null}`,
+    );
+  });
+
   it("fails closed without an in-memory CSRF credential", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
