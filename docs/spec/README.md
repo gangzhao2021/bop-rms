@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2051 — Privacy Execution Gate on codex/wp-2051`
+- Current discussion node: `WP-2052 — KMS, Audit and Archive Gate on codex/wp-2052`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2052 — KMS, Secret Rotation, Audit Integrity and Immutable Archive Gate` is locally implemented
+  and verified on top of WP-2051 head `f143a03`. It composes accepted Audit integrity/database tests
+  with a fail-closed external-evidence checklist; real KMS, secret rotation, Object Lock and restore
+  evidence remain unavailable and unclaimed. Exact scope is in
+  `docs/spec/work-packages/WP-2052.md`; GitHub publication/integration is deferred by Owner direction.
 
 - `WP-2051 — Privacy Rights, Necessary-cookie, Consent and Retention Execution Test` is locally
   implemented and verified on top of WP-2050 head `5ee1d5b`. It adds an executable necessary-cookie,
