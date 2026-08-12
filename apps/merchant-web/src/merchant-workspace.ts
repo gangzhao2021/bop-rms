@@ -23,6 +23,7 @@ export interface MerchantNavigationItem {
     | "OPS-ORDER-QUEUE"
     | "KIT-KITCHEN-QUEUE"
     | "FUL-PICKUP-QUEUE"
+    | "DEV-KDS-PROFILE"
     | "IAM-ROLE-LIST";
   readonly label: string;
   readonly href: string;
@@ -44,6 +45,7 @@ const NAVIGATION = Object.freeze({
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.read"],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
+  "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
   "IAM-ROLE-LIST": ["/app/organization/roles", "identity.manage"],
 } as const);
 

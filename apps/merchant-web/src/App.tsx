@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router";
 import { MerchantShell } from "./MerchantShell.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { PickupQueuePage } from "./PickupPages.js";
+import { KdsProfilePage } from "./KdsProfilePage.js";
 import { OrderDetailPage, OrderQueuePage } from "./OrderQueuePages.js";
 import { MenuBuilderPage, MenuListPage } from "./CatalogMenuPages.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
@@ -94,6 +95,7 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/operations/kitchen" element={<KitchenBoardPage />} />
       <Route path="/operations/kitchen/work-items/:id" element={<KitchenWorkItemPage />} />
       <Route path="/operations/pickup" element={<PickupQueuePage />} />
+      <Route path="/app/integrations/kds-profiles" element={<KdsProfilePage />} />
       <Route path="*" element={<Navigate replace to="/app" />} />
     </Routes>
   );

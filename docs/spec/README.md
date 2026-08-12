@@ -17,6 +17,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
+- `WP-1808 — Managed KDS Browser Profile, Named Operator Session, Auto-lock / Handover and Device
+UAT` is locally implemented and verified on top of WP-1807 head `479563f`. It adds the canonical
+  strict KDS Profile view with mandatory visibility lock, bounded auto-lock, lock-before-handover,
+  minimized Session state and evidence-gated UAT. Real device/Session composition, enrollment and
+  Store UAT remain unavailable and unclaimed. Security/privacy review found no unaccepted
+  Blocker/High issue; exact boundaries are in `docs/spec/work-packages/WP-1808.md`. GitHub
+  publication/integration is deferred by explicit Owner direction.
+
 - `WP-1807 — Permission-aware Navigation` is locally implemented and verified on top of WP-1806
   head `aa8b13e`. The same-origin Session now supplies a closed exact Screen/route/Permission
   navigation array; unknown, mismatched and duplicate destinations fail closed, and Store switch

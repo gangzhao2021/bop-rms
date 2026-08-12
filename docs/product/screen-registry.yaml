@@ -3491,6 +3491,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1408
+      - WP-1808
     handoff_section: "88.17"
     route_intent: DEV-DEVICE-DETAIL /app/integrations/devices/:id
     navigation_targets: []
@@ -3537,6 +3538,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1408
+      - WP-1808
     handoff_section: "88.17"
     route_intent: DEV-DEVICE-LIST /app/integrations/devices
     navigation_targets: []
