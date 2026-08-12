@@ -96,6 +96,7 @@ function optionRule(value: unknown): MenuOptionRule {
     "maximumSelections",
     "enabledOptionReferences",
     "defaultOptionReferences",
+    "options",
   ]);
   reference(raw.bindingReference);
   reference(raw.optionSetVersionReference);
@@ -103,17 +104,63 @@ function optionRule(value: unknown): MenuOptionRule {
   const maximumSelections = selectionInteger(raw.maximumSelections);
   const enabled = referenceList(raw.enabledOptionReferences);
   const defaults = referenceList(raw.defaultOptionReferences);
+  if (!Array.isArray(raw.options)) throw new TypeError("options required");
+  const options = Object.freeze(
+    raw.options.map((candidate) => {
+      const option = exact(candidate, [
+        "optionReference",
+        "name",
+        "maximumQuantity",
+        "conflictOptionReferences",
+        "selectedByDefault",
+        "incrementalPrice",
+      ]);
+      const optionReference = reference(option.optionReference);
+      const conflictOptionReferences = referenceList(option.conflictOptionReferences);
+      const incrementalPrice = exact(option.incrementalPrice, [
+        "status",
+        "amount",
+        "currency",
+        "reason",
+      ]);
+      if (
+        !Number.isSafeInteger(option.maximumQuantity) ||
+        Number(option.maximumQuantity) < 1 ||
+        Number(option.maximumQuantity) > 999 ||
+        typeof option.selectedByDefault !== "boolean" ||
+        conflictOptionReferences.includes(optionReference) ||
+        incrementalPrice.status !== "Unavailable" ||
+        incrementalPrice.amount !== null ||
+        incrementalPrice.currency !== null ||
+        incrementalPrice.reason !== "PRICING_NOT_INTEGRATED"
+      )
+        throw new TypeError("option invalid");
+      return Object.freeze({
+        optionReference,
+        name: text(option.name),
+        maximumQuantity: Number(option.maximumQuantity),
+        conflictOptionReferences,
+        selectedByDefault: option.selectedByDefault,
+      });
+    }),
+  );
   if (
     minimumSelections > maximumSelections ||
     maximumSelections > enabled.length ||
-    defaults.some((item) => !enabled.includes(item))
+    defaults.some((item) => !enabled.includes(item)) ||
+    options.length !== enabled.length ||
+    options.some(
+      (option, index) =>
+        option.optionReference !== enabled[index] ||
+        option.selectedByDefault !== defaults.includes(option.optionReference) ||
+        option.conflictOptionReferences.some((item) => !enabled.includes(item)),
+    )
   )
     throw new TypeError("invalid option rule");
   return Object.freeze({
     minimumSelections,
     maximumSelections,
-    enabledOptionCount: enabled.length,
-    defaultOptionCount: defaults.length,
+    options,
   });
 }
 

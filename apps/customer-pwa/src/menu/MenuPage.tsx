@@ -1,7 +1,14 @@
 import { AppFrame } from "@bop-rms/ui";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams } from "react-router";
+import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
+import type { CartItemDraft } from "../cart/types.js";
+import {
+  createConfigureController,
+  type ConfigureController,
+  type ConfigureState,
+} from "./configure-state.js";
 import { createCustomerMenuClient, normalizeMenuSearch } from "./menu-client.js";
 import type {
   CustomerMenuClient,
@@ -403,6 +410,7 @@ function SellableDetail({
   readonly sellable: MenuSellable;
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
 }) {
+  const [configuring, setConfiguring] = useState(false);
   return (
     <article className="sellable-detail">
       <Link to="/menu">← Back to menu</Link>
@@ -429,15 +437,15 @@ function SellableDetail({
           <dd>
             {sellable.optionRules.length === 0
               ? "No choices required"
-              : `${sellable.optionRules.length} option group${sellable.optionRules.length === 1 ? "" : "s"}; configure in Cart`}
+              : `${sellable.optionRules.length} option group${sellable.optionRules.length === 1 ? "" : "s"}`}
             {sellable.optionRules.length > 0 ? (
               <ul>
                 {sellable.optionRules.map((rule, index) => (
                   <li key={`${rule.minimumSelections}-${rule.maximumSelections}-${index}`}>
                     Choose {rule.minimumSelections}–{rule.maximumSelections} from{" "}
-                    {rule.enabledOptionCount}
-                    {rule.defaultOptionCount > 0
-                      ? `; ${rule.defaultOptionCount} selected by default`
+                    {rule.options.length}
+                    {rule.options.some((option) => option.selectedByDefault)
+                      ? `; ${rule.options.filter((option) => option.selectedByDefault).length} selected by default`
                       : ""}
                   </li>
                 ))}
@@ -447,10 +455,261 @@ function SellableDetail({
         </div>
       </dl>
       <AllergenSummary sellable={sellable} />
-      <p className="menu-boundary">
-        Configuration and adding this item to Cart are not available in this step.
-      </p>
+      {configuring ? (
+        <SellableConfigurator key={sellable.sellableReference} sellable={sellable} />
+      ) : (
+        <button className="menu-action" type="button" onClick={() => setConfiguring(true)}>
+          {sellable.optionRules.length === 0 ? "Add to cart" : "Configure and add"}
+        </button>
+      )}
     </article>
+  );
+}
+
+function configurationIssues(
+  sellable: MenuSellable,
+  selected: ReadonlyMap<string, number>,
+  quantity: number,
+  note: string,
+): readonly string[] {
+  const issues: string[] = [];
+  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100)
+    issues.push("Quantity must be between 1 and 100.");
+  sellable.optionRules.forEach((rule, index) => {
+    const count = rule.options.reduce(
+      (total, option) => total + (selected.get(option.optionReference) ?? 0),
+      0,
+    );
+    if (count < rule.minimumSelections)
+      issues.push(`Choice group ${index + 1} requires at least ${rule.minimumSelections}.`);
+    if (count > rule.maximumSelections)
+      issues.push(`Choice group ${index + 1} allows at most ${rule.maximumSelections}.`);
+    rule.options.forEach((option) => {
+      const optionQuantity = selected.get(option.optionReference) ?? 0;
+      if (optionQuantity > Math.min(option.maximumQuantity, 100))
+        issues.push(`${option.name} allows at most ${Math.min(option.maximumQuantity, 100)}.`);
+      if (
+        optionQuantity > 0 &&
+        option.conflictOptionReferences.some((reference) => (selected.get(reference) ?? 0) > 0)
+      )
+        issues.push(`${option.name} conflicts with another selected choice.`);
+    });
+  });
+  if (note !== note.normalize("NFC") || note.length > 500)
+    issues.push("Preparation note must be 500 characters or fewer.");
+  if (/\b(?:allerg(?:y|ic|ies)|anaphyla\w*|medical|medication|celiac|intoleran\w*)\b/iu.test(note))
+    issues.push("Do not put allergy or medical information in the preparation note; ask Staff.");
+  return Object.freeze(issues);
+}
+
+function ConfigureStatus({
+  state,
+  controller,
+}: {
+  readonly state: ConfigureState;
+  readonly controller: ConfigureController;
+}) {
+  if (state.status === "idle") return null;
+  if (state.status === "pending")
+    return (
+      <p className="configure-status" role="status">
+        {state.stage === "locate"
+          ? "Checking your current cart…"
+          : state.stage === "create"
+            ? "Starting your cart…"
+            : "Adding the item…"}
+      </p>
+    );
+  if (state.status === "added")
+    return (
+      <div className="configure-status configure-status--success" role="status">
+        <p>Added to the server cart.</p>
+        <Link className="menu-action" to="/cart">
+          Review cart
+        </Link>
+      </div>
+    );
+  const copy = {
+    offline: "You’re offline. Nothing was queued or replayed.",
+    "session-expired": "Your Store session expired. Scan the location QR code again.",
+    conflict: "Your cart changed. Review the current cart before trying again.",
+    validation: "The server rejected this changed, conflicting or unavailable configuration.",
+    "rate-limited": `Please wait${"retryAfterSeconds" in state && state.retryAfterSeconds !== null ? ` ${state.retryAfterSeconds} seconds` : ""} before trying again.`,
+    expired: "This cart expired. Return to the menu and start a current cart.",
+    abandoned: "This cart is closed and cannot accept another item.",
+    unavailable: "Cart service is unavailable. No success was assumed.",
+    "outcome-unknown": "The network ended before the server outcome was confirmed.",
+  } as const;
+  return (
+    <div className="configure-status configure-status--error" role="alert">
+      <p>{copy[state.status]}</p>
+      {"issueCodes" in state
+        ? state.issueCodes.map((issue) => <p key={issue}>Issue: {issue}</p>)
+        : null}
+      {state.canRetry ? (
+        <button type="button" onClick={() => void controller.retry()}>
+          Retry the same operation
+        </button>
+      ) : null}
+      {state.status === "conflict" ? <Link to="/cart">Review cart</Link> : null}
+      {state.status === "session-expired" ? <Link to="/">Return to entry</Link> : null}
+    </div>
+  );
+}
+
+export function SellableConfigurator({
+  sellable,
+  controller: provided,
+}: {
+  readonly sellable: MenuSellable;
+  readonly controller?: ConfigureController | undefined;
+}) {
+  const [controller] = useState(
+    () => provided ?? createConfigureController({ client: createBrowserCustomerCartClient() }),
+  );
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getState,
+    controller.getState,
+  );
+  const [quantity, setQuantity] = useState(1);
+  const [note, setNote] = useState("");
+  const [selected, setSelected] = useState<ReadonlyMap<string, number>>(
+    () =>
+      new Map(
+        sellable.optionRules.flatMap((rule) =>
+          rule.options
+            .filter((option) => option.selectedByDefault)
+            .map((option) => [option.optionReference, 1] as const),
+        ),
+      ),
+  );
+  const issues = configurationIssues(sellable, selected, quantity, note);
+  const busy = state.status === "pending";
+  useEffect(() => {
+    const offline = () => controller.setOnline(false);
+    const online = () => controller.setOnline(true);
+    window.addEventListener("offline", offline);
+    window.addEventListener("online", online);
+    return () => {
+      window.removeEventListener("offline", offline);
+      window.removeEventListener("online", online);
+    };
+  }, [controller]);
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (issues.length > 0 || busy || state.status === "added") return;
+    const draft: CartItemDraft = Object.freeze({
+      quantity,
+      optionSelections: Object.freeze(
+        sellable.optionRules.flatMap((rule) =>
+          rule.options
+            .filter((option) => selected.has(option.optionReference))
+            .map((option) =>
+              Object.freeze({
+                optionReference: option.optionReference,
+                quantity: selected.get(option.optionReference) ?? 1,
+              }),
+            ),
+        ),
+      ),
+      customerNote: note.trim() === "" ? null : note.normalize("NFC").trim(),
+    });
+    void controller.submit(sellable.sellableReference, draft);
+  };
+  return (
+    <form className="sellable-configurator" aria-labelledby="configure-heading" onSubmit={submit}>
+      <h3 id="configure-heading">Configure {sellable.name}</h3>
+      <p>
+        Published choices are confirmed by the server. Incremental prices are unavailable and final
+        amounts appear only in a valid Quote.
+      </p>
+      <label htmlFor="configure-quantity">Quantity</label>
+      <input
+        id="configure-quantity"
+        type="number"
+        min={1}
+        max={100}
+        inputMode="numeric"
+        value={quantity}
+        disabled={busy || state.status === "added"}
+        onChange={(event) => setQuantity(event.currentTarget.valueAsNumber)}
+      />
+      {sellable.optionRules.map((rule, groupIndex) => (
+        <fieldset key={`${rule.minimumSelections}-${rule.maximumSelections}-${groupIndex}`}>
+          <legend>
+            Choice group {groupIndex + 1} — select {rule.minimumSelections} to{" "}
+            {rule.maximumSelections}
+          </legend>
+          {rule.options.map((option) => (
+            <div className="configure-option" key={option.optionReference}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selected.has(option.optionReference)}
+                  disabled={busy || state.status === "added"}
+                  onChange={() => {
+                    const next = new Map(selected);
+                    if (next.has(option.optionReference)) next.delete(option.optionReference);
+                    else next.set(option.optionReference, 1);
+                    setSelected(next);
+                  }}
+                />
+                {option.name}
+                {option.selectedByDefault ? " (default)" : ""}
+              </label>
+              {selected.has(option.optionReference) && option.maximumQuantity > 1 ? (
+                <label>
+                  Quantity for {option.name}
+                  <input
+                    type="number"
+                    min={1}
+                    max={Math.min(option.maximumQuantity, 100)}
+                    inputMode="numeric"
+                    value={selected.get(option.optionReference)}
+                    disabled={busy || state.status === "added"}
+                    onChange={(event) => {
+                      const next = new Map(selected);
+                      next.set(option.optionReference, event.currentTarget.valueAsNumber);
+                      setSelected(next);
+                    }}
+                  />
+                </label>
+              ) : null}
+              <span>Incremental price confirmed in the final Quote</span>
+            </div>
+          ))}
+        </fieldset>
+      ))}
+      <label htmlFor="configure-note">Preparation note (optional)</label>
+      <textarea
+        id="configure-note"
+        maxLength={500}
+        value={note}
+        disabled={busy || state.status === "added"}
+        aria-describedby="configure-note-help"
+        onChange={(event) => setNote(event.currentTarget.value)}
+      />
+      <p id="configure-note-help">
+        Plain preparation requests only. Do not enter allergy, medical or other sensitive details;
+        ask Staff for assistance.
+      </p>
+      {issues.length > 0 ? (
+        <div className="configure-issues" role="alert">
+          {issues.map((issue) => (
+            <p key={issue}>{issue}</p>
+          ))}
+        </div>
+      ) : null}
+      <button
+        className="menu-action"
+        type="submit"
+        disabled={issues.length > 0 || busy || state.status === "added"}
+      >
+        Add to cart
+      </button>
+      <ConfigureStatus state={state} controller={controller} />
+    </form>
   );
 }
 

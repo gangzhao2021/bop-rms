@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
-import { MenuScreen } from "./MenuPage.js";
+import { MenuScreen, SellableConfigurator } from "./MenuPage.js";
+import type { ConfigureController } from "./configure-state.js";
 import type { MenuJourneyContext, MenuSellable, MenuView } from "./types.js";
 
 const context: MenuJourneyContext = Object.freeze({
@@ -24,8 +25,15 @@ const sellable: MenuSellable = Object.freeze({
     Object.freeze({
       minimumSelections: 0,
       maximumSelections: 1,
-      enabledOptionCount: 1,
-      defaultOptionCount: 0,
+      options: Object.freeze([
+        Object.freeze({
+          optionReference: "018f7500-0000-7000-8000-00000000000d",
+          name: "Oat beverage",
+          maximumQuantity: 1,
+          conflictOptionReferences: Object.freeze([]),
+          selectedByDefault: false,
+        }),
+      ]),
     }),
   ]),
 });
@@ -64,7 +72,7 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).not.toContain("$0");
   });
 
-  it("renders honest product-detail gaps and no Cart mutation", () => {
+  it("renders honest product-detail gaps and a bounded configure intent", () => {
     const html = render({
       context,
       detail: sellable,
@@ -74,8 +82,8 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).toContain("Image not available");
     expect(html).toContain("Confirmed in your final quote");
     expect(html).toContain("No published detail available");
-    expect(html).toContain("Configuration and adding this item to Cart are not available");
-    expect(html).not.toContain("Add to cart");
+    expect(html).toContain("Configure and add");
+    expect(html).not.toContain(sellable.optionRules[0]?.options[0]?.optionReference);
   });
 
   it.each([
@@ -101,5 +109,35 @@ describe("WP-1701 Customer Menu screens", () => {
     });
     expect(html).toContain("No allergen-free claim is made");
     expect(html).toContain("Ask staff");
+  });
+
+  it("renders required-selection, price and sensitive-note boundaries without references", () => {
+    const configurable = {
+      ...sellable,
+      optionRules: [
+        {
+          minimumSelections: 1,
+          maximumSelections: 1,
+          options: sellable.optionRules.flatMap((rule) => rule.options),
+        },
+      ],
+    };
+    const controller: ConfigureController = {
+      getState: () => ({ status: "idle" }),
+      retry: vi.fn(),
+      setOnline: vi.fn(),
+      submit: vi.fn(),
+      subscribe: () => () => undefined,
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <SellableConfigurator sellable={configurable} controller={controller} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Choice group 1 requires at least 1");
+    expect(html).toContain("Published choices are confirmed by the server");
+    expect(html).toContain("Oat beverage");
+    expect(html).toContain("Do not enter allergy, medical or other sensitive details");
+    expect(html).not.toContain(configurable.optionRules[0]?.options[0]?.optionReference);
   });
 });

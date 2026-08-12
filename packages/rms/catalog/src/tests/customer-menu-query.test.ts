@@ -71,6 +71,18 @@ function projection(overrides: Partial<PublishedMenuProjection> = {}): Published
                   maximumSelections: 1,
                   enabledOptionReferences: [id(14) as never],
                   defaultOptionReferences: [],
+                  options: [
+                    {
+                      optionReference: id(14) as never,
+                      localizedNames: {
+                        "en-CA": "Oat beverage",
+                        "fr-CA": "Boisson à l’avoine",
+                      },
+                      maximumQuantity: 1,
+                      conflictOptionReferences: [],
+                      selectedByDefault: false,
+                    },
+                  ],
                 },
               ],
             },
@@ -177,7 +189,21 @@ describe("WP-1026 Customer Menu Query", () => {
                 },
                 displayPrice: { status: "Unavailable", reason: "PRICING_NOT_INTEGRATED" },
                 taxDisplayContext: { status: "Unavailable", reason: "FINAL_QUOTE_REQUIRED" },
-                optionRules: [{}],
+                optionRules: [
+                  {
+                    options: [
+                      {
+                        name: "Boisson à l’avoine",
+                        maximumQuantity: 1,
+                        selectedByDefault: false,
+                        incrementalPrice: {
+                          status: "Unavailable",
+                          reason: "PRICING_NOT_INTEGRATED",
+                        },
+                      },
+                    ],
+                  },
+                ],
               },
             ],
           },

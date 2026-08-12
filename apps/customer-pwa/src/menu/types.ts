@@ -14,8 +14,13 @@ export interface MenuAllergenItem {
 export interface MenuOptionRule {
   readonly minimumSelections: number;
   readonly maximumSelections: number;
-  readonly enabledOptionCount: number;
-  readonly defaultOptionCount: number;
+  readonly options: readonly {
+    readonly optionReference: string;
+    readonly name: string;
+    readonly maximumQuantity: number;
+    readonly conflictOptionReferences: readonly string[];
+    readonly selectedByDefault: boolean;
+  }[];
 }
 
 export interface MenuSellable {

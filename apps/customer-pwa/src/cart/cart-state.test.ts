@@ -50,6 +50,12 @@ function fixture() {
       calls.push({ name: "load" });
       return current;
     },
+    async createCart() {
+      throw new Error("not used by Cart state");
+    },
+    async addItem() {
+      throw new Error("not used by Cart state");
+    },
     async updateItem(input) {
       calls.push({ name: "update", operationReference: input.operationReference });
       if (updateFailure !== null) throw updateFailure;

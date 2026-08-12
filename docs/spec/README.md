@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1701 — Menu Browse / Product Detail on codex/wp-1701`
+- Current discussion node: `WP-1702 — Cart UI on codex/wp-1702`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,10 +17,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1701 — Menu Browse / Product Detail` is active from exact integrated and exact-main verified
-  `main@9f02df243534a7be8926a1244ae192f5af404f62`. It owns only the Customer PWA rendering of the
-  existing Published Menu DTO for `CUST-MENU`, `CUST-MENU-SEARCH` and
-  `CUST-SELLABLE-DETAIL` described in `docs/spec/work-packages/WP-1701.md`.
+- `WP-1702 — Cart UI` is active from exact integrated and exact-main verified
+  `main@20ec3ba759b9c74a4a4822491c4d01c817965bcd` (`31547487467 / 93962977526`). It owns only
+  `CUST-SELLABLE-CONFIGURE`, safe default/configuration selection and the existing Customer Cart
+  create/add transport integration described in `docs/spec/work-packages/WP-1702.md`.
+
+- `WP-1701 — Menu Browse / Product Detail` is implemented and integrated at squash
+  `20ec3ba759b9c74a4a4822491c4d01c817965bcd` via PR #164. Exact implementation head
+  `0cf3bbd341f5459fd2f76f6659b0891370045d4d` passed run/job
+  `31546428666 / 93959825617`; exact-main run/job `31547487467 / 93962977526` passed. It owns only
+  the Customer PWA rendering of the existing Published Menu DTO for `CUST-MENU`,
+  `CUST-MENU-SEARCH` and `CUST-SELLABLE-DETAIL` described in
+  `docs/spec/work-packages/WP-1701.md`.
 
 - `WP-1700 — QR Entry and Store Context Screen` is implemented and integrated at squash
   `9f02df243534a7be8926a1244ae192f5af404f62` via PR #163. Exact implementation head

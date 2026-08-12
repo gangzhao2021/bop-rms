@@ -19,6 +19,19 @@ export interface CustomerMenuOptionRuleDto {
   readonly maximumSelections: number;
   readonly enabledOptionReferences: readonly CatalogReference[];
   readonly defaultOptionReferences: readonly CatalogReference[];
+  readonly options: readonly {
+    readonly optionReference: CatalogReference;
+    readonly name: string;
+    readonly maximumQuantity: number;
+    readonly conflictOptionReferences: readonly CatalogReference[];
+    readonly selectedByDefault: boolean;
+    readonly incrementalPrice: {
+      readonly status: "Unavailable";
+      readonly amount: null;
+      readonly currency: null;
+      readonly reason: "PRICING_NOT_INTEGRATED";
+    };
+  }[];
 }
 
 export interface CustomerMenuSellableDto {

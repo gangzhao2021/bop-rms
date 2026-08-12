@@ -66,7 +66,31 @@ function found(): CustomerMenuQueryResult {
               presentationRole: "Standard",
               pinned: false,
               availability: "Available",
-              optionRules: [],
+              optionRules: [
+                {
+                  bindingReference: "018f7500-0000-7000-8000-00000000000b" as never,
+                  optionSetVersionReference: "018f7500-0000-7000-8000-00000000000c" as never,
+                  minimumSelections: 0,
+                  maximumSelections: 1,
+                  enabledOptionReferences: ["018f7500-0000-7000-8000-00000000000d" as never],
+                  defaultOptionReferences: [],
+                  options: [
+                    {
+                      optionReference: "018f7500-0000-7000-8000-00000000000d" as never,
+                      name: "Oat beverage",
+                      maximumQuantity: 1,
+                      conflictOptionReferences: [],
+                      selectedByDefault: false,
+                      incrementalPrice: {
+                        status: "Unavailable",
+                        amount: null,
+                        currency: null,
+                        reason: "PRICING_NOT_INTEGRATED",
+                      },
+                    },
+                  ],
+                },
+              ],
               allergenDisclosure: {
                 registryVersionReference: "018f7500-0000-7000-8000-000000000009" as never,
                 items: [
