@@ -198,6 +198,7 @@ function fixture(
     service: createCartItemCommandService(ports),
     current: () => aggregate,
     generated: () => generated,
+    operations: () => operations.size,
     validations: () => validations,
   };
 }
@@ -434,5 +435,54 @@ describe("Cart Item Add / Update / Remove commands", () => {
     await expect(fixture({ catalogMode: "Failure" }).service.add(addInput())).rejects.toMatchObject(
       { code: "CART_DEPENDENCY_UNAVAILABLE" },
     );
+  });
+});
+
+describe("WP-2026 concurrent Cart update scenario", () => {
+  it("commits one winner, rejects the stale contender and replays only the winner", async () => {
+    const state = fixture();
+    const firstInput = addInput();
+    const secondInput = addInput({
+      operationReference: ids.secondOperation,
+      quantity: 3,
+      customerNote: "No cutlery",
+      requestedAt: "2026-08-02T14:01:01.000Z",
+    });
+
+    const results = await Promise.allSettled([
+      state.service.add(firstInput),
+      state.service.add(secondInput),
+    ]);
+    const fulfilled = results.filter(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof state.service.add>>> =>
+        result.status === "fulfilled",
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(fulfilled[0]?.value).toMatchObject({
+      status: "Applied",
+      aggregate: { aggregateVersion: 2 },
+    });
+    expect(rejected[0]?.reason).toEqual(new CartError("CART_VERSION_CONFLICT"));
+    expect(state.current()).toEqual(fulfilled[0]?.value.aggregate);
+    expect(state.current().items).toHaveLength(1);
+    expect(state.operations()).toBe(1);
+    expect(state.validations()).toBe(2);
+
+    const winnerInput = results[0]?.status === "fulfilled" ? firstInput : secondInput;
+    const loserInput = results[0]?.status === "rejected" ? firstInput : secondInput;
+    await expect(state.service.add(winnerInput)).resolves.toMatchObject({
+      status: "AlreadyApplied",
+      aggregate: { aggregateVersion: 2 },
+    });
+    await expect(state.service.add(loserInput)).rejects.toEqual(
+      new CartError("CART_VERSION_CONFLICT"),
+    );
+    expect(state.operations()).toBe(1);
+    expect(state.validations()).toBe(2);
   });
 });

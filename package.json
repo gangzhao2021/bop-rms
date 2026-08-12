@@ -110,6 +110,7 @@
     "e2e:duplicate-webhook": "pnpm --filter @rms/payment exec vitest run --config vitest.config.ts src/tests/payment-webhook-inbox.test.ts -t WP-2022",
     "e2e:outbox-dispatcher-failure": "vitest run --config packages/database/vitest.outbox-dispatcher.config.ts -t WP-2023",
     "e2e:projection-rebuild": "pnpm --filter @bop/projection exec vitest run --config vitest.config.ts src/tests/projection-rebuild.test.ts -t WP-2025",
+    "e2e:concurrent-update": "pnpm --filter @rms/ordering exec vitest run --config vitest.config.ts src/tests/cart-item-command.test.ts -t WP-2026",
     "public-capability:acceptance": "pnpm --filter @bop/public-capability public-capability:acceptance",
     "retry-dead-letter:acceptance": "vitest run --config packages/database/vitest.retry-dead-letter.config.ts",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",

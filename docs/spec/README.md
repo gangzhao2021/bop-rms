@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2025 — Projection Rebuild Scenario on codex/wp-2025`
+- Current discussion node: `WP-2026 — Concurrent Update Scenario on codex/wp-2026`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2026 — Concurrent Update Scenario` is locally implemented and verified on top of WP-2025
+  head `7b7b5a0`. Its concurrent Ordering scenario proves two different Cart intents from the same
+  expected version produce one atomic winner, one exact version conflict, one retained operation
+  and idempotent winner replay without a second validation. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2026.md`; GitHub publication/integration is deferred by Owner direction.
 
 - `WP-2025 — Projection Rebuild Scenario` is locally implemented and verified on top of WP-2024
   head `08aa0b6`. Its stateful failure injection proves validation failure abandons only the shadow,
