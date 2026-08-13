@@ -25,6 +25,7 @@
     "audit-record:acceptance": "vitest run --config packages/database/vitest.audit-record.config.ts",
     "database-ownership:check": "vitest run tooling/database-ownership/validate.test.mjs && node tooling/database-ownership/validate.mjs",
     "database-permission:check": "vitest run tooling/database-permission/validate.test.mjs && node tooling/database-permission/validate.mjs",
+    "disaster-recovery:check": "vitest run tooling/security/disaster-recovery-evidence-gate.test.mjs",
     "dining:acceptance": "pnpm --filter @rms/dining test",
     "dining-closing:acceptance": "pnpm --filter @bop/task test && pnpm --filter @rms/dining test",
     "dining-session:acceptance": "pnpm --filter @bop/public-capability test && pnpm --filter @rms/dining test && pnpm --filter @bop/identity guest-session:acceptance && vitest run --config packages/database/vitest.identity-session-store.config.ts",
