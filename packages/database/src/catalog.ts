@@ -103,6 +103,18 @@ export interface MigrationCatalog {
   readonly migrations: readonly MigrationFile[];
 }
 
+export function findCaseFoldConflicts(names: readonly string[]): ReadonlyMap<string, string> {
+  const firstByFoldedName = new Map<string, string>();
+  const conflicts = new Map<string, string>();
+  for (const name of names) {
+    const foldedName = name.toLowerCase();
+    const first = firstByFoldedName.get(foldedName);
+    if (first && first !== name) conflicts.set(name, first);
+    else firstByFoldedName.set(foldedName, name);
+  }
+  return conflicts;
+}
+
 const diagnostic = (
   code: MigrationDiagnostic["code"],
   file: string,
@@ -534,11 +546,10 @@ export async function readMigrationCatalog(root: string): Promise<MigrationCatal
   const entries = (await readdir(migrationsRoot, { withFileTypes: true })).sort((left, right) =>
     left.name.localeCompare(right.name, "en"),
   );
-  const folded = new Map<string, string>();
+  const rootCaseConflicts = findCaseFoldConflicts(entries.map((entry) => entry.name));
   for (const entry of entries) {
-    const lower = entry.name.toLowerCase();
-    const previous = folded.get(lower);
-    if (previous && previous !== entry.name)
+    const previous = rootCaseConflicts.get(entry.name);
+    if (previous)
       diagnostics.push(
         diagnostic(
           "CASE_CONFLICT",
@@ -546,7 +557,6 @@ export async function readMigrationCatalog(root: string): Promise<MigrationCatal
           `catalog entry conflicts with ${previous}`,
         ),
       );
-    folded.set(lower, entry.name);
     if (entry.name === "namespaces.json") continue;
     const directoryNamespace = namespaceByDirectory.get(entry.name);
     if (entry.isSymbolicLink()) {
@@ -570,14 +580,14 @@ export async function readMigrationCatalog(root: string): Promise<MigrationCatal
       continue;
     }
     const directory = path.join(migrationsRoot, entry.name);
-    const foldedChildren = new Map<string, string>();
-    for (const child of (await readdir(directory, { withFileTypes: true })).sort((left, right) =>
+    const children = (await readdir(directory, { withFileTypes: true })).sort((left, right) =>
       left.name.localeCompare(right.name, "en"),
-    )) {
+    );
+    const childCaseConflicts = findCaseFoldConflicts(children.map((child) => child.name));
+    for (const child of children) {
       const relativePath = `migrations/${entry.name}/${child.name}`;
-      const childLower = child.name.toLowerCase();
-      const previousChild = foldedChildren.get(childLower);
-      if (previousChild && previousChild !== child.name)
+      const previousChild = childCaseConflicts.get(child.name);
+      if (previousChild)
         diagnostics.push(
           diagnostic(
             "CASE_CONFLICT",
@@ -585,7 +595,6 @@ export async function readMigrationCatalog(root: string): Promise<MigrationCatal
             `migration filename conflicts with ${previousChild}`,
           ),
         );
-      foldedChildren.set(childLower, child.name);
       if (child.isSymbolicLink()) {
         diagnostics.push(
           diagnostic("SYMLINK_PATH", relativePath, "migration file must not be symbolic"),

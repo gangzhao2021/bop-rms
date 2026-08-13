@@ -118,7 +118,10 @@ export async function loadMigrationConnectionConfig(
   } catch {
     unsafe("repository root is not readable");
   }
-  const configuredEnvironment = path.resolve(canonicalRoot, envFile);
+  // Resolve the caller-visible path before canonicalizing it. On macOS `/tmp`
+  // resolves to `/private/tmp`; mixing the canonical root with the original
+  // absolute env-file path incorrectly rejects a file inside that same root.
+  const configuredEnvironment = path.resolve(root, envFile);
   let environmentState;
   let canonicalEnvironment: string;
   let text: string;
@@ -130,7 +133,6 @@ export async function loadMigrationConnectionConfig(
     unsafe("environment file is not readable");
   }
   if (
-    !configuredEnvironment.startsWith(`${canonicalRoot}${path.sep}`) ||
     !canonicalEnvironment.startsWith(`${canonicalRoot}${path.sep}`) ||
     environmentState.isSymbolicLink() ||
     !environmentState.isFile()

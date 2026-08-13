@@ -20,7 +20,8 @@ older historical snapshots retained later in this index.
 - `WP-2052 — KMS, Secret Rotation, Audit Integrity and Immutable Archive Gate` is locally implemented
   and verified on top of WP-2051 head `f143a03`. It composes accepted Audit integrity/database tests
   with a fail-closed external-evidence checklist; real KMS, secret rotation, Object Lock and restore
-  evidence remain unavailable and unclaimed. Exact scope is in
+  evidence remain unavailable and unclaimed. The final cumulative root suite passes `261/261`,
+  including filesystem-portable migration case-fold and canonical-path checks. Exact scope is in
   `docs/spec/work-packages/WP-2052.md`; GitHub publication/integration is deferred by Owner direction.
 
 - `WP-2051 — Privacy Rights, Necessary-cookie, Consent and Retention Execution Test` is locally

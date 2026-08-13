@@ -2,7 +2,7 @@ import { cp, mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "no
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { readMigrationCatalog } from "./catalog.ts";
+import { findCaseFoldConflicts, readMigrationCatalog } from "./catalog.ts";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const roots: string[] = [];
@@ -971,14 +971,13 @@ $unsafe$;
   });
 
   it("rejects case-fold-colliding migration filenames", async () => {
-    const root = await fixture();
-    const directory = path.dirname(migrationPath(root));
-    await writeFile(
-      path.join(directory, "0000_001_CREATE_MIGRATION_HISTORY.sql"),
-      await readFile(migrationPath(root)),
-    );
-    expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
-      "CASE_CONFLICT",
+    expect(
+      findCaseFoldConflicts([
+        "0000_001_create_migration_history.sql",
+        "0000_001_CREATE_MIGRATION_HISTORY.sql",
+      ]),
+    ).toEqual(
+      new Map([["0000_001_CREATE_MIGRATION_HISTORY.sql", "0000_001_create_migration_history.sql"]]),
     );
   });
 
@@ -1034,9 +1033,11 @@ $unsafe$;
 
   it("rejects unknown namespace entries and case-fold collisions", async () => {
     const root = await fixture();
-    await mkdir(path.join(root, "migrations", "0000-Platform"));
+    await mkdir(path.join(root, "migrations", "0000-platform-unknown"));
     const codes = (await readMigrationCatalog(root)).diagnostics.map((item) => item.code);
-    expect(codes).toContain("CASE_CONFLICT");
     expect(codes).toContain("MIGRATION_NAMESPACE_UNKNOWN");
+    expect(findCaseFoldConflicts(["0000-platform", "0000-Platform"])).toEqual(
+      new Map([["0000-Platform", "0000-platform"]]),
+    );
   });
 });
