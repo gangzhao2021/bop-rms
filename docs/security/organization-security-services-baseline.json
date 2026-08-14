@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "delegatedAdministratorAccount": "security-log-archive",
+  "organizationServices": [
+    "aws-config",
+    "cloudtrail",
+    "guardduty",
+    "iam-access-analyzer",
+    "security-hub"
+  ],
+  "centralArchive": {
+    "account": "security-log-archive",
+    "encrypted": true,
+    "bucketVersioning": true,
+    "objectLock": true,
+    "cloudTrailLogFileValidation": true,
+    "workloadAdministratorCanAlterDestinationOrRetention": false
+  },
+  "requiredLogSources": [
+    "cloudtrail-organization-management-events",
+    "cloudtrail-required-kms-data-events",
+    "cloudtrail-required-s3-data-events",
+    "vpc-flow-logs",
+    "waf-logs"
+  ],
+  "findingEscalation": {
+    "externalAccess": "page-security-owner",
+    "crossAccountAccess": "page-security-owner",
+    "unknownOrDeliveryFailure": "fail-closed"
+  },
+  "configAggregatorRequired": true,
+  "externalEvidenceRequired": true
+}

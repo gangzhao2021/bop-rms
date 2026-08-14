@@ -86,6 +86,7 @@
     "module-manifest:check": "node tooling/module-manifest/validate.mjs",
     "migration:check": "vitest run packages/database/src/catalog.test.ts packages/database/src/config.test.ts && node packages/database/src/check.ts",
     "notification:acceptance": "pnpm --filter @bop/notification test",
+    "organization-security-services:check": "vitest run tooling/security/organization-security-services-baseline.test.mjs && pnpm audit-integrity:acceptance",
     "openapi:check": "pnpm --filter @bop-rms/contracts-events openapi:check",
     "membership-aggregate:acceptance": "pnpm --filter @bop/membership test && vitest run --config packages/database/vitest.membership-aggregate.config.ts",
     "merchant-authentication:acceptance": "pnpm --filter @bop-rms/api merchant-authentication:acceptance",
