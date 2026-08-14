@@ -33,6 +33,9 @@ const moduleManifestInput =
     ],
     consumedEvents: [],
     publishedEvents: [
+      "rms.business-intelligence.analytics-backfill-completed.v1",
+      "rms.business-intelligence.analytics-load-completed.v1",
+      "rms.business-intelligence.analytics-load-failed.v1",
       "rms.business-intelligence.data-quality-issue-detected.v1",
       "rms.business-intelligence.data-quality-issue-resolved.v1",
       "rms.business-intelligence.metric-archived.v1",
@@ -56,6 +59,8 @@ const moduleManifestInput =
     ownedDatabase: {
       schema: "rms_reporting",
       tables: [
+        "backfill_request",
+        "backfill_request_version",
         "data_quality_check",
         "data_quality_check_version",
         "data_quality_result",
@@ -74,6 +79,9 @@ const moduleManifestInput =
         "metric_dependency_reference",
         "metric_certification_evidence",
         "metric_operation_record",
+        "pipeline_operation_record",
+        "pipeline_run",
+        "pipeline_run_state",
         "report_definition",
         "report_version",
         "report_dataset_reference",

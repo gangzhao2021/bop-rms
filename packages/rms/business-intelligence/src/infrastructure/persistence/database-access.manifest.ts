@@ -7,6 +7,22 @@ const databaseAccessManifestInput = {
   },
   tables: [
     {
+      table: "backfill_request",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/business-intelligence" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "backfill_request_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@rms/business-intelligence" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "data_quality_check",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@rms/business-intelligence" },
@@ -148,6 +164,30 @@ const databaseAccessManifestInput = {
       writeOwner: { kind: "module", id: "@rms/business-intelligence" },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "pipeline_operation_record",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/business-intelligence" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "pipeline_run",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/business-intelligence" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "pipeline_run_state",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/business-intelligence" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
     },
     {
