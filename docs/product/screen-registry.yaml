@@ -40,6 +40,11 @@ catalogs:
     - dining.operate
     - inventory.manage
     - inventory.movement.read
+    - inventory.count.read
+    - inventory.count.manage
+    - inventory.count.execute
+    - inventory.count.approve
+    - inventory.count.post
     - procurement.manage
     - customer.manage
     - reporting.read
@@ -77,6 +82,7 @@ catalogs:
     - inventory_*_v1
     - inventory_stock_overview_v1
     - inventory_movement_explorer_v1
+    - inventory_count_workbench_v1
     - procurement_*_v1
     - customer_loyalty_*_v1
     - reporting_*_v1
@@ -4972,13 +4978,13 @@ screens:
     roles:
       - Inventory Staff / Manager
       - submitter cannot approve when policy
-    permission_ref: inventory.manage
+    permission_ref: inventory.count.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - count ref、scope、type、status、assignee、freeze / snapshot、progress、variance、due
     search_filter_sort_export: ref；status、scope、assignee、date、variance / overdue
     query_ref: query.inv_count_list
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_count_workbench_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create、assign、start / continue、submit、approve / reject、cancel
     command_refs:
@@ -5018,13 +5024,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Count assignee / Approver
-    permission_ref: inventory.manage
+    permission_ref: inventory.count.execute
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - blind expected quantity policy、item / lot / location rows、counted quantity / unit、variance / reason、progress / conflict
     search_filter_sort_export: item / barcode scan；counted / missing / variance / exception
     query_ref: query.inv_count_workbench
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_count_workbench_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: enter / scan、save progress、recount、submit、approve / reject、post idempotent movements
     command_refs:
@@ -6131,7 +6137,7 @@ screens:
       - aliases respectively of INV-COUNT-LIST / Workbench、INV-ADJUSTMENT-WIZARD、INV-TRANSFER-LIST / Detail and INV-WASTE-WIZARD
       - no second route
       - Phase 2 / WP-2122–2125
-    permission_ref: inventory.manage
+    permission_ref: inventory.count.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - historic umbrella IDs
