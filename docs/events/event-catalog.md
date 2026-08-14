@@ -5,6 +5,9 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 
 ## Registered Events
 
+- `AnalyticsBackfillCompleted:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `AnalyticsLoadCompleted:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `AnalyticsLoadFailed:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `AvailabilityRuleCreated:v1` — owner `@rms/catalog`; stable; brand; none
 - `AvailabilityRuleLifecycleChanged:v1` — owner `@rms/catalog`; stable; brand; none
 - `AvailabilityRuleReplaced:v1` — owner `@rms/catalog`; stable; brand; none

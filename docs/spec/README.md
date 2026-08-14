@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2164 — Data Quality and Reconciliation on codex/wp-2164`
+- Current discussion node: `WP-2165 — Pipeline Run, watermark, late data and backfill approval on codex/wp-2165`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2165 — Pipeline Run, watermark, late data and backfill approval` is locally implemented and
+  verified on top of WP-2164 commit `4c86706`. It adds version-pinned Pipeline Runs, logical-batch
+  retry protection, append-only watermark/count/state evidence, distinct-actor Backfill approval,
+  pre/post Reconciliation gates, three strict Events, forced Brand/Store RLS and the full-state
+  `BI-PIPELINE-RUN` route. Business Intelligence passed `22/22`, Contracts passed `25/25`, Merchant
+  Web passed `265/265`, all `38/38` package tasks, root tests `319/319` and the complete retained
+  isolated PostgreSQL matrix passed under the exact full `pnpm verify`. Real Pipelines, source
+  Facts, checkpoints, watermarks, late/rejected records, Data Quality/Reconciliation outcomes,
+  approvals, incidents and external evidence remain unclaimed; GitHub publication is deferred.
 
 - `WP-2164 — Data Quality and cross-domain Reconciliation Workbench` is locally implemented and
   verified on top of WP-2163 commit `3839f3d`. It adds versioned closed Checks,

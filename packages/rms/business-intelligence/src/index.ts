@@ -11,3 +11,6 @@ export * from "./application/ports/metric-definition-ports.js";
 export * from "./contracts/data-quality-reconciliation.js";
 export * from "./application/data-quality-reconciliation-service.js";
 export * from "./application/ports/data-quality-reconciliation-ports.js";
+export * from "./contracts/pipeline-run.js";
+export * from "./application/pipeline-run-service.js";
+export * from "./application/ports/pipeline-run-ports.js";

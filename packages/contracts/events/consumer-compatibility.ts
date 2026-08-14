@@ -138,6 +138,16 @@ const contract = (
 });
 
 export const eventConsumerContracts = defineEventConsumerContracts([
+  ...["AnalyticsBackfillCompleted", "AnalyticsLoadCompleted", "AnalyticsLoadFailed"].map(
+    (eventType) =>
+      contract(
+        "reporting.pipeline-run-projection",
+        "@rms/business-intelligence",
+        eventType,
+        "brand",
+        "append_pipeline_run_projection",
+      ),
+  ),
   ...["DataQualityIssueDetected", "DataQualityIssueResolved"].map((eventType) =>
     contract(
       "reporting.data-quality-projection",

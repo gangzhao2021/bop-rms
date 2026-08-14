@@ -367,6 +367,31 @@ const reconciliationDifferenceDetectedPayload = z.strictObject({
   detectedAt: z.iso.datetime({ offset: false }),
 });
 
+const analyticsLoadCompletedPayload = z.strictObject({
+  runReference: z.string().regex(canonicalUuidV7),
+  pipelineVersionReference: z.string().regex(canonicalUuidV7),
+  outputDatasetVersionReference: z.string().regex(canonicalUuidV7),
+  outputPartitionCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  status: z.enum(["Succeeded", "SucceededWithWarning"]),
+  watermarkOccurredAt: z.iso.datetime({ offset: false }).nullable(),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const analyticsLoadFailedPayload = z.strictObject({
+  runReference: z.string().regex(canonicalUuidV7),
+  pipelineVersionReference: z.string().regex(canonicalUuidV7),
+  errorReference: z.string().regex(canonicalUuidV7),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const analyticsBackfillCompletedPayload = z.strictObject({
+  runReference: z.string().regex(canonicalUuidV7),
+  backfillRequestVersionReference: z.string().regex(canonicalUuidV7),
+  outputDatasetVersionReference: z.string().regex(canonicalUuidV7),
+  outputPartitionCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 const reportSchedulePayload = z.strictObject({
   scheduleReference: z.string().regex(canonicalUuidV7),
   scheduleVersionReference: z.string().regex(canonicalUuidV7),
@@ -517,6 +542,54 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  {
+    eventType: "AnalyticsBackfillCompleted",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.pipeline-run-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: analyticsBackfillCompletedPayload,
+  },
+  {
+    eventType: "AnalyticsLoadCompleted",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.pipeline-run-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: analyticsLoadCompletedPayload,
+  },
+  {
+    eventType: "AnalyticsLoadFailed",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.pipeline-run-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: analyticsLoadFailedPayload,
+  },
   {
     eventType: "DataQualityIssueDetected",
     schemaVersion: 1,
