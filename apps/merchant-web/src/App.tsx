@@ -69,6 +69,7 @@ import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPage
 import { OperationalDashboardPage } from "./OperationalDashboardPage.js";
 import { ReportBuilderPage, ReportCatalogPage } from "./ReportPages.js";
 import { ReportRunHistoryPage } from "./ReportRunHistoryPage.js";
+import { MetricCatalogPage, MetricDetailPage } from "./MetricPages.js";
 import {
   createMerchantWorkspaceClient,
   type MerchantWorkspaceClient,
@@ -191,6 +192,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/supply/discrepancies" element={<DiscrepancyPage />} />
       <Route path="/app/supply/performance" element={<SupplierPerformancePage />} />
       <Route path="/app/reports/operations" element={<OperationalDashboardPage />} />
+      <Route path="/app/reports/metrics" element={<MetricCatalogPage />} />
+      <Route path="/app/reports/metrics/:id" element={<MetricDetailPage />} />
       <Route path="/app/reports" element={<ReportCatalogPage />} />
       <Route path="/app/reports/:id/edit" element={<ReportBuilderPage />} />
       <Route path="/app/reports/runs" element={<ReportRunHistoryPage />} />

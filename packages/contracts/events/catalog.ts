@@ -320,6 +320,18 @@ const reportDefinitionPayload = z.strictObject({
   occurredAt: z.iso.datetime({ offset: false }),
 });
 
+const metricDefinitionPayload = z.strictObject({
+  metricReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "InReview", "Certified", "Deprecated", "Archived"]),
+  certificationStatus: z.enum(["Draft", "InReview", "Certified", "Deprecated"]),
+  ownerDomainCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  replacementMetricReference: z.string().regex(canonicalUuidV7).nullable(),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 const reportSchedulePayload = z.strictObject({
   scheduleReference: z.string().regex(canonicalUuidV7),
   scheduleVersionReference: z.string().regex(canonicalUuidV7),
@@ -470,6 +482,29 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  ...[
+    "MetricArchived",
+    "MetricCertified",
+    "MetricDefinitionDraftRecorded",
+    "MetricDefinitionPublished",
+    "MetricDefinitionReviewSubmitted",
+    "MetricDeprecated",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence" as const,
+    producerModule: "@rms/business-intelligence" as const,
+    stability: "stable" as const,
+    consumers: ["reporting.metric-catalog-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: metricDefinitionPayload,
+  })),
   ...[
     "ReportDefinitionArchived",
     "ReportDefinitionDraftCreated",

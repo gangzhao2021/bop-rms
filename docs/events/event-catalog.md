@@ -21,6 +21,12 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `KitchenWorkCreated:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `KitchenWorkStarted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `MenuPublished:v1` — owner `@rms/catalog`; stable; brand; none
+- `MetricArchived:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `MetricCertified:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `MetricDefinitionDraftRecorded:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `MetricDefinitionPublished:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `MetricDefinitionReviewSubmitted:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `MetricDeprecated:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `OrderAmended:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderConfirmed:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderCreated:v1` — owner `@rms/ordering`; stable; store; indirect_identifier

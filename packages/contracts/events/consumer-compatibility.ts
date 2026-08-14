@@ -139,6 +139,22 @@ const contract = (
 
 export const eventConsumerContracts = defineEventConsumerContracts([
   ...[
+    "MetricArchived",
+    "MetricCertified",
+    "MetricDefinitionDraftRecorded",
+    "MetricDefinitionPublished",
+    "MetricDefinitionReviewSubmitted",
+    "MetricDeprecated",
+  ].map((eventType) =>
+    contract(
+      "reporting.metric-catalog-projection",
+      "@rms/business-intelligence",
+      eventType,
+      "brand",
+      "replace_metric_catalog_projection",
+    ),
+  ),
+  ...[
     "ReportDefinitionArchived",
     "ReportDefinitionDraftCreated",
     "ReportDefinitionDraftReplaced",

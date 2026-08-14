@@ -5,3 +5,6 @@ export * from "./application/ports/report-definition-ports.js";
 export * from "./contracts/report-run.js";
 export * from "./application/report-run-service.js";
 export * from "./application/ports/report-run-ports.js";
+export * from "./contracts/metric-definition.js";
+export * from "./application/metric-definition-service.js";
+export * from "./application/ports/metric-definition-ports.js";

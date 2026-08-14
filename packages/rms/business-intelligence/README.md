@@ -5,13 +5,13 @@
 - Module Name: `business-intelligence`
 - Package Name: `@rms/business-intelligence`
 - Layer / Domain: `RMS / Business Intelligence`
-- Phase / owning Work Package: `Later / WP-2161–2162`
+- Phase / owning Work Package: `Later / WP-2161–2163`
 - Owner role: `Business Intelligence Engineering Owner`
 - Status: `active, runtime-inactive adapters`
-- Responsibility: versioned Report Definitions, certification, Schedule definitions, immutable Report
-  Runs and controlled artifact metadata.
-- Explicit non-goals: source facts, Metric definitions, query execution, artifact bytes/URLs and
-  delivery attempts.
+- Responsibility: versioned Report and Metric Definitions, certification, Lineage metadata,
+  Schedule definitions, immutable Report Runs and controlled artifact metadata.
+- Explicit non-goals: source facts, Warehouse / Pipeline execution, Metric calculation, artifact
+  bytes/URLs and delivery attempts.
 
 ## Public contract
 
@@ -23,6 +23,10 @@ inputs; private persistence shapes are not public.
 `createReportRunService` queues or reruns an exact published version, appends state facts, records
 opaque artifact revisions/revocations and returns download authorization metadata without a storage
 URL.
+
+`createMetricDefinitionService` records immutable semantic Versions, validates closed Lineage,
+requires distinct Business Owner and Data Owner approval evidence for certification, and preserves
+replacement-aware deprecation without rewriting pinned historical consumers.
 
 Private paths, Domain entities, ORM models, Provider payloads, and database fields are not public contracts.
 
@@ -36,8 +40,9 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 
 ## Data ownership and lifecycle
 
-- Owned objects: Report Definition Aggregate, immutable Report/ Schedule Versions, Report Run,
-  append-only Run State, artifact revision/revocation and operation/download audit records.
+- Owned objects: Report Definition and Metric Definition Aggregates, immutable Report / Schedule /
+  Metric Versions, Metric Lineage/certification evidence, Report Run, append-only Run State,
+  artifact revision/revocation and operation/download audit records.
 - Write owner: `@rms/business-intelligence`; reads only through owner repository or public Query.
 - Scope: Tenant plus Brand and optional Store; schedule scope cannot expand the Report scope.
 - Money: no money field is accepted.
@@ -48,10 +53,11 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 
 ## Persistence and eventing
 
-WP-2161 creates the `rms_reporting` schema and Definition tables; WP-2162 adds immutable Run, state,
-artifact metadata and access-audit tables under namespace 1800 with forced Brand/Store RLS.
-Repository ports require operation/Event/Audit composition in one transaction. Output/Notification
-continues to own artifact bytes and delivery.
+WP-2161 creates the `rms_reporting` schema and Report Definition tables; WP-2162 adds immutable Run,
+state, artifact metadata and access-audit tables; WP-2163 adds Metric Definition, Version, Lineage,
+dual-owner certification and operation evidence under namespace 1800. All use forced Brand/Store
+RLS. Repository ports require operation/Event/Audit composition in one transaction.
+Output/Notification continues to own artifact bytes and delivery.
 
 ## Security and privacy
 
@@ -74,13 +80,14 @@ pnpm --filter @rms/business-intelligence typecheck
 pnpm verify
 ```
 
-Tests cover strict contracts, lifecycle/concurrency/idempotency, four-eyes certification, exact
-rerun pinning, terminal finality, artifact expiry/revocation and isolated RLS/append-only persistence.
+Tests cover strict contracts, lifecycle/concurrency/idempotency, Report four-eyes and Metric
+dual-owner certification, exact rerun pinning, terminal finality, artifact expiry/revocation,
+Lineage metadata and isolated RLS/append-only persistence.
 
 ## Decisions and follow-up
 
 - Authority: Handoff Sections 38, 48, 50 and 88.15.
 - External Evidence: real certified Metric/Dataset, membership, execution engine, Output asset,
   recipient and delivery are unavailable.
-- Revisit trigger: WP-2163 Metric Definition implementation.
-- Next allowed Work Package: WP-2163.
+- Revisit trigger: WP-2164 Data Quality / reconciliation implementation.
+- Next allowed Work Package: WP-2164.

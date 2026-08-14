@@ -1000,6 +1000,474 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "MetricArchivedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "MetricArchivedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated", "Archived"],
+              "type": "string"
+            },
+            "metricReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "ownerDomainCode": {
+              "pattern": "^[A-Z][A-Z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            "replacementMetricReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "metricReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "ownerDomainCode",
+            "snapshotDigest",
+            "replacementMetricReference",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "MetricArchived v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.metric-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "MetricArchived",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "MetricCertifiedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "MetricCertifiedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated", "Archived"],
+              "type": "string"
+            },
+            "metricReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "ownerDomainCode": {
+              "pattern": "^[A-Z][A-Z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            "replacementMetricReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "metricReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "ownerDomainCode",
+            "snapshotDigest",
+            "replacementMetricReference",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "MetricCertified v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.metric-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "MetricCertified",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "MetricDefinitionDraftRecordedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "MetricDefinitionDraftRecordedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated", "Archived"],
+              "type": "string"
+            },
+            "metricReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "ownerDomainCode": {
+              "pattern": "^[A-Z][A-Z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            "replacementMetricReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "metricReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "ownerDomainCode",
+            "snapshotDigest",
+            "replacementMetricReference",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "MetricDefinitionDraftRecorded v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.metric-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "MetricDefinitionDraftRecorded",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "MetricDefinitionPublishedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "MetricDefinitionPublishedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated", "Archived"],
+              "type": "string"
+            },
+            "metricReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "ownerDomainCode": {
+              "pattern": "^[A-Z][A-Z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            "replacementMetricReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "metricReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "ownerDomainCode",
+            "snapshotDigest",
+            "replacementMetricReference",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "MetricDefinitionPublished v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.metric-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "MetricDefinitionPublished",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "MetricDefinitionReviewSubmittedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "MetricDefinitionReviewSubmittedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated", "Archived"],
+              "type": "string"
+            },
+            "metricReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "ownerDomainCode": {
+              "pattern": "^[A-Z][A-Z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            "replacementMetricReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "metricReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "ownerDomainCode",
+            "snapshotDigest",
+            "replacementMetricReference",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "MetricDefinitionReviewSubmitted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.metric-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "MetricDefinitionReviewSubmitted",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "MetricDeprecatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "MetricDeprecatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Certified", "Deprecated", "Archived"],
+              "type": "string"
+            },
+            "metricReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "ownerDomainCode": {
+              "pattern": "^[A-Z][A-Z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            "replacementMetricReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "metricReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "ownerDomainCode",
+            "snapshotDigest",
+            "replacementMetricReference",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "MetricDeprecated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.metric-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "MetricDeprecated",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "OrderAmendedV1": {
         "contentType": "application/json",
         "deprecated": false,
