@@ -48,6 +48,7 @@ import { GoodsReceiptPage } from "./GoodsReceiptPage.js";
 import { DiscrepancyPage } from "./DiscrepancyPage.js";
 import { SupplierPerformancePage } from "./SupplierPerformancePage.js";
 import { CustomerDetailPage, CustomerListPage } from "./CustomerProfilePages.js";
+import { CustomerMergeReviewPage } from "./CustomerMergeReviewPage.js";
 import { SupplierDetailPage, SupplierListPage } from "./SupplierPages.js";
 import { RequisitionDetailPage, RequisitionListPage } from "./RequisitionPages.js";
 import {
@@ -176,6 +177,7 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/supply/discrepancies" element={<DiscrepancyPage />} />
       <Route path="/app/supply/performance" element={<SupplierPerformancePage />} />
       <Route path="/app/customers" element={<CustomerListPage />} />
+      <Route path="/app/customers/merge-reviews/:reviewId" element={<CustomerMergeReviewPage />} />
       <Route path="/app/customers/:id" element={<CustomerDetailPage />} />
       <Route path="/app/supply/suppliers" element={<SupplierListPage />} />
       <Route path="/app/supply/suppliers/:id" element={<SupplierDetailPage />} />

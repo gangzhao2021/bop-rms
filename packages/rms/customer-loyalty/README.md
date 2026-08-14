@@ -13,9 +13,14 @@ Tenant, Brand, Actor, purpose, exact permission, operation reference, Expected V
 A Profile requires an explicit allowed basis. Verified contacts and User links consume Identity
 proof; Guest links consume source-owner proof and never rewrite the source transaction or Actor.
 
+`customer_merge_review_v1` supplies Privacy-purpose duplicate evidence, conflict, impact and rollback
+views. Merge review requires two pinned Profile versions, same-Brand exact evidence, a distinct
+approved Actor and append-only Audit. The resulting local `CustomerProfilesMerged` fact retains both
+Profile IDs and explicitly forbids rewriting transaction facts or historical Actors.
+
 ## Privacy and exclusions
 
 Raw contacts, passwords, authentication identity, sensitive notes, unrestricted object IDs and
-proof are prohibited in logs, URLs and analytics. Fixtures are synthetic. WP-2140 does not implement
-merge, Loyalty ledger/programs, Consent mutation, communications, Privacy Request workflow,
-persistence, external adapters or Provider integration.
+proof are prohibited in logs, URLs and analytics. Fixtures are synthetic. The current package does
+not implement Loyalty ledger/programs, Consent mutation, communications, Privacy Request workflow,
+persistence, live Outbox/Event Catalog publication, external adapters or Provider integration.
