@@ -2,7 +2,7 @@
 
 ## Identity and responsibility
 
-- Module: `@rms/inventory`; RMS Inventory Domain; Later / WP-2120–2122; Inventory Engineering Owner.
+- Module: `@rms/inventory`; RMS Inventory Domain; Later / WP-2120–2123; Inventory Engineering Owner.
 - Owns Inventory Item identity, lifecycle, unit / conversion, tracking / lot / expiry / negative-stock
   policy, scoped Reorder Policy and rebuildable Stock read contracts.
 - Does not own SKU, Recipe, Supplier Offering / price, Purchase Order or accounting ledger.
@@ -19,6 +19,9 @@ injected Ledger port for one exact inverse of an eligible original; it never edi
 `executeStockCountCommand` captures expected quantities only through a server-owned snapshot port,
 enforces blind-count / assignee / variance / recount / segregation policy, and posts one atomic set of
 idempotent Count Adjustment Movements only after approval and Balance-version validation.
+`executeStockAdjustmentCommand` validates a scoped, evidence-backed quantity delta against a
+server-owned Balance / Item-policy snapshot and authorized evidence resolver, enforces independent
+high-risk approval and accepts only one exact atomic immutable Adjustment Movement after approval.
 
 ## Data and security
 
@@ -39,4 +42,4 @@ CI=true pnpm --filter @rms/inventory test
 CI=true pnpm --filter @rms/inventory build
 ```
 
-WP-2123–2125 own Adjustment, Transfer and Waste workflows. WP-2132 owns Supplier Offering mapping.
+WP-2124–2125 own Waste and Transfer workflows. WP-2132 owns Supplier Offering mapping.

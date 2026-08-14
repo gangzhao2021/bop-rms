@@ -45,6 +45,10 @@ catalogs:
     - inventory.count.execute
     - inventory.count.approve
     - inventory.count.post
+    - inventory.adjustment.read
+    - inventory.adjustment.execute
+    - inventory.adjustment.approve
+    - inventory.adjustment.post
     - procurement.manage
     - customer.manage
     - reporting.read
@@ -83,6 +87,7 @@ catalogs:
     - inventory_stock_overview_v1
     - inventory_movement_explorer_v1
     - inventory_count_workbench_v1
+    - inventory_adjustment_wizard_v1
     - procurement_*_v1
     - customer_loyalty_*_v1
     - reporting_*_v1
@@ -4932,13 +4937,13 @@ screens:
     roles:
       - authorized Inventory Manager
       - high-risk control
-    permission_ref: inventory.manage
+    permission_ref: inventory.adjustment.execute
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - scope、item / lot / location、current projection、quantity delta / unit、reason、evidence、impact / approval
     search_filter_sort_export: exact item / barcode / lot
     query_ref: query.inv_adjustment_wizard
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_adjustment_wizard_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: validate、submit / approve、post one immutable movement
     command_refs:
@@ -6088,7 +6093,7 @@ screens:
       - aliases respectively of INV-COUNT-LIST / Workbench、INV-ADJUSTMENT-WIZARD、INV-TRANSFER-LIST / Detail and INV-WASTE-WIZARD
       - no second route
       - Phase 2 / WP-2122–2125
-    permission_ref: inventory.manage
+    permission_ref: inventory.adjustment.execute
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - historic umbrella IDs

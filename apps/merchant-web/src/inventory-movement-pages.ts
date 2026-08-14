@@ -27,6 +27,7 @@ export interface InventoryMovementRow {
     | "Consume"
     | "Waste"
     | "Transfer"
+    | "Adjustment"
     | "CountAdjustment"
     | "Correction";
   readonly itemReference: string;
@@ -194,6 +195,7 @@ function movement(value: unknown): InventoryMovementRow {
     "Consume",
     "Waste",
     "Transfer",
+    "Adjustment",
     "CountAdjustment",
     "Correction",
   ]);
@@ -212,7 +214,7 @@ function movement(value: unknown): InventoryMovementRow {
     conversionMultiplier.startsWith("-") ||
     /^0(?:\.0+)?$/u.test(conversionMultiplier) ||
     (raw.correctable === true &&
-      !["Receive", "Consume", "Waste", "CountAdjustment"].includes(movementType))
+      !["Receive", "Consume", "Waste", "Adjustment", "CountAdjustment"].includes(movementType))
   )
     throw new InventoryMovementClientError("Unavailable");
   return Object.freeze({

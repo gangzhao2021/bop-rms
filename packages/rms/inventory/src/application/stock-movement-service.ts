@@ -30,6 +30,7 @@ const movementTypes: readonly StockMovementType[] = [
   "Consume",
   "Waste",
   "Transfer",
+  "Adjustment",
   "CountAdjustment",
   "Correction",
 ];
@@ -37,6 +38,7 @@ const correctableTypes: readonly StockMovementType[] = [
   "Receive",
   "Consume",
   "Waste",
+  "Adjustment",
   "CountAdjustment",
 ];
 

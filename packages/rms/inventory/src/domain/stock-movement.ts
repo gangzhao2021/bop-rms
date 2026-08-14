@@ -16,6 +16,7 @@ export type StockMovementType =
   | "Consume"
   | "Waste"
   | "Transfer"
+  | "Adjustment"
   | "CountAdjustment"
   | "Correction";
 export type SignedInventoryDecimal = string & { readonly __signedInventoryDecimal: unique symbol };
@@ -26,7 +27,7 @@ export interface MovementStockScope {
 }
 
 export interface StockBalanceSnapshot {
-  readonly onHand: InventoryDecimal;
+  readonly onHand: SignedInventoryDecimal | "0";
   readonly reserved: InventoryDecimal;
   readonly available: SignedInventoryDecimal;
   readonly inTransit: InventoryDecimal;
@@ -190,7 +191,7 @@ function snapshot(value: unknown): StockBalanceSnapshot {
     "ledgerVersion",
   ]);
   return Object.freeze({
-    onHand: inventoryDecimal(raw.onHand),
+    onHand: raw.onHand === "0" ? ("0" as const) : parseSignedInventoryDecimal(raw.onHand),
     reserved: inventoryDecimal(raw.reserved),
     available:
       raw.available === "0"
@@ -239,6 +240,7 @@ export function parseStockMovementFact(value: unknown): StockMovementFact {
     "Consume",
     "Waste",
     "Transfer",
+    "Adjustment",
     "CountAdjustment",
     "Correction",
   ]);

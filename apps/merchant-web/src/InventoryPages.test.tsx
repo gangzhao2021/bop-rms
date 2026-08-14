@@ -78,7 +78,8 @@ describe("Inventory primary screens", () => {
       "12.5000 on hand",
       "KG",
       "Item / internal code / barcode / supplier item code",
-      "Adjust / waste / transfer",
+      "Adjust stock",
+      "Waste / transfer",
     ])
       expect(html).toContain(text);
     expect(html).toMatch(/<button disabled="">Start count<\/button>/u);

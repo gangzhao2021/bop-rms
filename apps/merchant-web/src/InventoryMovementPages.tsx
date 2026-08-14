@@ -195,6 +195,7 @@ export function InventoryMovementScreen({ view }: { readonly view: InventoryMove
                 <option>Consume</option>
                 <option>Waste</option>
                 <option>Transfer</option>
+                <option>Adjustment</option>
                 <option>CountAdjustment</option>
                 <option>Correction</option>
               </select>

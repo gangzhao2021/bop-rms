@@ -1,6 +1,8 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { InventoryAdjustmentContext } from "./InventoryAdjustmentWizard.js";
+import type { InventoryAdjustmentProjectionClient } from "./inventory-adjustment-wizard.js";
 import {
   InventoryClientError,
   parseInventoryView,
@@ -58,7 +60,13 @@ const quantities = (item: InventoryItemView) =>
   item.quantities
     ? `${item.quantities.onHand} on hand · ${item.quantities.reserved} reserved · ${item.quantities.available} available · ${item.quantities.inTransit} in transit · ${item.quantities.unitCode}`
     : "Location Scope Missing — quantity and reorder hidden";
-function ItemCard({ item }: { readonly item: InventoryItemView }) {
+function ItemCard({
+  item,
+  onAdjust,
+}: {
+  readonly item: InventoryItemView;
+  readonly onAdjust?: (() => void) | undefined;
+}) {
   return (
     <article className="store-card">
       <header>
@@ -81,16 +89,26 @@ function ItemCard({ item }: { readonly item: InventoryItemView }) {
         <Link to={`/app/supply/items/${item.itemReference}`}>Open item</Link>
         <button disabled>View movements</button>
         <button disabled>Start count</button>
-        <button disabled>Adjust / waste / transfer</button>
+        <button disabled={!onAdjust} onClick={onAdjust}>
+          Adjust stock
+        </button>
+        <button disabled>Waste / transfer</button>
       </div>
     </article>
   );
 }
-export function InventoryScreen({ view }: { readonly view: InventoryView }) {
+export function InventoryScreen({
+  view,
+  adjustmentClient,
+}: {
+  readonly view: InventoryView;
+  readonly adjustmentClient?: InventoryAdjustmentProjectionClient | undefined;
+}) {
   const selected =
     view.items.find((item) => item.itemReference === view.selectedItemReference) ?? null;
   const [query, setQuery] = useState("");
   const [lifecycle, setLifecycle] = useState("All");
+  const [adjustmentOpen, setAdjustmentOpen] = useState(false);
   const normalized = query.trim().toUpperCase();
   const items = view.items.filter(
     (item) =>
@@ -233,11 +251,22 @@ export function InventoryScreen({ view }: { readonly view: InventoryView }) {
           ) : (
             <div className="store-card-grid">
               {items.map((item) => (
-                <ItemCard key={item.itemReference} item={item} />
+                <ItemCard
+                  key={item.itemReference}
+                  item={item}
+                  onAdjust={
+                    adjustmentClient && view.stockScope && !stale
+                      ? () => setAdjustmentOpen(true)
+                      : undefined
+                  }
+                />
               ))}
             </div>
           )}
         </>
+      ) : null}
+      {adjustmentOpen && adjustmentClient ? (
+        <InventoryAdjustmentContext client={adjustmentClient} />
       ) : null}
     </AppFrame>
   );
@@ -245,9 +274,11 @@ export function InventoryScreen({ view }: { readonly view: InventoryView }) {
 function Page({
   screenId,
   client = unavailableInventoryClient,
+  adjustmentClient,
 }: {
   readonly screenId: InventoryScreenId;
   readonly client?: InventoryProjectionClient;
+  readonly adjustmentClient?: InventoryAdjustmentProjectionClient;
 }) {
   const [state, setState] = useState<State>({ kind: "Loading" });
   useEffect(() => {
@@ -268,23 +299,27 @@ function Page({
     };
   }, [client, screenId]);
   return state.kind === "Found" ? (
-    <InventoryScreen view={state.view} />
+    <InventoryScreen view={state.view} adjustmentClient={adjustmentClient} />
   ) : (
     <InventoryState state={state.kind} />
   );
 }
-export const StockOverviewPage = (props: { readonly client?: InventoryProjectionClient }) => (
+interface InventoryPageProps {
+  readonly client?: InventoryProjectionClient;
+  readonly adjustmentClient?: InventoryAdjustmentProjectionClient;
+}
+export const StockOverviewPage = (props: InventoryPageProps) => (
   <Page {...props} screenId="INV-STOCK-OVERVIEW" />
 );
-export const InventoryItemListPage = (props: { readonly client?: InventoryProjectionClient }) => (
+export const InventoryItemListPage = (props: InventoryPageProps) => (
   <Page {...props} screenId="INV-ITEM-LIST" />
 );
-export const InventoryItemDetailPage = (props: { readonly client?: InventoryProjectionClient }) => (
+export const InventoryItemDetailPage = (props: InventoryPageProps) => (
   <Page {...props} screenId="INV-ITEM-DETAIL" />
 );
-export const InventoryItemCreatePage = (props: { readonly client?: InventoryProjectionClient }) => (
+export const InventoryItemCreatePage = (props: InventoryPageProps) => (
   <Page {...props} screenId="INV-ITEM-CREATE" />
 );
-export const InventoryItemEditPage = (props: { readonly client?: InventoryProjectionClient }) => (
+export const InventoryItemEditPage = (props: InventoryPageProps) => (
   <Page {...props} screenId="INV-ITEM-EDIT" />
 );
