@@ -1575,6 +1575,286 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "PromotionArchivedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "PromotionArchivedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Paused", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "promotionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "promotionReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "PromotionArchived v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.promotion-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "PromotionArchived",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "PromotionDraftCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "PromotionDraftCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Paused", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "promotionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "promotionReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "PromotionDraftCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.promotion-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "PromotionDraftCreated",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "PromotionDraftReplacedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "PromotionDraftReplacedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Paused", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "promotionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "promotionReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "PromotionDraftReplaced v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.promotion-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "PromotionDraftReplaced",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "PromotionPausedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "PromotionPausedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Paused", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "promotionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "promotionReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "PromotionPaused v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.promotion-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "PromotionPaused",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "PromotionPublishedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "PromotionPublishedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Paused", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "promotionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "promotionReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "PromotionPublished v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.promotion-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "PromotionPublished",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "TaxConfigDraftCreatedV1": {
         "contentType": "application/json",
         "deprecated": false,

@@ -138,6 +138,21 @@ const contract = (
 });
 
 export const eventConsumerContracts = defineEventConsumerContracts([
+  ...[
+    "PromotionArchived",
+    "PromotionDraftCreated",
+    "PromotionDraftReplaced",
+    "PromotionPaused",
+    "PromotionPublished",
+  ].map((eventType) =>
+    contract(
+      "pricing.promotion-admin-projection",
+      "@rms/pricing",
+      eventType,
+      "brand",
+      "replace_promotion_admin_projection",
+    ),
+  ),
   ...["TaxConfigDraftCreated", "TaxConfigDraftReplaced", "TaxConfigPublished"].map((eventType) =>
     contract(
       "pricing.tax-config-admin-projection",

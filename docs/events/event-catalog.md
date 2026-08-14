@@ -30,6 +30,11 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `PriceBookDraftCreated:v1` — owner `@rms/pricing`; stable; brand; none
 - `PriceBookDraftReplaced:v1` — owner `@rms/pricing`; stable; brand; none
 - `PriceBookVersionPublished:v1` — owner `@rms/pricing`; stable; brand; none
+- `PromotionArchived:v1` — owner `@rms/pricing`; stable; brand; none
+- `PromotionDraftCreated:v1` — owner `@rms/pricing`; stable; brand; none
+- `PromotionDraftReplaced:v1` — owner `@rms/pricing`; stable; brand; none
+- `PromotionPaused:v1` — owner `@rms/pricing`; stable; brand; none
+- `PromotionPublished:v1` — owner `@rms/pricing`; stable; brand; none
 - `TaxConfigDraftCreated:v1` — owner `@rms/pricing`; stable; store; none
 - `TaxConfigDraftReplaced:v1` — owner `@rms/pricing`; stable; store; none
 - `TaxConfigPublished:v1` — owner `@rms/pricing`; stable; store; none

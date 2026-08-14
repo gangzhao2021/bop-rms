@@ -28,6 +28,7 @@ catalogs:
     - media.manage
     - catalog.manage
     - pricing.tax-config.manage
+    - pricing.promotion.manage
     - ordering.operate
     - payment.operate
     - kitchen.operate
@@ -47,6 +48,7 @@ catalogs:
     - catalog_*_v1
     - pricing_*_v1
     - pricing_tax_config_admin_v1
+    - pricing_promotion_admin_v1
     - recipe_*_v1
     - merchant_order_*_v1
     - payment_*_v1
@@ -8708,13 +8710,13 @@ screens:
     roles:
       - Promotion Editor
       - PII-free segment refs
-    permission_ref: catalog.manage
+    permission_ref: pricing.promotion.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - identity、audience / basket condition、eligible items、benefit、limits、stacking / priority、schedule、customer copy、impact
     search_filter_sort_export: Product / Category / Customer-segment picker；rule search
     query_ref: query.promo_editor
-    projection_ref: pricing_*_v1
+    projection_ref: pricing_promotion_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: save draft、validate、simulate representative baskets、compare、publish / schedule
     command_refs:
@@ -8754,13 +8756,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Promotion Manager / Approver
-    permission_ref: catalog.manage
+    permission_ref: pricing.promotion.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - name、code、type、status、scope、eligibility、benefit、budget / usage summary、effective dates、stacking
     search_filter_sort_export: name / code；status、Store / channel、type、scheduled / conflict
     query_ref: query.promo_list
-    projection_ref: pricing_*_v1
+    projection_ref: pricing_promotion_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create、duplicate、edit、simulate、submit / approve、pause、archive
     command_refs:

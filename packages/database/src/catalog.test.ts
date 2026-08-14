@@ -69,6 +69,7 @@ describe("migration catalog", () => {
       "1200_003_create_price_quote",
       "1200_004_create_price_book_admin_projection",
       "1200_005_create_tax_config_admin_projection",
+      "1200_006_create_promotion_management",
       "1300_001_create_cart_aggregate",
       "1300_002_alter_cart_item_commands",
       "1300_003_alter_cart_selection_evidence",
@@ -160,6 +161,26 @@ describe("migration catalog", () => {
       expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
     expect(migration?.sql).toContain("tax_amount_minor = trunc(tax_amount_minor)");
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(5);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2104 Promotion management migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1200_006_create_promotion_management",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/pricing", schema: "rms_pricing" });
+    for (const table of [
+      "promotion",
+      "promotion_version",
+      "promotion_eligibility_reference",
+      "promotion_operation_record",
+      "promotion_admin_projection_generation",
+      "promotion_admin_projection",
+      "promotion_admin_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
+    expect(migration?.sql).toContain("usage_minor <= budget_minor");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(7);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
