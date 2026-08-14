@@ -41,6 +41,11 @@ Customer-safe tracking projection. Only validated evidence authorizes Picked Up/
 custody or proof requires review, and the Customer contract excludes precise location, courier PII,
 raw address and evidence assets.
 
+WP-2154 adds append-only completion exceptions, evidence-gated reattempt/reroute/return/final
+resolution and the operational exception projection. Fulfillment coordinates but never invents
+Ordering cancellation, Payment/refund, Kitchen remake, Inventory replacement/disposal or Customer
+compensation finality.
+
 ## Public contract
 
 `createPickupFulfillmentService` exposes registration `fulfillment.confirmed-order:v1` plus an
