@@ -63,6 +63,10 @@ catalogs:
     - dining_floor_v1
     - dining_table_admin_v1
     - reservation_*_v1
+    - reservation_calendar_v1
+    - reservation_create_edit_v1
+    - reservation_detail_v1
+    - reservation_list_v1
     - fulfillment_*_v1
     - inventory_*_v1
     - procurement_*_v1
@@ -8954,7 +8958,7 @@ screens:
       - day / week capacity bands、reservations、holds、closures、Table / area hints、waitlist
     search_filter_sort_export: customer-safe name / ref / contact exact with permission；date、party size、status、channel、accessibility request
     query_ref: query.res_calendar
-    projection_ref: reservation_*_v1
+    projection_ref: reservation_calendar_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create、open、check in、reschedule via revision、cancel、mark no-show
     command_refs:
@@ -9046,7 +9050,7 @@ screens:
       - date / time、party size、contact minimum、channel、accessibility / controlled request、capacity result、deposit policy、confirmation
     search_filter_sort_export: availability lookup by exact scenario
     query_ref: query.res_create_edit
-    projection_ref: reservation_*_v1
+    projection_ref: reservation_create_edit_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: hold capacity、save request、collect deposit through Payment boundary、confirm、release on expiry
     command_refs:
@@ -9092,7 +9096,7 @@ screens:
       - original + revisions、capacity hold、customer snapshot、deposit collaboration、notifications、check-in / seating handoff、history
     search_filter_sort_export: —
     query_ref: query.res_detail
-    projection_ref: reservation_*_v1
+    projection_ref: reservation_detail_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: revise atomically with capacity check、check in、cancel、mark late / no-show、seat by Dining command
     command_refs:
@@ -9138,7 +9142,7 @@ screens:
       - ref、date / time、party size、customer snapshot、status、deposit / guarantee separate、source、special controlled needs
     search_filter_sort_export: ref / contact exact；date、status、party size、source、deposit、late / no-show
     query_ref: query.res_list
-    projection_ref: reservation_*_v1
+    projection_ref: reservation_list_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create、view、check in、revise、cancel、no-show per policy
     command_refs:

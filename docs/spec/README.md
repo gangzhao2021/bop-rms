@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2112 — Dining Table / Floor Board on codex/wp-2112`
+- Current discussion node: `WP-2113 — Reservation Calendar / List / Detail / Create / Revision / Deposit Collaboration on codex/wp-2113`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2113 — Reservation Calendar / List / Detail / Create / Revision / Deposit Collaboration` is
+  locally implemented and verified on top of WP-2112 head `ca9e8de`. It adds the runtime-inactive
+  `@rms/reservation-waiting` contract, strict Store-scoped authorization / idempotency / version
+  boundaries, append-only critical revisions with replacement Capacity Hold evidence, separated
+  deposit outcome references and the four Section 88.11 merchant Reservation screens. Section 50
+  grants no Reservation schema, so persistence, outbox and live adapters remain ports and no
+  migration is invented. Root Vitest passed `319/319`; all `33/33` package tasks, the complete
+  retained isolated PostgreSQL matrix and secret scan `2/2` passed. Exact evidence is recorded in
+  `docs/spec/work-packages/WP-2113.md`; GitHub publication is deferred.
 
 - `WP-2112 — Table Configuration, Floor Board and Dining Session Move / Closing` is locally
   implemented and verified on top of WP-2111 head `97dbfb5`. It adds strict, versioned Dining Table and QR /
