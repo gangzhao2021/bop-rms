@@ -18,9 +18,14 @@ views. Merge review requires two pinned Profile versions, same-Brand exact evide
 approved Actor and append-only Audit. The resulting local `CustomerProfilesMerged` fact retains both
 Profile IDs and explicitly forbids rewriting transaction facts or historical Actors.
 
+`loyalty_program_v1` owns stable Brand-scoped Program identities and append-only configuration
+Versions. Rules use exact integer Points, require deterministic lifecycle/conservation simulation and
+distinct approval before publish/schedule. Monetary benefit calculation remains Pricing-owned and
+Points are never Payment tender.
+
 ## Privacy and exclusions
 
 Raw contacts, passwords, authentication identity, sensitive notes, unrestricted object IDs and
 proof are prohibited in logs, URLs and analytics. Fixtures are synthetic. The current package does
-not implement Loyalty ledger/programs, Consent mutation, communications, Privacy Request workflow,
+not implement Loyalty Account/Points Ledger execution, Consent mutation, communications, Privacy Request workflow,
 persistence, live Outbox/Event Catalog publication, external adapters or Provider integration.

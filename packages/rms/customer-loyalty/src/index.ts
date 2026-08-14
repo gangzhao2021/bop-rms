@@ -7,3 +7,7 @@ export * from "./domain/customer-merge-review.js";
 export * from "./contracts/customer-merge-review.js";
 export * from "./application/customer-merge-review-service.js";
 export * from "./application/ports/customer-merge-review-ports.js";
+export * from "./domain/loyalty-program.js";
+export * from "./contracts/loyalty-program.js";
+export * from "./application/loyalty-program-service.js";
+export * from "./application/ports/loyalty-program-ports.js";
