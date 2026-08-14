@@ -26,6 +26,11 @@ pinned Dispatch Policy and Route Plan versions. Late acceptance, parallel offers
 candidate evidence and automatic-attempt exhaustion fail closed or create a dispatch exception.
 No live worker, Provider, scheduling/location result or Delivery persistence is claimed.
 
+WP-2151 adds field-masked Delivery Detail snapshots and exact-version, append-only revision
+contracts. Critical changes fail closed without fresh address, service-area, ETA, Pricing, Capacity
+and phase-dependent Provider/Manager evidence; rejected revisions never replace the last accepted
+snapshot.
+
 ## Public contract
 
 `createPickupFulfillmentService` exposes registration `fulfillment.confirmed-order:v1` plus an

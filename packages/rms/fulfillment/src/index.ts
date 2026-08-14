@@ -15,3 +15,7 @@ export * from "./domain/delivery-task.js";
 export * from "./contracts/delivery-dispatch.js";
 export * from "./application/ports/delivery-dispatch-ports.js";
 export * from "./application/delivery-dispatch-service.js";
+export * from "./domain/delivery-detail.js";
+export * from "./contracts/delivery-detail.js";
+export * from "./application/ports/delivery-detail-ports.js";
+export * from "./application/delivery-detail-service.js";

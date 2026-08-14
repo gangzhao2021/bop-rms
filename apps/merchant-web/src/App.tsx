@@ -55,6 +55,7 @@ import { ConsentPreferencePage } from "./ConsentPreferencePage.js";
 import { CommunicationHistoryPage, CommunicationTemplatePage } from "./CommunicationPages.js";
 import { PrivacyRequestPage } from "./PrivacyRequestPage.js";
 import { DeliveryDispatchPage } from "./DeliveryDispatchPage.js";
+import { DeliveryDetailPage } from "./DeliveryDetailPage.js";
 import { SupplierDetailPage, SupplierListPage } from "./SupplierPages.js";
 import { RequisitionDetailPage, RequisitionListPage } from "./RequisitionPages.js";
 import {
@@ -159,6 +160,7 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/commerce/recipes/:id/edit" element={<RecipeEditorPage />} />
       <Route path="/operations/orders" element={<OrderQueuePage />} />
       <Route path="/operations/delivery" element={<DeliveryDispatchPage />} />
+      <Route path="/operations/delivery/:id" element={<DeliveryDetailPage />} />
       <Route path="/operations/order-entry" element={<StaffOrderEntryPage />} />
       <Route path="/operations/inventory" element={<StockOverviewPage />} />
       <Route path="/operations/inventory/counts" element={<InventoryCountListPage />} />
