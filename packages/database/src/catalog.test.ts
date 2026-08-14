@@ -100,6 +100,7 @@ describe("migration catalog", () => {
       "1800_001_create_report_definition",
       "1800_002_create_report_run",
       "1800_003_create_metric_definition",
+      "1800_004_create_data_quality_reconciliation",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

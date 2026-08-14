@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(60);
+    expect(eventCatalog).toHaveLength(63);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
@@ -125,12 +125,15 @@ describe("Event Catalog source", () => {
       replaySemantics: "idempotent",
     });
     for (const eventType of [
+      "DataQualityIssueDetected",
+      "DataQualityIssueResolved",
       "MetricArchived",
       "MetricCertified",
       "MetricDefinitionDraftRecorded",
       "MetricDefinitionPublished",
       "MetricDefinitionReviewSubmitted",
       "MetricDeprecated",
+      "ReconciliationDifferenceDetected",
       "ReportDefinitionArchived",
       "ReportDefinitionDraftCreated",
       "ReportDefinitionDraftReplaced",
@@ -307,6 +310,8 @@ describe("Event Catalog source", () => {
       "BundleDraftReplaced:v1",
       "BundleLifecycleChanged:v1",
       "BundleVersionPublished:v1",
+      "DataQualityIssueDetected:v1",
+      "DataQualityIssueResolved:v1",
       "FulfillmentCompleted:v1",
       "KitchenItemCompleted:v1",
       "KitchenItemProgressRecorded:v1",
@@ -347,6 +352,7 @@ describe("Event Catalog source", () => {
       "RecipeDraftReplaced:v1",
       "RecipeInvalidated:v1",
       "RecipePublished:v1",
+      "ReconciliationDifferenceDetected:v1",
       "ReportArtifactRevisionRecorded:v1",
       "ReportArtifactRevoked:v1",
       "ReportDefinitionArchived:v1",
@@ -361,6 +367,42 @@ describe("Event Catalog source", () => {
       "TaxConfigDraftReplaced:v1",
       "TaxConfigPublished:v1",
     ]);
+  });
+
+  it("keeps Data Quality and Reconciliation events minimal and closed", () => {
+    const dataQuality = eventCatalog.find(
+      (entry) => entry.eventType === "DataQualityIssueDetected",
+    );
+    const reconciliation = eventCatalog.find(
+      (entry) => entry.eventType === "ReconciliationDifferenceDetected",
+    );
+    if (dataQuality === undefined || reconciliation === undefined)
+      throw new Error("EVENT_CATALOG_REGISTRATION_MISSING");
+    const detected = {
+      resultReference: "018f9910-0000-7000-8000-000000000001",
+      checkReference: "018f9910-0000-7000-8000-000000000002",
+      checkVersionReference: "018f9910-0000-7000-8000-000000000003",
+      datasetVersionReference: "018f9910-0000-7000-8000-000000000004",
+      partitionCode: "BUSINESS_DATE_2026_08_14",
+      severity: "Critical",
+      publicationDisposition: "BlockFormalReporting",
+      detectedAt: "2026-08-14T18:00:00.000Z",
+    };
+    expect(dataQuality.payloadSchema.safeParse(detected).success).toBe(true);
+    expect(
+      dataQuality.payloadSchema.safeParse({ ...detected, sql: "select private_data" }).success,
+    ).toBe(false);
+    expect(
+      reconciliation.payloadSchema.safeParse({
+        exceptionReference: "018f9910-0000-7000-8000-000000000005",
+        runReference: "018f9910-0000-7000-8000-000000000006",
+        control: "PaymentLedger",
+        periodFrom: "2026-08-14T17:00:00.000Z",
+        periodUntil: "2026-08-14T18:00:00.000Z",
+        unitCode: "CAD",
+        detectedAt: "2026-08-14T18:00:00.000Z",
+      }).success,
+    ).toBe(true);
   });
 
   it("keeps lifecycle payloads truthful, minimal and closed", () => {
@@ -759,7 +801,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(69);
+    expect(eventConsumerContracts).toHaveLength(72);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

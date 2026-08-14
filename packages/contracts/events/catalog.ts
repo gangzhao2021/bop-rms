@@ -332,6 +332,41 @@ const metricDefinitionPayload = z.strictObject({
   occurredAt: z.iso.datetime({ offset: false }),
 });
 
+const dataQualityIssueDetectedPayload = z.strictObject({
+  resultReference: z.string().regex(canonicalUuidV7),
+  checkReference: z.string().regex(canonicalUuidV7),
+  checkVersionReference: z.string().regex(canonicalUuidV7),
+  datasetVersionReference: z.string().regex(canonicalUuidV7),
+  partitionCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  severity: z.enum(["Info", "Warning", "Error", "Critical"]),
+  publicationDisposition: z.enum(["ContinueFormalReporting", "BlockFormalReporting"]),
+  detectedAt: z.iso.datetime({ offset: false }),
+});
+
+const dataQualityIssueResolvedPayload = z.strictObject({
+  resultReference: z.string().regex(canonicalUuidV7),
+  rerunResultReference: z.string().regex(canonicalUuidV7),
+  resolutionCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  resolvedAt: z.iso.datetime({ offset: false }),
+});
+
+const reconciliationDifferenceDetectedPayload = z.strictObject({
+  exceptionReference: z.string().regex(canonicalUuidV7),
+  runReference: z.string().regex(canonicalUuidV7),
+  control: z.enum([
+    "OrderItemTotal",
+    "PaymentLedger",
+    "InventoryLedger",
+    "PurchaseOrderReceipt",
+    "LoyaltyLedger",
+    "OutputAttempt",
+  ]),
+  periodFrom: z.iso.datetime({ offset: false }),
+  periodUntil: z.iso.datetime({ offset: false }),
+  unitCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  detectedAt: z.iso.datetime({ offset: false }),
+});
+
 const reportSchedulePayload = z.strictObject({
   scheduleReference: z.string().regex(canonicalUuidV7),
   scheduleVersionReference: z.string().regex(canonicalUuidV7),
@@ -482,6 +517,54 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  {
+    eventType: "DataQualityIssueDetected",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.data-quality-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: dataQualityIssueDetectedPayload,
+  },
+  {
+    eventType: "DataQualityIssueResolved",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.data-quality-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: dataQualityIssueResolvedPayload,
+  },
+  {
+    eventType: "ReconciliationDifferenceDetected",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.reconciliation-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: reconciliationDifferenceDetectedPayload,
+  },
   ...[
     "MetricArchived",
     "MetricCertified",

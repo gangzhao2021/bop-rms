@@ -33,6 +33,8 @@ const moduleManifestInput =
     ],
     consumedEvents: [],
     publishedEvents: [
+      "rms.business-intelligence.data-quality-issue-detected.v1",
+      "rms.business-intelligence.data-quality-issue-resolved.v1",
       "rms.business-intelligence.metric-archived.v1",
       "rms.business-intelligence.metric-certified.v1",
       "rms.business-intelligence.metric-definition-draft-recorded.v1",
@@ -49,10 +51,18 @@ const moduleManifestInput =
       "rms.business-intelligence.report-run-queued.v1",
       "rms.business-intelligence.report-run-state-recorded.v1",
       "rms.business-intelligence.report-schedule-version-recorded.v1",
+      "rms.business-intelligence.reconciliation-difference-detected.v1",
     ],
     ownedDatabase: {
       schema: "rms_reporting",
       tables: [
+        "data_quality_check",
+        "data_quality_check_version",
+        "data_quality_result",
+        "data_quality_issue_action",
+        "reconciliation_run",
+        "reconciliation_exception_state",
+        "data_quality_operation_record",
         "metric_definition",
         "metric_version",
         "metric_dimension",

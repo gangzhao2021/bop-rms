@@ -384,6 +384,113 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "DataQualityIssueDetectedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "DataQualityIssueDetectedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "checkReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "checkVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "datasetVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "detectedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "partitionCode": {
+              "pattern": "^[A-Z][A-Z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            "publicationDisposition": {
+              "enum": ["ContinueFormalReporting", "BlockFormalReporting"],
+              "type": "string"
+            },
+            "resultReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "severity": {
+              "enum": ["Info", "Warning", "Error", "Critical"],
+              "type": "string"
+            }
+          },
+          "required": [
+            "resultReference",
+            "checkReference",
+            "checkVersionReference",
+            "datasetVersionReference",
+            "partitionCode",
+            "severity",
+            "publicationDisposition",
+            "detectedAt"
+          ],
+          "type": "object"
+        },
+        "title": "DataQualityIssueDetected v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.data-quality-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "DataQualityIssueDetected",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "DataQualityIssueResolvedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "DataQualityIssueResolvedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "rerunResultReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "resolutionCode": {
+              "pattern": "^[A-Z][A-Z0-9_.:-]{0,63}$",
+              "type": "string"
+            },
+            "resolvedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "resultReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": ["resultReference", "rerunResultReference", "resolutionCode", "resolvedAt"],
+          "type": "object"
+        },
+        "title": "DataQualityIssueResolved v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.data-quality-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "DataQualityIssueResolved",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "FulfillmentCompletedV1": {
         "contentType": "application/json",
         "deprecated": false,
@@ -3059,6 +3166,76 @@
         "x-bop-event-type": "RecipePublished",
         "x-bop-owner-module": "@rms/recipe",
         "x-bop-producer-module": "@rms/recipe",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ReconciliationDifferenceDetectedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ReconciliationDifferenceDetectedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "control": {
+              "enum": [
+                "OrderItemTotal",
+                "PaymentLedger",
+                "InventoryLedger",
+                "PurchaseOrderReceipt",
+                "LoyaltyLedger",
+                "OutputAttempt"
+              ],
+              "type": "string"
+            },
+            "detectedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "exceptionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "periodFrom": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "periodUntil": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "runReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "unitCode": {
+              "pattern": "^[A-Z][A-Z0-9_.:-]{0,63}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "exceptionReference",
+            "runReference",
+            "control",
+            "periodFrom",
+            "periodUntil",
+            "unitCode",
+            "detectedAt"
+          ],
+          "type": "object"
+        },
+        "title": "ReconciliationDifferenceDetected v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.reconciliation-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ReconciliationDifferenceDetected",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
         "x-bop-replay-semantics": "idempotent",
         "x-bop-retention-category": "business_record",
         "x-bop-schema-version": 1,

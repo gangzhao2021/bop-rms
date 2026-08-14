@@ -138,6 +138,22 @@ const contract = (
 });
 
 export const eventConsumerContracts = defineEventConsumerContracts([
+  ...["DataQualityIssueDetected", "DataQualityIssueResolved"].map((eventType) =>
+    contract(
+      "reporting.data-quality-projection",
+      "@rms/business-intelligence",
+      eventType,
+      "brand",
+      "replace_data_quality_issue_projection",
+    ),
+  ),
+  contract(
+    "reporting.reconciliation-projection",
+    "@rms/business-intelligence",
+    "ReconciliationDifferenceDetected",
+    "brand",
+    "replace_reconciliation_exception_projection",
+  ),
   ...[
     "MetricArchived",
     "MetricCertified",

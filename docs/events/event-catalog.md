@@ -12,6 +12,8 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `BundleDraftReplaced:v1` — owner `@rms/catalog`; stable; brand; none
 - `BundleLifecycleChanged:v1` — owner `@rms/catalog`; stable; brand; none
 - `BundleVersionPublished:v1` — owner `@rms/catalog`; stable; brand; none
+- `DataQualityIssueDetected:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `DataQualityIssueResolved:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `FulfillmentCompleted:v1` — owner `@rms/fulfillment`; stable; store; indirect_identifier
 - `KitchenItemCompleted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenItemProgressRecorded:v1` — owner `@rms/kitchen`; stable; store; personal
@@ -52,6 +54,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `RecipeDraftReplaced:v1` — owner `@rms/recipe`; stable; brand; none
 - `RecipeInvalidated:v1` — owner `@rms/recipe`; stable; brand; none
 - `RecipePublished:v1` — owner `@rms/recipe`; stable; brand; none
+- `ReconciliationDifferenceDetected:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportArtifactRevisionRecorded:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportArtifactRevoked:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportDefinitionArchived:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
