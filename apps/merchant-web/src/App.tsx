@@ -45,6 +45,7 @@ import {
 import { InventoryLotExpiryPage } from "./InventoryLotExpiryPage.js";
 import { InventoryReplenishmentPage } from "./InventoryReplenishmentPage.js";
 import { GoodsReceiptPage } from "./GoodsReceiptPage.js";
+import { DiscrepancyPage } from "./DiscrepancyPage.js";
 import { SupplierDetailPage, SupplierListPage } from "./SupplierPages.js";
 import { RequisitionDetailPage, RequisitionListPage } from "./RequisitionPages.js";
 import {
@@ -170,6 +171,7 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/supply/purchase-orders" element={<PurchaseOrderListPage />} />
       <Route path="/app/supply/purchase-orders/:id/edit" element={<PurchaseOrderEditorPage />} />
       <Route path="/app/supply/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
+      <Route path="/app/supply/discrepancies" element={<DiscrepancyPage />} />
       <Route path="/app/supply/suppliers" element={<SupplierListPage />} />
       <Route path="/app/supply/suppliers/:id" element={<SupplierDetailPage />} />
       <Route path="/app/supply/offerings" element={<OfferingListPage />} />
