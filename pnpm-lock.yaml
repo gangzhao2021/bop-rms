@@ -400,6 +400,12 @@ importers:
         specifier: workspace:*
         version: link:../../bop/tenant
 
+  packages/rms/customer-loyalty:
+    dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../../bop/audit
+
   packages/rms/dining:
     dependencies:
       '@bop/audit':
