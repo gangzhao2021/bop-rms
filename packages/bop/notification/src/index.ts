@@ -8,3 +8,6 @@ export * from "./application/receipt-email-renderer.js";
 export * from "./application/delivery-orchestration.js";
 export * from "./application/resume-token-service.js";
 export * from "./application/ses-sns-event-service.js";
+export * from "./domain/communication-governance.js";
+export * from "./contracts/communication-governance.js";
+export * from "./application/communication-governance-service.js";

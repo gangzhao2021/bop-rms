@@ -14,3 +14,9 @@ recipient, destination, template, content, Event, and Provider-attempt reference
 This minimum contains no recipient address, content body, Provider payload, SES/SMS/Push resource,
 Event consumer, retry worker, bounce/complaint handling, database, migration, production API/UI,
 real delivery, or External Evidence claim.
+
+WP-2145 adds permission-trimmed administrative projections for immutable Communication History and
+versioned Template governance. Operational resend remains behind the accepted retry authorization;
+Marketing cannot borrow it. Template preview evidence must be escaped, tracking is prohibited and
+publication requires a distinct approver. No recipient value, live Provider result, approved sink,
+content approval or persistence is introduced.

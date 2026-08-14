@@ -52,6 +52,7 @@ import { CustomerMergeReviewPage } from "./CustomerMergeReviewPage.js";
 import { LoyaltyProgramEditorPage, LoyaltyProgramListPage } from "./LoyaltyProgramPages.js";
 import { LoyaltyAccountDetailPage, PointsReviewPage } from "./LoyaltyAccountPages.js";
 import { ConsentPreferencePage } from "./ConsentPreferencePage.js";
+import { CommunicationHistoryPage, CommunicationTemplatePage } from "./CommunicationPages.js";
 import { SupplierDetailPage, SupplierListPage } from "./SupplierPages.js";
 import { RequisitionDetailPage, RequisitionListPage } from "./RequisitionPages.js";
 import {
@@ -185,6 +186,9 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/customers/loyalty-accounts/:id" element={<LoyaltyAccountDetailPage />} />
       <Route path="/app/customers/loyalty-exceptions" element={<PointsReviewPage />} />
       <Route path="/app/customers/consents/:customerId" element={<ConsentPreferencePage />} />
+      <Route path="/app/customers/communications" element={<CommunicationHistoryPage />} />
+      <Route path="/app/customers/templates" element={<CommunicationTemplatePage />} />
+      <Route path="/app/customers/templates/:id" element={<CommunicationTemplatePage />} />
       <Route path="/app/customers/merge-reviews/:reviewId" element={<CustomerMergeReviewPage />} />
       <Route path="/app/customers/:id" element={<CustomerDetailPage />} />
       <Route path="/app/supply/suppliers" element={<SupplierListPage />} />
