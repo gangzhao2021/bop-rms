@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "accounts": ["management", "security-log-archive", "development", "staging", "production"],
+  "approvedRegions": ["ca-central-1", "ca-west-1"],
+  "requiredScpDenials": [
+    "organization-exit",
+    "unapproved-region",
+    "public-s3",
+    "public-rds",
+    "cloudtrail-disable-or-divert",
+    "config-disable-or-divert",
+    "guardduty-disable-or-divert",
+    "security-hub-disable-or-divert",
+    "unencrypted-storage"
+  ],
+  "externalEvidenceRequired": true
+}
