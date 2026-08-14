@@ -23,9 +23,14 @@ Versions. Rules use exact integer Points, require deterministic lifecycle/conser
 distinct approval before publish/schedule. Monetary benefit calculation remains Pricing-owned and
 Points are never Payment tender.
 
+`loyalty_account_v1` and `loyalty_points_exception_v1` expose derived balances, bounded active
+Reservations, append-only Ledger facts and source-linked correction reviews. No command can set a
+balance directly; expiry, release, redemption, reversal and adjustment remain distinct immutable
+facts, and insufficient reversals create visible Points Debt.
+
 ## Privacy and exclusions
 
 Raw contacts, passwords, authentication identity, sensitive notes, unrestricted object IDs and
 proof are prohibited in logs, URLs and analytics. Fixtures are synthetic. The current package does
-not implement Loyalty Account/Points Ledger execution, Consent mutation, communications, Privacy Request workflow,
+not implement persistence/live Ledger feeds, Consent mutation, communications, Privacy Request workflow,
 persistence, live Outbox/Event Catalog publication, external adapters or Provider integration.

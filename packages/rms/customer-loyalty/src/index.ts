@@ -11,3 +11,7 @@ export * from "./domain/loyalty-program.js";
 export * from "./contracts/loyalty-program.js";
 export * from "./application/loyalty-program-service.js";
 export * from "./application/ports/loyalty-program-ports.js";
+export * from "./domain/loyalty-account.js";
+export * from "./contracts/loyalty-account.js";
+export * from "./application/loyalty-account-service.js";
+export * from "./application/ports/loyalty-account-ports.js";

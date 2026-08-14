@@ -50,6 +50,7 @@ import { SupplierPerformancePage } from "./SupplierPerformancePage.js";
 import { CustomerDetailPage, CustomerListPage } from "./CustomerProfilePages.js";
 import { CustomerMergeReviewPage } from "./CustomerMergeReviewPage.js";
 import { LoyaltyProgramEditorPage, LoyaltyProgramListPage } from "./LoyaltyProgramPages.js";
+import { LoyaltyAccountDetailPage, PointsReviewPage } from "./LoyaltyAccountPages.js";
 import { SupplierDetailPage, SupplierListPage } from "./SupplierPages.js";
 import { RequisitionDetailPage, RequisitionListPage } from "./RequisitionPages.js";
 import {
@@ -180,6 +181,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/customers" element={<CustomerListPage />} />
       <Route path="/app/customers/loyalty-programs" element={<LoyaltyProgramListPage />} />
       <Route path="/app/customers/loyalty-programs/:id" element={<LoyaltyProgramEditorPage />} />
+      <Route path="/app/customers/loyalty-accounts/:id" element={<LoyaltyAccountDetailPage />} />
+      <Route path="/app/customers/loyalty-exceptions" element={<PointsReviewPage />} />
       <Route path="/app/customers/merge-reviews/:reviewId" element={<CustomerMergeReviewPage />} />
       <Route path="/app/customers/:id" element={<CustomerDetailPage />} />
       <Route path="/app/supply/suppliers" element={<SupplierListPage />} />
