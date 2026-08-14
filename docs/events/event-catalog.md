@@ -5,6 +5,10 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 
 ## Registered Events
 
+- `BundleDraftCreated:v1` — owner `@rms/catalog`; stable; brand; none
+- `BundleDraftReplaced:v1` — owner `@rms/catalog`; stable; brand; none
+- `BundleLifecycleChanged:v1` — owner `@rms/catalog`; stable; brand; none
+- `BundleVersionPublished:v1` — owner `@rms/catalog`; stable; brand; none
 - `FulfillmentCompleted:v1` — owner `@rms/fulfillment`; stable; store; indirect_identifier
 - `KitchenItemCompleted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenItemProgressRecorded:v1` — owner `@rms/kitchen`; stable; store; personal

@@ -62,6 +62,7 @@ describe("migration catalog", () => {
       "1105_001_create_published_menu_projection",
       "1106_001_create_allergen_provenance",
       "1106_002_alter_catalog_function_permissions",
+      "1107_001_create_bundle_aggregate",
       "1200_001_create_tax_configuration",
       "1200_002_create_price_book",
       "1200_003_create_price_quote",
@@ -101,6 +102,26 @@ describe("migration catalog", () => {
     );
     expect(migration?.metadata).toMatchObject({ owner: "@rms/catalog", schema: "rms_catalog" });
     expect(migration?.sql.match(/REVOKE ALL ON FUNCTION rms_catalog\./gu)).toHaveLength(4);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2100 Bundle aggregate migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1107_001_create_bundle_aggregate",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/catalog", schema: "rms_catalog" });
+    for (const table of [
+      "bundle",
+      "bundle_version",
+      "bundle_component_group",
+      "bundle_component_sellable",
+      "bundle_availability_rule",
+      "bundle_operation_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
+    expect(migration?.sql).toContain("sellable_type IN ('Product', 'Sku')");
+    expect(migration?.sql).toContain("numeric(30,0)");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(6);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

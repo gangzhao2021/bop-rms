@@ -3,6 +3,234 @@
   "channels": {},
   "components": {
     "messages": {
+      "BundleDraftCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "BundleDraftCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "bundleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "bundleVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "validationDigest": {
+              "anyOf": [
+                {
+                  "pattern": "^sha256:[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "bundleReference",
+            "bundleVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "validationDigest"
+          ],
+          "type": "object"
+        },
+        "title": "BundleDraftCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.bundle-management-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "BundleDraftCreated",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "BundleDraftReplacedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "BundleDraftReplacedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "bundleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "bundleVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "validationDigest": {
+              "anyOf": [
+                {
+                  "pattern": "^sha256:[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "bundleReference",
+            "bundleVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "validationDigest"
+          ],
+          "type": "object"
+        },
+        "title": "BundleDraftReplaced v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.bundle-management-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "BundleDraftReplaced",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "BundleLifecycleChangedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "BundleLifecycleChangedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "bundleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "bundleVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "validationDigest": {
+              "anyOf": [
+                {
+                  "pattern": "^sha256:[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "bundleReference",
+            "bundleVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "validationDigest"
+          ],
+          "type": "object"
+        },
+        "title": "BundleLifecycleChanged v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.bundle-management-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "BundleLifecycleChanged",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "BundleVersionPublishedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "BundleVersionPublishedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "bundleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "bundleVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "validationDigest": {
+              "anyOf": [
+                {
+                  "pattern": "^sha256:[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "bundleReference",
+            "bundleVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "validationDigest"
+          ],
+          "type": "object"
+        },
+        "title": "BundleVersionPublished v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.bundle-menu-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "BundleVersionPublished",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "FulfillmentCompletedV1": {
         "contentType": "application/json",
         "deprecated": false,

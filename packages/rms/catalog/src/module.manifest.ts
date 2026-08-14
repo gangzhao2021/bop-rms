@@ -42,7 +42,13 @@ const moduleManifestInput =
       },
     ],
     consumedEvents: ["rms.catalog.menu-published.v1"],
-    publishedEvents: ["rms.catalog.menu-published.v1"],
+    publishedEvents: [
+      "rms.catalog.bundle-draft-created.v1",
+      "rms.catalog.bundle-draft-replaced.v1",
+      "rms.catalog.bundle-lifecycle-changed.v1",
+      "rms.catalog.bundle-version-published.v1",
+      "rms.catalog.menu-published.v1",
+    ],
     ownedDatabase: {
       schema: "rms_catalog",
       tables: [
@@ -87,6 +93,12 @@ const moduleManifestInput =
         "allergen_source_assertion",
         "menu_allergen_validation_evidence",
         "menu_sellable_allergen_disclosure",
+        "bundle",
+        "bundle_version",
+        "bundle_component_group",
+        "bundle_component_sellable",
+        "bundle_availability_rule",
+        "bundle_operation_record",
       ],
     },
     ownedJobs: [],

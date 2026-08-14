@@ -253,6 +253,17 @@ const menuPublishedPayload = z.strictObject({
   timeZone: z.string().min(1).max(63),
 });
 
+const bundleLifecyclePayload = z.strictObject({
+  bundleReference: z.string().regex(canonicalUuidV7),
+  bundleVersionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "Published", "Suspended", "Discontinued", "Archived"]),
+  validationDigest: z
+    .string()
+    .regex(/^sha256:[0-9a-f]{64}$/u)
+    .nullable(),
+});
+
 const orderCreatedPayload = z.strictObject({
   orderReference: z.uuid(),
   orderBatchReference: z.uuid(),
@@ -305,6 +316,27 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  ...[
+    ["BundleDraftCreated", "catalog.bundle-management-projection:v1"],
+    ["BundleDraftReplaced", "catalog.bundle-management-projection:v1"],
+    ["BundleLifecycleChanged", "catalog.bundle-management-projection:v1"],
+    ["BundleVersionPublished", "catalog.bundle-menu-projection:v1"],
+  ].map(([eventType, consumer]) => ({
+    eventType: eventType as string,
+    schemaVersion: 1,
+    ownerModule: "@rms/catalog" as const,
+    producerModule: "@rms/catalog" as const,
+    stability: "stable" as const,
+    consumers: [consumer as string],
+    tenantScope: "brand" as const,
+    dataClassification: "none" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: bundleLifecyclePayload,
+  })),
   {
     eventType: "FulfillmentCompleted",
     schemaVersion: 1,

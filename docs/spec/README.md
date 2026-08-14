@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2066 — CloudFormation Recovery Evidence on codex/wp-2066`
+- Current discussion node: `WP-2100 — Bundle Configuration on codex/wp-2100`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2100 — Bundle Configuration, Simulation, Publish and Menu Integration` is locally implemented
+  and verified on top of WP-2066 head `26deed5`. It owns the Brand-scoped Bundle Aggregate,
+  exact-money simulation, six-table RLS persistence, four registered Events, public Menu fact and
+  `CAT-BUNDLE-LIST` / `CAT-BUNDLE-EDITOR` routes. Root Vitest passed `314/314`; all `31/31` package
+  tasks and the isolated Bundle PostgreSQL acceptance passed. Exact scope is in
+  `docs/spec/work-packages/WP-2100.md`; GitHub publication is deferred.
 
 - `WP-2066 — CloudFormation Change-set / Drift, Deletion Protection, Backup Policy and Cross-account
 Restore Evidence` is locally implemented and verified on top of WP-2065 head `395342e`. Its
