@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2160 — Operational Dashboard scope / freshness / drill-down on codex/wp-2160`
+- Current discussion node: `WP-2161 — Report Catalog / Builder / certification / scheduling on codex/wp-2161`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2161 — Report Catalog / Builder / certification / scheduling` is locally implemented and
+  verified on top of WP-2160 commit `48bb1c6`. It adds the canonical
+  `@rms/business-intelligence` owner, immutable Report Versions, four-eyes certification,
+  version-pinned schedule intent, strict Event contracts, forced Brand/Store RLS and the full-state
+  `RPT-REPORT-CATALOG` / `RPT-REPORT-BUILDER` routes. Business Intelligence passed `4/4`, Contracts
+  passed `24/24`, Merchant Web passed `217/217`, all `38/38` package tasks and the complete retained
+  isolated PostgreSQL matrix passed. GitHub publication is deferred.
 
 - `WP-2160 — Operational Dashboard scope / freshness / drill-down` is locally implemented and verified on
   top of WP-2155 commit `e990926`. It connects the accepted operational Query to the full-state
@@ -1463,6 +1471,15 @@ WP-0024 implementation commit `6371aa8cc96da021fc2a337a768039abce46548b`、PR #2
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
+
+WP-2161 local implementation verification is complete from exact predecessor
+`WP-2160@48bb1c6` on `codex/wp-2161`. The bounded implementation adds the canonical Reporting Domain,
+strict version/certification/schedule contracts, migration namespace `1800-rms-reporting`, generated
+Event Catalog artifacts and the two Section 88 routes. `pnpm verify` passed with all `38/38` package
+format/lint/typecheck/test/build tasks and the retained isolated PostgreSQL matrix. Real Dataset or
+Metric certification, membership, Report Runs, artifacts, recipient resolution, delivery, Provider,
+production scheduler, external evidence, GitHub and deployment remain gated and unclaimed. This
+paragraph supersedes the historical active-stage snapshots below.
 
 WP-1404 local implementation verification is active from exact integrated and exact-main verified
 `origin/main@2cbc0be35980e8245eeda486d60730004bc5ce8f` on the sole active branch

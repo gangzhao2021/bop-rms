@@ -310,6 +310,28 @@ const recipePayload = z.strictObject({
   occurredAt: z.iso.datetime({ offset: false }),
 });
 
+const reportDefinitionPayload = z.strictObject({
+  reportReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "InReview", "Published", "Archived"]),
+  certificationStatus: z.enum(["Draft", "InReview", "Certified"]),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const reportSchedulePayload = z.strictObject({
+  scheduleReference: z.string().regex(canonicalUuidV7),
+  scheduleVersionReference: z.string().regex(canonicalUuidV7),
+  reportReference: z.string().regex(canonicalUuidV7),
+  reportVersionReference: z.string().regex(canonicalUuidV7),
+  status: z.enum(["Active", "Paused", "Archived"]),
+  cadence: z.enum(["Daily", "Weekly", "Monthly"]),
+  format: z.enum(["Csv", "Json"]),
+  timezone: z.string().regex(/^[A-Za-z_+-]+(?:\/[A-Za-z0-9_+-]+)+$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 const orderCreatedPayload = z.strictObject({
   orderReference: z.uuid(),
   orderBatchReference: z.uuid(),
@@ -391,6 +413,44 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  ...[
+    "ReportDefinitionArchived",
+    "ReportDefinitionDraftCreated",
+    "ReportDefinitionDraftReplaced",
+    "ReportDefinitionPublished",
+    "ReportDefinitionReviewSubmitted",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence" as const,
+    producerModule: "@rms/business-intelligence" as const,
+    stability: "stable" as const,
+    consumers: ["reporting.report-catalog-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: reportDefinitionPayload,
+  })),
+  {
+    eventType: "ReportScheduleVersionRecorded",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.report-scheduler:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: reportSchedulePayload,
+  },
   ...[
     "ProductionBatchPlanned",
     "ProductionBatchStarted",

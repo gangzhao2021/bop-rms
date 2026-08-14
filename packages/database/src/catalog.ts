@@ -65,6 +65,7 @@ const businessOwners = new Map([
   ["rms_payment", "@rms/payment"],
   ["rms_kitchen", "@rms/kitchen"],
   ["rms_fulfillment", "@rms/fulfillment"],
+  ["rms_reporting", "@rms/business-intelligence"],
 ]);
 const metadataKeys = [
   "bop-rms-migration",
@@ -326,6 +327,7 @@ function validateSql(
           "rms_recipe",
           "rms_ordering",
           "rms_payment",
+          "rms_reporting",
         ].includes(metadata.schema) && acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
       )
     )

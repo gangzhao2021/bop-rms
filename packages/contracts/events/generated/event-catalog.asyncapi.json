@@ -2596,6 +2596,382 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "ReportDefinitionArchivedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ReportDefinitionArchivedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Published", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "reportReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reportReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ReportDefinitionArchived v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.report-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ReportDefinitionArchived",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ReportDefinitionDraftCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ReportDefinitionDraftCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Published", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "reportReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reportReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ReportDefinitionDraftCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.report-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ReportDefinitionDraftCreated",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ReportDefinitionDraftReplacedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ReportDefinitionDraftReplacedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Published", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "reportReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reportReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ReportDefinitionDraftReplaced v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.report-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ReportDefinitionDraftReplaced",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ReportDefinitionPublishedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ReportDefinitionPublishedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Published", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "reportReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reportReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ReportDefinitionPublished v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.report-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ReportDefinitionPublished",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ReportDefinitionReviewSubmittedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ReportDefinitionReviewSubmittedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "certificationStatus": {
+              "enum": ["Draft", "InReview", "Certified"],
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "InReview", "Published", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "reportReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reportReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "certificationStatus",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ReportDefinitionReviewSubmitted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.report-catalog-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ReportDefinitionReviewSubmitted",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ReportScheduleVersionRecordedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ReportScheduleVersionRecordedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "cadence": {
+              "enum": ["Daily", "Weekly", "Monthly"],
+              "type": "string"
+            },
+            "format": {
+              "enum": ["Csv", "Json"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "reportReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "reportVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "status": {
+              "enum": ["Active", "Paused", "Archived"],
+              "type": "string"
+            },
+            "timezone": {
+              "pattern": "^[A-Za-z_+-]+(?:\\/[A-Za-z0-9_+-]+)+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "scheduleReference",
+            "scheduleVersionReference",
+            "reportReference",
+            "reportVersionReference",
+            "status",
+            "cadence",
+            "format",
+            "timezone",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ReportScheduleVersionRecorded v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["reporting.report-scheduler:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ReportScheduleVersionRecorded",
+        "x-bop-owner-module": "@rms/business-intelligence",
+        "x-bop-producer-module": "@rms/business-intelligence",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "TaxConfigDraftCreatedV1": {
         "contentType": "application/json",
         "deprecated": false,

@@ -97,6 +97,7 @@ describe("migration catalog", () => {
       "1700_003_create_pickup_proof",
       "1700_004_create_pickup_handoff",
       "1700_005_create_fulfillment_completion_publication",
+      "1800_001_create_report_definition",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

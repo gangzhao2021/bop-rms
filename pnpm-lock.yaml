@@ -381,6 +381,21 @@ importers:
         specifier: 10.3.1
         version: 10.3.1
 
+  packages/rms/business-intelligence:
+    dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../../bop/audit
+      '@bop/permission':
+        specifier: workspace:*
+        version: link:../../bop/permission
+      '@bop/publishing':
+        specifier: workspace:*
+        version: link:../../bop/publishing
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../../bop/tenant
+
   packages/rms/catalog:
     dependencies:
       '@bop/audit':

@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(44);
+    expect(eventCatalog).toHaveLength(50);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
@@ -124,6 +124,22 @@ describe("Event Catalog source", () => {
       tenantScope: "brand",
       replaySemantics: "idempotent",
     });
+    for (const eventType of [
+      "ReportDefinitionArchived",
+      "ReportDefinitionDraftCreated",
+      "ReportDefinitionDraftReplaced",
+      "ReportDefinitionPublished",
+      "ReportDefinitionReviewSubmitted",
+      "ReportScheduleVersionRecorded",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/business-intelligence",
+        tenantScope: "brand",
+        dataClassification: "indirect_identifier",
+        replaySemantics: "idempotent",
+      });
     for (const eventType of [
       "AvailabilityRuleCreated",
       "AvailabilityRuleLifecycleChanged",
@@ -315,6 +331,12 @@ describe("Event Catalog source", () => {
       "RecipeDraftReplaced:v1",
       "RecipeInvalidated:v1",
       "RecipePublished:v1",
+      "ReportDefinitionArchived:v1",
+      "ReportDefinitionDraftCreated:v1",
+      "ReportDefinitionDraftReplaced:v1",
+      "ReportDefinitionPublished:v1",
+      "ReportDefinitionReviewSubmitted:v1",
+      "ReportScheduleVersionRecorded:v1",
       "TaxConfigDraftCreated:v1",
       "TaxConfigDraftReplaced:v1",
       "TaxConfigPublished:v1",
@@ -717,7 +739,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(53);
+    expect(eventConsumerContracts).toHaveLength(59);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

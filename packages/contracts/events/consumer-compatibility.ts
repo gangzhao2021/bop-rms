@@ -139,6 +139,28 @@ const contract = (
 
 export const eventConsumerContracts = defineEventConsumerContracts([
   ...[
+    "ReportDefinitionArchived",
+    "ReportDefinitionDraftCreated",
+    "ReportDefinitionDraftReplaced",
+    "ReportDefinitionPublished",
+    "ReportDefinitionReviewSubmitted",
+  ].map((eventType) =>
+    contract(
+      "reporting.report-catalog-projection",
+      "@rms/business-intelligence",
+      eventType,
+      "brand",
+      "replace_report_catalog_projection",
+    ),
+  ),
+  contract(
+    "reporting.report-scheduler",
+    "@rms/business-intelligence",
+    "ReportScheduleVersionRecorded",
+    "brand",
+    "enqueue_version_pinned_report_run",
+  ),
+  ...[
     "ProductionBatchPlanned",
     "ProductionBatchStarted",
     "ProductionBatchObservationRecorded",
