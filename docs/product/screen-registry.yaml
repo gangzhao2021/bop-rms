@@ -67,6 +67,8 @@ catalogs:
     - reservation_create_edit_v1
     - reservation_detail_v1
     - reservation_list_v1
+    - waitlist_board_v1
+    - waitlist_entry_v1
     - fulfillment_*_v1
     - inventory_*_v1
     - procurement_*_v1
@@ -10126,7 +10128,7 @@ screens:
       - ordered entries、party size、quoted / current ETA、priority reason、contact state、ready expiry、seating eligibility
     search_filter_sort_export: customer-safe name / ref；status、party size、area、priority、overdue
     query_ref: query.wait_board
-    projection_ref: reservation_*_v1
+    projection_ref: waitlist_board_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: add、update estimate、notify ready、hold / remove with reason、seat through Dining handoff
     command_refs:
@@ -10172,7 +10174,7 @@ screens:
       - identity / contact snapshot、party / preferences、arrival / wait metrics、notifications、revision / timeline
     search_filter_sort_export: —
     query_ref: query.wait_entry
-    projection_ref: reservation_*_v1
+    projection_ref: waitlist_entry_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: edit controlled details、mark Ready、extend once by policy、cancel、seat
     command_refs:
