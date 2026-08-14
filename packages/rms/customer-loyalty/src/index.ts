@@ -15,3 +15,7 @@ export * from "./domain/loyalty-account.js";
 export * from "./contracts/loyalty-account.js";
 export * from "./application/loyalty-account-service.js";
 export * from "./application/ports/loyalty-account-ports.js";
+export * from "./domain/consent-preference.js";
+export * from "./contracts/consent-preference.js";
+export * from "./application/consent-preference-service.js";
+export * from "./application/ports/consent-preference-ports.js";

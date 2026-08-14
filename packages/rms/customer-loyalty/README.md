@@ -28,9 +28,14 @@ Reservations, append-only Ledger facts and source-linked correction reviews. No 
 balance directly; expiry, release, redemption, reversal and adjustment remain distinct immutable
 facts, and insufficient reversals create visible Points Debt.
 
+`customer_consent_preference_v1` exposes Brand-scoped, append-only purpose/channel Consent choices
+using opaque Identity-owned Contact Method references. Contact Preference is a separate versioned
+record and never authorizes Marketing. Withdrawal derives an immediate deny decision, while
+necessary operational communication remains separately classified.
+
 ## Privacy and exclusions
 
 Raw contacts, passwords, authentication identity, sensitive notes, unrestricted object IDs and
 proof are prohibited in logs, URLs and analytics. Fixtures are synthetic. The current package does
-not implement persistence/live Ledger feeds, Consent mutation, communications, Privacy Request workflow,
-persistence, live Outbox/Event Catalog publication, external adapters or Provider integration.
+not implement persistence/live Ledger feeds, communications, Privacy Request workflow, persistence,
+live Outbox/Event Catalog publication, external adapters or Provider integration.
