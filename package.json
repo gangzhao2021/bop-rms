@@ -18,6 +18,7 @@
     "break-glass-runbook:check": "vitest run tooling/security/break-glass-runbook.test.mjs",
     "browser-session:acceptance": "pnpm --filter @bop/identity browser-session:acceptance",
     "catalog-product:acceptance": "pnpm --filter @rms/catalog test && vitest run --config packages/database/vitest.catalog-product-aggregate.config.ts",
+    "cloud-operations-evidence:check": "vitest run tooling/security/cloud-operations-evidence-baseline.test.mjs && pnpm alert-routing:acceptance && pnpm core-telemetry:acceptance",
     "catalog-category-menu:acceptance": "pnpm --filter @rms/catalog test && vitest run --config packages/database/vitest.category-menu-structure.config.ts",
     "catalog-option-set:acceptance": "pnpm --filter @rms/catalog test && vitest run --config packages/database/vitest.option-set-binding.config.ts",
     "catalog-availability:acceptance": "pnpm --filter @rms/catalog test && vitest run --config packages/database/vitest.availability-rule.config.ts",

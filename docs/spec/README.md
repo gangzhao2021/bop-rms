@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2064 — Release Deployment Pipeline on codex/wp-2064`
+- Current discussion node: `WP-2065 — Cloud Operations Evidence on codex/wp-2065`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2065 — CloudWatch / X-Ray, Alert Routing, Budget / Cost Anomaly, Capacity and Acknowledgement
+Drill` is locally implemented and verified on top of WP-2064 head `9777af2`. It adds a fail-closed
+  cloud-operations evidence contract without configuring a Provider, contact, budget or capacity.
+  Root Vitest passed `307/307`; all `31/31` package lint/typecheck/test/build tasks and the remaining
+  verification gates passed. Exact scope is in `docs/spec/work-packages/WP-2065.md`; GitHub and AWS
+  execution are deferred.
 
 - `WP-2064 — GitHub OIDC, ECR Immutable Digest, CodeDeploy Blue / Green and Migration Task Pipeline`
   is locally implemented and verified on top of WP-2063 head `e1929a3`. It adds a fail-closed local
