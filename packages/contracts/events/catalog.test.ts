@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(50);
+    expect(eventCatalog).toHaveLength(54);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
@@ -130,6 +130,10 @@ describe("Event Catalog source", () => {
       "ReportDefinitionDraftReplaced",
       "ReportDefinitionPublished",
       "ReportDefinitionReviewSubmitted",
+      "ReportArtifactRevisionRecorded",
+      "ReportArtifactRevoked",
+      "ReportRunQueued",
+      "ReportRunStateRecorded",
       "ReportScheduleVersionRecorded",
     ])
       expect(byType.get(eventType)).toMatchObject({
@@ -331,11 +335,15 @@ describe("Event Catalog source", () => {
       "RecipeDraftReplaced:v1",
       "RecipeInvalidated:v1",
       "RecipePublished:v1",
+      "ReportArtifactRevisionRecorded:v1",
+      "ReportArtifactRevoked:v1",
       "ReportDefinitionArchived:v1",
       "ReportDefinitionDraftCreated:v1",
       "ReportDefinitionDraftReplaced:v1",
       "ReportDefinitionPublished:v1",
       "ReportDefinitionReviewSubmitted:v1",
+      "ReportRunQueued:v1",
+      "ReportRunStateRecorded:v1",
       "ReportScheduleVersionRecorded:v1",
       "TaxConfigDraftCreated:v1",
       "TaxConfigDraftReplaced:v1",
@@ -739,7 +747,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(59);
+    expect(eventConsumerContracts).toHaveLength(63);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

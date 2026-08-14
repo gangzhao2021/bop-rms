@@ -5,11 +5,13 @@
 - Module Name: `business-intelligence`
 - Package Name: `@rms/business-intelligence`
 - Layer / Domain: `RMS / Business Intelligence`
-- Phase / owning Work Package: `Later / WP-2161`
+- Phase / owning Work Package: `Later / WP-2161–2162`
 - Owner role: `Business Intelligence Engineering Owner`
 - Status: `active, runtime-inactive adapters`
-- Responsibility: versioned Report Definitions, certification, publication and Schedule definitions.
-- Explicit non-goals: source facts, Metric definitions, Report Runs/artifacts and delivery attempts.
+- Responsibility: versioned Report Definitions, certification, Schedule definitions, immutable Report
+  Runs and controlled artifact metadata.
+- Explicit non-goals: source facts, Metric definitions, query execution, artifact bytes/URLs and
+  delivery attempts.
 
 ## Public contract
 
@@ -17,6 +19,10 @@
 schedule operations. Every mutation carries Tenant/Brand/optional Store, Actor, purpose,
 permission, expected version and idempotency. Query-view contracts are permission-trimmed BFF
 inputs; private persistence shapes are not public.
+
+`createReportRunService` queues or reruns an exact published version, appends state facts, records
+opaque artifact revisions/revocations and returns download authorization metadata without a storage
+URL.
 
 Private paths, Domain entities, ORM models, Provider payloads, and database fields are not public contracts.
 
@@ -30,11 +36,11 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 
 ## Data ownership and lifecycle
 
-- Owned objects: Report Definition Aggregate, immutable Report Version, append-only Operation Record
-  and immutable Schedule Version.
+- Owned objects: Report Definition Aggregate, immutable Report/ Schedule Versions, Report Run,
+  append-only Run State, artifact revision/revocation and operation/download audit records.
 - Write owner: `@rms/business-intelligence`; reads only through owner repository or public Query.
 - Scope: Tenant plus Brand and optional Store; schedule scope cannot expand the Report scope.
-- Money: no money field is accepted in WP-2161.
+- Money: no money field is accepted.
 - Time: UTC instants plus explicit IANA timezone/effective period; Business Date semantics are pinned.
 - Concurrency/idempotency/audit: exact expected aggregate version, intent digest and atomic Audit.
 - Classification: internal configuration and indirect identifiers; no PII, Payment, health or secret.
@@ -42,10 +48,10 @@ Private paths, Domain entities, ORM models, Provider payloads, and database fiel
 
 ## Persistence and eventing
 
-WP-2161 creates the `rms_reporting` schema and Report Definition tables under namespace 1800 with
-forced Brand RLS. Repository ports require aggregate/version/operation/Audit composition in one
-transaction. Published versions and schedules are immutable; actual Report Run scheduling and
-artifact delivery begin in WP-2162 and later Worker/Notification packages.
+WP-2161 creates the `rms_reporting` schema and Definition tables; WP-2162 adds immutable Run, state,
+artifact metadata and access-audit tables under namespace 1800 with forced Brand/Store RLS.
+Repository ports require operation/Event/Audit composition in one transaction. Output/Notification
+continues to own artifact bytes and delivery.
 
 ## Security and privacy
 
@@ -68,12 +74,13 @@ pnpm --filter @rms/business-intelligence typecheck
 pnpm verify
 ```
 
-Tests cover strict contracts, lifecycle/concurrency/idempotency, four-eyes certification, schedule
-scope/time/format and the isolated RLS/append-only persistence contract.
+Tests cover strict contracts, lifecycle/concurrency/idempotency, four-eyes certification, exact
+rerun pinning, terminal finality, artifact expiry/revocation and isolated RLS/append-only persistence.
 
 ## Decisions and follow-up
 
 - Authority: Handoff Sections 38, 48, 50 and 88.15.
-- External Evidence: real certified Metric/Dataset, membership and schedule execution are unavailable.
-- Revisit trigger: WP-2162 Report Run/artifact implementation.
-- Next allowed Work Package: WP-2162.
+- External Evidence: real certified Metric/Dataset, membership, execution engine, Output asset,
+  recipient and delivery are unavailable.
+- Revisit trigger: WP-2163 Metric Definition implementation.
+- Next allowed Work Package: WP-2163.

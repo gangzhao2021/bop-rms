@@ -46,11 +46,15 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `RecipeDraftReplaced:v1` — owner `@rms/recipe`; stable; brand; none
 - `RecipeInvalidated:v1` — owner `@rms/recipe`; stable; brand; none
 - `RecipePublished:v1` — owner `@rms/recipe`; stable; brand; none
+- `ReportArtifactRevisionRecorded:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `ReportArtifactRevoked:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportDefinitionArchived:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportDefinitionDraftCreated:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportDefinitionDraftReplaced:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportDefinitionPublished:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportDefinitionReviewSubmitted:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `ReportRunQueued:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `ReportRunStateRecorded:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportScheduleVersionRecorded:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `TaxConfigDraftCreated:v1` — owner `@rms/pricing`; stable; store; none
 - `TaxConfigDraftReplaced:v1` — owner `@rms/pricing`; stable; store; none

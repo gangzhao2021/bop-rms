@@ -161,6 +161,20 @@ export const eventConsumerContracts = defineEventConsumerContracts([
     "enqueue_version_pinned_report_run",
   ),
   ...[
+    "ReportRunQueued",
+    "ReportRunStateRecorded",
+    "ReportArtifactRevisionRecorded",
+    "ReportArtifactRevoked",
+  ].map((eventType) =>
+    contract(
+      "reporting.report-run-history-projection",
+      "@rms/business-intelligence",
+      eventType,
+      "brand",
+      "replace_report_run_history_projection",
+    ),
+  ),
+  ...[
     "ProductionBatchPlanned",
     "ProductionBatchStarted",
     "ProductionBatchObservationRecorded",

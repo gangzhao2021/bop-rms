@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2161 — Report Catalog / Builder / certification / scheduling on codex/wp-2161`
+- Current discussion node: `WP-2162 — Report Run / artifact / expiry / rerun management on codex/wp-2162`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2162 — Report Run / artifact / expiry / rerun management` is locally implemented and
+  verified on top of WP-2161 commit `765d9ec`. It adds immutable, version-pinned Run snapshots,
+  append-only state and artifact-revision evidence, exact rerun semantics, expiry / revocation /
+  download-authorization controls, four strict Events, forced Brand/Store RLS and the full-state
+  `RPT-RUN-HISTORY` route. Business Intelligence passed `8/8`, Contracts passed `24/24`, Merchant
+  Web passed `229/229`, all `38/38` package tasks and the complete retained isolated PostgreSQL
+  matrix passed. Output bytes, storage URLs, source facts, recipients and external evidence remain
+  unclaimed; GitHub publication is deferred.
 
 - `WP-2161 — Report Catalog / Builder / certification / scheduling` is locally implemented and
   verified on top of WP-2160 commit `48bb1c6`. It adds the canonical
@@ -1471,6 +1480,16 @@ WP-0024 implementation commit `6371aa8cc96da021fc2a337a768039abce46548b`、PR #2
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
+
+WP-2162 local implementation verification is complete from exact predecessor
+`WP-2161@765d9ec` on `codex/wp-2162`. The bounded implementation adds version-pinned Report Run
+snapshots, append-only state / artifact / revocation / operation evidence, forced Brand/Store RLS,
+strict generated Event Catalog artifacts and the Section 88 `RPT-RUN-HISTORY` route. `pnpm verify`
+passed with all `38/38` package format/lint/typecheck/test/build tasks and the retained isolated
+PostgreSQL matrix. Real report execution, source facts or checkpoints, Output bytes, storage URLs,
+recipients, delivery, production retention / Legal Hold, Provider, external evidence, GitHub and
+deployment remain gated and unclaimed. This paragraph supersedes the historical active-stage
+snapshots below.
 
 WP-2161 local implementation verification is complete from exact predecessor
 `WP-2160@48bb1c6` on `codex/wp-2161`. The bounded implementation adds the canonical Reporting Domain,

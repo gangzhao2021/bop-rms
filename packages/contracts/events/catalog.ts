@@ -332,6 +332,63 @@ const reportSchedulePayload = z.strictObject({
   occurredAt: z.iso.datetime({ offset: false }),
 });
 
+const reportRunQueuedPayload = z.strictObject({
+  runReference: z.string().regex(canonicalUuidV7),
+  reportReference: z.string().regex(canonicalUuidV7),
+  reportVersionReference: z.string().regex(canonicalUuidV7),
+  parameterSnapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  triggerKind: z.enum(["Manual", "Scheduled"]),
+  queuedAt: z.iso.datetime({ offset: false }),
+});
+
+const reportRunStatePayload = z.strictObject({
+  runReference: z.string().regex(canonicalUuidV7),
+  stateReference: z.string().regex(canonicalUuidV7),
+  sequence: z.string().regex(/^[1-9][0-9]*$/u),
+  status: z.union([
+    z.literal("Queued"),
+    z.literal("Running"),
+    z.literal("Completed"),
+    z.literal("CompletedWithWarning"),
+    z.literal("Failed"),
+    z.literal("Cancelled"),
+  ]),
+  dataAsOf: z.iso.datetime({ offset: false }).nullable(),
+  generatedAt: z.iso.datetime({ offset: false }).nullable(),
+  rowCount: z
+    .string()
+    .regex(/^(?:0|[1-9][0-9]*)$/u)
+    .nullable(),
+  summaryDigest: z
+    .string()
+    .regex(/^sha256:[0-9a-f]{64}$/u)
+    .nullable(),
+  errorCode: z
+    .string()
+    .regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u)
+    .nullable(),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const reportArtifactRevisionPayload = z.strictObject({
+  artifactReference: z.string().regex(canonicalUuidV7),
+  revisionReference: z.string().regex(canonicalUuidV7),
+  runReference: z.string().regex(canonicalUuidV7),
+  revisionNumber: z.string().regex(/^[1-9][0-9]*$/u),
+  outputAssetReference: z.string().regex(canonicalUuidV7),
+  format: z.enum(["Csv", "Spreadsheet", "Pdf"]),
+  classification: z.enum(["Public", "Internal", "Confidential", "Restricted"]),
+  expiresAt: z.iso.datetime({ offset: false }),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const reportArtifactRevokedPayload = z.strictObject({
+  artifactReference: z.string().regex(canonicalUuidV7),
+  revisionReference: z.string().regex(canonicalUuidV7),
+  reasonCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  revokedAt: z.iso.datetime({ offset: false }),
+});
+
 const orderCreatedPayload = z.strictObject({
   orderReference: z.uuid(),
   orderBatchReference: z.uuid(),
@@ -451,6 +508,27 @@ export const eventCatalog = defineEventCatalog([
     replacement: null,
     payloadSchema: reportSchedulePayload,
   },
+  ...[
+    ["ReportRunQueued", reportRunQueuedPayload],
+    ["ReportRunStateRecorded", reportRunStatePayload],
+    ["ReportArtifactRevisionRecorded", reportArtifactRevisionPayload],
+    ["ReportArtifactRevoked", reportArtifactRevokedPayload],
+  ].map(([eventType, payloadSchema]) => ({
+    eventType: eventType as string,
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence" as const,
+    producerModule: "@rms/business-intelligence" as const,
+    stability: "stable" as const,
+    consumers: ["reporting.report-run-history-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: payloadSchema as z.ZodObject,
+  })),
   ...[
     "ProductionBatchPlanned",
     "ProductionBatchStarted",
