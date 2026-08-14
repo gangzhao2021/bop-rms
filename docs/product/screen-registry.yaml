@@ -34,6 +34,7 @@ catalogs:
     - ordering.operate
     - payment.operate
     - kitchen.operate
+    - kitchen.production.manage
     - fulfillment.operate
     - dining.operate
     - inventory.manage
@@ -57,6 +58,7 @@ catalogs:
     - merchant_order_amendment_v1
     - payment_*_v1
     - kitchen_*_v1
+    - kitchen_production_batch_v1
     - dining_*_v1
     - reservation_*_v1
     - fulfillment_*_v1
@@ -6551,13 +6553,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Kitchen Lead / Inventory authorized roles
-    permission_ref: kitchen.operate
+    permission_ref: kitchen.production.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - batch、Recipe / version、planned / actual yield、station、lot / ingredient refs、state、variance、quality hold
     search_filter_sort_export: batch / Recipe；state、station、date、variance / hold
     query_ref: query.kit_production_batch
-    projection_ref: kitchen_*_v1
+    projection_ref: kitchen_production_batch_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create plan、start、record controlled yield / consumption、complete、quarantine / exception
     command_refs:

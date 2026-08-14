@@ -14,6 +14,7 @@ import { PriceBookEditorPage, PriceBookListPage } from "./PriceBookPages.js";
 import { TaxConfigPage } from "./TaxConfigPage.js";
 import { PromotionEditorPage, PromotionListPage } from "./PromotionPages.js";
 import { RecipeEditorPage, RecipeListPage } from "./RecipePages.js";
+import { ProductionBatchPage } from "./ProductionBatchPage.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
 import {
   createMerchantWorkspaceClient,
@@ -112,6 +113,7 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/operations/orders/:id" element={<OrderDetailPage />} />
       <Route path="/operations/orders/:id/amend" element={<OrderAmendmentPage />} />
       <Route path="/operations/kitchen" element={<KitchenBoardPage />} />
+      <Route path="/operations/production-batches" element={<ProductionBatchPage />} />
       <Route path="/operations/kitchen/work-items/:id" element={<KitchenWorkItemPage />} />
       <Route path="/operations/pickup" element={<PickupQueuePage />} />
       <Route path="/app/integrations/kds-profiles" element={<KdsProfilePage />} />

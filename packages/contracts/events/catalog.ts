@@ -341,6 +341,21 @@ const orderAmendedPayload = z.strictObject({
   occurredAt: z.iso.datetime({ offset: false }),
 });
 
+const productionBatchPayload = z.strictObject({
+  productionBatchReference: z.string().regex(canonicalUuidV7),
+  recipeReference: z.string().regex(canonicalUuidV7),
+  recipeVersionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  status: z.enum(["Planned", "InProgress", "Completed", "Quarantined"]),
+  plannedYieldMicrounits: z.string().regex(/^[1-9][0-9]*$/u),
+  actualYieldMicrounits: z
+    .string()
+    .regex(/^(?:0|[1-9][0-9]*)$/u)
+    .nullable(),
+  qualityHold: z.boolean(),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 const paymentSucceededPayload = z.strictObject({
   paymentTransactionReference: z.uuid(),
   paymentIntentReference: z.uuid(),
@@ -376,6 +391,31 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  ...[
+    "ProductionBatchPlanned",
+    "ProductionBatchStarted",
+    "ProductionBatchObservationRecorded",
+    "ProductionBatchCompleted",
+    "ProductionBatchQuarantined",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen" as const,
+    producerModule: "@rms/kitchen" as const,
+    stability: "stable" as const,
+    consumers:
+      eventType === "ProductionBatchObservationRecorded" || eventType === "ProductionBatchCompleted"
+        ? ["inventory.batch-consumption:v1", "kitchen.batch-projection:v1"]
+        : ["kitchen.batch-projection:v1"],
+    tenantScope: "store" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: productionBatchPayload,
+  })),
   ...[
     "RecipeArchived",
     "RecipeDraftCreated",

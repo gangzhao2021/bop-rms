@@ -138,6 +138,30 @@ const contract = (
 });
 
 export const eventConsumerContracts = defineEventConsumerContracts([
+  ...[
+    "ProductionBatchPlanned",
+    "ProductionBatchStarted",
+    "ProductionBatchObservationRecorded",
+    "ProductionBatchCompleted",
+    "ProductionBatchQuarantined",
+  ].map((eventType) =>
+    contract(
+      "kitchen.batch-projection",
+      "@rms/kitchen",
+      eventType,
+      "store",
+      "replace_production_batch_projection",
+    ),
+  ),
+  ...["ProductionBatchObservationRecorded", "ProductionBatchCompleted"].map((eventType) =>
+    contract(
+      "inventory.batch-consumption",
+      "@rms/inventory",
+      eventType,
+      "store",
+      "record_production_consumption_fact",
+    ),
+  ),
   contract(
     "inventory.order-amendment",
     "@rms/inventory",

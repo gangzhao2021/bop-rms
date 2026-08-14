@@ -31,6 +31,11 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `PriceBookDraftCreated:v1` — owner `@rms/pricing`; stable; brand; none
 - `PriceBookDraftReplaced:v1` — owner `@rms/pricing`; stable; brand; none
 - `PriceBookVersionPublished:v1` — owner `@rms/pricing`; stable; brand; none
+- `ProductionBatchCompleted:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
+- `ProductionBatchObservationRecorded:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
+- `ProductionBatchPlanned:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
+- `ProductionBatchQuarantined:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
+- `ProductionBatchStarted:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `PromotionArchived:v1` — owner `@rms/pricing`; stable; brand; none
 - `PromotionDraftCreated:v1` — owner `@rms/pricing`; stable; brand; none
 - `PromotionDraftReplaced:v1` — owner `@rms/pricing`; stable; brand; none

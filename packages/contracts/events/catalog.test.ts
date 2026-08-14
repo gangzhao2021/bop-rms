@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(39);
+    expect(eventCatalog).toHaveLength(44);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
@@ -221,6 +221,22 @@ describe("Event Catalog source", () => {
       dataClassification: "indirect_identifier",
       replaySemantics: "idempotent",
     });
+    for (const eventType of [
+      "ProductionBatchPlanned",
+      "ProductionBatchStarted",
+      "ProductionBatchObservationRecorded",
+      "ProductionBatchCompleted",
+      "ProductionBatchQuarantined",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/kitchen",
+        producerModule: "@rms/kitchen",
+        tenantScope: "store",
+        dataClassification: "indirect_identifier",
+        replaySemantics: "idempotent",
+      });
     expect(byType.get("OrderCreated")).toMatchObject({
       eventType: "OrderCreated",
       schemaVersion: 1,
@@ -284,6 +300,11 @@ describe("Event Catalog source", () => {
       "PriceBookDraftCreated:v1",
       "PriceBookDraftReplaced:v1",
       "PriceBookVersionPublished:v1",
+      "ProductionBatchCompleted:v1",
+      "ProductionBatchObservationRecorded:v1",
+      "ProductionBatchPlanned:v1",
+      "ProductionBatchQuarantined:v1",
+      "ProductionBatchStarted:v1",
       "PromotionArchived:v1",
       "PromotionDraftCreated:v1",
       "PromotionDraftReplaced:v1",
@@ -696,7 +717,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(46);
+    expect(eventConsumerContracts).toHaveLength(53);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

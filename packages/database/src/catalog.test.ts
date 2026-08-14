@@ -91,6 +91,7 @@ describe("migration catalog", () => {
       "1500_004_create_kitchen_ready_publication",
       "1500_005_create_kitchen_allergen_safety",
       "1500_006_create_kds_continuity",
+      "1500_007_create_production_batch",
       "1700_001_create_pickup_fulfillment",
       "1700_002_create_fulfillment_readiness",
       "1700_003_create_pickup_proof",

@@ -1651,6 +1651,391 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "ProductionBatchCompletedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductionBatchCompletedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "actualYieldMicrounits": {
+              "anyOf": [
+                {
+                  "pattern": "^(?:0|[1-9][0-9]*)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "plannedYieldMicrounits": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "productionBatchReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "qualityHold": {
+              "type": "boolean"
+            },
+            "recipeReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "recipeVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "status": {
+              "enum": ["Planned", "InProgress", "Completed", "Quarantined"],
+              "type": "string"
+            }
+          },
+          "required": [
+            "productionBatchReference",
+            "recipeReference",
+            "recipeVersionReference",
+            "aggregateVersion",
+            "status",
+            "plannedYieldMicrounits",
+            "actualYieldMicrounits",
+            "qualityHold",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ProductionBatchCompleted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["inventory.batch-consumption:v1", "kitchen.batch-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductionBatchCompleted",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "ProductionBatchObservationRecordedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductionBatchObservationRecordedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "actualYieldMicrounits": {
+              "anyOf": [
+                {
+                  "pattern": "^(?:0|[1-9][0-9]*)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "plannedYieldMicrounits": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "productionBatchReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "qualityHold": {
+              "type": "boolean"
+            },
+            "recipeReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "recipeVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "status": {
+              "enum": ["Planned", "InProgress", "Completed", "Quarantined"],
+              "type": "string"
+            }
+          },
+          "required": [
+            "productionBatchReference",
+            "recipeReference",
+            "recipeVersionReference",
+            "aggregateVersion",
+            "status",
+            "plannedYieldMicrounits",
+            "actualYieldMicrounits",
+            "qualityHold",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ProductionBatchObservationRecorded v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["inventory.batch-consumption:v1", "kitchen.batch-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductionBatchObservationRecorded",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "ProductionBatchPlannedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductionBatchPlannedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "actualYieldMicrounits": {
+              "anyOf": [
+                {
+                  "pattern": "^(?:0|[1-9][0-9]*)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "plannedYieldMicrounits": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "productionBatchReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "qualityHold": {
+              "type": "boolean"
+            },
+            "recipeReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "recipeVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "status": {
+              "enum": ["Planned", "InProgress", "Completed", "Quarantined"],
+              "type": "string"
+            }
+          },
+          "required": [
+            "productionBatchReference",
+            "recipeReference",
+            "recipeVersionReference",
+            "aggregateVersion",
+            "status",
+            "plannedYieldMicrounits",
+            "actualYieldMicrounits",
+            "qualityHold",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ProductionBatchPlanned v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["kitchen.batch-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductionBatchPlanned",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "ProductionBatchQuarantinedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductionBatchQuarantinedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "actualYieldMicrounits": {
+              "anyOf": [
+                {
+                  "pattern": "^(?:0|[1-9][0-9]*)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "plannedYieldMicrounits": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "productionBatchReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "qualityHold": {
+              "type": "boolean"
+            },
+            "recipeReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "recipeVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "status": {
+              "enum": ["Planned", "InProgress", "Completed", "Quarantined"],
+              "type": "string"
+            }
+          },
+          "required": [
+            "productionBatchReference",
+            "recipeReference",
+            "recipeVersionReference",
+            "aggregateVersion",
+            "status",
+            "plannedYieldMicrounits",
+            "actualYieldMicrounits",
+            "qualityHold",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ProductionBatchQuarantined v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["kitchen.batch-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductionBatchQuarantined",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "ProductionBatchStartedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductionBatchStartedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "actualYieldMicrounits": {
+              "anyOf": [
+                {
+                  "pattern": "^(?:0|[1-9][0-9]*)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "plannedYieldMicrounits": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "productionBatchReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "qualityHold": {
+              "type": "boolean"
+            },
+            "recipeReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "recipeVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "status": {
+              "enum": ["Planned", "InProgress", "Completed", "Quarantined"],
+              "type": "string"
+            }
+          },
+          "required": [
+            "productionBatchReference",
+            "recipeReference",
+            "recipeVersionReference",
+            "aggregateVersion",
+            "status",
+            "plannedYieldMicrounits",
+            "actualYieldMicrounits",
+            "qualityHold",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "ProductionBatchStarted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["kitchen.batch-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductionBatchStarted",
+        "x-bop-owner-module": "@rms/kitchen",
+        "x-bop-producer-module": "@rms/kitchen",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
       "PromotionArchivedV1": {
         "contentType": "application/json",
         "deprecated": false,
