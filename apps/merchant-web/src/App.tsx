@@ -24,6 +24,13 @@ import {
 import { WaitlistBoardPage } from "./WaitlistPages.js";
 import { CapacityPolicyPage } from "./CapacityPolicyPage.js";
 import { StaffOrderEntryPage } from "./StaffOrderEntryPage.js";
+import {
+  InventoryItemCreatePage,
+  InventoryItemDetailPage,
+  InventoryItemEditPage,
+  InventoryItemListPage,
+  StockOverviewPage,
+} from "./InventoryPages.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
 import {
   createMerchantWorkspaceClient,
@@ -120,6 +127,11 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/commerce/recipes/:id/edit" element={<RecipeEditorPage />} />
       <Route path="/operations/orders" element={<OrderQueuePage />} />
       <Route path="/operations/order-entry" element={<StaffOrderEntryPage />} />
+      <Route path="/operations/inventory" element={<StockOverviewPage />} />
+      <Route path="/app/supply/items" element={<InventoryItemListPage />} />
+      <Route path="/app/supply/items/new" element={<InventoryItemCreatePage />} />
+      <Route path="/app/supply/items/:id/edit" element={<InventoryItemEditPage />} />
+      <Route path="/app/supply/items/:id" element={<InventoryItemDetailPage />} />
       <Route path="/operations/orders/:id" element={<OrderDetailPage />} />
       <Route path="/operations/orders/:id/amend" element={<OrderAmendmentPage />} />
       <Route path="/operations/kitchen" element={<KitchenBoardPage />} />

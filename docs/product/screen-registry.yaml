@@ -74,6 +74,7 @@ catalogs:
     - waitlist_entry_v1
     - fulfillment_*_v1
     - inventory_*_v1
+    - inventory_stock_overview_v1
     - procurement_*_v1
     - customer_loyalty_*_v1
     - reporting_*_v1
@@ -6182,7 +6183,7 @@ screens:
       - one explicit Stock Scope、on-hand / reserved / available、reorder / expiry / negative / count alerts、freshness、value only if authorized
     search_filter_sort_export: item / code / barcode / supplier item code；category、location、availability、below reorder、expiry、negative、tracking
     query_ref: query.inv_stock_overview
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_stock_overview_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: open item / movements、start count、adjust / waste / transfer through wizard、set policy
     command_refs:
