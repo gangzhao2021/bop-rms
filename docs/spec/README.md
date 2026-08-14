@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2155 — Delivery E2E, privacy, late / duplicate / Provider failure acceptance on codex/wp-2155`
+- Current discussion node: `WP-2160 — Operational Dashboard scope / freshness / drill-down on codex/wp-2160`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2160 — Operational Dashboard scope / freshness / drill-down` is locally implemented and verified on
+  top of WP-2155 commit `e990926`. It connects the accepted operational Query to the full-state
+  `RPT-OPS-DASHBOARD` route with exact scope, Metric Version, freshness/completeness and authorized
+  source drill-down contracts. Merchant Web passed `204/204`, root tests passed `319/319`, all
+  `37/37` package tasks and the complete retained isolated PostgreSQL matrix passed. GitHub
+  publication is deferred.
 
 - `WP-2155 — Delivery E2E, privacy, late / duplicate / Provider failure acceptance` is locally
   implemented and verified on top of WP-2154 head `678a9ad`. It adds a synthetic cross-contract acceptance
