@@ -130,6 +130,7 @@
     "retry-dead-letter:acceptance": "vitest run --config packages/database/vitest.retry-dead-letter.config.ts",
     "rate-limit-abuse-baseline:check": "vitest run tooling/security/rate-limit-abuse-baseline.test.mjs",
     "repository-guidance:check": "node tooling/repository-guidance/validate.mjs",
+    "release-deployment-pipeline:check": "vitest run tooling/security/release-deployment-pipeline-baseline.test.mjs && pnpm release-evidence-gate:check && pnpm --filter @bop-rms/api exec vitest run src/server.test.ts src/health-readiness.test.ts && pnpm --filter @bop-rms/worker exec vitest run src/lifecycle.test.ts",
     "release-evidence-gate:check": "vitest run tooling/security/release-evidence-gate.test.mjs",
     "realtime:acceptance": "pnpm --filter @bop-rms/api realtime:acceptance",
     "request-correlation:acceptance": "pnpm --filter @bop-rms/api request-correlation:acceptance && vitest run --config packages/database/vitest.request-command-event-correlation.config.ts",
