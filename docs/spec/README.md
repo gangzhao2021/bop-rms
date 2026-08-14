@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2104 — Promotion Management on codex/wp-2104`
+- Current discussion node: `WP-2105 — Recipe Management on codex/wp-2105`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2105 — Recipe List / Editor, Yield / Cost / Allergen Graph, Dual Review and Invalidation` is
+  locally implemented and verified on top of WP-2104 head `8af32de`. It adds Brand-scoped,
+  version-pinned Recipe administration, exact bounded quantity / yield / cost derivation, fail-closed
+  sub-recipe graph and Allergen evidence validation, distinct cost and food-safety review, five
+  registered Events, a rebuildable forced-RLS projection and the `RECIPE-LIST` / `RECIPE-EDITOR`
+  routes. Root Vitest passed `319/319`; all `32/32` package tasks and the isolated Recipe PostgreSQL
+  acceptance passed. Exact scope is in `docs/spec/work-packages/WP-2105.md`; real supplier,
+  professional-review, Inventory and cost evidence remains unclaimed, and GitHub publication is
+  deferred.
 
 - `WP-2104 — Promotion List / Editor, Stacking / Budget / Basket Simulation and Approval` is
   locally implemented and verified on top of WP-2103 head `d1b3517`. It adds Brand-scoped,

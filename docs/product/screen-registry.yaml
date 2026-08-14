@@ -29,6 +29,7 @@ catalogs:
     - catalog.manage
     - pricing.tax-config.manage
     - pricing.promotion.manage
+    - recipe.manage
     - ordering.operate
     - payment.operate
     - kitchen.operate
@@ -49,6 +50,7 @@ catalogs:
     - pricing_*_v1
     - pricing_tax_config_admin_v1
     - pricing_promotion_admin_v1
+    - recipe_admin_v1
     - recipe_*_v1
     - merchant_order_*_v1
     - payment_*_v1
@@ -8848,13 +8850,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Recipe Editor + Food Safety Approver
-    permission_ref: catalog.manage
+    permission_ref: recipe.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - identity、yield、Ingredient usage / quantities / loss、preparation version、substitution policy、allergen union / evidence、cost derivation、usage / history
     search_filter_sort_export: Inventory Item picker；Ingredient / allergen / unresolved source
     query_ref: query.recipe_editor
-    projection_ref: recipe_*_v1
+    projection_ref: recipe_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: save draft、recalculate yield / cost / allergens、validate、submit dual review、publish / invalidate
     command_refs:
@@ -8894,13 +8896,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Recipe Manager / Food Safety reviewer
-    permission_ref: catalog.manage
+    permission_ref: recipe.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - name、code、status、yield / unit、cost summary、allergen verification、Product / SKU usage、effective version
     search_filter_sort_export: name / code / Ingredient；status、unverified allergen、missing mapping、cost changed
     query_ref: query.recipe_list
-    projection_ref: recipe_*_v1
+    projection_ref: recipe_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create、duplicate、edit、review、publish、archive
     command_refs:

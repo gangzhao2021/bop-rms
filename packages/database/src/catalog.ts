@@ -23,6 +23,7 @@ const expectedNamespaces = [
   ["1106", "1106-rms-catalog-allergen-provenance"],
   ["1107", "1107-rms-catalog-bundle"],
   ["1200", "1200-rms-pricing"],
+  ["1250", "1250-rms-recipe"],
   ["1300", "1300-rms-ordering"],
   ["1400", "1400-rms-payment"],
   ["1500", "1500-rms-kitchen"],
@@ -59,6 +60,7 @@ const businessOwners = new Map([
   ["bop_operating_entity", "@bop/operating-entity"],
   ["rms_catalog", "@rms/catalog"],
   ["rms_pricing", "@rms/pricing"],
+  ["rms_recipe", "@rms/recipe"],
   ["rms_ordering", "@rms/ordering"],
   ["rms_payment", "@rms/payment"],
   ["rms_kitchen", "@rms/kitchen"],
@@ -321,6 +323,7 @@ function validateSql(
           "rms_fulfillment",
           "rms_kitchen",
           "rms_pricing",
+          "rms_recipe",
           "rms_ordering",
           "rms_payment",
         ].includes(metadata.schema) && acceptedForeignReferences.has(`${match[1]}.${match[2]}`)

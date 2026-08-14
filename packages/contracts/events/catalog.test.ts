@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(33);
+    expect(eventCatalog).toHaveLength(38);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
@@ -183,6 +183,21 @@ describe("Event Catalog source", () => {
         dataClassification: "none",
         replaySemantics: "idempotent",
       });
+    for (const eventType of [
+      "RecipeArchived",
+      "RecipeDraftCreated",
+      "RecipeDraftReplaced",
+      "RecipeInvalidated",
+      "RecipePublished",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/recipe",
+        tenantScope: "brand",
+        dataClassification: "none",
+        replaySemantics: "idempotent",
+      });
     expect(byType.get("OrderConfirmed")).toMatchObject({
       eventType: "OrderConfirmed",
       schemaVersion: 1,
@@ -265,6 +280,11 @@ describe("Event Catalog source", () => {
       "PromotionDraftReplaced:v1",
       "PromotionPaused:v1",
       "PromotionPublished:v1",
+      "RecipeArchived:v1",
+      "RecipeDraftCreated:v1",
+      "RecipeDraftReplaced:v1",
+      "RecipeInvalidated:v1",
+      "RecipePublished:v1",
       "TaxConfigDraftCreated:v1",
       "TaxConfigDraftReplaced:v1",
       "TaxConfigPublished:v1",
@@ -667,7 +687,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(37);
+    expect(eventConsumerContracts).toHaveLength(42);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

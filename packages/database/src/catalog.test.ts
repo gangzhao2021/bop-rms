@@ -70,6 +70,7 @@ describe("migration catalog", () => {
       "1200_004_create_price_book_admin_projection",
       "1200_005_create_tax_config_admin_projection",
       "1200_006_create_promotion_management",
+      "1250_001_create_recipe_management",
       "1300_001_create_cart_aggregate",
       "1300_002_alter_cart_item_commands",
       "1300_003_alter_cart_selection_evidence",
@@ -181,6 +182,30 @@ describe("migration catalog", () => {
       expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
     expect(migration?.sql).toContain("usage_minor <= budget_minor");
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(7);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2105 Recipe management migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1250_001_create_recipe_management",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/recipe", schema: "rms_recipe" });
+    for (const table of [
+      "recipe",
+      "recipe_version",
+      "recipe_ingredient_requirement",
+      "recipe_allergen_evidence",
+      "recipe_preparation_step",
+      "recipe_scope_binding",
+      "recipe_review_record",
+      "recipe_operation_record",
+      "recipe_admin_projection_generation",
+      "recipe_admin_projection",
+      "recipe_admin_ingredient_projection",
+      "recipe_admin_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_recipe.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(12);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

@@ -139,6 +139,21 @@ const contract = (
 
 export const eventConsumerContracts = defineEventConsumerContracts([
   ...[
+    "RecipeArchived",
+    "RecipeDraftCreated",
+    "RecipeDraftReplaced",
+    "RecipeInvalidated",
+    "RecipePublished",
+  ].map((eventType) =>
+    contract(
+      "recipe.admin-projection",
+      "@rms/recipe",
+      eventType,
+      "brand",
+      "replace_recipe_admin_projection",
+    ),
+  ),
+  ...[
     "PromotionArchived",
     "PromotionDraftCreated",
     "PromotionDraftReplaced",
