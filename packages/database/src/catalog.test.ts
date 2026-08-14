@@ -68,6 +68,7 @@ describe("migration catalog", () => {
       "1200_002_create_price_book",
       "1200_003_create_price_quote",
       "1200_004_create_price_book_admin_projection",
+      "1200_005_create_tax_config_admin_projection",
       "1300_001_create_cart_aggregate",
       "1300_002_alter_cart_item_commands",
       "1300_003_alter_cart_selection_evidence",
@@ -141,6 +142,24 @@ describe("migration catalog", () => {
       expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
     expect(migration?.sql).toContain("amount_minor = trunc(amount_minor)");
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(4);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2103 Tax Config Admin projection migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1200_005_create_tax_config_admin_projection",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/pricing", schema: "rms_pricing" });
+    for (const table of [
+      "tax_config_admin_projection_generation",
+      "tax_config_admin_projection",
+      "tax_config_rule_projection",
+      "tax_config_receipt_fixture_projection",
+      "tax_config_admin_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
+    expect(migration?.sql).toContain("tax_amount_minor = trunc(tax_amount_minor)");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(5);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

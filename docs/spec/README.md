@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2102 — Price Book Administration on codex/wp-2102`
+- Current discussion node: `WP-2103 — Tax Configuration Administration on codex/wp-2103`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2103 — Tax Configuration Admin, Approved Fixture Simulation and Receipt Preview` is locally
+  implemented and verified on top of WP-2102 head `960f1d1`. It adds Store-scoped, four-eyes Tax
+  Configuration administration, exact approved Basket/Refund fixture simulation, inclusive and
+  exclusive receipt preview, three registered Events, a rebuildable forced-RLS projection and the
+  `TAX-CONFIG` route without inventing any legal tax fact. Root Vitest passed `317/317`; all `31/31`
+  package tasks and both new and retained Tax isolated PostgreSQL checks passed. Exact scope is in
+  `docs/spec/work-packages/WP-2103.md`; SPIKE-1106 evidence remains unclaimed and GitHub publication
+  is deferred.
 
 - `WP-2102 — Price Book / Record Admin, Coverage / Conflict Resolution and Publish Workflow` is
   locally implemented and verified on top of WP-2101 head `b7d4405`. It adds Brand-scoped,

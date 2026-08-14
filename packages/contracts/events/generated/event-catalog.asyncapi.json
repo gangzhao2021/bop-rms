@@ -1574,6 +1574,189 @@
         "x-bop-retention-category": "business_record",
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
+      },
+      "TaxConfigDraftCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "TaxConfigDraftCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "configurationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "jurisdictionCode": {
+              "pattern": "^[A-Z][A-Z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "configurationReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "jurisdictionCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "TaxConfigDraftCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.tax-config-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "TaxConfigDraftCreated",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "TaxConfigDraftReplacedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "TaxConfigDraftReplacedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "configurationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "jurisdictionCode": {
+              "pattern": "^[A-Z][A-Z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "configurationReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "jurisdictionCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "TaxConfigDraftReplaced v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.tax-config-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "TaxConfigDraftReplaced",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "TaxConfigPublishedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "TaxConfigPublishedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "configurationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "jurisdictionCode": {
+              "pattern": "^[A-Z][A-Z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "configurationReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "jurisdictionCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "TaxConfigPublished v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.tax-config-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "TaxConfigPublished",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
       }
     }
   },

@@ -27,6 +27,7 @@ catalogs:
     - workflow.operate
     - media.manage
     - catalog.manage
+    - pricing.tax-config.manage
     - ordering.operate
     - payment.operate
     - kitchen.operate
@@ -45,6 +46,7 @@ catalogs:
     - organization_*_v1
     - catalog_*_v1
     - pricing_*_v1
+    - pricing_tax_config_admin_v1
     - recipe_*_v1
     - merchant_order_*_v1
     - payment_*_v1
@@ -184,6 +186,7 @@ catalogs:
     - WP-2100
     - WP-2101
     - WP-2102
+    - WP-2103
     - WP-2104
     - WP-2105
     - WP-2110
@@ -9961,13 +9964,13 @@ screens:
     roles:
       - Finance / Tax Admin
       - no developer-authored legal assumption
-    permission_ref: catalog.manage
+    permission_ref: pricing.tax-config.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - Store registration applicability reference、tax categories、rates / inclusive flag、jurisdiction、effective dates、receipt fixture status
     search_filter_sort_export: category / code；jurisdiction、active / future
     query_ref: query.tax_config
-    projection_ref: pricing_*_v1
+    projection_ref: pricing_tax_config_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create professional-fixture-backed draft、simulate basket / refund、submit / approve / publish
     command_refs:
@@ -9993,6 +9996,7 @@ screens:
       - WP-1103
       - WP-1104
       - WP-1105
+      - WP-2103
     handoff_section: "88.8"
     route_intent: TAX-CONFIG /app/commerce/tax
     navigation_targets: []

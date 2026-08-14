@@ -282,6 +282,16 @@ const priceBookPayload = z.strictObject({
   occurredAt: z.iso.datetime({ offset: false }),
 });
 
+const taxConfigPayload = z.strictObject({
+  configurationReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "Published"]),
+  jurisdictionCode: z.string().regex(/^[A-Z][A-Z0-9_-]{0,63}$/u),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 const orderCreatedPayload = z.strictObject({
   orderReference: z.uuid(),
   orderBatchReference: z.uuid(),
@@ -334,6 +344,22 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  ...["TaxConfigDraftCreated", "TaxConfigDraftReplaced", "TaxConfigPublished"].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/pricing" as const,
+    producerModule: "@rms/pricing" as const,
+    stability: "stable" as const,
+    consumers: ["pricing.tax-config-admin-projection:v1"],
+    tenantScope: "store" as const,
+    dataClassification: "none" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: taxConfigPayload,
+  })),
   ...[
     "PriceBookArchived",
     "PriceBookDraftCreated",
