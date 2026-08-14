@@ -13,6 +13,7 @@
     "authentication-threat-model:check": "vitest run tooling/security/authentication-threat-model.test.mjs",
     "audit-integrity:acceptance": "pnpm --filter @bop/audit audit-integrity:acceptance",
     "aws-organization-baseline:check": "vitest run tooling/security/aws-organization-baseline.test.mjs && pnpm break-glass-runbook:check",
+    "aws-workload-stack-baseline:check": "vitest run tooling/security/aws-workload-stack-baseline.test.mjs && pnpm kms-audit-archive:acceptance && pnpm upload-egress-security:check",
     "build": "turbo run build",
     "break-glass-runbook:check": "vitest run tooling/security/break-glass-runbook.test.mjs",
     "browser-session:acceptance": "pnpm --filter @bop/identity browser-session:acceptance",
