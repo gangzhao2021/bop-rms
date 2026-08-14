@@ -42,4 +42,4 @@ CI=true pnpm --filter @rms/inventory test
 CI=true pnpm --filter @rms/inventory build
 ```
 
-WP-2124 owns the scoped Waste Aggregate, threshold approval and Food Safety / Kitchen public-reference linkage. WP-2125 owns scoped Transfer requests, dispatch, receipt, In Transit and discrepancy workflows. WP-2132 owns Supplier Offering mapping.
+WP-2124 owns the scoped Waste Aggregate, threshold approval and Food Safety / Kitchen public-reference linkage. WP-2125 owns scoped Transfer requests, dispatch, receipt, In Transit and discrepancy workflows. WP-2126 owns the scoped Lot / Expiry explorer, append-only Hold decisions and public trace handoff. WP-2132 owns Supplier Offering mapping.
