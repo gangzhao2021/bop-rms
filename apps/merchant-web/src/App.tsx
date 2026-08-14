@@ -6,6 +6,7 @@ import { PickupQueuePage } from "./PickupPages.js";
 import { KdsProfilePage } from "./KdsProfilePage.js";
 import { OrderExceptionPage } from "./OrderExceptionPage.js";
 import { OrderDetailPage, OrderQueuePage } from "./OrderQueuePages.js";
+import { OrderAmendmentPage } from "./OrderAmendmentPage.js";
 import { MenuBuilderPage, MenuListPage } from "./CatalogMenuPages.js";
 import { BundleEditorPage, BundleListPage } from "./BundlePages.js";
 import { AvailabilityWorkbenchPage } from "./AvailabilityWorkbenchPage.js";
@@ -109,6 +110,7 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/commerce/recipes/:id/edit" element={<RecipeEditorPage />} />
       <Route path="/operations/orders" element={<OrderQueuePage />} />
       <Route path="/operations/orders/:id" element={<OrderDetailPage />} />
+      <Route path="/operations/orders/:id/amend" element={<OrderAmendmentPage />} />
       <Route path="/operations/kitchen" element={<KitchenBoardPage />} />
       <Route path="/operations/kitchen/work-items/:id" element={<KitchenWorkItemPage />} />
       <Route path="/operations/pickup" element={<PickupQueuePage />} />

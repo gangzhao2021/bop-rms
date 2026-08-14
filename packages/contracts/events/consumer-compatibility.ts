@@ -138,6 +138,34 @@ const contract = (
 });
 
 export const eventConsumerContracts = defineEventConsumerContracts([
+  contract(
+    "inventory.order-amendment",
+    "@rms/inventory",
+    "OrderAmended",
+    "store",
+    "record_theoretical_consumption_delta",
+  ),
+  contract(
+    "kitchen.order-amendment",
+    "@rms/kitchen",
+    "OrderAmended",
+    "store",
+    "create_amended_kitchen_work",
+  ),
+  contract(
+    "ordering.amendment-projection",
+    "@rms/ordering",
+    "OrderAmended",
+    "store",
+    "replace_order_amendment_projection",
+  ),
+  contract(
+    "payment.order-amendment",
+    "@rms/payment",
+    "OrderAmended",
+    "store",
+    "record_payment_delta_requirement",
+  ),
   ...[
     "RecipeArchived",
     "RecipeDraftCreated",

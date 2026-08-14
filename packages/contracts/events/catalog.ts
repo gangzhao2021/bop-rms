@@ -327,6 +327,20 @@ const orderConfirmedPayload = z.strictObject({
   confirmedAt: z.iso.datetime({ offset: false }),
 });
 
+const orderAmendedPayload = z.strictObject({
+  amendmentReference: z.string().regex(canonicalUuidV7),
+  orderReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  amendmentKind: z
+    .string()
+    .regex(/^(?:AddItem|ReduceItem|VoidItem|ReplaceItemConfiguration|UpdateNote)$/u),
+  quoteReference: z.string().regex(canonicalUuidV7),
+  quoteVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  deltaMinor: z.string().regex(/^-?(?:0|[1-9][0-9]{0,29})$/u),
+  currencyCode: z.string().regex(/^[A-Z]{3}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 const paymentSucceededPayload = z.strictObject({
   paymentTransactionReference: z.uuid(),
   paymentIntentReference: z.uuid(),
@@ -627,6 +641,27 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: menuPublishedPayload,
+  },
+  {
+    eventType: "OrderAmended",
+    schemaVersion: 1,
+    ownerModule: "@rms/ordering",
+    producerModule: "@rms/ordering",
+    stability: "stable",
+    consumers: [
+      "inventory.order-amendment:v1",
+      "kitchen.order-amendment:v1",
+      "ordering.amendment-projection:v1",
+      "payment.order-amendment:v1",
+    ],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: orderAmendedPayload,
   },
   {
     eventType: "OrderConfirmed",

@@ -21,6 +21,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `KitchenWorkCreated:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `KitchenWorkStarted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `MenuPublished:v1` — owner `@rms/catalog`; stable; brand; none
+- `OrderAmended:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderConfirmed:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderCreated:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `PaymentFailed:v1` — owner `@rms/payment`; stable; store; payment

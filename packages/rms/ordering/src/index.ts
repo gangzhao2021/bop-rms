@@ -48,3 +48,6 @@ export * from "./contracts/fulfillment-completed-event.js";
 export * from "./application/fulfillment-completed-event.js";
 export * from "./application/fulfillment-completed-event-consumer-service.js";
 export * from "./application/ports/fulfillment-completed-event-ports.js";
+export * from "./domain/order-amendment.js";
+export * from "./application/order-amendment-service.js";
+export * from "./application/ports/order-amendment-ports.js";

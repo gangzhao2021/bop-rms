@@ -74,9 +74,18 @@ and rejected when it contains control or bidirectional-override characters. Orde
 must not infer allergy truth from it or emit it in Events, Audit, errors, logs, URLs, analytics,
 screenshots or non-synthetic fixtures.
 
+WP-2110 adds the Phase-2 Order Amendment contract. Add, Reduce / Void, Replace Configuration and
+Update Note are explicit Store-scoped, idempotent actions over immutable Order facts. Pricing alone
+supplies the pinned Quote and integer-minor-unit delta; employees cannot enter price, tax or refund
+values. Fulfilled / Closed Orders fail closed, destructive changes wait for Kitchen confirmation
+after work starts, and policy-required approval uses a distinct Actor. Applied changes append one
+minimal `OrderAmended.v1` fact for the collaborating public consumers; they do not claim Payment,
+Kitchen, Inventory or Fulfillment side effects completed.
+
 ```bash
 pnpm --filter @rms/ordering test
 pnpm ordering-cart:acceptance
 pnpm ordering-business-date:acceptance
 pnpm ordering-create-order:acceptance
+pnpm order-amendment:acceptance
 ```

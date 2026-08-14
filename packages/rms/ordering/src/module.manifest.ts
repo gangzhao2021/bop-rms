@@ -47,7 +47,11 @@ const moduleManifestInput =
       "rms.payment.payment-failed.v1",
       "rms.payment.payment-succeeded.v1",
     ],
-    publishedEvents: ["rms.ordering.order-confirmed.v1", "rms.ordering.order-created.v1"],
+    publishedEvents: [
+      "rms.ordering.order-amended.v1",
+      "rms.ordering.order-confirmed.v1",
+      "rms.ordering.order-created.v1",
+    ],
     ownedDatabase: {
       schema: "rms_ordering",
       tables: [
@@ -63,6 +67,10 @@ const moduleManifestInput =
         "order_submission_record",
         "order_batch",
         "order_item",
+        "order_amendment",
+        "order_amendment_change",
+        "order_amendment_state_record",
+        "order_amendment_operation_record",
         "order_status_projection_generation",
         "order_status_projection",
       ],

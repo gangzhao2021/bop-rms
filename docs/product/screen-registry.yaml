@@ -30,6 +30,7 @@ catalogs:
     - pricing.tax-config.manage
     - pricing.promotion.manage
     - recipe.manage
+    - ordering.order.amend
     - ordering.operate
     - payment.operate
     - kitchen.operate
@@ -53,6 +54,7 @@ catalogs:
     - recipe_admin_v1
     - recipe_*_v1
     - merchant_order_*_v1
+    - merchant_order_amendment_v1
     - payment_*_v1
     - kitchen_*_v1
     - dining_*_v1
@@ -6927,13 +6929,13 @@ screens:
     roles:
       - Manager
       - state / cutoff / expected version enforced
-    permission_ref: ordering.operate
+    permission_ref: ordering.order.amend
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - reason、eligible items / quantities / configuration、repricing / tax delta、Kitchen / fulfillment impact、payment / refund consequence、customer notice
     search_filter_sort_export: item lookup within Order only
     query_ref: query.ops_order_amend
-    projection_ref: merchant_order_*_v1
+    projection_ref: merchant_order_amendment_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: validate impact、submit amendment、request approval、abort
     command_refs:

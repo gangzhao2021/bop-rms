@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2105 — Recipe Management on codex/wp-2105`
+- Current discussion node: `WP-2110 — Order Amendment on codex/wp-2110`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2110 — Order Amendment Impact / Repricing / Approval Workflow` is locally implemented and
+  verified on top of WP-2105 head `2ba8201`. It adds Store-scoped, append-only Amendment Commands,
+  pinned Quote repricing with integer minor units, Kitchen Pending / rejection handling, distinct
+  policy approval, one registered `OrderAmended` Event and the full-state `OPS-ORDER-AMEND` wizard.
+  Root Vitest passed `319/319`; all `32/32` package tasks, the retained Cart PostgreSQL acceptance
+  and the isolated Amendment PostgreSQL acceptance passed. Exact scope is in
+  `docs/spec/work-packages/WP-2110.md`; real Order and collaborating-domain outcomes remain
+  unclaimed, and GitHub publication is deferred.
 
 - `WP-2105 — Recipe List / Editor, Yield / Cost / Allergen Graph, Dual Review and Invalidation` is
   locally implemented and verified on top of WP-2104 head `8af32de`. It adds Brand-scoped,
