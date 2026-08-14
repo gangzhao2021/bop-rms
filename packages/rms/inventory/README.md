@@ -2,11 +2,10 @@
 
 ## Identity and responsibility
 
-- Module: `@rms/inventory`; RMS Inventory Domain; Later / WP-2120; Inventory Engineering Owner.
+- Module: `@rms/inventory`; RMS Inventory Domain; Later / WP-2120–2121; Inventory Engineering Owner.
 - Owns Inventory Item identity, lifecycle, unit / conversion, tracking / lot / expiry / negative-stock
   policy, scoped Reorder Policy and rebuildable Stock read contracts.
-- Does not own SKU, Recipe, Supplier Offering / price, Purchase Order, accounting ledger, or any
-  Movement workflow not explicitly implemented by a later WP.
+- Does not own SKU, Recipe, Supplier Offering / price, Purchase Order or accounting ledger.
 
 ## Public contract
 
@@ -14,13 +13,17 @@
 purpose, `inventory.manage`, operation idempotency and expected version. `queryStockOverview`
 permits identity-only reads without Stock Scope but requires exactly one Store / StockSite / Location
 scope for every quantity, reorder, quantity sort / filter / export or stock action.
+`queryStockMovements` requires one explicit Stock Scope and returns immutable source, conversion,
+balance-snapshot, Actor, Audit and correction-chain evidence. `correctStockMovement` can only ask an
+injected Ledger port for one exact inverse of an eligible original; it never edits or deletes facts.
 
 ## Data and security
 
 Inventory Item is the configuration aggregate; Stock Ledger remains the quantity source of truth.
-Quantities use exact decimal strings plus Unit and never binary floating point. All writes authorize
-before reads and use injected repository / Audit ports. No schema, migration, Provider, external
-service, customer PII, health data, secret, opening balance or live Store fact is implemented here.
+Quantities use exact signed decimal strings plus Unit and conversion snapshot, never binary floating
+point. All writes authorize before reads and use injected Ledger / idempotency / Audit ports. No
+schema, migration, Provider, external service, customer PII, health data, secret, opening balance or
+live Store fact is implemented here.
 
 ## Verification
 
@@ -32,5 +35,5 @@ CI=true pnpm --filter @rms/inventory test
 CI=true pnpm --filter @rms/inventory build
 ```
 
-WP-2121 may add immutable Movement contracts; WP-2122–2125 own Count, Adjustment, Transfer and
-Waste. WP-2132 owns Supplier Offering mapping.
+WP-2122–2125 own Count, Adjustment, Transfer and Waste workflows. WP-2132 owns Supplier Offering
+mapping.

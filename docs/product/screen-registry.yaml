@@ -39,6 +39,7 @@ catalogs:
     - fulfillment.operate
     - dining.operate
     - inventory.manage
+    - inventory.movement.read
     - procurement.manage
     - customer.manage
     - reporting.read
@@ -75,6 +76,7 @@ catalogs:
     - fulfillment_*_v1
     - inventory_*_v1
     - inventory_stock_overview_v1
+    - inventory_movement_explorer_v1
     - procurement_*_v1
     - customer_loyalty_*_v1
     - reporting_*_v1
@@ -5803,13 +5805,13 @@ screens:
     roles:
       - route /app/supply/items/:id/movements backed by INV-MOVEMENT-LIST contract
       - Phase 2 / WP-2120–2121
-    permission_ref: inventory.manage
+    permission_ref: inventory.movement.read
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - item-scoped immutable Movement Explorer with explicit Stock Scope
     search_filter_sort_export: inherits parent Screen
     query_ref: query.inv_item_stock_history
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_movement_explorer_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: inherits parent Screen
     command_refs:
@@ -5940,13 +5942,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - scoped inventory read
-    permission_ref: inventory.manage
+    permission_ref: inventory.movement.read
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - immutable quantity / conversion、before / after projection snapshot、source Event / document、lot / expiry、audit / correction chain
     search_filter_sort_export: —
     query_ref: query.inv_movement_detail
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_movement_explorer_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: open source、start correction wizard
     command_refs:
@@ -5986,13 +5988,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Inventory / Auditor
-    permission_ref: inventory.manage
+    permission_ref: inventory.movement.read
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - movement ref、type、item、lot / location、quantity / unit、source / destination、business source、Actor / time、correction link
     search_filter_sort_export: ref / item / barcode / source ref；type、scope、location、lot、date、Actor、corrected
     query_ref: query.inv_movement_list
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_movement_explorer_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: view evidence / source、create compensating correction when eligible、export
     command_refs:

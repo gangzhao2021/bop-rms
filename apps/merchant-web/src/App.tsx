@@ -31,6 +31,11 @@ import {
   InventoryItemListPage,
   StockOverviewPage,
 } from "./InventoryPages.js";
+import {
+  InventoryItemStockHistoryPage,
+  InventoryMovementDetailPage,
+  InventoryMovementListPage,
+} from "./InventoryMovementPages.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
 import {
   createMerchantWorkspaceClient,
@@ -131,7 +136,10 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/supply/items" element={<InventoryItemListPage />} />
       <Route path="/app/supply/items/new" element={<InventoryItemCreatePage />} />
       <Route path="/app/supply/items/:id/edit" element={<InventoryItemEditPage />} />
+      <Route path="/app/supply/items/:id/movements" element={<InventoryItemStockHistoryPage />} />
       <Route path="/app/supply/items/:id" element={<InventoryItemDetailPage />} />
+      <Route path="/app/supply/movements" element={<InventoryMovementListPage />} />
+      <Route path="/app/supply/movements/:id" element={<InventoryMovementDetailPage />} />
       <Route path="/operations/orders/:id" element={<OrderDetailPage />} />
       <Route path="/operations/orders/:id/amend" element={<OrderAmendmentPage />} />
       <Route path="/operations/kitchen" element={<KitchenBoardPage />} />
