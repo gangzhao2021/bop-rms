@@ -23,6 +23,7 @@ import {
 } from "./ReservationPages.js";
 import { WaitlistBoardPage } from "./WaitlistPages.js";
 import { CapacityPolicyPage } from "./CapacityPolicyPage.js";
+import { StaffOrderEntryPage } from "./StaffOrderEntryPage.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
 import {
   createMerchantWorkspaceClient,
@@ -118,6 +119,7 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/commerce/recipes" element={<RecipeListPage />} />
       <Route path="/app/commerce/recipes/:id/edit" element={<RecipeEditorPage />} />
       <Route path="/operations/orders" element={<OrderQueuePage />} />
+      <Route path="/operations/order-entry" element={<StaffOrderEntryPage />} />
       <Route path="/operations/orders/:id" element={<OrderDetailPage />} />
       <Route path="/operations/orders/:id/amend" element={<OrderAmendmentPage />} />
       <Route path="/operations/kitchen" element={<KitchenBoardPage />} />

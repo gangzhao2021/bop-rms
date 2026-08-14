@@ -31,6 +31,7 @@ catalogs:
     - pricing.promotion.manage
     - recipe.manage
     - ordering.order.amend
+    - ordering.order.create_staff
     - ordering.operate
     - payment.operate
     - kitchen.operate
@@ -56,6 +57,7 @@ catalogs:
     - recipe_*_v1
     - merchant_order_*_v1
     - merchant_order_amendment_v1
+    - merchant_staff_order_entry_v1
     - payment_*_v1
     - kitchen_*_v1
     - kitchen_production_batch_v1
@@ -7038,13 +7040,13 @@ screens:
     roles:
       - Counter / Server Staff + explicit ordering.order.create_staff
       - no arbitrary price / tax / status override
-    permission_ref: ordering.operate
+    permission_ref: ordering.order.create_staff
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - fixed Store / service context、public-effective Menu、Sellable configurator、staff Cart / Quote、optional Dining Session / verified Customer ref、structured allergen review、cashless Payment / Terminal handoff
     search_filter_sort_export: localized Menu item / code；section、available now、service mode
     query_ref: query.ops_order_entry
-    projection_ref: merchant_order_*_v1
+    projection_ref: merchant_staff_order_entry_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create staff-scoped Cart、configure、requote、attach eligible Dining Session、record Staff allergen assistance、submit Order / Batch idempotently、start Terminal payment
     command_refs:
@@ -7061,7 +7063,7 @@ screens:
       - Command Failed
       - Offline Read-only
     responsive_accessibility: Sections 88.4 and 88.27-88.30 universal profile
-    analytics_privacy: Section 88.28 allowlist and exclusions
+    analytics_privacy: Section 88.28 allowlist and exclusions; no contact, allergy / health, token or Provider detail
     work_package_mode: resolved
     work_packages:
       - WP-2116
