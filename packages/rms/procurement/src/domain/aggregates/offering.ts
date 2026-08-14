@@ -73,7 +73,7 @@ export class OfferingError extends Error {
 const fail = (code: OfferingError["code"]): never => {
   throw new OfferingError(code);
 };
-const refPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const refPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const codePattern = /^[A-Z0-9][A-Z0-9._-]{0,63}$/u;
 const decimalPattern = /^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/u;
 export const offeringReference = (value: unknown): OfferingReference =>

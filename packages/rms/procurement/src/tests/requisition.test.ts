@@ -21,7 +21,7 @@ import {
 } from "../domain/aggregates/requisition.js";
 
 const id = (n: number) =>
-  `00000000-0000-4000-8000-${String(n).padStart(12, "0")}` as RequisitionReference;
+  `018fa900-0000-7000-8000-${n.toString(16).padStart(12, "0")}` as RequisitionReference;
 const at = (day: number) => `2026-08-${String(day).padStart(2, "0")}T12:00:00.000Z`;
 const line = {
   lineReference: id(10),

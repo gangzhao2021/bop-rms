@@ -2,12 +2,16 @@
 
 ## Identity and responsibility
 
-- Module: `@rms/inventory`; RMS Inventory Domain; Later / WP-2120–2123; Inventory Engineering Owner.
+- Module: `@rms/inventory`; RMS Inventory Domain; WP-2120–2135; Inventory Engineering Owner.
 - Owns Inventory Item identity, lifecycle, unit / conversion, tracking / lot / expiry / negative-stock
   policy, scoped Reorder Policy and rebuildable Stock read contracts.
 - `WP-2130` adds the exact-scope Replenishment Need workbench contract, append-only acknowledgement
   and dismissal decisions, and a Need-ID-idempotent public handoff that accepts only a Draft
   Procurement Requisition and never creates or issues a Purchase Order.
+- `WP-2135` adds PO-linked Goods Receipt validation, exact tolerance and independent-override rules,
+  immutable Receipt / correction facts, accepted Stock Movement preparation and strict public
+  `GoodsReceiptPosted`, `GoodsReceiptAdjusted` and `GoodsReceiptVoided` contracts. Procurement remains
+  the PO owner and is accessed only through its public issued receiving snapshot.
 - Does not own SKU, Recipe, Supplier Offering / price, Purchase Order or accounting ledger.
 
 ## Public contract
@@ -25,6 +29,9 @@ idempotent Count Adjustment Movements only after approval and Balance-version va
 `executeStockAdjustmentCommand` validates a scoped, evidence-backed quantity delta against a
 server-owned Balance / Item-policy snapshot and authorized evidence resolver, enforces independent
 high-risk approval and accepts only one exact atomic immutable Adjustment Movement after approval.
+`executeGoodsReceipt` authorizes before reads, rebinds exact PO/line/version/Offering/conversion facts,
+keeps rejected and damaged quantity out of accepted Stock, and passes prepared movement facts plus the
+Receipt, Event and Audit to one atomic repository commit. Corrections append compensating movements.
 
 ## Data and security
 

@@ -13,7 +13,7 @@ import {
 } from "../domain/aggregates/offering.js";
 
 const id = (n: number) =>
-  `00000000-0000-4000-8000-${String(n).padStart(12, "0")}` as OfferingReference;
+  `018fa900-0000-7000-8000-${n.toString(16).padStart(12, "0")}` as OfferingReference;
 const at = (day: number) => `2026-08-${String(day).padStart(2, "0")}T12:00:00.000Z`;
 const config = {
   versionReference: id(20),
