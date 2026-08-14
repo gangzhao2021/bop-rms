@@ -19,3 +19,6 @@ export * from "./domain/delivery-detail.js";
 export * from "./contracts/delivery-detail.js";
 export * from "./application/ports/delivery-detail-ports.js";
 export * from "./application/delivery-detail-service.js";
+export * from "./domain/delivery-provider.js";
+export * from "./contracts/delivery-provider.js";
+export * from "./application/ports/delivery-provider-ports.js";

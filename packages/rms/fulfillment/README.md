@@ -31,6 +31,11 @@ contracts. Critical changes fail closed without fresh address, service-area, ETA
 and phase-dependent Provider/Manager evidence; rejected revisions never replace the last accepted
 snapshot.
 
+WP-2152 adds a Provider adapter boundary with account/health separation, operation-scoped circuit
+breakers, authenticated append-only webhook envelopes, pinned fail-closed status mapping and
+indeterminate Create reconciliation. Credentials remain Secret references and raw Provider payloads
+are excluded.
+
 ## Public contract
 
 `createPickupFulfillmentService` exposes registration `fulfillment.confirmed-order:v1` plus an
