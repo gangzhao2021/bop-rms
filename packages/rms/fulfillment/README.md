@@ -36,6 +36,11 @@ breakers, authenticated append-only webhook envelopes, pinned fail-closed status
 indeterminate Create reconciliation. Credentials remain Secret references and raw Provider payloads
 are excluded.
 
+WP-2153 adds dual-confirmed courier custody handoff, append-only policy-pinned Delivery Proof and a
+Customer-safe tracking projection. Only validated evidence authorizes Picked Up/Delivered; uncertain
+custody or proof requires review, and the Customer contract excludes precise location, courier PII,
+raw address and evidence assets.
+
 ## Public contract
 
 `createPickupFulfillmentService` exposes registration `fulfillment.confirmed-order:v1` plus an

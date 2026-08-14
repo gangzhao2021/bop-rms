@@ -12,6 +12,7 @@ import { OrderStatusPage } from "./order-status/OrderStatusPage.js";
 import { ConnectivityBanner } from "./connectivity/ConnectivityBanner.js";
 import { PwaUpdateBanner } from "./pwa/PwaUpdateBanner.js";
 import { ReceiptPage } from "./receipt/ReceiptPage.js";
+import { DeliveryStatusPage } from "./delivery-status/DeliveryStatusPage.js";
 
 export function App({
   entryClient,
@@ -54,6 +55,7 @@ export function App({
         <Route path="/checkout/payment" element={<PaymentPage mode="handoff" />} />
         <Route path="/checkout/result" element={<PaymentPage mode="result" />} />
         <Route path="/orders/:orderReference" element={<OrderStatusPage />} />
+        <Route path="/orders/:orderReference/delivery" element={<DeliveryStatusPage />} />
         <Route path="/orders/:orderReference/receipt" element={<ReceiptPage />} />
         <Route path="*" element={<CustomerShell />} />
       </Routes>

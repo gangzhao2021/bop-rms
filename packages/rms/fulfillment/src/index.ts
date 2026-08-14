@@ -22,3 +22,6 @@ export * from "./application/delivery-detail-service.js";
 export * from "./domain/delivery-provider.js";
 export * from "./contracts/delivery-provider.js";
 export * from "./application/ports/delivery-provider-ports.js";
+export * from "./domain/delivery-handoff-proof.js";
+export * from "./contracts/customer-delivery-tracking.js";
+export * from "./application/ports/customer-delivery-tracking-ports.js";
