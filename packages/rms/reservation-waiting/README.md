@@ -5,12 +5,12 @@
 - Module Name: `reservation-waiting`
 - Package Name: `@rms/reservation-waiting`
 - Layer / Domain: `RMS / Reservation & Waiting`
-- Phase / owning Work Package: `Later / WP-2113`
+- Phase / owning Work Packages: `Later / WP-2113–WP-2115`
 - Owner role: `Reservation Engineering Owner`
 - Status: `runtime-inactive contract implemented locally`
 - Responsibility: Reservation identity, status, append-only revision, capacity-hold reference,
-  Waitlist Entry lifecycle / dynamic ordering evidence / ETA history, contact snapshot and Pricing /
-  Payment / Dining / Notification collaboration references.
+  Waitlist Entry lifecycle / dynamic ordering evidence / ETA history, versioned Capacity Policy,
+  contact snapshot and Pricing / Payment / Dining / Notification collaboration references.
 - Explicit non-goals: one shared Waitlist Queue Aggregate, actual Table / Session, money calculation,
   Payment mutation, Notification delivery, Customer profile, persistence and Provider integration.
 
@@ -34,6 +34,13 @@
   `reviseWaitlistEntry` produce bounded integer ranges and append-only evidence.
 - `createWaitlistService` applies the same Store-scoped authorization, exact-version, idempotency,
   Audit and injected collaboration rules; Notification failure never rewrites lifecycle state.
+- `createCapacityPolicy`, `reviseCapacityPolicy` and `transitionCapacityPolicy` validate append-only
+  Store / area / service versions, non-overlapping local buckets, controlled Manager-only overbook,
+  closures, effective periods and Pricing-owned policy references.
+- `simulateCapacityPolicy` deterministically reports demand / conflict blockers from an explicit
+  owner-issued scenario without creating a Capacity Hold, Reservation, Table promise or fee.
+- `createCapacityPolicyService` authorizes before reads, preserves idempotency / exact version /
+  Audit, requires collaborator-issued publication evidence and keeps persistence injected.
 
 ## Dependencies
 
@@ -93,14 +100,16 @@ CI=true pnpm verify
 
 The suite covers strict validation, Reservation / Waitlist lifecycle transitions, terminal
 immutability, deposit separation, critical replacement holds, non-critical bypass resistance,
-dynamic compatibility ordering, deterministic ETA, Notification separation, authorization-before-
-read, idempotent replay, exact version conflict, append-only evidence and all owned screen states.
+dynamic compatibility ordering, deterministic ETA, Capacity Policy buckets / closures / overbook /
+publication simulation, Notification separation, authorization-before-read, idempotent replay,
+exact version conflict, append-only evidence and all owned screen states.
 
 ## Decisions and follow-up
 
 - Authority: Handoff Sections 32, 48.5, 50 and 88.11;
-  `docs/spec/work-packages/WP-2113.md` and `docs/spec/work-packages/WP-2114.md`.
+  `docs/spec/work-packages/WP-2113.md`, `docs/spec/work-packages/WP-2114.md` and
+  `docs/spec/work-packages/WP-2115.md`.
 - External Evidence: real Store, capacity, contact, Pricing, Payment, Dining and Notification facts
   are unavailable and not claimed.
 - Revisit trigger: an accepted Reservation persistence / Event Catalog WP or authorized BFF contract.
-- Next allowed Work Package: `WP-2115`.
+- Next allowed Work Package: `WP-2116`.

@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2114 — Waitlist Board / Entry, ETA, Ready Notification and Dining Handoff on codex/wp-2114`
+- Current discussion node: `WP-2115 — Reservation Capacity / Closure / Overbook / No-show Policy Configuration on codex/wp-2115`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2115 — Reservation Capacity / Closure / Overbook / No-show Policy Configuration` is locally
+  implemented and verified on top of WP-2114 head `8873089`. It adds append-only Store / area /
+  service Capacity Policy versions, deterministic bucket / closure / online-allocation /
+  Manager-overbook conflict simulation, strict publication-evidence ports and the full-state
+  `RES-CAPACITY-CONFIG` route. Pricing, Dining and Store facts remain owner-issued references;
+  Section 50 grants no Reservation persistence namespace, so no migration or Event Catalog fact is
+  invented. Root Vitest passed `319/319`; all `33/33` package tasks, the complete retained isolated
+  PostgreSQL matrix, module tests `26/26`, merchant-web tests `88/88` and secret scan `2/2` passed.
+  Exact evidence is recorded in `docs/spec/work-packages/WP-2115.md`; GitHub publication is deferred.
 
 - `WP-2114 — Waitlist Board / Entry, ETA, Ready Notification and Dining Handoff` is locally
   implemented and verified on top of WP-2113 head `a551a7a`. It extends

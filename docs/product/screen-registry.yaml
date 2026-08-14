@@ -67,6 +67,7 @@ catalogs:
     - reservation_create_edit_v1
     - reservation_detail_v1
     - reservation_list_v1
+    - reservation_capacity_policy_v1
     - waitlist_board_v1
     - waitlist_entry_v1
     - fulfillment_*_v1
@@ -9006,7 +9007,7 @@ screens:
       - Store / area、time buckets、capacity、online allocation、overbook policy、closures、deposit / no-show refs、effective period
     search_filter_sort_export: date / area / service
     query_ref: query.res_capacity_config
-    projection_ref: reservation_*_v1
+    projection_ref: reservation_capacity_policy_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: edit draft、simulate demand / conflicts、publish / schedule
     command_refs:
