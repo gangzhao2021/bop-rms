@@ -5,6 +5,9 @@
 - Module: `@rms/inventory`; RMS Inventory Domain; Later / WP-2120–2123; Inventory Engineering Owner.
 - Owns Inventory Item identity, lifecycle, unit / conversion, tracking / lot / expiry / negative-stock
   policy, scoped Reorder Policy and rebuildable Stock read contracts.
+- `WP-2130` adds the exact-scope Replenishment Need workbench contract, append-only acknowledgement
+  and dismissal decisions, and a Need-ID-idempotent public handoff that accepts only a Draft
+  Procurement Requisition and never creates or issues a Purchase Order.
 - Does not own SKU, Recipe, Supplier Offering / price, Purchase Order or accounting ledger.
 
 ## Public contract
