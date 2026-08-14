@@ -16,9 +16,15 @@ source.
   Aggregate Ready phase, issue/regenerate/validate Ready-bound Pickup Proof evidence, and plan an
   authorized append-only Pickup Handoff with exact cumulative quantity and completion derivation.
   A strict `FulfillmentCompleted.v1` publication exposes the minimal completed business fact.
-- Explicit non-goals: private Ordering/Kitchen reads, Delivery, non-Kitchen Ready, raw proof
-  generation/hashing, other handoff Events, cancellation, Queue/Detail Projection, API/UI/SSE, live
-  grants and production activation.
+- Explicit non-goals: private Ordering/Kitchen reads, non-Kitchen Ready, raw proof
+  generation/hashing, unaccepted handoff Events, Delivery persistence, live API/SSE, grants and
+  production activation.
+
+WP-2150 adds runtime-inactive Delivery Task creation and dispatch contracts. Execution and
+Assignment state remain separate; every Offer is a single active TTL-bound append-only Attempt with
+pinned Dispatch Policy and Route Plan versions. Late acceptance, parallel offers, indeterminate
+candidate evidence and automatic-attempt exhaustion fail closed or create a dispatch exception.
+No live worker, Provider, scheduling/location result or Delivery persistence is claimed.
 
 ## Public contract
 

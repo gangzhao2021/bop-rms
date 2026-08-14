@@ -11,3 +11,7 @@ export * from "./contracts/pickup-proof.js";
 export * from "./contracts/pickup-handoff.js";
 export * from "./contracts/fulfillment-completed-event.js";
 export * from "./application/fulfillment-completed-event.js";
+export * from "./domain/delivery-task.js";
+export * from "./contracts/delivery-dispatch.js";
+export * from "./application/ports/delivery-dispatch-ports.js";
+export * from "./application/delivery-dispatch-service.js";
