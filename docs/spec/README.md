@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2115 — Reservation Capacity / Closure / Overbook / No-show Policy Configuration on codex/wp-2115`
+- Current discussion node: `WP-2155 — Delivery E2E, privacy, late / duplicate / Provider failure acceptance on codex/wp-2155`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2155 — Delivery E2E, privacy, late / duplicate / Provider failure acceptance` is locally
+  implemented and verified on top of WP-2154 head `678a9ad`. It adds a synthetic cross-contract acceptance
+  suite for assignment expiry, Provider duplicate / timeout / terminal conflict, custody, proof,
+  remedy and final-failure privacy boundaries. Fulfillment tests passed `61/61`, root tests passed
+  `319/319`, all `37/37` package tasks and the complete retained isolated PostgreSQL matrix passed.
+  GitHub publication is deferred.
 
 - `WP-2115 — Reservation Capacity / Closure / Overbook / No-show Policy Configuration` is locally
   implemented and verified on top of WP-2114 head `8873089`. It adds append-only Store / area /
