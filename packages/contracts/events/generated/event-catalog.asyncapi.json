@@ -3,6 +3,159 @@
   "channels": {},
   "components": {
     "messages": {
+      "AvailabilityRuleCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "AvailabilityRuleCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "availabilityRuleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Inactive", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "sellableType": {
+              "enum": ["Product", "Sku", "Bundle"],
+              "type": "string"
+            }
+          },
+          "required": [
+            "availabilityRuleReference",
+            "aggregateVersion",
+            "sellableType",
+            "lifecycle",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "AvailabilityRuleCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.availability-workbench-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "AvailabilityRuleCreated",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "AvailabilityRuleLifecycleChangedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "AvailabilityRuleLifecycleChangedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "availabilityRuleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Inactive", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "sellableType": {
+              "enum": ["Product", "Sku", "Bundle"],
+              "type": "string"
+            }
+          },
+          "required": [
+            "availabilityRuleReference",
+            "aggregateVersion",
+            "sellableType",
+            "lifecycle",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "AvailabilityRuleLifecycleChanged v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.availability-workbench-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "AvailabilityRuleLifecycleChanged",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "AvailabilityRuleReplacedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "AvailabilityRuleReplacedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "availabilityRuleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Inactive", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "sellableType": {
+              "enum": ["Product", "Sku", "Bundle"],
+              "type": "string"
+            }
+          },
+          "required": [
+            "availabilityRuleReference",
+            "aggregateVersion",
+            "sellableType",
+            "lifecycle",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "AvailabilityRuleReplaced v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.availability-workbench-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "AvailabilityRuleReplaced",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "BundleDraftCreatedV1": {
         "contentType": "application/json",
         "deprecated": false,

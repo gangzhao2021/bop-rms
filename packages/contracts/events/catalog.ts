@@ -264,6 +264,14 @@ const bundleLifecyclePayload = z.strictObject({
     .nullable(),
 });
 
+const availabilityRulePayload = z.strictObject({
+  availabilityRuleReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  sellableType: z.enum(["Product", "Sku", "Bundle"]),
+  lifecycle: z.enum(["Draft", "Active", "Inactive", "Archived"]),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 const orderCreatedPayload = z.strictObject({
   orderReference: z.uuid(),
   orderBatchReference: z.uuid(),
@@ -316,6 +324,26 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  ...[
+    "AvailabilityRuleCreated",
+    "AvailabilityRuleReplaced",
+    "AvailabilityRuleLifecycleChanged",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/catalog" as const,
+    producerModule: "@rms/catalog" as const,
+    stability: "stable" as const,
+    consumers: ["catalog.availability-workbench-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "none" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: availabilityRulePayload,
+  })),
   ...[
     ["BundleDraftCreated", "catalog.bundle-management-projection:v1"],
     ["BundleDraftReplaced", "catalog.bundle-management-projection:v1"],

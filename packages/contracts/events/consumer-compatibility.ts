@@ -138,6 +138,19 @@ const contract = (
 });
 
 export const eventConsumerContracts = defineEventConsumerContracts([
+  ...[
+    "AvailabilityRuleCreated",
+    "AvailabilityRuleReplaced",
+    "AvailabilityRuleLifecycleChanged",
+  ].map((eventType) =>
+    contract(
+      "catalog.availability-workbench-projection",
+      "@rms/catalog",
+      eventType,
+      "brand",
+      "replace_availability_workbench_projection",
+    ),
+  ),
   ...["BundleDraftCreated", "BundleDraftReplaced", "BundleLifecycleChanged"].map((eventType) =>
     contract(
       "catalog.bundle-management-projection",

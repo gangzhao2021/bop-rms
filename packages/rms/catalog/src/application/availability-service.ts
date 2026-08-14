@@ -12,6 +12,7 @@ import {
 } from "../domain/product.js";
 import type {
   AvailabilityOperationAction,
+  AvailabilityEvent,
   AvailabilityOperationRecord,
   AvailabilityPorts,
 } from "./ports/availability-ports.js";
@@ -132,7 +133,8 @@ function verify(
       saved.operationReference !== expected.operationReference ||
       !ports.references.equals(saved.operationIntentHash, expected.operationIntentHash) ||
       aggregate.ruleReference !== expected.aggregate.ruleReference ||
-      aggregate.aggregateVersion !== expected.aggregate.aggregateVersion
+      aggregate.aggregateVersion !== expected.aggregate.aggregateVersion ||
+      JSON.stringify(saved.event) !== JSON.stringify(expected.event)
     )
       throw new Error("bad");
     return aggregate;
@@ -150,11 +152,31 @@ async function facts(
         brandReference: aggregate.brandReference,
         storeReference: aggregate.storeReference,
         sellableReference: aggregate.sellableReference,
-        sellableType: "Sku",
+        sellableType: aggregate.sellableType,
       })
       .catch(failure))
   )
     throw new CatalogError("CATALOG_UNAVAILABLE");
+}
+function event(
+  action: AvailabilityOperationAction,
+  aggregate: ReturnType<typeof parseAvailabilityRule>,
+  at: CatalogInstant,
+): AvailabilityEvent {
+  const eventTypes: Record<AvailabilityOperationAction, AvailabilityEvent["eventType"]> = {
+    Create: "AvailabilityRuleCreated",
+    Replace: "AvailabilityRuleReplaced",
+    ChangeLifecycle: "AvailabilityRuleLifecycleChanged",
+  };
+  return Object.freeze({
+    eventType: eventTypes[action],
+    aggregateReference: aggregate.ruleReference,
+    aggregateVersion: aggregate.aggregateVersion,
+    brandReference: aggregate.brandReference,
+    sellableType: aggregate.sellableType,
+    lifecycle: aggregate.lifecycle,
+    occurredAt: at,
+  });
 }
 function lifecycle(current: AvailabilityRuleLifecycle, target: AvailabilityRuleLifecycle) {
   const allowed: Record<AvailabilityRuleLifecycle, readonly AvailabilityRuleLifecycle[]> = {
@@ -228,6 +250,7 @@ export function createAvailabilityService(ports: AvailabilityPorts) {
         operationReference,
         operationIntentHash: intent,
         aggregate,
+        event: event("Create", aggregate, requestedAt),
       });
       const saved = await ports.repository.create({ record, audit: auth.audit }).catch(failure);
       return Object.freeze({ status: "Applied" as const, aggregate: verify(saved, record, ports) });
@@ -281,6 +304,7 @@ export function createAvailabilityService(ports: AvailabilityPorts) {
         operationReference,
         operationIntentHash: intent,
         aggregate: candidate,
+        event: event("Replace", candidate, requestedAt),
       });
       const saved = await ports.repository
         .commit({ record, expectedAggregateVersion: expected, audit: auth.audit })
@@ -333,6 +357,7 @@ export function createAvailabilityService(ports: AvailabilityPorts) {
         operationReference,
         operationIntentHash: intent,
         aggregate,
+        event: event("ChangeLifecycle", aggregate, requestedAt),
       });
       const saved = await ports.repository
         .commit({ record, expectedAggregateVersion: expected, audit: auth.audit })

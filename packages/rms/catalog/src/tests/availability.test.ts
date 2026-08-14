@@ -9,6 +9,7 @@ import { parseCatalogCode, parseCatalogReference, parseCatalogInstant } from "..
 import {
   parseAvailabilityRule,
   resolveStoreAvailability,
+  simulateEffectiveAvailability,
   type AvailabilityRuleAggregate,
 } from "../domain/availability.js";
 
@@ -208,7 +209,11 @@ function serviceFixture(options: { denied?: boolean; invalidFacts?: boolean } = 
       },
     },
   };
-  return { service: createAvailabilityService(ports), current: () => aggregate };
+  return {
+    service: createAvailabilityService(ports),
+    current: () => aggregate,
+    operation: (reference: string) => operations.get(reference),
+  };
 }
 
 describe("Store Availability Overlay", () => {
@@ -249,8 +254,14 @@ describe("Store Availability Overlay", () => {
         .status,
     ).toBe("Indeterminate");
   });
-  it("rejects invalid periods, targets and inactive/no effective rules", () => {
-    expect(() => parseAvailabilityRule({ ...rule(), sellableType: "Bundle" })).toThrowError(
+  it("supports Product, SKU and Bundle targets while rejecting unknown types and periods", () => {
+    expect(parseAvailabilityRule({ ...rule(), sellableType: "Bundle" }).sellableType).toBe(
+      "Bundle",
+    );
+    expect(parseAvailabilityRule({ ...rule(), sellableType: "Product" }).sellableType).toBe(
+      "Product",
+    );
+    expect(() => parseAvailabilityRule({ ...rule(), sellableType: "Modifier" })).toThrowError(
       expect.objectContaining({ code: "CATALOG_INPUT_INVALID" }),
     );
     expect(() =>
@@ -260,6 +271,39 @@ describe("Store Availability Overlay", () => {
       status: "Indeterminate",
       reasonCode: "NO_EFFECTIVE_RULE",
     });
+  });
+
+  it("simulates one explicit IANA time zone and Business Date without browser-time inference", () => {
+    expect(
+      simulateEffectiveAvailability({
+        brandReference: ids.brand,
+        storeReference: ids.store,
+        sellableReference: ids.sku,
+        sellableType: "Sku",
+        channelCode: "DINE_IN",
+        orderTypeCode: "TABLE_SERVICE",
+        at,
+        timeZone: "America/Toronto",
+        businessDate: "2026-08-01",
+        rules: [rule()],
+        safetyEvidence: [],
+      }),
+    ).toMatchObject({ status: "Available", businessDate: "2026-08-01" });
+    expect(() =>
+      simulateEffectiveAvailability({
+        brandReference: ids.brand,
+        storeReference: ids.store,
+        sellableReference: ids.sku,
+        sellableType: "Sku",
+        channelCode: "DINE_IN",
+        orderTypeCode: "TABLE_SERVICE",
+        at,
+        timeZone: "America/Toronto",
+        businessDate: "2026-08-02",
+        rules: [rule()],
+        safetyEvidence: [],
+      }),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_INPUT_INVALID" }));
   });
 
   it("creates one Store overlay as Draft and idempotently replays it", async () => {
@@ -274,6 +318,12 @@ describe("Store Availability Overlay", () => {
         lifecycle: "Draft",
         aggregateVersion: 1,
       },
+    });
+    expect(state.operation(ids.operation)?.event).toMatchObject({
+      eventType: "AvailabilityRuleCreated",
+      sellableType: "Sku",
+      lifecycle: "Draft",
+      aggregateVersion: 1,
     });
     await expect(state.service.create(createInput())).resolves.toMatchObject({
       status: "AlreadyApplied",
@@ -312,6 +362,11 @@ describe("Store Availability Overlay", () => {
       aggregate: { lifecycle: "Active", aggregateVersion: 2 },
     });
     expect(state.current()).toMatchObject({ lifecycle: "Active", aggregateVersion: 2 });
+    expect(state.operation(ids.secondOperation)?.event).toMatchObject({
+      eventType: "AvailabilityRuleLifecycleChanged",
+      lifecycle: "Active",
+      aggregateVersion: 2,
+    });
     await expect(
       state.service.changeLifecycle({
         ruleReference: ids.brandRule,

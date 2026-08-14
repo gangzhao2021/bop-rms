@@ -182,6 +182,7 @@ catalogs:
     - WP-2065
     - WP-2066
     - WP-2100
+    - WP-2101
     - WP-2104
     - WP-2105
     - WP-2110
@@ -652,6 +653,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1023
+      - WP-2101
     handoff_section: "88.8"
     route_intent: CAT-AVAILABILITY /app/commerce/availability
     navigation_targets: []

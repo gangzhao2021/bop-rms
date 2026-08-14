@@ -63,6 +63,7 @@ describe("migration catalog", () => {
       "1106_001_create_allergen_provenance",
       "1106_002_alter_catalog_function_permissions",
       "1107_001_create_bundle_aggregate",
+      "1107_002_alter_availability_workbench",
       "1200_001_create_tax_configuration",
       "1200_002_create_price_book",
       "1200_003_create_price_quote",
@@ -159,6 +160,22 @@ describe("migration catalog", () => {
     expect(migration?.metadata.owner).toBe("@rms/catalog");
     expect(migration?.sql).toContain("CREATE TABLE rms_catalog.availability_rule");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2101 Availability Workbench migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1107_002_alter_availability_workbench",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/catalog", schema: "rms_catalog" });
+    for (const table of [
+      "availability_workbench_projection_generation",
+      "availability_workbench_projection",
+      "availability_workbench_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
+    expect(migration?.sql).toContain("sellable_type IN ('Product', 'Sku', 'Bundle')");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

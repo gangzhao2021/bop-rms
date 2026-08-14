@@ -5,6 +5,9 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 
 ## Registered Events
 
+- `AvailabilityRuleCreated:v1` — owner `@rms/catalog`; stable; brand; none
+- `AvailabilityRuleLifecycleChanged:v1` — owner `@rms/catalog`; stable; brand; none
+- `AvailabilityRuleReplaced:v1` — owner `@rms/catalog`; stable; brand; none
 - `BundleDraftCreated:v1` — owner `@rms/catalog`; stable; brand; none
 - `BundleDraftReplaced:v1` — owner `@rms/catalog`; stable; brand; none
 - `BundleLifecycleChanged:v1` — owner `@rms/catalog`; stable; brand; none
