@@ -292,6 +292,8 @@ importers:
         specifier: workspace:*
         version: link:../tenant
 
+  packages/bop/privacy-governance: {}
+
   packages/bop/projection: {}
 
   packages/bop/public-capability: {}
