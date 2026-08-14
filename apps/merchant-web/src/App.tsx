@@ -45,6 +45,7 @@ import {
 import { InventoryLotExpiryPage } from "./InventoryLotExpiryPage.js";
 import { InventoryReplenishmentPage } from "./InventoryReplenishmentPage.js";
 import { SupplierDetailPage, SupplierListPage } from "./SupplierPages.js";
+import { OfferingEditorPage, OfferingListPage } from "./OfferingPages.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
 import {
   createMerchantWorkspaceClient,
@@ -158,6 +159,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/supply/replenishment" element={<InventoryReplenishmentPage />} />
       <Route path="/app/supply/suppliers" element={<SupplierListPage />} />
       <Route path="/app/supply/suppliers/:id" element={<SupplierDetailPage />} />
+      <Route path="/app/supply/offerings" element={<OfferingListPage />} />
+      <Route path="/app/supply/offerings/:id" element={<OfferingEditorPage />} />
       <Route path="/operations/orders/:id" element={<OrderDetailPage />} />
       <Route path="/operations/orders/:id/amend" element={<OrderAmendmentPage />} />
       <Route path="/operations/kitchen" element={<KitchenBoardPage />} />
