@@ -137,6 +137,7 @@
     "screen-registry:check": "node tooling/screen-registry/validate.ts",
     "secret-scan:check": "vitest run tooling/security/secret-scan.test.mjs",
     "structured-logging:acceptance": "pnpm --filter @bop-rms/observability build && pnpm --filter @bop-rms/observability test && pnpm --filter @bop-rms/api structured-logging:acceptance && pnpm --filter @bop-rms/worker structured-logging:acceptance",
+    "statutory-archive:check": "vitest run tooling/security/statutory-archive-gate.test.mjs && pnpm audit-integrity:acceptance",
     "pii-log-redaction:acceptance": "pnpm structured-logging:acceptance",
     "store:acceptance": "pnpm --filter @rms/store test",
     "task:acceptance": "pnpm --filter @bop/task test",
