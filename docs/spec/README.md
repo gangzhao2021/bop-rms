@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2111 — Production Batch on codex/wp-2111`
+- Current discussion node: `WP-2112 — Dining Table / Floor Board on codex/wp-2112`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2112 — Table Configuration, Floor Board and Dining Session Move / Closing` is locally
+  implemented and verified on top of WP-2111 head `97dbfb5`. It adds strict, versioned Dining Table and QR /
+  temporary-block contracts, exact-version Active Session movement, idempotent Store-authorized
+  Application ports and the complete `DIN-FLOOR-BOARD` / `DIN-TABLE-LIST` routes. Section 50 and
+  accepted WP-1006 / WP-1007 authorize no Dining schema or migration namespace, so persistence,
+  outbox publication and live BFF facts remain deliberately unclaimed. Root Vitest passed
+  `319/319`, all `32/32` package tasks and the retained isolated PostgreSQL matrix passed. Exact scope is in
+  `docs/spec/work-packages/WP-2112.md`; GitHub publication is deferred.
 
 - `WP-2111 — Production Batch Planning, Yield / Consumption and Quality Exception` is locally
   implemented and verified on top of WP-2110 head `df9760f`. It adds Store-scoped, append-only

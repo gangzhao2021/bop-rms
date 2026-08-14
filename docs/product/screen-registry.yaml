@@ -60,6 +60,8 @@ catalogs:
     - kitchen_*_v1
     - kitchen_production_batch_v1
     - dining_*_v1
+    - dining_floor_v1
+    - dining_table_admin_v1
     - reservation_*_v1
     - fulfillment_*_v1
     - inventory_*_v1
@@ -3625,7 +3627,7 @@ screens:
       - floor / area、Table label / capacity / state、active party / Session、elapsed time、Order / payment summary、reservation / waitlist handoff、attention cue
     search_filter_sort_export: Table / Session / reservation ref；area、state、server / owner、attention
     query_ref: query.din_floor_board
-    projection_ref: dining_*_v1
+    projection_ref: dining_floor_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: start Staff Dining Session、seat eligible party、open Session、mark Table unavailable through command
     command_refs:
@@ -3765,7 +3767,7 @@ screens:
       - Table stable label、area、capacity、accessibility attributes、QR state、operational state、current Session
     search_filter_sort_export: label；area、capacity、state、QR active / replacement
     query_ref: query.din_table_list
-    projection_ref: dining_*_v1
+    projection_ref: dining_table_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create / edit configuration draft、issue / revoke QR capability、set temporary operational block
     command_refs:
