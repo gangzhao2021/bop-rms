@@ -46,6 +46,11 @@ import { InventoryLotExpiryPage } from "./InventoryLotExpiryPage.js";
 import { InventoryReplenishmentPage } from "./InventoryReplenishmentPage.js";
 import { SupplierDetailPage, SupplierListPage } from "./SupplierPages.js";
 import { RequisitionDetailPage, RequisitionListPage } from "./RequisitionPages.js";
+import {
+  PurchaseOrderDetailPage,
+  PurchaseOrderEditorPage,
+  PurchaseOrderListPage,
+} from "./PurchaseOrderPages.js";
 import { OfferingEditorPage, OfferingListPage } from "./OfferingPages.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
 import {
@@ -160,6 +165,9 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/supply/replenishment" element={<InventoryReplenishmentPage />} />
       <Route path="/app/supply/requisitions" element={<RequisitionListPage />} />
       <Route path="/app/supply/requisitions/:id" element={<RequisitionDetailPage />} />
+      <Route path="/app/supply/purchase-orders" element={<PurchaseOrderListPage />} />
+      <Route path="/app/supply/purchase-orders/:id/edit" element={<PurchaseOrderEditorPage />} />
+      <Route path="/app/supply/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
       <Route path="/app/supply/suppliers" element={<SupplierListPage />} />
       <Route path="/app/supply/suppliers/:id" element={<SupplierDetailPage />} />
       <Route path="/app/supply/offerings" element={<OfferingListPage />} />
