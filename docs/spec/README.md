@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2061 — Organization Security Services on codex/wp-2061`
+- Current discussion node: `WP-2062 — Edge and Ingress Baseline on codex/wp-2062`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2062 — Route 53 / Registrar / ACM, Regional WAF, ALB and Public-asset CloudFront Baseline` is
+  locally implemented and verified on top of WP-2061 head `37c1913`. It adds a fail-closed edge,
+  ingress, public-asset and WAF policy gate without creating or inspecting AWS/domain resources.
+  Root Vitest passed `289/289`; all `31/31` package lint/typecheck/test/build tasks and the remaining
+  verification gates passed. Exact scope is in `docs/spec/work-packages/WP-2062.md`; GitHub and
+  external execution are deferred.
 
 - `WP-2061 — Organization CloudTrail, AWS Config, GuardDuty, Security Hub, IAM Access Analyzer and
 Central Log Archive` is locally implemented and verified on top of WP-2060 head `85d9001`. It adds
