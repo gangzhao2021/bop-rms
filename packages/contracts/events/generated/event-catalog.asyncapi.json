@@ -1330,6 +1330,250 @@
         "x-bop-retention-category": "business_record",
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "store"
+      },
+      "PriceBookArchivedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "PriceBookArchivedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "currencyCode": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "priceBookReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "priceBookReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "currencyCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "PriceBookArchived v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.price-book-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "PriceBookArchived",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "PriceBookDraftCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "PriceBookDraftCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "currencyCode": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "priceBookReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "priceBookReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "currencyCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "PriceBookDraftCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.price-book-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "PriceBookDraftCreated",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "PriceBookDraftReplacedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "PriceBookDraftReplacedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "currencyCode": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "priceBookReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "priceBookReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "currencyCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "PriceBookDraftReplaced v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.price-book-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "PriceBookDraftReplaced",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "PriceBookVersionPublishedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "PriceBookVersionPublishedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "currencyCode": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Published", "Archived"],
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "priceBookReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "priceBookReference",
+            "versionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "currencyCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "PriceBookVersionPublished v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.price-book-admin-projection:v1"],
+        "x-bop-data-classification": "none",
+        "x-bop-event-type": "PriceBookVersionPublished",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
       }
     }
   },

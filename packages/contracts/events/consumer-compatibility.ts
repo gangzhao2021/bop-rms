@@ -139,6 +139,20 @@ const contract = (
 
 export const eventConsumerContracts = defineEventConsumerContracts([
   ...[
+    "PriceBookArchived",
+    "PriceBookDraftCreated",
+    "PriceBookDraftReplaced",
+    "PriceBookVersionPublished",
+  ].map((eventType) =>
+    contract(
+      "pricing.price-book-admin-projection",
+      "@rms/pricing",
+      eventType,
+      "brand",
+      "replace_price_book_admin_projection",
+    ),
+  ),
+  ...[
     "AvailabilityRuleCreated",
     "AvailabilityRuleReplaced",
     "AvailabilityRuleLifecycleChanged",

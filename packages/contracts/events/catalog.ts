@@ -272,6 +272,16 @@ const availabilityRulePayload = z.strictObject({
   occurredAt: z.iso.datetime({ offset: false }),
 });
 
+const priceBookPayload = z.strictObject({
+  priceBookReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "Published", "Archived"]),
+  currencyCode: z.string().regex(/^[A-Z]{3}$/u),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 const orderCreatedPayload = z.strictObject({
   orderReference: z.uuid(),
   orderBatchReference: z.uuid(),
@@ -324,6 +334,27 @@ const paymentRefundedPayload = z.strictObject({
 });
 
 export const eventCatalog = defineEventCatalog([
+  ...[
+    "PriceBookArchived",
+    "PriceBookDraftCreated",
+    "PriceBookDraftReplaced",
+    "PriceBookVersionPublished",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/pricing" as const,
+    producerModule: "@rms/pricing" as const,
+    stability: "stable" as const,
+    consumers: ["pricing.price-book-admin-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "none" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: priceBookPayload,
+  })),
   ...[
     "AvailabilityRuleCreated",
     "AvailabilityRuleReplaced",

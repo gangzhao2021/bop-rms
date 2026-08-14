@@ -26,6 +26,10 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `PaymentFailed:v1` — owner `@rms/payment`; stable; store; payment
 - `PaymentRefunded:v1` — owner `@rms/payment`; stable; store; payment
 - `PaymentSucceeded:v1` — owner `@rms/payment`; stable; store; payment
+- `PriceBookArchived:v1` — owner `@rms/pricing`; stable; brand; none
+- `PriceBookDraftCreated:v1` — owner `@rms/pricing`; stable; brand; none
+- `PriceBookDraftReplaced:v1` — owner `@rms/pricing`; stable; brand; none
+- `PriceBookVersionPublished:v1` — owner `@rms/pricing`; stable; brand; none
 
 Registered Event identities are the only bounded Event-type metric label candidates.
 An empty catalog therefore enables no Event-type production metric label.

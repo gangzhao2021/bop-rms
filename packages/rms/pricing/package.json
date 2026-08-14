@@ -17,6 +17,9 @@
     "typecheck": "tsc --project tsconfig.json"
   },
   "dependencies": {
-    "@bop/effective-period": "workspace:*"
+    "@bop/audit": "workspace:*",
+    "@bop/effective-period": "workspace:*",
+    "@bop/permission": "workspace:*",
+    "@bop/tenant": "workspace:*"
   }
 }

@@ -9,6 +9,7 @@ import { OrderDetailPage, OrderQueuePage } from "./OrderQueuePages.js";
 import { MenuBuilderPage, MenuListPage } from "./CatalogMenuPages.js";
 import { BundleEditorPage, BundleListPage } from "./BundlePages.js";
 import { AvailabilityWorkbenchPage } from "./AvailabilityWorkbenchPage.js";
+import { PriceBookEditorPage, PriceBookListPage } from "./PriceBookPages.js";
 import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
 import {
   createMerchantWorkspaceClient,
@@ -96,6 +97,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/commerce/bundles" element={<BundleListPage />} />
       <Route path="/app/commerce/bundles/:id/edit" element={<BundleEditorPage />} />
       <Route path="/app/commerce/availability" element={<AvailabilityWorkbenchPage />} />
+      <Route path="/app/commerce/pricing" element={<PriceBookListPage />} />
+      <Route path="/app/commerce/pricing/:id" element={<PriceBookEditorPage />} />
       <Route path="/operations/orders" element={<OrderQueuePage />} />
       <Route path="/operations/orders/:id" element={<OrderDetailPage />} />
       <Route path="/operations/kitchen" element={<KitchenBoardPage />} />

@@ -67,6 +67,7 @@ describe("migration catalog", () => {
       "1200_001_create_tax_configuration",
       "1200_002_create_price_book",
       "1200_003_create_price_quote",
+      "1200_004_create_price_book_admin_projection",
       "1300_001_create_cart_aggregate",
       "1300_002_alter_cart_item_commands",
       "1300_003_alter_cart_selection_evidence",
@@ -123,6 +124,23 @@ describe("migration catalog", () => {
     expect(migration?.sql).toContain("sellable_type IN ('Product', 'Sku')");
     expect(migration?.sql).toContain("numeric(30,0)");
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(6);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2102 Price Book Admin projection migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1200_004_create_price_book_admin_projection",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/pricing", schema: "rms_pricing" });
+    for (const table of [
+      "price_book_admin_projection_generation",
+      "price_book_admin_projection",
+      "price_book_entry_projection",
+      "price_book_admin_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
+    expect(migration?.sql).toContain("amount_minor = trunc(amount_minor)");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(4);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 

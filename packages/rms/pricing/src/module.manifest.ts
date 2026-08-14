@@ -11,13 +11,33 @@ const moduleManifestInput =
     publicExports: ["."],
     allowedSynchronousDependencies: [
       {
+        moduleName: "audit",
+        packageName: "@bop/audit",
+        layer: "BOP",
+      },
+      {
         moduleName: "effective-period",
         packageName: "@bop/effective-period",
         layer: "BOP",
       },
+      {
+        moduleName: "permission",
+        packageName: "@bop/permission",
+        layer: "BOP",
+      },
+      {
+        moduleName: "tenant",
+        packageName: "@bop/tenant",
+        layer: "BOP",
+      },
     ],
     consumedEvents: [],
-    publishedEvents: [],
+    publishedEvents: [
+      "rms.pricing.price-book-archived.v1",
+      "rms.pricing.price-book-draft-created.v1",
+      "rms.pricing.price-book-draft-replaced.v1",
+      "rms.pricing.price-book-version-published.v1",
+    ],
     ownedDatabase: {
       schema: "rms_pricing",
       tables: [
@@ -29,6 +49,10 @@ const moduleManifestInput =
         "price_book_version",
         "price_entry",
         "price_book_operation_record",
+        "price_book_admin_projection_generation",
+        "price_book_admin_projection",
+        "price_book_entry_projection",
+        "price_book_admin_projection_checkpoint",
         "price_quote",
         "price_quote_line",
         "price_quote_tax_line",

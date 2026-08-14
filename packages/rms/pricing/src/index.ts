@@ -5,6 +5,8 @@ export * from "./contracts/tax-configuration.js";
 export * from "./domain/tax-configuration.js";
 export * from "./contracts/price-resolution.js";
 export * from "./domain/price-resolution.js";
+export * from "./application/price-book-service.js";
+export * from "./application/ports/price-book-ports.js";
 export * from "./contracts/price-quote.js";
 export * from "./domain/price-quote.js";
 export * from "./contracts/price-quote-lifecycle.js";
