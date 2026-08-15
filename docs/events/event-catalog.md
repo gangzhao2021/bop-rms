@@ -30,6 +30,8 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `CriticalComplianceFindingDetected:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `DataQualityIssueDetected:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `DataQualityIssueResolved:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `EmployeeQualificationExpired:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `EmployeeQualificationExpiring:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `FulfillmentCompleted:v1` — owner `@rms/fulfillment`; stable; store; indirect_identifier
 - `KitchenItemCompleted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenItemProgressRecorded:v1` — owner `@rms/kitchen`; stable; store; personal
@@ -38,6 +40,9 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `KitchenWorkAccepted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenWorkCreated:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `KitchenWorkStarted:v1` — owner `@rms/kitchen`; stable; store; personal
+- `LicenseExpired:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `LicenseExpiring:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `LicenseSuspended:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `MenuPublished:v1` — owner `@rms/catalog`; stable; brand; none
 - `MetricArchived:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `MetricCertified:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier

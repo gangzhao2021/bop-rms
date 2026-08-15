@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2173 — Temperature Monitoring / Excursion / Cleaning and Sanitation on codex/wp-2173`
+- Current discussion node: `WP-2174 — Permit, Employee / Supplier / Device Qualification and Expiry on codex/wp-2174`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2174 — Permit, Employee / Supplier / Device Qualification and Expiry` is locally implemented
+  and verified on top of exact WP-2173 commit `9443308`. It adds immutable Permit and Employee
+  Qualification revisions, owner-version-pinned Supplier/Device Compliance assessments, explicit
+  Renewal Task and eligibility outcome ports, five canonical Compliance Events and the full-state
+  `CMP-QUALIFICATION` route while retaining no Compliance schema, migration or runtime adapter.
+  Compliance passed `32/32`, Contracts passed `26/26`, Merchant Web passed `323/323`, root tests
+  passed `319/319`, all `39/39` package tasks and the complete retained isolated PostgreSQL matrix
+  passed under exact full `pnpm verify`. Real permits, authorities, legal entities, requirements,
+  certificates, Evidence, source records, renewal Tasks and eligibility outcomes remain unclaimed;
+  GitHub publication is deferred.
 
 - `WP-2173 — Temperature Monitoring / Excursion / Cleaning and Sanitation` is locally implemented
   and verified on top of exact WP-2172 commit `4a9d961`. It adds append-only exact-decimal

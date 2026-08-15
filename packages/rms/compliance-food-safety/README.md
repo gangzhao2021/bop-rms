@@ -5,12 +5,12 @@
 - Module Name: `compliance-food-safety`
 - Package Name: `@rms/compliance-food-safety`
 - Layer / Domain: `RMS / Compliance and Food Safety`
-- Phase / owning Work Package: `Later / WP-2170–2173`
+- Phase / owning Work Package: `Later / WP-2170–2174`
 - Owner role: `Compliance and Food Safety Engineering Owner`
 - Status: `active contracts, runtime-inactive adapters`
 - Responsibility: closed Compliance Dashboard query policy, rebuildable operational summaries and
-  versioned Compliance Case, Inspection, Finding, Corrective Action, containment, Verification and
-  Regulatory Notification contracts.
+  versioned Compliance Case, Inspection, Finding, Corrective Action, monitoring, Permit,
+  Qualification, containment, Verification and Regulatory Notification contracts.
 - Explicit non-goals: source Compliance Case/Record persistence and Product, Recipe, Supplier,
   Inventory, Kitchen, Device, Workforce or Order facts and commands.
 
@@ -43,6 +43,12 @@ corrections, Temperature Excursion revisions and Cleaning/Sanitation revisions. 
 never fabricates a measurement; Excursions do not decide Inventory disposition; Cleaning completion
 does not imply Verification; and out-of-requirement chemical snapshots require Safety Review.
 
+`createComplianceQualificationService` preserves immutable Permit and Employee Qualification
+records plus Compliance assessments of Procurement-owned Supplier and Device-owned Device source
+records. It records exact owner versions, expiry and Verification facts; requests Renewal Tasks and
+eligibility changes only through explicit ports; and never mutates Identity, Membership, Supplier,
+Offering, Purchase Order, Device routing or Store operation.
+
 ## Dependencies
 
 - Allowed synchronous dependencies: `@bop/audit` safe Audit validation, `@bop/permission` Tenant
@@ -56,8 +62,9 @@ does not imply Verification; and out-of-requirement chemical snapshots require S
 ## Data ownership and lifecycle
 
 - Owned objects: rebuildable Compliance Dashboard query policy, Compliance Case Aggregate contract,
-  immutable Inspection/Finding/Corrective Action, Temperature/Excursion and Cleaning revisions,
-  Containment outcome and Regulatory Notification records.
+  immutable Inspection/Finding/Corrective Action, Temperature/Excursion, Cleaning, Permit and
+  Employee Qualification revisions, Supplier/Device assessment records, Containment outcomes and
+  Regulatory Notification records.
 - Write owner: `@rms/compliance-food-safety`; business outcomes remain owner-issued references.
 - Scope: Tenant plus Brand and optional Store, revalidated at query execution.
 - Money: not accepted.
@@ -72,8 +79,8 @@ does not imply Verification; and out-of-requirement chemical snapshots require S
 
 Persistence is not implemented because Section 50 grants no Compliance schema or migration
 namespace. Section 40.29 authorizes the bounded Case, Finding, Corrective Action, Temperature,
-Cleaning and Regulatory Notification Events registered through WP-2173; runtime publication remains
-inactive until an accepted durable adapter exists.
+Cleaning, License, Employee Qualification and Regulatory Notification Events registered through
+WP-2174; runtime publication remains inactive until an accepted durable adapter exists.
 
 ## Security and privacy
 
@@ -101,7 +108,8 @@ Tests cover authorization, scope isolation, exact parsing, stable severity/due s
 math, Case lifecycle/concurrency/idempotency, append-only Inspection correction, Finding escalation,
 Corrective Action completion/independent Verification, independent closure, owning-Domain
 containment, Temperature correction/offline semantics, Excursion disposition boundaries, Cleaning
-chemical/verification controls, Regulatory Notification, filtering, stale/partial presentation and
+chemical/verification controls, Permit/Qualification owner boundaries, expiry, renewal and
+eligibility outcomes, Regulatory Notification, filtering, stale/partial presentation and
 restricted-field rejection.
 
 ## Decisions and follow-up
@@ -110,4 +118,4 @@ restricted-field rejection.
 - External Evidence: real Cases, Requirements, licenses, Findings, actions, Evidence, deadlines,
   regulators and legal interpretations remain unavailable and unclaimed.
 - Revisit trigger: a later accepted WP authorizes Compliance persistence/runtime adapters.
-- Next allowed Work Package: WP-2174.
+- Next allowed Work Package: WP-2175.

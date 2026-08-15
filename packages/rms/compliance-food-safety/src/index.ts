@@ -11,3 +11,6 @@ export * from "./application/ports/compliance-inspection-action-ports.js";
 export * from "./contracts/compliance-monitoring.js";
 export * from "./application/compliance-monitoring-service.js";
 export * from "./application/ports/compliance-monitoring-ports.js";
+export * from "./contracts/compliance-qualification.js";
+export * from "./application/compliance-qualification-service.js";
+export * from "./application/ports/compliance-qualification-ports.js";

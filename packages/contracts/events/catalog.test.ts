@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(82);
+    expect(eventCatalog).toHaveLength(87);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
@@ -328,6 +328,8 @@ describe("Event Catalog source", () => {
       "CriticalComplianceFindingDetected:v1",
       "DataQualityIssueDetected:v1",
       "DataQualityIssueResolved:v1",
+      "EmployeeQualificationExpired:v1",
+      "EmployeeQualificationExpiring:v1",
       "FulfillmentCompleted:v1",
       "KitchenItemCompleted:v1",
       "KitchenItemProgressRecorded:v1",
@@ -336,6 +338,9 @@ describe("Event Catalog source", () => {
       "KitchenWorkAccepted:v1",
       "KitchenWorkCreated:v1",
       "KitchenWorkStarted:v1",
+      "LicenseExpired:v1",
+      "LicenseExpiring:v1",
+      "LicenseSuspended:v1",
       "MenuPublished:v1",
       "MetricArchived:v1",
       "MetricCertified:v1",
@@ -386,6 +391,37 @@ describe("Event Catalog source", () => {
       "TaxConfigPublished:v1",
       "TemperatureExcursionDetected:v1",
     ]);
+  });
+
+  it("keeps qualification expiry events minimal, scoped and closed", () => {
+    const payload = {
+      recordReference: "018f9960-0000-7000-8000-000000000001",
+      tenantReference: "018f9960-0000-7000-8000-000000000002",
+      brandReference: "018f9960-0000-7000-8000-000000000003",
+      storeReference: null,
+      requirementVersionReference: "018f9960-0000-7000-8000-000000000004",
+      severity: "Critical",
+      occurredAt: "2026-08-14T18:00:00.000Z",
+    };
+    for (const eventType of [
+      "EmployeeQualificationExpired",
+      "EmployeeQualificationExpiring",
+      "LicenseExpired",
+      "LicenseExpiring",
+      "LicenseSuspended",
+    ]) {
+      const event = eventCatalog.find((entry) => entry.eventType === eventType);
+      expect(event).toMatchObject({
+        ownerModule: "@rms/compliance-food-safety",
+        consumers: ["compliance.qualification-projection:v1"],
+        tenantScope: "brand",
+        dataClassification: "indirect_identifier",
+      });
+      expect(event?.payloadSchema.safeParse(payload).success).toBe(true);
+      expect(
+        event?.payloadSchema.safeParse({ ...payload, certificateNumber: "PRIVATE" }).success,
+      ).toBe(false);
+    }
   });
 
   it("keeps Data Quality and Reconciliation events minimal and closed", () => {
@@ -820,7 +856,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(91);
+    expect(eventConsumerContracts).toHaveLength(96);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

@@ -138,6 +138,21 @@ const contract = (
 });
 
 export const eventConsumerContracts = defineEventConsumerContracts([
+  ...[
+    "EmployeeQualificationExpired",
+    "EmployeeQualificationExpiring",
+    "LicenseExpired",
+    "LicenseExpiring",
+    "LicenseSuspended",
+  ].map((eventType) =>
+    contract(
+      "compliance.qualification-projection",
+      "@rms/compliance-food-safety",
+      eventType,
+      "brand",
+      "append_compliance_qualification_projection",
+    ),
+  ),
   ...["CleaningVerificationFailed", "TemperatureExcursionDetected"].map((eventType) =>
     contract(
       "compliance.case-projection",

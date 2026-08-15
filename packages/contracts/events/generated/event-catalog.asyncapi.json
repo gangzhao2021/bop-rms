@@ -1638,6 +1638,142 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "EmployeeQualificationExpiredV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "EmployeeQualificationExpiredV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "brandReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "recordReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "requirementVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "severity": {
+              "enum": ["Observation", "Minor", "Major", "Critical", "ImmediateDanger"],
+              "type": "string"
+            },
+            "storeReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "recordReference",
+            "tenantReference",
+            "brandReference",
+            "storeReference",
+            "requirementVersionReference",
+            "severity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "EmployeeQualificationExpired v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["compliance.qualification-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "EmployeeQualificationExpired",
+        "x-bop-owner-module": "@rms/compliance-food-safety",
+        "x-bop-producer-module": "@rms/compliance-food-safety",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "EmployeeQualificationExpiringV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "EmployeeQualificationExpiringV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "brandReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "recordReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "requirementVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "severity": {
+              "enum": ["Observation", "Minor", "Major", "Critical", "ImmediateDanger"],
+              "type": "string"
+            },
+            "storeReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "recordReference",
+            "tenantReference",
+            "brandReference",
+            "storeReference",
+            "requirementVersionReference",
+            "severity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "EmployeeQualificationExpiring v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["compliance.qualification-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "EmployeeQualificationExpiring",
+        "x-bop-owner-module": "@rms/compliance-food-safety",
+        "x-bop-producer-module": "@rms/compliance-food-safety",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "FulfillmentCompletedV1": {
         "contentType": "application/json",
         "deprecated": false,
@@ -2180,6 +2316,210 @@
         "x-bop-retention-category": "business_record",
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "store"
+      },
+      "LicenseExpiredV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "LicenseExpiredV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "brandReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "recordReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "requirementVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "severity": {
+              "enum": ["Observation", "Minor", "Major", "Critical", "ImmediateDanger"],
+              "type": "string"
+            },
+            "storeReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "recordReference",
+            "tenantReference",
+            "brandReference",
+            "storeReference",
+            "requirementVersionReference",
+            "severity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "LicenseExpired v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["compliance.qualification-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "LicenseExpired",
+        "x-bop-owner-module": "@rms/compliance-food-safety",
+        "x-bop-producer-module": "@rms/compliance-food-safety",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "LicenseExpiringV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "LicenseExpiringV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "brandReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "recordReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "requirementVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "severity": {
+              "enum": ["Observation", "Minor", "Major", "Critical", "ImmediateDanger"],
+              "type": "string"
+            },
+            "storeReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "recordReference",
+            "tenantReference",
+            "brandReference",
+            "storeReference",
+            "requirementVersionReference",
+            "severity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "LicenseExpiring v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["compliance.qualification-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "LicenseExpiring",
+        "x-bop-owner-module": "@rms/compliance-food-safety",
+        "x-bop-producer-module": "@rms/compliance-food-safety",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "LicenseSuspendedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "LicenseSuspendedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "brandReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            },
+            "recordReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "requirementVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "severity": {
+              "enum": ["Observation", "Minor", "Major", "Critical", "ImmediateDanger"],
+              "type": "string"
+            },
+            "storeReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "recordReference",
+            "tenantReference",
+            "brandReference",
+            "storeReference",
+            "requirementVersionReference",
+            "severity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "LicenseSuspended v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["compliance.qualification-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "LicenseSuspended",
+        "x-bop-owner-module": "@rms/compliance-food-safety",
+        "x-bop-producer-module": "@rms/compliance-food-safety",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
       },
       "MenuPublishedV1": {
         "contentType": "application/json",
