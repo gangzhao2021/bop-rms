@@ -320,6 +320,17 @@ const reportDefinitionPayload = z.strictObject({
   occurredAt: z.iso.datetime({ offset: false }),
 });
 
+const complianceCasePayload = z.strictObject({
+  caseReference: z.string().regex(canonicalUuidV7),
+  tenantReference: z.string().regex(canonicalUuidV7),
+  brandReference: z.string().regex(canonicalUuidV7),
+  storeReference: z.string().regex(canonicalUuidV7).nullable(),
+  aggregateVersion: z.int().positive(),
+  severity: z.enum(["Observation", "Minor", "Major", "Critical", "ImmediateDanger"]),
+  requirementVersionReference: z.string().regex(canonicalUuidV7),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 const metricDefinitionPayload = z.strictObject({
   metricReference: z.string().regex(canonicalUuidV7),
   versionReference: z.string().regex(canonicalUuidV7),
@@ -590,6 +601,33 @@ export const eventCatalog = defineEventCatalog([
     replacement: null,
     payloadSchema: analyticsLoadFailedPayload,
   },
+  ...(
+    [
+      "ComplianceCaseCancelled",
+      "ComplianceCaseClosed",
+      "ComplianceCaseEnteredCorrectiveAction",
+      "ComplianceCaseEscalated",
+      "ComplianceCaseOpened",
+      "ComplianceCaseVerificationStarted",
+      "RegulatoryNotificationRequired",
+      "RegulatoryNotificationSubmitted",
+    ] as const
+  ).map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/compliance-food-safety" as const,
+    producerModule: "@rms/compliance-food-safety" as const,
+    stability: "stable" as const,
+    consumers: ["compliance.case-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: complianceCasePayload,
+  })),
   {
     eventType: "DataQualityIssueDetected",
     schemaVersion: 1,

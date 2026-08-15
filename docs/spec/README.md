@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2170 — Compliance Dashboard, due, severity and evidence coverage on codex/wp-2170`
+- Current discussion node: `WP-2171 — Compliance Case List / Detail / containment / notification on codex/wp-2171`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2171 — Compliance Case List / Detail / containment / notification` is locally implemented
+  and verified on top of exact WP-2170 commit `457807e`. It adds strict Case lifecycle Commands and
+  snapshots, close gates, owner-outcome containment, Regulatory Notification records, eight
+  canonical Events and the full-state `CMP-CASE-LIST` / `CMP-CASE-DETAIL` routes while retaining no
+  Compliance schema, migration or runtime adapter. Compliance passed `10/10`, Contracts passed
+  `25/25`, Merchant Web passed `284/284`, root tests passed `319/319`, all `39/39` package tasks and
+  the complete retained isolated PostgreSQL matrix passed under exact full `pnpm verify`. Real
+  Cases, Evidence, authorities, submissions, containment outcomes and legal interpretations remain
+  unclaimed; GitHub publication is deferred.
 
 - `WP-2170 — Compliance Dashboard, due, severity and evidence coverage` is locally implemented and
   verified from exact WP-2165 ownership-corrected commit `081f0ec`. It creates the canonical

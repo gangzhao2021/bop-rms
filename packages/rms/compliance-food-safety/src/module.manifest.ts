@@ -11,6 +11,11 @@ const moduleManifestInput =
     publicExports: ["."],
     allowedSynchronousDependencies: [
       {
+        moduleName: "audit",
+        packageName: "@bop/audit",
+        layer: "BOP",
+      },
+      {
         moduleName: "permission",
         packageName: "@bop/permission",
         layer: "BOP",
@@ -22,7 +27,16 @@ const moduleManifestInput =
       },
     ],
     consumedEvents: [],
-    publishedEvents: [],
+    publishedEvents: [
+      "rms.compliance-food-safety.compliance-case-cancelled.v1",
+      "rms.compliance-food-safety.compliance-case-closed.v1",
+      "rms.compliance-food-safety.compliance-case-entered-corrective-action.v1",
+      "rms.compliance-food-safety.compliance-case-escalated.v1",
+      "rms.compliance-food-safety.compliance-case-opened.v1",
+      "rms.compliance-food-safety.compliance-case-verification-started.v1",
+      "rms.compliance-food-safety.regulatory-notification-required.v1",
+      "rms.compliance-food-safety.regulatory-notification-submitted.v1",
+    ],
     ownedDatabase: {
       schema: null,
       tables: [],
@@ -31,7 +45,7 @@ const moduleManifestInput =
     featureFlags: [],
     killSwitches: [],
     piiClassification: {
-      classes: ["none"],
+      classes: ["indirect_identifier"],
       handling: {
         logs: "prohibited",
         urls: "prohibited",

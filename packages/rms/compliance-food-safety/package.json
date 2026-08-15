@@ -17,6 +17,7 @@
     "typecheck": "tsc --project tsconfig.json"
   },
   "dependencies": {
+    "@bop/audit": "workspace:*",
     "@bop/permission": "workspace:*",
     "@bop/tenant": "workspace:*"
   }

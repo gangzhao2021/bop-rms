@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(66);
+    expect(eventCatalog).toHaveLength(74);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
@@ -313,6 +313,12 @@ describe("Event Catalog source", () => {
       "BundleDraftReplaced:v1",
       "BundleLifecycleChanged:v1",
       "BundleVersionPublished:v1",
+      "ComplianceCaseCancelled:v1",
+      "ComplianceCaseClosed:v1",
+      "ComplianceCaseEnteredCorrectiveAction:v1",
+      "ComplianceCaseEscalated:v1",
+      "ComplianceCaseOpened:v1",
+      "ComplianceCaseVerificationStarted:v1",
       "DataQualityIssueDetected:v1",
       "DataQualityIssueResolved:v1",
       "FulfillmentCompleted:v1",
@@ -356,6 +362,8 @@ describe("Event Catalog source", () => {
       "RecipeInvalidated:v1",
       "RecipePublished:v1",
       "ReconciliationDifferenceDetected:v1",
+      "RegulatoryNotificationRequired:v1",
+      "RegulatoryNotificationSubmitted:v1",
       "ReportArtifactRevisionRecorded:v1",
       "ReportArtifactRevoked:v1",
       "ReportDefinitionArchived:v1",
@@ -804,7 +812,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(75);
+    expect(eventConsumerContracts).toHaveLength(83);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

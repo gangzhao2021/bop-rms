@@ -419,6 +419,9 @@ importers:
 
   packages/rms/compliance-food-safety:
     dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../../bop/audit
       '@bop/permission':
         specifier: workspace:*
         version: link:../../bop/permission

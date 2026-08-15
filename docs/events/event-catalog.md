@@ -15,6 +15,12 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `BundleDraftReplaced:v1` — owner `@rms/catalog`; stable; brand; none
 - `BundleLifecycleChanged:v1` — owner `@rms/catalog`; stable; brand; none
 - `BundleVersionPublished:v1` — owner `@rms/catalog`; stable; brand; none
+- `ComplianceCaseCancelled:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `ComplianceCaseClosed:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `ComplianceCaseEnteredCorrectiveAction:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `ComplianceCaseEscalated:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `ComplianceCaseOpened:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `ComplianceCaseVerificationStarted:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `DataQualityIssueDetected:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `DataQualityIssueResolved:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `FulfillmentCompleted:v1` — owner `@rms/fulfillment`; stable; store; indirect_identifier
@@ -58,6 +64,8 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `RecipeInvalidated:v1` — owner `@rms/recipe`; stable; brand; none
 - `RecipePublished:v1` — owner `@rms/recipe`; stable; brand; none
 - `ReconciliationDifferenceDetected:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `RegulatoryNotificationRequired:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `RegulatoryNotificationSubmitted:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `ReportArtifactRevisionRecorded:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportArtifactRevoked:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportDefinitionArchived:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier

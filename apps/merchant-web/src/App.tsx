@@ -71,6 +71,7 @@ import { ReportBuilderPage, ReportCatalogPage } from "./ReportPages.js";
 import { ReportRunHistoryPage } from "./ReportRunHistoryPage.js";
 import { PipelineRunPage } from "./PipelineRunPage.js";
 import { ComplianceDashboardPage } from "./ComplianceDashboardPage.js";
+import { ComplianceCaseDetailPage, ComplianceCaseListPage } from "./ComplianceCasePages.js";
 import { MetricCatalogPage, MetricDetailPage } from "./MetricPages.js";
 import { DataQualityPage, ReconciliationPage } from "./DataQualityPages.js";
 import {
@@ -204,6 +205,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/reports/data-quality" element={<DataQualityPage />} />
       <Route path="/app/reports/reconciliation" element={<ReconciliationPage />} />
       <Route path="/app/compliance" element={<ComplianceDashboardPage />} />
+      <Route path="/app/compliance/cases" element={<ComplianceCaseListPage />} />
+      <Route path="/app/compliance/cases/:id" element={<ComplianceCaseDetailPage />} />
       <Route path="/app/customers" element={<CustomerListPage />} />
       <Route path="/app/customers/loyalty-programs" element={<LoyaltyProgramListPage />} />
       <Route path="/app/customers/loyalty-programs/:id" element={<LoyaltyProgramEditorPage />} />
