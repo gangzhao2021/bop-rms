@@ -15,7 +15,12 @@ const moduleManifestInput = {
     schema: "bop_operating_entity",
     tables: [
       "brand_operating_entity_assignment",
+      "business_function_assignment_decision",
       "operating_entity",
+      "operating_entity_admin_operation",
+      "operating_entity_approval_decision",
+      "operating_entity_authority_version",
+      "operating_entity_profile_version",
       "store_operating_entity_assignment",
     ],
   },

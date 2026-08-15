@@ -18,7 +18,12 @@ const expectedForcedTables = [
   "bop_membership.membership",
   "bop_membership.store_assignment",
   "bop_operating_entity.brand_operating_entity_assignment",
+  "bop_operating_entity.business_function_assignment_decision",
   "bop_operating_entity.operating_entity",
+  "bop_operating_entity.operating_entity_admin_operation",
+  "bop_operating_entity.operating_entity_approval_decision",
+  "bop_operating_entity.operating_entity_authority_version",
+  "bop_operating_entity.operating_entity_profile_version",
   "bop_operating_entity.store_operating_entity_assignment",
   "bop_permission.permission_grant",
   "bop_permission.permission_override",
@@ -118,7 +123,7 @@ async function prove(context) {
   const pool = new Pool({ ...context.clientConfig, max: 1 });
   await admin.connect();
   try {
-    assert.equal(expectedForcedTables.length, 100);
+    assert.equal(expectedForcedTables.length, 105);
     const forced = await admin.query(
       `SELECT format('%I.%I', namespace.nspname, relation.relname) AS table_name
        FROM pg_class AS relation

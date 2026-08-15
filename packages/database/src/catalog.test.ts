@@ -54,6 +54,7 @@ describe("migration catalog", () => {
       "0200_006_create_guest_session",
       "0200_007_alter_guest_dining_binding",
       "0200_008_create_api_client",
+      "0200_009_create_operating_entity_administration",
       "0300_001_create_permission",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
@@ -981,6 +982,11 @@ describe("migration catalog", () => {
       ["0200_006_create_guest_session", "@bop/identity", "bop_identity"],
       ["0200_007_alter_guest_dining_binding", "@bop/identity", "bop_identity"],
       ["0200_008_create_api_client", "@bop/identity", "bop_identity"],
+      [
+        "0200_009_create_operating_entity_administration",
+        "@bop/operating-entity",
+        "bop_operating_entity",
+      ],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
@@ -1005,6 +1011,16 @@ describe("migration catalog", () => {
     expect(apiClient?.sql).toContain("CREATE TABLE bop_identity.api_client");
     expect(apiClient?.sql).toContain("CREATE TABLE bop_identity.api_client_credential_metadata");
     expect(apiClient?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    const entityAdmin = migrations.find(
+      (migration) => migration.id === "0200_009_create_operating_entity_administration",
+    );
+    expect(entityAdmin?.sql).toContain(
+      "CREATE TABLE bop_operating_entity.operating_entity_profile_version",
+    );
+    expect(entityAdmin?.sql).toContain(
+      "CREATE TABLE bop_operating_entity.business_function_assignment_decision",
+    );
+    expect(entityAdmin?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migrations.map((migration) => migration.sql).join("\n")).not.toMatch(
       /\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu,
     );
