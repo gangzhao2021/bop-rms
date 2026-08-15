@@ -78,6 +78,10 @@ import {
 } from "./ComplianceInspectionActionPages.js";
 import { CleaningLogPage, TemperatureLogPage } from "./ComplianceMonitoringPages.js";
 import { ComplianceQualificationPage } from "./ComplianceQualificationPage.js";
+import {
+  ComplianceAllergenReviewPage,
+  ComplianceIncidentPage,
+} from "./ComplianceAllergenIncidentPages.js";
 import { MetricCatalogPage, MetricDetailPage } from "./MetricPages.js";
 import { DataQualityPage, ReconciliationPage } from "./DataQualityPages.js";
 import {
@@ -218,6 +222,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/operations/compliance/temperature" element={<TemperatureLogPage />} />
       <Route path="/operations/compliance/cleaning" element={<CleaningLogPage />} />
       <Route path="/app/compliance/qualifications" element={<ComplianceQualificationPage />} />
+      <Route path="/app/compliance/allergens" element={<ComplianceAllergenReviewPage />} />
+      <Route path="/app/compliance/incidents/:id" element={<ComplianceIncidentPage />} />
       <Route path="/app/customers" element={<CustomerListPage />} />
       <Route path="/app/customers/loyalty-programs" element={<LoyaltyProgramListPage />} />
       <Route path="/app/customers/loyalty-programs/:id" element={<LoyaltyProgramEditorPage />} />

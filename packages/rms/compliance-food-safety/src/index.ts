@@ -14,3 +14,6 @@ export * from "./application/ports/compliance-monitoring-ports.js";
 export * from "./contracts/compliance-qualification.js";
 export * from "./application/compliance-qualification-service.js";
 export * from "./application/ports/compliance-qualification-ports.js";
+export * from "./contracts/compliance-allergen-incident.js";
+export * from "./application/compliance-allergen-incident-service.js";
+export * from "./application/ports/compliance-allergen-incident-ports.js";

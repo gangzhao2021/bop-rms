@@ -28,6 +28,7 @@ const moduleManifestInput =
     ],
     consumedEvents: [],
     publishedEvents: [
+      "rms.compliance-food-safety.allergen-control-failure-detected.v1",
       "rms.compliance-food-safety.cleaning-verification-failed.v1",
       "rms.compliance-food-safety.compliance-finding-recorded.v1",
       "rms.compliance-food-safety.compliance-case-cancelled.v1",
@@ -43,6 +44,7 @@ const moduleManifestInput =
       "rms.compliance-food-safety.critical-compliance-finding-detected.v1",
       "rms.compliance-food-safety.employee-qualification-expired.v1",
       "rms.compliance-food-safety.employee-qualification-expiring.v1",
+      "rms.compliance-food-safety.food-safety-incident-reported.v1",
       "rms.compliance-food-safety.license-expired.v1",
       "rms.compliance-food-safety.license-expiring.v1",
       "rms.compliance-food-safety.license-suspended.v1",

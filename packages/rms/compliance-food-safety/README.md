@@ -5,12 +5,13 @@
 - Module Name: `compliance-food-safety`
 - Package Name: `@rms/compliance-food-safety`
 - Layer / Domain: `RMS / Compliance and Food Safety`
-- Phase / owning Work Package: `Later / WP-2170–2174`
+- Phase / owning Work Package: `Later / WP-2170–2175`
 - Owner role: `Compliance and Food Safety Engineering Owner`
 - Status: `active contracts, runtime-inactive adapters`
 - Responsibility: closed Compliance Dashboard query policy, rebuildable operational summaries and
   versioned Compliance Case, Inspection, Finding, Corrective Action, monitoring, Permit,
-  Qualification, containment, Verification and Regulatory Notification contracts.
+  Qualification, Allergen Control, Food Safety Incident, containment, Verification and Regulatory
+  Notification contracts.
 - Explicit non-goals: source Compliance Case/Record persistence and Product, Recipe, Supplier,
   Inventory, Kitchen, Device, Workforce or Order facts and commands.
 
@@ -49,6 +50,13 @@ records. It records exact owner versions, expiry and Verification facts; request
 eligibility changes only through explicit ports; and never mutates Identity, Membership, Supplier,
 Offering, Purchase Order, Device routing or Store operation.
 
+`createComplianceAllergenIncidentService` pins Catalog/Recipe-owned allergen source versions and
+exact configuration digests without creating an absence claim. It appends controlled Review and
+restricted Food Safety Incident revisions, validates exact Case scope, emits only committed failure
+or report facts, and requests Catalog availability / Ordering-Payment admission blocks solely
+through an idempotent owner port. Medical narrative, Customer notes and Payment facts never enter
+the public contract.
+
 ## Dependencies
 
 - Allowed synchronous dependencies: `@bop/audit` safe Audit validation, `@bop/permission` Tenant
@@ -62,9 +70,9 @@ Offering, Purchase Order, Device routing or Store operation.
 ## Data ownership and lifecycle
 
 - Owned objects: rebuildable Compliance Dashboard query policy, Compliance Case Aggregate contract,
-  immutable Inspection/Finding/Corrective Action, Temperature/Excursion, Cleaning, Permit and
-  Employee Qualification revisions, Supplier/Device assessment records, Containment outcomes and
-  Regulatory Notification records.
+  immutable Inspection/Finding/Corrective Action, Temperature/Excursion, Cleaning, Permit,
+  Employee Qualification, Allergen Review and Food Safety Incident revisions, Supplier/Device
+  assessment records, Containment outcomes and Regulatory Notification records.
 - Write owner: `@rms/compliance-food-safety`; business outcomes remain owner-issued references.
 - Scope: Tenant plus Brand and optional Store, revalidated at query execution.
 - Money: not accepted.
@@ -79,8 +87,9 @@ Offering, Purchase Order, Device routing or Store operation.
 
 Persistence is not implemented because Section 50 grants no Compliance schema or migration
 namespace. Section 40.29 authorizes the bounded Case, Finding, Corrective Action, Temperature,
-Cleaning, License, Employee Qualification and Regulatory Notification Events registered through
-WP-2174; runtime publication remains inactive until an accepted durable adapter exists.
+Cleaning, License, Employee Qualification, Allergen Control, Food Safety Incident and Regulatory
+Notification Events registered through WP-2175; runtime publication remains inactive until an
+accepted durable adapter exists.
 
 ## Security and privacy
 
@@ -109,8 +118,9 @@ math, Case lifecycle/concurrency/idempotency, append-only Inspection correction,
 Corrective Action completion/independent Verification, independent closure, owning-Domain
 containment, Temperature correction/offline semantics, Excursion disposition boundaries, Cleaning
 chemical/verification controls, Permit/Qualification owner boundaries, expiry, renewal and
-eligibility outcomes, Regulatory Notification, filtering, stale/partial presentation and
-restricted-field rejection.
+eligibility outcomes, Allergen source invalidation / no-absence semantics, restricted Incident
+Case binding and owner block outcomes, Regulatory Notification, filtering, stale/partial
+presentation and restricted-field rejection.
 
 ## Decisions and follow-up
 
@@ -118,4 +128,4 @@ restricted-field rejection.
 - External Evidence: real Cases, Requirements, licenses, Findings, actions, Evidence, deadlines,
   regulators and legal interpretations remain unavailable and unclaimed.
 - Revisit trigger: a later accepted WP authorizes Compliance persistence/runtime adapters.
-- Next allowed Work Package: WP-2175.
+- Next allowed Work Package: WP-2176.

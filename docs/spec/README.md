@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2174 — Permit, Employee / Supplier / Device Qualification and Expiry on codex/wp-2174`
+- Current discussion node: `WP-2175 — Allergen Review / Food Safety Incident / Publish and Payment Block Linkage on codex/wp-2175`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2175 — Allergen Review / Food Safety Incident / Publish and Payment Block Linkage` is
+  locally implemented and verified on top of exact WP-2174 commit `c6fd8ff`. It adds immutable
+  Allergen Control Review revisions with exact source/configuration pinning, no-absence and
+  fail-closed invalidation semantics, restricted Food Safety Incident/Case records, explicit
+  Catalog/Ordering/Payment owner-block ports, two canonical Compliance Events and the full-state
+  `CMP-ALLERGEN-REVIEW` / `CMP-INCIDENT` routes while retaining no Compliance schema, migration or
+  runtime adapter. Compliance passed `40/40`, Contracts passed `27/27`, Merchant Web passed
+  `337/337`, root tests passed `319/319`, all `39/39` package tasks and the complete retained
+  isolated PostgreSQL matrix passed under exact full `pnpm verify`. Real allergen policy/source
+  facts, recipes, supplier Evidence, incidents, restricted health/allegation records, reviewers,
+  Case facts and owner-Domain block outcomes remain unclaimed; GitHub publication is deferred.
 
 - `WP-2174 — Permit, Employee / Supplier / Device Qualification and Expiry` is locally implemented
   and verified on top of exact WP-2173 commit `9443308`. It adds immutable Permit and Employee

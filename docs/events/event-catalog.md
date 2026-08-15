@@ -5,6 +5,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 
 ## Registered Events
 
+- `AllergenControlFailureDetected:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `AnalyticsBackfillCompleted:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `AnalyticsLoadCompleted:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `AnalyticsLoadFailed:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
@@ -32,6 +33,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `DataQualityIssueResolved:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `EmployeeQualificationExpired:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `EmployeeQualificationExpiring:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `FoodSafetyIncidentReported:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `FulfillmentCompleted:v1` — owner `@rms/fulfillment`; stable; store; indirect_identifier
 - `KitchenItemCompleted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenItemProgressRecorded:v1` — owner `@rms/kitchen`; stable; store; personal

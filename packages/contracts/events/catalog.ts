@@ -683,6 +683,24 @@ export const eventCatalog = defineEventCatalog([
     replacement: null,
     payloadSchema: complianceMonitoringPayload,
   })),
+  ...(["AllergenControlFailureDetected", "FoodSafetyIncidentReported"] as const).map(
+    (eventType) => ({
+      eventType,
+      schemaVersion: 1,
+      ownerModule: "@rms/compliance-food-safety" as const,
+      producerModule: "@rms/compliance-food-safety" as const,
+      stability: "stable" as const,
+      consumers: ["compliance.incident-projection:v1"],
+      tenantScope: "brand" as const,
+      dataClassification: "indirect_identifier" as const,
+      compatibility: "additive" as const,
+      retentionCategory: "business_record" as const,
+      replaySemantics: "idempotent" as const,
+      deprecated: false,
+      replacement: null,
+      payloadSchema: complianceMonitoringPayload,
+    }),
+  ),
   ...(
     [
       "EmployeeQualificationExpired",

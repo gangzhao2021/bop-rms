@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(87);
+    expect(eventCatalog).toHaveLength(89);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
@@ -303,6 +303,7 @@ describe("Event Catalog source", () => {
       dataClassification: "payment",
     });
     expect(registeredEventMetricLabels(eventCatalog)).toEqual([
+      "AllergenControlFailureDetected:v1",
       "AnalyticsBackfillCompleted:v1",
       "AnalyticsLoadCompleted:v1",
       "AnalyticsLoadFailed:v1",
@@ -330,6 +331,7 @@ describe("Event Catalog source", () => {
       "DataQualityIssueResolved:v1",
       "EmployeeQualificationExpired:v1",
       "EmployeeQualificationExpiring:v1",
+      "FoodSafetyIncidentReported:v1",
       "FulfillmentCompleted:v1",
       "KitchenItemCompleted:v1",
       "KitchenItemProgressRecorded:v1",
@@ -421,6 +423,31 @@ describe("Event Catalog source", () => {
       expect(
         event?.payloadSchema.safeParse({ ...payload, certificateNumber: "PRIVATE" }).success,
       ).toBe(false);
+    }
+  });
+
+  it("keeps allergen failure and Incident events free of restricted detail", () => {
+    const payload = {
+      recordReference: "018f9970-0000-7000-8000-000000000001",
+      tenantReference: "018f9970-0000-7000-8000-000000000002",
+      brandReference: "018f9970-0000-7000-8000-000000000003",
+      storeReference: null,
+      requirementVersionReference: "018f9970-0000-7000-8000-000000000004",
+      severity: "Critical",
+      occurredAt: "2026-08-14T18:00:00.000Z",
+    };
+    for (const eventType of ["AllergenControlFailureDetected", "FoodSafetyIncidentReported"]) {
+      const event = eventCatalog.find((entry) => entry.eventType === eventType);
+      expect(event).toMatchObject({
+        ownerModule: "@rms/compliance-food-safety",
+        consumers: ["compliance.incident-projection:v1"],
+        tenantScope: "brand",
+        dataClassification: "indirect_identifier",
+      });
+      expect(event?.payloadSchema.safeParse(payload).success).toBe(true);
+      expect(event?.payloadSchema.safeParse({ ...payload, symptoms: "restricted" }).success).toBe(
+        false,
+      );
     }
   });
 
@@ -856,7 +883,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(96);
+    expect(eventConsumerContracts).toHaveLength(98);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();
