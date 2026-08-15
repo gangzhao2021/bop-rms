@@ -10,6 +10,9 @@ const { Client, Pool } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const id = (digit) => `018f3f7a-8b1c-7a11-8d01-0000000000${digit.padStart(2, "0")}`;
 const expectedForcedTables = [
+  "bop_feature_control.control_dependency",
+  "bop_feature_control.control_operation",
+  "bop_feature_control.control_version",
   "bop_identity.api_client",
   "bop_identity.api_client_access_version",
   "bop_identity.api_client_credential_metadata",
@@ -130,7 +133,7 @@ async function prove(context) {
   const pool = new Pool({ ...context.clientConfig, max: 1 });
   await admin.connect();
   try {
-    assert.equal(expectedForcedTables.length, 112);
+    assert.equal(expectedForcedTables.length, 115);
     const forced = await admin.query(
       `SELECT format('%I.%I', namespace.nspname, relation.relname) AS table_name
        FROM pg_class AS relation

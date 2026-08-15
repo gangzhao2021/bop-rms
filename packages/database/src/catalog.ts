@@ -53,6 +53,7 @@ const platformOwners = new Map([
   ["security", "shared-infrastructure/security"],
 ]);
 const businessOwners = new Map([
+  ["bop_feature_control", "@bop/feature-control"],
   ["bop_identity", "@bop/identity"],
   ["bop_membership", "@bop/membership"],
   ["bop_permission", "@bop/permission"],
@@ -317,6 +318,7 @@ function validateSql(
         [
           "platform_audit",
           "platform_eventing",
+          "bop_feature_control",
           "bop_identity",
           "bop_membership",
           "bop_permission",

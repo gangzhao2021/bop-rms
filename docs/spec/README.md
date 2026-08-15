@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2192 — Store List / Detail / Setup / Hours / Service Configuration on codex/wp-2192`
+- Current discussion node: `WP-2193 — Capability / Feature Flag Dependency and Effective-period Administration on codex/wp-2193`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2193 — Capability / Feature Flag Dependency and Effective-period Administration` is locally
+  implemented and verified on top of exact WP-2192 commit `0f1b562`. It keeps Feature Control as the
+  sole owner, treats Store Capability as an exact Brand-to-Store overlay, requires compatible
+  dependency/Future Trigger evidence before publication, adds append-only administration history
+  with forced Brand/optional-Store RLS, and completes `STORE-CAPABILITY` / `FEATURE-FLAG-LIST`.
+  Exact full `pnpm verify` passed with Feature Control `19/19`, Merchant Web `441/441`, the
+  `79`-migration / `14`-namespace catalog, all `40/40` package format/lint/typecheck/test/build tasks
+  and the complete retained isolated PostgreSQL matrix; the dedicated WP-2193 database acceptance
+  also passed. No real control, approval, Future Trigger evidence, publication or production
+  activation is claimed; GitHub publication and deployment remain deferred.
 
 - `WP-2192 — Store List / Detail / Setup / Hours / Service Configuration` is locally implemented
   and verified on top of exact WP-2191 commit `df57ad1`. It adds immutable Store-owned operating

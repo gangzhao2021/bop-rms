@@ -57,6 +57,7 @@ describe("migration catalog", () => {
       "0200_009_create_operating_entity_administration",
       "0200_010_create_brand_administration",
       "0300_001_create_permission",
+      "0400_001_create_feature_control_administration",
       "1000_001_create_store_configuration",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
@@ -150,6 +151,19 @@ describe("migration catalog", () => {
       expect(migration?.sql).toContain(`CREATE TABLE rms_store.${table}`);
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(4);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2193 Feature Control administration migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "0400_001_create_feature_control_administration",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@bop/feature-control",
+      schema: "bop_feature_control",
+    });
+    for (const table of ["control_version", "control_dependency", "control_operation"])
+      expect(migration?.sql).toContain(`CREATE TABLE bop_feature_control.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
   });
 
   it("registers the exact WP-2181 KDS Profile and UAT migration", async () => {

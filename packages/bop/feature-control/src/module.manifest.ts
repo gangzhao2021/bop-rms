@@ -25,7 +25,10 @@ const moduleManifestInput = {
   ],
   consumedEvents: [],
   publishedEvents: [],
-  ownedDatabase: { schema: null, tables: [] },
+  ownedDatabase: {
+    schema: "bop_feature_control",
+    tables: ["control_version", "control_dependency", "control_operation"],
+  },
   ownedJobs: [],
   featureFlags: [],
   killSwitches: [],
