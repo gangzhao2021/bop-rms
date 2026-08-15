@@ -1610,6 +1610,17 @@ Agents must read the root `AGENTS.md`, this index, and the active Work Package b
 
 ## Current repository stage
 
+WP-2182 local implementation verification is complete from exact predecessor
+`WP-2181@3c121a6` on `codex/wp-2182`. The bounded expansion adds the rebuildable
+`provider_integration_admin_v1` Projection, owner-routed permission/version/idempotency-bound action
+intents and the Section 88 `INT-PROVIDER-LIST` / `INT-PROVIDER-DETAIL` routes. Exact `pnpm verify`
+passed with root `321/321`, Projection `28/28`, Merchant `424/424`, all `40/40` package
+format/lint/typecheck/test/build tasks and the retained isolated PostgreSQL matrix. No Provider SDK,
+account, endpoint, credential, raw payload, webhook replay, Kill Switch mutation or live/sandbox
+result was created or claimed. Accepted Provider/region/evidence gates, owning-Domain authority,
+GitHub and deployment remain unchanged and deferred. This paragraph supersedes the historical
+active-stage snapshots below.
+
 WP-2181 local implementation verification is complete from exact predecessor
 `WP-2180@c33a0d8` on `codex/wp-2181`. The bounded Device-domain expansion adds immutable managed KDS
 Profile Versions, effective-dated assignments, append-only Store UAT runs/check results, evidence-
