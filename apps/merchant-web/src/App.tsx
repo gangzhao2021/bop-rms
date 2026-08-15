@@ -100,6 +100,7 @@ import { OperatingEntityDetailPage, OperatingEntityListPage } from "./OperatingE
 import { BrandDetailPage, BrandListPage } from "./BrandAdminPages.js";
 import { FeatureFlagListPage, StoreCapabilityPage } from "./FeatureControlAdminPages.js";
 import { PlatformLiveGatePage, StoreLiveGatePage } from "./LiveGatePages.js";
+import { RoleEditorPage, RoleListPage } from "./RoleAdministrationPages.js";
 import { MetricCatalogPage, MetricDetailPage } from "./MetricPages.js";
 import { DataQualityPage, ReconciliationPage } from "./DataQualityPages.js";
 import {
@@ -187,6 +188,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/organization/stores/:id/live-gate" element={<StoreLiveGatePage />} />
       <Route path="/app/organization/stores/:id" element={<StoreDetailPage />} />
       <Route path="/app/organization/features" element={<FeatureFlagListPage />} />
+      <Route path="/app/organization/roles" element={<RoleListPage />} />
+      <Route path="/app/organization/roles/:id" element={<RoleEditorPage />} />
       <Route path="/platform/live-gates" element={<PlatformLiveGatePage />} />
       <Route path="/app/commerce/menus" element={<MenuListPage />} />
       <Route path="/app/commerce/menus/:id/edit" element={<MenuBuilderPage />} />

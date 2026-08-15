@@ -282,6 +282,9 @@ importers:
 
   packages/bop/permission:
     dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../audit
       '@bop/identity':
         specifier: workspace:*
         version: link:../identity

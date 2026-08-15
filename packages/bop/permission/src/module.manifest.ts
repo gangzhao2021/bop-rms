@@ -8,6 +8,11 @@ const moduleManifestInput = {
   publicExports: ["."],
   allowedSynchronousDependencies: [
     {
+      moduleName: "audit",
+      packageName: "@bop/audit",
+      layer: "BOP",
+    },
+    {
       moduleName: "identity",
       packageName: "@bop/identity",
       layer: "BOP",
@@ -28,6 +33,10 @@ const moduleManifestInput = {
   ownedDatabase: {
     schema: "bop_permission",
     tables: [
+      "role_administration_decision",
+      "role_administration_operation",
+      "role_administration_permission",
+      "role_administration_version",
       "policy_state",
       "permission_definition",
       "role",

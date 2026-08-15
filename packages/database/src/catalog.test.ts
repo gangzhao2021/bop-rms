@@ -57,6 +57,7 @@ describe("migration catalog", () => {
       "0200_009_create_operating_entity_administration",
       "0200_010_create_brand_administration",
       "0300_001_create_permission",
+      "0300_002_create_role_administration",
       "0400_001_create_feature_control_administration",
       "0400_002_create_live_gate_workflow",
       "1000_001_create_store_configuration",
@@ -136,6 +137,20 @@ describe("migration catalog", () => {
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(6);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
     expect(migration?.sql).not.toMatch(/(?:credential|secret|token)_(?:value|bytes|text)/iu);
+  });
+
+  it("registers the exact WP-2195 role administration migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "0300_002_create_role_administration",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@bop/permission",
+      schema: "bop_permission",
+    });
+    expect(migration?.sql).toContain("CREATE TABLE bop_permission.role_administration_version");
+    expect(migration?.sql).toContain("CREATE TABLE bop_permission.role_administration_decision");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).toContain("append-only");
   });
 
   it("registers the exact WP-2192 Store configuration migration", async () => {
@@ -1035,6 +1050,7 @@ describe("migration catalog", () => {
       ],
       ["0200_010_create_brand_administration", "@bop/tenant", "bop_tenant"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
+      ["0300_002_create_role_administration", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",

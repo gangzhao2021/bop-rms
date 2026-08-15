@@ -32,6 +32,10 @@ const expectedForcedTables = [
   "bop_permission.permission_override",
   "bop_permission.policy_state",
   "bop_permission.role",
+  "bop_permission.role_administration_decision",
+  "bop_permission.role_administration_operation",
+  "bop_permission.role_administration_permission",
+  "bop_permission.role_administration_version",
   "bop_permission.role_assignment",
   "bop_publishing.live_gate_operation",
   "bop_publishing.live_gate_requirement",
@@ -136,7 +140,7 @@ async function prove(context) {
   const pool = new Pool({ ...context.clientConfig, max: 1 });
   await admin.connect();
   try {
-    assert.equal(expectedForcedTables.length, 118);
+    assert.equal(expectedForcedTables.length, 122);
     const forced = await admin.query(
       `SELECT format('%I.%I', namespace.nspname, relation.relname) AS table_name
        FROM pg_class AS relation
