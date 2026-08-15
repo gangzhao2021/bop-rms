@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(74);
+    expect(eventCatalog).toHaveLength(80);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
@@ -319,6 +319,12 @@ describe("Event Catalog source", () => {
       "ComplianceCaseEscalated:v1",
       "ComplianceCaseOpened:v1",
       "ComplianceCaseVerificationStarted:v1",
+      "ComplianceFindingRecorded:v1",
+      "CorrectiveActionAssigned:v1",
+      "CorrectiveActionCompleted:v1",
+      "CorrectiveActionVerificationFailed:v1",
+      "CorrectiveActionVerified:v1",
+      "CriticalComplianceFindingDetected:v1",
       "DataQualityIssueDetected:v1",
       "DataQualityIssueResolved:v1",
       "FulfillmentCompleted:v1",
@@ -812,7 +818,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(83);
+    expect(eventConsumerContracts).toHaveLength(89);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

@@ -21,6 +21,12 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `ComplianceCaseEscalated:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `ComplianceCaseOpened:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `ComplianceCaseVerificationStarted:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `ComplianceFindingRecorded:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `CorrectiveActionAssigned:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `CorrectiveActionCompleted:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `CorrectiveActionVerificationFailed:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `CorrectiveActionVerified:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `CriticalComplianceFindingDetected:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `DataQualityIssueDetected:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `DataQualityIssueResolved:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `FulfillmentCompleted:v1` — owner `@rms/fulfillment`; stable; store; indirect_identifier

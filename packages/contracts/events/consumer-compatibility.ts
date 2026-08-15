@@ -139,6 +139,22 @@ const contract = (
 
 export const eventConsumerContracts = defineEventConsumerContracts([
   ...[
+    "ComplianceFindingRecorded",
+    "CorrectiveActionAssigned",
+    "CorrectiveActionCompleted",
+    "CorrectiveActionVerificationFailed",
+    "CorrectiveActionVerified",
+    "CriticalComplianceFindingDetected",
+  ].map((eventType) =>
+    contract(
+      "compliance.case-projection",
+      "@rms/compliance-food-safety",
+      eventType,
+      "brand",
+      "append_compliance_case_projection",
+    ),
+  ),
+  ...[
     "ComplianceCaseCancelled",
     "ComplianceCaseClosed",
     "ComplianceCaseEnteredCorrectiveAction",

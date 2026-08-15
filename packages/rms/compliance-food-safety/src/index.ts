@@ -5,3 +5,6 @@ export * from "./application/ports/compliance-dashboard-ports.js";
 export * from "./contracts/compliance-case.js";
 export * from "./application/compliance-case-service.js";
 export * from "./application/ports/compliance-case-ports.js";
+export * from "./contracts/compliance-inspection-action.js";
+export * from "./application/compliance-inspection-action-service.js";
+export * from "./application/ports/compliance-inspection-action-ports.js";

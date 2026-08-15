@@ -5,11 +5,12 @@
 - Module Name: `compliance-food-safety`
 - Package Name: `@rms/compliance-food-safety`
 - Layer / Domain: `RMS / Compliance and Food Safety`
-- Phase / owning Work Package: `Later / WP-2170–2171`
+- Phase / owning Work Package: `Later / WP-2170–2172`
 - Owner role: `Compliance and Food Safety Engineering Owner`
 - Status: `active contracts, runtime-inactive adapters`
 - Responsibility: closed Compliance Dashboard query policy, rebuildable operational summaries and
-  versioned Compliance Case lifecycle/containment/Regulatory Notification contracts.
+  versioned Compliance Case, Inspection, Finding, Corrective Action, containment, Verification and
+  Regulatory Notification contracts.
 - Explicit non-goals: source Compliance Case/Record persistence and Product, Recipe, Supplier,
   Inventory, Kitchen, Device, Workforce or Order facts and commands.
 
@@ -31,6 +32,12 @@ outcomes; Regulatory Notification records never infer submission. Critical closu
 complete and independent gate evidence. Canonical Section 40.29 Case and Notification Events are
 registered in the Event Catalog; no generic transition or unaccepted event is published.
 
+`createComplianceInspectionActionService` adds Case-versioned, append-only Inspection corrections,
+stable Findings and Case-owned Corrective Actions. Checklist and Requirement Versions remain pinned;
+Critical Findings emit explicit escalation; Hard Requirements cannot be accepted as risk; completion
+does not imply Verification; and high-risk Actions require a distinct verifier. Operational work and
+Evidence bytes remain outside the contract.
+
 ## Dependencies
 
 - Allowed synchronous dependencies: `@bop/audit` safe Audit validation, `@bop/permission` Tenant
@@ -44,7 +51,8 @@ registered in the Event Catalog; no generic transition or unaccepted event is pu
 ## Data ownership and lifecycle
 
 - Owned objects: rebuildable Compliance Dashboard query policy, Compliance Case Aggregate contract,
-  immutable revisions, Containment outcome and Regulatory Notification records.
+  immutable Inspection/Finding/Corrective Action revisions, Containment outcome and Regulatory
+  Notification records.
 - Write owner: `@rms/compliance-food-safety`; business outcomes remain owner-issued references.
 - Scope: Tenant plus Brand and optional Store, revalidated at query execution.
 - Money: not accepted.
@@ -58,8 +66,9 @@ registered in the Event Catalog; no generic transition or unaccepted event is pu
 ## Persistence and eventing
 
 Persistence is not implemented because Section 50 grants no Compliance schema or migration
-namespace. Section 40.29 authorizes the bounded Case and Regulatory Notification Events registered
-by WP-2171; runtime publication remains inactive until an accepted durable adapter exists.
+namespace. Section 40.29 authorizes the bounded Case, Finding, Corrective Action and Regulatory
+Notification Events registered through WP-2172; runtime publication remains inactive until an
+accepted durable adapter exists.
 
 ## Security and privacy
 
@@ -84,8 +93,10 @@ pnpm verify
 ```
 
 Tests cover authorization, scope isolation, exact parsing, stable severity/due sorting, Evidence
-math, Case lifecycle/concurrency/idempotency, independent closure, owning-Domain containment,
-Regulatory Notification, filtering, stale/partial presentation and restricted-field rejection.
+math, Case lifecycle/concurrency/idempotency, append-only Inspection correction, Finding escalation,
+Corrective Action completion/independent Verification, independent closure, owning-Domain
+containment, Regulatory Notification, filtering, stale/partial presentation and restricted-field
+rejection.
 
 ## Decisions and follow-up
 
@@ -93,4 +104,4 @@ Regulatory Notification, filtering, stale/partial presentation and restricted-fi
 - External Evidence: real Cases, Requirements, licenses, Findings, actions, Evidence, deadlines,
   regulators and legal interpretations remain unavailable and unclaimed.
 - Revisit trigger: a later accepted WP authorizes Compliance persistence/runtime adapters.
-- Next allowed Work Package: WP-2172.
+- Next allowed Work Package: WP-2173.
