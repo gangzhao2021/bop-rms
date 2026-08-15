@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2195 — Role Editor, Compare and Approval Administration on codex/wp-2195`
+- Current discussion node: `WP-2196 — Export Job, Artifact, Expiry and Revocation Center on codex/wp-2196`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,19 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2196 — Export Job, Artifact, Expiry and Revocation Center` is resolved for local execution on
+  top of exact WP-2195 commit `a861e6f`. Business Intelligence owns only the cross-source export
+  request, state, artifact grant and download/revocation histories; source facts and exportable-field
+  decisions remain with their owning Domains through public contracts. It adds CSV/canonical-JSON
+  limits, formula-safe text, 24-hour encrypted artifacts, five-minute single-use application grants,
+  append-only history with forced Brand/optional-Store RLS and the complete `EXPORT-JOB-LIST`
+  route. Exact full `pnpm verify` passed with Business Intelligence `25/25`, Merchant Web `448/448`,
+  the `82`-migration / `14`-namespace catalog, all `40/40` package
+  format/lint/typecheck/test/build tasks and the complete retained isolated PostgreSQL matrix; the
+  dedicated WP-2196 database acceptance also passed. No real export, PII, source snapshot, object,
+  encryption result, application grant or download is claimed; GitHub publication and deployment
+  remain deferred.
 
 - `WP-2195 — Role Editor, Compare and Approval Administration` is resolved for local execution on
   top of exact WP-2194 commit `8096594`. Permission remains the sole Role/Grant owner; immutable

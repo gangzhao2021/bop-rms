@@ -59,6 +59,13 @@ const moduleManifestInput =
     ownedDatabase: {
       schema: "rms_reporting",
       tables: [
+        "export_access_grant",
+        "export_artifact",
+        "export_grant_consumption",
+        "export_job",
+        "export_job_state_record",
+        "export_operation_record",
+        "export_revocation",
         "backfill_request",
         "backfill_request_version",
         "data_quality_check",

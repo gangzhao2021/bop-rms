@@ -111,6 +111,7 @@ describe("migration catalog", () => {
       "1800_003_create_metric_definition",
       "1800_004_create_data_quality_reconciliation",
       "1800_005_create_pipeline_run",
+      "1800_006_create_export_job",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -151,6 +152,28 @@ describe("migration catalog", () => {
     expect(migration?.sql).toContain("CREATE TABLE bop_permission.role_administration_decision");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migration?.sql).toContain("append-only");
+  });
+
+  it("registers the exact WP-2196 Export Job migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1800_006_create_export_job",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@rms/business-intelligence",
+      schema: "rms_reporting",
+    });
+    for (const table of [
+      "export_job",
+      "export_job_state_record",
+      "export_artifact",
+      "export_access_grant",
+      "export_grant_consumption",
+      "export_revocation",
+      "export_operation_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_reporting.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(7);
+    expect(migration?.sql).not.toMatch(/(?:presigned|object_key|recipient|filename)/iu);
   });
 
   it("registers the exact WP-2192 Store configuration migration", async () => {
