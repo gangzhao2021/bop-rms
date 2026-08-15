@@ -61,6 +61,7 @@ describe("migration catalog", () => {
       "0300_002_create_role_administration",
       "0400_001_create_feature_control_administration",
       "0400_002_create_live_gate_workflow",
+      "0400_003_create_support_case",
       "1000_001_create_store_configuration",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
@@ -233,6 +234,25 @@ describe("migration catalog", () => {
     for (const table of ["live_gate_version", "live_gate_requirement", "live_gate_operation"])
       expect(migration?.sql).toContain(`CREATE TABLE bop_publishing.${table}`);
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
+  });
+
+  it("registers the exact WP-2198 Support Case migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "0400_003_create_support_case",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@bop/task", schema: "bop_task" });
+    for (const table of [
+      "support_case_version",
+      "diagnostic_access_grant",
+      "diagnostic_access_revocation",
+      "support_action_record",
+      "support_case_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE bop_task.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(5);
+    expect(migration?.sql).toContain("interval '15 minutes'");
+    expect(migration?.sql).toContain("bop.platform_support_case_id");
+    expect(migration?.sql).not.toMatch(/(?:command_text|query_text|secret|credential_value)/iu);
   });
 
   it("registers the exact WP-2181 KDS Profile and UAT migration", async () => {

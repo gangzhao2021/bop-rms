@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2197 — Platform Tenant / Region / Lifecycle Operations on codex/wp-2197`
+- Current discussion node: `WP-2198 — Purpose-bound Support Case and diagnostic access workflow on codex/wp-2198`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,20 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2198 — Purpose-bound Support Case and diagnostic access workflow` is resolved for local
+  execution on top of exact WP-2197 commit `69ba7e6`. Task owns immutable Support Case versions,
+  exact assignment/lifecycle operations, independently approved 15-minute diagnostic grants,
+  revocation and minimized action evidence while Tenant/Store, Permission, Identity/MFA, approval,
+  evidence bytes, Audit and source facts remain with their owners. Named Platform actor, one exact
+  Case/Tenant/optional Store, purpose, masking and exact delegated permissions fail closed;
+  impersonation, arbitrary database browsing, silent extension and diagnostic command/query/payload
+  storage are prohibited. Exact full `pnpm verify` passed with Task `30/30`, Merchant Web `452/452`,
+  the `84`-migration / `14`-namespace catalog, forced-RLS inventory `137`, all `40/40` package
+  format/lint/typecheck/test/build tasks and the complete retained isolated PostgreSQL matrix; the
+  dedicated WP-2198 Case-context, append-only and 15-minute-grant acceptance also passed. No real
+  Case, Actor, Tenant/Store, verification, MFA, approval, diagnostic access/action, break-glass task
+  or external mutation is claimed; GitHub publication and deployment remain deferred.
 
 - `WP-2197 — Platform Tenant / Region / Lifecycle Operations` is resolved for local execution on
   top of exact WP-2196 commit `1bdc804`. Tenant owns immutable Platform administration versions and

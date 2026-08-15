@@ -103,6 +103,7 @@ import { PlatformLiveGatePage, StoreLiveGatePage } from "./LiveGatePages.js";
 import { RoleEditorPage, RoleListPage } from "./RoleAdministrationPages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
 import { PlatformTenantDetailPage, PlatformTenantListPage } from "./PlatformTenantPages.js";
+import { SupportCasePage } from "./SupportCasePages.js";
 import { MetricCatalogPage, MetricDetailPage } from "./MetricPages.js";
 import { DataQualityPage, ReconciliationPage } from "./DataQualityPages.js";
 import {
@@ -195,6 +196,7 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/platform/live-gates" element={<PlatformLiveGatePage />} />
       <Route path="/platform/tenants" element={<PlatformTenantListPage />} />
       <Route path="/platform/tenants/:id" element={<PlatformTenantDetailPage />} />
+      <Route path="/platform/support-cases" element={<SupportCasePage />} />
       <Route path="/app/exports" element={<ExportJobListPage />} />
       <Route path="/app/commerce/menus" element={<MenuListPage />} />
       <Route path="/app/commerce/menus/:id/edit" element={<MenuBuilderPage />} />
