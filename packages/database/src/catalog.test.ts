@@ -92,6 +92,7 @@ describe("migration catalog", () => {
       "1500_005_create_kitchen_allergen_safety",
       "1500_006_create_kds_continuity",
       "1500_007_create_production_batch",
+      "1600_001_create_device_management",
       "1700_001_create_pickup_fulfillment",
       "1700_002_create_fulfillment_readiness",
       "1700_003_create_pickup_proof",
@@ -106,6 +107,28 @@ describe("migration catalog", () => {
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
     ).toBe(true);
+  });
+
+  it("registers the exact WP-2180 Device management migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1600_001_create_device_management",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@rms/printing-device",
+      schema: "rms_device",
+    });
+    for (const table of [
+      "device",
+      "device_capability_version",
+      "device_assignment",
+      "device_health_signal",
+      "device_health_current",
+      "device_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_device.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(6);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+    expect(migration?.sql).not.toMatch(/(?:credential|secret|token)_(?:value|bytes|text)/iu);
   });
 
   it("registers the WP-2005 Catalog function PUBLIC-execute revocation", async () => {

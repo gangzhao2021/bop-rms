@@ -31,6 +31,13 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `CriticalComplianceFindingDetected:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `DataQualityIssueDetected:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `DataQualityIssueResolved:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `DeviceActivated:v1` — owner `@rms/printing-device`; stable; store; indirect_identifier
+- `DeviceCapabilityChanged:v1` — owner `@rms/printing-device`; stable; store; indirect_identifier
+- `DeviceCredentialRevoked:v1` — owner `@rms/printing-device`; stable; store; indirect_identifier
+- `DeviceHealthChanged:v1` — owner `@rms/printing-device`; stable; store; indirect_identifier
+- `DeviceProvisioned:v1` — owner `@rms/printing-device`; stable; store; indirect_identifier
+- `DeviceRetired:v1` — owner `@rms/printing-device`; stable; store; indirect_identifier
+- `DeviceSuspended:v1` — owner `@rms/printing-device`; stable; store; indirect_identifier
 - `EmployeeQualificationExpired:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `EmployeeQualificationExpiring:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `FoodSafetyIncidentReported:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier

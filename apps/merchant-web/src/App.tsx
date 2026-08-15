@@ -85,6 +85,7 @@ import {
 import { ComplianceTraceabilityPage } from "./ComplianceTraceabilityPage.js";
 import { ComplianceRecallCasePage } from "./ComplianceRecallCasePage.js";
 import { CompliancePolicyPage } from "./CompliancePolicyPage.js";
+import { DeviceDetailPage, DeviceListPage } from "./DevicePages.js";
 import { MetricCatalogPage, MetricDetailPage } from "./MetricPages.js";
 import { DataQualityPage, ReconciliationPage } from "./DataQualityPages.js";
 import {
@@ -231,6 +232,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/compliance/recalls/:id" element={<ComplianceRecallCasePage />} />
       <Route path="/app/compliance/policies" element={<CompliancePolicyPage />} />
       <Route path="/app/compliance/policies/:id" element={<CompliancePolicyPage />} />
+      <Route path="/app/integrations/devices" element={<DeviceListPage />} />
+      <Route path="/app/integrations/devices/:id" element={<DeviceDetailPage />} />
       <Route path="/app/customers" element={<CustomerListPage />} />
       <Route path="/app/customers/loyalty-programs" element={<LoyaltyProgramListPage />} />
       <Route path="/app/customers/loyalty-programs/:id" element={<LoyaltyProgramEditorPage />} />

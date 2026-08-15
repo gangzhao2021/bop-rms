@@ -138,6 +138,24 @@ const contract = (
 });
 
 export const eventConsumerContracts = defineEventConsumerContracts([
+  ...[
+    "DeviceActivated",
+    "DeviceCapabilityChanged",
+    "DeviceCredentialRevoked",
+    "DeviceHealthChanged",
+    "DeviceProvisioned",
+    "DeviceRetired",
+    "DeviceSuspended",
+  ].map((eventType) =>
+    contract(
+      "device.management-projection",
+      "@rms/printing-device",
+      eventType,
+      "store",
+      "replace_device_management_projection",
+      "none",
+    ),
+  ),
   ...["RecallClosed", "RecallInitiated"].map((eventType) =>
     contract(
       "compliance.recall-projection",

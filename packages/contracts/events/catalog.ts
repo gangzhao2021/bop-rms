@@ -566,6 +566,17 @@ const paymentRefundedPayload = z.strictObject({
   providerConfirmedAt: z.iso.datetime({ offset: false }),
 });
 
+const deviceManagementPayload = z.strictObject({
+  deviceReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z
+    .enum(["Draft", "Provisioning", "Active", "Suspended", "Inactive", "Retired"])
+    .nullable(),
+  health: z.enum(["Healthy", "Degraded", "Unavailable", "Unknown"]).nullable(),
+  connectivity: z.enum(["Online", "Intermittent", "Offline", "Unknown"]).nullable(),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 export const eventCatalog = defineEventCatalog([
   {
     eventType: "AnalyticsBackfillCompleted",
@@ -641,6 +652,32 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: complianceCasePayload,
+  })),
+  ...(
+    [
+      "DeviceActivated",
+      "DeviceCapabilityChanged",
+      "DeviceCredentialRevoked",
+      "DeviceHealthChanged",
+      "DeviceProvisioned",
+      "DeviceRetired",
+      "DeviceSuspended",
+    ] as const
+  ).map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/printing-device" as const,
+    producerModule: "@rms/printing-device" as const,
+    stability: "stable" as const,
+    consumers: ["device.management-projection:v1"],
+    tenantScope: "store" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: deviceManagementPayload,
   })),
   ...(
     [

@@ -47,8 +47,27 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(91);
+    expect(eventCatalog).toHaveLength(98);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
+    for (const eventType of [
+      "DeviceActivated",
+      "DeviceCapabilityChanged",
+      "DeviceCredentialRevoked",
+      "DeviceHealthChanged",
+      "DeviceProvisioned",
+      "DeviceRetired",
+      "DeviceSuspended",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/printing-device",
+        producerModule: "@rms/printing-device",
+        consumers: ["device.management-projection:v1"],
+        tenantScope: "store",
+        dataClassification: "indirect_identifier",
+        replaySemantics: "idempotent",
+      });
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
       schemaVersion: 1,
@@ -329,6 +348,13 @@ describe("Event Catalog source", () => {
       "CriticalComplianceFindingDetected:v1",
       "DataQualityIssueDetected:v1",
       "DataQualityIssueResolved:v1",
+      "DeviceActivated:v1",
+      "DeviceCapabilityChanged:v1",
+      "DeviceCredentialRevoked:v1",
+      "DeviceHealthChanged:v1",
+      "DeviceProvisioned:v1",
+      "DeviceRetired:v1",
+      "DeviceSuspended:v1",
       "EmployeeQualificationExpired:v1",
       "EmployeeQualificationExpiring:v1",
       "FoodSafetyIncidentReported:v1",
@@ -913,7 +939,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(100);
+    expect(eventConsumerContracts).toHaveLength(107);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

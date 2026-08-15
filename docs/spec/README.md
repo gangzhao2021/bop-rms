@@ -1610,6 +1610,18 @@ Agents must read the root `AGENTS.md`, this index, and the active Work Package b
 
 ## Current repository stage
 
+WP-2180 local implementation verification is complete from exact predecessor
+`WP-2178@81a3e36` on `codex/wp-2180`. The bounded implementation adds the canonical
+`@rms/printing-device` Device Aggregate, immutable capability/configuration and assignment history,
+independent append-only Health signals/current projection, forced Store RLS, seven generated Event
+Catalog contracts and the Section 88 `DEV-DEVICE-LIST` / `DEV-DEVICE-DETAIL` routes. Exact
+`pnpm verify` passed with root `320/320`, Device `7/7`, Contracts `28/28`, Merchant `398/398`, all
+`40/40` package format/lint/typecheck/test/build tasks and the retained isolated PostgreSQL matrix.
+IDR-0039 remains unchanged: only browser KDS is Pilot; physical printers/peripherals, Store Gateway,
+vendor adapters/SDKs, application Offline Queue, real devices, credentials, pairing, external
+evidence, GitHub and deployment remain gated and unclaimed. This paragraph supersedes the
+historical active-stage snapshots below.
+
 WP-2163 local implementation verification is complete from exact predecessor
 `WP-2162@1827474` on `codex/wp-2163`. The bounded implementation adds immutable semantic Metric
 Versions, closed Lineage metadata, distinct Business Owner / Data Owner certification,

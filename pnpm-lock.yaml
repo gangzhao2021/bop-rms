@@ -546,6 +546,18 @@ importers:
         specifier: workspace:*
         version: link:../../bop/tenant
 
+  packages/rms/printing-device:
+    dependencies:
+      '@bop/audit':
+        specifier: workspace:*
+        version: link:../../bop/audit
+      '@bop/permission':
+        specifier: workspace:*
+        version: link:../../bop/permission
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../../bop/tenant
+
   packages/rms/procurement:
     dependencies:
       '@bop/audit':

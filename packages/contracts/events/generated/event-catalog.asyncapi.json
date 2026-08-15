@@ -1706,6 +1706,545 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "DeviceActivatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "DeviceActivatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "connectivity": {
+              "anyOf": [
+                {
+                  "enum": ["Online", "Intermittent", "Offline", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "deviceReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "health": {
+              "anyOf": [
+                {
+                  "enum": ["Healthy", "Degraded", "Unavailable", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "anyOf": [
+                {
+                  "enum": ["Draft", "Provisioning", "Active", "Suspended", "Inactive", "Retired"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "deviceReference",
+            "aggregateVersion",
+            "lifecycle",
+            "health",
+            "connectivity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "DeviceActivated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["device.management-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "DeviceActivated",
+        "x-bop-owner-module": "@rms/printing-device",
+        "x-bop-producer-module": "@rms/printing-device",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "DeviceCapabilityChangedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "DeviceCapabilityChangedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "connectivity": {
+              "anyOf": [
+                {
+                  "enum": ["Online", "Intermittent", "Offline", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "deviceReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "health": {
+              "anyOf": [
+                {
+                  "enum": ["Healthy", "Degraded", "Unavailable", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "anyOf": [
+                {
+                  "enum": ["Draft", "Provisioning", "Active", "Suspended", "Inactive", "Retired"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "deviceReference",
+            "aggregateVersion",
+            "lifecycle",
+            "health",
+            "connectivity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "DeviceCapabilityChanged v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["device.management-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "DeviceCapabilityChanged",
+        "x-bop-owner-module": "@rms/printing-device",
+        "x-bop-producer-module": "@rms/printing-device",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "DeviceCredentialRevokedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "DeviceCredentialRevokedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "connectivity": {
+              "anyOf": [
+                {
+                  "enum": ["Online", "Intermittent", "Offline", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "deviceReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "health": {
+              "anyOf": [
+                {
+                  "enum": ["Healthy", "Degraded", "Unavailable", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "anyOf": [
+                {
+                  "enum": ["Draft", "Provisioning", "Active", "Suspended", "Inactive", "Retired"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "deviceReference",
+            "aggregateVersion",
+            "lifecycle",
+            "health",
+            "connectivity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "DeviceCredentialRevoked v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["device.management-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "DeviceCredentialRevoked",
+        "x-bop-owner-module": "@rms/printing-device",
+        "x-bop-producer-module": "@rms/printing-device",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "DeviceHealthChangedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "DeviceHealthChangedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "connectivity": {
+              "anyOf": [
+                {
+                  "enum": ["Online", "Intermittent", "Offline", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "deviceReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "health": {
+              "anyOf": [
+                {
+                  "enum": ["Healthy", "Degraded", "Unavailable", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "anyOf": [
+                {
+                  "enum": ["Draft", "Provisioning", "Active", "Suspended", "Inactive", "Retired"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "deviceReference",
+            "aggregateVersion",
+            "lifecycle",
+            "health",
+            "connectivity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "DeviceHealthChanged v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["device.management-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "DeviceHealthChanged",
+        "x-bop-owner-module": "@rms/printing-device",
+        "x-bop-producer-module": "@rms/printing-device",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "DeviceProvisionedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "DeviceProvisionedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "connectivity": {
+              "anyOf": [
+                {
+                  "enum": ["Online", "Intermittent", "Offline", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "deviceReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "health": {
+              "anyOf": [
+                {
+                  "enum": ["Healthy", "Degraded", "Unavailable", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "anyOf": [
+                {
+                  "enum": ["Draft", "Provisioning", "Active", "Suspended", "Inactive", "Retired"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "deviceReference",
+            "aggregateVersion",
+            "lifecycle",
+            "health",
+            "connectivity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "DeviceProvisioned v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["device.management-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "DeviceProvisioned",
+        "x-bop-owner-module": "@rms/printing-device",
+        "x-bop-producer-module": "@rms/printing-device",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "DeviceRetiredV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "DeviceRetiredV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "connectivity": {
+              "anyOf": [
+                {
+                  "enum": ["Online", "Intermittent", "Offline", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "deviceReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "health": {
+              "anyOf": [
+                {
+                  "enum": ["Healthy", "Degraded", "Unavailable", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "anyOf": [
+                {
+                  "enum": ["Draft", "Provisioning", "Active", "Suspended", "Inactive", "Retired"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "deviceReference",
+            "aggregateVersion",
+            "lifecycle",
+            "health",
+            "connectivity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "DeviceRetired v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["device.management-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "DeviceRetired",
+        "x-bop-owner-module": "@rms/printing-device",
+        "x-bop-producer-module": "@rms/printing-device",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "DeviceSuspendedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "DeviceSuspendedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "connectivity": {
+              "anyOf": [
+                {
+                  "enum": ["Online", "Intermittent", "Offline", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "deviceReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "health": {
+              "anyOf": [
+                {
+                  "enum": ["Healthy", "Degraded", "Unavailable", "Unknown"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "anyOf": [
+                {
+                  "enum": ["Draft", "Provisioning", "Active", "Suspended", "Inactive", "Retired"],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "deviceReference",
+            "aggregateVersion",
+            "lifecycle",
+            "health",
+            "connectivity",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "DeviceSuspended v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["device.management-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "DeviceSuspended",
+        "x-bop-owner-module": "@rms/printing-device",
+        "x-bop-producer-module": "@rms/printing-device",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
       "EmployeeQualificationExpiredV1": {
         "contentType": "application/json",
         "deprecated": false,
