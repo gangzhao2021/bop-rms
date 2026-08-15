@@ -9,3 +9,6 @@ export * from "./application/store-operating-status-service.js";
 export * from "./application/ports/store-operating-status-ports.js";
 export * from "./contracts/business-date.js";
 export * from "./domain/resolve-business-date.js";
+export * from "./contracts/store-configuration-administration.js";
+export * from "./application/ports/store-configuration-administration-ports.js";
+export * from "./application/store-configuration-administration-service.js";

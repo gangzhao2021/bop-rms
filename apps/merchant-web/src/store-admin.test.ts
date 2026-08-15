@@ -2,11 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   STORE_SETUP_STEPS,
   parseStoreDetailView,
+  parseStoreHoursServiceView,
   parseStoreListView,
   parseStoreRouteReference,
   parseStoreSetupView,
 } from "./store-admin.js";
-import { STORE_REFERENCE, detailView, listView, setupView } from "./store-admin.fixtures.js";
+import {
+  STORE_REFERENCE,
+  detailView,
+  hoursServiceView,
+  listView,
+  setupView,
+} from "./store-admin.fixtures.js";
 
 describe("Store administration screen contracts", () => {
   it("accepts closed list/detail/setup views and exact UUIDv7 route", () => {
@@ -16,6 +23,7 @@ describe("Store administration screen contracts", () => {
     expect(parseStoreSetupView(setupView()).steps.map((step) => step.step)).toEqual(
       STORE_SETUP_STEPS,
     );
+    expect(parseStoreHoursServiceView(hoursServiceView()).weeklyDays).toHaveLength(7);
   });
 
   it("rejects open, mismatched and unordered values", () => {
@@ -33,5 +41,8 @@ describe("Store administration screen contracts", () => {
       "STORE_ADMIN_INVALID",
     );
     expect(() => parseStoreRouteReference("not-a-store")).toThrow("STORE_ADMIN_INVALID");
+    expect(() =>
+      parseStoreHoursServiceView({ ...hoursServiceView(), canManageService: "yes" }),
+    ).toThrow("STORE_ADMIN_INVALID");
   });
 });

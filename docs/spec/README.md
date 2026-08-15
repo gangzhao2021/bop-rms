@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2191 — Brand Configuration, Store Membership and Inheritance on codex/wp-2191`
+- Current discussion node: `WP-2192 — Store List / Detail / Setup / Hours / Service Configuration on codex/wp-2192`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,19 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2192 — Store List / Detail / Setup / Hours / Service Configuration` is locally implemented
+  and verified on top of exact WP-2191 commit `df57ad1`. It adds immutable Store-owned operating
+  configuration versions, controlled cross-Domain references, IANA timezone and local Business Day
+  Start, overlap-safe weekly/exception service periods, independent approval plus Publishing/Live
+  Gate evidence gates, append-only operation history, forced Store RLS and the full-state
+  `STORE-HOURS-SERVICE` route while completing the existing Store list/detail/setup contract. Exact
+  full `pnpm verify` passed with Store `83/83`, Merchant Web `438/438`, the `78`-migration / `14`-
+  namespace catalog, all `40/40` package format/lint/typecheck/test/build tasks and the complete
+  retained isolated PostgreSQL matrix. Stale Identity acceptance inventories were corrected to
+  include the already-accepted WP-2183 API Client tables/functions/RLS. No real Store, address,
+  contact, hours, tax/payment/capacity fact, approval, publication/live-gate decision or external
+  mutation was created or claimed; GitHub publication and deployment remain deferred.
 
 - `WP-2191 — Brand Configuration, Store Membership and Inheritance` is locally implemented and
   verified on top of exact WP-2190 commit `d148d38`. It adds immutable approved/published Brand

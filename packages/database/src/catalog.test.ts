@@ -57,6 +57,7 @@ describe("migration catalog", () => {
       "0200_009_create_operating_entity_administration",
       "0200_010_create_brand_administration",
       "0300_001_create_permission",
+      "1000_001_create_store_configuration",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
       "1102_001_create_option_set_binding",
@@ -133,6 +134,22 @@ describe("migration catalog", () => {
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(6);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
     expect(migration?.sql).not.toMatch(/(?:credential|secret|token)_(?:value|bytes|text)/iu);
+  });
+
+  it("registers the exact WP-2192 Store configuration migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1000_001_create_store_configuration",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/store", schema: "rms_store" });
+    for (const table of [
+      "store_configuration_version",
+      "store_weekly_service_period",
+      "store_service_exception",
+      "store_configuration_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_store.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(4);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
   it("registers the exact WP-2181 KDS Profile and UAT migration", async () => {

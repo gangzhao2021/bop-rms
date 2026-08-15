@@ -58,6 +58,7 @@ const businessOwners = new Map([
   ["bop_permission", "@bop/permission"],
   ["bop_tenant", "@bop/tenant"],
   ["bop_operating_entity", "@bop/operating-entity"],
+  ["rms_store", "@rms/store"],
   ["rms_catalog", "@rms/catalog"],
   ["rms_pricing", "@rms/pricing"],
   ["rms_recipe", "@rms/recipe"],
@@ -330,6 +331,7 @@ function validateSql(
           "rms_payment",
           "rms_device",
           "rms_reporting",
+          "rms_store",
         ].includes(metadata.schema) && acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
       )
     )

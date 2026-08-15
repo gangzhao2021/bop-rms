@@ -5,12 +5,14 @@ import {
   STORE_SETUP_STEPS,
   StoreAdminClientError,
   parseStoreDetailView,
+  parseStoreHoursServiceView,
   parseStoreListView,
   parseStoreRouteReference,
   parseStoreSetupView,
   unavailableStoreAdminClient,
   type StoreAdminClient,
   type StoreDetailView,
+  type StoreHoursServiceView,
   type StoreListView,
   type StoreSetupView,
 } from "./store-admin.js";
@@ -204,6 +206,12 @@ export function StoreDetailScreen({ view }: { readonly view: StoreDetailView }) 
         <Link className="shell-action" to={`/app/organization/stores/${view.storeReference}/setup`}>
           Open setup
         </Link>
+        <Link
+          className="shell-action"
+          to={`/app/organization/stores/${view.storeReference}/service`}
+        >
+          Hours &amp; service
+        </Link>
       </header>
       <div className="detail-section-grid">
         {Object.entries(view.sections).map(([name, status]) => (
@@ -219,6 +227,70 @@ export function StoreDetailScreen({ view }: { readonly view: StoreDetailView }) 
           </StatePanel>
         ))}
       </div>
+    </AppFrame>
+  );
+}
+
+export function StoreHoursServiceScreen({ view }: { readonly view: StoreHoursServiceView }) {
+  const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  return (
+    <AppFrame
+      title={`${view.name} hours & service`}
+      description={`STORE-HOURS-SERVICE · Expected Version ${view.version}`}
+    >
+      <header className="screen-heading">
+        <div>
+          <p className="bop-eyebrow">STORE-HOURS-SERVICE</p>
+          <h2>Hours and service configuration</h2>
+          <p>
+            {view.configurationSource} · effective {view.effectiveFrom}
+            {view.effectiveUntil ? ` to ${view.effectiveUntil}` : " onward"}
+          </p>
+        </div>
+        <strong>{view.pauseState}</strong>
+      </header>
+      <dl className="detail-list">
+        <div>
+          <dt>Business Day Start</dt>
+          <dd>{view.businessDayStartLocalTime} local</dd>
+        </div>
+        <div>
+          <dt>Service modes</dt>
+          <dd>{view.enabledServiceModes.join(", ")}</dd>
+        </div>
+        <div>
+          <dt>Exceptions</dt>
+          <dd>{view.exceptionCount}</dd>
+        </div>
+        <div>
+          <dt>Projection</dt>
+          <dd>
+            {view.projection.freshness} · {view.projection.asOfUtc}
+          </dd>
+        </div>
+      </dl>
+      <div className="detail-section-grid">
+        {view.weeklyDays.map((day, index) => (
+          <StatePanel heading={weekdays[index] ?? "Day"} key={day.isoWeekday}>
+            <p>{day.hoursSummary}</p>
+          </StatePanel>
+        ))}
+      </div>
+      <StatePanel
+        heading={view.canManageService ? "Store service controls" : "Permission-trimmed controls"}
+        tone={view.canManageService ? "neutral" : "offline"}
+      >
+        <p>
+          Overrides are overlap-validated. Pausing service never changes published hours or external
+          configuration.
+        </p>
+        <div className="card-actions">
+          <button disabled={!view.canManageService}>Create override</button>
+          <button disabled={!view.canManageService}>Validate overlap</button>
+          <button disabled={!view.canManageService}>Schedule</button>
+          <button disabled={!view.canManageService}>Pause service safely</button>
+        </div>
+      </StatePanel>
     </AppFrame>
   );
 }
@@ -348,6 +420,39 @@ export function StoreSetupPage({
     <StoreSetupScreen view={state.view} />
   ) : (
     <AppFrame title="Store setup" description="STORE-SETUP">
+      <StoreAdminStatePanel state={state.kind} />
+    </AppFrame>
+  );
+}
+
+export function StoreHoursServicePage({
+  client = unavailableStoreAdminClient,
+}: {
+  readonly client?: StoreAdminClient;
+}) {
+  const route = storeReference(useParams().id);
+  const load = useCallback(
+    () =>
+      route === null
+        ? Promise.reject(new Error("NOT_FOUND"))
+        : client.loadHoursService(route).then((value) => {
+            const view = parseStoreHoursServiceView(value);
+            if (view.storeReference !== route) throw new Error("STORE_MISMATCH");
+            return view;
+          }),
+    [client, route],
+  );
+  const state = useLoad(load, route ?? "invalid");
+  if (route === null)
+    return (
+      <AppFrame title="Hours & service" description="STORE-HOURS-SERVICE">
+        <StoreAdminStatePanel state="NotFound" />
+      </AppFrame>
+    );
+  return state.kind === "Found" ? (
+    <StoreHoursServiceScreen view={state.view} />
+  ) : (
+    <AppFrame title="Hours & service" description="STORE-HOURS-SERVICE">
       <StoreAdminStatePanel state={state.kind} />
     </AppFrame>
   );

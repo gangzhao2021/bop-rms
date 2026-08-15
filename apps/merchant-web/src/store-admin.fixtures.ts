@@ -57,3 +57,23 @@ export const setupView = () => ({
     status: index === 0 ? "Valid" : index === 1 ? "InProgress" : "NotStarted",
   })),
 });
+
+export const hoursServiceView = () => ({
+  screenId: "STORE-HOURS-SERVICE",
+  storeReference: STORE_REFERENCE,
+  name: "Training Store",
+  version: 3,
+  projection: { asOfUtc: AT, freshness: "Current" },
+  configurationSource: "StoreOverride",
+  effectiveFrom: AT,
+  effectiveUntil: null,
+  businessDayStartLocalTime: "04:00:00",
+  enabledServiceModes: ["DineIn", "Pickup"],
+  weeklyDays: Array.from({ length: 7 }, (_, index) => ({
+    isoWeekday: index + 1,
+    hoursSummary: index < 5 ? "09:00–22:00 · DineIn, Pickup" : "Closed",
+  })),
+  exceptionCount: 2,
+  pauseState: "Running",
+  canManageService: true,
+});

@@ -4,11 +4,17 @@ import { describe, expect, it } from "vitest";
 import {
   StoreAdminStatePanel,
   StoreDetailScreen,
+  StoreHoursServiceScreen,
   StoreListScreen,
   StoreSetupScreen,
 } from "./StoreAdminPages.js";
-import { detailView, listView, setupView } from "./store-admin.fixtures.js";
-import { parseStoreDetailView, parseStoreListView, parseStoreSetupView } from "./store-admin.js";
+import { detailView, hoursServiceView, listView, setupView } from "./store-admin.fixtures.js";
+import {
+  parseStoreDetailView,
+  parseStoreHoursServiceView,
+  parseStoreListView,
+  parseStoreSetupView,
+} from "./store-admin.js";
 
 describe("Store administration Section 88 screens", () => {
   it("renders every STORE-LIST field group and safe actions", () => {
@@ -73,5 +79,22 @@ describe("Store administration Section 88 screens", () => {
     expect(permission).toContain("current permission and Store scope");
     expect(conflict).toContain("Source changed");
     expect(conflict).toContain("authoritative Store version");
+  });
+
+  it("renders STORE-HOURS-SERVICE source, Business Day Start and safe controls", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreHoursServiceScreen view={parseStoreHoursServiceView(hoursServiceView())} />
+      </MemoryRouter>,
+    );
+    for (const value of [
+      "STORE-HOURS-SERVICE",
+      "StoreOverride",
+      "Business Day Start",
+      "04:00:00 local",
+      "Monday",
+      "Pause service safely",
+    ])
+      expect(html).toContain(value);
   });
 });

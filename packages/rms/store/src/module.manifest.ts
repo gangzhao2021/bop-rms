@@ -18,7 +18,15 @@ const moduleManifestInput = {
   ],
   consumedEvents: [],
   publishedEvents: [],
-  ownedDatabase: { schema: null, tables: [] },
+  ownedDatabase: {
+    schema: "rms_store",
+    tables: [
+      "store_configuration_version",
+      "store_weekly_service_period",
+      "store_service_exception",
+      "store_configuration_operation",
+    ],
+  },
   ownedJobs: [],
   featureFlags: [],
   killSwitches: [],

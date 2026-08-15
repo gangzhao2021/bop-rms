@@ -65,7 +65,12 @@ import {
   PurchaseOrderListPage,
 } from "./PurchaseOrderPages.js";
 import { OfferingEditorPage, OfferingListPage } from "./OfferingPages.js";
-import { StoreDetailPage, StoreListPage, StoreSetupPage } from "./StoreAdminPages.js";
+import {
+  StoreDetailPage,
+  StoreHoursServicePage,
+  StoreListPage,
+  StoreSetupPage,
+} from "./StoreAdminPages.js";
 import { OperationalDashboardPage } from "./OperationalDashboardPage.js";
 import { ReportBuilderPage, ReportCatalogPage } from "./ReportPages.js";
 import { ReportRunHistoryPage } from "./ReportRunHistoryPage.js";
@@ -175,6 +180,7 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app" element={<MerchantShell state={state} onSwitchStore={switchStore} />} />
       <Route path="/app/organization/stores" element={<StoreListPage />} />
       <Route path="/app/organization/stores/:id/setup" element={<StoreSetupPage />} />
+      <Route path="/app/organization/stores/:id/service" element={<StoreHoursServicePage />} />
       <Route path="/app/organization/stores/:id" element={<StoreDetailPage />} />
       <Route path="/app/commerce/menus" element={<MenuListPage />} />
       <Route path="/app/commerce/menus/:id/edit" element={<MenuBuilderPage />} />

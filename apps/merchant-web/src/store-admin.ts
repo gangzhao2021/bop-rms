@@ -72,10 +72,31 @@ export interface StoreSetupView {
   }[];
 }
 
+export interface StoreHoursServiceView {
+  readonly screenId: "STORE-HOURS-SERVICE";
+  readonly storeReference: string;
+  readonly name: string;
+  readonly version: number;
+  readonly projection: ProjectionState;
+  readonly configurationSource: "StoreOverride" | "BrandInherited";
+  readonly effectiveFrom: string;
+  readonly effectiveUntil: string | null;
+  readonly businessDayStartLocalTime: string;
+  readonly enabledServiceModes: readonly ("DineIn" | "Pickup" | "Delivery")[];
+  readonly weeklyDays: readonly {
+    readonly isoWeekday: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+    readonly hoursSummary: string;
+  }[];
+  readonly exceptionCount: number;
+  readonly pauseState: "Running" | "Paused" | "Unavailable";
+  readonly canManageService: boolean;
+}
+
 export interface StoreAdminClient {
   listStores(): Promise<unknown>;
   loadStore(storeReference: string): Promise<unknown>;
   loadSetup(storeReference: string): Promise<unknown>;
+  loadHoursService(storeReference: string): Promise<unknown>;
 }
 
 export type StoreAdminClientErrorCode =
@@ -292,6 +313,75 @@ export function parseStoreSetupView(value: unknown): StoreSetupView {
   });
 }
 
+export function parseStoreHoursServiceView(value: unknown): StoreHoursServiceView {
+  const input = closed(value, [
+    "screenId",
+    "storeReference",
+    "name",
+    "version",
+    "projection",
+    "configurationSource",
+    "effectiveFrom",
+    "effectiveUntil",
+    "businessDayStartLocalTime",
+    "enabledServiceModes",
+    "weeklyDays",
+    "exceptionCount",
+    "pauseState",
+    "canManageService",
+  ]);
+  if (
+    input.screenId !== "STORE-HOURS-SERVICE" ||
+    !["StoreOverride", "BrandInherited"].includes(String(input.configurationSource)) ||
+    typeof input.effectiveFrom !== "string" ||
+    !INSTANT.test(input.effectiveFrom) ||
+    (input.effectiveUntil !== null &&
+      (typeof input.effectiveUntil !== "string" || !INSTANT.test(input.effectiveUntil))) ||
+    typeof input.businessDayStartLocalTime !== "string" ||
+    !/^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/u.test(input.businessDayStartLocalTime) ||
+    !Array.isArray(input.enabledServiceModes) ||
+    input.enabledServiceModes.some((mode) => !serviceModeOrder.includes(mode as never)) ||
+    new Set(input.enabledServiceModes).size !== input.enabledServiceModes.length ||
+    !Array.isArray(input.weeklyDays) ||
+    input.weeklyDays.length !== 7 ||
+    typeof input.exceptionCount !== "number" ||
+    !Number.isSafeInteger(input.exceptionCount) ||
+    input.exceptionCount < 0 ||
+    !["Running", "Paused", "Unavailable"].includes(String(input.pauseState)) ||
+    typeof input.canManageService !== "boolean"
+  )
+    throw new Error("STORE_ADMIN_INVALID");
+  const enabledServiceModes = input.enabledServiceModes as readonly unknown[];
+  const weeklyDays = Object.freeze(
+    input.weeklyDays.map((value, index) => {
+      const day = closed(value, ["isoWeekday", "hoursSummary"]);
+      if (day.isoWeekday !== index + 1) throw new Error("STORE_ADMIN_INVALID");
+      return Object.freeze({
+        isoWeekday: day.isoWeekday as StoreHoursServiceView["weeklyDays"][number]["isoWeekday"],
+        hoursSummary: text(day.hoursSummary),
+      });
+    }),
+  );
+  return Object.freeze({
+    screenId: "STORE-HOURS-SERVICE",
+    storeReference: reference(input.storeReference),
+    name: text(input.name),
+    version: version(input.version),
+    projection: projection(input.projection),
+    configurationSource: input.configurationSource as StoreHoursServiceView["configurationSource"],
+    effectiveFrom: input.effectiveFrom,
+    effectiveUntil: input.effectiveUntil as string | null,
+    businessDayStartLocalTime: input.businessDayStartLocalTime,
+    enabledServiceModes: Object.freeze(
+      serviceModeOrder.filter((mode) => enabledServiceModes.includes(mode)),
+    ),
+    weeklyDays,
+    exceptionCount: input.exceptionCount,
+    pauseState: input.pauseState as StoreHoursServiceView["pauseState"],
+    canManageService: input.canManageService,
+  });
+}
+
 export const unavailableStoreAdminClient: StoreAdminClient = Object.freeze({
   async listStores() {
     throw new StoreAdminClientError("Unavailable");
@@ -300,6 +390,9 @@ export const unavailableStoreAdminClient: StoreAdminClient = Object.freeze({
     throw new StoreAdminClientError("Unavailable");
   },
   async loadSetup() {
+    throw new StoreAdminClientError("Unavailable");
+  },
+  async loadHoursService() {
     throw new StoreAdminClientError("Unavailable");
   },
 });

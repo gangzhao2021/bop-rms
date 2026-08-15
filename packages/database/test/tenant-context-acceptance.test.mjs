@@ -118,6 +118,10 @@ const expectedForcedTables = [
   "rms_payment.provider_webhook_processing_record",
   "rms_payment.provider_webhook_raw_evidence",
   "rms_payment.provider_webhook_record",
+  "rms_store.store_configuration_operation",
+  "rms_store.store_configuration_version",
+  "rms_store.store_service_exception",
+  "rms_store.store_weekly_service_period",
 ];
 
 async function prove(context) {
@@ -126,7 +130,7 @@ async function prove(context) {
   const pool = new Pool({ ...context.clientConfig, max: 1 });
   await admin.connect();
   try {
-    assert.equal(expectedForcedTables.length, 108);
+    assert.equal(expectedForcedTables.length, 112);
     const forced = await admin.query(
       `SELECT format('%I.%I', namespace.nspname, relation.relname) AS table_name
        FROM pg_class AS relation
