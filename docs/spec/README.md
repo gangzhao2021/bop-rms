@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2193 — Capability / Feature Flag Dependency and Effective-period Administration on codex/wp-2193`
+- Current discussion node: `WP-2194 — Store / Platform Live Gate Evidence Workflow on codex/wp-2194`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2194 — Store / Platform Live Gate Evidence Workflow` is locally implemented and verified on
+  top of exact WP-2193 commit `85bfaa5`. Publishing owns immutable gate decisions while evidence
+  bytes and professional/external facts remain with their owners. It adds fail-closed requirement
+  evaluation, independently authorized review decisions, append-only history with forced Store RLS,
+  and complete `STORE-LIVE-GATE` / `PLT-LIVE-GATE` routes. Exact full `pnpm verify` passed with
+  Publishing `19/19`, Merchant Web `444/444`, the `80`-migration / `14`-namespace catalog, all
+  `40/40` package format/lint/typecheck/test/build tasks and the complete retained isolated
+  PostgreSQL matrix; the dedicated WP-2194 database acceptance also passed. The canonical Pilot
+  gate remains blocked until real IDR-0037 evidence exists; no evidence, professional approval or
+  production activation is claimed. GitHub publication and deployment remain deferred.
 
 - `WP-2193 — Capability / Feature Flag Dependency and Effective-period Administration` is locally
   implemented and verified on top of exact WP-2192 commit `0f1b562`. It keeps Feature Control as the

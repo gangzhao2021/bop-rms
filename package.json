@@ -110,6 +110,7 @@
     "brand-admin:acceptance": "pnpm --filter @bop/tenant test && pnpm --filter @bop-rms/merchant-web test && vitest run --config packages/database/vitest.brand-admin.config.ts",
     "store-configuration:acceptance": "pnpm --filter @rms/store test && pnpm --filter @bop-rms/merchant-web test && vitest run --config packages/database/vitest.store-configuration.config.ts",
     "feature-control-admin:acceptance": "pnpm --filter @bop/feature-control test && pnpm --filter @bop-rms/merchant-web test && vitest run --config packages/database/vitest.feature-control-administration.config.ts",
+    "live-gate-workflow:acceptance": "pnpm --filter @bop/publishing test && pnpm --filter @bop-rms/merchant-web test && vitest run --config packages/database/vitest.live-gate-workflow.config.ts",
     "ordering-business-date:acceptance": "pnpm --filter @rms/store test && pnpm --filter @rms/ordering test && vitest run --config packages/database/vitest.order-number-allocation.config.ts",
     "ordering-create-order:acceptance": "pnpm --filter @rms/ordering test && vitest run --config packages/database/vitest.order-submission.config.ts",
     "ordering-status:acceptance": "pnpm --filter @rms/ordering test && vitest run --config packages/database/vitest.order-status-projection.config.ts",

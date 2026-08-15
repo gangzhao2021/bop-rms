@@ -99,6 +99,7 @@ import { ApiClientPage } from "./ApiClientPage.js";
 import { OperatingEntityDetailPage, OperatingEntityListPage } from "./OperatingEntityPages.js";
 import { BrandDetailPage, BrandListPage } from "./BrandAdminPages.js";
 import { FeatureFlagListPage, StoreCapabilityPage } from "./FeatureControlAdminPages.js";
+import { PlatformLiveGatePage, StoreLiveGatePage } from "./LiveGatePages.js";
 import { MetricCatalogPage, MetricDetailPage } from "./MetricPages.js";
 import { DataQualityPage, ReconciliationPage } from "./DataQualityPages.js";
 import {
@@ -183,8 +184,10 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/organization/stores/:id/setup" element={<StoreSetupPage />} />
       <Route path="/app/organization/stores/:id/service" element={<StoreHoursServicePage />} />
       <Route path="/app/organization/stores/:id/capabilities" element={<StoreCapabilityPage />} />
+      <Route path="/app/organization/stores/:id/live-gate" element={<StoreLiveGatePage />} />
       <Route path="/app/organization/stores/:id" element={<StoreDetailPage />} />
       <Route path="/app/organization/features" element={<FeatureFlagListPage />} />
+      <Route path="/platform/live-gates" element={<PlatformLiveGatePage />} />
       <Route path="/app/commerce/menus" element={<MenuListPage />} />
       <Route path="/app/commerce/menus/:id/edit" element={<MenuBuilderPage />} />
       <Route path="/app/commerce/bundles" element={<BundleListPage />} />

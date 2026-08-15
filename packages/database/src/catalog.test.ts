@@ -58,6 +58,7 @@ describe("migration catalog", () => {
       "0200_010_create_brand_administration",
       "0300_001_create_permission",
       "0400_001_create_feature_control_administration",
+      "0400_002_create_live_gate_workflow",
       "1000_001_create_store_configuration",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
@@ -163,6 +164,19 @@ describe("migration catalog", () => {
     });
     for (const table of ["control_version", "control_dependency", "control_operation"])
       expect(migration?.sql).toContain(`CREATE TABLE bop_feature_control.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
+  });
+
+  it("registers the exact WP-2194 Live Gate workflow migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "0400_002_create_live_gate_workflow",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@bop/publishing",
+      schema: "bop_publishing",
+    });
+    for (const table of ["live_gate_version", "live_gate_requirement", "live_gate_operation"])
+      expect(migration?.sql).toContain(`CREATE TABLE bop_publishing.${table}`);
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
   });
 
