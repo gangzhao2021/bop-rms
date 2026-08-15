@@ -417,6 +417,15 @@ importers:
         specifier: workspace:*
         version: link:../../bop/tenant
 
+  packages/rms/compliance-food-safety:
+    dependencies:
+      '@bop/permission':
+        specifier: workspace:*
+        version: link:../../bop/permission
+      '@bop/tenant':
+        specifier: workspace:*
+        version: link:../../bop/tenant
+
   packages/rms/customer-loyalty:
     dependencies:
       '@bop/audit':
