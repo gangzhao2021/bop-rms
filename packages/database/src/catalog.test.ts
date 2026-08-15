@@ -53,6 +53,7 @@ describe("migration catalog", () => {
       "0200_005_create_workforce_identity_security",
       "0200_006_create_guest_session",
       "0200_007_alter_guest_dining_binding",
+      "0200_008_create_api_client",
       "0300_001_create_permission",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
@@ -979,6 +980,7 @@ describe("migration catalog", () => {
       ["0200_005_create_workforce_identity_security", "@bop/identity", "bop_identity"],
       ["0200_006_create_guest_session", "@bop/identity", "bop_identity"],
       ["0200_007_alter_guest_dining_binding", "@bop/identity", "bop_identity"],
+      ["0200_008_create_api_client", "@bop/identity", "bop_identity"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
@@ -999,6 +1001,10 @@ describe("migration catalog", () => {
     );
     expect(guestSession?.sql).toContain("CREATE TABLE bop_identity.guest_session");
     expect(guestSession?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    const apiClient = migrations.find((migration) => migration.id === "0200_008_create_api_client");
+    expect(apiClient?.sql).toContain("CREATE TABLE bop_identity.api_client");
+    expect(apiClient?.sql).toContain("CREATE TABLE bop_identity.api_client_credential_metadata");
+    expect(apiClient?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migrations.map((migration) => migration.sql).join("\n")).not.toMatch(
       /\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu,
     );
