@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2177 — Recall Case, Scope Calculation, Containment, Notice and Disposition on codex/wp-2177`
+- Current discussion node: `WP-2178 — Compliance Policy / Regulatory Requirement Version and Control Mapping on codex/wp-2178`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2178 — Compliance Policy / Regulatory Requirement Version and Control Mapping` is locally
+  implemented and verified on top of exact WP-2177 commit `1aeeb1d`. It adds immutable versioned
+  Policy/Requirement contracts, Platform/Brand/Store inheritance that cannot weaken published Hard
+  Requirements, exact Evidence and owner-Control mappings, author/reviewer/Counsel/second-approver
+  separation, prospective retirement and the full-state `CMP-POLICY-LIST` / `CMP-POLICY-EDITOR`
+  routes while retaining no Compliance schema, migration, runtime adapter or invented Policy Event.
+  Compliance passed `62/62`, Contracts passed `28/28`, Merchant Web passed `383/383`, root tests
+  passed `319/319`, all `39/39` package tasks and the complete retained isolated PostgreSQL matrix
+  passed under exact full `pnpm verify`. Real jurisdictions, authorities, legal text and
+  interpretations, requirements, Evidence, controls, reviewers and production enforcement remain
+  unclaimed; GitHub publication is deferred.
 
 - `WP-2177 — Recall Case, Scope Calculation, Containment, Notice and Disposition` is locally
   implemented and verified on top of exact WP-2176 commit `8e4ed1f`. It adds immutable Case-bound

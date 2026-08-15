@@ -72,6 +72,13 @@ idempotent owner ports and return opaque outcomes. Hard Blocks are non-overridab
 never edits source history; closure requires complete Trace coverage, all owner outcomes and an
 independent passing Verification. Only `RecallInitiated` and `RecallClosed` are published.
 
+`createCompliancePolicyService` manages immutable Compliance Policy / Regulatory Requirement
+Versions with explicit Platform, Brand and Store inheritance. Child rules may be stricter but cannot
+weaken a published Hard Requirement, retention, monitoring, notification, mandatory Evidence or
+owner-Control mapping. Author, reviewer, Counsel and second-approval separation is validated before
+publication; retirement is prospective. Legal text, Evidence content and owner-Control execution
+remain outside this module, and Section 40.29 authorizes no Policy event.
+
 ## Dependencies
 
 - Allowed synchronous dependencies: `@bop/audit` safe Audit validation, `@bop/permission` Tenant
@@ -88,8 +95,9 @@ independent passing Verification. Only `RecallInitiated` and `RecallClosed` are 
   immutable Inspection/Finding/Corrective Action, Temperature/Excursion, Cleaning, Permit,
   Employee Qualification, Allergen Review and Food Safety Incident revisions, Supplier/Device
   assessment records, immutable restricted Trace Evidence Sets, Recall/Withdrawal revisions,
-  Containment outcomes and Regulatory Notification records. Trace chain and operational outcome
-  facts remain owned by their source Domains/projections.
+  versioned Compliance Policy / Regulatory Requirement definitions, Containment outcomes and
+  Regulatory Notification records. Trace chain, Evidence and operational Control/outcome facts
+  remain owned by their source Domains/projections.
 - Write owner: `@rms/compliance-food-safety`; business outcomes remain owner-issued references.
 - Scope: Tenant plus Brand and optional Store, revalidated at query execution.
 - Money: not accepted.
@@ -107,7 +115,8 @@ namespace. Section 40.29 authorizes the bounded Case, Finding, Corrective Action
 Cleaning, License, Employee Qualification, Allergen Control, Food Safety Incident and Regulatory
 Notification Events registered through WP-2175; runtime publication remains inactive until an
 accepted durable adapter exists. WP-2176 adds no Event; WP-2177 adds only Recall initiation/closure
-facts. Trace, containment, Task, notice and disposition requests use explicit ports.
+facts; WP-2178 adds no Event because Section 40.29 defines none for Policy. Trace, containment,
+Task, notice, disposition and Policy reviewer validation use explicit ports.
 
 ## Security and privacy
 
@@ -142,7 +151,8 @@ Case binding and owner block outcomes, canonical forward/backward Trace topology
 restricted Customer nodes, Evidence pin/export and Recall delegation, Regulatory Notification,
 Recall scope reconciliation, non-overridable owner containment, aggregate-only notice scope,
 disposition and independent closure, filtering, stale/partial presentation and restricted-field
-rejection.
+rejection, Policy Version immutability, non-weakening inheritance, mapping completeness,
+independent review, publication and prospective retirement.
 
 ## Decisions and follow-up
 
@@ -150,4 +160,4 @@ rejection.
 - External Evidence: real Cases, Requirements, licenses, Findings, actions, Evidence, deadlines,
   regulators and legal interpretations remain unavailable and unclaimed.
 - Revisit trigger: a later accepted WP authorizes Compliance persistence/runtime adapters.
-- Next allowed Work Package: WP-2178.
+- Next allowed Work Package: WP-2180.

@@ -23,3 +23,6 @@ export * from "./application/ports/compliance-traceability-ports.js";
 export * from "./contracts/compliance-recall.js";
 export * from "./application/compliance-recall-service.js";
 export * from "./application/ports/compliance-recall-ports.js";
+export * from "./contracts/compliance-policy.js";
+export * from "./application/compliance-policy-service.js";
+export * from "./application/ports/compliance-policy-ports.js";
