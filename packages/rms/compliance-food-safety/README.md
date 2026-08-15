@@ -5,13 +5,13 @@
 - Module Name: `compliance-food-safety`
 - Package Name: `@rms/compliance-food-safety`
 - Layer / Domain: `RMS / Compliance and Food Safety`
-- Phase / owning Work Package: `Later / WP-2170–2176`
+- Phase / owning Work Package: `Later / WP-2170–2177`
 - Owner role: `Compliance and Food Safety Engineering Owner`
 - Status: `active contracts, runtime-inactive adapters`
 - Responsibility: closed Compliance Dashboard query policy, rebuildable operational summaries and
   versioned Compliance Case, Inspection, Finding, Corrective Action, monitoring, Permit,
   Qualification, Allergen Control, Food Safety Incident, Traceability, containment, Verification,
-  restricted Evidence Set and Regulatory Notification contracts.
+  restricted Evidence Set, Recall/Withdrawal and Regulatory Notification contracts.
 - Explicit non-goals: source Compliance Case/Record persistence and Product, Recipe, Supplier,
   Inventory, Kitchen, Device, Workforce or Order facts and commands.
 
@@ -65,6 +65,13 @@ and Recall opening are separately authorized/audited owner-port operations that 
 Evidence Set, artifact and Recall outcome references; the service never copies the transaction
 chain, exports bytes/URLs or implements Recall lifecycle.
 
+`createComplianceRecallService` coordinates immutable Case-bound Recall/Withdrawal revisions. Trace
+scope calculation reconciles expected/traced/Gap counts and exposes Customer/Fulfillment aggregates
+only. Inventory, Catalog, Ordering, Procurement, Task and Notification actions execute through
+idempotent owner ports and return opaque outcomes. Hard Blocks are non-overridable; disposition
+never edits source history; closure requires complete Trace coverage, all owner outcomes and an
+independent passing Verification. Only `RecallInitiated` and `RecallClosed` are published.
+
 ## Dependencies
 
 - Allowed synchronous dependencies: `@bop/audit` safe Audit validation, `@bop/permission` Tenant
@@ -80,8 +87,9 @@ chain, exports bytes/URLs or implements Recall lifecycle.
 - Owned objects: rebuildable Compliance Dashboard query policy, Compliance Case Aggregate contract,
   immutable Inspection/Finding/Corrective Action, Temperature/Excursion, Cleaning, Permit,
   Employee Qualification, Allergen Review and Food Safety Incident revisions, Supplier/Device
-  assessment records, immutable restricted Trace Evidence Sets, Containment outcomes and Regulatory
-  Notification records. Trace chain facts remain owned by their source Domains/projection.
+  assessment records, immutable restricted Trace Evidence Sets, Recall/Withdrawal revisions,
+  Containment outcomes and Regulatory Notification records. Trace chain and operational outcome
+  facts remain owned by their source Domains/projections.
 - Write owner: `@rms/compliance-food-safety`; business outcomes remain owner-issued references.
 - Scope: Tenant plus Brand and optional Store, revalidated at query execution.
 - Money: not accepted.
@@ -98,8 +106,8 @@ Persistence is not implemented because Section 50 grants no Compliance schema or
 namespace. Section 40.29 authorizes the bounded Case, Finding, Corrective Action, Temperature,
 Cleaning, License, Employee Qualification, Allergen Control, Food Safety Incident and Regulatory
 Notification Events registered through WP-2175; runtime publication remains inactive until an
-accepted durable adapter exists. WP-2176 adds no Event; Trace queries and export/Recall requests use
-explicit ports.
+accepted durable adapter exists. WP-2176 adds no Event; WP-2177 adds only Recall initiation/closure
+facts. Trace, containment, Task, notice and disposition requests use explicit ports.
 
 ## Security and privacy
 
@@ -132,7 +140,9 @@ chemical/verification controls, Permit/Qualification owner boundaries, expiry, r
 eligibility outcomes, Allergen source invalidation / no-absence semantics, restricted Incident
 Case binding and owner block outcomes, canonical forward/backward Trace topology, explicit Gaps,
 restricted Customer nodes, Evidence pin/export and Recall delegation, Regulatory Notification,
-filtering, stale/partial presentation and restricted-field rejection.
+Recall scope reconciliation, non-overridable owner containment, aggregate-only notice scope,
+disposition and independent closure, filtering, stale/partial presentation and restricted-field
+rejection.
 
 ## Decisions and follow-up
 
@@ -140,4 +150,4 @@ filtering, stale/partial presentation and restricted-field rejection.
 - External Evidence: real Cases, Requirements, licenses, Findings, actions, Evidence, deadlines,
   regulators and legal interpretations remain unavailable and unclaimed.
 - Revisit trigger: a later accepted WP authorizes Compliance persistence/runtime adapters.
-- Next allowed Work Package: WP-2177.
+- Next allowed Work Package: WP-2178.

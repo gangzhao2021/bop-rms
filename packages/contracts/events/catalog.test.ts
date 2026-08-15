@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(89);
+    expect(eventCatalog).toHaveLength(91);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
@@ -370,6 +370,8 @@ describe("Event Catalog source", () => {
       "PromotionDraftReplaced:v1",
       "PromotionPaused:v1",
       "PromotionPublished:v1",
+      "RecallClosed:v1",
+      "RecallInitiated:v1",
       "RecipeArchived:v1",
       "RecipeDraftCreated:v1",
       "RecipeDraftReplaced:v1",
@@ -448,6 +450,34 @@ describe("Event Catalog source", () => {
       expect(event?.payloadSchema.safeParse({ ...payload, symptoms: "restricted" }).success).toBe(
         false,
       );
+    }
+  });
+
+  it("keeps Recall lifecycle events free of affected-object and Customer detail", () => {
+    const payload = {
+      recordReference: "018f9990-0000-7000-8000-000000000001",
+      tenantReference: "018f9990-0000-7000-8000-000000000002",
+      brandReference: "018f9990-0000-7000-8000-000000000003",
+      storeReference: null,
+      requirementVersionReference: "018f9990-0000-7000-8000-000000000004",
+      severity: "Critical",
+      occurredAt: "2026-08-14T18:00:00.000Z",
+    };
+    for (const eventType of ["RecallClosed", "RecallInitiated"]) {
+      const event = eventCatalog.find((entry) => entry.eventType === eventType);
+      expect(event).toMatchObject({
+        ownerModule: "@rms/compliance-food-safety",
+        consumers: ["compliance.recall-projection:v1"],
+        tenantScope: "brand",
+        dataClassification: "indirect_identifier",
+      });
+      expect(event?.payloadSchema.safeParse(payload).success).toBe(true);
+      expect(
+        event?.payloadSchema.safeParse({
+          ...payload,
+          customerReferences: [payload.recordReference],
+        }).success,
+      ).toBe(false);
     }
   });
 
@@ -883,7 +913,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(98);
+    expect(eventConsumerContracts).toHaveLength(100);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

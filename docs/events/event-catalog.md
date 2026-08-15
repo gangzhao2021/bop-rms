@@ -72,6 +72,8 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `PromotionDraftReplaced:v1` — owner `@rms/pricing`; stable; brand; none
 - `PromotionPaused:v1` — owner `@rms/pricing`; stable; brand; none
 - `PromotionPublished:v1` — owner `@rms/pricing`; stable; brand; none
+- `RecallClosed:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
+- `RecallInitiated:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `RecipeArchived:v1` — owner `@rms/recipe`; stable; brand; none
 - `RecipeDraftCreated:v1` — owner `@rms/recipe`; stable; brand; none
 - `RecipeDraftReplaced:v1` — owner `@rms/recipe`; stable; brand; none

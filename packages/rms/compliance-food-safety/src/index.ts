@@ -20,3 +20,6 @@ export * from "./application/ports/compliance-allergen-incident-ports.js";
 export * from "./contracts/compliance-traceability.js";
 export * from "./application/compliance-traceability-service.js";
 export * from "./application/ports/compliance-traceability-ports.js";
+export * from "./contracts/compliance-recall.js";
+export * from "./application/compliance-recall-service.js";
+export * from "./application/ports/compliance-recall-ports.js";

@@ -50,6 +50,8 @@ const moduleManifestInput =
       "rms.compliance-food-safety.license-suspended.v1",
       "rms.compliance-food-safety.regulatory-notification-required.v1",
       "rms.compliance-food-safety.regulatory-notification-submitted.v1",
+      "rms.compliance-food-safety.recall-closed.v1",
+      "rms.compliance-food-safety.recall-initiated.v1",
       "rms.compliance-food-safety.temperature-excursion-detected.v1",
     ],
     ownedDatabase: {
