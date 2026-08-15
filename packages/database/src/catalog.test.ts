@@ -55,6 +55,7 @@ describe("migration catalog", () => {
       "0200_007_alter_guest_dining_binding",
       "0200_008_create_api_client",
       "0200_009_create_operating_entity_administration",
+      "0200_010_create_brand_administration",
       "0300_001_create_permission",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
@@ -987,6 +988,7 @@ describe("migration catalog", () => {
         "@bop/operating-entity",
         "bop_operating_entity",
       ],
+      ["0200_010_create_brand_administration", "@bop/tenant", "bop_tenant"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
@@ -1021,6 +1023,12 @@ describe("migration catalog", () => {
       "CREATE TABLE bop_operating_entity.business_function_assignment_decision",
     );
     expect(entityAdmin?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    const brandAdmin = migrations.find(
+      (migration) => migration.id === "0200_010_create_brand_administration",
+    );
+    expect(brandAdmin?.sql).toContain("CREATE TABLE bop_tenant.brand_configuration_version");
+    expect(brandAdmin?.sql).toContain("CREATE TABLE bop_tenant.brand_store_membership_record");
+    expect(brandAdmin?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migrations.map((migration) => migration.sql).join("\n")).not.toMatch(
       /\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu,
     );

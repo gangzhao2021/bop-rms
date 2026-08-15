@@ -15,7 +15,16 @@ const moduleManifestInput = {
   ],
   consumedEvents: [],
   publishedEvents: [],
-  ownedDatabase: { schema: "bop_tenant", tables: ["brand", "store"] },
+  ownedDatabase: {
+    schema: "bop_tenant",
+    tables: [
+      "brand",
+      "brand_admin_operation",
+      "brand_configuration_version",
+      "brand_store_membership_record",
+      "store",
+    ],
+  },
   ownedJobs: [],
   featureFlags: [],
   killSwitches: [],

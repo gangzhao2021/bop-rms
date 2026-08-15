@@ -92,6 +92,7 @@ import {
 } from "./ProviderIntegrationPages.js";
 import { ApiClientPage } from "./ApiClientPage.js";
 import { OperatingEntityDetailPage, OperatingEntityListPage } from "./OperatingEntityPages.js";
+import { BrandDetailPage, BrandListPage } from "./BrandAdminPages.js";
 import { MetricCatalogPage, MetricDetailPage } from "./MetricPages.js";
 import { DataQualityPage, ReconciliationPage } from "./DataQualityPages.js";
 import {
@@ -245,6 +246,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/integrations/api-clients" element={<ApiClientPage />} />
       <Route path="/app/organization/entities" element={<OperatingEntityListPage />} />
       <Route path="/app/organization/entities/:id" element={<OperatingEntityDetailPage />} />
+      <Route path="/app/organization/brands" element={<BrandListPage />} />
+      <Route path="/app/organization/brands/:id" element={<BrandDetailPage />} />
       <Route path="/app/customers" element={<CustomerListPage />} />
       <Route path="/app/customers/loyalty-programs" element={<LoyaltyProgramListPage />} />
       <Route path="/app/customers/loyalty-programs/:id" element={<LoyaltyProgramEditorPage />} />
