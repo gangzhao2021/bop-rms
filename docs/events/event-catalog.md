@@ -15,6 +15,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `BundleDraftReplaced:v1` — owner `@rms/catalog`; stable; brand; none
 - `BundleLifecycleChanged:v1` — owner `@rms/catalog`; stable; brand; none
 - `BundleVersionPublished:v1` — owner `@rms/catalog`; stable; brand; none
+- `CleaningVerificationFailed:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `ComplianceCaseCancelled:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `ComplianceCaseClosed:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 - `ComplianceCaseEnteredCorrectiveAction:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
@@ -85,6 +86,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `TaxConfigDraftCreated:v1` — owner `@rms/pricing`; stable; store; none
 - `TaxConfigDraftReplaced:v1` — owner `@rms/pricing`; stable; store; none
 - `TaxConfigPublished:v1` — owner `@rms/pricing`; stable; store; none
+- `TemperatureExcursionDetected:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 
 Registered Event identities are the only bounded Event-type metric label candidates.
 An empty catalog therefore enables no Event-type production metric label.

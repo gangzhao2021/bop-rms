@@ -5,7 +5,7 @@
 - Module Name: `compliance-food-safety`
 - Package Name: `@rms/compliance-food-safety`
 - Layer / Domain: `RMS / Compliance and Food Safety`
-- Phase / owning Work Package: `Later / WP-2170–2172`
+- Phase / owning Work Package: `Later / WP-2170–2173`
 - Owner role: `Compliance and Food Safety Engineering Owner`
 - Status: `active contracts, runtime-inactive adapters`
 - Responsibility: closed Compliance Dashboard query policy, rebuildable operational summaries and
@@ -38,6 +38,11 @@ Critical Findings emit explicit escalation; Hard Requirements cannot be accepted
 does not imply Verification; and high-risk Actions require a distinct verifier. Operational work and
 Evidence bytes remain outside the contract.
 
+`createComplianceMonitoringService` appends exact-decimal Temperature Readings, controlled Manual
+corrections, Temperature Excursion revisions and Cleaning/Sanitation revisions. Missing/Device Fault
+never fabricates a measurement; Excursions do not decide Inventory disposition; Cleaning completion
+does not imply Verification; and out-of-requirement chemical snapshots require Safety Review.
+
 ## Dependencies
 
 - Allowed synchronous dependencies: `@bop/audit` safe Audit validation, `@bop/permission` Tenant
@@ -51,8 +56,8 @@ Evidence bytes remain outside the contract.
 ## Data ownership and lifecycle
 
 - Owned objects: rebuildable Compliance Dashboard query policy, Compliance Case Aggregate contract,
-  immutable Inspection/Finding/Corrective Action revisions, Containment outcome and Regulatory
-  Notification records.
+  immutable Inspection/Finding/Corrective Action, Temperature/Excursion and Cleaning revisions,
+  Containment outcome and Regulatory Notification records.
 - Write owner: `@rms/compliance-food-safety`; business outcomes remain owner-issued references.
 - Scope: Tenant plus Brand and optional Store, revalidated at query execution.
 - Money: not accepted.
@@ -66,9 +71,9 @@ Evidence bytes remain outside the contract.
 ## Persistence and eventing
 
 Persistence is not implemented because Section 50 grants no Compliance schema or migration
-namespace. Section 40.29 authorizes the bounded Case, Finding, Corrective Action and Regulatory
-Notification Events registered through WP-2172; runtime publication remains inactive until an
-accepted durable adapter exists.
+namespace. Section 40.29 authorizes the bounded Case, Finding, Corrective Action, Temperature,
+Cleaning and Regulatory Notification Events registered through WP-2173; runtime publication remains
+inactive until an accepted durable adapter exists.
 
 ## Security and privacy
 
@@ -95,8 +100,9 @@ pnpm verify
 Tests cover authorization, scope isolation, exact parsing, stable severity/due sorting, Evidence
 math, Case lifecycle/concurrency/idempotency, append-only Inspection correction, Finding escalation,
 Corrective Action completion/independent Verification, independent closure, owning-Domain
-containment, Regulatory Notification, filtering, stale/partial presentation and restricted-field
-rejection.
+containment, Temperature correction/offline semantics, Excursion disposition boundaries, Cleaning
+chemical/verification controls, Regulatory Notification, filtering, stale/partial presentation and
+restricted-field rejection.
 
 ## Decisions and follow-up
 
@@ -104,4 +110,4 @@ rejection.
 - External Evidence: real Cases, Requirements, licenses, Findings, actions, Evidence, deadlines,
   regulators and legal interpretations remain unavailable and unclaimed.
 - Revisit trigger: a later accepted WP authorizes Compliance persistence/runtime adapters.
-- Next allowed Work Package: WP-2173.
+- Next allowed Work Package: WP-2174.

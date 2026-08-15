@@ -335,6 +335,16 @@ const complianceFindingActionPayload = complianceCasePayload.extend({
   recordReference: z.string().regex(canonicalUuidV7),
 });
 
+const complianceMonitoringPayload = z.strictObject({
+  recordReference: z.string().regex(canonicalUuidV7),
+  tenantReference: z.string().regex(canonicalUuidV7),
+  brandReference: z.string().regex(canonicalUuidV7),
+  storeReference: z.string().regex(canonicalUuidV7).nullable(),
+  requirementVersionReference: z.string().regex(canonicalUuidV7),
+  severity: z.enum(["Observation", "Minor", "Major", "Critical", "ImmediateDanger"]),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 const metricDefinitionPayload = z.strictObject({
   metricReference: z.string().regex(canonicalUuidV7),
   versionReference: z.string().regex(canonicalUuidV7),
@@ -656,6 +666,22 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: complianceFindingActionPayload,
+  })),
+  ...(["CleaningVerificationFailed", "TemperatureExcursionDetected"] as const).map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/compliance-food-safety" as const,
+    producerModule: "@rms/compliance-food-safety" as const,
+    stability: "stable" as const,
+    consumers: ["compliance.case-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: complianceMonitoringPayload,
   })),
   {
     eventType: "DataQualityIssueDetected",

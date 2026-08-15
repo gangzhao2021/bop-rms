@@ -8,3 +8,6 @@ export * from "./application/ports/compliance-case-ports.js";
 export * from "./contracts/compliance-inspection-action.js";
 export * from "./application/compliance-inspection-action-service.js";
 export * from "./application/ports/compliance-inspection-action-ports.js";
+export * from "./contracts/compliance-monitoring.js";
+export * from "./application/compliance-monitoring-service.js";
+export * from "./application/ports/compliance-monitoring-ports.js";

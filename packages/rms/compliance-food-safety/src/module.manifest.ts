@@ -28,6 +28,7 @@ const moduleManifestInput =
     ],
     consumedEvents: [],
     publishedEvents: [
+      "rms.compliance-food-safety.cleaning-verification-failed.v1",
       "rms.compliance-food-safety.compliance-finding-recorded.v1",
       "rms.compliance-food-safety.compliance-case-cancelled.v1",
       "rms.compliance-food-safety.compliance-case-closed.v1",
@@ -42,6 +43,7 @@ const moduleManifestInput =
       "rms.compliance-food-safety.critical-compliance-finding-detected.v1",
       "rms.compliance-food-safety.regulatory-notification-required.v1",
       "rms.compliance-food-safety.regulatory-notification-submitted.v1",
+      "rms.compliance-food-safety.temperature-excursion-detected.v1",
     ],
     ownedDatabase: {
       schema: null,
