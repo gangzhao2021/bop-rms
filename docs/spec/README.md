@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2196 — Export Job, Artifact, Expiry and Revocation Center on codex/wp-2196`
+- Current discussion node: `WP-2197 — Platform Tenant / Region / Lifecycle Operations on codex/wp-2197`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,19 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2197 — Platform Tenant / Region / Lifecycle Operations` is resolved for local execution on
+  top of exact WP-2196 commit `1bdc804`. Tenant owns immutable Platform administration versions and
+  operation history while Store/provider health, Support Case, plan/capability, policy, Export,
+  Restore and Audit facts stay behind owner contracts. Named Platform actor, purpose/case binding,
+  independent approval, recent MFA and external evidence gates fail closed; Platform-context forced
+  RLS and the complete `PLT-TENANT-LIST` / `PLT-TENANT-DETAIL` routes are included. Exact full
+  `pnpm verify` passed with Tenant `20/20`, Merchant Web `450/450`, the `83`-migration / `14`-
+  namespace catalog, forced-RLS inventory `132`, all `40/40` package
+  format/lint/typecheck/test/build tasks and the complete retained isolated PostgreSQL matrix; the
+  dedicated WP-2197 database acceptance also passed. No real Tenant, Platform access, onboarding,
+  approval, health, suspension, export, restore or external mutation is claimed; GitHub publication
+  and deployment remain deferred.
 
 - `WP-2196 — Export Job, Artifact, Expiry and Revocation Center` is resolved for local execution on
   top of exact WP-2195 commit `a861e6f`. Business Intelligence owns only the cross-source export

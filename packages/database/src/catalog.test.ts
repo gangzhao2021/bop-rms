@@ -56,6 +56,7 @@ describe("migration catalog", () => {
       "0200_008_create_api_client",
       "0200_009_create_operating_entity_administration",
       "0200_010_create_brand_administration",
+      "0200_011_create_platform_tenant_administration",
       "0300_001_create_permission",
       "0300_002_create_role_administration",
       "0400_001_create_feature_control_administration",
@@ -174,6 +175,22 @@ describe("migration catalog", () => {
       expect(migration?.sql).toContain(`CREATE TABLE rms_reporting.${table}`);
     expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(7);
     expect(migration?.sql).not.toMatch(/(?:presigned|object_key|recipient|filename)/iu);
+  });
+
+  it("registers the exact WP-2197 Platform Tenant administration migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "0200_011_create_platform_tenant_administration",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@bop/tenant", schema: "bop_tenant" });
+    for (const table of [
+      "tenant_administration_version",
+      "tenant_capability_metadata_reference",
+      "tenant_administration_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE bop_tenant.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
+    expect(migration?.sql).toContain("bop.platform_support_case_id");
+    expect(migration?.sql).not.toMatch(/(?:secret|credential|token|database_query)/iu);
   });
 
   it("registers the exact WP-2192 Store configuration migration", async () => {
@@ -1072,6 +1089,7 @@ describe("migration catalog", () => {
         "bop_operating_entity",
       ],
       ["0200_010_create_brand_administration", "@bop/tenant", "bop_tenant"],
+      ["0200_011_create_platform_tenant_administration", "@bop/tenant", "bop_tenant"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
       ["0300_002_create_role_administration", "@bop/permission", "bop_permission"],
     ]);

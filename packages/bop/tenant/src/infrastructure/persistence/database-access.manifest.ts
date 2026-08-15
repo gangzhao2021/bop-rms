@@ -3,6 +3,30 @@ const databaseAccessManifestInput = {
   module: { moduleName: "tenant", packageName: "@bop/tenant", layer: "BOP" },
   tables: [
     {
+      table: "tenant_administration_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/tenant" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tenant_administration_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@bop/tenant" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tenant_capability_metadata_reference",
+      classification: "relationship-assignment",
+      writeOwner: { kind: "module", id: "@bop/tenant" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "brand_admin_operation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@bop/tenant" },
