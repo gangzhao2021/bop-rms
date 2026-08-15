@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2175 — Allergen Review / Food Safety Incident / Publish and Payment Block Linkage on codex/wp-2175`
+- Current discussion node: `WP-2176 — Forward / Backward Traceability Explorer and Restricted Evidence Export on codex/wp-2176`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2176 — Forward / Backward Traceability Explorer and Restricted Evidence Export` is locally
+  implemented and verified on top of exact WP-2175 commit `91f5a79`. It adds bounded canonical
+  Trace Runs over owner/BI projections, exact direction/seed/scope/period and projection version
+  pinning, mandatory explicit Gaps for incomplete chains, Restricted Customer nodes, immutable Case
+  Evidence Sets, opaque restricted-export receipts, Recall owner delegation and the full-state
+  `TRACE-EXPLORER` route while retaining no Compliance schema, migration, runtime adapter or new
+  Event. Compliance passed `48/48`, Contracts passed `27/27`, Merchant Web passed `353/353`, root
+  tests passed `319/319`, all `39/39` package tasks and the complete retained isolated PostgreSQL
+  matrix passed under exact full `pnpm verify`. Real source chains, Customers, Cases, Evidence,
+  retention/legal-hold decisions, exports and Recall outcomes remain unclaimed; GitHub publication
+  is deferred.
 
 - `WP-2175 — Allergen Review / Food Safety Incident / Publish and Payment Block Linkage` is
   locally implemented and verified on top of exact WP-2174 commit `c6fd8ff`. It adds immutable

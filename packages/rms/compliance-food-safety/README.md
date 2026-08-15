@@ -5,13 +5,13 @@
 - Module Name: `compliance-food-safety`
 - Package Name: `@rms/compliance-food-safety`
 - Layer / Domain: `RMS / Compliance and Food Safety`
-- Phase / owning Work Package: `Later / WP-2170–2175`
+- Phase / owning Work Package: `Later / WP-2170–2176`
 - Owner role: `Compliance and Food Safety Engineering Owner`
 - Status: `active contracts, runtime-inactive adapters`
 - Responsibility: closed Compliance Dashboard query policy, rebuildable operational summaries and
   versioned Compliance Case, Inspection, Finding, Corrective Action, monitoring, Permit,
-  Qualification, Allergen Control, Food Safety Incident, containment, Verification and Regulatory
-  Notification contracts.
+  Qualification, Allergen Control, Food Safety Incident, Traceability, containment, Verification,
+  restricted Evidence Set and Regulatory Notification contracts.
 - Explicit non-goals: source Compliance Case/Record persistence and Product, Recipe, Supplier,
   Inventory, Kitchen, Device, Workforce or Order facts and commands.
 
@@ -57,6 +57,14 @@ or report facts, and requests Catalog availability / Ordering-Payment admission 
 through an idempotent owner port. Medical narrative, Customer notes and Payment facts never enter
 the public contract.
 
+`createComplianceTraceabilityService` runs bounded forward/backward queries against an approved
+owner/BI projection and pins Run ID, exact seed/scope/period, source-as-of and projection version.
+The graph accepts only canonical owner/reference relationships; incomplete segments are explicit
+Gaps and cannot claim completeness. Customer nodes remain Restricted. Pin, restricted Case export
+and Recall opening are separately authorized/audited owner-port operations that return only opaque
+Evidence Set, artifact and Recall outcome references; the service never copies the transaction
+chain, exports bytes/URLs or implements Recall lifecycle.
+
 ## Dependencies
 
 - Allowed synchronous dependencies: `@bop/audit` safe Audit validation, `@bop/permission` Tenant
@@ -72,7 +80,8 @@ the public contract.
 - Owned objects: rebuildable Compliance Dashboard query policy, Compliance Case Aggregate contract,
   immutable Inspection/Finding/Corrective Action, Temperature/Excursion, Cleaning, Permit,
   Employee Qualification, Allergen Review and Food Safety Incident revisions, Supplier/Device
-  assessment records, Containment outcomes and Regulatory Notification records.
+  assessment records, immutable restricted Trace Evidence Sets, Containment outcomes and Regulatory
+  Notification records. Trace chain facts remain owned by their source Domains/projection.
 - Write owner: `@rms/compliance-food-safety`; business outcomes remain owner-issued references.
 - Scope: Tenant plus Brand and optional Store, revalidated at query execution.
 - Money: not accepted.
@@ -89,13 +98,15 @@ Persistence is not implemented because Section 50 grants no Compliance schema or
 namespace. Section 40.29 authorizes the bounded Case, Finding, Corrective Action, Temperature,
 Cleaning, License, Employee Qualification, Allergen Control, Food Safety Incident and Regulatory
 Notification Events registered through WP-2175; runtime publication remains inactive until an
-accepted durable adapter exists.
+accepted durable adapter exists. WP-2176 adds no Event; Trace queries and export/Recall requests use
+explicit ports.
 
 ## Security and privacy
 
-Authorization, purpose and exact scope are mandatory. Payloads are exact-field parsed, capped at
-500 signals and reject extra/restricted fields, duplicate references, future observations,
-cross-scope signals and impossible Evidence counts. Logs, URLs, analytics and fixtures may not
+Authorization, purpose and exact scope are mandatory. Payloads are exact-field parsed, bounded and
+reject extra/restricted fields, duplicate references, invented topology, hidden Gaps, future
+observations, cross-scope facts and impossible Evidence counts. Customer source identity and
+artifact bytes/URLs never enter the Trace UI contract. Logs, URLs, analytics and fixtures may not
 contain restricted facts; tests use synthetic opaque identifiers only.
 
 ## Operations
@@ -119,8 +130,9 @@ Corrective Action completion/independent Verification, independent closure, owni
 containment, Temperature correction/offline semantics, Excursion disposition boundaries, Cleaning
 chemical/verification controls, Permit/Qualification owner boundaries, expiry, renewal and
 eligibility outcomes, Allergen source invalidation / no-absence semantics, restricted Incident
-Case binding and owner block outcomes, Regulatory Notification, filtering, stale/partial
-presentation and restricted-field rejection.
+Case binding and owner block outcomes, canonical forward/backward Trace topology, explicit Gaps,
+restricted Customer nodes, Evidence pin/export and Recall delegation, Regulatory Notification,
+filtering, stale/partial presentation and restricted-field rejection.
 
 ## Decisions and follow-up
 
@@ -128,4 +140,4 @@ presentation and restricted-field rejection.
 - External Evidence: real Cases, Requirements, licenses, Findings, actions, Evidence, deadlines,
   regulators and legal interpretations remain unavailable and unclaimed.
 - Revisit trigger: a later accepted WP authorizes Compliance persistence/runtime adapters.
-- Next allowed Work Package: WP-2176.
+- Next allowed Work Package: WP-2177.
