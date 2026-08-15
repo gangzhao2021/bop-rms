@@ -1610,6 +1610,18 @@ Agents must read the root `AGENTS.md`, this index, and the active Work Package b
 
 ## Current repository stage
 
+WP-2181 local implementation verification is complete from exact predecessor
+`WP-2180@c33a0d8` on `codex/wp-2181`. The bounded Device-domain expansion adds immutable managed KDS
+Profile Versions, effective-dated assignments, append-only Store UAT runs/check results, evidence-
+gated publication/revocation and the expanded Section 88 `DEV-KDS-PROFILE` contract. Exact
+`pnpm verify` passed with root `321/321`, Device `13/13`, Merchant `409/409`, all `40/40` package
+format/lint/typecheck/test/build tasks and the retained isolated PostgreSQL matrix. Real Store/device
+UAT, managed-browser policy, network/wake/power/accessibility evidence, named Sessions and support
+facts remain unavailable and unclaimed; `STORE-LIVE-GATE-CA-ON-TOR-001` stays blocked. IDR-0039
+continues to exclude physical output, Store Gateway, vendor adapters and application Offline Queue.
+GitHub and deployment remain deferred. This paragraph supersedes the historical active-stage
+snapshots below.
+
 WP-2180 local implementation verification is complete from exact predecessor
 `WP-2178@81a3e36` on `codex/wp-2180`. The bounded implementation adds the canonical
 `@rms/printing-device` Device Aggregate, immutable capability/configuration and assignment history,

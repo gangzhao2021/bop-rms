@@ -52,6 +52,12 @@ const expectedForcedTables = [
   "rms_device.device_health_current",
   "rms_device.device_health_signal",
   "rms_device.device_operation",
+  "rms_device.kds_profile",
+  "rms_device.kds_profile_assignment",
+  "rms_device.kds_profile_operation",
+  "rms_device.kds_profile_version",
+  "rms_device.kds_uat_check_result",
+  "rms_device.kds_uat_run",
   "rms_fulfillment.fulfillment",
   "rms_fulfillment.fulfillment_completion_publication",
   "rms_fulfillment.fulfillment_creation_operation",
@@ -108,7 +114,7 @@ async function prove(context) {
   const pool = new Pool({ ...context.clientConfig, max: 1 });
   await admin.connect();
   try {
-    assert.equal(expectedForcedTables.length, 90);
+    assert.equal(expectedForcedTables.length, 96);
     const forced = await admin.query(
       `SELECT format('%I.%I', namespace.nspname, relation.relname) AS table_name
        FROM pg_class AS relation

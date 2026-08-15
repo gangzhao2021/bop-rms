@@ -10,78 +10,121 @@ import {
 type State =
   | {
       readonly kind:
-        "Loading" | "PermissionDenied" | "Offline" | "Conflict" | "CommandFailed" | "Unavailable";
+        | "Loading"
+        | "PermissionDenied"
+        | "NotFound"
+        | "FeatureDisabled"
+        | "Offline"
+        | "Stale"
+        | "Conflict"
+        | "CommandFailed"
+        | "Unavailable";
     }
   | { readonly kind: "Found"; readonly view: KdsProfileView };
+const label = (value: string) => value.replaceAll("_", " ");
 export function KdsProfileScreen({ view }: { readonly view: KdsProfileView }) {
-  const actionable =
-    view.freshnessStatus === "Fresh" &&
+  const publishable =
+    view.freshness === "Current" &&
+    view.completeness === "Complete" &&
+    view.lifecycle === "Draft" &&
+    view.assignmentReference !== null &&
     view.operatorSessionStatus !== "NamedActive" &&
-    view.uatStatus === "Passed";
+    view.uat.status === "Passed";
   return (
     <AppFrame
-      title="Managed KDS Profile"
-      description={`DEV-KDS-PROFILE · ${view.storeLabel} · ${view.stationLabel}`}
+      title="Managed KDS Profiles"
+      description={`DEV-KDS-PROFILE · ${view.storeLabel} · ${view.stationLabel ?? "Unassigned"}`}
     >
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">{view.profileLabel}</p>
+          <p className="bop-eyebrow">
+            {label(view.profileLabelCode)} · Version {view.profileVersion}
+          </p>
           <h2>
-            {view.browserFamily} · {view.resolution}
+            {view.browserFamily} · minimum {view.minimumLogicalWidth}×{view.minimumLogicalHeight}
           </h2>
           <p>
-            {view.freshnessStatus} · {view.projectedAt}
+            {view.lifecycle} · {view.freshness} · source {view.sourceAsOf}
           </p>
         </div>
-        <strong>{view.uatStatus}</strong>
+        <strong>{view.uat.status}</strong>
       </header>
+      <form className="list-filters" aria-label="KDS Profile filters">
+        <label>
+          Store / station
+          <input
+            value={`${view.filters.storeReference ?? "All"} · ${view.filters.stationReference ?? "All"}`}
+            readOnly
+          />
+        </label>
+        <label>
+          Lifecycle / UAT due
+          <input value={`${view.filters.lifecycle ?? "All"} · ${view.filters.uatDue}`} readOnly />
+        </label>
+      </form>
       <div className="detail-section-grid">
-        <StatePanel heading="Lock and handover" status>
-          <dl>
-            <div>
-              <dt>Auto-lock</dt>
-              <dd>{view.autoLockSeconds} seconds</dd>
-            </div>
-            <div>
-              <dt>Visibility loss</dt>
-              <dd>Locks board</dd>
-            </div>
-            <div>
-              <dt>Handover</dt>
-              <dd>Lock, sign out, rotate named Session</dd>
-            </div>
-            <div>
-              <dt>Session</dt>
-              <dd>{view.operatorSessionStatus}</dd>
-            </div>
-          </dl>
+        <StatePanel heading="Managed browser and power" status>
+          <p>
+            {view.wakePolicyCode} · {view.powerPolicyCode}
+          </p>
+          <p>Auto-lock {view.autoLockSeconds} seconds · visibility loss locks</p>
+          <p>Handover locks/signs out before a fresh named Session.</p>
+          <p>Session {view.operatorSessionStatus}</p>
         </StatePanel>
         <StatePanel heading="Continuity procedures">
           <p>{view.networkProcedureCode}</p>
           <p>{view.replacementProcedureCode}</p>
           <p>{view.notificationMode}</p>
+          <p>Browser commands are never queued offline.</p>
         </StatePanel>
         <StatePanel
-          heading="Device UAT evidence"
-          tone={view.uatStatus === "Passed" ? "neutral" : "offline"}
+          heading="Store UAT"
+          tone={view.uat.status === "Passed" ? "neutral" : "offline"}
           status
         >
           <p>
-            {view.uatStatus === "Passed"
-              ? "Accepted evidence reference is present."
-              : "Real Store device UAT is unavailable and not claimed."}
+            Checklist {view.uat.checklistVersionCode} · due {view.uat.dueAt}
+          </p>
+          <p>
+            {view.uat.browserVersionCode ?? "Browser version not recorded"} ·{" "}
+            {view.uat.logicalWidth ?? "—"}×{view.uat.logicalHeight ?? "—"}
+          </p>
+          <p>
+            {view.uat.status === "Passed"
+              ? "Accepted Evidence reference is present."
+              : "Real Store device UAT remains unavailable unless accepted Evidence is supplied."}
           </p>
         </StatePanel>
       </div>
+      <section className="card-list" aria-label="KDS UAT checklist">
+        {view.uat.checks.map((item) => (
+          <article className="summary-card" key={item.checkCode}>
+            <h3>{label(item.checkCode)}</h3>
+            <p>
+              {item.outcome} · {item.safeResultCode ?? "Not run"}
+            </p>
+          </article>
+        ))}
+      </section>
       <div className="card-actions">
-        <button disabled={!actionable}>Assign / publish profile</button>
-        <button disabled>Run UAT checklist — external device required</button>
-        <button disabled>Revoke profile</button>
+        {view.permissions.mayCreate ? <button>Create Profile revision</button> : null}
+        {view.permissions.mayAssign && view.lifecycle === "Draft" ? (
+          <button>Assign eligible KDS</button>
+        ) : null}
+        {view.permissions.mayRunUat && view.assignmentReference !== null ? (
+          <button>Run UAT checklist</button>
+        ) : null}
+        {view.permissions.mayPublish ? (
+          <button disabled={!publishable}>Publish Profile</button>
+        ) : null}
+        {view.permissions.mayRevoke && view.lifecycle === "Published" ? (
+          <button>Revoke Profile</button>
+        ) : null}
       </div>
       <StatePanel heading="Named operator privacy boundary">
         <p>
-          No shared username, credential, token, operator name, medical narrative or unrestricted
-          device identifier is displayed or stored by this browser view.
+          No shared username, credential, operator name, token, raw Device log or unrestricted
+          identifier is displayed. Store UAT Evidence stays with its owning service.
         </p>
       </StatePanel>
     </AppFrame>
@@ -89,13 +132,15 @@ export function KdsProfileScreen({ view }: { readonly view: KdsProfileView }) {
 }
 export function KdsProfileState({ state }: { readonly state: Exclude<State["kind"], "Found"> }) {
   const copy = {
-    Loading: "Loading authorized KDS profile…",
-    PermissionDenied: "Your integration permission or Store scope does not allow this profile.",
+    Loading: "Loading authorized KDS profiles…",
+    PermissionDenied: "Your Device permission or Store scope does not allow this profile.",
+    NotFound: "No authorized KDS Profile was found.",
+    FeatureDisabled: "Managed browser KDS is not enabled for this Store.",
     Offline: "Offline read-only. Lock the board and use the approved recovery procedure.",
-    Conflict: "Profile source changed. Refresh before any assignment.",
-    CommandFailed: "No profile, Session or device state change is assumed.",
-    Unavailable:
-      "The Device/KDS profile adapter is not connected. No external evidence is claimed.",
+    Stale: "Device or UAT eligibility is stale. Refresh before acting.",
+    Conflict: "Profile source changed. Refresh before assignment or publication.",
+    CommandFailed: "No Profile, UAT, Session or Device state change is assumed.",
+    Unavailable: "The KDS Profile adapter is not connected. No external evidence is claimed.",
   } as const;
   return (
     <StatePanel
