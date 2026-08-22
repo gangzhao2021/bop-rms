@@ -35,11 +35,15 @@ describe("Customer Cart browser client", () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(cart()), { status: 200 }));
     vi.stubGlobal("fetch", fetch);
     expect(await createBrowserCustomerCartClient().loadCurrent()).toEqual(cart());
-    expect(fetch).toHaveBeenCalledWith("/bff/customer/cart", {
-      method: "GET",
-      cache: "no-store",
-      credentials: "same-origin",
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/bff/customer/cart",
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: expect.any(AbortSignal),
+      }),
+    );
   });
 
   it("keeps CSRF and operation context in memory and sends no client money", async () => {

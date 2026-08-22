@@ -27,7 +27,19 @@ export interface SupportCaseOperation {
   readonly action: SupportActionRecord | null;
   readonly grantReference: SupportCaseReference | null;
 }
+export interface ActiveDiagnosticAccessInput {
+  readonly caseReference: SupportCaseReference;
+  readonly grantReference: SupportCaseReference;
+  readonly actorReference: SupportCaseReference;
+  readonly tenantReference: SupportCaseReference;
+  readonly storeReference: SupportCaseReference | null;
+  readonly purposeCode: string;
+  readonly delegatedPermission: string;
+  /** Trusted application time for audit correlation; expiry uses repository transaction time. */
+  readonly observedAt: string;
+}
 export interface SupportCasePorts {
+  readonly clock: { now(): string };
   readonly authorization: {
     authorize(input: {
       readonly command: SupportCaseCommand;
@@ -77,10 +89,16 @@ export interface SupportCasePorts {
     loadLatest(reference: SupportCaseReference): Promise<SupportCaseVersion | null>;
     loadGrant(reference: SupportCaseReference): Promise<DiagnosticAccessGrant | null>;
     isGrantRevoked(reference: SupportCaseReference): Promise<boolean>;
+    /** Resolves Case, grant, expiry and revocation atomically using repository transaction time. */
+    resolveActiveDiagnosticAccess(
+      input: ActiveDiagnosticAccessInput,
+    ): Promise<DiagnosticAccessGrant | null>;
     resolveOperation(reference: SupportCaseReference): Promise<SupportCaseOperation | null>;
     commit(input: {
       readonly operation: SupportCaseOperation;
       readonly expectedVersion: number;
+      /** Revalidate this predicate in the same transaction as the operation/action write. */
+      readonly requiredActiveDiagnosticAccess: ActiveDiagnosticAccessInput | null;
       readonly audit: {
         readonly actorReference: SupportCaseReference;
         readonly purposeCode: string;
@@ -99,7 +117,6 @@ export interface ResolveDiagnosticAccessInput {
   readonly storeReference: SupportCaseReference | null;
   readonly purposeCode: string;
   readonly delegatedPermission: string;
-  readonly observedAt: string;
 }
 export type DiagnosticAccessDecision =
   | Readonly<{ allowed: false; reason: "Denied" }>

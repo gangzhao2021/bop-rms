@@ -110,6 +110,46 @@ describe("WP-1205 in-memory Cart state", () => {
     expect(state.calls).toEqual([{ name: "load" }, { name: "update", operationReference: id(20) }]);
   });
 
+  it("coalesces concurrent mutations into one key and one request", async () => {
+    let release!: (value: CartView) => void;
+    let mutationCalls = 0;
+    let keyCalls = 0;
+    const gate = new Promise<CartView>((resolve) => {
+      release = resolve;
+    });
+    const client: CustomerCartClient = {
+      loadCurrent: async () => cart(),
+      createCart: async () => cart(),
+      addItem: async () => cart(),
+      updateItem: async () => {
+        mutationCalls += 1;
+        return gate;
+      },
+      removeItem: async () => {
+        mutationCalls += 1;
+        return gate;
+      },
+    };
+    const controller = createCartStateController({
+      client,
+      keyFactory: () => {
+        keyCalls += 1;
+        return id(20);
+      },
+    });
+    await controller.load();
+    const first = controller.updateItem(id(2), {
+      quantity: 2,
+      optionSelections: [],
+      customerNote: null,
+    });
+    const second = controller.removeItem(id(2));
+    expect(second).toBe(first);
+    expect({ mutationCalls, keyCalls }).toEqual({ mutationCalls: 1, keyCalls: 1 });
+    release(cart(4));
+    await Promise.all([first, second]);
+  });
+
   it("retries an unknown foreground outcome with the exact same operation key", async () => {
     const state = fixture();
     await state.controller.load();

@@ -3,6 +3,7 @@ import {
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
+import { boundedFetch } from "../network/bounded-fetch.js";
 
 const errorCodes = new Set<CartErrorCode>([
   "cart_request_invalid",
@@ -224,7 +225,7 @@ async function parse(response: Response): Promise<CartView | null> {
 async function request(url: string, init: RequestInit): Promise<CartView | null> {
   try {
     return await parse(
-      await fetch(url, {
+      await boundedFetch(globalThis.fetch, url, {
         ...init,
         cache: "no-store",
         credentials: "same-origin",

@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2198 — Purpose-bound Support Case and diagnostic access workflow on codex/wp-2198`
+- Current discussion node: `WP-2199 — Trusted diagnostic authorization time and browser request resilience on codex/wp-2199`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2199 — Trusted diagnostic authorization time and browser request resilience` is resolved for
+  local execution on top of exact WP-2198 commit `0d7ecba`. It replaces caller-controlled support
+  authorization time with a trusted application clock, requires active diagnostic grants to be
+  revalidated atomically with action commits, bounds customer and merchant browser requests, and
+  coalesces concurrent customer write intents. Exact full `pnpm verify` passed with root `328/328`,
+  Task `32/32`, Customer PWA `203/203`, Merchant Web `452/452`, the `84`-migration / `14`-namespace
+  catalog and all `40/40` package format/lint/typecheck/test/build tasks; the tracked-file secret
+  scan also passed. No production diagnostic access, external mutation, deployment or publication
+  is authorized.
 
 - `WP-2198 — Purpose-bound Support Case and diagnostic access workflow` is resolved for local
   execution on top of exact WP-2197 commit `69ba7e6`. Task owns immutable Support Case versions,

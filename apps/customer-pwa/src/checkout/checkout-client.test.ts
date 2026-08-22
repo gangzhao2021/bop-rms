@@ -92,17 +92,21 @@ describe("WP-1703 Checkout transport", () => {
     const client = createCheckoutClient({} as CustomerCartClient);
 
     await expect(client.quote(cart, id(9))).resolves.toEqual(quote);
-    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/carts/${id(1)}/quote`, {
-      method: "POST",
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: {
-        "content-type": "application/json",
-        "idempotency-key": id(9),
-        "x-csrf-token": "c".repeat(43),
-      },
-      body: JSON.stringify({ cartVersion: 3 }),
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/carts/${id(1)}/quote`,
+      expect.objectContaining({
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": id(9),
+          "x-csrf-token": "c".repeat(43),
+        },
+        body: JSON.stringify({ cartVersion: 3 }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
   });
 
   it("fails a response carrying an unapproved internal field closed", async () => {
@@ -161,6 +165,33 @@ describe("WP-1703 Checkout state", () => {
     await controller.load();
     await controller.quote();
     expect(controller.getState()).toEqual({ status: "ready", cart, quote });
+  });
+
+  it("coalesces concurrent Quote writes into one key and one request", async () => {
+    let release!: (value: CheckoutQuote) => void;
+    let quoteCalls = 0;
+    let keyCalls = 0;
+    const gate = new Promise<CheckoutQuote>((resolve) => {
+      release = resolve;
+    });
+    const client: CheckoutClient = {
+      loadCart: async () => cart,
+      quote: async () => {
+        quoteCalls += 1;
+        return gate;
+      },
+    };
+    const controller = createCheckoutController(client, () => {
+      keyCalls += 1;
+      return id(9);
+    });
+    await controller.load();
+    const first = controller.quote();
+    const second = controller.quote();
+    expect(second).toBe(first);
+    expect({ quoteCalls, keyCalls }).toEqual({ quoteCalls: 1, keyCalls: 1 });
+    release(quote);
+    await Promise.all([first, second]);
   });
 
   it("retries an unknown outcome with the same operation key", async () => {

@@ -82,7 +82,26 @@ function fixture(
   activeGrant: DiagnosticAccessGrant | null = null,
 ) {
   const operations = new Map<string, SupportCaseOperation>();
+  let observedAt = at;
+  let revoked = false;
+  const resolveActive = async (
+    query: Parameters<SupportCasePorts["repository"]["resolveActiveDiagnosticAccess"]>[0],
+  ) =>
+    current?.status === "AccessGranted" &&
+    activeGrant !== null &&
+    !revoked &&
+    activeGrant.caseReference === query.caseReference &&
+    activeGrant.grantReference === query.grantReference &&
+    activeGrant.supportActorReference === query.actorReference &&
+    activeGrant.tenantReference === query.tenantReference &&
+    activeGrant.storeReference === query.storeReference &&
+    activeGrant.purposeCode === query.purposeCode &&
+    activeGrant.delegatedPermissions.includes(query.delegatedPermission) &&
+    Date.parse(query.observedAt) < Date.parse(activeGrant.expiresAt)
+      ? activeGrant
+      : null;
   const ports: SupportCasePorts = {
+    clock: { now: () => observedAt },
     authorization: {
       authorize: vi.fn(async () => ({
         allowed: true,
@@ -107,15 +126,30 @@ function fixture(
     repository: {
       loadLatest: vi.fn(async () => current),
       loadGrant: vi.fn(async () => activeGrant),
-      isGrantRevoked: vi.fn(async () => false),
+      isGrantRevoked: vi.fn(async () => revoked),
+      resolveActiveDiagnosticAccess: vi.fn(resolveActive),
       resolveOperation: vi.fn(async (reference) => operations.get(reference) ?? null),
-      commit: vi.fn(async ({ operation }) => {
+      commit: vi.fn(async ({ operation, requiredActiveDiagnosticAccess }) => {
+        if (
+          requiredActiveDiagnosticAccess !== null &&
+          (await resolveActive(requiredActiveDiagnosticAccess)) === null
+        )
+          throw new Error("active diagnostic access changed before commit");
         operations.set(operation.operationReference, operation);
         return operation;
       }),
     },
   };
-  return { ports, service: createSupportCaseService(ports) };
+  return {
+    ports,
+    service: createSupportCaseService(ports),
+    revoke: () => {
+      revoked = true;
+    },
+    setNow: (value: string) => {
+      observedAt = value;
+    },
+  };
 }
 describe("WP-2198 Support Case", () => {
   it("creates a verified, purpose-bound Case without impersonation material", async () => {
@@ -178,6 +212,7 @@ describe("WP-2198 Support Case", () => {
       g = grant(),
       f = fixture(active, g),
       resolve = createDiagnosticAccessResolver(f.ports);
+    f.setNow("2026-08-15T16:15:00.000Z");
     await expect(
       resolve({
         caseReference: id(1),
@@ -187,8 +222,61 @@ describe("WP-2198 Support Case", () => {
         storeReference: id(3),
         purposeCode: "AUTHORIZED_SUPPORT",
         delegatedPermission: "tenant.diagnostics",
-        observedAt: "2026-08-15T16:15:00.000Z",
       }),
     ).resolves.toEqual({ allowed: false, reason: "Denied" });
+  });
+  it("uses trusted time instead of caller-controlled diagnostic timestamps", async () => {
+    const active = version("AccessGranted", 4),
+      f = fixture(active, grant()),
+      resolve = createDiagnosticAccessResolver(f.ports);
+    f.setNow("2026-08-15T16:15:00.000Z");
+    await expect(
+      resolve({
+        caseReference: id(1),
+        grantReference: id(30),
+        actorReference: id(4),
+        tenantReference: id(2),
+        storeReference: id(3),
+        purposeCode: "AUTHORIZED_SUPPORT",
+        delegatedPermission: "tenant.diagnostics",
+      }),
+    ).resolves.toEqual({ allowed: false, reason: "Denied" });
+  });
+  it("requires the active grant to be revalidated atomically with an action commit", async () => {
+    const active = version("AccessGranted", 4),
+      f = fixture(active, grant()),
+      candidate = version("AccessGranted", 5, {
+        supersedesVersionReference: active.versionReference,
+      }),
+      action = createSupportActionRecord({
+        actionReference: id(60),
+        caseReference: id(1),
+        grantReference: id(30),
+        supportActorReference: id(4),
+        delegatedPermission: "tenant.diagnostics",
+        targetType: "TENANT_HEALTH",
+        targetReference: id(61),
+        reasonCode: "INVESTIGATE_INCIDENT",
+        evidenceReference: id(62),
+        occurredAt: at,
+        dataClassification: "RestrictedAccessMetadata",
+      });
+    vi.mocked(f.ports.repository.resolveActiveDiagnosticAccess).mockImplementationOnce(
+      async (query) => {
+        f.revoke();
+        return grant().grantReference === query.grantReference ? grant() : null;
+      },
+    );
+    await expect(
+      f.service.execute(
+        "RecordAction",
+        input(candidate, id(4), { action, grantReference: id(30) }),
+      ),
+    ).rejects.toMatchObject({ code: "SUPPORT_CASE_DEPENDENCY_UNAVAILABLE" });
+    expect(f.ports.repository.commit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requiredActiveDiagnosticAccess: expect.objectContaining({ observedAt: at }),
+      }),
+    );
   });
 });

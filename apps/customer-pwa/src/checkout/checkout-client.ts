@@ -1,4 +1,5 @@
 import type { CustomerCartClient } from "../cart/cart-client.js";
+import { boundedFetch } from "../network/bounded-fetch.js";
 import { CartClientError, type CartMoney, type CartView } from "../cart/types.js";
 import { getCustomerCsrfCredential } from "../session/customer-transaction-context.js";
 import type { CheckoutQuote, CheckoutState } from "./types.js";
@@ -142,17 +143,21 @@ export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutCl
         throw new CartClientError("cart_request_invalid");
       let response: Response;
       try {
-        response = await fetch(`/api/v1/carts/${cart.cart.cartReference}/quote`, {
-          method: "POST",
-          credentials: "same-origin",
-          cache: "no-store",
-          headers: {
-            "content-type": "application/json",
-            "idempotency-key": operationReference,
-            "x-csrf-token": csrf,
+        response = await boundedFetch(
+          globalThis.fetch,
+          `/api/v1/carts/${cart.cart.cartReference}/quote`,
+          {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+              "content-type": "application/json",
+              "idempotency-key": operationReference,
+              "x-csrf-token": csrf,
+            },
+            body: JSON.stringify({ cartVersion: cart.cart.version }),
           },
-          body: JSON.stringify({ cartVersion: cart.cart.version }),
-        });
+        );
       } catch {
         throw new CartClientError("network_unknown");
       }
@@ -208,6 +213,7 @@ export function createCheckoutController(
   let state: CheckoutState = { status: "loading" };
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
   let pendingKey: string | null = null;
+  let quoteFlight: Promise<void> | null = null;
   const listeners = new Set<() => void>();
   const publish = (next: CheckoutState) => {
     state = next;
@@ -232,7 +238,7 @@ export function createCheckoutController(
       canRetry: parsed === "network_unknown",
     });
   };
-  const quote = async () => {
+  const executeQuote = async () => {
     const current = cart();
     if (!online) {
       publish({ status: "offline", cart: current, canRetry: pendingKey !== null });
@@ -259,6 +265,20 @@ export function createCheckoutController(
       }
       fail(error, current);
     }
+  };
+  const quote = (): Promise<void> => {
+    if (quoteFlight !== null) return quoteFlight;
+    const current = executeQuote();
+    quoteFlight = current;
+    void current.then(
+      () => {
+        if (quoteFlight === current) quoteFlight = null;
+      },
+      () => {
+        if (quoteFlight === current) quoteFlight = null;
+      },
+    );
+    return current;
   };
   return Object.freeze({
     getState: () => state,

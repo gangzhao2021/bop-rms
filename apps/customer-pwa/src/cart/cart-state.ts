@@ -71,6 +71,7 @@ export function createCartStateController({
   let state: CartState = { status: "loading" };
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
   let pending: PendingOperation | null = null;
+  let commandFlight: Promise<void> | null = null;
   const listeners = new Set<() => void>();
 
   const publish = (next: CartState) => {
@@ -159,16 +160,30 @@ export function createCartStateController({
       mapError(error, cart, true);
     }
   };
+  const begin = (createOperation: () => PendingOperation): Promise<void> => {
+    if (commandFlight !== null) return commandFlight;
+    const current = execute(createOperation());
+    commandFlight = current;
+    void current.then(
+      () => {
+        if (commandFlight === current) commandFlight = null;
+      },
+      () => {
+        if (commandFlight === current) commandFlight = null;
+      },
+    );
+    return current;
+  };
 
   return Object.freeze({
     getState: () => state,
     load,
     removeItem: (cartItemReference: string) =>
-      execute({ kind: "remove", cartItemReference, operationReference: keyFactory() }),
-    retry: async () => {
+      begin(() => ({ kind: "remove", cartItemReference, operationReference: keyFactory() })),
+    retry: () => {
       if (pending === null || state.status !== "command-failed" || !state.canRetrySameOperation)
-        return;
-      await execute(pending);
+        return Promise.resolve();
+      return begin(() => pending as PendingOperation);
     },
     setOnline: (value: boolean) => {
       online = value;
@@ -179,6 +194,6 @@ export function createCartStateController({
       return () => listeners.delete(listener);
     },
     updateItem: (cartItemReference: string, draft: CartItemDraft) =>
-      execute({ kind: "update", cartItemReference, draft, operationReference: keyFactory() }),
+      begin(() => ({ kind: "update", cartItemReference, draft, operationReference: keyFactory() })),
   });
 }

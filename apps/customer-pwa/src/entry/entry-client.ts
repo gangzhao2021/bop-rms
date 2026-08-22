@@ -8,6 +8,7 @@ import {
   setCustomerCsrfCredential,
   setPaymentOperationReference,
 } from "../session/customer-transaction-context.js";
+import { boundedFetch } from "../network/bounded-fetch.js";
 
 const compactTokenPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -199,7 +200,7 @@ export function createCustomerEntryClient(
     if (token === null) return Object.freeze({ kind: "Missing" });
     if (!boundary.online()) return Object.freeze({ kind: "Offline" });
     try {
-      const response = await boundary.fetch("/bff/customer/entry", {
+      const response = await boundedFetch(boundary.fetch, "/bff/customer/entry", {
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",

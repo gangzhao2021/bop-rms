@@ -1,3 +1,4 @@
+import { parseCanonicalInstant } from "@bop/identity";
 import {
   createSupportCaseOperationInput,
   SupportCaseError,
@@ -6,6 +7,7 @@ import {
   type SupportCaseVersion,
 } from "../contracts/support-case.js";
 import type {
+  ActiveDiagnosticAccessInput,
   DiagnosticAccessDecision,
   ResolveDiagnosticAccessInput,
   SupportCaseCommand,
@@ -17,6 +19,13 @@ const fail = (code: ConstructorParameters<typeof SupportCaseError>[0]): never =>
   throw new SupportCaseError(code);
 };
 const dependency = () => fail("SUPPORT_CASE_DEPENDENCY_UNAVAILABLE");
+function trustedNow(ports: SupportCasePorts): string {
+  try {
+    return parseCanonicalInstant(ports.clock.now());
+  } catch {
+    return dependency();
+  }
+}
 const transitions: Readonly<
   Record<SupportCaseCommand, readonly [SupportCaseStatus | null, SupportCaseStatus]>
 > = {
@@ -68,6 +77,7 @@ async function validateGrant(
   grant: DiagnosticAccessGrant,
   input: ReturnType<typeof createSupportCaseOperationInput>,
   ports: SupportCasePorts,
+  observedAt: string,
 ) {
   if (
     grant.caseReference !== input.candidate.caseReference ||
@@ -77,7 +87,8 @@ async function validateGrant(
     grant.purposeCode !== input.candidate.purposeCode ||
     grant.purposeCode !== input.purposeCode ||
     grant.approvedByReference !== input.actorReference ||
-    grant.grantedAt !== input.occurredAt
+    grant.grantedAt !== observedAt ||
+    input.occurredAt !== observedAt
   )
     fail("SUPPORT_CASE_GRANT_INVALID");
   const auth = await ports.authorization
@@ -88,7 +99,7 @@ async function validateGrant(
       tenantReference: input.candidate.tenantReference,
       storeReference: input.candidate.storeReference,
       purposeCode: input.purposeCode,
-      observedAt: input.occurredAt,
+      observedAt,
     })
     .catch(dependency);
   if (!auth.recentMfa) fail("SUPPORT_CASE_MFA_REQUIRED");
@@ -96,7 +107,7 @@ async function validateGrant(
     fail("SUPPORT_CASE_APPROVAL_INVALID");
   if (
     !(await ports.evidence
-      .validateApproval(grant.approvalEvidenceReference, input.occurredAt)
+      .validateApproval(grant.approvalEvidenceReference, observedAt)
       .catch(dependency))
   )
     fail("SUPPORT_CASE_APPROVAL_INVALID");
@@ -105,7 +116,7 @@ async function validateGrant(
       .validateRecentMfa({
         actorReference: input.actorReference,
         evidenceReference: grant.recentMfaEvidenceReference,
-        observedAt: input.occurredAt,
+        observedAt,
       })
       .catch(dependency))
   )
@@ -134,6 +145,7 @@ export function createSupportCaseService(ports: SupportCasePorts) {
         return fail("SUPPORT_CASE_INPUT_INVALID");
       }
       exactPayload(command, input.grant, input.action, input.grantReference);
+      const observedAt = trustedNow(ports);
       const auth = await ports.authorization
         .authorize({
           command,
@@ -142,7 +154,7 @@ export function createSupportCaseService(ports: SupportCasePorts) {
           tenantReference: input.candidate.tenantReference,
           storeReference: input.candidate.storeReference,
           purposeCode: input.purposeCode,
-          observedAt: input.occurredAt,
+          observedAt,
         })
         .catch(dependency);
       if (!auth.allowed || !auth.namedPlatformActor) fail("SUPPORT_CASE_PERMISSION_DENIED");
@@ -163,10 +175,7 @@ export function createSupportCaseService(ports: SupportCasePorts) {
         fail("SUPPORT_CASE_SCOPE_INVALID");
       if (
         !(await ports.evidence
-          .validateRequester(
-            input.candidate.requesterVerificationEvidenceReference,
-            input.occurredAt,
-          )
+          .validateRequester(input.candidate.requesterVerificationEvidenceReference, observedAt)
           .catch(dependency))
       )
         fail("SUPPORT_CASE_EVIDENCE_INVALID");
@@ -198,7 +207,8 @@ export function createSupportCaseService(ports: SupportCasePorts) {
         fail("SUPPORT_CASE_LIFECYCLE_CONFLICT");
       if (command === "Create" && input.candidate.requesterActorReference !== input.actorReference)
         fail("SUPPORT_CASE_PERMISSION_DENIED");
-      if (command === "GrantAccess" && input.grant) await validateGrant(input.grant, input, ports);
+      if (command === "GrantAccess" && input.grant)
+        await validateGrant(input.grant, input, ports, observedAt);
       if (command === "RevokeAccess" && input.grantReference) {
         const grant = await ports.repository.loadGrant(input.grantReference).catch(dependency);
         if (
@@ -210,12 +220,29 @@ export function createSupportCaseService(ports: SupportCasePorts) {
         )
           fail("SUPPORT_CASE_GRANT_INVALID");
       }
+      let requiredActiveDiagnosticAccess: ActiveDiagnosticAccessInput | null = null;
       if (command === "RecordAction" && input.action && input.grantReference) {
-        const grant = await ports.repository.loadGrant(input.grantReference).catch(dependency);
+        if (
+          input.occurredAt !== observedAt ||
+          input.action.occurredAt !== observedAt ||
+          input.candidate.updatedAt !== observedAt
+        )
+          fail("SUPPORT_CASE_INPUT_INVALID");
+        requiredActiveDiagnosticAccess = Object.freeze({
+          caseReference: input.candidate.caseReference,
+          grantReference: input.grantReference,
+          actorReference: input.actorReference,
+          tenantReference: input.candidate.tenantReference,
+          storeReference: input.candidate.storeReference,
+          purposeCode: input.purposeCode,
+          delegatedPermission: input.action.delegatedPermission,
+          observedAt,
+        });
+        const grant = await ports.repository
+          .resolveActiveDiagnosticAccess(requiredActiveDiagnosticAccess)
+          .catch(dependency);
         const activeGrant = grant ?? fail("SUPPORT_CASE_GRANT_REVOKED");
-        if (await ports.repository.isGrantRevoked(input.grantReference).catch(dependency))
-          fail("SUPPORT_CASE_GRANT_REVOKED");
-        if (Date.parse(input.occurredAt) >= Date.parse(activeGrant.expiresAt))
+        if (Date.parse(observedAt) >= Date.parse(activeGrant.expiresAt))
           fail("SUPPORT_CASE_GRANT_EXPIRED");
         if (
           input.action.caseReference !== input.candidate.caseReference ||
@@ -241,12 +268,13 @@ export function createSupportCaseService(ports: SupportCasePorts) {
         .commit({
           operation,
           expectedVersion: input.expectedVersion,
+          requiredActiveDiagnosticAccess,
           audit: {
             actorReference: input.actorReference,
             purposeCode: input.purposeCode,
             caseReference: input.candidate.caseReference,
             auditReference: input.auditReference,
-            occurredAt: input.occurredAt,
+            occurredAt: observedAt,
           },
         })
         .catch(dependency);
@@ -258,20 +286,17 @@ export function createSupportCaseService(ports: SupportCasePorts) {
 export function createDiagnosticAccessResolver(ports: SupportCasePorts) {
   return async (input: ResolveDiagnosticAccessInput): Promise<DiagnosticAccessDecision> => {
     try {
-      const current = await ports.repository.loadLatest(input.caseReference),
-        grant = await ports.repository.loadGrant(input.grantReference);
+      const observedAt = trustedNow(ports);
+      const grant = await ports.repository.resolveActiveDiagnosticAccess({ ...input, observedAt });
       if (
-        !current ||
-        current.status !== "AccessGranted" ||
         !grant ||
-        (await ports.repository.isGrantRevoked(input.grantReference)) ||
         grant.caseReference !== input.caseReference ||
         grant.supportActorReference !== input.actorReference ||
         grant.tenantReference !== input.tenantReference ||
         grant.storeReference !== input.storeReference ||
         grant.purposeCode !== input.purposeCode ||
         !grant.delegatedPermissions.includes(input.delegatedPermission) ||
-        Date.parse(input.observedAt) >= Date.parse(grant.expiresAt)
+        Date.parse(observedAt) >= Date.parse(grant.expiresAt)
       )
         return Object.freeze({ allowed: false, reason: "Denied" });
       return Object.freeze({

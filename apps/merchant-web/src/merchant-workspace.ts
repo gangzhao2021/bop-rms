@@ -39,6 +39,7 @@ export interface MerchantSessionBootstrap {
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const CREDENTIAL = /^[A-Za-z0-9_-]{43}$/u;
 const SAFE_LABEL = /^[^\p{Cc}\p{Cf}]{1,100}$/u;
+const REQUEST_TIMEOUT_MS = 15_000;
 const NAVIGATION = Object.freeze({
   "HOME-OVERVIEW": ["/app", "merchant.access"],
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
@@ -168,11 +169,25 @@ export interface MerchantWorkspaceClient {
   switchStore(csrf: string, targetStoreReference: string): Promise<MerchantSessionBootstrap>;
 }
 
+async function boundedRequest(
+  request: typeof fetch,
+  input: RequestInfo | URL,
+  init: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await request(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function createMerchantWorkspaceClient(
   request: typeof fetch = globalThis.fetch,
 ): MerchantWorkspaceClient {
   const bootstrap = async (): Promise<MerchantSessionBootstrap | null> => {
-    const response = await request("/merchant/session", {
+    const response = await boundedRequest(request, "/merchant/session", {
       cache: "no-store",
       credentials: "same-origin",
       headers: { Accept: "application/json" },
@@ -193,7 +208,7 @@ export function createMerchantWorkspaceClient(
     async switchStore(csrf: string, targetStoreReference: string) {
       if (!CREDENTIAL.test(csrf) || !UUID_V7.test(targetStoreReference))
         throw new Error("MERCHANT_STORE_SWITCH_DENIED");
-      const response = await request("/merchant/store-context", {
+      const response = await boundedRequest(request, "/merchant/store-context", {
         method: "POST",
         cache: "no-store",
         credentials: "same-origin",

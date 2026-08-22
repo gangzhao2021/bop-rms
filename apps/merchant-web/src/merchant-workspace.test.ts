@@ -98,7 +98,14 @@ describe("Merchant workspace client boundary", () => {
     expect(request).toHaveBeenNthCalledWith(
       2,
       "/merchant/session",
-      expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
+      expect.objectContaining({
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(request.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 });

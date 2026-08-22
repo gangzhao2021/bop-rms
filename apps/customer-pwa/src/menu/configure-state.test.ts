@@ -109,6 +109,38 @@ describe("WP-1702 in-memory Configurator state", () => {
     ]);
   });
 
+  it("coalesces concurrent submissions before allocating another operation plan", async () => {
+    let release!: (value: CartView | null) => void;
+    let loadCalls = 0;
+    let keyCalls = 0;
+    const gate = new Promise<CartView | null>((resolve) => {
+      release = resolve;
+    });
+    const client: CustomerCartClient = {
+      loadCurrent: async () => {
+        loadCalls += 1;
+        return gate;
+      },
+      createCart: async () => cart(1),
+      addItem: async (input) => cart(input.cart.cart.version + 1, [addedItem]),
+      updateItem: async () => cart(1),
+      removeItem: async () => cart(1),
+    };
+    const controller = createConfigureController({
+      client,
+      keyFactory: () => {
+        keyCalls += 1;
+        return id(20 + keyCalls);
+      },
+    });
+    const first = controller.submit(id(3), draft);
+    const second = controller.submit(id(3), draft);
+    expect(second).toBe(first);
+    expect({ loadCalls, keyCalls }).toEqual({ loadCalls: 1, keyCalls: 2 });
+    release(cart(3));
+    await Promise.all([first, second]);
+  });
+
   it("retries an unknown create outcome with its exact key before adding", async () => {
     const state = fixture(null);
     state.failCreate(new CartClientError("network_unknown"));
