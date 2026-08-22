@@ -24,8 +24,9 @@ older historical snapshots retained later in this index.
   coalesces concurrent customer write intents. Exact full `pnpm verify` passed with root `328/328`,
   Task `32/32`, Customer PWA `203/203`, Merchant Web `452/452`, the `84`-migration / `14`-namespace
   catalog and all `40/40` package format/lint/typecheck/test/build tasks; the tracked-file secret
-  scan also passed. No production diagnostic access, external mutation, deployment or publication
-  is authorized.
+  scan also passed. No production diagnostic access, external mutation or deployment is authorized.
+  Draft PR #169 is published; GitHub Actions execution is externally blocked by the account
+  payment/spending limit.
 
 - `WP-2198 — Purpose-bound Support Case and diagnostic access workflow` is resolved for local
   execution on top of exact WP-2197 commit `69ba7e6`. Task owns immutable Support Case versions,
