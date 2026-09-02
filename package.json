@@ -44,6 +44,7 @@
     "effective-period:acceptance": "pnpm --filter @bop/effective-period test",
     "feature-control:acceptance": "pnpm --filter @bop/feature-control test",
     "media:acceptance": "pnpm --filter @bop/media test",
+    "merchant-demo-browser:acceptance": "pnpm --filter @bop-rms/merchant-web test:browser",
     "publishing:acceptance": "pnpm --filter @bop/publishing test",
     "clean": "turbo run clean",
     "dev": "node tooling/environment/local.mjs start",
