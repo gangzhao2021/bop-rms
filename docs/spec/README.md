@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2202 — Restore finite GitHub cold-start verification on codex/wp-2202`
+- Current discussion node: `WP-2202 — Post-integration documentation closeout`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,16 +17,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-2202 — Restore finite GitHub cold-start verification` is resolved for execution on exact
-  WP-2201 head `32010a8`. GitHub runs `33586898910` and `33586944954` independently exhausted the
-  existing 180-second WP-0006 health wait while clean-runner workspace builds were still active;
-  earlier run `33585461764` passed startup but reached the workflow's fixed 20-minute limit during
-  passing Merchant Web tests. This bounded CI repair extends only those finite budgets to 360
-  seconds and 45 minutes. It removes, skips and reorders no verification and changes no application,
-  Domain, database, security, production or deployment behavior. PR #172 is published against
-  `codex/wp-2201`; exact implementation head `049de27` passed every unchanged workflow gate in
-  run/job `33629139991 / 100243961313` in `34m27s`. The documentation-only evidence head remains
-  subject to the same complete check.
+- `WP-2202 — Restore finite GitHub cold-start verification` is implemented, verified and integrated
+  through aggregate PR #168 at squash `41ac34f2ff8a51d4b79c4e024d7d2cb552273056`. The bounded CI
+  repair extends only the finite WP-0006 health wait and workflow job limit to 360 seconds and 45
+  minutes; it removes, skips and reorders no verification and changes no application, Domain,
+  database, security, production or deployment behavior. Exact implementation head `049de27`
+  passed run/job `33629139991 / 100243961313` in `34m27s`; exact evidence head `c367b80` passed
+  run/job `33632514089 / 100255198921` in `33m49s`; aggregate exact-head run/job
+  `33636743203 / 100269386715` passed in `30m35s`. Section 91 findings were `0/0/0/0`, reviews and
+  unresolved threads were both `0`, and exact-main run/job `33654851978 / 100330734031` passed in
+  `33m44s`. PR #172 was closed as absorbed; the local and remote WP-1704 / WP-2198–2202 branches
+  were removed. This final integration record supersedes the pre-integration WP-2198–2201 status
+  snapshots retained below. No deployment or external Provider action was performed.
 
 - `WP-2201 — Production exclusion for the local Merchant demo` is completed and locally verified
   on exact WP-2200 commit `e9be823`. A development-only HTML entry keeps the deterministic demo
