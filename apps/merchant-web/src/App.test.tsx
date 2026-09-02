@@ -85,4 +85,29 @@ describe("HOME-OVERVIEW Merchant shell", () => {
     expect(html).toContain("previous authorized scope is unchanged");
     expect(html).toContain('role="alert"');
   });
+
+  it("renders the visibly synthetic showcase without changing normal workspace contracts", () => {
+    const html = renderToStaticMarkup(
+      <MerchantShell
+        preview
+        state={{ kind: "Ready", switching: false, switchFailed: false, workspace }}
+        onSwitchStore={vi.fn()}
+      />,
+    );
+    for (const value of [
+      "Synthetic daily summary",
+      "Orders today",
+      "CAD $1,284.60",
+      "Explore the operating system",
+      "Order Queue",
+      "Kitchen Board",
+      "Store Configuration",
+      "Compliance Dashboard",
+      "PLATFORM · NONPRODUCTION",
+      "Synthetic operating timeline",
+    ])
+      expect(html).toContain(value);
+    expect(html).toContain('href="/platform/support-cases"');
+    expect(html).not.toContain("Unavailable until the WP-1905");
+  });
 });

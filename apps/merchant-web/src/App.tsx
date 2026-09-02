@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { MerchantShell } from "./MerchantShell.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
@@ -66,11 +66,13 @@ import {
 } from "./PurchaseOrderPages.js";
 import { OfferingEditorPage, OfferingListPage } from "./OfferingPages.js";
 import {
+  LocalDemoNotice,
   StoreDetailPage,
   StoreHoursServicePage,
   StoreListPage,
   StoreSetupPage,
 } from "./StoreAdminPages.js";
+import { merchantDemoClientsForEnvironment } from "./merchant-demo.js";
 import { OperationalDashboardPage } from "./OperationalDashboardPage.js";
 import { ReportBuilderPage, ReportCatalogPage } from "./ReportPages.js";
 import { ReportRunHistoryPage } from "./ReportRunHistoryPage.js";
@@ -129,8 +131,24 @@ export interface AppProps {
   readonly client?: MerchantWorkspaceClient;
 }
 
+function LocalDemoRoute({ enabled, children }: { readonly enabled: boolean; children: ReactNode }) {
+  return (
+    <>
+      {enabled ? <LocalDemoNotice /> : null}
+      {children}
+    </>
+  );
+}
+
 export function App({ client: injectedClient }: AppProps = {}) {
-  const client = useMemo(() => injectedClient ?? createMerchantWorkspaceClient(), [injectedClient]);
+  const demo = merchantDemoClientsForEnvironment({
+    development: import.meta.env.DEV,
+    flag: import.meta.env.VITE_BOP_LOCAL_DEMO,
+  });
+  const client = useMemo(
+    () => injectedClient ?? demo.workspace ?? createMerchantWorkspaceClient(),
+    [demo.workspace, injectedClient],
+  );
   const [state, setState] = useState<WorkspaceState>({ kind: "Loading" });
   const switching = useRef(false);
 
@@ -183,23 +201,79 @@ export function App({ client: injectedClient }: AppProps = {}) {
 
   return (
     <Routes>
-      <Route path="/app" element={<MerchantShell state={state} onSwitchStore={switchStore} />} />
-      <Route path="/app/organization/stores" element={<StoreListPage />} />
-      <Route path="/app/organization/stores/:id/setup" element={<StoreSetupPage />} />
-      <Route path="/app/organization/stores/:id/service" element={<StoreHoursServicePage />} />
+      <Route
+        path="/app"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <MerchantShell preview={demo.enabled} state={state} onSwitchStore={switchStore} />
+          </LocalDemoRoute>
+        }
+      />
+      <Route
+        path="/app/organization/stores"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <StoreListPage client={demo.storeAdmin} />
+          </LocalDemoRoute>
+        }
+      />
+      <Route
+        path="/app/organization/stores/:id/setup"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <StoreSetupPage client={demo.storeAdmin} />
+          </LocalDemoRoute>
+        }
+      />
+      <Route
+        path="/app/organization/stores/:id/service"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <StoreHoursServicePage client={demo.storeAdmin} />
+          </LocalDemoRoute>
+        }
+      />
       <Route path="/app/organization/stores/:id/capabilities" element={<StoreCapabilityPage />} />
       <Route path="/app/organization/stores/:id/live-gate" element={<StoreLiveGatePage />} />
-      <Route path="/app/organization/stores/:id" element={<StoreDetailPage />} />
+      <Route
+        path="/app/organization/stores/:id"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <StoreDetailPage client={demo.storeAdmin} />
+          </LocalDemoRoute>
+        }
+      />
       <Route path="/app/organization/features" element={<FeatureFlagListPage />} />
       <Route path="/app/organization/roles" element={<RoleListPage />} />
       <Route path="/app/organization/roles/:id" element={<RoleEditorPage />} />
       <Route path="/platform/live-gates" element={<PlatformLiveGatePage />} />
       <Route path="/platform/tenants" element={<PlatformTenantListPage />} />
       <Route path="/platform/tenants/:id" element={<PlatformTenantDetailPage />} />
-      <Route path="/platform/support-cases" element={<SupportCasePage />} />
+      <Route
+        path="/platform/support-cases"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <SupportCasePage client={demo.supportCase} />
+          </LocalDemoRoute>
+        }
+      />
       <Route path="/app/exports" element={<ExportJobListPage />} />
-      <Route path="/app/commerce/menus" element={<MenuListPage />} />
-      <Route path="/app/commerce/menus/:id/edit" element={<MenuBuilderPage />} />
+      <Route
+        path="/app/commerce/menus"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <MenuListPage client={demo.catalogMenu} />
+          </LocalDemoRoute>
+        }
+      />
+      <Route
+        path="/app/commerce/menus/:id/edit"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <MenuBuilderPage client={demo.catalogMenu} />
+          </LocalDemoRoute>
+        }
+      />
       <Route path="/app/commerce/bundles" element={<BundleListPage />} />
       <Route path="/app/commerce/bundles/:id/edit" element={<BundleEditorPage />} />
       <Route path="/app/commerce/availability" element={<AvailabilityWorkbenchPage />} />
@@ -210,7 +284,14 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/commerce/promotions/:id/edit" element={<PromotionEditorPage />} />
       <Route path="/app/commerce/recipes" element={<RecipeListPage />} />
       <Route path="/app/commerce/recipes/:id/edit" element={<RecipeEditorPage />} />
-      <Route path="/operations/orders" element={<OrderQueuePage />} />
+      <Route
+        path="/operations/orders"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <OrderQueuePage client={demo.orderQueue} />
+          </LocalDemoRoute>
+        }
+      />
       <Route path="/operations/delivery" element={<DeliveryDispatchPage />} />
       <Route path="/operations/delivery/:id" element={<DeliveryDetailPage />} />
       <Route path="/operations/delivery/exceptions" element={<DeliveryExceptionPage />} />
@@ -247,7 +328,14 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/reports/pipelines" element={<PipelineRunPage />} />
       <Route path="/app/reports/data-quality" element={<DataQualityPage />} />
       <Route path="/app/reports/reconciliation" element={<ReconciliationPage />} />
-      <Route path="/app/compliance" element={<ComplianceDashboardPage />} />
+      <Route
+        path="/app/compliance"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <ComplianceDashboardPage client={demo.complianceDashboard} />
+          </LocalDemoRoute>
+        }
+      />
       <Route path="/app/compliance/cases" element={<ComplianceCaseListPage />} />
       <Route path="/app/compliance/cases/:id" element={<ComplianceCaseDetailPage />} />
       <Route path="/app/compliance/inspections" element={<ComplianceInspectionPage />} />
@@ -286,9 +374,23 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/app/supply/suppliers/:id" element={<SupplierDetailPage />} />
       <Route path="/app/supply/offerings" element={<OfferingListPage />} />
       <Route path="/app/supply/offerings/:id" element={<OfferingEditorPage />} />
-      <Route path="/operations/orders/:id" element={<OrderDetailPage />} />
+      <Route
+        path="/operations/orders/:id"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <OrderDetailPage client={demo.orderQueue} />
+          </LocalDemoRoute>
+        }
+      />
       <Route path="/operations/orders/:id/amend" element={<OrderAmendmentPage />} />
-      <Route path="/operations/kitchen" element={<KitchenBoardPage />} />
+      <Route
+        path="/operations/kitchen"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <KitchenBoardPage client={demo.kitchenBoard} />
+          </LocalDemoRoute>
+        }
+      />
       <Route path="/operations/production-batches" element={<ProductionBatchPage />} />
       <Route path="/operations/dining" element={<DiningFloorPage />} />
       <Route path="/operations/reservations/calendar" element={<ReservationCalendarPage />} />
@@ -296,7 +398,14 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route path="/operations/reservations" element={<ReservationListPage />} />
       <Route path="/operations/waitlist" element={<WaitlistBoardPage />} />
       <Route path="/app/operations/reservation-capacity" element={<CapacityPolicyPage />} />
-      <Route path="/operations/kitchen/work-items/:id" element={<KitchenWorkItemPage />} />
+      <Route
+        path="/operations/kitchen/work-items/:id"
+        element={
+          <LocalDemoRoute enabled={demo.enabled}>
+            <KitchenWorkItemPage client={demo.kitchenBoard} />
+          </LocalDemoRoute>
+        }
+      />
       <Route path="/operations/pickup" element={<PickupQueuePage />} />
       <Route path="/app/integrations/kds-profiles" element={<KdsProfilePage />} />
       <Route path="/app/operations/tables" element={<DiningTableListPage />} />

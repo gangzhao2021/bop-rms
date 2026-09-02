@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "dev:demo": "VITE_BOP_LOCAL_DEMO=1 vite --host 127.0.0.1 --port 5173 --strictPort",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
     "lint": "eslint src vite.config.ts",
     "test": "vitest run",

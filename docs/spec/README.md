@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2199 — Trusted diagnostic authorization time and browser request resilience on codex/wp-2199`
+- Current discussion node: `WP-2200 — Local-only Merchant core workflow preview on codex/wp-2200`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2200 — Local-only Merchant core workflow preview` is resolved for local execution on top of
+  exact WP-2199 commit `328e656`. Following the Owner-directed `2026-08-28` scope extension, it is
+  limited to a visibly labelled, read-only, deterministic synthetic preview of Store, Menu, Order,
+  Kitchen, Compliance dashboard and sanitized non-production Support routes behind an exact Vite
+  development-only flag. Its Owner-approved showcase extension adds a synthetic `HOME-OVERVIEW`,
+  coherent permission-labelled navigation and a root `pnpm demo:merchant` command. It creates no
+  API, authentication, permission, persistence, real business fact or production activation.
+  Merchant Web format, lint, typecheck, `459/459` tests, development and production builds,
+  secret/bundle review, desktop/mobile browser checks and production fail-closed checks passed.
+  GitHub publication and deployment are not authorized.
 
 - `WP-2199 — Trusted diagnostic authorization time and browser request resilience` is resolved for
   local execution on top of exact WP-2198 commit `0d7ecba`. It replaces caller-controlled support
