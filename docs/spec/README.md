@@ -29,8 +29,9 @@ older historical snapshots retained later in this index.
   Merchant Vitest passed `458/458`, and the complete repository `pnpm verify` passed with all
   architecture, contract, migration, permission, isolated PostgreSQL and 40-package build gates.
   No Screen, route, fixture, application, Domain, database, authentication, permission, production
-  activation, deployment or external Provider behavior is changed. PR #174 is open and its
-  corrected exact-head verification is pending. Exact scope and evidence are in
+  activation, deployment or external Provider behavior is changed. PR #174 corrected implementation
+  head `a558cee` passed complete run/job `33688814243 / 100442536570` in `34m41s`; final
+  evidence-head verification and merge remain pending. Exact scope and evidence are in
   [`WP-2203`](./work-packages/WP-2203.md).
 
 - `WP-2202 — Restore finite GitHub cold-start verification` is implemented, verified and integrated
