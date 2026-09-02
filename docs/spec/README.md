@@ -23,8 +23,10 @@ older historical snapshots retained later in this index.
   preserving the flagged local preview and the normal production/unflagged fail-closed behavior.
   Merchant Web format, lint, typecheck, `458/458` tests, both production builds, bounded asset
   scans, desktop/mobile demo browser checks and production route checks passed. It adds no API,
-  authentication, permission, persistence, production activation or external evidence. GitHub
-  publication and deployment are not authorized.
+  authentication, permission, persistence, production activation or external evidence. PR #171 is
+  published against `codex/wp-2200`. Its initial Actions run failed in the shared WP-0006
+  environment verifier after the local stack remained stopped for 180 seconds; no WP-2201 test
+  assertion ran or failed. Merge and deployment remain unauthorized.
 
 - `WP-2200 — Local-only Merchant core workflow preview` is resolved for local execution on top of
   exact WP-2199 commit `328e656`. Following the Owner-directed `2026-08-28` scope extension, it is
