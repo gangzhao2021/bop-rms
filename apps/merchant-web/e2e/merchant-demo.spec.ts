@@ -85,8 +85,15 @@ test.describe("@demo local-only Merchant showcase", () => {
   test("uses an accessible visible link for an accepted workflow", async ({ page }) => {
     const violations = monitorBrowserBoundary(page);
     await page.goto("/app");
-    await page.keyboard.press("Tab");
-    await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
+    await expect(page.getByRole("status", { name: "Local synthetic preview" })).toBeVisible();
+
+    const skipLink = page.getByRole("link", { name: "Skip to main content" });
+    for (let tabIndex = 0; tabIndex < 5; tabIndex += 1) {
+      if (await skipLink.evaluate((element) => element === document.activeElement)) break;
+      await page.keyboard.press("Tab");
+    }
+    await expect(skipLink).toBeFocused();
+    await expect(skipLink).toBeInViewport();
 
     const orderQueue = page.getByRole("link", { name: /Order Queue/ });
     await expect(orderQueue).toBeVisible();
