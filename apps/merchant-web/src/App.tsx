@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { MerchantShell } from "./MerchantShell.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
@@ -66,13 +66,12 @@ import {
 } from "./PurchaseOrderPages.js";
 import { OfferingEditorPage, OfferingListPage } from "./OfferingPages.js";
 import {
-  LocalDemoNotice,
   StoreDetailPage,
   StoreHoursServicePage,
   StoreListPage,
   StoreSetupPage,
 } from "./StoreAdminPages.js";
-import { merchantDemoClientsForEnvironment } from "./merchant-demo.js";
+import type { MerchantDemoClients } from "./merchant-demo.js";
 import { OperationalDashboardPage } from "./OperationalDashboardPage.js";
 import { ReportBuilderPage, ReportCatalogPage } from "./ReportPages.js";
 import { ReportRunHistoryPage } from "./ReportRunHistoryPage.js";
@@ -129,25 +128,36 @@ type WorkspaceState =
 
 export interface AppProps {
   readonly client?: MerchantWorkspaceClient;
+  readonly demo?: MerchantDemoClients;
 }
 
-function LocalDemoRoute({ enabled, children }: { readonly enabled: boolean; children: ReactNode }) {
+function LocalDemoRoute({
+  notice: Notice,
+  children,
+}: {
+  readonly notice: ComponentType | null;
+  readonly children: ReactNode;
+}) {
   return (
     <>
-      {enabled ? <LocalDemoNotice /> : null}
+      {Notice === null ? null : <Notice />}
       {children}
     </>
   );
 }
 
-export function App({ client: injectedClient }: AppProps = {}) {
-  const demo = merchantDemoClientsForEnvironment({
-    development: import.meta.env.DEV,
-    flag: import.meta.env.VITE_BOP_LOCAL_DEMO,
-  });
+function clientProps<T>(
+  client: T | undefined,
+): { readonly client?: never } | { readonly client: T } {
+  return client === undefined ? {} : { client };
+}
+
+export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {}) {
+  const demo = injectedDemo ?? null;
+  const DemoOverview = demo?.Overview;
   const client = useMemo(
-    () => injectedClient ?? demo.workspace ?? createMerchantWorkspaceClient(),
-    [demo.workspace, injectedClient],
+    () => injectedClient ?? demo?.workspace ?? createMerchantWorkspaceClient(),
+    [demo?.workspace, injectedClient],
   );
   const [state, setState] = useState<WorkspaceState>({ kind: "Loading" });
   const switching = useRef(false);
@@ -204,32 +214,36 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route
         path="/app"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <MerchantShell preview={demo.enabled} state={state} onSwitchStore={switchStore} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <MerchantShell
+              overview={DemoOverview === undefined ? null : <DemoOverview />}
+              state={state}
+              onSwitchStore={switchStore}
+            />
           </LocalDemoRoute>
         }
       />
       <Route
         path="/app/organization/stores"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <StoreListPage client={demo.storeAdmin} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <StoreListPage {...clientProps(demo?.storeAdmin)} />
           </LocalDemoRoute>
         }
       />
       <Route
         path="/app/organization/stores/:id/setup"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <StoreSetupPage client={demo.storeAdmin} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <StoreSetupPage {...clientProps(demo?.storeAdmin)} />
           </LocalDemoRoute>
         }
       />
       <Route
         path="/app/organization/stores/:id/service"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <StoreHoursServicePage client={demo.storeAdmin} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <StoreHoursServicePage {...clientProps(demo?.storeAdmin)} />
           </LocalDemoRoute>
         }
       />
@@ -238,8 +252,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route
         path="/app/organization/stores/:id"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <StoreDetailPage client={demo.storeAdmin} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <StoreDetailPage {...clientProps(demo?.storeAdmin)} />
           </LocalDemoRoute>
         }
       />
@@ -252,8 +266,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route
         path="/platform/support-cases"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <SupportCasePage client={demo.supportCase} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <SupportCasePage {...clientProps(demo?.supportCase)} />
           </LocalDemoRoute>
         }
       />
@@ -261,16 +275,16 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route
         path="/app/commerce/menus"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <MenuListPage client={demo.catalogMenu} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <MenuListPage {...clientProps(demo?.catalogMenu)} />
           </LocalDemoRoute>
         }
       />
       <Route
         path="/app/commerce/menus/:id/edit"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <MenuBuilderPage client={demo.catalogMenu} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <MenuBuilderPage {...clientProps(demo?.catalogMenu)} />
           </LocalDemoRoute>
         }
       />
@@ -287,8 +301,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route
         path="/operations/orders"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <OrderQueuePage client={demo.orderQueue} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <OrderQueuePage {...clientProps(demo?.orderQueue)} />
           </LocalDemoRoute>
         }
       />
@@ -331,8 +345,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route
         path="/app/compliance"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <ComplianceDashboardPage client={demo.complianceDashboard} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <ComplianceDashboardPage {...clientProps(demo?.complianceDashboard)} />
           </LocalDemoRoute>
         }
       />
@@ -377,8 +391,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route
         path="/operations/orders/:id"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <OrderDetailPage client={demo.orderQueue} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <OrderDetailPage {...clientProps(demo?.orderQueue)} />
           </LocalDemoRoute>
         }
       />
@@ -386,8 +400,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route
         path="/operations/kitchen"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <KitchenBoardPage client={demo.kitchenBoard} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <KitchenBoardPage {...clientProps(demo?.kitchenBoard)} />
           </LocalDemoRoute>
         }
       />
@@ -401,8 +415,8 @@ export function App({ client: injectedClient }: AppProps = {}) {
       <Route
         path="/operations/kitchen/work-items/:id"
         element={
-          <LocalDemoRoute enabled={demo.enabled}>
-            <KitchenWorkItemPage client={demo.kitchenBoard} />
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            <KitchenWorkItemPage {...clientProps(demo?.kitchenBoard)} />
           </LocalDemoRoute>
         }
       />

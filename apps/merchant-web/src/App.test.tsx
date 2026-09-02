@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { MerchantShell } from "./MerchantShell.js";
+import { ShowcaseOverview } from "./merchant-demo-ui.js";
 import type { MerchantWorkspaceSnapshot } from "./merchant-workspace.js";
 
 const workspace: MerchantWorkspaceSnapshot = Object.freeze({
@@ -89,7 +90,7 @@ describe("HOME-OVERVIEW Merchant shell", () => {
   it("renders the visibly synthetic showcase without changing normal workspace contracts", () => {
     const html = renderToStaticMarkup(
       <MerchantShell
-        preview
+        overview={<ShowcaseOverview />}
         state={{ kind: "Ready", switching: false, switchFailed: false, workspace }}
         onSwitchStore={vi.fn()}
       />,

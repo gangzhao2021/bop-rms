@@ -51,17 +51,6 @@ function useLoad<T>(load: () => Promise<T>, key: string): LoadState<T> {
 
 type StoreAdminState = Exclude<LoadState<never>["kind"], "Found">;
 
-export function LocalDemoNotice() {
-  return (
-    <aside className="local-demo-notice" role="status" aria-label="Local synthetic preview">
-      <strong>Local synthetic preview</strong>
-      <span>
-        Read-only training data. No API, permission, business fact, or publication is implied.
-      </span>
-    </aside>
-  );
-}
-
 export function StoreAdminStatePanel({ state }: { readonly state: StoreAdminState }) {
   const states: Record<
     StoreAdminState,

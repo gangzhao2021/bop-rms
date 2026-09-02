@@ -1,39 +1,44 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { parseMenuListView } from "./catalog-menu.js";
 import { parseComplianceDashboardView } from "./compliance-dashboard-page.js";
 import { parseKitchenBoardView } from "./kitchen-board.js";
+import { loadLocalMerchantDemo, shouldUseLocalMerchantDemoEntry } from "./merchant-demo-entry.js";
 import {
-  isLocalMerchantDemoEnabled,
+  enabledMerchantDemoClients,
   localMerchantWorkspace,
-  merchantDemoClientsForEnvironment,
   sanitizedSupportCaseFixture,
 } from "./merchant-demo.js";
+import { LocalDemoNotice } from "./merchant-demo-ui.js";
 import { parseOrderQueueView } from "./order-queue.js";
-import { parseStoreListView, unavailableStoreAdminClient } from "./store-admin.js";
-import {
-  parseSupportCasePageView,
-  unavailableSupportCasePageClient,
-} from "./support-case-pages.js";
+import { parseStoreListView } from "./store-admin.js";
+import { parseSupportCasePageView } from "./support-case-pages.js";
 
 describe("local-only Merchant core workflow preview", () => {
-  it("requires both Vite development mode and the exact local flag", () => {
-    expect(isLocalMerchantDemoEnabled({ development: true, flag: "1" })).toBe(true);
-    expect(isLocalMerchantDemoEnabled({ development: false, flag: "1" })).toBe(false);
-    expect(isLocalMerchantDemoEnabled({ development: true, flag: "true" })).toBe(false);
-    expect(isLocalMerchantDemoEnabled({ development: true, flag: undefined })).toBe(false);
+  it("labels local preview data without implying authority or publication", () => {
+    const html = renderToStaticMarkup(createElement(LocalDemoNotice));
+    expect(html).toContain("Local synthetic preview");
+    expect(html).toContain("Read-only training data");
+    expect(html).toContain("No API, permission, business fact, or publication is implied");
+    expect(html).toContain('role="status"');
   });
 
-  it("keeps production and unflagged development failed closed", () => {
-    const production = merchantDemoClientsForEnvironment({ development: false, flag: "1" });
-    const unflagged = merchantDemoClientsForEnvironment({ development: true, flag: undefined });
-    expect(production.enabled).toBe(false);
-    expect(production.storeAdmin).toBe(unavailableStoreAdminClient);
-    expect(production.supportCase).toBe(unavailableSupportCasePageClient);
-    expect(unflagged.enabled).toBe(false);
+  it("selects only the exact development entry and fails closed when loading fails", async () => {
+    expect(shouldUseLocalMerchantDemoEntry("serve", "1")).toBe(true);
+    expect(shouldUseLocalMerchantDemoEntry("build", "1")).toBe(false);
+    expect(shouldUseLocalMerchantDemoEntry("serve", "true")).toBe(false);
+    expect(shouldUseLocalMerchantDemoEntry("serve", undefined)).toBe(false);
+    await expect(loadLocalMerchantDemo(async () => ({ enabledMerchantDemoClients }))).resolves.toBe(
+      enabledMerchantDemoClients,
+    );
+    await expect(
+      loadLocalMerchantDemo(async () => Promise.reject(new Error("load failed"))),
+    ).resolves.toBeNull();
   });
 
   it("serves strict deterministic fixtures for every primary preview", async () => {
-    const clients = merchantDemoClientsForEnvironment({ development: true, flag: "1" });
+    const clients = enabledMerchantDemoClients;
     expect(clients.enabled).toBe(true);
     expect(parseStoreListView(await clients.storeAdmin.listStores()).items).toHaveLength(1);
     expect(parseMenuListView(await clients.catalogMenu.listMenus()).items).toHaveLength(1);
@@ -68,7 +73,7 @@ describe("local-only Merchant core workflow preview", () => {
   });
 
   it("bootstraps one canonical synthetic Store workspace and rejects another Store", async () => {
-    const clients = merchantDemoClientsForEnvironment({ development: true, flag: "1" });
+    const clients = enabledMerchantDemoClients;
     const workspaceClient = clients.workspace;
     if (workspaceClient === null) throw new Error("synthetic workspace client missing");
     const bootstrap = await workspaceClient.bootstrap();

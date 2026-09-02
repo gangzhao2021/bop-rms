@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2200 — Local-only Merchant core workflow preview on codex/wp-2200`
+- Current discussion node: `WP-2201 — Production exclusion for the local Merchant demo on codex/wp-2201`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2201 — Production exclusion for the local Merchant demo` is completed and locally verified
+  on exact WP-2200 commit `e9be823`. A development-only HTML entry keeps the deterministic demo
+  module, UI and fixtures outside both normal and exact-flag production dependency graphs while
+  preserving the flagged local preview and the normal production/unflagged fail-closed behavior.
+  Merchant Web format, lint, typecheck, `458/458` tests, both production builds, bounded asset
+  scans, desktop/mobile demo browser checks and production route checks passed. It adds no API,
+  authentication, permission, persistence, production activation or external evidence. GitHub
+  publication and deployment are not authorized.
 
 - `WP-2200 — Local-only Merchant core workflow preview` is resolved for local execution on top of
   exact WP-2199 commit `328e656`. Following the Owner-directed `2026-08-28` scope extension, it is

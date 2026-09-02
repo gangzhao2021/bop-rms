@@ -2,7 +2,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import {
-  LocalDemoNotice,
   StoreAdminStatePanel,
   StoreDetailScreen,
   StoreHoursServiceScreen,
@@ -18,14 +17,6 @@ import {
 } from "./store-admin.js";
 
 describe("Store administration Section 88 screens", () => {
-  it("labels local preview data without implying authority or publication", () => {
-    const html = renderToStaticMarkup(<LocalDemoNotice />);
-    expect(html).toContain("Local synthetic preview");
-    expect(html).toContain("Read-only training data");
-    expect(html).toContain("No API, permission, business fact, or publication is implied");
-    expect(html).toContain('role="status"');
-  });
-
   it("renders every STORE-LIST field group and safe actions", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>

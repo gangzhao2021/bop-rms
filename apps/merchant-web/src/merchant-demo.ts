@@ -1,31 +1,18 @@
 import { menuBuilderFixture, menuListFixture } from "./catalog-menu.fixtures.js";
-import {
-  CatalogMenuClientError,
-  unavailableCatalogMenuClient,
-  type CatalogMenuClient,
-} from "./catalog-menu.js";
+import { CatalogMenuClientError, type CatalogMenuClient } from "./catalog-menu.js";
 import { complianceDashboardFixture } from "./compliance-dashboard.fixtures.js";
-import {
-  unavailableComplianceDashboardClient,
-  type ComplianceDashboardClient,
-} from "./compliance-dashboard-page.js";
+import type { ComplianceDashboardClient } from "./compliance-dashboard-page.js";
 import { KITCHEN_REFS, kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
-import {
-  KitchenBoardClientError,
-  unavailableKitchenBoardClient,
-  type KitchenBoardClient,
-} from "./kitchen-board.js";
+import { KitchenBoardClientError, type KitchenBoardClient } from "./kitchen-board.js";
 import { orderDetailFixture, orderQueueFixture } from "./order-queue.fixtures.js";
-import {
-  OrderQueueClientError,
-  unavailableOrderQueueClient,
-  type OrderQueueClient,
-} from "./order-queue.js";
+import { OrderQueueClientError, type OrderQueueClient } from "./order-queue.js";
 import {
   parseMerchantWorkspace,
   type MerchantWorkspaceClient,
   type MerchantWorkspaceSnapshot,
 } from "./merchant-workspace.js";
+import { LocalDemoNotice, ShowcaseOverview } from "./merchant-demo-ui.js";
+import type { ComponentType } from "react";
 import {
   detailView,
   hoursServiceView,
@@ -33,24 +20,8 @@ import {
   setupView,
   STORE_REFERENCE,
 } from "./store-admin.fixtures.js";
-import {
-  StoreAdminClientError,
-  unavailableStoreAdminClient,
-  type StoreAdminClient,
-} from "./store-admin.js";
-import {
-  unavailableSupportCasePageClient,
-  type SupportCasePageClient,
-} from "./support-case-pages.js";
-
-export interface LocalMerchantDemoEnvironment {
-  readonly development: boolean;
-  readonly flag: string | undefined;
-}
-
-export function isLocalMerchantDemoEnabled(environment: LocalMerchantDemoEnvironment): boolean {
-  return environment.development && environment.flag === "1";
-}
+import { StoreAdminClientError, type StoreAdminClient } from "./store-admin.js";
+import type { SupportCasePageClient } from "./support-case-pages.js";
 
 const localStoreAdminClient: StoreAdminClient = Object.freeze({
   async listStores() {
@@ -210,6 +181,8 @@ const localMerchantWorkspaceClient: MerchantWorkspaceClient = Object.freeze({
 
 export interface MerchantDemoClients {
   readonly enabled: boolean;
+  readonly Notice: ComponentType;
+  readonly Overview: ComponentType;
   readonly storeAdmin: StoreAdminClient;
   readonly catalogMenu: CatalogMenuClient;
   readonly orderQueue: OrderQueueClient;
@@ -219,8 +192,10 @@ export interface MerchantDemoClients {
   readonly workspace: MerchantWorkspaceClient | null;
 }
 
-const enabledClients: MerchantDemoClients = Object.freeze({
+export const enabledMerchantDemoClients: MerchantDemoClients = Object.freeze({
   enabled: true,
+  Notice: LocalDemoNotice,
+  Overview: ShowcaseOverview,
   storeAdmin: localStoreAdminClient,
   catalogMenu: localCatalogMenuClient,
   orderQueue: localOrderQueueClient,
@@ -229,20 +204,3 @@ const enabledClients: MerchantDemoClients = Object.freeze({
   supportCase: localSupportCasePageClient,
   workspace: localMerchantWorkspaceClient,
 });
-
-const disabledClients: MerchantDemoClients = Object.freeze({
-  enabled: false,
-  storeAdmin: unavailableStoreAdminClient,
-  catalogMenu: unavailableCatalogMenuClient,
-  orderQueue: unavailableOrderQueueClient,
-  kitchenBoard: unavailableKitchenBoardClient,
-  complianceDashboard: unavailableComplianceDashboardClient,
-  supportCase: unavailableSupportCasePageClient,
-  workspace: null,
-});
-
-export function merchantDemoClientsForEnvironment(
-  environment: LocalMerchantDemoEnvironment,
-): MerchantDemoClients {
-  return isLocalMerchantDemoEnabled(environment) ? enabledClients : disabledClients;
-}
