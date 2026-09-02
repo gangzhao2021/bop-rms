@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2202 — Post-integration documentation closeout`
+- Current discussion node: `WP-2203 — Automated Local Merchant Demo Browser Acceptance`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,23 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2203 — Automated Local Merchant Demo Browser Acceptance` is locally implemented and verified
+  on exact `main@1a325973050f0c2bbd6ac3727e9cb6f57be5a42b`. It converts the manual browser evidence from
+  WP-2200 / WP-2201 into one deterministic Chromium acceptance gate over the existing local-only
+  Merchant showcase: all 13 accepted overview, Store, Menu, Order, Kitchen, Compliance and Support
+  routes at desktop and mobile viewports; explicit synthetic/read-only labelling; zero application
+  API or non-loopback requests; no page/console errors or horizontal overflow; and production
+  fail-closed behavior even when the demo flag is present. Playwright `1.62.1` is the only new test
+  dependency, supports the repository's pinned Node 24 runtime, and runs with one worker, zero
+  retries and finite Playwright-managed server lifecycles. The final browser matrix passed `42/42`,
+  Merchant Vitest passed `458/458`, and the complete repository `pnpm verify` passed with all
+  architecture, contract, migration, permission, isolated PostgreSQL and 40-package build gates.
+  No Screen, route, fixture, application, Domain, database, authentication, permission, production
+  activation, deployment or external Provider behavior is changed. PR #174 corrected implementation
+  head `a558cee` passed complete run/job `33688814243 / 100442536570` in `34m41s`; final
+  evidence-head verification and merge remain pending. Exact scope and evidence are in
+  [`WP-2203`](./work-packages/WP-2203.md).
 
 - `WP-2202 — Restore finite GitHub cold-start verification` is implemented, verified and integrated
   through aggregate PR #168 at squash `41ac34f2ff8a51d4b79c4e024d7d2cb552273056`. The bounded CI
