@@ -23,7 +23,10 @@ older historical snapshots retained later in this index.
   earlier run `33585461764` passed startup but reached the workflow's fixed 20-minute limit during
   passing Merchant Web tests. This bounded CI repair extends only those finite budgets to 360
   seconds and 45 minutes. It removes, skips and reorders no verification and changes no application,
-  Domain, database, security, production or deployment behavior.
+  Domain, database, security, production or deployment behavior. PR #172 is published against
+  `codex/wp-2201`; exact implementation head `049de27` passed every unchanged workflow gate in
+  run/job `33629139991 / 100243961313` in `34m27s`. The documentation-only evidence head remains
+  subject to the same complete check.
 
 - `WP-2201 — Production exclusion for the local Merchant demo` is completed and locally verified
   on exact WP-2200 commit `e9be823`. A development-only HTML entry keeps the deterministic demo
