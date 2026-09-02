@@ -26,7 +26,10 @@ older historical snapshots retained later in this index.
   API, authentication, permission, persistence, real business fact or production activation.
   Merchant Web format, lint, typecheck, `459/459` tests, development and production builds,
   secret/bundle review, desktop/mobile browser checks and production fail-closed checks passed.
-  GitHub publication and deployment are not authorized.
+  PR #170 is published against `codex/wp-2199`. Its initial Actions run passed environment startup
+  and the workspace baseline, then the fixed 20-minute workflow limit cancelled the repository-wide
+  quality step while Merchant Web tests were still passing; no assertion failure was reported.
+  Merge and deployment remain unauthorized.
 
 - `WP-2199 — Trusted diagnostic authorization time and browser request resilience` is resolved for
   local execution on top of exact WP-2198 commit `0d7ecba`. It replaces caller-controlled support
