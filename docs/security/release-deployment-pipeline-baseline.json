@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "githubOidc": {
+    "longLivedAwsCredential": false,
+    "trustClaims": [
+      "github-organization",
+      "repository-id",
+      "immutable-default-branch-workflow",
+      "environment",
+      "protected-branch-or-tag"
+    ],
+    "forkOrPullRequestCanAssumeDeploymentRole": false,
+    "productionEnvironmentApprovalRequired": true
+  },
+  "ecr": {
+    "tagImmutable": true,
+    "enhancedScanning": true,
+    "deployByDigestOnly": true,
+    "sameDigestStagingAndProduction": true
+  },
+  "blueGreen": {
+    "provider": "codedeploy-ecs",
+    "targetGroups": 2,
+    "healthAlarmsRequired": true,
+    "canaryTrafficPercent": 10,
+    "canaryObservationMinutesMinimum": 10,
+    "automaticRollbackToPriorHealthyDigest": true
+  },
+  "migration": {
+    "oneShotTask": true,
+    "dedicatedRole": true,
+    "backupAndRecoveryCheck": true,
+    "advisoryLock": true,
+    "applicationAutoMigrate": false,
+    "sequence": ["expand", "backfill", "dual-compatible-application", "verify", "contract"],
+    "contractWaitsObservationWindow": true,
+    "restoreOrCompensationPathRequired": true
+  },
+  "runtime": {
+    "startupConfigurationSchemaValidated": true,
+    "missingOrUnknownProductionConfigurationFailsReadiness": true,
+    "livenessSeparatedFromReadiness": true,
+    "shutdownSequence": ["fail-readiness", "stop-new-work", "drain-bounded-leases", "exit"],
+    "abandonedLeaseRecoverable": true
+  },
+  "externalEvidenceRequired": true
+}

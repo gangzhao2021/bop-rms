@@ -25,7 +25,10 @@ const moduleManifestInput = {
   ],
   consumedEvents: [],
   publishedEvents: [],
-  ownedDatabase: { schema: null, tables: [] },
+  ownedDatabase: {
+    schema: "bop_publishing",
+    tables: ["live_gate_version", "live_gate_requirement", "live_gate_operation"],
+  },
   ownedJobs: [],
   featureFlags: [],
   killSwitches: [],

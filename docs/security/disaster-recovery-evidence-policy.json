@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "primaryRegion": "ca-central-1",
+  "recoveryRegion": "ca-west-1",
+  "transactionRpoMinutes": 5,
+  "transactionRtoMinutes": 60,
+  "productionRetentionDays": 35,
+  "stagingRetentionDays": 7,
+  "replicaLagAlertMinutes": 2,
+  "replicaLagPageMinutes": 5,
+  "requiredRecoveredData": [
+    "source-transactions",
+    "pg-boss",
+    "outbox",
+    "inbox",
+    "idempotency",
+    "session-revocation",
+    "audit"
+  ],
+  "requiredRestoreChecks": [
+    "schema",
+    "audit-chain",
+    "malware-and-object-reference",
+    "authorization",
+    "privacy-tombstone-reapplication"
+  ],
+  "requiredReconciliations": ["payment", "webhook", "email"],
+  "externalEvidenceRequired": true
+}

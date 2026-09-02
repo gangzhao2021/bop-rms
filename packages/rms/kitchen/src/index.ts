@@ -339,3 +339,6 @@ export {
   parseKitchenOrderReadyEnvelope,
   parseKitchenReadyEnvelope,
 } from "./application/kitchen-ready-events.js";
+export * from "./domain/production-batch.js";
+export * from "./application/production-batch-service.js";
+export * from "./application/ports/production-batch-ports.js";

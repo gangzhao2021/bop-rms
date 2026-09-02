@@ -173,6 +173,35 @@ describe("WP-1304 Payment webhook Inbox", () => {
     expect(storage.byKey.size).toBe(1);
   });
 
+  it("WP-2022 converges duplicate delivery and processing on one durable effect", async () => {
+    const { service, storage, mapper } = fixture();
+    const deliveries = await Promise.all([service.accept(verified()), service.accept(verified())]);
+    expect(deliveries.map((result) => result.status).sort()).toEqual(["Accepted", "Duplicate"]);
+    expect(new Set(deliveries.map((result) => result.receipt.webhookReceiptReference)).size).toBe(
+      1,
+    );
+
+    const webhookReceiptReference = deliveries[0]?.receipt.webhookReceiptReference;
+    if (webhookReceiptReference === undefined) throw new Error("synthetic receipt missing");
+    const input = { webhookReceiptReference, requestedAt: processedAt };
+    const processed = await Promise.all([service.process(input), service.process(input)]);
+    expect(processed.map((result) => result.status).sort()).toEqual([
+      "AlreadyCompleted",
+      "Completed",
+    ]);
+
+    const laterDelivery = await service.accept(verified());
+    const laterProcessing = await service.process({
+      webhookReceiptReference: laterDelivery.receipt.webhookReceiptReference,
+      requestedAt: processedAt,
+    });
+    expect(laterDelivery).toMatchObject({ status: "Duplicate", receipt: deliveries[0]?.receipt });
+    expect(laterProcessing.status).toBe("AlreadyCompleted");
+    expect(storage.byKey.size).toBe(1);
+    expect(storage.completions.size).toBe(1);
+    expect(mapper.process).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects same account and Event ID with conflicting immutable evidence", async () => {
     const { service, storage } = fixture();
     await service.accept(verified());

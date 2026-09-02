@@ -22,6 +22,10 @@ async function prove(context) {
        WHERE table_schema = 'bop_identity' ORDER BY table_name`,
     );
     assert.deepEqual(inventory.rows, [
+      { table_name: "api_client" },
+      { table_name: "api_client_access_version" },
+      { table_name: "api_client_credential_metadata" },
+      { table_name: "api_client_operation" },
       { table_name: "authentication_session" },
       { table_name: "guest_session" },
       { table_name: "oidc_authorization_transaction" },
@@ -168,7 +172,7 @@ async function prove(context) {
             'bop_identity.session_revocation_request'::regclass
           ) AND NOT tgisinternal) AS triggers`,
     );
-    assert.deepEqual(dynamic.rows, [{ functions: 0, triggers: 0 }]);
+    assert.deepEqual(dynamic.rows, [{ functions: 2, triggers: 0 }]);
 
     await client.query(
       `CREATE ROLE ${deniedRole} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`,

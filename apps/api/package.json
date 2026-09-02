@@ -11,6 +11,7 @@
     "customer-entry:acceptance": "vitest run src/customer-entry.test.ts",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
     "health-readiness:acceptance": "vitest run src/health-readiness.test.ts src/app.test.ts src/server.test.ts",
+    "http-security:acceptance": "vitest run src/http-security.test.ts src/app.test.ts src/server.test.ts",
     "lint": "eslint src",
     "merchant-bff:acceptance": "vitest run src/merchant-bff.test.ts",
     "merchant-catalog:acceptance": "vitest run src/merchant-catalog.test.ts",

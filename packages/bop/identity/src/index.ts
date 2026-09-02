@@ -214,3 +214,6 @@ export {
   type WorkforceIdentitySecurityServiceOptions,
 } from "./application/workforce-identity-security-service.js";
 export { moduleManifest } from "./module.manifest.js";
+export * from "./contracts/api-client.js";
+export * from "./application/api-client-service.js";
+export * from "./application/ports/api-client-ports.js";

@@ -11,6 +11,7 @@ import {
 export type AvailabilityRuleLifecycle = "Draft" | "Active" | "Inactive" | "Archived";
 export type AvailabilityDecision = "Available" | "Unavailable";
 export type AvailabilityResolutionStatus = AvailabilityDecision | "Indeterminate";
+export type AvailabilitySellableType = "Product" | "Sku" | "Bundle";
 
 export interface AvailabilityRuleAggregate {
   readonly ruleReference: CatalogReference;
@@ -19,7 +20,7 @@ export interface AvailabilityRuleAggregate {
   readonly aggregateVersion: number;
   readonly lifecycle: AvailabilityRuleLifecycle;
   readonly sellableReference: CatalogReference;
-  readonly sellableType: "Sku";
+  readonly sellableType: AvailabilitySellableType;
   readonly storeReference: CatalogReference | null;
   readonly channelCodes: readonly CatalogCode[];
   readonly orderTypeCodes: readonly CatalogCode[];
@@ -115,7 +116,7 @@ export function parseAvailabilityRule(value: unknown): AvailabilityRuleAggregate
   ]);
   if (
     !["Draft", "Active", "Inactive", "Archived"].includes(String(raw.lifecycle)) ||
-    raw.sellableType !== "Sku" ||
+    !["Product", "Sku", "Bundle"].includes(String(raw.sellableType)) ||
     (raw.decision !== "Available" && raw.decision !== "Unavailable")
   )
     return invalid();
@@ -136,7 +137,7 @@ export function parseAvailabilityRule(value: unknown): AvailabilityRuleAggregate
     aggregateVersion: positive(raw.aggregateVersion),
     lifecycle: raw.lifecycle as AvailabilityRuleLifecycle,
     sellableReference: parseCatalogReference(raw.sellableReference),
-    sellableType: "Sku",
+    sellableType: raw.sellableType as AvailabilitySellableType,
     storeReference: raw.storeReference === null ? null : parseCatalogReference(raw.storeReference),
     channelCodes: codes(raw.channelCodes),
     orderTypeCodes: codes(raw.orderTypeCodes),
@@ -149,6 +150,72 @@ export function parseAvailabilityRule(value: unknown): AvailabilityRuleAggregate
     createdByActorReference: parseCatalogReference(raw.createdByActorReference),
     updatedAt,
   });
+}
+
+function businessDateAt(instant: CatalogInstant, timeZone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(instant));
+    const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    if (value.year === undefined || value.month === undefined || value.day === undefined)
+      return invalid();
+    return `${value.year}-${value.month}-${value.day}`;
+  } catch {
+    return invalid();
+  }
+}
+
+export function simulateEffectiveAvailability(value: unknown): Readonly<{
+  status: AvailabilityResolutionStatus;
+  reasonCode: CatalogCode;
+  ruleReference: CatalogReference | null;
+  businessDate: string;
+  timeZone: string;
+}> {
+  const raw = exact(value, [
+    "brandReference",
+    "storeReference",
+    "sellableReference",
+    "sellableType",
+    "channelCode",
+    "orderTypeCode",
+    "at",
+    "timeZone",
+    "businessDate",
+    "rules",
+    "safetyEvidence",
+  ]);
+  if (
+    !["Product", "Sku", "Bundle"].includes(String(raw.sellableType)) ||
+    typeof raw.timeZone !== "string" ||
+    raw.timeZone.length < 1 ||
+    raw.timeZone.length > 63 ||
+    typeof raw.businessDate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(raw.businessDate) ||
+    !Array.isArray(raw.rules) ||
+    !Array.isArray(raw.safetyEvidence)
+  )
+    return invalid();
+  const at = parseCatalogInstant(raw.at);
+  if (businessDateAt(at, raw.timeZone) !== raw.businessDate) return invalid();
+  const sellableType = raw.sellableType as AvailabilitySellableType;
+  const rules = raw.rules.map(parseAvailabilityRule);
+  if (rules.some((rule) => rule.sellableType !== sellableType)) return invalid();
+  const result = resolveStoreAvailability({
+    brandReference: parseCatalogReference(raw.brandReference),
+    storeReference: parseCatalogReference(raw.storeReference),
+    sellableReference: parseCatalogReference(raw.sellableReference),
+    channelCode: parseCatalogCode(raw.channelCode),
+    orderTypeCode: parseCatalogCode(raw.orderTypeCode),
+    at,
+    rules,
+    safetyEvidence: raw.safetyEvidence.map(parseAvailabilitySafetyEvidence),
+  });
+  return Object.freeze({ ...result, businessDate: raw.businessDate, timeZone: raw.timeZone });
 }
 
 export function parseAvailabilitySafetyEvidence(value: unknown): AvailabilitySafetyEvidence {

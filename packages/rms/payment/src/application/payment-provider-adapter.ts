@@ -13,8 +13,10 @@ import {
   type PaymentEvidenceDigest,
   type PaymentMethod,
   type PaymentProviderContext,
+  type PaymentProviderAdapter,
   type PaymentProviderFailure,
   type PaymentProviderOutcome,
+  type PaymentProviderRequest,
   type PaymentProviderSnapshot,
   type PaymentReference,
   type ProviderIdempotencyKey,
@@ -352,4 +354,90 @@ export function parsePaymentProviderOutcome(input: unknown): PaymentProviderOutc
   if (kind.value === "Failure")
     return createPaymentProviderFailure(input as PaymentProviderFailure);
   fail("PAYMENT_PROVIDER_INPUT_INVALID");
+}
+
+function sameContext(left: PaymentProviderContext, right: PaymentProviderContext): boolean {
+  return (
+    left.provider === right.provider &&
+    left.environment === right.environment &&
+    left.brandReference === right.brandReference &&
+    left.storeReference === right.storeReference &&
+    left.paymentAttemptReference === right.paymentAttemptReference &&
+    left.operationReference === right.operationReference
+  );
+}
+
+function unknownProviderOutcome(context: PaymentProviderContext): PaymentProviderFailure {
+  return createPaymentProviderFailure({
+    kind: "Failure",
+    context,
+    code: "Unknown",
+    retryDisposition: "Unknown",
+    safeReasonCode: "PROVIDER_OUTCOME_UNKNOWN" as SafeReasonCode,
+  });
+}
+
+function outcomeBoundToRequest(
+  request: PaymentProviderRequest,
+  outcome: PaymentProviderOutcome,
+): boolean {
+  if (!sameContext(request.context, outcome.context)) return false;
+  if (outcome.kind === "Failure") return true;
+  if (
+    request.operation !== "CreateIntent" &&
+    outcome.providerIntentReference !== request.providerIntentReference
+  )
+    return false;
+  if (request.operation === "CreateIntent")
+    return (
+      outcome.paymentMethod === request.paymentMethod &&
+      outcome.captureMode === request.captureMode &&
+      outcome.requestedAmount.amountMinor === request.amount.amountMinor &&
+      outcome.requestedAmount.currencyCode === request.amount.currencyCode
+    );
+  if (request.operation === "CaptureIntent") return outcome.paymentMethod === "TerminalCard";
+  if (request.operation === "RefundPayment")
+    return outcome.paymentMethod === request.originalPaymentMethod;
+  return true;
+}
+
+async function invokeProvider(
+  request: PaymentProviderRequest,
+  invoke: () => Promise<unknown>,
+): Promise<PaymentProviderOutcome> {
+  try {
+    const outcome = parsePaymentProviderOutcome(await invoke());
+    return outcomeBoundToRequest(request, outcome)
+      ? outcome
+      : unknownProviderOutcome(request.context);
+  } catch {
+    return unknownProviderOutcome(request.context);
+  }
+}
+
+export function createContractValidatedPaymentProviderAdapter(
+  delegate: PaymentProviderAdapter,
+): PaymentProviderAdapter {
+  return Object.freeze({
+    createIntent(input: CreateIntentRequest) {
+      const request = createCreateIntentRequest(input);
+      return invokeProvider(request, () => delegate.createIntent(request));
+    },
+    retrieveIntent(input: RetrieveIntentRequest) {
+      const request = createRetrieveIntentRequest(input);
+      return invokeProvider(request, () => delegate.retrieveIntent(request));
+    },
+    cancelIntent(input: CancelIntentRequest) {
+      const request = createCancelIntentRequest(input);
+      return invokeProvider(request, () => delegate.cancelIntent(request));
+    },
+    captureIntent(input: CaptureIntentRequest) {
+      const request = createCaptureIntentRequest(input);
+      return invokeProvider(request, () => delegate.captureIntent(request));
+    },
+    refundPayment(input: RefundPaymentRequest) {
+      const request = createRefundPaymentRequest(input);
+      return invokeProvider(request, () => delegate.refundPayment(request));
+    },
+  });
 }

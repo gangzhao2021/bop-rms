@@ -31,3 +31,6 @@ export * from "./application/ports/allergen-provenance-ports.js";
 export * from "./contracts/selection-validation.js";
 export * from "./application/selection-validation-service.js";
 export * from "./application/ports/selection-validation-ports.js";
+export * from "./contracts/bundle.js";
+export * from "./application/ports/bundle-ports.js";
+export * from "./application/bundle-service.js";

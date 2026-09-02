@@ -255,7 +255,7 @@ function registration(
   handler: ConsumerRegistration["handler"],
 ): ConsumerRegistration {
   return Object.freeze({
-    consumerName: "ordering.payment-outcome",
+    consumerName: "ordering.payment-outcome:v1",
     consumerVersion: 1,
     eventType,
     schemaVersions: Object.freeze([1]),

@@ -12,6 +12,10 @@ const moduleManifestInput = {
   ownedDatabase: {
     schema: "bop_identity",
     tables: [
+      "api_client",
+      "api_client_access_version",
+      "api_client_credential_metadata",
+      "api_client_operation",
       "authentication_session",
       "guest_session",
       "oidc_authorization_transaction",

@@ -3,6 +3,38 @@ const databaseAccessManifestInput = {
   module: { moduleName: "identity", packageName: "@bop/identity", layer: "BOP" },
   tables: [
     {
+      table: "api_client",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@bop/identity" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "credential"],
+    },
+    {
+      table: "api_client_access_version",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/identity" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "api_client_credential_metadata",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/identity" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "credential"],
+    },
+    {
+      table: "api_client_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/identity" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "credential"],
+    },
+    {
       table: "guest_session",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@bop/identity" },

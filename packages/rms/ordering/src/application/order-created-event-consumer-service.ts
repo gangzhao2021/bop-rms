@@ -58,7 +58,7 @@ function eventBindingMatches(
 
 export function createOrderCreatedEventConsumerService(ports: OrderCreatedEventConsumerPorts) {
   const registration: ConsumerRegistration = {
-    consumerName: "ordering.order-status-projection",
+    consumerName: "ordering.order-status-projection:v1",
     consumerVersion: 1,
     eventType: "OrderCreated",
     schemaVersions: [1],

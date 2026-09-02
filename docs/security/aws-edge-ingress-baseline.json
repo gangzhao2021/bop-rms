@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "dnsAndCertificate": {
+    "services": ["route53", "acm"],
+    "domainEvidenceRequired": true,
+    "registrarControls": [
+      "mfa",
+      "transfer-lock",
+      "least-privilege-dns-change",
+      "dnssec-where-supported",
+      "tls-renewal-alarm",
+      "dns-ownership-and-unexpected-record-alarm"
+    ]
+  },
+  "regionalAlbOrigins": ["customer", "merchant", "integrations"],
+  "alb": {
+    "tlsPolicy": "ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09",
+    "httpAction": "fixed-https-redirect",
+    "deletionProtection": true,
+    "desyncMitigationMode": "strictest",
+    "dropInvalidHeaders": true,
+    "idleTimeoutSeconds": 120,
+    "forwardedChainMode": "append",
+    "rejectUnknownHost": true
+  },
+  "publicAssetCloudFront": {
+    "minimumTls": "TLSv1.2_2021",
+    "origin": "private-s3-oac",
+    "allowedContent": ["content-hashed-non-pii-image", "public-brand-asset"],
+    "forwardCookie": false,
+    "forwardAuthorization": false,
+    "forwardUserSpecificQuery": false,
+    "cors": "exact-customer-and-merchant-origins"
+  },
+  "cloudFrontDeniedClasses": [
+    "api-v1-public",
+    "guest-session",
+    "merchant-private",
+    "provider-result",
+    "receipt",
+    "support",
+    "transaction"
+  ],
+  "integrationsOrigin": {
+    "browserCookie": false,
+    "cors": false,
+    "cache": false
+  },
+  "waf": {
+    "regionalOrigins": ["customer", "merchant", "integrations"],
+    "cloudFrontScope": "public-assets-only",
+    "managedRuleGroups": ["core", "known-bad-inputs", "sql-database", "amazon-ip-reputation"],
+    "changeSequence": ["staging-count", "replay-review", "block"],
+    "exclusionRequirements": ["path-and-rule-scoped", "owned", "expiring"],
+    "mayReplaceProviderSignatureVerification": false
+  },
+  "externalEvidenceRequired": true
+}

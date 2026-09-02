@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "authority": "BOP-RMS Handoff 87.7.2",
+  "requiredPlatform": "linux/amd64",
+  "requiredBaseImage": "node:24.18.0-bookworm-slim",
+  "requiredArtifacts": [
+    "spdx-sbom",
+    "intoto-provenance",
+    "osv-dependency",
+    "gitleaks-history-and-release",
+    "semgrep-sast",
+    "trivy-container",
+    "trivy-iac",
+    "zap-authenticated-owned-routes",
+    "third-party-notices"
+  ],
+  "requiredToolPins": [
+    "buildkit",
+    "sbom-generator",
+    "osv-scanner",
+    "gitleaks",
+    "semgrep",
+    "trivy",
+    "owasp-zap",
+    "cosign"
+  ],
+  "allowedRuntimeLicenses": [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0"
+  ],
+  "reviewRequiredRuntimeLicenses": ["LGPL", "MPL"],
+  "blockedRuntimeLicenses": ["AGPL", "SSPL", "UNKNOWN", "NONCOMMERCIAL"],
+  "externalEvidenceRequired": true
+}

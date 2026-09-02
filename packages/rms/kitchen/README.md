@@ -1,15 +1,15 @@
 # `kitchen`
 
 Kitchen-owned, runtime-inactive confirmed-order intake, minimum Ticket / Work Item aggregate,
-deterministic Station plan, lifecycle execution, Store queue projection, minimal realtime hint and
-named-operator KDS continuity records.
+deterministic Station plan, lifecycle execution, Store queue projection, minimal realtime hint,
+named-operator KDS continuity records and Store-scoped Production Batch evidence.
 
 ## Identity and responsibility
 
 - Module Name: `kitchen`
 - Package Name: `@rms/kitchen`
 - Layer / Domain: `RMS / Kitchen`
-- Phase / owning Work Package: `Phase 1 / WP-1400–1408`
+- Phase / owning Work Package: `Phase 1–2 / WP-1400–1408, WP-2111`
 - Owner role: `Kitchen Engineering Owner`
 - Status: `active contract surface and persistence boundary; runtime inactive`
 - Responsibility: consume Ordering-owned `OrderConfirmed.v1`, resolve exact public Ordering source
@@ -57,6 +57,15 @@ It accepts only the four strict command shapes, returns one bounded durable resu
 injected authority, transaction, owner-repository, Audit, Eventing, clock, digest and opaque evidence
 ports. No HTTP, Session, CSRF, offline-command or live safety adapter is included.
 
+`createProductionBatchService` exposes the separate WP-2111 runtime-inactive command boundary for
+Create Plan, Start, Record Observation, Complete and Quarantine. Every effect is final-authorized
+with `kitchen.production.manage`, Store scope, named Actor, purpose, Expected Version, idempotency,
+Audit and a minimal Event. Create validates only Recipe and Inventory public contracts. Later
+commands preserve the pinned Recipe version, Station and Item / Lot identities and must equal the
+exact Domain transition. Yield and consumption use bounded integer microunits; completion requires
+complete observations and no quality hold. Kitchen records consumption evidence but never mutates
+Inventory stock, movement or valuation.
+
 `createKitchenQueueProjectionService` exposes one frozen runtime-inactive coordinator with
 `registration`, `lifecycleRegistrations`, `consume`, `consumeLifecycle`, `rebuild`, `list` and
 `get`. The original registration consumes strict `KitchenWorkCreated.v1`; the four lifecycle
@@ -96,7 +105,8 @@ timestamps and digests only.
 - Allowed asynchronous dependencies: consumes `rms.ordering.order-confirmed.v1` plus
   `rms.kitchen.kitchen-work-created.v1`, `rms.kitchen.kitchen-work-accepted.v1`,
   `rms.kitchen.kitchen-work-started.v1`, `rms.kitchen.kitchen-item-progress-recorded.v1` and
-  `rms.kitchen.kitchen-item-completed.v1`; publishes the same five Kitchen Events.
+  `rms.kitchen.kitchen-item-completed.v1`; publishes the same five Kitchen Events plus the five
+  Store-scoped `ProductionBatch*` lifecycle Events registered by WP-2111.
 - Forbidden dependencies: Ordering private paths/repository/tables, current Catalog/Recipe lookup,
   HTTP/ORM/Provider SDK, cross-domain transaction and inferred routing.
 - Failure behavior: closed safe codes distinguish invalid input, permission denial, conflict and
@@ -173,6 +183,11 @@ snapshot binding adds `acceptedAt` and `orderItemReadyAt`; lifecycle incremental
 acceptance but preserve the prior Ready value, while only a complete authorized rebuild may project
 Ready until WP-1406.
 
+- Production Batch evidence: the plan root, Ingredient plan, lifecycle state, quality exception and
+  operation history are append-only, exact and forced-Store-RLS. A separate rebuildable
+  `kitchen_production_batch_v1` generation/projection/checkpoint is query-only. Quarantine records
+  containment intent without claiming disposal, stock adjustment or a legal food-safety outcome.
+
 ## Security and privacy
 
 Module classification is `indirect_identifier,personal,health` because the immutable Work Item may
@@ -219,6 +234,7 @@ pnpm kitchen-queue:acceptance
 pnpm kitchen-work-lifecycle:acceptance
 pnpm kitchen-ready-event:acceptance
 pnpm kds-continuity:acceptance
+pnpm production-batch:acceptance
 pnpm --filter @rms/kitchen format:check
 pnpm --filter @rms/kitchen lint
 pnpm --filter @rms/kitchen typecheck
@@ -238,8 +254,8 @@ Progress/Completed Events and atomic rollback.
 
 ## Decisions and follow-up
 
-- Authority: WP-0023, WP-0030, WP-0032, WP-0034, WP-0035, WP-0042, WP-1310 and
-  WP-1400–WP-1408.
+- Authority: WP-0023, WP-0030, WP-0032, WP-0034, WP-0035, WP-0042, WP-1310,
+  WP-1400–WP-1408 and WP-2111.
 - External Evidence: real Ordering persistence/source adapter, real Kitchen Station/routing and
   Recipe-preparation adapters/facts, WP-2045 live Payment gate, runtime roles/RLS, real Store/Order
   facts, browser/managed-device and network/power continuity, approved manual runbook, trained

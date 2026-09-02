@@ -162,7 +162,7 @@ export function CheckoutPage({
         <button type="button" disabled>
           Continue to payment
         </button>
-        <p>Payment handoff is owned by WP-1704.</p>
+        <p>Payment remains gated until an approved Provider and public Guest adapter exist.</p>
       </section>
       <Link to="/cart">Back to cart</Link>
     </main>

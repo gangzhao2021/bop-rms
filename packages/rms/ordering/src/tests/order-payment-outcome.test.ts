@@ -524,12 +524,12 @@ describe("WP-1310 Ordering payment outcome", () => {
     const state = fixture();
     expect(state.service.registrations).toEqual([
       expect.objectContaining({
-        consumerName: "ordering.payment-outcome",
+        consumerName: "ordering.payment-outcome:v1",
         consumerVersion: 1,
         eventType: "PaymentSucceeded",
       }),
       expect.objectContaining({
-        consumerName: "ordering.payment-outcome",
+        consumerName: "ordering.payment-outcome:v1",
         consumerVersion: 1,
         eventType: "PaymentFailed",
       }),

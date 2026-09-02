@@ -24,7 +24,7 @@ describe("customer PWA shell", () => {
     expect(html).toContain("Order at BOP");
     expect(html).toContain("No cached menu is enabled");
   });
-  it("does not enable a Service Worker or background replay", () => {
+  it("registers only the bounded Customer Service Worker without persistence code in entry clients", () => {
     const source = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
     const entrySource = readFileSync(new URL("./entry/entry-client.ts", import.meta.url), "utf8");
     const menuSource = readFileSync(new URL("./menu/menu-client.ts", import.meta.url), "utf8");
@@ -33,12 +33,35 @@ describe("customer PWA shell", () => {
       readFileSync(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"),
     );
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-    expect(source).not.toMatch(/serviceWorker|registerSW|workbox/i);
+    expect(source).toContain("startCustomerServiceWorker");
     expect(entrySource).not.toMatch(/localStorage|sessionStorage|indexedDB|CacheStorage/i);
     expect(menuSource).not.toMatch(/localStorage|sessionStorage|indexedDB|CacheStorage/i);
     expect(appSource).not.toMatch(/csrfToken|publicTableReference|contextExpiresAt/);
-    expect(JSON.stringify(pkg)).not.toMatch(/vite-plugin-pwa|workbox-background-sync/i);
+    expect(JSON.stringify(pkg)).not.toMatch(/workbox-background-sync/i);
     expect(manifest.start_url).toBe("/");
+  });
+  it("keeps WP-1707 separate from Workbox and private caching", () => {
+    const connectivity = readFileSync(
+      new URL("./connectivity/connectivity-controller.ts", import.meta.url),
+      "utf8",
+    );
+    expect(connectivity).not.toMatch(/fetch|retry\(|submit\(|observe\(|load\(/u);
+    expect(connectivity).not.toMatch(
+      /serviceWorker|workbox|background.?sync|CacheStorage|localStorage|sessionStorage|indexedDB/u,
+    );
+  });
+  it("keeps mutation replay and private client storage absent from the WP-1708 runtime", () => {
+    const serviceWorker = readFileSync(new URL("./service-worker.ts", import.meta.url), "utf8");
+    const registration = readFileSync(
+      new URL("./pwa/register-service-worker.ts", import.meta.url),
+      "utf8",
+    );
+    expect(`${serviceWorker}\n${registration}`).not.toMatch(
+      /workbox-background-sync|BackgroundSyncPlugin|Queue\(|localStorage|sessionStorage|indexedDB/u,
+    );
+    expect(serviceWorker).toContain("NetworkOnly");
+    expect(serviceWorker).toContain('request.method === "POST"');
+    expect(serviceWorker).toContain('response.headers.get("X-BOP-Cache-Class") === "public"');
   });
   it("maps the canonical clean /cart route to CUST-CART loading state", () => {
     const html = renderToStaticMarkup(
@@ -59,7 +82,48 @@ describe("customer PWA shell", () => {
     expect(html).toContain("Review your order");
     expect(html).toContain("Loading checkout");
     expect(html).toContain("Continue to payment");
-    expect(html).toContain("Payment handoff is owned by WP-1704");
+    expect(html).toContain("Payment remains gated until an approved Provider");
+  });
+  it("maps the canonical clean Payment routes without trusting callback state", () => {
+    const payment = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/checkout/payment"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    const result = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/checkout/result?payment=success#provider-secret"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(payment).toContain("Continue to payment");
+    expect(payment).toContain("Loading payment");
+    expect(result).toContain("Verify your payment");
+    expect(result).toContain("Verifying payment");
+    expect(result).not.toContain("Payment confirmed");
+    expect(result).not.toContain("provider-secret");
+  });
+  it("maps the canonical Order Status route without treating the reference as authority", () => {
+    const reference = "018f7a00-0000-7000-8000-000000000001";
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={[`/orders/${reference}`]}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Track your order");
+    expect(html).toContain("Loading order status");
+    expect(html).toContain("Your Guest Session authorizes access");
+    expect(html).not.toContain(`>${reference}<`);
+  });
+  it("maps the canonical Receipt route without treating the reference as authority", () => {
+    const reference = "018f7a00-0000-7000-8000-000000000001";
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={[`/orders/${reference}/receipt`]}>
+        <App />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Your receipt");
+    expect(html).toContain("Loading receipt");
+    expect(html).not.toContain(`>${reference}<`);
   });
   it("fails a direct /menu navigation closed without page-memory Store context", () => {
     const html = renderToStaticMarkup(

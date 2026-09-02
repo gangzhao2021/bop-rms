@@ -189,6 +189,30 @@ async function proveDispatcher(context) {
         leaseToken: leaseId("3"),
       }),
     );
+    const failedState = await inScope(admin, { brandId: brandA }, (transaction) =>
+      transaction.query(
+        `SELECT
+          attempt_count,
+          last_error_code,
+          lease_token,
+          lease_owner,
+          lease_expires_at,
+          published_at
+        FROM platform_eventing.outbox_event
+        WHERE event_id = $1`,
+        [eventId("2")],
+      ),
+    );
+    assert.deepEqual(failedState.rows, [
+      {
+        attempt_count: 1,
+        last_error_code: "TRANSPORT_REJECTED",
+        lease_token: null,
+        lease_owner: null,
+        lease_expires_at: null,
+        published_at: null,
+      },
+    ]);
     assert.deepEqual(await claim(workerA, { brandId: brandA }, leaseId("4")), []);
 
     const brandBClaim = await claim(workerA, { brandId: brandB }, leaseId("5"));
@@ -268,6 +292,6 @@ async function proveDispatcher(context) {
   }
 }
 
-it("proves the WP-0031 leased dispatcher concurrency, fencing, ordering and RLS contract", async () => {
+it("proves the WP-0031 dispatcher and WP-2023 rejection/crash failure recovery contract", async () => {
   await withIsolatedDatabase({ caseId: "dispatcher", root }, proveDispatcher);
 }, 180_000);

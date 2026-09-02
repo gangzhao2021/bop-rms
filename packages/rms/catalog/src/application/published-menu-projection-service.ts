@@ -34,7 +34,7 @@ function menuEnvelope(value: MenuPublishedEnvelope): MenuPublishedEnvelope {
 
 export function createPublishedMenuProjectionService(ports: PublishedMenuProjectionPorts) {
   const registration: ConsumerRegistration = {
-    consumerName: "catalog.published-menu-projection",
+    consumerName: "catalog.published-menu-projection:v1",
     consumerVersion: 1,
     eventType: "MenuPublished",
     schemaVersions: [1],

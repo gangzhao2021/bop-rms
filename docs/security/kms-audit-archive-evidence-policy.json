@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "requiredControls": [
+    "purpose-and-environment-key-separation",
+    "p256-sign-verify-dedicated-keys",
+    "symmetric-annual-automatic-rotation",
+    "asymmetric-annual-or-compromise-rotation",
+    "verify-only-kid-overlap",
+    "two-person-key-deletion-approval",
+    "minimum-30-day-key-deletion-window",
+    "archive-key-dependency-block",
+    "secrets-manager-90-day-or-shorter-rotation",
+    "nonrotatable-secret-180-day-review",
+    "dual-read-single-write-rotation",
+    "pepper-maximum-24-hour-overlap-or-global-revocation",
+    "secret-access-and-unusual-decrypt-alerts",
+    "append-only-audit-runtime-acl",
+    "daily-audit-chain-and-signature-verification",
+    "high-risk-export-freeze-on-verifier-failure",
+    "versioned-sse-kms-object-lock-governance",
+    "no-ordinary-bypass-governance-retention",
+    "seven-years-from-fiscal-year-end",
+    "legal-hold-extension",
+    "data-minimized-statutory-snapshot",
+    "linked-correction-refund-and-void",
+    "daily-source-manifest-archive-verification",
+    "quarterly-cross-tenant-safe-restore-sample"
+  ],
+  "externalEvidenceRequired": true
+}

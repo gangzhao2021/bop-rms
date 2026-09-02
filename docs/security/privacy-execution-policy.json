@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "authority": ["BOP-RMS Handoff 86.9", "BOP-RMS Handoff 87.10.1", "BOP-RMS Handoff 87.10.2"],
+  "unknownClassification": "Confidential",
+  "prohibitedData": ["PAN", "CVV", "raw-authentication-credential"],
+  "necessaryCookies": [
+    {
+      "name": "__Host-bop-auth",
+      "purpose": "merchant-oauth-transaction",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null
+    },
+    {
+      "name": "__Host-bop-merchant",
+      "purpose": "merchant-session",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null
+    },
+    {
+      "name": "__Host-bop-guest",
+      "purpose": "guest-session",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null
+    }
+  ],
+  "prohibitedTracking": [
+    "advertising-cookie",
+    "cross-site-tracker",
+    "third-party-analytics",
+    "fingerprinting",
+    "session-replay",
+    "email-open-tracking",
+    "email-click-tracking",
+    "tracking-pixel"
+  ],
+  "marketing": {
+    "enabled": false,
+    "futureRequires": [
+      "consent-evidence",
+      "withdrawal-or-unsubscribe",
+      "privacy-review",
+      "CASL-review"
+    ]
+  },
+  "privacyRights": {
+    "types": ["AccessPortability", "Correction", "ConsentWithdrawal", "DeletionAnonymization"],
+    "trackedRequestRequired": true,
+    "proportionalIdentityProof": true,
+    "responseTargetCalendarDays": 30,
+    "exportEncrypted": true,
+    "exportSingleUse": true,
+    "exportMaximumHours": 24,
+    "unencryptedEmailAttachment": false,
+    "preserveFinancialAndAuditHistory": true,
+    "legalHoldOrStatutoryBlockReasonRequired": true
+  },
+  "privacyTombstone": {
+    "allowedFields": [
+      "opaqueSubjectId",
+      "fieldReference",
+      "policyVersion",
+      "completedAt",
+      "replayStatus"
+    ],
+    "prohibitedFields": ["email", "phone", "name"],
+    "productSearch": false,
+    "analytics": false,
+    "applyBeforeRestoredTraffic": true
+  },
+  "retention": [
+    {
+      "class": "business-record",
+      "period": "P7Y",
+      "trigger": "fiscal-year-end",
+      "legalHoldExtends": true
+    },
+    {
+      "class": "corporate-permanent-record",
+      "period": "INDEFINITE",
+      "trigger": "record-created",
+      "legalHoldExtends": true
+    },
+    {
+      "class": "unnecessary-customer-contact",
+      "period": "P24M",
+      "trigger": "last-closed-transaction",
+      "legalHoldExtends": true
+    },
+    {
+      "class": "raw-provider-payload",
+      "period": "P30D",
+      "trigger": "received-at",
+      "legalHoldExtends": true
+    },
+    {
+      "class": "application-log",
+      "period": "P30D",
+      "trigger": "recorded-at",
+      "legalHoldExtends": false
+    },
+    {
+      "class": "security-audit-archive",
+      "period": "P365D",
+      "trigger": "recorded-at",
+      "legalHoldExtends": true
+    },
+    {
+      "class": "import-result-artifact",
+      "period": "P90D",
+      "trigger": "completed-at",
+      "legalHoldExtends": true
+    },
+    {
+      "class": "development-staging-data",
+      "period": "P7D",
+      "trigger": "created-at",
+      "legalHoldExtends": false
+    }
+  ],
+  "externalEvidenceRequired": true
+}

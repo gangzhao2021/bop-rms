@@ -16,9 +16,35 @@ source.
   Aggregate Ready phase, issue/regenerate/validate Ready-bound Pickup Proof evidence, and plan an
   authorized append-only Pickup Handoff with exact cumulative quantity and completion derivation.
   A strict `FulfillmentCompleted.v1` publication exposes the minimal completed business fact.
-- Explicit non-goals: private Ordering/Kitchen reads, Delivery, non-Kitchen Ready, raw proof
-  generation/hashing, other handoff Events, cancellation, Queue/Detail Projection, API/UI/SSE, live
-  grants and production activation.
+- Explicit non-goals: private Ordering/Kitchen reads, non-Kitchen Ready, raw proof
+  generation/hashing, unaccepted handoff Events, Delivery persistence, live API/SSE, grants and
+  production activation.
+
+WP-2150 adds runtime-inactive Delivery Task creation and dispatch contracts. Execution and
+Assignment state remain separate; every Offer is a single active TTL-bound append-only Attempt with
+pinned Dispatch Policy and Route Plan versions. Late acceptance, parallel offers, indeterminate
+candidate evidence and automatic-attempt exhaustion fail closed or create a dispatch exception.
+No live worker, Provider, scheduling/location result or Delivery persistence is claimed.
+
+WP-2151 adds field-masked Delivery Detail snapshots and exact-version, append-only revision
+contracts. Critical changes fail closed without fresh address, service-area, ETA, Pricing, Capacity
+and phase-dependent Provider/Manager evidence; rejected revisions never replace the last accepted
+snapshot.
+
+WP-2152 adds a Provider adapter boundary with account/health separation, operation-scoped circuit
+breakers, authenticated append-only webhook envelopes, pinned fail-closed status mapping and
+indeterminate Create reconciliation. Credentials remain Secret references and raw Provider payloads
+are excluded.
+
+WP-2153 adds dual-confirmed courier custody handoff, append-only policy-pinned Delivery Proof and a
+Customer-safe tracking projection. Only validated evidence authorizes Picked Up/Delivered; uncertain
+custody or proof requires review, and the Customer contract excludes precise location, courier PII,
+raw address and evidence assets.
+
+WP-2154 adds append-only completion exceptions, evidence-gated reattempt/reroute/return/final
+resolution and the operational exception projection. Fulfillment coordinates but never invents
+Ordering cancellation, Payment/refund, Kitchen remake, Inventory replacement/disposal or Customer
+compensation finality.
 
 ## Public contract
 

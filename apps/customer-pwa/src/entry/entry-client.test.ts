@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { consumeCustomerQrFragment, createCustomerEntryClient } from "./entry-client.js";
-import { getCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import {
+  getCustomerCsrfCredential,
+  getPaymentOperationReference,
+  setPaymentOperationReference,
+} from "../session/customer-transaction-context.js";
 
 const established = Object.freeze({
   schemaVersion: 2,
@@ -47,6 +51,7 @@ describe("customer entry browser boundary", () => {
   );
 
   it("posts once across repeated starts and keeps browser storage out of the boundary", async () => {
+    setPaymentOperationReference("018f7900-0000-7000-8000-000000000001");
     const events: string[] = [];
     const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       events.push("fetch");
@@ -73,6 +78,7 @@ describe("customer entry browser boundary", () => {
     expect(first).toEqual(second);
     expect(first.kind).toBe("Established");
     expect(getCustomerCsrfCredential()).toBe(established.csrfToken);
+    expect(getPaymentOperationReference()).toBeNull();
   });
 
   it("maps closed error contracts without exposing an oracle", async () => {

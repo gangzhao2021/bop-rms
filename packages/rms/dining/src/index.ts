@@ -9,5 +9,8 @@ export * from "./application/dining-session-service.js";
 export * from "./application/ports/dining-session-ports.js";
 export * from "./contracts/dining-closing.js";
 export * from "./domain/dining-closing.js";
+export * from "./domain/dining-table.js";
+export * from "./application/dining-table-service.js";
+export * from "./application/ports/dining-table-ports.js";
 export * from "./application/dining-closing-service.js";
 export * from "./application/ports/dining-closing-ports.js";

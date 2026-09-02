@@ -2,7 +2,7 @@ import { cp, mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "no
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { readMigrationCatalog } from "./catalog.ts";
+import { findCaseFoldConflicts, readMigrationCatalog } from "./catalog.ts";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const roots: string[] = [];
@@ -45,6 +45,7 @@ describe("migration catalog", () => {
       "0000_013_create_retry_dead_letter",
       "0000_014_create_audit_record",
       "0000_015_alter_audit_hash_chain",
+      "0000_016_create_security_abuse_bucket",
       "0200_001_create_tenant_organization",
       "0200_002_create_operating_entity",
       "0200_003_create_membership",
@@ -52,7 +53,16 @@ describe("migration catalog", () => {
       "0200_005_create_workforce_identity_security",
       "0200_006_create_guest_session",
       "0200_007_alter_guest_dining_binding",
+      "0200_008_create_api_client",
+      "0200_009_create_operating_entity_administration",
+      "0200_010_create_brand_administration",
+      "0200_011_create_platform_tenant_administration",
       "0300_001_create_permission",
+      "0300_002_create_role_administration",
+      "0400_001_create_feature_control_administration",
+      "0400_002_create_live_gate_workflow",
+      "0400_003_create_support_case",
+      "1000_001_create_store_configuration",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
       "1102_001_create_option_set_binding",
@@ -60,9 +70,16 @@ describe("migration catalog", () => {
       "1104_001_create_menu_publication",
       "1105_001_create_published_menu_projection",
       "1106_001_create_allergen_provenance",
+      "1106_002_alter_catalog_function_permissions",
+      "1107_001_create_bundle_aggregate",
+      "1107_002_alter_availability_workbench",
       "1200_001_create_tax_configuration",
       "1200_002_create_price_book",
       "1200_003_create_price_quote",
+      "1200_004_create_price_book_admin_projection",
+      "1200_005_create_tax_config_admin_projection",
+      "1200_006_create_promotion_management",
+      "1250_001_create_recipe_management",
       "1300_001_create_cart_aggregate",
       "1300_002_alter_cart_item_commands",
       "1300_003_alter_cart_selection_evidence",
@@ -71,6 +88,7 @@ describe("migration catalog", () => {
       "1300_006_create_order_number_allocation",
       "1300_007_create_order_submission",
       "1300_008_create_order_status_projection",
+      "1300_009_create_order_amendment",
       "1400_001_create_payment_intent",
       "1400_002_create_provider_webhook_inbox",
       "1400_003_create_payment_terminal_fact",
@@ -82,15 +100,289 @@ describe("migration catalog", () => {
       "1500_004_create_kitchen_ready_publication",
       "1500_005_create_kitchen_allergen_safety",
       "1500_006_create_kds_continuity",
+      "1500_007_create_production_batch",
+      "1600_001_create_device_management",
+      "1600_002_create_kds_profile_management",
       "1700_001_create_pickup_fulfillment",
       "1700_002_create_fulfillment_readiness",
       "1700_003_create_pickup_proof",
       "1700_004_create_pickup_handoff",
       "1700_005_create_fulfillment_completion_publication",
+      "1800_001_create_report_definition",
+      "1800_002_create_report_run",
+      "1800_003_create_metric_definition",
+      "1800_004_create_data_quality_reconciliation",
+      "1800_005_create_pipeline_run",
+      "1800_006_create_export_job",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
     ).toBe(true);
+  });
+
+  it("registers the exact WP-2180 Device management migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1600_001_create_device_management",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@rms/printing-device",
+      schema: "rms_device",
+    });
+    for (const table of [
+      "device",
+      "device_capability_version",
+      "device_assignment",
+      "device_health_signal",
+      "device_health_current",
+      "device_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_device.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(6);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+    expect(migration?.sql).not.toMatch(/(?:credential|secret|token)_(?:value|bytes|text)/iu);
+  });
+
+  it("registers the exact WP-2195 role administration migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "0300_002_create_role_administration",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@bop/permission",
+      schema: "bop_permission",
+    });
+    expect(migration?.sql).toContain("CREATE TABLE bop_permission.role_administration_version");
+    expect(migration?.sql).toContain("CREATE TABLE bop_permission.role_administration_decision");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).toContain("append-only");
+  });
+
+  it("registers the exact WP-2196 Export Job migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1800_006_create_export_job",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@rms/business-intelligence",
+      schema: "rms_reporting",
+    });
+    for (const table of [
+      "export_job",
+      "export_job_state_record",
+      "export_artifact",
+      "export_access_grant",
+      "export_grant_consumption",
+      "export_revocation",
+      "export_operation_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_reporting.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(7);
+    expect(migration?.sql).not.toMatch(/(?:presigned|object_key|recipient|filename)/iu);
+  });
+
+  it("registers the exact WP-2197 Platform Tenant administration migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "0200_011_create_platform_tenant_administration",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@bop/tenant", schema: "bop_tenant" });
+    for (const table of [
+      "tenant_administration_version",
+      "tenant_capability_metadata_reference",
+      "tenant_administration_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE bop_tenant.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
+    expect(migration?.sql).toContain("bop.platform_support_case_id");
+    expect(migration?.sql).not.toMatch(/(?:secret|credential|token|database_query)/iu);
+  });
+
+  it("registers the exact WP-2192 Store configuration migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1000_001_create_store_configuration",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/store", schema: "rms_store" });
+    for (const table of [
+      "store_configuration_version",
+      "store_weekly_service_period",
+      "store_service_exception",
+      "store_configuration_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_store.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(4);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2193 Feature Control administration migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "0400_001_create_feature_control_administration",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@bop/feature-control",
+      schema: "bop_feature_control",
+    });
+    for (const table of ["control_version", "control_dependency", "control_operation"])
+      expect(migration?.sql).toContain(`CREATE TABLE bop_feature_control.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
+  });
+
+  it("registers the exact WP-2194 Live Gate workflow migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "0400_002_create_live_gate_workflow",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@bop/publishing",
+      schema: "bop_publishing",
+    });
+    for (const table of ["live_gate_version", "live_gate_requirement", "live_gate_operation"])
+      expect(migration?.sql).toContain(`CREATE TABLE bop_publishing.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
+  });
+
+  it("registers the exact WP-2198 Support Case migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "0400_003_create_support_case",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@bop/task", schema: "bop_task" });
+    for (const table of [
+      "support_case_version",
+      "diagnostic_access_grant",
+      "diagnostic_access_revocation",
+      "support_action_record",
+      "support_case_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE bop_task.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(5);
+    expect(migration?.sql).toContain("interval '15 minutes'");
+    expect(migration?.sql).toContain("bop.platform_support_case_id");
+    expect(migration?.sql).not.toMatch(/(?:command_text|query_text|secret|credential_value)/iu);
+  });
+
+  it("registers the exact WP-2181 KDS Profile and UAT migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1600_002_create_kds_profile_management",
+    );
+    expect(migration?.metadata).toMatchObject({
+      owner: "@rms/printing-device",
+      schema: "rms_device",
+    });
+    for (const table of [
+      "kds_profile",
+      "kds_profile_version",
+      "kds_profile_assignment",
+      "kds_uat_run",
+      "kds_uat_check_result",
+      "kds_profile_operation",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_device.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(6);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+    expect(migration?.sql).not.toMatch(/(?:credential|secret|token)_(?:value|bytes|text)/iu);
+  });
+
+  it("registers the WP-2005 Catalog function PUBLIC-execute revocation", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1106_002_alter_catalog_function_permissions",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/catalog", schema: "rms_catalog" });
+    expect(migration?.sql.match(/REVOKE ALL ON FUNCTION rms_catalog\./gu)).toHaveLength(4);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2100 Bundle aggregate migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1107_001_create_bundle_aggregate",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/catalog", schema: "rms_catalog" });
+    for (const table of [
+      "bundle",
+      "bundle_version",
+      "bundle_component_group",
+      "bundle_component_sellable",
+      "bundle_availability_rule",
+      "bundle_operation_record",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
+    expect(migration?.sql).toContain("sellable_type IN ('Product', 'Sku')");
+    expect(migration?.sql).toContain("numeric(30,0)");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(6);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2102 Price Book Admin projection migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1200_004_create_price_book_admin_projection",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/pricing", schema: "rms_pricing" });
+    for (const table of [
+      "price_book_admin_projection_generation",
+      "price_book_admin_projection",
+      "price_book_entry_projection",
+      "price_book_admin_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
+    expect(migration?.sql).toContain("amount_minor = trunc(amount_minor)");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(4);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2103 Tax Config Admin projection migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1200_005_create_tax_config_admin_projection",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/pricing", schema: "rms_pricing" });
+    for (const table of [
+      "tax_config_admin_projection_generation",
+      "tax_config_admin_projection",
+      "tax_config_rule_projection",
+      "tax_config_receipt_fixture_projection",
+      "tax_config_admin_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
+    expect(migration?.sql).toContain("tax_amount_minor = trunc(tax_amount_minor)");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(5);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2104 Promotion management migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1200_006_create_promotion_management",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/pricing", schema: "rms_pricing" });
+    for (const table of [
+      "promotion",
+      "promotion_version",
+      "promotion_eligibility_reference",
+      "promotion_operation_record",
+      "promotion_admin_projection_generation",
+      "promotion_admin_projection",
+      "promotion_admin_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_pricing.${table}`);
+    expect(migration?.sql).toContain("usage_minor <= budget_minor");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(7);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2105 Recipe management migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1250_001_create_recipe_management",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/recipe", schema: "rms_recipe" });
+    for (const table of [
+      "recipe",
+      "recipe_version",
+      "recipe_ingredient_requirement",
+      "recipe_allergen_evidence",
+      "recipe_preparation_step",
+      "recipe_scope_binding",
+      "recipe_review_record",
+      "recipe_operation_record",
+      "recipe_admin_projection_generation",
+      "recipe_admin_projection",
+      "recipe_admin_ingredient_projection",
+      "recipe_admin_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_recipe.${table}`);
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(12);
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
   it("registers the exact WP-1603 Pickup Handoff migration", async () => {
@@ -127,6 +419,22 @@ describe("migration catalog", () => {
     expect(migration?.metadata.owner).toBe("@rms/catalog");
     expect(migration?.sql).toContain("CREATE TABLE rms_catalog.availability_rule");
     expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
+  it("registers the exact WP-2101 Availability Workbench migration", async () => {
+    const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (candidate) => candidate.id === "1107_002_alter_availability_workbench",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/catalog", schema: "rms_catalog" });
+    for (const table of [
+      "availability_workbench_projection_generation",
+      "availability_workbench_projection",
+      "availability_workbench_projection_checkpoint",
+    ])
+      expect(migration?.sql).toContain(`CREATE TABLE rms_catalog.${table}`);
+    expect(migration?.sql).toContain("sellable_type IN ('Product', 'Sku', 'Bundle')");
+    expect(migration?.sql.match(/FORCE ROW LEVEL SECURITY/gu)).toHaveLength(3);
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
@@ -794,7 +1102,16 @@ describe("migration catalog", () => {
       ["0200_005_create_workforce_identity_security", "@bop/identity", "bop_identity"],
       ["0200_006_create_guest_session", "@bop/identity", "bop_identity"],
       ["0200_007_alter_guest_dining_binding", "@bop/identity", "bop_identity"],
+      ["0200_008_create_api_client", "@bop/identity", "bop_identity"],
+      [
+        "0200_009_create_operating_entity_administration",
+        "@bop/operating-entity",
+        "bop_operating_entity",
+      ],
+      ["0200_010_create_brand_administration", "@bop/tenant", "bop_tenant"],
+      ["0200_011_create_platform_tenant_administration", "@bop/tenant", "bop_tenant"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
+      ["0300_002_create_role_administration", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",
@@ -814,6 +1131,26 @@ describe("migration catalog", () => {
     );
     expect(guestSession?.sql).toContain("CREATE TABLE bop_identity.guest_session");
     expect(guestSession?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    const apiClient = migrations.find((migration) => migration.id === "0200_008_create_api_client");
+    expect(apiClient?.sql).toContain("CREATE TABLE bop_identity.api_client");
+    expect(apiClient?.sql).toContain("CREATE TABLE bop_identity.api_client_credential_metadata");
+    expect(apiClient?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    const entityAdmin = migrations.find(
+      (migration) => migration.id === "0200_009_create_operating_entity_administration",
+    );
+    expect(entityAdmin?.sql).toContain(
+      "CREATE TABLE bop_operating_entity.operating_entity_profile_version",
+    );
+    expect(entityAdmin?.sql).toContain(
+      "CREATE TABLE bop_operating_entity.business_function_assignment_decision",
+    );
+    expect(entityAdmin?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    const brandAdmin = migrations.find(
+      (migration) => migration.id === "0200_010_create_brand_administration",
+    );
+    expect(brandAdmin?.sql).toContain("CREATE TABLE bop_tenant.brand_configuration_version");
+    expect(brandAdmin?.sql).toContain("CREATE TABLE bop_tenant.brand_store_membership_record");
+    expect(brandAdmin?.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(migrations.map((migration) => migration.sql).join("\n")).not.toMatch(
       /\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu,
     );
@@ -960,14 +1297,13 @@ $unsafe$;
   });
 
   it("rejects case-fold-colliding migration filenames", async () => {
-    const root = await fixture();
-    const directory = path.dirname(migrationPath(root));
-    await writeFile(
-      path.join(directory, "0000_001_CREATE_MIGRATION_HISTORY.sql"),
-      await readFile(migrationPath(root)),
-    );
-    expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
-      "CASE_CONFLICT",
+    expect(
+      findCaseFoldConflicts([
+        "0000_001_create_migration_history.sql",
+        "0000_001_CREATE_MIGRATION_HISTORY.sql",
+      ]),
+    ).toEqual(
+      new Map([["0000_001_CREATE_MIGRATION_HISTORY.sql", "0000_001_create_migration_history.sql"]]),
     );
   });
 
@@ -1023,9 +1359,11 @@ $unsafe$;
 
   it("rejects unknown namespace entries and case-fold collisions", async () => {
     const root = await fixture();
-    await mkdir(path.join(root, "migrations", "0000-Platform"));
+    await mkdir(path.join(root, "migrations", "0000-platform-unknown"));
     const codes = (await readMigrationCatalog(root)).diagnostics.map((item) => item.code);
-    expect(codes).toContain("CASE_CONFLICT");
     expect(codes).toContain("MIGRATION_NAMESPACE_UNKNOWN");
+    expect(findCaseFoldConflicts(["0000-platform", "0000-Platform"])).toEqual(
+      new Map([["0000-Platform", "0000-platform"]]),
+    );
   });
 });

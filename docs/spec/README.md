@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-1703 — Checkout / Quote Review on codex/wp-1703`
+- Current discussion node: `WP-2202 — Restore finite GitHub cold-start verification on codex/wp-2202`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -17,10 +17,892 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-1703 — Checkout / Quote Review` is active from exact integrated and exact-main verified
-  `main@2bacc889105e131616f113cefdd211cae548c2cd` (`31550601942 / 93972290641`). It owns only
-  the bounded `CUST-CHECKOUT` Quote review and recovery UI described in
-  `docs/spec/work-packages/WP-1703.md`.
+- `WP-2202 — Restore finite GitHub cold-start verification` is resolved for execution on exact
+  WP-2201 head `32010a8`. GitHub runs `33586898910` and `33586944954` independently exhausted the
+  existing 180-second WP-0006 health wait while clean-runner workspace builds were still active;
+  earlier run `33585461764` passed startup but reached the workflow's fixed 20-minute limit during
+  passing Merchant Web tests. This bounded CI repair extends only those finite budgets to 360
+  seconds and 45 minutes. It removes, skips and reorders no verification and changes no application,
+  Domain, database, security, production or deployment behavior. PR #172 is published against
+  `codex/wp-2201`; exact implementation head `049de27` passed every unchanged workflow gate in
+  run/job `33629139991 / 100243961313` in `34m27s`. The documentation-only evidence head remains
+  subject to the same complete check.
+
+- `WP-2201 — Production exclusion for the local Merchant demo` is completed and locally verified
+  on exact WP-2200 commit `e9be823`. A development-only HTML entry keeps the deterministic demo
+  module, UI and fixtures outside both normal and exact-flag production dependency graphs while
+  preserving the flagged local preview and the normal production/unflagged fail-closed behavior.
+  Merchant Web format, lint, typecheck, `458/458` tests, both production builds, bounded asset
+  scans, desktop/mobile demo browser checks and production route checks passed. It adds no API,
+  authentication, permission, persistence, production activation or external evidence. PR #171 is
+  published against `codex/wp-2200`. Its initial Actions run failed in the shared WP-0006
+  environment verifier after the local stack remained stopped for 180 seconds; no WP-2201 test
+  assertion ran or failed. Merge and deployment remain unauthorized.
+
+- `WP-2200 — Local-only Merchant core workflow preview` is resolved for local execution on top of
+  exact WP-2199 commit `328e656`. Following the Owner-directed `2026-08-28` scope extension, it is
+  limited to a visibly labelled, read-only, deterministic synthetic preview of Store, Menu, Order,
+  Kitchen, Compliance dashboard and sanitized non-production Support routes behind an exact Vite
+  development-only flag. Its Owner-approved showcase extension adds a synthetic `HOME-OVERVIEW`,
+  coherent permission-labelled navigation and a root `pnpm demo:merchant` command. It creates no
+  API, authentication, permission, persistence, real business fact or production activation.
+  Merchant Web format, lint, typecheck, `459/459` tests, development and production builds,
+  secret/bundle review, desktop/mobile browser checks and production fail-closed checks passed.
+  PR #170 is published against `codex/wp-2199`. Its initial Actions run passed environment startup
+  and the workspace baseline, then the fixed 20-minute workflow limit cancelled the repository-wide
+  quality step while Merchant Web tests were still passing; no assertion failure was reported.
+  Merge and deployment remain unauthorized.
+
+- `WP-2199 — Trusted diagnostic authorization time and browser request resilience` is resolved for
+  local execution on top of exact WP-2198 commit `0d7ecba`. It replaces caller-controlled support
+  authorization time with a trusted application clock, requires active diagnostic grants to be
+  revalidated atomically with action commits, bounds customer and merchant browser requests, and
+  coalesces concurrent customer write intents. Exact full `pnpm verify` passed with root `328/328`,
+  Task `32/32`, Customer PWA `203/203`, Merchant Web `452/452`, the `84`-migration / `14`-namespace
+  catalog and all `40/40` package format/lint/typecheck/test/build tasks; the tracked-file secret
+  scan also passed. No production diagnostic access, external mutation or deployment is authorized.
+  Draft PR #169 is published; GitHub Actions execution is externally blocked by the account
+  payment/spending limit.
+
+- `WP-2198 — Purpose-bound Support Case and diagnostic access workflow` is resolved for local
+  execution on top of exact WP-2197 commit `69ba7e6`. Task owns immutable Support Case versions,
+  exact assignment/lifecycle operations, independently approved 15-minute diagnostic grants,
+  revocation and minimized action evidence while Tenant/Store, Permission, Identity/MFA, approval,
+  evidence bytes, Audit and source facts remain with their owners. Named Platform actor, one exact
+  Case/Tenant/optional Store, purpose, masking and exact delegated permissions fail closed;
+  impersonation, arbitrary database browsing, silent extension and diagnostic command/query/payload
+  storage are prohibited. Exact full `pnpm verify` passed with Task `30/30`, Merchant Web `452/452`,
+  the `84`-migration / `14`-namespace catalog, forced-RLS inventory `137`, all `40/40` package
+  format/lint/typecheck/test/build tasks and the complete retained isolated PostgreSQL matrix; the
+  dedicated WP-2198 Case-context, append-only and 15-minute-grant acceptance also passed. No real
+  Case, Actor, Tenant/Store, verification, MFA, approval, diagnostic access/action, break-glass task
+  or external mutation is claimed; GitHub publication and deployment remain deferred.
+
+- `WP-2197 — Platform Tenant / Region / Lifecycle Operations` is resolved for local execution on
+  top of exact WP-2196 commit `1bdc804`. Tenant owns immutable Platform administration versions and
+  operation history while Store/provider health, Support Case, plan/capability, policy, Export,
+  Restore and Audit facts stay behind owner contracts. Named Platform actor, purpose/case binding,
+  independent approval, recent MFA and external evidence gates fail closed; Platform-context forced
+  RLS and the complete `PLT-TENANT-LIST` / `PLT-TENANT-DETAIL` routes are included. Exact full
+  `pnpm verify` passed with Tenant `20/20`, Merchant Web `450/450`, the `83`-migration / `14`-
+  namespace catalog, forced-RLS inventory `132`, all `40/40` package
+  format/lint/typecheck/test/build tasks and the complete retained isolated PostgreSQL matrix; the
+  dedicated WP-2197 database acceptance also passed. No real Tenant, Platform access, onboarding,
+  approval, health, suspension, export, restore or external mutation is claimed; GitHub publication
+  and deployment remain deferred.
+
+- `WP-2196 — Export Job, Artifact, Expiry and Revocation Center` is resolved for local execution on
+  top of exact WP-2195 commit `a861e6f`. Business Intelligence owns only the cross-source export
+  request, state, artifact grant and download/revocation histories; source facts and exportable-field
+  decisions remain with their owning Domains through public contracts. It adds CSV/canonical-JSON
+  limits, formula-safe text, 24-hour encrypted artifacts, five-minute single-use application grants,
+  append-only history with forced Brand/optional-Store RLS and the complete `EXPORT-JOB-LIST`
+  route. Exact full `pnpm verify` passed with Business Intelligence `25/25`, Merchant Web `448/448`,
+  the `82`-migration / `14`-namespace catalog, all `40/40` package
+  format/lint/typecheck/test/build tasks and the complete retained isolated PostgreSQL matrix; the
+  dedicated WP-2196 database acceptance also passed. No real export, PII, source snapshot, object,
+  encryption result, application grant or download is claimed; GitHub publication and deployment
+  remain deferred.
+
+- `WP-2195 — Role Editor, Compare and Approval Administration` is resolved for local execution on
+  top of exact WP-2194 commit `8096594`. Permission remains the sole Role/Grant owner; immutable
+  administration versions add compare, impact, segregation and policy-drift gates without treating
+  names, counts or navigation as authority. It adds exact-action validation, independently approved
+  Custom Role lifecycle commands, append-only history with forced Brand/optional-Store RLS and the
+  full-state `IAM-ROLE-LIST` / `IAM-ROLE-EDITOR` routes. Exact full `pnpm verify` passed with
+  Permission `21/21`, Merchant Web `446/446`, the `81`-migration / `14`-namespace catalog, all
+  `40/40` package format/lint/typecheck/test/build tasks and the complete retained isolated
+  PostgreSQL matrix; the dedicated WP-2195 database acceptance also passed. No real Role,
+  Permission Definition, assignment, approval or policy activation is claimed; GitHub publication
+  and deployment remain deferred.
+
+- `WP-2194 — Store / Platform Live Gate Evidence Workflow` is locally implemented and verified on
+  top of exact WP-2193 commit `85bfaa5`. Publishing owns immutable gate decisions while evidence
+  bytes and professional/external facts remain with their owners. It adds fail-closed requirement
+  evaluation, independently authorized review decisions, append-only history with forced Store RLS,
+  and complete `STORE-LIVE-GATE` / `PLT-LIVE-GATE` routes. Exact full `pnpm verify` passed with
+  Publishing `19/19`, Merchant Web `444/444`, the `80`-migration / `14`-namespace catalog, all
+  `40/40` package format/lint/typecheck/test/build tasks and the complete retained isolated
+  PostgreSQL matrix; the dedicated WP-2194 database acceptance also passed. The canonical Pilot
+  gate remains blocked until real IDR-0037 evidence exists; no evidence, professional approval or
+  production activation is claimed. GitHub publication and deployment remain deferred.
+
+- `WP-2193 — Capability / Feature Flag Dependency and Effective-period Administration` is locally
+  implemented and verified on top of exact WP-2192 commit `0f1b562`. It keeps Feature Control as the
+  sole owner, treats Store Capability as an exact Brand-to-Store overlay, requires compatible
+  dependency/Future Trigger evidence before publication, adds append-only administration history
+  with forced Brand/optional-Store RLS, and completes `STORE-CAPABILITY` / `FEATURE-FLAG-LIST`.
+  Exact full `pnpm verify` passed with Feature Control `19/19`, Merchant Web `441/441`, the
+  `79`-migration / `14`-namespace catalog, all `40/40` package format/lint/typecheck/test/build tasks
+  and the complete retained isolated PostgreSQL matrix; the dedicated WP-2193 database acceptance
+  also passed. No real control, approval, Future Trigger evidence, publication or production
+  activation is claimed; GitHub publication and deployment remain deferred.
+
+- `WP-2192 — Store List / Detail / Setup / Hours / Service Configuration` is locally implemented
+  and verified on top of exact WP-2191 commit `df57ad1`. It adds immutable Store-owned operating
+  configuration versions, controlled cross-Domain references, IANA timezone and local Business Day
+  Start, overlap-safe weekly/exception service periods, independent approval plus Publishing/Live
+  Gate evidence gates, append-only operation history, forced Store RLS and the full-state
+  `STORE-HOURS-SERVICE` route while completing the existing Store list/detail/setup contract. Exact
+  full `pnpm verify` passed with Store `83/83`, Merchant Web `438/438`, the `78`-migration / `14`-
+  namespace catalog, all `40/40` package format/lint/typecheck/test/build tasks and the complete
+  retained isolated PostgreSQL matrix. Stale Identity acceptance inventories were corrected to
+  include the already-accepted WP-2183 API Client tables/functions/RLS. No real Store, address,
+  contact, hours, tax/payment/capacity fact, approval, publication/live-gate decision or external
+  mutation was created or claimed; GitHub publication and deployment remain deferred.
+
+- `WP-2191 — Brand Configuration, Store Membership and Inheritance` is locally implemented and
+  verified on top of exact WP-2190 commit `d148d38`. It adds immutable approved/published Brand
+  Configuration Versions, explicit locale/Media/Catalog/template references, hard-requirement and
+  override allowlists, fail-closed compatible inheritance resolution, append-only same-Brand Store
+  membership evidence, root revision/terminal guards, forced Brand RLS and the full-state
+  `ORG-BRAND-LIST` / `ORG-BRAND-DETAIL` routes. Exact full `pnpm verify` passed with Tenant `15/15`,
+  Merchant Web `437/437`, the `77`-migration / `14`-namespace catalog, all `40/40` package
+  format/lint/typecheck/test/build tasks and the complete retained isolated PostgreSQL matrix. No
+  cross-Brand Store move, foreign configuration value, real Brand/Store, Media/Catalog object,
+  approval or production publication was created or claimed; GitHub publication and deployment
+  remain deferred.
+
+- `WP-2190 — Operating Entity, Business Function and Authority Administration` is locally
+  implemented and verified on top of exact WP-2183 commit `2d47960`. It preserves the Ontario-first
+  single Legal Entity Pilot constraint while adding versioned restricted-reference profile metadata,
+  independently approved authority summaries, 15-minute server-validated recent-MFA reveal grants,
+  effective Business Function decisions, fail-closed Store assignment overlap, append-only
+  administration history, forced Brand/optional-Store RLS and the full-state `ORG-ENTITY-LIST` /
+  `ORG-ENTITY-DETAIL` routes. Exact full `pnpm verify` passed with Operating Entity `12/12`, Merchant
+  Web `433/433`, the `76`-migration / `14`-namespace catalog, all `40/40` package
+  format/lint/typecheck/test/build tasks and the complete retained isolated PostgreSQL matrix. No
+  corporation, registration/tax/banking fact, address, person, filing, professional approval,
+  Provider account or production activation was created or claimed; GitHub publication and
+  deployment remain deferred.
+
+- `WP-2183 — API Client Scope, Credential Lifecycle and Audit` is locally implemented and verified
+  on top of exact WP-2182 commit `580d71e`. It adds the Identity-owned API Client aggregate,
+  independent Approval and Permission grant validation ports, secure credential-service metadata
+  boundary, expected-version/idempotent lifecycle commands, append-only access/credential/operation
+  history, forced Brand/optional-Store RLS and the full-state `INT-API-CLIENT` route. Exact full
+  `pnpm verify` passed with Identity `79/79`, Merchant Web `428/428`, the `75`-migration / `14`-
+  namespace catalog, all `40/40` package format/lint/typecheck/test/build tasks and the complete
+  retained isolated PostgreSQL matrix. No credential value, OAuth server, runtime authentication,
+  real Client, grant, approval, secret-manager object, last-use fact or external result was created
+  or claimed; GitHub publication and deployment remain deferred.
+
+- `WP-2178 — Compliance Policy / Regulatory Requirement Version and Control Mapping` is locally
+  implemented and verified on top of exact WP-2177 commit `1aeeb1d`. It adds immutable versioned
+  Policy/Requirement contracts, Platform/Brand/Store inheritance that cannot weaken published Hard
+  Requirements, exact Evidence and owner-Control mappings, author/reviewer/Counsel/second-approver
+  separation, prospective retirement and the full-state `CMP-POLICY-LIST` / `CMP-POLICY-EDITOR`
+  routes while retaining no Compliance schema, migration, runtime adapter or invented Policy Event.
+  Compliance passed `62/62`, Contracts passed `28/28`, Merchant Web passed `383/383`, root tests
+  passed `319/319`, all `39/39` package tasks and the complete retained isolated PostgreSQL matrix
+  passed under exact full `pnpm verify`. Real jurisdictions, authorities, legal text and
+  interpretations, requirements, Evidence, controls, reviewers and production enforcement remain
+  unclaimed; GitHub publication is deferred.
+
+- `WP-2177 — Recall Case, Scope Calculation, Containment, Notice and Disposition` is locally
+  implemented and verified on top of exact WP-2176 commit `8e4ed1f`. It adds immutable Case-bound
+  Recall/Withdrawal revisions, reconciled Trace scope and explicit Gap closure blocking,
+  non-overridable Inventory/Catalog/Ordering/Procurement owner containment, Task and aggregate-only
+  Notification ports, owner disposition, independent closure Verification, two canonical Events and
+  the full-state `RECALL-CASE` route while retaining no Compliance schema, migration or runtime
+  adapter. Compliance passed `55/55`, Contracts passed `28/28`, Merchant Web passed `368/368`, root
+  tests passed `319/319`, all `39/39` package tasks and the complete retained isolated PostgreSQL
+  matrix passed under exact full `pnpm verify`. Real notices, authorities, Trace scope, Customers,
+  Cases, Tasks, owner outcomes, dispositions and verification remain unclaimed; GitHub publication
+  is deferred.
+
+- `WP-2176 — Forward / Backward Traceability Explorer and Restricted Evidence Export` is locally
+  implemented and verified on top of exact WP-2175 commit `91f5a79`. It adds bounded canonical
+  Trace Runs over owner/BI projections, exact direction/seed/scope/period and projection version
+  pinning, mandatory explicit Gaps for incomplete chains, Restricted Customer nodes, immutable Case
+  Evidence Sets, opaque restricted-export receipts, Recall owner delegation and the full-state
+  `TRACE-EXPLORER` route while retaining no Compliance schema, migration, runtime adapter or new
+  Event. Compliance passed `48/48`, Contracts passed `27/27`, Merchant Web passed `353/353`, root
+  tests passed `319/319`, all `39/39` package tasks and the complete retained isolated PostgreSQL
+  matrix passed under exact full `pnpm verify`. Real source chains, Customers, Cases, Evidence,
+  retention/legal-hold decisions, exports and Recall outcomes remain unclaimed; GitHub publication
+  is deferred.
+
+- `WP-2175 — Allergen Review / Food Safety Incident / Publish and Payment Block Linkage` is
+  locally implemented and verified on top of exact WP-2174 commit `c6fd8ff`. It adds immutable
+  Allergen Control Review revisions with exact source/configuration pinning, no-absence and
+  fail-closed invalidation semantics, restricted Food Safety Incident/Case records, explicit
+  Catalog/Ordering/Payment owner-block ports, two canonical Compliance Events and the full-state
+  `CMP-ALLERGEN-REVIEW` / `CMP-INCIDENT` routes while retaining no Compliance schema, migration or
+  runtime adapter. Compliance passed `40/40`, Contracts passed `27/27`, Merchant Web passed
+  `337/337`, root tests passed `319/319`, all `39/39` package tasks and the complete retained
+  isolated PostgreSQL matrix passed under exact full `pnpm verify`. Real allergen policy/source
+  facts, recipes, supplier Evidence, incidents, restricted health/allegation records, reviewers,
+  Case facts and owner-Domain block outcomes remain unclaimed; GitHub publication is deferred.
+
+- `WP-2174 — Permit, Employee / Supplier / Device Qualification and Expiry` is locally implemented
+  and verified on top of exact WP-2173 commit `9443308`. It adds immutable Permit and Employee
+  Qualification revisions, owner-version-pinned Supplier/Device Compliance assessments, explicit
+  Renewal Task and eligibility outcome ports, five canonical Compliance Events and the full-state
+  `CMP-QUALIFICATION` route while retaining no Compliance schema, migration or runtime adapter.
+  Compliance passed `32/32`, Contracts passed `26/26`, Merchant Web passed `323/323`, root tests
+  passed `319/319`, all `39/39` package tasks and the complete retained isolated PostgreSQL matrix
+  passed under exact full `pnpm verify`. Real permits, authorities, legal entities, requirements,
+  certificates, Evidence, source records, renewal Tasks and eligibility outcomes remain unclaimed;
+  GitHub publication is deferred.
+
+- `WP-2173 — Temperature Monitoring / Excursion / Cleaning and Sanitation` is locally implemented
+  and verified on top of exact WP-2172 commit `4a9d961`. It adds append-only exact-decimal
+  Temperature Readings and Manual corrections, immutable Excursion revisions, Cleaning lifecycle
+  and independent verification controls, two canonical Events and the full-state `CMP-TEMP-LOG` /
+  `CMP-CLEANING` routes while retaining no Compliance schema, migration or runtime adapter.
+  Compliance passed `24/24`, Contracts passed `25/25`, Merchant Web passed `310/310`, root tests
+  passed `319/319`, all `39/39` package tasks and the complete retained isolated PostgreSQL matrix
+  passed under exact full `pnpm verify`. Real policies, readings, devices, calibration, food/lot
+  scope, excursions, cleaning work, chemicals, Evidence, containment outcomes and safety reviews
+  remain unclaimed; GitHub publication is deferred.
+
+- `WP-2172 — Inspection / Finding / Corrective Action / independent verification` is locally
+  implemented and verified on top of exact WP-2171 commit `d11c642`. It adds Case-versioned,
+  append-only Inspection corrections, stable Findings, Case-owned Corrective Actions, independent
+  high-risk Verification, six canonical Events and the full-state `CMP-INSPECTION` /
+  `CMP-CORRECTIVE-ACTION` routes while retaining no Compliance schema, migration or runtime adapter.
+  Compliance passed `17/17`, Contracts passed `25/25`, Merchant Web passed `297/297`, root tests
+  passed `319/319`, all `39/39` package tasks and the complete retained isolated PostgreSQL matrix
+  passed under exact full `pnpm verify`. Real inspections, Findings, Evidence, authority ratings,
+  owner-Domain outcomes and legal decisions remain unclaimed; GitHub publication is deferred.
+
+- `WP-2171 — Compliance Case List / Detail / containment / notification` is locally implemented
+  and verified on top of exact WP-2170 commit `457807e`. It adds strict Case lifecycle Commands and
+  snapshots, close gates, owner-outcome containment, Regulatory Notification records, eight
+  canonical Events and the full-state `CMP-CASE-LIST` / `CMP-CASE-DETAIL` routes while retaining no
+  Compliance schema, migration or runtime adapter. Compliance passed `10/10`, Contracts passed
+  `25/25`, Merchant Web passed `284/284`, root tests passed `319/319`, all `39/39` package tasks and
+  the complete retained isolated PostgreSQL matrix passed under exact full `pnpm verify`. Real
+  Cases, Evidence, authorities, submissions, containment outcomes and legal interpretations remain
+  unclaimed; GitHub publication is deferred.
+
+- `WP-2170 — Compliance Dashboard, due, severity and evidence coverage` is locally implemented and
+  verified from exact WP-2165 ownership-corrected commit `081f0ec`. It creates the canonical
+  `@rms/compliance-food-safety` public query owner with no schema, migration, persistence or Event,
+  plus the full-state `CMP-DASHBOARD` route. The contract revalidates purpose, permission and exact
+  Tenant/Brand/Store scope; rejects restricted or cross-scope content; derives due and Evidence
+  coverage from pinned owner summaries; and exposes stale/partial state without rewriting source
+  facts. Compliance passed `4/4`, Merchant Web passed `273/273`, root tests passed `319/319`, all
+  `39/39` package format/lint/typecheck/test/build tasks and the complete retained isolated
+  PostgreSQL matrix passed under exact full `pnpm verify`. Real Cases, licenses, Findings, actions,
+  Evidence, regulators and legal interpretations remain unclaimed; GitHub publication is deferred.
+
+- `WP-2165 — Pipeline Run, watermark, late data and backfill approval` is locally implemented and
+  verified on top of WP-2164 commit `4c86706`. It adds version-pinned Pipeline Runs, logical-batch
+  retry protection, append-only watermark/count/state evidence, distinct-actor Backfill approval,
+  pre/post Reconciliation gates, three strict Events, forced Brand/Store RLS and the full-state
+  `BI-PIPELINE-RUN` route. Business Intelligence passed `22/22`, Contracts passed `25/25`, Merchant
+  Web passed `265/265`, all `38/38` package tasks, root tests `319/319` and the complete retained
+  isolated PostgreSQL matrix passed under the exact full `pnpm verify`. Real Pipelines, source
+  Facts, checkpoints, watermarks, late/rejected records, Data Quality/Reconciliation outcomes,
+  approvals, incidents and external evidence remain unclaimed; GitHub publication is deferred.
+
+- `WP-2164 — Data Quality and cross-domain Reconciliation Workbench` is locally implemented and
+  verified on top of WP-2163 commit `3839f3d`. It adds versioned closed Checks,
+  immutable Results and actions, exact-decimal public-observation Reconciliation, append-only
+  Exceptions, three strict Events, forced Brand/Store RLS and the full-state `BI-DATA-QUALITY` /
+  `BI-RECONCILIATION` routes. Business Intelligence passed `16/16`, Contracts passed `25/25`,
+  Merchant Web passed `253/253`, all `38/38` package tasks and the complete retained isolated
+  PostgreSQL matrix passed. Real source observations, differences, owners, incidents, backfill
+  execution and external evidence remain unclaimed; GitHub publication is deferred.
+
+- `WP-2163 — Metric Definition / Version / Lineage / Certification` is locally implemented and
+  verified on top of WP-2162 commit `1827474`. It adds immutable semantic Metric Versions, closed
+  Lineage references, current impact validation, distinct Business Owner / Data Owner certification,
+  replacement-aware deprecation, six strict Events, forced Brand/Store RLS and the full-state
+  `BI-METRIC-CATALOG` / `BI-METRIC-DETAIL` routes. Business Intelligence passed `12/12`, Contracts
+  passed `24/24`, Merchant Web passed `241/241`, all `38/38` package tasks and the complete retained
+  isolated PostgreSQL matrix passed. Real formulas, Warehouse builds, source facts, quality results
+  and external evidence remain unclaimed; GitHub publication is deferred.
+
+- `WP-2162 — Report Run / artifact / expiry / rerun management` is locally implemented and
+  verified on top of WP-2161 commit `765d9ec`. It adds immutable, version-pinned Run snapshots,
+  append-only state and artifact-revision evidence, exact rerun semantics, expiry / revocation /
+  download-authorization controls, four strict Events, forced Brand/Store RLS and the full-state
+  `RPT-RUN-HISTORY` route. Business Intelligence passed `8/8`, Contracts passed `24/24`, Merchant
+  Web passed `229/229`, all `38/38` package tasks and the complete retained isolated PostgreSQL
+  matrix passed. Output bytes, storage URLs, source facts, recipients and external evidence remain
+  unclaimed; GitHub publication is deferred.
+
+- `WP-2161 — Report Catalog / Builder / certification / scheduling` is locally implemented and
+  verified on top of WP-2160 commit `48bb1c6`. It adds the canonical
+  `@rms/business-intelligence` owner, immutable Report Versions, four-eyes certification,
+  version-pinned schedule intent, strict Event contracts, forced Brand/Store RLS and the full-state
+  `RPT-REPORT-CATALOG` / `RPT-REPORT-BUILDER` routes. Business Intelligence passed `4/4`, Contracts
+  passed `24/24`, Merchant Web passed `217/217`, all `38/38` package tasks and the complete retained
+  isolated PostgreSQL matrix passed. GitHub publication is deferred.
+
+- `WP-2160 — Operational Dashboard scope / freshness / drill-down` is locally implemented and verified on
+  top of WP-2155 commit `e990926`. It connects the accepted operational Query to the full-state
+  `RPT-OPS-DASHBOARD` route with exact scope, Metric Version, freshness/completeness and authorized
+  source drill-down contracts. Merchant Web passed `204/204`, root tests passed `319/319`, all
+  `37/37` package tasks and the complete retained isolated PostgreSQL matrix passed. GitHub
+  publication is deferred.
+
+- `WP-2155 — Delivery E2E, privacy, late / duplicate / Provider failure acceptance` is locally
+  implemented and verified on top of WP-2154 head `678a9ad`. It adds a synthetic cross-contract acceptance
+  suite for assignment expiry, Provider duplicate / timeout / terminal conflict, custody, proof,
+  remedy and final-failure privacy boundaries. Fulfillment tests passed `61/61`, root tests passed
+  `319/319`, all `37/37` package tasks and the complete retained isolated PostgreSQL matrix passed.
+  GitHub publication is deferred.
+
+- `WP-2115 — Reservation Capacity / Closure / Overbook / No-show Policy Configuration` is locally
+  implemented and verified on top of WP-2114 head `8873089`. It adds append-only Store / area /
+  service Capacity Policy versions, deterministic bucket / closure / online-allocation /
+  Manager-overbook conflict simulation, strict publication-evidence ports and the full-state
+  `RES-CAPACITY-CONFIG` route. Pricing, Dining and Store facts remain owner-issued references;
+  Section 50 grants no Reservation persistence namespace, so no migration or Event Catalog fact is
+  invented. Root Vitest passed `319/319`; all `33/33` package tasks, the complete retained isolated
+  PostgreSQL matrix, module tests `26/26`, merchant-web tests `88/88` and secret scan `2/2` passed.
+  Exact evidence is recorded in `docs/spec/work-packages/WP-2115.md`; GitHub publication is deferred.
+
+- `WP-2114 — Waitlist Board / Entry, ETA, Ready Notification and Dining Handoff` is locally
+  implemented and verified on top of WP-2113 head `a551a7a`. It extends
+  `@rms/reservation-waiting` with an
+  independent Entry Aggregate, compatibility-first dynamic ordering, deterministic ETA ranges,
+  append-only detail / estimate / priority evidence, Call / Ready / Missed / restore handling,
+  Notification-outcome separation and Dining-issued seating. It adds the full-state `WAIT-BOARD`
+  route and contextual `WAIT-ENTRY`; Section 50 grants no persistence namespace, so live adapters
+  remain ports and no migration is invented. Root Vitest passed `319/319`; all `33/33` package
+  tasks, the complete retained isolated PostgreSQL matrix, module tests `17/17`, merchant-web tests
+  `84/84` and secret scan `2/2` passed. Exact verification evidence is recorded in
+  `docs/spec/work-packages/WP-2114.md`; GitHub publication is deferred.
+
+- `WP-2113 — Reservation Calendar / List / Detail / Create / Revision / Deposit Collaboration` is
+  locally implemented and verified on top of WP-2112 head `ca9e8de`. It adds the runtime-inactive
+  `@rms/reservation-waiting` contract, strict Store-scoped authorization / idempotency / version
+  boundaries, append-only critical revisions with replacement Capacity Hold evidence, separated
+  deposit outcome references and the four Section 88.11 merchant Reservation screens. Section 50
+  grants no Reservation schema, so persistence, outbox and live adapters remain ports and no
+  migration is invented. Root Vitest passed `319/319`; all `33/33` package tasks, the complete
+  retained isolated PostgreSQL matrix and secret scan `2/2` passed. Exact evidence is recorded in
+  `docs/spec/work-packages/WP-2113.md`; GitHub publication is deferred.
+
+- `WP-2112 — Table Configuration, Floor Board and Dining Session Move / Closing` is locally
+  implemented and verified on top of WP-2111 head `97dbfb5`. It adds strict, versioned Dining Table and QR /
+  temporary-block contracts, exact-version Active Session movement, idempotent Store-authorized
+  Application ports and the complete `DIN-FLOOR-BOARD` / `DIN-TABLE-LIST` routes. Section 50 and
+  accepted WP-1006 / WP-1007 authorize no Dining schema or migration namespace, so persistence,
+  outbox publication and live BFF facts remain deliberately unclaimed. Root Vitest passed
+  `319/319`, all `32/32` package tasks and the retained isolated PostgreSQL matrix passed. Exact scope is in
+  `docs/spec/work-packages/WP-2112.md`; GitHub publication is deferred.
+
+- `WP-2111 — Production Batch Planning, Yield / Consumption and Quality Exception` is locally
+  implemented and verified on top of WP-2110 head `df9760f`. It adds Store-scoped, append-only
+  Batch planning and lifecycle evidence, exact integer-microunit Yield / consumption, pinned Recipe
+  and Inventory public references, quality hold / quarantine, five registered Events, a rebuildable
+  forced-RLS projection and the full-state `KIT-PRODUCTION-BATCH` route. Root Vitest passed
+  `319/319`; all `32/32` package tasks, the retained Cart and Amendment PostgreSQL acceptances and
+  the isolated Production Batch PostgreSQL acceptance passed. Exact scope is in
+  `docs/spec/work-packages/WP-2111.md`; real Recipe, Lot, physical Yield and professional quality
+  evidence remain unclaimed, and GitHub publication is deferred.
+
+- `WP-2110 — Order Amendment Impact / Repricing / Approval Workflow` is locally implemented and
+  verified on top of WP-2105 head `2ba8201`. It adds Store-scoped, append-only Amendment Commands,
+  pinned Quote repricing with integer minor units, Kitchen Pending / rejection handling, distinct
+  policy approval, one registered `OrderAmended` Event and the full-state `OPS-ORDER-AMEND` wizard.
+  Root Vitest passed `319/319`; all `32/32` package tasks, the retained Cart PostgreSQL acceptance
+  and the isolated Amendment PostgreSQL acceptance passed. Exact scope is in
+  `docs/spec/work-packages/WP-2110.md`; real Order and collaborating-domain outcomes remain
+  unclaimed, and GitHub publication is deferred.
+
+- `WP-2105 — Recipe List / Editor, Yield / Cost / Allergen Graph, Dual Review and Invalidation` is
+  locally implemented and verified on top of WP-2104 head `8af32de`. It adds Brand-scoped,
+  version-pinned Recipe administration, exact bounded quantity / yield / cost derivation, fail-closed
+  sub-recipe graph and Allergen evidence validation, distinct cost and food-safety review, five
+  registered Events, a rebuildable forced-RLS projection and the `RECIPE-LIST` / `RECIPE-EDITOR`
+  routes. Root Vitest passed `319/319`; all `32/32` package tasks and the isolated Recipe PostgreSQL
+  acceptance passed. Exact scope is in `docs/spec/work-packages/WP-2105.md`; real supplier,
+  professional-review, Inventory and cost evidence remains unclaimed, and GitHub publication is
+  deferred.
+
+- `WP-2104 — Promotion List / Editor, Stacking / Budget / Basket Simulation and Approval` is
+  locally implemented and verified on top of WP-2103 head `d1b3517`. It adds Brand-scoped,
+  versioned Promotion administration, exact integer-minor-unit simulation, deterministic
+  customer-saving stacking decisions, four-eyes publish, five registered Events, a rebuildable
+  forced-RLS projection and the `PROMO-LIST` / `PROMO-EDITOR` routes. Root Vitest passed `318/318`;
+  all `31/31` package tasks and the isolated Promotion PostgreSQL acceptance passed. Exact scope is
+  in `docs/spec/work-packages/WP-2104.md`; GitHub publication is deferred.
+
+- `WP-2103 — Tax Configuration Admin, Approved Fixture Simulation and Receipt Preview` is locally
+  implemented and verified on top of WP-2102 head `960f1d1`. It adds Store-scoped, four-eyes Tax
+  Configuration administration, exact approved Basket/Refund fixture simulation, inclusive and
+  exclusive receipt preview, three registered Events, a rebuildable forced-RLS projection and the
+  `TAX-CONFIG` route without inventing any legal tax fact. Root Vitest passed `317/317`; all `31/31`
+  package tasks and both new and retained Tax isolated PostgreSQL checks passed. Exact scope is in
+  `docs/spec/work-packages/WP-2103.md`; SPIKE-1106 evidence remains unclaimed and GitHub publication
+  is deferred.
+
+- `WP-2102 — Price Book / Record Admin, Coverage / Conflict Resolution and Publish Workflow` is
+  locally implemented and verified on top of WP-2101 head `b7d4405`. It adds Brand-scoped,
+  versioned Price Book administration, deterministic coverage/conflict analysis, four-eyes publish,
+  four registered Events, a rebuildable forced-RLS projection and `PRICE-BOOK-LIST` /
+  `PRICE-BOOK-EDITOR` routes. Root Vitest passed `316/316`; all `31/31` package tasks and both new and
+  retained Pricing isolated PostgreSQL checks passed. Exact scope is in
+  `docs/spec/work-packages/WP-2102.md`; GitHub publication is deferred.
+
+- `WP-2101 — Availability Rule Workbench, Effective-result Simulation and Store / Channel Schedule`
+  is locally implemented and verified on top of WP-2100 head `1156377`. It extends Availability to
+  Product/SKU/Bundle targets, explicit IANA time-zone/Business-Date simulation, three registered
+  Events, a rebuildable forced-RLS projection and the `CAT-AVAILABILITY` route. Root Vitest passed
+  `315/315`; all `31/31` package tasks and both new/legacy isolated Availability PostgreSQL checks
+  passed. Exact scope is in `docs/spec/work-packages/WP-2101.md`; GitHub publication is deferred.
+
+- `WP-2100 — Bundle Configuration, Simulation, Publish and Menu Integration` is locally implemented
+  and verified on top of WP-2066 head `26deed5`. It owns the Brand-scoped Bundle Aggregate,
+  exact-money simulation, six-table RLS persistence, four registered Events, public Menu fact and
+  `CAT-BUNDLE-LIST` / `CAT-BUNDLE-EDITOR` routes. Root Vitest passed `314/314`; all `31/31` package
+  tasks and the isolated Bundle PostgreSQL acceptance passed. Exact scope is in
+  `docs/spec/work-packages/WP-2100.md`; GitHub publication is deferred.
+
+- `WP-2066 — CloudFormation Change-set / Drift, Deletion Protection, Backup Policy and Cross-account
+Restore Evidence` is locally implemented and verified on top of WP-2065 head `395342e`. Its
+  fail-closed infrastructure-change and recovery contract passed root Vitest `34/34` files and
+  `313/313` tests plus the full repository verification suite without mutating AWS resources. Exact
+  scope is in `docs/spec/work-packages/WP-2066.md`; GitHub and AWS execution are deferred.
+
+- `WP-2065 — CloudWatch / X-Ray, Alert Routing, Budget / Cost Anomaly, Capacity and Acknowledgement
+Drill` is locally implemented and verified on top of WP-2064 head `9777af2`. It adds a fail-closed
+  cloud-operations evidence contract without configuring a Provider, contact, budget or capacity.
+  Root Vitest passed `307/307`; all `31/31` package lint/typecheck/test/build tasks and the remaining
+  verification gates passed. Exact scope is in `docs/spec/work-packages/WP-2065.md`; GitHub and AWS
+  execution are deferred.
+
+- `WP-2064 — GitHub OIDC, ECR Immutable Digest, CodeDeploy Blue / Green and Migration Task Pipeline`
+  is locally implemented and verified on top of WP-2063 head `e1929a3`. It adds a fail-closed local
+  deployment contract while skipping GitHub/workflow and AWS execution by explicit Owner direction.
+  Root Vitest passed `301/301`; all `31/31` package lint/typecheck/test/build tasks and the remaining
+  verification gates passed. Exact scope is in `docs/spec/work-packages/WP-2064.md`.
+
+- `WP-2063 — CDK VPC, ECS, RDS, S3, KMS, Secrets, VPC Endpoint, NAT / Network Firewall Egress and
+Least-privilege Role Stacks` is locally implemented and verified on top of WP-2062 head `f8eee4d`.
+  It adds a fail-closed workload-stack contract without inventing CDK synth/deploy or AWS resources.
+  Root Vitest passed `295/295`; all `31/31` package lint/typecheck/test/build tasks and the remaining
+  verification gates passed. Exact scope is in `docs/spec/work-packages/WP-2063.md`; GitHub and AWS
+  execution are deferred.
+
+- `WP-2062 — Route 53 / Registrar / ACM, Regional WAF, ALB and Public-asset CloudFront Baseline` is
+  locally implemented and verified on top of WP-2061 head `37c1913`. It adds a fail-closed edge,
+  ingress, public-asset and WAF policy gate without creating or inspecting AWS/domain resources.
+  Root Vitest passed `289/289`; all `31/31` package lint/typecheck/test/build tasks and the remaining
+  verification gates passed. Exact scope is in `docs/spec/work-packages/WP-2062.md`; GitHub and
+  external execution are deferred.
+
+- `WP-2061 — Organization CloudTrail, AWS Config, GuardDuty, Security Hub, IAM Access Analyzer and
+Central Log Archive` is locally implemented and verified on top of WP-2060 head `85d9001`. It adds
+  a fail-closed organization security-service, immutable archive and finding-escalation policy gate
+  without creating or inspecting AWS resources. Root Vitest passed `283/283`; all `31/31` package
+  lint/typecheck/test/build tasks and the remaining verification gates passed. Exact scope is in
+  `docs/spec/work-packages/WP-2061.md`; GitHub and AWS execution are deferred.
+
+- `WP-2060 — AWS Organizations Accounts, IAM Identity Center, Root / Break-glass and SCP Baseline`
+  is locally implemented and verified on top of WP-2055 head `fdb893e`. It adds a fail-closed account,
+  identity, root and SCP policy gate without creating or inspecting AWS resources. Root Vitest passed
+  `278/278`; all `31/31` package lint/typecheck/test/build tasks and the remaining verification gates
+  passed. Exact scope is in `docs/spec/work-packages/WP-2060.md`; GitHub and AWS execution are deferred.
+
+- `WP-2055 — Statutory Record Archive, Retention / Legal Hold, Restore and Privacy-tombstone
+Verification` is locally implemented and verified on top of WP-2054 head `fa5146e`. It adds a
+  fail-closed archive lifecycle validator without approving legal retention, enabling Object Lock or
+  accessing production records. Focused checks pass `34/34` and the cumulative root suite passes
+  `274/274`. Exact scope is in `docs/spec/work-packages/WP-2055.md`; GitHub is deferred.
+
+- `WP-2054 — Upload Quarantine, Content Sniffing, Signed Download and SSRF / Egress Test` is locally
+  implemented and verified on top of WP-2053 head `5ccf5ee`. It composes accepted Media behavior with
+  fail-closed content, private-download and per-hop outbound controls without accessing S3, GuardDuty
+  or a remote URL. Focused checks pass `16/16` and the cumulative root suite passes `269/269`. Exact
+  scope is in `docs/spec/work-packages/WP-2054.md`; GitHub is deferred.
+
+- `WP-2053 — Cross-Region Backup / Replica, Failover and Reconciliation Drill` is locally implemented
+  and verified on top of WP-2052 head `06025ac`. It adds a fail-closed evidence validator for the
+  accepted Canada cross-Region topology, recovery facts, write fencing, Provider reconciliation and
+  measured RPO/RTO drills without claiming AWS resources or a real exercise. The focused gate passes
+  `4/4` and the cumulative root suite passes `265/265`. Exact scope is in
+  `docs/spec/work-packages/WP-2053.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2052 — KMS, Secret Rotation, Audit Integrity and Immutable Archive Gate` is locally implemented
+  and verified on top of WP-2051 head `f143a03`. It composes accepted Audit integrity/database tests
+  with a fail-closed external-evidence checklist; real KMS, secret rotation, Object Lock and restore
+  evidence remain unavailable and unclaimed. The final cumulative root suite passes `261/261`,
+  including filesystem-portable migration case-fold and canonical-path checks. Exact scope is in
+  `docs/spec/work-packages/WP-2052.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2051 — Privacy Rights, Necessary-cookie, Consent and Retention Execution Test` is locally
+  implemented and verified on top of WP-2050 head `5ee1d5b`. It adds an executable necessary-cookie,
+  tracker prohibition, privacy-right and classified-retention policy without claiming legal
+  approval or real production fulfilment/deletion evidence. Exact scope is in
+  `docs/spec/work-packages/WP-2051.md`; GitHub publication/integration is deferred by Owner
+  direction.
+
+- `WP-2050 — SBOM, Build Provenance, Container Scan, Signing and Digest Promotion Gate` is locally
+  implemented and verified on top of WP-2049 head `09f226e`. It adds a fail-closed validator for a
+  digest-bound release evidence bundle without claiming a real build, scan, signature, KMS key,
+  registry or deployment. Exact scope is in `docs/spec/work-packages/WP-2050.md`; GitHub
+  publication/integration is deferred by Owner direction.
+
+- `WP-2049 — PWA Cache Storage, Offline Mutation and Update-interruption Security Test` is locally
+  implemented and verified on top of WP-2048 head `13cc9b0`. Its focused gate composes exact Cache
+  Storage allowlisting, private/mutation NetworkOnly behavior, no replay, same-operation recovery,
+  safe-route update activation and generated-worker inspection. Real browser/device/rollout
+  evidence remains unavailable and unclaimed. Exact scope is in
+  `docs/spec/work-packages/WP-2049.md`; GitHub publication/integration is deferred by Owner
+  direction.
+
+- `WP-2048 — Public Capability Token, Enumeration and Pickup Attempt Security Test` is locally
+  implemented and verified on top of WP-2047 head `3127b13`. It adds the accepted atomic PostgreSQL
+  `security.abuse_bucket`, keyed-hash-only scope, concurrent budget admission, execute-only runtime
+  boundary and 24-hour cleanup while retaining WAF/trusted-proxy/pepper/load facts as External
+  Evidence. Exact scope is in `docs/spec/work-packages/WP-2048.md`; GitHub publication/integration
+  is deferred by Owner direction.
+
+- `WP-2047 — HTTP Security Header, CSP, CORS and Request Limit Baseline` is locally implemented and
+  verified on top of WP-2046 head `19740d4`. It centralizes environment-aware CSP/HSTS, exact
+  response headers, no credentialed CORS and stable 64 KiB JSON / 100-field / 16 KiB header / 8 KiB
+  target / 15-second request limits without inventing Stripe or public-asset origins. Exact scope is
+  in `docs/spec/work-packages/WP-2047.md`; deployed ALB/WAF/browser evidence and GitHub publication
+  remain deferred.
+
+- `WP-2046 — Break-glass Access Runbook` is locally implemented and verified on top of WP-2045 head
+  `3c4b65e`. It version-controls the fail-closed request, two-person approval, named recent-MFA
+  execution, finite expiry, least-privilege issuance, immediate revocation and independent-review
+  lifecycle plus an intentionally unfilled restricted-evidence template. Real Actors, production
+  identities, contact tree and exercise remain unavailable External Evidence gates. Exact scope is
+  in `docs/spec/work-packages/WP-2046.md`; GitHub publication/integration is deferred by Owner
+  direction.
+
+- `WP-2045 — Payment Webhook Security Review` is locally implemented and verified on top of WP-2044
+  head `e1e88bd`. Its focused gate composes accepted raw-byte verification, exact Provider account
+  and environment binding, bounded secret rotation, durable-before-acknowledge Inbox idempotency,
+  transactional processing and isolated PostgreSQL RLS evidence. Production Stripe endpoint,
+  account, secret-rotation and delivery evidence remains unavailable and unclaimed. Exact scope is
+  in `docs/spec/work-packages/WP-2045.md`; GitHub publication/integration is deferred by Owner
+  direction.
+
+- `WP-2044 — Secret Scanning` is locally implemented and verified on top of WP-2043 head
+  `a3c4c7f`. Its deterministic high-confidence gate detects runtime-built positive canaries and
+  scans the exact tracked-file inventory while retaining pinned Gitleaks complete-history/release-
+  artifact evidence for WP-2050. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2044.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2043 — PII Log Redaction` is locally implemented and verified on top of WP-2042 head
+  `19a6d44`. Its dedicated gate composes the accepted centralized Observability/API/Worker
+  redaction and failure-isolation matrix without adding a second filter or claiming production
+  destination/retention evidence. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2043.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2042 — Rate Limit / Abuse Baseline` is locally implemented and verified on top of WP-2041
+  head `1d9cb2a`. Its versioned, machine-validated artifact freezes the ten accepted default abuse
+  budgets, privacy/retention rules and WAF/application responsibility split without claiming the
+  WP-2048 atomic limiter or production WAF/load evidence. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2042.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2041 — Tenant Isolation Security Test` is locally implemented and verified on top of WP-2040
+  head `ec00954`. Its focused gate composes application Tenant/object/Store-switch denials with
+  isolated PostgreSQL Tenant Context, forced-RLS and least-privilege evidence without treating
+  either layer as a substitute for the other. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2041.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2040 — Authentication Threat Model` is locally implemented and verified on top of WP-2028
+  head `ff74315`. It materializes `16` accepted same-origin BFF/Identity threats, assets, trust
+  boundaries, controls, evidence ownership and a deterministic completeness gate while retaining
+  Cognito Plus, Threat Protection, WAF, KMS/Secrets Manager and penetration evidence as production
+  hard gates. Exact scope and evidence are in `docs/spec/work-packages/WP-2040.md`; GitHub
+  publication/integration is deferred by Owner direction.
+
+- `WP-2028 — Receipt / Resume Email Recovery E2E` is locally implemented and verified on top of
+  WP-2027 head `430abaa`. Its synthetic cross-Domain scenario proves duplicate logical request
+  convergence, safe receipt rendering, one-time fragment recovery, token non-persistence,
+  privacy-minimized duplicate hard-bounce suppression and the intentional no-contact/no-remote-
+  recovery rule without claiming a production SES send. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2028.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2027 — Allergen Safety E2E` is locally implemented and verified on top of WP-2026 head
+  `4985c58`. Its synthetic cross-Domain scenario proves unknown/conflicting source blocks, modifier
+  propagation, structured Staff review invalidation, exact eligibility gating, distinct Kitchen
+  acknowledgements, persistent non-color cue and incident traceability without medical narrative.
+  Exact scope and evidence are in `docs/spec/work-packages/WP-2027.md`; GitHub
+  publication/integration is deferred by Owner direction.
+
+- `WP-2026 — Concurrent Update Scenario` is locally implemented and verified on top of WP-2025
+  head `7b7b5a0`. Its concurrent Ordering scenario proves two different Cart intents from the same
+  expected version produce one atomic winner, one exact version conflict, one retained operation
+  and idempotent winner replay without a second validation. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2026.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2025 — Projection Rebuild Scenario` is locally implemented and verified on top of WP-2024
+  head `08aa0b6`. Its stateful failure injection proves validation failure abandons only the shadow,
+  retry uses a fresh shadow to atomically replace the expected active generation, and completion
+  replay opens no further shadow. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2025.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2024 — Printer Offline Scenario` is resolved as a no-code Future Trigger closeout on top of
+  WP-2023 head `d1dc7d4`. Later accepted IDR-0039 disables physical printers, Store Gateway and
+  application Offline Queue for the first Pilot; without the required Store evidence and IDR
+  revision, no adapter, Output Job, retry queue or device fact may be fabricated. Exact authority
+  and verification are in `docs/spec/work-packages/WP-2024.md`; GitHub publication/integration is
+  deferred by Owner direction.
+
+- `WP-2023 — Outbox Dispatcher Failure Scenario` is locally implemented and verified on top of
+  WP-2022 head `4dbf85e`. Its isolated PostgreSQL acceptance proves exact rejected-event state,
+  no immediate reclaim, crash lease expiry, stale-worker fencing and replacement completion without
+  inventing WP-0033 retry behavior. Exact scope and evidence are in
+  `docs/spec/work-packages/WP-2023.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2022 — Duplicate Webhook Scenario` is locally implemented and verified on top of WP-2021
+  head `c8b535c`. Its Payment Webhook Inbox scenario proves concurrent delivery plus processing and
+  later replay converge on one receipt, one completion and one mapper effect. Exact scope and
+  evidence are in `docs/spec/work-packages/WP-2022.md`; GitHub publication/integration is deferred
+  by Owner direction.
+
+- `WP-2021 — Payment Success E2E` is locally implemented and verified on top of WP-2020 head
+  `de998ce`. Its synthetic verified-Provider-observation → `PaymentSucceeded.v1` → clean Customer
+  result scenario proves exact amount/scope, terminal replay and minimal same-operation success.
+  The Provider IDR and real public Guest Payment adapter remain unavailable, so production Payment
+  stays gated. Exact scope and evidence are in `docs/spec/work-packages/WP-2021.md`; GitHub
+  publication/integration is deferred by Owner direction.
+
+- `WP-2020 — QR → Menu → Cart → Order E2E` is locally implemented and verified on top of WP-2005
+  head `90a55a7`. Its deterministic synthetic cross-layer scenario passes through the existing
+  Customer Entry/Menu/Cart/Quote HTTP handlers and Ordering's internal CreateOrder application API,
+  proving immutable snapshot lineage, permanent-Submission replay and changed-intent conflict.
+  Accepted WP-1224 forbids an independent Customer Create Order route, and WP-2021 retains Payment
+  Success E2E. Exact scope and evidence are in `docs/spec/work-packages/WP-2020.md`; GitHub
+  publication/integration is deferred by Owner direction.
+
+- `WP-2005 — Database Permission Test` is locally implemented and verified on top of WP-2004 head
+  `ed82c82`. A new migration-permission gate enforces complete
+  Brand/Store RLS, PUBLIC revocation and no privilege weakening; its first full scan found four
+  historical Catalog trigger functions with default PUBLIC execute, corrected through ordered
+  forward migration `1106_002`. Exact boundaries are in `docs/spec/work-packages/WP-2005.md`;
+  GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2004 — Module Dependency Test` is locally implemented and verified on top of WP-2003 head
+  `c328583`. The Import Boundary architecture gate now validates exact
+  Manifest/package runtime-dependency parity, rejects unknown declared Modules and detects complete
+  synchronous dependency cycles in addition to existing source/import boundaries. Exact boundaries
+  are in `docs/spec/work-packages/WP-2004.md`; GitHub publication/integration is deferred by Owner
+  direction.
+
+- `WP-2003 — Provider Adapter Contract Test` is locally implemented and verified on top of WP-2002
+  head `94fcf6f`. Payment now owns one executable validation
+  boundary for all five Provider operations; it binds normalized outcomes to exact request scope and
+  converts thrown, malformed or mismatched Provider results into bounded safe Unknown data. Exact
+  boundaries are in `docs/spec/work-packages/WP-2003.md`; GitHub publication/integration is deferred
+  by Owner direction.
+
+- `WP-2002 — Consumer Compatibility Test` is locally implemented and verified on top of WP-2001
+  head `fbb4107`. The Event Contract package now owns an
+  exact 18-relation Consumer Contract catalog and fail-closed coverage/version/scope/replay gates;
+  executable Catalog and Ordering Consumer identities now match their accepted `:v1` Event Catalog
+  names. Exact boundaries are in `docs/spec/work-packages/WP-2002.md`; GitHub
+  publication/integration is deferred by Owner direction.
+
+- `WP-2001 — Event Envelope Contract Test` is locally implemented and verified on top of WP-2000
+  head `c922d31`. `@bop/eventing` closes the Domain Event Envelope and Actor shapes and adds explicit
+  negative contract evidence for identity, scope, time, version, correlation, classification,
+  payload/replay and unknown-field handling. Exact boundaries are in
+  `docs/spec/work-packages/WP-2001.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-2000 — OpenAPI Schema Validation` is locally implemented and verified on top of WP-1905 head
+  `9e6bd6c`. The Contract package now owns deterministic Zod-first OpenAPI 3.1 generation and parser,
+  drift, operation, Error Contract and mutation-header validation for the currently composed public
+  REST routes only. Exact boundaries are in `docs/spec/work-packages/WP-2000.md`; GitHub
+  publication/integration is deferred by Owner direction.
+
+- `WP-1905 — Basic Merchant Dashboard Query` is locally implemented and verified on top of WP-1904
+  head `5afc46a`. `@bop/projection` adds the strict `reporting_operations_dashboard_v1` Query with
+  exact CAD minor-unit summaries, authorized scope/filtering and per-source freshness,
+  completeness and checkpoint lineage. Screen/API/persistence/export composition remains
+  unavailable and unclaimed. Exact boundaries are in `docs/spec/work-packages/WP-1905.md`;
+  GitHub publication/integration is deferred by Owner direction.
+
+- `WP-1904 — Projection Rebuild Command` is locally implemented and verified on top of WP-1903
+  head `6abbfac`. `@bop/projection` adds an authorized, idempotent fixed-checkpoint rebuild contract that
+  writes and validates a shadow generation before an expected-generation atomic switch. Durable
+  persistence, ACL, Worker composition and real rebuild drills remain unavailable and unclaimed.
+  Exact boundaries are in `docs/spec/work-packages/WP-1904.md`; GitHub publication/integration is
+  deferred by Owner direction.
+
+- `WP-1903 — Fulfillment Operational Projection` is locally implemented and verified on top of
+  WP-1902 head `6ce1c12`. `@bop/projection` now exports `fulfillment_operations_v1` with exact
+  Store/Business-Date scope, phase/readiness/handoff-quantity invariants, minimized proof readiness,
+  deterministic rebuild metadata and a 2-second Fresh/Stale target. No Pickup Proof, recipient,
+  Customer/contact or device identifier enters the Projection. Persistence/API/proof/device
+  composition remains unavailable and unclaimed. Exact boundaries are in
+  `docs/spec/work-packages/WP-1903.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-1902 — Kitchen Operational Projection` is locally implemented and verified on top of WP-1901
+  head `419dd28`. `@bop/projection` now exports `kitchen_operations_v1` with exact Store/station
+  scope, lifecycle/quantity/Ready invariants, a structured non-medical safety cue, deterministic
+  rebuild metadata and a 2-second Fresh/Stale target. The Kitchen-owned `kitchen_work_queue_v1`
+  remains unchanged. Persistence/API/device composition remains unavailable and unclaimed. Exact
+  boundaries are in `docs/spec/work-packages/WP-1902.md`; GitHub publication/integration is deferred
+  by explicit Owner direction.
+
+- `WP-1901 — Payment Operational Projection` is locally implemented and verified on top of WP-1900
+  head `eb38d71`. `@bop/projection` now exports `payment_operations_v1` with exact CAD minor-unit
+  strings, cumulative amount invariants, retained Provider Unknown/reconciliation gaps,
+  deterministic rebuild metadata and a 5-second Fresh/Stale target. Durable persistence/API and
+  Provider composition remain unavailable and unclaimed. Exact boundaries are in
+  `docs/spec/work-packages/WP-1901.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-1900 — Order Operational Projection` is locally implemented and verified on top of WP-1809
+  head `d239359`. `@bop/projection` now exports the strict Store/Business-Date-scoped
+  `merchant_order_queue_v1` contract over Ordering plus authorized Payment/Kitchen/Fulfillment
+  summaries, with explicit gaps, retained Payment Unknown, deterministic rebuild metadata and a
+  2-second Fresh/Stale target. Durable persistence/API/realtime composition remains unavailable and
+  unclaimed. Exact boundaries are in `docs/spec/work-packages/WP-1900.md`; GitHub
+  publication/integration is deferred by explicit Owner direction.
+
+- `WP-1809 — Order Exception Workbench, merchant_order_exception_v1 Projection and Authorized
+Compensation Actions` is locally implemented and verified on top of WP-1808 head `22b1888`. It
+  introduces the schema-less technical contract module `@bop/projection`, a strict Store-scoped
+  rebuildable exception contract with a
+  15-minute Critical visibility gate, the canonical workbench and permission/version/idempotency-
+  bound owning-Domain action intents. Projection/UI state never supplies Provider or financial
+  finality. Durable consumers/persistence and real actions remain unavailable and unclaimed. Exact
+  boundaries are in `docs/spec/work-packages/WP-1809.md`; GitHub publication/integration is deferred
+  by explicit Owner direction.
+
+- `WP-1808 — Managed KDS Browser Profile, Named Operator Session, Auto-lock / Handover and Device
+UAT` is locally implemented and verified on top of WP-1807 head `479563f`. It adds the canonical
+  strict KDS Profile view with mandatory visibility lock, bounded auto-lock, lock-before-handover,
+  minimized Session state and evidence-gated UAT. Real device/Session composition, enrollment and
+  Store UAT remain unavailable and unclaimed. Security/privacy review found no unaccepted
+  Blocker/High issue; exact boundaries are in `docs/spec/work-packages/WP-1808.md`. GitHub
+  publication/integration is deferred by explicit Owner direction.
+
+- `WP-1807 — Permission-aware Navigation` is locally implemented and verified on top of WP-1806
+  head `aa8b13e`. The same-origin Session now supplies a closed exact Screen/route/Permission
+  navigation array; unknown, mismatched and duplicate destinations fail closed, and Store switch
+  rotates into a fresh array. Visibility never grants direct-route or Command authority. Exact
+  boundaries are in `docs/spec/work-packages/WP-1807.md`; GitHub publication/integration is deferred
+  by explicit Owner direction.
+
+- `WP-1806 — Device / Output Failure View` is locally resolved on top of WP-1805 head `185ebaa` as
+  a no-code closeout. Later accepted Sections 88.17/88.21 and IDR-0039 assign managed KDS Device UI
+  and UAT to WP-1808/2180/2181 and keep physical Output behind WP-1500–1506 Future Triggers; Section
+  88 defines no WP-1806 Screen mapping. No route, Device/Output fact, printer action or external
+  evidence was fabricated. Exact precedence and boundaries are recorded in
+  `docs/spec/work-packages/WP-1806.md`; GitHub publication/integration is deferred by Owner direction.
+
+- `WP-1805 — Pickup Completion Screen` is locally implemented and verified on top of WP-1804 head
+  `0df9ee5`. It adds the canonical Pickup Queue, strict browser DTO, deterministic wait/overdue and
+  explicit proof-plus-target handoff gating described in `docs/spec/work-packages/WP-1805.md`.
+  Merchant HTTP/Command/proof/device composition remains unavailable and unclaimed; GitHub
+  publication/integration is deferred by explicit Owner direction.
+
+- `WP-1804 — Kitchen Board` is locally implemented and verified on top of WP-1803 head `3836365`.
+  It adds the canonical Kitchen queue/work-item routes, strict closed browser DTOs, deterministic
+  projection-time age and explicit Fresh + named-operator action gating described in
+  `docs/spec/work-packages/WP-1804.md`. Merchant HTTP/realtime/Command/Session composition and real
+  device/UAT evidence remain unavailable and unclaimed; GitHub publication/integration is deferred
+  by explicit Owner direction.
+
+- `WP-1803 — Order Queue` is locally implemented and verified on top of WP-1802 head `f2e94ae`.
+  It adds the canonical Order Queue/detail routes, strict Store/Business-Date browser DTOs,
+  deterministic projection-time age, explicit dependent-source gaps and stale read-only behavior
+  described in `docs/spec/work-packages/WP-1803.md`. WP-1225 supplies no Merchant HTTP/realtime or
+  claim/accept/reject Commands and WP-1900 still owns cross-Domain operational facts, so those
+  actions remain unavailable rather than fabricated. GitHub publication/integration is deferred
+  by explicit Owner direction.
+
+- `WP-1802 — Catalog Authoring / Publish Screen` is locally implemented and verified on top of
+  WP-1801 head `e6645c1`. It adds the canonical Menu list and builder routes, strict closed browser
+  DTOs, safe projection-gap labels, keyboard-visible section controls and a contextual publish
+  rail described in `docs/spec/work-packages/WP-1802.md`. The existing WP-1027 summary lacks the
+  authoritative digest, effective period, evidence and browser scope envelope required for safe
+  lifecycle mutations, so authoring/publish actions remain unavailable rather than fabricated.
+  GitHub publication/integration is deferred by explicit Owner direction.
+
+- `WP-1801 — Store Setup Minimum Screen` is locally implemented and verified on top of WP-1800
+  head `29d20cb`. It adds the canonical Store list/detail/setup routes, strict closed browser DTOs,
+  permission-safe state handling and the fixed eight-step evidence-gated setup presentation
+  described in `docs/spec/work-packages/WP-1801.md`. Real Store projections, persistence and
+  authoring Commands remain owned by WP-2192 and are unavailable rather than fabricated; external
+  Store evidence remains gated and unclaimed. GitHub publication/integration is deferred by
+  explicit Owner direction.
+
+- `WP-1800 — Merchant Sign-in and Store Switch` is locally implemented and verified on top of
+  WP-1724 head `c510b4f`. It connects the accepted same-origin Merchant BFF and Session-rotating
+  Store-switch contract to the canonical `HOME-OVERVIEW /app` screen, with a closed
+  permission-trimmed workspace DTO and explicit WP-1905 dashboard unavailability described in
+  `docs/spec/work-packages/WP-1800.md`. Real Cognito, workforce/Store facts and dashboard
+  projection evidence remain externally gated and unclaimed; GitHub publication/integration is
+  deferred by explicit Owner direction.
+
+- `WP-1724 — SES Event Authentication, Recipient Privacy, Retention and Deliverability Runbook` is
+  locally implemented and verified on top of WP-1723 head `bdc6ccf`. It owns the strict SNS
+  Signature Version 2 envelope admission, exact `ca-central-1` Topic/certificate allowlist,
+  privacy-minimized SES event normalization, atomic Inbox/suppression intent and scoped
+  subscription-confirmation contract described in `docs/spec/work-packages/WP-1724.md`. AWS SDK,
+  persistence/IaC and real Provider/deliverability evidence remain externally gated and unclaimed;
+  GitHub publication/integration is deferred by explicit Owner direction.
+
+- `WP-1723 — Worker-minted Resume Token, Fragment-link Delivery and Clean Recovery E2E` is locally
+  implemented and verified on top of WP-1722 head `0ed8eaf`. It owns the bounded hash-only token
+  lifecycle and clean Customer fragment handoff described in `docs/spec/work-packages/WP-1723.md`;
+  production crypto/persistence/API composition remains gated. GitHub publication/integration is
+  deferred by explicit Owner direction.
+
+- `WP-1722 — Idempotent Delivery, Suppression, Retry / Dead-letter and Delivery Observability` is
+  locally implemented and verified on top of WP-1721 head `3c04058`. It owns the bounded resend
+  authorization, retry/backoff/exhaustion and privacy-safe operational summary described in
+  `docs/spec/work-packages/WP-1722.md`; GitHub publication/integration is deferred by explicit Owner
+  direction.
+
+- `WP-1721 — Localized Escaped Transactional Template, Minimal Receipt Body and No-tracking
+Contract` is locally implemented and verified on top of WP-1720 head `714c2da`. It owns the
+  strict React DOM Server transactional-receipt renderer described in
+  `docs/spec/work-packages/WP-1721.md`; send orchestration and resume links remain WP-1722–1723.
+  GitHub publication/integration is deferred by explicit Owner direction.
+
+- `WP-1720 — SES Domain Identity, Authentication, Sandbox Exit and Regional Evidence` is locally
+  implemented and verified on top of WP-1709 head `9afea90`. It owns Notification's strict
+  `ca-central-1` readiness-evidence admission described in `docs/spec/work-packages/WP-1720.md`.
+  Real SES, DNS, DMARC, account and Production Access evidence remains externally gated and
+  unclaimed; GitHub publication/integration is deferred by explicit Owner direction.
+
+- `WP-1709 — Accessible Immutable Digital Receipt, Correction / Reissue and Guest-authorized
+Retrieval` is locally implemented and verified on top of WP-1708 head `e7328ea`. It owns the
+  bounded Ordering receipt-chain contract and `CUST-RECEIPT-SUPPORT` runtime-inactive Customer
+  screen described in `docs/spec/work-packages/WP-1709.md`. SES delivery and resume-token minting
+  remain WP-1720–1724; GitHub publication/integration is deferred by explicit Owner direction.
+
+- `WP-1708 — Workbox Cache Allowlist / NetworkOnly / Safe Update` is locally implemented and
+  verified on a sequential local stack from WP-1707 head `3a39269`. It owns only the bounded
+  Customer PWA cache routing and safe-update contract described in
+  `docs/spec/work-packages/WP-1708.md`. GitHub publication/integration is deferred by explicit Owner
+  direction.
+
+- `WP-1707 — PWA Offline Shell / Retry UX Baseline` is locally implemented and verified at
+  `3a39269` on top of WP-1706. It owns only the bounded Customer PWA connectivity and explicit
+  foreground-recovery contract described in `docs/spec/work-packages/WP-1707.md`; GitHub
+  publication/integration is deferred by Owner direction.
+
+- `WP-1706 — Pickup Ready / Confirmation Screen` is locally implemented and verified at
+  `185633f` on top of WP-1705. It owns only the bounded contextual `CUST-PICKUP-CODE` browser
+  contract described in `docs/spec/work-packages/WP-1706.md`; GitHub publication/integration is
+  deferred by Owner direction.
+
+- `WP-1705 — Customer Order Status / Realtime Refresh` is locally implemented and verified at
+  `669256d` on top of locally verified WP-1704 head
+  `520c212a52594ff9e9aeb033e3b1b72a11c6d3fc`. It owns only the bounded
+  `CUST-ORDER-STATUS` browser contract described in `docs/spec/work-packages/WP-1705.md`; GitHub
+  publication/integration is deferred by Owner direction.
+
+- `WP-1704 — Payment Redirect / Result Handling` is locally implemented and verified at
+  `520c212a52594ff9e9aeb033e3b1b72a11c6d3fc`; PR #167 remains open and all GitHub follow-up is
+  deferred by Owner direction. It began from exact integrated and exact-main verified
+  `main@3ce5966960dd860acc8f41fb804b01f468d992c0` (`31553442340 / 93980838403`) and owns only the
+  Provider-gated `CUST-PAYMENT` and clean `CUST-CHECKOUT-RESULT` browser contract described in
+  `docs/spec/work-packages/WP-1704.md`.
+
+- `WP-1703 — Checkout / Quote Review` is implemented and integrated at squash
+  `3ce5966960dd860acc8f41fb804b01f468d992c0` via PR #166. Exact implementation head
+  `ad0431b468999cea45c86b23860b3f88065d5ec1` passed run/job
+  `31552575689 / 93978219025`; exact-main run/job `31553442340 / 93980838403` passed.
 
 - `WP-1702 — Cart UI` is implemented and integrated at squash
   `2bacc889105e131616f113cefdd211cae548c2cd` via PR #165. Exact implementation head
@@ -897,6 +1779,70 @@ WP-0024 implementation commit `6371aa8cc96da021fc2a337a768039abce46548b`、PR #2
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
 ## Current repository stage
+
+WP-2182 local implementation verification is complete from exact predecessor
+`WP-2181@3c121a6` on `codex/wp-2182`. The bounded expansion adds the rebuildable
+`provider_integration_admin_v1` Projection, owner-routed permission/version/idempotency-bound action
+intents and the Section 88 `INT-PROVIDER-LIST` / `INT-PROVIDER-DETAIL` routes. Exact `pnpm verify`
+passed with root `321/321`, Projection `28/28`, Merchant `424/424`, all `40/40` package
+format/lint/typecheck/test/build tasks and the retained isolated PostgreSQL matrix. No Provider SDK,
+account, endpoint, credential, raw payload, webhook replay, Kill Switch mutation or live/sandbox
+result was created or claimed. Accepted Provider/region/evidence gates, owning-Domain authority,
+GitHub and deployment remain unchanged and deferred. This paragraph supersedes the historical
+active-stage snapshots below.
+
+WP-2181 local implementation verification is complete from exact predecessor
+`WP-2180@c33a0d8` on `codex/wp-2181`. The bounded Device-domain expansion adds immutable managed KDS
+Profile Versions, effective-dated assignments, append-only Store UAT runs/check results, evidence-
+gated publication/revocation and the expanded Section 88 `DEV-KDS-PROFILE` contract. Exact
+`pnpm verify` passed with root `321/321`, Device `13/13`, Merchant `409/409`, all `40/40` package
+format/lint/typecheck/test/build tasks and the retained isolated PostgreSQL matrix. Real Store/device
+UAT, managed-browser policy, network/wake/power/accessibility evidence, named Sessions and support
+facts remain unavailable and unclaimed; `STORE-LIVE-GATE-CA-ON-TOR-001` stays blocked. IDR-0039
+continues to exclude physical output, Store Gateway, vendor adapters and application Offline Queue.
+GitHub and deployment remain deferred. This paragraph supersedes the historical active-stage
+snapshots below.
+
+WP-2180 local implementation verification is complete from exact predecessor
+`WP-2178@81a3e36` on `codex/wp-2180`. The bounded implementation adds the canonical
+`@rms/printing-device` Device Aggregate, immutable capability/configuration and assignment history,
+independent append-only Health signals/current projection, forced Store RLS, seven generated Event
+Catalog contracts and the Section 88 `DEV-DEVICE-LIST` / `DEV-DEVICE-DETAIL` routes. Exact
+`pnpm verify` passed with root `320/320`, Device `7/7`, Contracts `28/28`, Merchant `398/398`, all
+`40/40` package format/lint/typecheck/test/build tasks and the retained isolated PostgreSQL matrix.
+IDR-0039 remains unchanged: only browser KDS is Pilot; physical printers/peripherals, Store Gateway,
+vendor adapters/SDKs, application Offline Queue, real devices, credentials, pairing, external
+evidence, GitHub and deployment remain gated and unclaimed. This paragraph supersedes the
+historical active-stage snapshots below.
+
+WP-2163 local implementation verification is complete from exact predecessor
+`WP-2162@1827474` on `codex/wp-2163`. The bounded implementation adds immutable semantic Metric
+Versions, closed Lineage metadata, distinct Business Owner / Data Owner certification,
+replacement-aware deprecation, generated Event Catalog artifacts, forced Brand/Store RLS and the
+Section 88 `BI-METRIC-CATALOG` / `BI-METRIC-DETAIL` routes. `pnpm verify` passed with all `38/38`
+package format/lint/typecheck/test/build tasks and the retained isolated PostgreSQL matrix. Real
+formulas or calculations, Warehouse / Pipeline execution, source facts, KPI targets, Data Quality
+results, Provider, external evidence, GitHub and deployment remain gated and unclaimed. This
+paragraph supersedes the historical active-stage snapshots below.
+
+WP-2162 local implementation verification is complete from exact predecessor
+`WP-2161@765d9ec` on `codex/wp-2162`. The bounded implementation adds version-pinned Report Run
+snapshots, append-only state / artifact / revocation / operation evidence, forced Brand/Store RLS,
+strict generated Event Catalog artifacts and the Section 88 `RPT-RUN-HISTORY` route. `pnpm verify`
+passed with all `38/38` package format/lint/typecheck/test/build tasks and the retained isolated
+PostgreSQL matrix. Real report execution, source facts or checkpoints, Output bytes, storage URLs,
+recipients, delivery, production retention / Legal Hold, Provider, external evidence, GitHub and
+deployment remain gated and unclaimed. This paragraph supersedes the historical active-stage
+snapshots below.
+
+WP-2161 local implementation verification is complete from exact predecessor
+`WP-2160@48bb1c6` on `codex/wp-2161`. The bounded implementation adds the canonical Reporting Domain,
+strict version/certification/schedule contracts, migration namespace `1800-rms-reporting`, generated
+Event Catalog artifacts and the two Section 88 routes. `pnpm verify` passed with all `38/38` package
+format/lint/typecheck/test/build tasks and the retained isolated PostgreSQL matrix. Real Dataset or
+Metric certification, membership, Report Runs, artifacts, recipient resolution, delivery, Provider,
+production scheduler, external evidence, GitHub and deployment remain gated and unclaimed. This
+paragraph supersedes the historical active-stage snapshots below.
 
 WP-1404 local implementation verification is active from exact integrated and exact-main verified
 `origin/main@2cbc0be35980e8245eeda486d60730004bc5ce8f` on the sole active branch

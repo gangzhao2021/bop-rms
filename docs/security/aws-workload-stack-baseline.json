@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "toolchain": { "awsCdk": "2.261.0", "constructs": "10.7.0" },
+  "environments": ["development", "staging", "production"],
+  "network": {
+    "productionAvailabilityZonesMinimum": 2,
+    "publicSubnetResources": ["alb", "required-managed-edge"],
+    "ecsSubnet": "private",
+    "rdsSubnet": "isolated-database",
+    "rdsPublicEndpoint": false,
+    "ecsPublicAddress": false
+  },
+  "ecs": {
+    "productionApiBffTasksMinimum": 2,
+    "productionWorkerTasksMinimum": 2,
+    "readOnlyRootFilesystem": true,
+    "dropLinuxCapabilities": true,
+    "boundedEphemeralTmp": true,
+    "ecsExec": false,
+    "ssh": false,
+    "publicDebugEndpoint": false
+  },
+  "rds": {
+    "engine": "postgresql-18.4",
+    "encrypted": true,
+    "multiAzProduction": true,
+    "pitr": true,
+    "maximumApplicationConnectionBudgetPercent": 70
+  },
+  "s3": {
+    "accountAndBucketBlockPublicAccess": true,
+    "objectOwnership": "bucket-owner-enforced",
+    "acls": false,
+    "denyNonTls": true,
+    "requireSseKmsAndEncryptionContext": true,
+    "limitToNamedRoleOacOrVpcEndpoint": true
+  },
+  "kmsAndSecrets": {
+    "productionSeparatedFromDevelopment": true,
+    "secretsManager": true,
+    "plaintextEnvironmentSecret": false
+  },
+  "vpcEndpoints": ["cloudwatch-logs", "ecr", "kms", "s3", "secrets-manager"],
+  "remainingInternetEgress": {
+    "path": "multi-az-nat-and-network-firewall",
+    "statefulSniAndHttpHostAllowlist": true,
+    "centralFlowAndAlertLogs": true,
+    "unregisteredDestination": "deny"
+  },
+  "taskRoles": ["api-bff", "worker", "migration", "operational-break-glass"],
+  "sharedIamUserKey": false,
+  "applicationRootUse": false,
+  "externalEvidenceRequired": true
+}

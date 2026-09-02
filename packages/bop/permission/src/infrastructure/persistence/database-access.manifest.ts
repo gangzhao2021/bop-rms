@@ -3,6 +3,38 @@ const databaseAccessManifestInput = {
   module: { moduleName: "permission", packageName: "@bop/permission", layer: "BOP" },
   tables: [
     {
+      table: "role_administration_decision",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "role_administration_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "role_administration_permission",
+      classification: "aggregate-child-entity",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["none"],
+    },
+    {
+      table: "role_administration_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "policy_state",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@bop/permission" },

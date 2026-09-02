@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "telemetry": {
+    "structuredLogs": "cloudwatch-logs",
+    "metrics": "cloudwatch-metrics",
+    "traces": "x-ray",
+    "collector": "adot",
+    "failureIsolatedFromBusinessOutcome": true,
+    "highCardinalityBusinessLabels": false
+  },
+  "alertTransport": {
+    "path": "cloudwatch-alarm-or-eventbridge-to-encrypted-sns",
+    "leastPrivilegePublish": true,
+    "verifiedEmailSubscriptions": true,
+    "customerPayload": false,
+    "roleDestinations": ["on-call-primary", "on-call-backup", "security-on-call"],
+    "unknownOrDeliveryFailure": "fail-closed"
+  },
+  "costAndQuota": {
+    "controls": ["aws-budgets", "cost-anomaly-detection", "service-quota-alarms"],
+    "requiredTags": ["resource-owner", "environment", "data-class"],
+    "destinations": ["finance", "operations"],
+    "alarmAction": "notify-only",
+    "mayDeleteProductionData": false,
+    "mayStopTransactionService": false
+  },
+  "capacity": {
+    "autoscalingMinimumAndMaximumRequired": true,
+    "signals": ["cpu", "memory", "request-load", "queue-lag"],
+    "databaseConnectionBudgetPercentMaximum": 70,
+    "deploymentMayExhaustDatabasePool": false
+  },
+  "acknowledgementDrill": {
+    "stagingFaultInjection": true,
+    "primaryAndBackupDelivery": true,
+    "humanAcknowledgement": true,
+    "escalationAndRecoveryRecorded": true,
+    "realContactEvidenceRequired": true
+  },
+  "externalEvidenceRequired": true
+}

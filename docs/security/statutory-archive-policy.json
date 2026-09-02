@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "recordClasses": ["order", "receipt", "tax", "payment", "refund", "settlement"],
+  "snapshotFormats": ["canonical-json", "inert-receipt-html"],
+  "manifestFields": [
+    "schemaVersion",
+    "policyVersion",
+    "templateVersion",
+    "businessDateFrom",
+    "businessDateThrough",
+    "fiscalYearEnd",
+    "objectCount",
+    "sourceHash",
+    "archiveHash"
+  ],
+  "excludedFields": ["customerContact", "freeText", "pickupProof", "allergyHealthDetail"],
+  "retentionYearsFromFiscalYearEnd": 7,
+  "requiredAccessControls": [
+    "finance-or-compliance-permission",
+    "recent-mfa",
+    "purpose",
+    "case-reference",
+    "audit"
+  ],
+  "privacyTombstoneFields": [
+    "opaqueSubjectId",
+    "fieldReference",
+    "policyVersion",
+    "completedAt",
+    "replayStatus"
+  ],
+  "externalEvidenceRequired": true
+}

@@ -357,3 +357,37 @@ export function validatePriceCoverage(
   if (!Array.isArray(contexts) || contexts.length === 0) fail("PRICE_COVERAGE_MISSING");
   for (const context of contexts) resolvePrice(snapshot, context);
 }
+
+export interface PriceCoverageResult {
+  readonly context: PriceResolutionContext;
+  readonly status: "Covered" | "Missing" | "Conflict";
+  readonly resolved: ResolvedPrice | null;
+}
+
+export function analyzePriceCoverage(
+  snapshot: PriceBookSnapshot,
+  contexts: readonly PriceResolutionContext[],
+): readonly PriceCoverageResult[] {
+  if (!Array.isArray(contexts) || contexts.length === 0) fail("PRICE_COVERAGE_MISSING");
+  return Object.freeze(
+    contexts.map((context) => {
+      try {
+        return Object.freeze({
+          context,
+          status: "Covered" as const,
+          resolved: resolvePrice(snapshot, context),
+        });
+      } catch (error) {
+        if (!(error instanceof PriceResolutionError)) throw error;
+        if (error.code !== "PRICE_COVERAGE_MISSING" && error.code !== "PRICE_ENTRY_CONFLICT")
+          throw error;
+        return Object.freeze({
+          context,
+          status:
+            error.code === "PRICE_ENTRY_CONFLICT" ? ("Conflict" as const) : ("Missing" as const),
+          resolved: null,
+        });
+      }
+    }),
+  );
+}

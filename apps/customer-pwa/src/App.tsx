@@ -7,6 +7,12 @@ import { EntryContextPage } from "./entry/EntryContextPage.js";
 import type { CustomerEntryClient } from "./entry/types.js";
 import { MenuBrowsePage, MenuSearchPage, SellableDetailPage } from "./menu/MenuPage.js";
 import type { MenuJourneyContext } from "./menu/types.js";
+import { PaymentPage } from "./payment/PaymentPage.js";
+import { OrderStatusPage } from "./order-status/OrderStatusPage.js";
+import { ConnectivityBanner } from "./connectivity/ConnectivityBanner.js";
+import { PwaUpdateBanner } from "./pwa/PwaUpdateBanner.js";
+import { ReceiptPage } from "./receipt/ReceiptPage.js";
+import { DeliveryStatusPage } from "./delivery-status/DeliveryStatusPage.js";
 
 export function App({
   entryClient,
@@ -30,20 +36,29 @@ export function App({
     );
   }, []);
   return (
-    <Routes>
-      <Route
-        path="/"
-        element={<EntryContextPage client={entryClient} onEstablished={establishMenuContext} />}
-      />
-      <Route path="/menu" element={<MenuBrowsePage context={menuContext} />} />
-      <Route path="/menu/search" element={<MenuSearchPage context={menuContext} />} />
-      <Route
-        path="/menu/items/:sellableId"
-        element={<SellableDetailPage context={menuContext} />}
-      />
-      <Route path="/cart" element={<CartPage />} />
-      <Route path="/checkout" element={<CheckoutPage />} />
-      <Route path="*" element={<CustomerShell />} />
-    </Routes>
+    <>
+      <ConnectivityBanner />
+      <PwaUpdateBanner />
+      <Routes>
+        <Route
+          path="/"
+          element={<EntryContextPage client={entryClient} onEstablished={establishMenuContext} />}
+        />
+        <Route path="/menu" element={<MenuBrowsePage context={menuContext} />} />
+        <Route path="/menu/search" element={<MenuSearchPage context={menuContext} />} />
+        <Route
+          path="/menu/items/:sellableId"
+          element={<SellableDetailPage context={menuContext} />}
+        />
+        <Route path="/cart" element={<CartPage />} />
+        <Route path="/checkout" element={<CheckoutPage />} />
+        <Route path="/checkout/payment" element={<PaymentPage mode="handoff" />} />
+        <Route path="/checkout/result" element={<PaymentPage mode="result" />} />
+        <Route path="/orders/:orderReference" element={<OrderStatusPage />} />
+        <Route path="/orders/:orderReference/delivery" element={<DeliveryStatusPage />} />
+        <Route path="/orders/:orderReference/receipt" element={<ReceiptPage />} />
+        <Route path="*" element={<CustomerShell />} />
+      </Routes>
+    </>
   );
 }

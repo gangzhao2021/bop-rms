@@ -17,6 +17,32 @@ const secret = (byte: number) =>
 const authCookie = secret(1);
 const sessionCookie = secret(2);
 const csrf = secret(3);
+const storeReference = "018f7f9a-ad3e-7a11-8d01-000000000003";
+const secondStoreReference = "018f7f9a-ad3e-7a11-8d01-000000000004";
+const workspace = Object.freeze({
+  screenId: "HOME-OVERVIEW",
+  selectedScope: Object.freeze({
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Training Store",
+    storeReference,
+  }),
+  authorizedStores: Object.freeze([
+    Object.freeze({
+      brandLabel: "Synthetic Brand",
+      storeLabel: "Training Store",
+      storeReference,
+    }),
+    Object.freeze({
+      brandLabel: "Synthetic Brand",
+      storeLabel: "Second Store",
+      storeReference: secondStoreReference,
+    }),
+  ]),
+  businessDate: "2026-07-29",
+  storeStatus: "Open",
+  freshness: "Current",
+  dashboardAvailability: "UnavailableUntilWP1905",
+});
 const session = createAuthenticationSession({
   sessionReference: "018f7f9a-ad3e-7a11-8d01-000000000001",
   actor: {
@@ -81,9 +107,16 @@ function fakeService(): MerchantBffService {
         cookieMutation(sessionCookie, merchantSessionCookie),
       ],
     })),
-    bootstrap: vi.fn(async () => ({ session, csrf })),
+    bootstrap: vi.fn(async () => ({ session, csrf, workspace })),
     authorize: vi.fn(async () => session),
     logout: vi.fn(async () => cookieMutation("", merchantSessionCookie, true)),
+    switchStore: vi.fn(async () => ({
+      cookie: cookieMutation(secret(4), merchantSessionCookie),
+      workspace: Object.freeze({
+        ...workspace,
+        selectedScope: workspace.authorizedStores[1],
+      }),
+    })),
   };
 }
 
@@ -109,6 +142,7 @@ async function request(
   root: string,
   pathname: string,
   options: {
+    readonly body?: string;
     readonly method?: string;
     readonly headers?: Readonly<Record<string, string | undefined>>;
   } = {},
@@ -144,7 +178,7 @@ async function request(
       },
     );
     outgoing.once("error", reject);
-    outgoing.end();
+    outgoing.end(options.body);
   });
 }
 
@@ -171,7 +205,13 @@ describe("isolated merchant BFF transport", () => {
     const callback = await request(
       root,
       `/merchant/callback?code=${secret(8)}&state=${secret(9)}`,
-      { headers: { ...safeHeaders, Cookie: `__Host-bop-auth=${authCookie}` } },
+      {
+        headers: {
+          Host: "merchant.invalid",
+          "Sec-Fetch-Site": "cross-site",
+          Cookie: `__Host-bop-auth=${authCookie}`,
+        },
+      },
     );
     expect(callback.status).toBe(303);
     expect(callback.headers.get("location")).toBe("/orders");
@@ -196,6 +236,7 @@ describe("isolated merchant BFF transport", () => {
     expect(await bootstrap.json()).toEqual({
       authenticated: true,
       csrf,
+      workspace,
     });
     const command = await request(root, "/merchant/protected", {
       method: "POST",
@@ -210,7 +251,6 @@ describe("isolated merchant BFF transport", () => {
   });
 
   it.each([
-    ["missing Origin", { Host: "merchant.invalid", "Sec-Fetch-Site": "same-origin" }],
     [
       "cross-site Origin",
       {
@@ -244,13 +284,75 @@ describe("isolated merchant BFF transport", () => {
     expect(service.start).not.toHaveBeenCalled();
   });
 
+  it("accepts a same-site top-level login navigation without Origin", async () => {
+    const service = fakeService();
+    const root = await serve(service);
+    const response = await request(root, "/merchant/login", {
+      headers: { Host: "merchant.invalid", "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(response.status).toBe(303);
+  });
+
+  it("switches only through same-origin CSRF POST and returns a fresh closed workspace", async () => {
+    const service = fakeService();
+    const root = await serve(service);
+    const headers = {
+      ...safeHeaders,
+      Cookie: `__Host-bop-merchant=${sessionCookie}`,
+      "Content-Type": "application/json",
+      "X-BOP-CSRF": csrf,
+    };
+    const response = await request(root, "/merchant/store-context", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ targetStoreReference: secondStoreReference }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toContain("__Host-bop-merchant=");
+    expect(await response.json()).toMatchObject({
+      workspace: { selectedScope: { storeReference: secondStoreReference } },
+    });
+    expect(service.switchStore).toHaveBeenCalledWith({
+      sessionCookie,
+      csrf,
+      targetStoreReference: secondStoreReference,
+    });
+
+    const openBody = await request(root, "/merchant/store-context", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ targetStoreReference: secondStoreReference, injected: true }),
+    });
+    expect(openBody.status).toBe(403);
+    expect(service.switchStore).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects malformed/open workspace adapter output without exposing it", async () => {
+    const service = fakeService();
+    vi.mocked(service.bootstrap).mockResolvedValueOnce({
+      session,
+      csrf,
+      workspace: { ...workspace, injected: "denied" },
+    });
+    const root = await serve(service);
+    const response = await request(root, "/merchant/session", {
+      headers: { ...safeHeaders, Cookie: `__Host-bop-merchant=${sessionCookie}` },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe('{"error":"request_denied"}');
+  });
+
   it("collapses callback failures, clears auth state, and leaks no query credential", async () => {
     const service = fakeService();
     vi.mocked(service.callback).mockRejectedValueOnce(new Error("synthetic-provider-detail"));
     const root = await serve(service);
     const code = secret(11);
     const response = await request(root, `/merchant/callback?code=${code}&state=${secret(12)}`, {
-      headers: { ...safeHeaders, Cookie: `__Host-bop-auth=${authCookie}` },
+      headers: {
+        Host: "merchant.invalid",
+        "Sec-Fetch-Site": "cross-site",
+        Cookie: `__Host-bop-auth=${authCookie}`,
+      },
     });
     expect(response.status).toBe(403);
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");

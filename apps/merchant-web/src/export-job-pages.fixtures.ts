@@ -1,0 +1,27 @@
+export const exportJobPageFixture = {
+  screenId: "EXPORT-JOB-LIST",
+  sourceAsOf: "2026-08-15T16:00:00.000Z",
+  freshness: "Fresh",
+  completeness: "Complete",
+  mayCreate: true,
+  jobs: [
+    {
+      jobReference: "018f9816-0000-7000-8000-000000000007",
+      sourceScreen: "Order queue",
+      sourceView: "Open orders",
+      scope: "Synthetic Brand",
+      filterSummary: "Status: Open",
+      classification: "Internal",
+      format: "Csv",
+      status: "Completed",
+      rowCount: 42,
+      requestedBy: "Synthetic requester",
+      requestedAt: "2026-08-15T15:00:00.000Z",
+      expiresAt: "2026-08-16T15:00:00.000Z",
+      grantState: "Ready",
+      mayCancel: false,
+      mayDownload: true,
+      mayRevoke: true,
+    },
+  ],
+} as const;

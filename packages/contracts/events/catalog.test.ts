@@ -16,6 +16,12 @@ import {
   createEventCatalogSnapshot,
   EventCatalogCompatibilityError,
 } from "./compatibility.ts";
+import {
+  assertEventConsumerCompatibility,
+  defineEventConsumerContracts,
+  EventConsumerCompatibilityError,
+  eventConsumerContracts,
+} from "./consumer-compatibility.ts";
 import { renderCatalogArtifacts } from "./render.ts";
 
 const registration = (
@@ -41,8 +47,27 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(14);
+    expect(eventCatalog).toHaveLength(98);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
+    for (const eventType of [
+      "DeviceActivated",
+      "DeviceCapabilityChanged",
+      "DeviceCredentialRevoked",
+      "DeviceHealthChanged",
+      "DeviceProvisioned",
+      "DeviceRetired",
+      "DeviceSuspended",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/printing-device",
+        producerModule: "@rms/printing-device",
+        consumers: ["device.management-projection:v1"],
+        tenantScope: "store",
+        dataClassification: "indirect_identifier",
+        replaySemantics: "idempotent",
+      });
     expect(byType.get("FulfillmentCompleted")).toMatchObject({
       eventType: "FulfillmentCompleted",
       schemaVersion: 1,
@@ -118,6 +143,109 @@ describe("Event Catalog source", () => {
       tenantScope: "brand",
       replaySemantics: "idempotent",
     });
+    for (const eventType of [
+      "DataQualityIssueDetected",
+      "DataQualityIssueResolved",
+      "MetricArchived",
+      "MetricCertified",
+      "MetricDefinitionDraftRecorded",
+      "MetricDefinitionPublished",
+      "MetricDefinitionReviewSubmitted",
+      "MetricDeprecated",
+      "ReconciliationDifferenceDetected",
+      "ReportDefinitionArchived",
+      "ReportDefinitionDraftCreated",
+      "ReportDefinitionDraftReplaced",
+      "ReportDefinitionPublished",
+      "ReportDefinitionReviewSubmitted",
+      "ReportArtifactRevisionRecorded",
+      "ReportArtifactRevoked",
+      "ReportRunQueued",
+      "ReportRunStateRecorded",
+      "ReportScheduleVersionRecorded",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/business-intelligence",
+        tenantScope: "brand",
+        dataClassification: "indirect_identifier",
+        replaySemantics: "idempotent",
+      });
+    for (const eventType of [
+      "AvailabilityRuleCreated",
+      "AvailabilityRuleLifecycleChanged",
+      "AvailabilityRuleReplaced",
+      "BundleDraftCreated",
+      "BundleDraftReplaced",
+      "BundleLifecycleChanged",
+      "BundleVersionPublished",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/catalog",
+        tenantScope: "brand",
+        dataClassification: "none",
+        replaySemantics: "idempotent",
+      });
+    for (const eventType of [
+      "TaxConfigDraftCreated",
+      "TaxConfigDraftReplaced",
+      "TaxConfigPublished",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/pricing",
+        tenantScope: "store",
+        dataClassification: "none",
+        replaySemantics: "idempotent",
+      });
+    for (const eventType of [
+      "PriceBookArchived",
+      "PriceBookDraftCreated",
+      "PriceBookDraftReplaced",
+      "PriceBookVersionPublished",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/pricing",
+        tenantScope: "brand",
+        dataClassification: "none",
+        replaySemantics: "idempotent",
+      });
+    for (const eventType of [
+      "PromotionArchived",
+      "PromotionDraftCreated",
+      "PromotionDraftReplaced",
+      "PromotionPaused",
+      "PromotionPublished",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/pricing",
+        tenantScope: "brand",
+        dataClassification: "none",
+        replaySemantics: "idempotent",
+      });
+    for (const eventType of [
+      "RecipeArchived",
+      "RecipeDraftCreated",
+      "RecipeDraftReplaced",
+      "RecipeInvalidated",
+      "RecipePublished",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/recipe",
+        tenantScope: "brand",
+        dataClassification: "none",
+        replaySemantics: "idempotent",
+      });
     expect(byType.get("OrderConfirmed")).toMatchObject({
       eventType: "OrderConfirmed",
       schemaVersion: 1,
@@ -133,6 +261,30 @@ describe("Event Catalog source", () => {
       deprecated: false,
       replacement: null,
     });
+    expect(byType.get("OrderAmended")).toMatchObject({
+      eventType: "OrderAmended",
+      schemaVersion: 1,
+      ownerModule: "@rms/ordering",
+      tenantScope: "store",
+      dataClassification: "indirect_identifier",
+      replaySemantics: "idempotent",
+    });
+    for (const eventType of [
+      "ProductionBatchPlanned",
+      "ProductionBatchStarted",
+      "ProductionBatchObservationRecorded",
+      "ProductionBatchCompleted",
+      "ProductionBatchQuarantined",
+    ])
+      expect(byType.get(eventType)).toMatchObject({
+        eventType,
+        schemaVersion: 1,
+        ownerModule: "@rms/kitchen",
+        producerModule: "@rms/kitchen",
+        tenantScope: "store",
+        dataClassification: "indirect_identifier",
+        replaySemantics: "idempotent",
+      });
     expect(byType.get("OrderCreated")).toMatchObject({
       eventType: "OrderCreated",
       schemaVersion: 1,
@@ -170,6 +322,42 @@ describe("Event Catalog source", () => {
       dataClassification: "payment",
     });
     expect(registeredEventMetricLabels(eventCatalog)).toEqual([
+      "AllergenControlFailureDetected:v1",
+      "AnalyticsBackfillCompleted:v1",
+      "AnalyticsLoadCompleted:v1",
+      "AnalyticsLoadFailed:v1",
+      "AvailabilityRuleCreated:v1",
+      "AvailabilityRuleLifecycleChanged:v1",
+      "AvailabilityRuleReplaced:v1",
+      "BundleDraftCreated:v1",
+      "BundleDraftReplaced:v1",
+      "BundleLifecycleChanged:v1",
+      "BundleVersionPublished:v1",
+      "CleaningVerificationFailed:v1",
+      "ComplianceCaseCancelled:v1",
+      "ComplianceCaseClosed:v1",
+      "ComplianceCaseEnteredCorrectiveAction:v1",
+      "ComplianceCaseEscalated:v1",
+      "ComplianceCaseOpened:v1",
+      "ComplianceCaseVerificationStarted:v1",
+      "ComplianceFindingRecorded:v1",
+      "CorrectiveActionAssigned:v1",
+      "CorrectiveActionCompleted:v1",
+      "CorrectiveActionVerificationFailed:v1",
+      "CorrectiveActionVerified:v1",
+      "CriticalComplianceFindingDetected:v1",
+      "DataQualityIssueDetected:v1",
+      "DataQualityIssueResolved:v1",
+      "DeviceActivated:v1",
+      "DeviceCapabilityChanged:v1",
+      "DeviceCredentialRevoked:v1",
+      "DeviceHealthChanged:v1",
+      "DeviceProvisioned:v1",
+      "DeviceRetired:v1",
+      "DeviceSuspended:v1",
+      "EmployeeQualificationExpired:v1",
+      "EmployeeQualificationExpiring:v1",
+      "FoodSafetyIncidentReported:v1",
       "FulfillmentCompleted:v1",
       "KitchenItemCompleted:v1",
       "KitchenItemProgressRecorded:v1",
@@ -178,13 +366,181 @@ describe("Event Catalog source", () => {
       "KitchenWorkAccepted:v1",
       "KitchenWorkCreated:v1",
       "KitchenWorkStarted:v1",
+      "LicenseExpired:v1",
+      "LicenseExpiring:v1",
+      "LicenseSuspended:v1",
       "MenuPublished:v1",
+      "MetricArchived:v1",
+      "MetricCertified:v1",
+      "MetricDefinitionDraftRecorded:v1",
+      "MetricDefinitionPublished:v1",
+      "MetricDefinitionReviewSubmitted:v1",
+      "MetricDeprecated:v1",
+      "OrderAmended:v1",
       "OrderConfirmed:v1",
       "OrderCreated:v1",
       "PaymentFailed:v1",
       "PaymentRefunded:v1",
       "PaymentSucceeded:v1",
+      "PriceBookArchived:v1",
+      "PriceBookDraftCreated:v1",
+      "PriceBookDraftReplaced:v1",
+      "PriceBookVersionPublished:v1",
+      "ProductionBatchCompleted:v1",
+      "ProductionBatchObservationRecorded:v1",
+      "ProductionBatchPlanned:v1",
+      "ProductionBatchQuarantined:v1",
+      "ProductionBatchStarted:v1",
+      "PromotionArchived:v1",
+      "PromotionDraftCreated:v1",
+      "PromotionDraftReplaced:v1",
+      "PromotionPaused:v1",
+      "PromotionPublished:v1",
+      "RecallClosed:v1",
+      "RecallInitiated:v1",
+      "RecipeArchived:v1",
+      "RecipeDraftCreated:v1",
+      "RecipeDraftReplaced:v1",
+      "RecipeInvalidated:v1",
+      "RecipePublished:v1",
+      "ReconciliationDifferenceDetected:v1",
+      "RegulatoryNotificationRequired:v1",
+      "RegulatoryNotificationSubmitted:v1",
+      "ReportArtifactRevisionRecorded:v1",
+      "ReportArtifactRevoked:v1",
+      "ReportDefinitionArchived:v1",
+      "ReportDefinitionDraftCreated:v1",
+      "ReportDefinitionDraftReplaced:v1",
+      "ReportDefinitionPublished:v1",
+      "ReportDefinitionReviewSubmitted:v1",
+      "ReportRunQueued:v1",
+      "ReportRunStateRecorded:v1",
+      "ReportScheduleVersionRecorded:v1",
+      "TaxConfigDraftCreated:v1",
+      "TaxConfigDraftReplaced:v1",
+      "TaxConfigPublished:v1",
+      "TemperatureExcursionDetected:v1",
     ]);
+  });
+
+  it("keeps qualification expiry events minimal, scoped and closed", () => {
+    const payload = {
+      recordReference: "018f9960-0000-7000-8000-000000000001",
+      tenantReference: "018f9960-0000-7000-8000-000000000002",
+      brandReference: "018f9960-0000-7000-8000-000000000003",
+      storeReference: null,
+      requirementVersionReference: "018f9960-0000-7000-8000-000000000004",
+      severity: "Critical",
+      occurredAt: "2026-08-14T18:00:00.000Z",
+    };
+    for (const eventType of [
+      "EmployeeQualificationExpired",
+      "EmployeeQualificationExpiring",
+      "LicenseExpired",
+      "LicenseExpiring",
+      "LicenseSuspended",
+    ]) {
+      const event = eventCatalog.find((entry) => entry.eventType === eventType);
+      expect(event).toMatchObject({
+        ownerModule: "@rms/compliance-food-safety",
+        consumers: ["compliance.qualification-projection:v1"],
+        tenantScope: "brand",
+        dataClassification: "indirect_identifier",
+      });
+      expect(event?.payloadSchema.safeParse(payload).success).toBe(true);
+      expect(
+        event?.payloadSchema.safeParse({ ...payload, certificateNumber: "PRIVATE" }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("keeps allergen failure and Incident events free of restricted detail", () => {
+    const payload = {
+      recordReference: "018f9970-0000-7000-8000-000000000001",
+      tenantReference: "018f9970-0000-7000-8000-000000000002",
+      brandReference: "018f9970-0000-7000-8000-000000000003",
+      storeReference: null,
+      requirementVersionReference: "018f9970-0000-7000-8000-000000000004",
+      severity: "Critical",
+      occurredAt: "2026-08-14T18:00:00.000Z",
+    };
+    for (const eventType of ["AllergenControlFailureDetected", "FoodSafetyIncidentReported"]) {
+      const event = eventCatalog.find((entry) => entry.eventType === eventType);
+      expect(event).toMatchObject({
+        ownerModule: "@rms/compliance-food-safety",
+        consumers: ["compliance.incident-projection:v1"],
+        tenantScope: "brand",
+        dataClassification: "indirect_identifier",
+      });
+      expect(event?.payloadSchema.safeParse(payload).success).toBe(true);
+      expect(event?.payloadSchema.safeParse({ ...payload, symptoms: "restricted" }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it("keeps Recall lifecycle events free of affected-object and Customer detail", () => {
+    const payload = {
+      recordReference: "018f9990-0000-7000-8000-000000000001",
+      tenantReference: "018f9990-0000-7000-8000-000000000002",
+      brandReference: "018f9990-0000-7000-8000-000000000003",
+      storeReference: null,
+      requirementVersionReference: "018f9990-0000-7000-8000-000000000004",
+      severity: "Critical",
+      occurredAt: "2026-08-14T18:00:00.000Z",
+    };
+    for (const eventType of ["RecallClosed", "RecallInitiated"]) {
+      const event = eventCatalog.find((entry) => entry.eventType === eventType);
+      expect(event).toMatchObject({
+        ownerModule: "@rms/compliance-food-safety",
+        consumers: ["compliance.recall-projection:v1"],
+        tenantScope: "brand",
+        dataClassification: "indirect_identifier",
+      });
+      expect(event?.payloadSchema.safeParse(payload).success).toBe(true);
+      expect(
+        event?.payloadSchema.safeParse({
+          ...payload,
+          customerReferences: [payload.recordReference],
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("keeps Data Quality and Reconciliation events minimal and closed", () => {
+    const dataQuality = eventCatalog.find(
+      (entry) => entry.eventType === "DataQualityIssueDetected",
+    );
+    const reconciliation = eventCatalog.find(
+      (entry) => entry.eventType === "ReconciliationDifferenceDetected",
+    );
+    if (dataQuality === undefined || reconciliation === undefined)
+      throw new Error("EVENT_CATALOG_REGISTRATION_MISSING");
+    const detected = {
+      resultReference: "018f9910-0000-7000-8000-000000000001",
+      checkReference: "018f9910-0000-7000-8000-000000000002",
+      checkVersionReference: "018f9910-0000-7000-8000-000000000003",
+      datasetVersionReference: "018f9910-0000-7000-8000-000000000004",
+      partitionCode: "BUSINESS_DATE_2026_08_14",
+      severity: "Critical",
+      publicationDisposition: "BlockFormalReporting",
+      detectedAt: "2026-08-14T18:00:00.000Z",
+    };
+    expect(dataQuality.payloadSchema.safeParse(detected).success).toBe(true);
+    expect(
+      dataQuality.payloadSchema.safeParse({ ...detected, sql: "select private_data" }).success,
+    ).toBe(false);
+    expect(
+      reconciliation.payloadSchema.safeParse({
+        exceptionReference: "018f9910-0000-7000-8000-000000000005",
+        runReference: "018f9910-0000-7000-8000-000000000006",
+        control: "PaymentLedger",
+        periodFrom: "2026-08-14T17:00:00.000Z",
+        periodUntil: "2026-08-14T18:00:00.000Z",
+        unitCode: "CAD",
+        detectedAt: "2026-08-14T18:00:00.000Z",
+      }).success,
+    ).toBe(true);
   });
 
   it("keeps lifecycle payloads truthful, minimal and closed", () => {
@@ -575,6 +931,82 @@ describe("Event Catalog compatibility", () => {
         createEventCatalogSnapshot(next),
       ),
     ).toThrow(code);
+  });
+});
+
+describe("Event consumer compatibility", () => {
+  const firstConsumer = eventConsumerContracts[0];
+  if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
+
+  it("covers every accepted producer-to-consumer relation exactly", () => {
+    expect(eventConsumerContracts).toHaveLength(107);
+    expect(() =>
+      assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
+    ).not.toThrow();
+  });
+
+  it.each([
+    [
+      "missing registration",
+      eventConsumerContracts.filter(
+        (contract) =>
+          contract.consumerName !== "ordering.order-status-projection:v1" ||
+          contract.eventType !== "OrderCreated",
+      ),
+      "CONSUMER_CONTRACT_MISSING",
+    ],
+    [
+      "unsupported schema version",
+      eventConsumerContracts.map((contract) =>
+        contract.consumerName === "ordering.order-status-projection:v1"
+          ? { ...contract, schemaVersions: [2] }
+          : contract,
+      ),
+      "CONSUMER_EVENT_INCOMPATIBLE",
+    ],
+    [
+      "scope mismatch",
+      eventConsumerContracts.map((contract) =>
+        contract.consumerName === "catalog.published-menu-projection:v1"
+          ? { ...contract, tenantScope: "store" as const }
+          : contract,
+      ),
+      "CONSUMER_EVENT_INCOMPATIBLE",
+    ],
+    [
+      "unsafe replay declaration",
+      eventConsumerContracts.map((contract) =>
+        contract.consumerName === "fulfillment.confirmed-order:v1"
+          ? { ...contract, replaySafe: false }
+          : contract,
+      ),
+      "CONSUMER_EVENT_INCOMPATIBLE",
+    ],
+  ])("blocks %s", (_label, contracts, code) => {
+    expect(() => assertEventConsumerCompatibility(eventCatalog, contracts)).toThrow(
+      EventConsumerCompatibilityError,
+    );
+    expect(() => assertEventConsumerCompatibility(eventCatalog, contracts)).toThrow(code);
+  });
+
+  it("rejects invalid, duplicate and orphaned declarations", () => {
+    expect(() =>
+      defineEventConsumerContracts([{ ...firstConsumer, consumerName: "catalog.projection" }]),
+    ).toThrow("CONSUMER_CONTRACT_INVALID");
+    expect(() => defineEventConsumerContracts([firstConsumer, firstConsumer])).toThrow(
+      "CONSUMER_CONTRACT_DUPLICATE",
+    );
+    const orphan = defineEventConsumerContracts([
+      ...eventConsumerContracts,
+      {
+        ...firstConsumer,
+        consumerName: "catalog.synthetic-projection:v1",
+        eventType: "SyntheticChanged",
+      },
+    ]);
+    expect(() => assertEventConsumerCompatibility(eventCatalog, orphan)).toThrow(
+      "CONSUMER_CONTRACT_ORPHANED",
+    );
   });
 });
 

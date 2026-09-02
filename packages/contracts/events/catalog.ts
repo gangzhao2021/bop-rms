@@ -253,6 +253,239 @@ const menuPublishedPayload = z.strictObject({
   timeZone: z.string().min(1).max(63),
 });
 
+const bundleLifecyclePayload = z.strictObject({
+  bundleReference: z.string().regex(canonicalUuidV7),
+  bundleVersionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "Published", "Suspended", "Discontinued", "Archived"]),
+  validationDigest: z
+    .string()
+    .regex(/^sha256:[0-9a-f]{64}$/u)
+    .nullable(),
+});
+
+const availabilityRulePayload = z.strictObject({
+  availabilityRuleReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  sellableType: z.enum(["Product", "Sku", "Bundle"]),
+  lifecycle: z.enum(["Draft", "Active", "Inactive", "Archived"]),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const priceBookPayload = z.strictObject({
+  priceBookReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "Published", "Archived"]),
+  currencyCode: z.string().regex(/^[A-Z]{3}$/u),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const taxConfigPayload = z.strictObject({
+  configurationReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "Published"]),
+  jurisdictionCode: z.string().regex(/^[A-Z][A-Z0-9_-]{0,63}$/u),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const promotionPayload = z.strictObject({
+  promotionReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "Published", "Paused", "Archived"]),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const recipePayload = z.strictObject({
+  recipeReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "Published", "Invalidated", "Archived"]),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const reportDefinitionPayload = z.strictObject({
+  reportReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "InReview", "Published", "Archived"]),
+  certificationStatus: z.enum(["Draft", "InReview", "Certified"]),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const complianceCasePayload = z.strictObject({
+  caseReference: z.string().regex(canonicalUuidV7),
+  tenantReference: z.string().regex(canonicalUuidV7),
+  brandReference: z.string().regex(canonicalUuidV7),
+  storeReference: z.string().regex(canonicalUuidV7).nullable(),
+  aggregateVersion: z.int().positive(),
+  severity: z.enum(["Observation", "Minor", "Major", "Critical", "ImmediateDanger"]),
+  requirementVersionReference: z.string().regex(canonicalUuidV7),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const complianceFindingActionPayload = complianceCasePayload.extend({
+  recordReference: z.string().regex(canonicalUuidV7),
+});
+
+const complianceMonitoringPayload = z.strictObject({
+  recordReference: z.string().regex(canonicalUuidV7),
+  tenantReference: z.string().regex(canonicalUuidV7),
+  brandReference: z.string().regex(canonicalUuidV7),
+  storeReference: z.string().regex(canonicalUuidV7).nullable(),
+  requirementVersionReference: z.string().regex(canonicalUuidV7),
+  severity: z.enum(["Observation", "Minor", "Major", "Critical", "ImmediateDanger"]),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const metricDefinitionPayload = z.strictObject({
+  metricReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z.enum(["Draft", "InReview", "Certified", "Deprecated", "Archived"]),
+  certificationStatus: z.enum(["Draft", "InReview", "Certified", "Deprecated"]),
+  ownerDomainCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  replacementMetricReference: z.string().regex(canonicalUuidV7).nullable(),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const dataQualityIssueDetectedPayload = z.strictObject({
+  resultReference: z.string().regex(canonicalUuidV7),
+  checkReference: z.string().regex(canonicalUuidV7),
+  checkVersionReference: z.string().regex(canonicalUuidV7),
+  datasetVersionReference: z.string().regex(canonicalUuidV7),
+  partitionCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  severity: z.enum(["Info", "Warning", "Error", "Critical"]),
+  publicationDisposition: z.enum(["ContinueFormalReporting", "BlockFormalReporting"]),
+  detectedAt: z.iso.datetime({ offset: false }),
+});
+
+const dataQualityIssueResolvedPayload = z.strictObject({
+  resultReference: z.string().regex(canonicalUuidV7),
+  rerunResultReference: z.string().regex(canonicalUuidV7),
+  resolutionCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  resolvedAt: z.iso.datetime({ offset: false }),
+});
+
+const reconciliationDifferenceDetectedPayload = z.strictObject({
+  exceptionReference: z.string().regex(canonicalUuidV7),
+  runReference: z.string().regex(canonicalUuidV7),
+  control: z.enum([
+    "OrderItemTotal",
+    "PaymentLedger",
+    "InventoryLedger",
+    "PurchaseOrderReceipt",
+    "LoyaltyLedger",
+    "OutputAttempt",
+  ]),
+  periodFrom: z.iso.datetime({ offset: false }),
+  periodUntil: z.iso.datetime({ offset: false }),
+  unitCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  detectedAt: z.iso.datetime({ offset: false }),
+});
+
+const analyticsLoadCompletedPayload = z.strictObject({
+  runReference: z.string().regex(canonicalUuidV7),
+  pipelineVersionReference: z.string().regex(canonicalUuidV7),
+  outputDatasetVersionReference: z.string().regex(canonicalUuidV7),
+  outputPartitionCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  status: z.enum(["Succeeded", "SucceededWithWarning"]),
+  watermarkOccurredAt: z.iso.datetime({ offset: false }).nullable(),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const analyticsLoadFailedPayload = z.strictObject({
+  runReference: z.string().regex(canonicalUuidV7),
+  pipelineVersionReference: z.string().regex(canonicalUuidV7),
+  errorReference: z.string().regex(canonicalUuidV7),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const analyticsBackfillCompletedPayload = z.strictObject({
+  runReference: z.string().regex(canonicalUuidV7),
+  backfillRequestVersionReference: z.string().regex(canonicalUuidV7),
+  outputDatasetVersionReference: z.string().regex(canonicalUuidV7),
+  outputPartitionCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const reportSchedulePayload = z.strictObject({
+  scheduleReference: z.string().regex(canonicalUuidV7),
+  scheduleVersionReference: z.string().regex(canonicalUuidV7),
+  reportReference: z.string().regex(canonicalUuidV7),
+  reportVersionReference: z.string().regex(canonicalUuidV7),
+  status: z.enum(["Active", "Paused", "Archived"]),
+  cadence: z.enum(["Daily", "Weekly", "Monthly"]),
+  format: z.enum(["Csv", "Json"]),
+  timezone: z.string().regex(/^[A-Za-z_+-]+(?:\/[A-Za-z0-9_+-]+)+$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const reportRunQueuedPayload = z.strictObject({
+  runReference: z.string().regex(canonicalUuidV7),
+  reportReference: z.string().regex(canonicalUuidV7),
+  reportVersionReference: z.string().regex(canonicalUuidV7),
+  parameterSnapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  triggerKind: z.enum(["Manual", "Scheduled"]),
+  queuedAt: z.iso.datetime({ offset: false }),
+});
+
+const reportRunStatePayload = z.strictObject({
+  runReference: z.string().regex(canonicalUuidV7),
+  stateReference: z.string().regex(canonicalUuidV7),
+  sequence: z.string().regex(/^[1-9][0-9]*$/u),
+  status: z.union([
+    z.literal("Queued"),
+    z.literal("Running"),
+    z.literal("Completed"),
+    z.literal("CompletedWithWarning"),
+    z.literal("Failed"),
+    z.literal("Cancelled"),
+  ]),
+  dataAsOf: z.iso.datetime({ offset: false }).nullable(),
+  generatedAt: z.iso.datetime({ offset: false }).nullable(),
+  rowCount: z
+    .string()
+    .regex(/^(?:0|[1-9][0-9]*)$/u)
+    .nullable(),
+  summaryDigest: z
+    .string()
+    .regex(/^sha256:[0-9a-f]{64}$/u)
+    .nullable(),
+  errorCode: z
+    .string()
+    .regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u)
+    .nullable(),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const reportArtifactRevisionPayload = z.strictObject({
+  artifactReference: z.string().regex(canonicalUuidV7),
+  revisionReference: z.string().regex(canonicalUuidV7),
+  runReference: z.string().regex(canonicalUuidV7),
+  revisionNumber: z.string().regex(/^[1-9][0-9]*$/u),
+  outputAssetReference: z.string().regex(canonicalUuidV7),
+  format: z.enum(["Csv", "Spreadsheet", "Pdf"]),
+  classification: z.enum(["Public", "Internal", "Confidential", "Restricted"]),
+  expiresAt: z.iso.datetime({ offset: false }),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const reportArtifactRevokedPayload = z.strictObject({
+  artifactReference: z.string().regex(canonicalUuidV7),
+  revisionReference: z.string().regex(canonicalUuidV7),
+  reasonCode: z.string().regex(/^[A-Z][A-Z0-9_.:-]{0,63}$/u),
+  revokedAt: z.iso.datetime({ offset: false }),
+});
+
 const orderCreatedPayload = z.strictObject({
   orderReference: z.uuid(),
   orderBatchReference: z.uuid(),
@@ -268,6 +501,35 @@ const orderConfirmedPayload = z.strictObject({
   orderBatchReference: z.uuid(),
   sourceSnapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
   confirmedAt: z.iso.datetime({ offset: false }),
+});
+
+const orderAmendedPayload = z.strictObject({
+  amendmentReference: z.string().regex(canonicalUuidV7),
+  orderReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  amendmentKind: z
+    .string()
+    .regex(/^(?:AddItem|ReduceItem|VoidItem|ReplaceItemConfiguration|UpdateNote)$/u),
+  quoteReference: z.string().regex(canonicalUuidV7),
+  quoteVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  deltaMinor: z.string().regex(/^-?(?:0|[1-9][0-9]{0,29})$/u),
+  currencyCode: z.string().regex(/^[A-Z]{3}$/u),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const productionBatchPayload = z.strictObject({
+  productionBatchReference: z.string().regex(canonicalUuidV7),
+  recipeReference: z.string().regex(canonicalUuidV7),
+  recipeVersionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  status: z.enum(["Planned", "InProgress", "Completed", "Quarantined"]),
+  plannedYieldMicrounits: z.string().regex(/^[1-9][0-9]*$/u),
+  actualYieldMicrounits: z
+    .string()
+    .regex(/^(?:0|[1-9][0-9]*)$/u)
+    .nullable(),
+  qualityHold: z.boolean(),
+  occurredAt: z.iso.datetime({ offset: false }),
 });
 
 const paymentSucceededPayload = z.strictObject({
@@ -304,7 +566,495 @@ const paymentRefundedPayload = z.strictObject({
   providerConfirmedAt: z.iso.datetime({ offset: false }),
 });
 
+const deviceManagementPayload = z.strictObject({
+  deviceReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  lifecycle: z
+    .enum(["Draft", "Provisioning", "Active", "Suspended", "Inactive", "Retired"])
+    .nullable(),
+  health: z.enum(["Healthy", "Degraded", "Unavailable", "Unknown"]).nullable(),
+  connectivity: z.enum(["Online", "Intermittent", "Offline", "Unknown"]).nullable(),
+  occurredAt: z.iso.datetime({ offset: false }),
+});
+
 export const eventCatalog = defineEventCatalog([
+  {
+    eventType: "AnalyticsBackfillCompleted",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.pipeline-run-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: analyticsBackfillCompletedPayload,
+  },
+  {
+    eventType: "AnalyticsLoadCompleted",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.pipeline-run-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: analyticsLoadCompletedPayload,
+  },
+  {
+    eventType: "AnalyticsLoadFailed",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.pipeline-run-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: analyticsLoadFailedPayload,
+  },
+  ...(
+    [
+      "ComplianceCaseCancelled",
+      "ComplianceCaseClosed",
+      "ComplianceCaseEnteredCorrectiveAction",
+      "ComplianceCaseEscalated",
+      "ComplianceCaseOpened",
+      "ComplianceCaseVerificationStarted",
+      "RegulatoryNotificationRequired",
+      "RegulatoryNotificationSubmitted",
+    ] as const
+  ).map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/compliance-food-safety" as const,
+    producerModule: "@rms/compliance-food-safety" as const,
+    stability: "stable" as const,
+    consumers: ["compliance.case-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: complianceCasePayload,
+  })),
+  ...(
+    [
+      "DeviceActivated",
+      "DeviceCapabilityChanged",
+      "DeviceCredentialRevoked",
+      "DeviceHealthChanged",
+      "DeviceProvisioned",
+      "DeviceRetired",
+      "DeviceSuspended",
+    ] as const
+  ).map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/printing-device" as const,
+    producerModule: "@rms/printing-device" as const,
+    stability: "stable" as const,
+    consumers: ["device.management-projection:v1"],
+    tenantScope: "store" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: deviceManagementPayload,
+  })),
+  ...(
+    [
+      "ComplianceFindingRecorded",
+      "CorrectiveActionAssigned",
+      "CorrectiveActionCompleted",
+      "CorrectiveActionVerificationFailed",
+      "CorrectiveActionVerified",
+      "CriticalComplianceFindingDetected",
+    ] as const
+  ).map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/compliance-food-safety" as const,
+    producerModule: "@rms/compliance-food-safety" as const,
+    stability: "stable" as const,
+    consumers: ["compliance.case-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: complianceFindingActionPayload,
+  })),
+  ...(["CleaningVerificationFailed", "TemperatureExcursionDetected"] as const).map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/compliance-food-safety" as const,
+    producerModule: "@rms/compliance-food-safety" as const,
+    stability: "stable" as const,
+    consumers: ["compliance.case-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: complianceMonitoringPayload,
+  })),
+  ...(["AllergenControlFailureDetected", "FoodSafetyIncidentReported"] as const).map(
+    (eventType) => ({
+      eventType,
+      schemaVersion: 1,
+      ownerModule: "@rms/compliance-food-safety" as const,
+      producerModule: "@rms/compliance-food-safety" as const,
+      stability: "stable" as const,
+      consumers: ["compliance.incident-projection:v1"],
+      tenantScope: "brand" as const,
+      dataClassification: "indirect_identifier" as const,
+      compatibility: "additive" as const,
+      retentionCategory: "business_record" as const,
+      replaySemantics: "idempotent" as const,
+      deprecated: false,
+      replacement: null,
+      payloadSchema: complianceMonitoringPayload,
+    }),
+  ),
+  ...(["RecallClosed", "RecallInitiated"] as const).map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/compliance-food-safety" as const,
+    producerModule: "@rms/compliance-food-safety" as const,
+    stability: "stable" as const,
+    consumers: ["compliance.recall-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: complianceMonitoringPayload,
+  })),
+  ...(
+    [
+      "EmployeeQualificationExpired",
+      "EmployeeQualificationExpiring",
+      "LicenseExpired",
+      "LicenseExpiring",
+      "LicenseSuspended",
+    ] as const
+  ).map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/compliance-food-safety" as const,
+    producerModule: "@rms/compliance-food-safety" as const,
+    stability: "stable" as const,
+    consumers: ["compliance.qualification-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: complianceMonitoringPayload,
+  })),
+  {
+    eventType: "DataQualityIssueDetected",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.data-quality-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: dataQualityIssueDetectedPayload,
+  },
+  {
+    eventType: "DataQualityIssueResolved",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.data-quality-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: dataQualityIssueResolvedPayload,
+  },
+  {
+    eventType: "ReconciliationDifferenceDetected",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.reconciliation-projection:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: reconciliationDifferenceDetectedPayload,
+  },
+  ...[
+    "MetricArchived",
+    "MetricCertified",
+    "MetricDefinitionDraftRecorded",
+    "MetricDefinitionPublished",
+    "MetricDefinitionReviewSubmitted",
+    "MetricDeprecated",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence" as const,
+    producerModule: "@rms/business-intelligence" as const,
+    stability: "stable" as const,
+    consumers: ["reporting.metric-catalog-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: metricDefinitionPayload,
+  })),
+  ...[
+    "ReportDefinitionArchived",
+    "ReportDefinitionDraftCreated",
+    "ReportDefinitionDraftReplaced",
+    "ReportDefinitionPublished",
+    "ReportDefinitionReviewSubmitted",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence" as const,
+    producerModule: "@rms/business-intelligence" as const,
+    stability: "stable" as const,
+    consumers: ["reporting.report-catalog-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: reportDefinitionPayload,
+  })),
+  {
+    eventType: "ReportScheduleVersionRecorded",
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence",
+    producerModule: "@rms/business-intelligence",
+    stability: "stable",
+    consumers: ["reporting.report-scheduler:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: reportSchedulePayload,
+  },
+  ...[
+    ["ReportRunQueued", reportRunQueuedPayload],
+    ["ReportRunStateRecorded", reportRunStatePayload],
+    ["ReportArtifactRevisionRecorded", reportArtifactRevisionPayload],
+    ["ReportArtifactRevoked", reportArtifactRevokedPayload],
+  ].map(([eventType, payloadSchema]) => ({
+    eventType: eventType as string,
+    schemaVersion: 1,
+    ownerModule: "@rms/business-intelligence" as const,
+    producerModule: "@rms/business-intelligence" as const,
+    stability: "stable" as const,
+    consumers: ["reporting.report-run-history-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: payloadSchema as z.ZodObject,
+  })),
+  ...[
+    "ProductionBatchPlanned",
+    "ProductionBatchStarted",
+    "ProductionBatchObservationRecorded",
+    "ProductionBatchCompleted",
+    "ProductionBatchQuarantined",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen" as const,
+    producerModule: "@rms/kitchen" as const,
+    stability: "stable" as const,
+    consumers:
+      eventType === "ProductionBatchObservationRecorded" || eventType === "ProductionBatchCompleted"
+        ? ["inventory.batch-consumption:v1", "kitchen.batch-projection:v1"]
+        : ["kitchen.batch-projection:v1"],
+    tenantScope: "store" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: productionBatchPayload,
+  })),
+  ...[
+    "RecipeArchived",
+    "RecipeDraftCreated",
+    "RecipeDraftReplaced",
+    "RecipeInvalidated",
+    "RecipePublished",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/recipe" as const,
+    producerModule: "@rms/recipe" as const,
+    stability: "stable" as const,
+    consumers: ["recipe.admin-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "none" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: recipePayload,
+  })),
+  ...[
+    "PromotionArchived",
+    "PromotionDraftCreated",
+    "PromotionDraftReplaced",
+    "PromotionPaused",
+    "PromotionPublished",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/pricing" as const,
+    producerModule: "@rms/pricing" as const,
+    stability: "stable" as const,
+    consumers: ["pricing.promotion-admin-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "none" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: promotionPayload,
+  })),
+  ...["TaxConfigDraftCreated", "TaxConfigDraftReplaced", "TaxConfigPublished"].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/pricing" as const,
+    producerModule: "@rms/pricing" as const,
+    stability: "stable" as const,
+    consumers: ["pricing.tax-config-admin-projection:v1"],
+    tenantScope: "store" as const,
+    dataClassification: "none" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: taxConfigPayload,
+  })),
+  ...[
+    "PriceBookArchived",
+    "PriceBookDraftCreated",
+    "PriceBookDraftReplaced",
+    "PriceBookVersionPublished",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/pricing" as const,
+    producerModule: "@rms/pricing" as const,
+    stability: "stable" as const,
+    consumers: ["pricing.price-book-admin-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "none" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: priceBookPayload,
+  })),
+  ...[
+    "AvailabilityRuleCreated",
+    "AvailabilityRuleReplaced",
+    "AvailabilityRuleLifecycleChanged",
+  ].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/catalog" as const,
+    producerModule: "@rms/catalog" as const,
+    stability: "stable" as const,
+    consumers: ["catalog.availability-workbench-projection:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "none" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: availabilityRulePayload,
+  })),
+  ...[
+    ["BundleDraftCreated", "catalog.bundle-management-projection:v1"],
+    ["BundleDraftReplaced", "catalog.bundle-management-projection:v1"],
+    ["BundleLifecycleChanged", "catalog.bundle-management-projection:v1"],
+    ["BundleVersionPublished", "catalog.bundle-menu-projection:v1"],
+  ].map(([eventType, consumer]) => ({
+    eventType: eventType as string,
+    schemaVersion: 1,
+    ownerModule: "@rms/catalog" as const,
+    producerModule: "@rms/catalog" as const,
+    stability: "stable" as const,
+    consumers: [consumer as string],
+    tenantScope: "brand" as const,
+    dataClassification: "none" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: bundleLifecyclePayload,
+  })),
   {
     eventType: "FulfillmentCompleted",
     schemaVersion: 1,
@@ -448,6 +1198,27 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: menuPublishedPayload,
+  },
+  {
+    eventType: "OrderAmended",
+    schemaVersion: 1,
+    ownerModule: "@rms/ordering",
+    producerModule: "@rms/ordering",
+    stability: "stable",
+    consumers: [
+      "inventory.order-amendment:v1",
+      "kitchen.order-amendment:v1",
+      "ordering.amendment-projection:v1",
+      "payment.order-amendment:v1",
+    ],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: orderAmendedPayload,
   },
   {
     eventType: "OrderConfirmed",

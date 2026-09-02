@@ -21,6 +21,8 @@ import {
   parseNotificationVersion,
   registerNotificationRequest,
   resolveNotificationDeliveryStatus,
+  summarizeDeliveryOperations,
+  parseSesReadinessEvidence,
   NotificationContractError,
   NotificationServiceError,
   type NotificationChannel,
@@ -52,6 +54,10 @@ const ids = {
   attempt2: "018f4000-0000-7000-8000-000000000011",
   destination: "018f4000-0000-7000-8000-000000000012",
   providerAttempt: "018f4000-0000-7000-8000-000000000013",
+  sesEvidence: "018f4000-0000-7000-8000-000000000014",
+  sesIdentity: "018f4000-0000-7000-8000-000000000015",
+  resendAuthorization: "018f4000-0000-7000-8000-000000000016",
+  attempt3: "018f4000-0000-7000-8000-000000000017",
 } as const;
 
 const before = parseNotificationInstant("2026-07-29T19:55:00.000Z");
@@ -189,9 +195,12 @@ function ports(options?: {
   appendFailure?: boolean;
   adapter?: "Accepted" | "Rejected" | "Unknown" | "Throw" | "Extra";
   destination?: "Resolved" | "Unavailable";
+  readiness?: "Ready" | "Missing" | "Expired";
+  resendDenied?: boolean;
 }) {
   const registrations: unknown[] = [];
   const attempts: NotificationDeliveryAttempt[] = [];
+  const appended: unknown[] = [];
   const adapter = {
     deliver: vi.fn(async () => {
       if (options?.adapter === "Throw") throw new Error("synthetic provider detail");
@@ -219,6 +228,7 @@ function ports(options?: {
       appendAttempt: vi.fn(async (input) => {
         if (options?.appendFailure) throw new Error("synthetic append failure");
         attempts.push(input.attempt);
+        appended.push(input);
       }),
     },
     destinations: {
@@ -232,8 +242,34 @@ function ports(options?: {
       ),
     },
     adapters: { Email: adapter, SMS: adapter, Push: adapter },
+    providerReadiness: {
+      environment: "Staging",
+      loadSesEvidence: vi.fn(async () =>
+        options?.readiness === "Missing"
+          ? null
+          : parseSesReadinessEvidence({
+              evidenceReference: ids.sesEvidence,
+              identityReference: ids.sesIdentity,
+              environment: "Staging",
+              region: "ca-central-1",
+              dkimStatus: "Verified",
+              spfStatus: "Aligned",
+              dmarcStatus: "ReportingActive",
+              productionAccessStatus: "Granted",
+              reviewedAt: before,
+              validUntil: options?.readiness === "Expired" ? at : "2026-07-30T20:00:00.000Z",
+            }),
+      ),
+    },
+    resendAuthorization: {
+      authorize: vi.fn(async () =>
+        options?.resendDenied
+          ? null
+          : { authorizationReference: parseNotificationReference(ids.resendAuthorization) },
+      ),
+    },
   };
-  return { value, registrations, attempts, adapter };
+  return { value, registrations, attempts, appended, adapter };
 }
 
 function registrationInput(
@@ -405,6 +441,27 @@ describe("Notification request and routing", () => {
 });
 
 describe("Notification delivery attempts", () => {
+  it.each(["Missing", "Expired"] as const)(
+    "fails closed before destination and adapter when SES evidence is %s",
+    async (readiness) => {
+      const fixture = request();
+      const adapter = ports({ readiness });
+      await expect(
+        executeNotificationDelivery(
+          {
+            request: fixture.record,
+            attemptReference: parseNotificationReference(ids.attempt1),
+            channel: "Email",
+            previousAttempt: null,
+            idempotencyKey: parseNotificationReference(ids.idempotency),
+            attemptedAt: at,
+          },
+          adapter.value,
+        ),
+      ).rejects.toMatchObject({ code: "NOTIFICATION_PROVIDER_NOT_READY" });
+      expect(adapter.adapter.deliver).not.toHaveBeenCalled();
+    },
+  );
   it("submits only opaque normalized adapter input and appends Accepted", async () => {
     const fixture = request();
     const adapter = ports();
@@ -488,7 +545,42 @@ describe("Notification delivery attempts", () => {
     );
     expect(first).toMatchObject({ sequence: 1, outcome: "Unknown" });
     expect(second).toMatchObject({ sequence: 2, outcome: "Accepted" });
+    expect(adapter.attempts).toHaveLength(1);
+    expect(adapter.appended[0]).toMatchObject({
+      resendAuthorizationReference: ids.resendAuthorization,
+    });
     expect(resolveNotificationDeliveryStatus(ids.request, [first, second])).toBe("AdapterAccepted");
+  });
+
+  it("denies blind or early resend after Unknown", async () => {
+    const fixture = request();
+    const first = createNotificationDeliveryAttempt({
+      attemptReference: parseNotificationReference(ids.attempt1),
+      requestReference: fixture.record.requestReference,
+      channel: "Email",
+      sequence: parseDeliveryAttemptSequence(1),
+      destinationReference: parseNotificationReference(ids.destination),
+      outcome: "Unknown",
+      providerAttemptReference: null,
+      attemptedAt: at,
+    });
+    const input = {
+      request: fixture.record,
+      attemptReference: parseNotificationReference(ids.attempt2),
+      channel: "Email" as const,
+      previousAttempt: first,
+      idempotencyKey: parseNotificationReference(ids.idempotency),
+      attemptedAt: later,
+    };
+    await expect(
+      executeNotificationDelivery(input, ports({ resendDenied: true }).value),
+    ).rejects.toMatchObject({ code: "NOTIFICATION_DELIVERY_DENIED" });
+    await expect(
+      executeNotificationDelivery(
+        { ...input, attemptedAt: "2026-07-29T20:14:59.999Z" },
+        ports().value,
+      ),
+    ).rejects.toMatchObject({ code: "NOTIFICATION_DELIVERY_DENIED" });
   });
 
   it("denies delivery for suppressed routes, disabled channels, or resend after Accepted", async () => {
@@ -603,5 +695,52 @@ describe("Notification delivery attempts", () => {
     expect(() => resolveNotificationDeliveryStatus(ids.request, [invalid])).toThrow(
       NotificationContractError,
     );
+  });
+
+  it("summarizes bounded operational state without recipient or destination", () => {
+    const first = createNotificationDeliveryAttempt({
+      attemptReference: parseNotificationReference(ids.attempt1),
+      requestReference: parseNotificationReference(ids.request),
+      channel: "Email",
+      sequence: parseDeliveryAttemptSequence(1),
+      destinationReference: parseNotificationReference(ids.destination),
+      outcome: "Unknown",
+      providerAttemptReference: null,
+      attemptedAt: at,
+    });
+    const summary = summarizeDeliveryOperations({
+      requestReference: ids.request,
+      requestOutcome: "Accepted",
+      attempts: [first],
+      observedAt: later,
+    });
+    expect(summary).toMatchObject({ state: "Unknown", attemptCount: 1 });
+    expect(JSON.stringify(summary)).not.toContain(ids.destination);
+    expect(JSON.stringify(summary)).not.toContain(ids.recipient);
+  });
+
+  it("dead-letters exhausted attempt history", () => {
+    const attempts = [ids.attempt1, ids.attempt2, ids.attempt3].map((attemptReference, index) =>
+      createNotificationDeliveryAttempt({
+        attemptReference: parseNotificationReference(attemptReference),
+        requestReference: parseNotificationReference(ids.request),
+        channel: "Email",
+        sequence: parseDeliveryAttemptSequence(index + 1),
+        destinationReference: parseNotificationReference(ids.destination),
+        outcome: "Rejected",
+        providerAttemptReference: null,
+        attemptedAt: parseNotificationInstant(
+          new Date(Date.parse(at) + index * 60 * 60_000).toISOString(),
+        ),
+      }),
+    );
+    expect(
+      summarizeDeliveryOperations({
+        requestReference: ids.request,
+        requestOutcome: "Accepted",
+        attempts,
+        observedAt: "2026-07-30T00:00:00.000Z",
+      }),
+    ).toMatchObject({ state: "DeadLettered", attemptCount: 3, nextEligibleAt: null });
   });
 });

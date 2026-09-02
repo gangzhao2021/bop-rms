@@ -27,12 +27,28 @@ catalogs:
     - workflow.operate
     - media.manage
     - catalog.manage
+    - pricing.tax-config.manage
+    - pricing.promotion.manage
+    - recipe.manage
+    - ordering.order.amend
+    - ordering.order.create_staff
     - ordering.operate
     - payment.operate
     - kitchen.operate
+    - kitchen.production.manage
     - fulfillment.operate
     - dining.operate
     - inventory.manage
+    - inventory.movement.read
+    - inventory.count.read
+    - inventory.count.manage
+    - inventory.count.execute
+    - inventory.count.approve
+    - inventory.count.post
+    - inventory.adjustment.read
+    - inventory.adjustment.execute
+    - inventory.adjustment.approve
+    - inventory.adjustment.post
     - procurement.manage
     - customer.manage
     - reporting.read
@@ -45,14 +61,33 @@ catalogs:
     - organization_*_v1
     - catalog_*_v1
     - pricing_*_v1
+    - pricing_tax_config_admin_v1
+    - pricing_promotion_admin_v1
+    - recipe_admin_v1
     - recipe_*_v1
     - merchant_order_*_v1
+    - merchant_order_amendment_v1
+    - merchant_staff_order_entry_v1
     - payment_*_v1
     - kitchen_*_v1
+    - kitchen_production_batch_v1
     - dining_*_v1
+    - dining_floor_v1
+    - dining_table_admin_v1
     - reservation_*_v1
+    - reservation_calendar_v1
+    - reservation_create_edit_v1
+    - reservation_detail_v1
+    - reservation_list_v1
+    - reservation_capacity_policy_v1
+    - waitlist_board_v1
+    - waitlist_entry_v1
     - fulfillment_*_v1
     - inventory_*_v1
+    - inventory_stock_overview_v1
+    - inventory_movement_explorer_v1
+    - inventory_count_workbench_v1
+    - inventory_adjustment_wizard_v1
     - procurement_*_v1
     - customer_loyalty_*_v1
     - reporting_*_v1
@@ -157,8 +192,13 @@ catalogs:
     - WP-1724
     - WP-1800
     - WP-1801
+    - WP-1802
+    - WP-1803
+    - WP-1804
+    - WP-1805
     - WP-1807
     - WP-1808
+    - WP-1809
     - WP-1900
     - WP-1901
     - WP-1902
@@ -177,6 +217,9 @@ catalogs:
     - WP-2065
     - WP-2066
     - WP-2100
+    - WP-2101
+    - WP-2102
+    - WP-2103
     - WP-2104
     - WP-2105
     - WP-2110
@@ -230,6 +273,7 @@ catalogs:
     - WP-2183
     - WP-2190
     - WP-2191
+    - WP-2192
     - WP-2193
     - WP-2194
     - WP-2196
@@ -646,6 +690,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1023
+      - WP-2101
     handoff_section: "88.8"
     route_intent: CAT-AVAILABILITY /app/commerce/availability
     navigation_targets: []
@@ -831,6 +876,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1024
+      - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-MENU-BUILDER /app/commerce/menus/:id/edit
     navigation_targets: []
@@ -878,6 +924,7 @@ screens:
       - WP-1025
       - WP-1026
       - WP-1027
+      - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-MENU-LIST /app/commerce/menus
     navigation_targets: []
@@ -973,6 +1020,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1024
+      - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-MENU-PUBLISH contextual
     navigation_targets:
@@ -3483,6 +3531,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1408
+      - WP-1808
     handoff_section: "88.17"
     route_intent: DEV-DEVICE-DETAIL /app/integrations/devices/:id
     navigation_targets: []
@@ -3529,6 +3578,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1408
+      - WP-1808
     handoff_section: "88.17"
     route_intent: DEV-DEVICE-LIST /app/integrations/devices
     navigation_targets: []
@@ -3600,7 +3650,7 @@ screens:
       - floor / area、Table label / capacity / state、active party / Session、elapsed time、Order / payment summary、reservation / waitlist handoff、attention cue
     search_filter_sort_export: Table / Session / reservation ref；area、state、server / owner、attention
     query_ref: query.din_floor_board
-    projection_ref: dining_*_v1
+    projection_ref: dining_floor_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: start Staff Dining Session、seat eligible party、open Session、mark Table unavailable through command
     command_refs:
@@ -3740,7 +3790,7 @@ screens:
       - Table stable label、area、capacity、accessibility attributes、QR state、operational state、current Session
     search_filter_sort_export: label；area、capacity、state、QR active / replacement
     query_ref: query.din_table_list
-    projection_ref: dining_*_v1
+    projection_ref: dining_table_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create / edit configuration draft、issue / revoke QR capability、set temporary operational block
     command_refs:
@@ -4053,6 +4103,7 @@ screens:
       - WP-1603
       - WP-1604
       - WP-1605
+      - WP-1805
     handoff_section: "88.10"
     route_intent: FUL-FULFILLMENT-DETAIL /app/operations/fulfillments/:id
     navigation_targets: []
@@ -4102,6 +4153,7 @@ screens:
       - WP-1603
       - WP-1604
       - WP-1605
+      - WP-1805
     handoff_section: "88.10"
     route_intent: FUL-PICKUP-HANDOFF contextual
     navigation_targets:
@@ -4153,6 +4205,7 @@ screens:
       - WP-1603
       - WP-1604
       - WP-1605
+      - WP-1805
     handoff_section: "88.10"
     route_intent: FUL-PICKUP-QUEUE /operations/pickup
     navigation_targets: []
@@ -4884,13 +4937,13 @@ screens:
     roles:
       - authorized Inventory Manager
       - high-risk control
-    permission_ref: inventory.manage
+    permission_ref: inventory.adjustment.execute
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - scope、item / lot / location、current projection、quantity delta / unit、reason、evidence、impact / approval
     search_filter_sort_export: exact item / barcode / lot
     query_ref: query.inv_adjustment_wizard
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_adjustment_wizard_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: validate、submit / approve、post one immutable movement
     command_refs:
@@ -4930,13 +4983,13 @@ screens:
     roles:
       - Inventory Staff / Manager
       - submitter cannot approve when policy
-    permission_ref: inventory.manage
+    permission_ref: inventory.count.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - count ref、scope、type、status、assignee、freeze / snapshot、progress、variance、due
     search_filter_sort_export: ref；status、scope、assignee、date、variance / overdue
     query_ref: query.inv_count_list
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_count_workbench_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create、assign、start / continue、submit、approve / reject、cancel
     command_refs:
@@ -4976,13 +5029,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Count assignee / Approver
-    permission_ref: inventory.manage
+    permission_ref: inventory.count.execute
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - blind expected quantity policy、item / lot / location rows、counted quantity / unit、variance / reason、progress / conflict
     search_filter_sort_export: item / barcode scan；counted / missing / variance / exception
     query_ref: query.inv_count_workbench
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_count_workbench_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: enter / scan、save progress、recount、submit、approve / reject、post idempotent movements
     command_refs:
@@ -5763,13 +5816,13 @@ screens:
     roles:
       - route /app/supply/items/:id/movements backed by INV-MOVEMENT-LIST contract
       - Phase 2 / WP-2120–2121
-    permission_ref: inventory.manage
+    permission_ref: inventory.movement.read
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - item-scoped immutable Movement Explorer with explicit Stock Scope
     search_filter_sort_export: inherits parent Screen
     query_ref: query.inv_item_stock_history
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_movement_explorer_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: inherits parent Screen
     command_refs:
@@ -5900,13 +5953,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - scoped inventory read
-    permission_ref: inventory.manage
+    permission_ref: inventory.movement.read
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - immutable quantity / conversion、before / after projection snapshot、source Event / document、lot / expiry、audit / correction chain
     search_filter_sort_export: —
     query_ref: query.inv_movement_detail
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_movement_explorer_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: open source、start correction wizard
     command_refs:
@@ -5946,13 +5999,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Inventory / Auditor
-    permission_ref: inventory.manage
+    permission_ref: inventory.movement.read
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - movement ref、type、item、lot / location、quantity / unit、source / destination、business source、Actor / time、correction link
     search_filter_sort_export: ref / item / barcode / source ref；type、scope、location、lot、date、Actor、corrected
     query_ref: query.inv_movement_list
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_movement_explorer_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: view evidence / source、create compensating correction when eligible、export
     command_refs:
@@ -6040,7 +6093,7 @@ screens:
       - aliases respectively of INV-COUNT-LIST / Workbench、INV-ADJUSTMENT-WIZARD、INV-TRANSFER-LIST / Detail and INV-WASTE-WIZARD
       - no second route
       - Phase 2 / WP-2122–2125
-    permission_ref: inventory.manage
+    permission_ref: inventory.adjustment.execute
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - historic umbrella IDs
@@ -6089,7 +6142,7 @@ screens:
       - aliases respectively of INV-COUNT-LIST / Workbench、INV-ADJUSTMENT-WIZARD、INV-TRANSFER-LIST / Detail and INV-WASTE-WIZARD
       - no second route
       - Phase 2 / WP-2122–2125
-    permission_ref: inventory.manage
+    permission_ref: inventory.count.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - historic umbrella IDs
@@ -6143,7 +6196,7 @@ screens:
       - one explicit Stock Scope、on-hand / reserved / available、reorder / expiry / negative / count alerts、freshness、value only if authorized
     search_filter_sort_export: item / code / barcode / supplier item code；category、location、availability、below reorder、expiry、negative、tracking
     query_ref: query.inv_stock_overview
-    projection_ref: inventory_*_v1
+    projection_ref: inventory_stock_overview_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: open item / movements、start count、adjust / waste / transfer through wizard、set policy
     command_refs:
@@ -6450,6 +6503,7 @@ screens:
       - WP-1406
       - WP-1407
       - WP-1408
+      - WP-1804
     handoff_section: "88.10"
     route_intent: KIT-EXCEPTION contextual / queue
     navigation_targets:
@@ -6504,6 +6558,7 @@ screens:
       - WP-1406
       - WP-1407
       - WP-1408
+      - WP-1804
     handoff_section: "88.10"
     route_intent: KIT-KITCHEN-QUEUE /operations/kitchen
     navigation_targets: []
@@ -6523,13 +6578,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Kitchen Lead / Inventory authorized roles
-    permission_ref: kitchen.operate
+    permission_ref: kitchen.production.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - batch、Recipe / version、planned / actual yield、station、lot / ingredient refs、state、variance、quality hold
     search_filter_sort_export: batch / Recipe；state、station、date、variance / hold
     query_ref: query.kit_production_batch
-    projection_ref: kitchen_*_v1
+    projection_ref: kitchen_production_batch_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create plan、start、record controlled yield / consumption、complete、quarantine / exception
     command_refs:
@@ -6605,6 +6660,7 @@ screens:
       - WP-1406
       - WP-1407
       - WP-1408
+      - WP-1804
     handoff_section: "88.10"
     route_intent: KIT-WORK-ITEM /operations/kitchen/work-items/:id full-screen child route
     navigation_targets: []
@@ -6900,13 +6956,13 @@ screens:
     roles:
       - Manager
       - state / cutoff / expected version enforced
-    permission_ref: ordering.operate
+    permission_ref: ordering.order.amend
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - reason、eligible items / quantities / configuration、repricing / tax delta、Kitchen / fulfillment impact、payment / refund consequence、customer notice
     search_filter_sort_export: item lookup within Order only
     query_ref: query.ops_order_amend
-    projection_ref: merchant_order_*_v1
+    projection_ref: merchant_order_amendment_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: validate impact、submit amendment、request approval、abort
     command_refs:
@@ -6978,6 +7034,8 @@ screens:
       - WP-1224
       - WP-1225
       - WP-1226
+      - WP-1803
+      - WP-1900
     handoff_section: "88.10"
     route_intent: OPS-ORDER-DETAIL /operations/orders/:id
     navigation_targets: []
@@ -6996,13 +7054,13 @@ screens:
     roles:
       - Counter / Server Staff + explicit ordering.order.create_staff
       - no arbitrary price / tax / status override
-    permission_ref: ordering.operate
+    permission_ref: ordering.order.create_staff
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - fixed Store / service context、public-effective Menu、Sellable configurator、staff Cart / Quote、optional Dining Session / verified Customer ref、structured allergen review、cashless Payment / Terminal handoff
     search_filter_sort_export: localized Menu item / code；section、available now、service mode
     query_ref: query.ops_order_entry
-    projection_ref: merchant_order_*_v1
+    projection_ref: merchant_staff_order_entry_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create staff-scoped Cart、configure、requote、attach eligible Dining Session、record Staff allergen assistance、submit Order / Batch idempotently、start Terminal payment
     command_refs:
@@ -7019,7 +7077,7 @@ screens:
       - Command Failed
       - Offline Read-only
     responsive_accessibility: Sections 88.4 and 88.27-88.30 universal profile
-    analytics_privacy: Section 88.28 allowlist and exclusions
+    analytics_privacy: Section 88.28 allowlist and exclusions; no contact, allergy / health, token or Provider detail
     work_package_mode: resolved
     work_packages:
       - WP-2116
@@ -7069,6 +7127,9 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1007
+      - WP-1310
+      - WP-1809
+      - WP-1900
     handoff_section: "88.10"
     route_intent: OPS-ORDER-EXCEPTION /operations/order-exceptions
     navigation_targets:
@@ -7115,6 +7176,8 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1225
+      - WP-1803
+      - WP-1900
     handoff_section: "88.10"
     route_intent: OPS-ORDER-QUEUE /operations/orders
     navigation_targets: []
@@ -7506,6 +7569,7 @@ screens:
       - WP-1306
       - WP-1307
       - WP-1308
+      - WP-1901
     handoff_section: "88.10"
     route_intent: PAY-PAYMENT-LIST /app/operations/payments
     navigation_targets: []
@@ -7552,6 +7616,8 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1307
+      - WP-1310
+      - WP-1901
     handoff_section: "88.10"
     route_intent: PAY-RECONCILIATION /app/operations/payment-reconciliation
     navigation_targets: []
@@ -8279,6 +8345,7 @@ screens:
       - WP-1103
       - WP-1104
       - WP-1105
+      - WP-2102
     handoff_section: "88.8"
     route_intent: PRICE-BOOK-EDITOR /app/commerce/pricing/:id
     navigation_targets: []
@@ -8330,6 +8397,7 @@ screens:
       - WP-1103
       - WP-1104
       - WP-1105
+      - WP-2102
     handoff_section: "88.8"
     route_intent: PRICE-BOOK-LIST /app/commerce/pricing
     navigation_targets: []
@@ -8673,13 +8741,13 @@ screens:
     roles:
       - Promotion Editor
       - PII-free segment refs
-    permission_ref: catalog.manage
+    permission_ref: pricing.promotion.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - identity、audience / basket condition、eligible items、benefit、limits、stacking / priority、schedule、customer copy、impact
     search_filter_sort_export: Product / Category / Customer-segment picker；rule search
     query_ref: query.promo_editor
-    projection_ref: pricing_*_v1
+    projection_ref: pricing_promotion_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: save draft、validate、simulate representative baskets、compare、publish / schedule
     command_refs:
@@ -8719,13 +8787,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Promotion Manager / Approver
-    permission_ref: catalog.manage
+    permission_ref: pricing.promotion.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - name、code、type、status、scope、eligibility、benefit、budget / usage summary、effective dates、stacking
     search_filter_sort_export: name / code；status、Store / channel、type、scheduled / conflict
     query_ref: query.promo_list
-    projection_ref: pricing_*_v1
+    projection_ref: pricing_promotion_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create、duplicate、edit、simulate、submit / approve、pause、archive
     command_refs:
@@ -8811,13 +8879,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Recipe Editor + Food Safety Approver
-    permission_ref: catalog.manage
+    permission_ref: recipe.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - identity、yield、Ingredient usage / quantities / loss、preparation version、substitution policy、allergen union / evidence、cost derivation、usage / history
     search_filter_sort_export: Inventory Item picker；Ingredient / allergen / unresolved source
     query_ref: query.recipe_editor
-    projection_ref: recipe_*_v1
+    projection_ref: recipe_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: save draft、recalculate yield / cost / allergens、validate、submit dual review、publish / invalidate
     command_refs:
@@ -8857,13 +8925,13 @@ screens:
     feature_gate: phase_capability
     roles:
       - Recipe Manager / Food Safety reviewer
-    permission_ref: catalog.manage
+    permission_ref: recipe.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - name、code、status、yield / unit、cost summary、allergen verification、Product / SKU usage、effective version
     search_filter_sort_export: name / code / Ingredient；status、unverified allergen、missing mapping、cost changed
     query_ref: query.recipe_list
-    projection_ref: recipe_*_v1
+    projection_ref: recipe_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create、duplicate、edit、review、publish、archive
     command_refs:
@@ -8909,7 +8977,7 @@ screens:
       - day / week capacity bands、reservations、holds、closures、Table / area hints、waitlist
     search_filter_sort_export: customer-safe name / ref / contact exact with permission；date、party size、status、channel、accessibility request
     query_ref: query.res_calendar
-    projection_ref: reservation_*_v1
+    projection_ref: reservation_calendar_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create、open、check in、reschedule via revision、cancel、mark no-show
     command_refs:
@@ -8955,7 +9023,7 @@ screens:
       - Store / area、time buckets、capacity、online allocation、overbook policy、closures、deposit / no-show refs、effective period
     search_filter_sort_export: date / area / service
     query_ref: query.res_capacity_config
-    projection_ref: reservation_*_v1
+    projection_ref: reservation_capacity_policy_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: edit draft、simulate demand / conflicts、publish / schedule
     command_refs:
@@ -9001,7 +9069,7 @@ screens:
       - date / time、party size、contact minimum、channel、accessibility / controlled request、capacity result、deposit policy、confirmation
     search_filter_sort_export: availability lookup by exact scenario
     query_ref: query.res_create_edit
-    projection_ref: reservation_*_v1
+    projection_ref: reservation_create_edit_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: hold capacity、save request、collect deposit through Payment boundary、confirm、release on expiry
     command_refs:
@@ -9047,7 +9115,7 @@ screens:
       - original + revisions、capacity hold、customer snapshot、deposit collaboration、notifications、check-in / seating handoff、history
     search_filter_sort_export: —
     query_ref: query.res_detail
-    projection_ref: reservation_*_v1
+    projection_ref: reservation_detail_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: revise atomically with capacity check、check in、cancel、mark late / no-show、seat by Dining command
     command_refs:
@@ -9093,7 +9161,7 @@ screens:
       - ref、date / time、party size、customer snapshot、status、deposit / guarantee separate、source、special controlled needs
     search_filter_sort_export: ref / contact exact；date、status、party size、source、deposit、late / no-show
     query_ref: query.res_list
-    projection_ref: reservation_*_v1
+    projection_ref: reservation_list_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create、view、check in、revise、cancel、no-show per policy
     command_refs:
@@ -9396,6 +9464,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1801
+      - WP-2192
     handoff_section: "88.7"
     route_intent: STORE-DETAIL /app/organization/stores/:id
     navigation_targets: []
@@ -9489,6 +9558,8 @@ screens:
     work_packages:
       - WP-1000
       - WP-1001
+      - WP-1801
+      - WP-2192
     handoff_section: "88.7"
     route_intent: STORE-LIST /app/organization/stores
     navigation_targets: []
@@ -9583,6 +9654,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1801
+      - WP-2192
     handoff_section: "88.7"
     route_intent: STORE-SETUP /app/organization/stores/:id/setup
     navigation_targets: []
@@ -9925,13 +9997,13 @@ screens:
     roles:
       - Finance / Tax Admin
       - no developer-authored legal assumption
-    permission_ref: catalog.manage
+    permission_ref: pricing.tax-config.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - Store registration applicability reference、tax categories、rates / inclusive flag、jurisdiction、effective dates、receipt fixture status
     search_filter_sort_export: category / code；jurisdiction、active / future
     query_ref: query.tax_config
-    projection_ref: pricing_*_v1
+    projection_ref: pricing_tax_config_admin_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: create professional-fixture-backed draft、simulate basket / refund、submit / approve / publish
     command_refs:
@@ -9957,6 +10029,7 @@ screens:
       - WP-1103
       - WP-1104
       - WP-1105
+      - WP-2103
     handoff_section: "88.8"
     route_intent: TAX-CONFIG /app/commerce/tax
     navigation_targets: []
@@ -10072,7 +10145,7 @@ screens:
       - ordered entries、party size、quoted / current ETA、priority reason、contact state、ready expiry、seating eligibility
     search_filter_sort_export: customer-safe name / ref；status、party size、area、priority、overdue
     query_ref: query.wait_board
-    projection_ref: reservation_*_v1
+    projection_ref: waitlist_board_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: add、update estimate、notify ready、hold / remove with reason、seat through Dining handoff
     command_refs:
@@ -10118,7 +10191,7 @@ screens:
       - identity / contact snapshot、party / preferences、arrival / wait metrics、notifications、revision / timeline
     search_filter_sort_export: —
     query_ref: query.wait_entry
-    projection_ref: reservation_*_v1
+    projection_ref: waitlist_entry_v1
     freshness: Section 88.22 projection target or inherited parent freshness
     action_summary: edit controlled details、mark Ready、extend once by policy、cancel、seat
     command_refs:

@@ -261,6 +261,9 @@ function CartContent({
       return (
         <StateMessage heading="Offline" tone="warning">
           <p>No private cart is cached. Reconnect to load your cart.</p>
+          <button type="button" onClick={() => void controller.load()}>
+            Refresh after reconnecting
+          </button>
           <a href="/menu">Return to menu</a>
         </StateMessage>
       );
@@ -281,6 +284,9 @@ function CartContent({
       {readOnly ? (
         <div className="cart-offline" role="status">
           Offline read-only. Changes and checkout are disabled; nothing will replay on reconnect.
+          <button type="button" onClick={() => void controller.load()}>
+            Refresh after reconnecting
+          </button>
         </div>
       ) : null}
       {state.status !== "ready" && state.status !== "command-pending" && !readOnly ? (
@@ -324,7 +330,7 @@ function CartContent({
       </section>
       <div className="cart-boundaries">
         <p id="clear-boundary">Clear cart requires an atomic server command and is unavailable.</p>
-        <p id="checkout-boundary">Payment remains unavailable until WP-1704.</p>
+        <p id="checkout-boundary">Payment remains unavailable until the Provider gate is closed.</p>
       </div>
       <p className="cart-version">
         Cart version {cart.cart.version} · {cart.cart.serviceMode}
@@ -345,10 +351,7 @@ export function CartPage({ controller: provided }: { readonly controller?: CartS
   useEffect(() => {
     void controller.load();
     const offline = () => controller.setOnline(false);
-    const online = () => {
-      controller.setOnline(true);
-      void controller.load();
-    };
+    const online = () => controller.setOnline(true);
     window.addEventListener("offline", offline);
     window.addEventListener("online", online);
     return () => {

@@ -7,6 +7,7 @@ import type {
   MenuSellable,
   MenuView,
 } from "./types.js";
+import { boundedFetch } from "../network/bounded-fetch.js";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -378,7 +379,8 @@ export function createCustomerMenuClient(
       if (pending !== undefined) return pending;
       const request = (async (): Promise<MenuLoadResult> => {
         try {
-          const response = await boundary.fetch(
+          const response = await boundedFetch(
+            boundary.fetch,
             `/api/v1/public/stores/${context.publicStoreReference}/menu?${parameters.toString()}`,
             {
               method: "GET",

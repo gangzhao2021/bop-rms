@@ -16,6 +16,8 @@ import {
   type NotificationSuppressionEvidence,
 } from "../contracts/notification.js";
 import { evaluateNotificationRoute } from "../domain/evaluate-delivery.js";
+import { assertSesReady } from "../contracts/ses-readiness.js";
+import { assertAuthorizedRetryDue } from "./delivery-orchestration.js";
 import type {
   DeliverNotificationAdapterResult,
   NotificationDestinationResolution,
@@ -29,6 +31,7 @@ export const notificationServiceErrorCodes = [
   "NOTIFICATION_DELIVERY_DENIED",
   "NOTIFICATION_DESTINATION_UNAVAILABLE",
   "NOTIFICATION_ATTEMPT_COMMIT_FAILED",
+  "NOTIFICATION_PROVIDER_NOT_READY",
 ] as const;
 export type NotificationServiceErrorCode = (typeof notificationServiceErrorCodes)[number];
 
@@ -258,6 +261,7 @@ export async function executeNotificationDelivery(
   let previousAttempt: NotificationDeliveryAttempt | null;
   let idempotencyKey: NotificationReference;
   let attemptedAt: ReturnType<typeof parseNotificationInstant>;
+  let resendAuthorizationReference: NotificationReference | null = null;
   try {
     exactEnvelope(
       input,
@@ -294,6 +298,37 @@ export async function executeNotificationDelivery(
     (previousAttempt !== null && Date.parse(attemptedAt) < Date.parse(previousAttempt.attemptedAt))
   )
     fail("NOTIFICATION_DELIVERY_DENIED");
+
+  if (previousAttempt !== null) {
+    try {
+      assertAuthorizedRetryDue({ previousAttempt, attemptedAt });
+      const authorization = await ports.resendAuthorization.authorize({
+        requestReference: request.requestReference,
+        previousAttemptReference: previousAttempt.attemptReference,
+        attemptedAt,
+      });
+      if (authorization === null) fail("NOTIFICATION_DELIVERY_DENIED");
+      resendAuthorizationReference = parseNotificationReference(
+        authorization.authorizationReference,
+      );
+    } catch {
+      return fail("NOTIFICATION_DELIVERY_DENIED");
+    }
+  }
+
+  if (input.channel === "Email") {
+    try {
+      const evidence = await ports.providerReadiness.loadSesEvidence();
+      if (evidence === null) fail("NOTIFICATION_PROVIDER_NOT_READY");
+      assertSesReady({
+        evidence,
+        environment: ports.providerReadiness.environment,
+        evaluatedAt: attemptedAt,
+      });
+    } catch {
+      return fail("NOTIFICATION_PROVIDER_NOT_READY");
+    }
+  }
 
   let destination: NotificationDestinationResolution;
   try {
@@ -352,6 +387,7 @@ export async function executeNotificationDelivery(
       request,
       previousAttempt,
       attempt,
+      resendAuthorizationReference,
     });
   } catch {
     return fail("NOTIFICATION_ATTEMPT_COMMIT_FAILED");

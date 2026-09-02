@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "changeSet": {
+    "cdkSynthRequired": true,
+    "securityScanRequired": true,
+    "cloudFormationChangeSetRequired": true,
+    "productionApprovalRequired": true,
+    "signedScannedDigestRequired": true
+  },
+  "drift": {
+    "frequency": "weekly",
+    "unexplainedChangeAction": "create-owned-expiring-exception",
+    "automaticReconciliation": false,
+    "reviewableEvidenceRequired": true
+  },
+  "protection": {
+    "productionStackTerminationProtection": true,
+    "statefulResourceDeletionProtection": true,
+    "protectedClasses": ["central-log-archive", "kms", "rds", "s3"]
+  },
+  "backupPolicy": {
+    "productionRetentionDays": 35,
+    "rdsPitr": true,
+    "rdsMultiAz": true,
+    "crossRegionAutomatedBackup": true,
+    "s3VersioningAndCrossRegionReplication": true,
+    "ecrCrossRegionReplication": true,
+    "destinationKeysSecretsConfigurationPrepared": true,
+    "unnecessaryPiiCopied": false
+  },
+  "crossAccountRestore": {
+    "isolatedRestore": true,
+    "customerAndProviderTrafficFenced": true,
+    "dedicatedRestoreVerifierRole": true,
+    "requiredChecks": [
+      "schema",
+      "audit-chain",
+      "malware-and-object-reference",
+      "authorization",
+      "privacy-tombstone-reapplication"
+    ],
+    "providerReconciliationBeforeUnknownRetry": true,
+    "quarterlyRestoreDrill": true,
+    "semiannualCrossRegionDrill": true,
+    "transactionRpoMinutes": 5,
+    "transactionRtoMinutes": 60
+  },
+  "externalEvidenceRequired": true
+}

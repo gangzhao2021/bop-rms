@@ -1,0 +1,50 @@
+const id = (n: number) => `018f9816-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+export const platformAccessFixture = {
+  actor: "Platform Operator",
+  purpose: "Authorized support",
+  supportCaseReference: id(90),
+  recentMfa: true,
+  environment: "Production",
+} as const;
+export const platformTenantFixture = {
+  tenantReference: id(1),
+  displayName: "Pilot Tenant",
+  region: "CA-ON",
+  status: "Active",
+  plan: "Approved plan metadata",
+  capabilityCount: 3,
+  storeCount: 2,
+  health: "Degraded",
+  openIncidentReference: id(2),
+  mayView: true,
+  mayRequestSuspension: true,
+} as const;
+export const platformTenantListFixture = {
+  screenId: "PLT-TENANT-LIST",
+  sourceAsOf: "2026-08-15T16:00:00.000Z",
+  freshness: "Fresh",
+  completeness: "Complete",
+  access: platformAccessFixture,
+  tenants: [platformTenantFixture],
+  mayStartOnboarding: true,
+} as const;
+export const platformTenantDetailFixture = {
+  screenId: "PLT-TENANT-DETAIL",
+  sourceAsOf: "2026-08-15T16:00:00.000Z",
+  freshness: "Fresh",
+  completeness: "Complete",
+  access: platformAccessFixture,
+  tenant: platformTenantFixture,
+  environments: ["Production"],
+  capabilities: ["Ordering", "Payments", "Reporting"],
+  storeHealthSummary: "1 healthy, 1 degraded",
+  providerHealthSummary: "One open provider incident",
+  supportCaseReferences: [id(90)],
+  dataPolicyReference: id(91),
+  retentionPolicyReference: id(92),
+  auditReferences: [id(93)],
+  mayOpenDiagnostic: true,
+  mayManageCapabilities: true,
+  mayStartExport: true,
+  mayRequestRestore: false,
+} as const;

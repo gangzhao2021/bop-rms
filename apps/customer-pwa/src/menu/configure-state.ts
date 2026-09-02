@@ -62,6 +62,7 @@ export function createConfigureController({
   let state: ConfigureState = { status: "idle" };
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
   let pending: AddPlan | null = null;
+  let commandFlight: Promise<void> | null = null;
   const listeners = new Set<() => void>();
   const publish = (next: ConfigureState) => {
     state = next;
@@ -140,27 +141,40 @@ export function createConfigureController({
       fail(error, true);
     }
   };
+  const begin = (createPlan: () => AddPlan): Promise<void> => {
+    if (commandFlight !== null) return commandFlight;
+    const current = execute(createPlan());
+    commandFlight = current;
+    void current.then(
+      () => {
+        if (commandFlight === current) commandFlight = null;
+      },
+      () => {
+        if (commandFlight === current) commandFlight = null;
+      },
+    );
+    return current;
+  };
   return Object.freeze({
     getState: () => state,
-    retry: async () => {
+    retry: () => {
       if (pending !== null && (state.status === "outcome-unknown" || state.status === "offline"))
-        await execute(pending);
+        return begin(() => pending as AddPlan);
+      return Promise.resolve();
     },
     setOnline: (value: boolean) => {
       online = value;
       if (!value) publish({ status: "offline", canRetry: pending !== null });
     },
-    submit: async (sellableReference: string, draft: CartItemDraft) => {
-      const plan: AddPlan = {
+    submit: (sellableReference: string, draft: CartItemDraft) =>
+      begin(() => ({
         sellableReference,
         draft,
         createOperationReference: keyFactory(),
         addOperationReference: keyFactory(),
         stage: "locate",
         cart: null,
-      };
-      await execute(plan);
-    },
+      })),
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
