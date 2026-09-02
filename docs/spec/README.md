@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2201 — Production exclusion for the local Merchant demo on codex/wp-2201`
+- Current discussion node: `WP-2202 — Restore finite GitHub cold-start verification on codex/wp-2202`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2202 — Restore finite GitHub cold-start verification` is resolved for execution on exact
+  WP-2201 head `32010a8`. GitHub runs `33586898910` and `33586944954` independently exhausted the
+  existing 180-second WP-0006 health wait while clean-runner workspace builds were still active;
+  earlier run `33585461764` passed startup but reached the workflow's fixed 20-minute limit during
+  passing Merchant Web tests. This bounded CI repair extends only those finite budgets to 360
+  seconds and 45 minutes. It removes, skips and reorders no verification and changes no application,
+  Domain, database, security, production or deployment behavior.
 
 - `WP-2201 — Production exclusion for the local Merchant demo` is completed and locally verified
   on exact WP-2200 commit `e9be823`. A development-only HTML entry keeps the deterministic demo

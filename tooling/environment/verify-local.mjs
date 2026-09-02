@@ -15,7 +15,7 @@ const envFile = path.join(temp, "environment.env");
 const logFile = path.join(temp, "supervisor.log");
 const projectName = "bop-rms-wp0006-verify";
 const ports = { api: 53001, customerPwa: 53003, merchantWeb: 53002, postgres: 55433 };
-const healthyStatusTimeoutMs = 180_000;
+const healthyStatusTimeoutMs = 360_000;
 let supervisor;
 let logHandle;
 
