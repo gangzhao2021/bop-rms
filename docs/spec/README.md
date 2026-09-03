@@ -17,13 +17,16 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-2206 — Pilot Integration Readiness Inventory` is active as a documentation-only inventory
+- `WP-2206 — Pilot Integration Readiness Inventory` is integrated through PR #180 at squash
+  `b3274672e4604786420e227c02c0f94bfce3d986` as a documentation-only inventory
   from exact verified `main@ee54f68e1e0f7cb08ca975486d5ed780444202c4`. It consolidates accepted
   Pilot planning boundaries, accountable owner roles, required evidence outcomes, repository
   dependencies and exact unblock conditions while keeping every external item blocked and
   unclaimed. It does not reproduce or replace external `IDR-0037`, collect evidence bytes, create a
   real corporation/Store/account/Provider/environment, change runtime behavior or authorize
-  production. Exact scope is in [`WP-2206`](./work-packages/WP-2206.md); the actionable matrix is
+  production. Final head `eb78ad9` passed complete run/job `33779079917 / 100728012752` in
+  `35m28s`; exact merge `b327467` passed complete run/job `33797765237 / 100789479743` in
+  `36m28s`. Exact scope is in [`WP-2206`](./work-packages/WP-2206.md); the actionable matrix is
   the [Pilot Integration Readiness Inventory](../runbooks/pilot-integration-readiness-inventory.md).
 
 - `WP-2205 — Automated Local Customer Demo Browser Acceptance` is implemented, verified and
