@@ -17,12 +17,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-2204 — Local-only Customer PWA Core Workflow Preview` is resolved and approved for execution
-  from exact `main@200d6cc67ec814d3110c0785446cf8ed8960b573`. It will compose the existing Customer
-  entry, menu, Cart, Checkout, Provider-unavailable Payment, Order, Delivery and Receipt screens
-  with deterministic synthetic, read-only dependencies behind an exact Vite serve-only flag. It
-  changes no API, Domain, database, Screen Registry, production activation, deployment or Provider
-  behavior. Exact scope and evidence are in [`WP-2204`](./work-packages/WP-2204.md).
+- `WP-2204 — Local-only Customer PWA Core Workflow Preview` is implemented, verified and
+  integrated through PR #176 at squash `c6afd957b89777e4ea781326d2e21ed7798878eb`. It composes the
+  existing Customer entry, menu, Cart, Checkout, Provider-unavailable Payment, Order, Delivery and
+  Receipt screens with deterministic synthetic, read-only dependencies behind an exact Vite
+  serve-only flag. Customer Vitest passed `213/213`, local Chromium passed `68/68` checks across 11
+  routes and two viewports, both production build variants excluded every demo marker, and the
+  exact merge commit passed the complete GitHub workflow. It changes no API, Domain, database,
+  Screen Registry, production activation, deployment or Provider behavior. Exact scope and evidence
+  are in [`WP-2204`](./work-packages/WP-2204.md).
 
 - `WP-2203 — Automated Local Merchant Demo Browser Acceptance` is implemented, verified and
   integrated through PR #174 at squash `34e10a39a031631c3f8f9eaecd4c93868a45fcc9`. It converts the
