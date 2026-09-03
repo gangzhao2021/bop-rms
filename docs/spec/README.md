@@ -24,8 +24,9 @@ older historical snapshots retained later in this index.
   Chromium passed `36/36`, the retained Merchant gate passed `42/42`, Customer Vitest passed
   `213/213`, PWA security passed `47/47`, and complete `pnpm verify` passed. It changes no
   application source, Screen, fixture, API, Domain, database, permission, production activation,
-  deployment or Provider behavior. GitHub publication and exact-head verification are pending.
-  Exact scope and evidence are in
+  deployment or Provider behavior. Exact implementation head `12eb10f` passed the complete GitHub
+  workflow as run/job `33745389353 / 100616550632` in `33m31s`; final evidence-head verification,
+  review and integration remain pending in PR #178. Exact scope and evidence are in
   [`WP-2205`](./work-packages/WP-2205.md).
 
 - `WP-2204 — Local-only Customer PWA Core Workflow Preview` is implemented, verified and
