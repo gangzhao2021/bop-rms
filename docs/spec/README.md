@@ -17,16 +17,19 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-2205 — Automated Local Customer Demo Browser Acceptance` is implemented and locally verified
-  on exact `main@8768b93ed1dc7685a561c1460cf872043d7bbeb2`. It converts WP-2204's manually executed
-  Customer Chromium evidence into one finite, one-worker, zero-retry Playwright gate across all 11
-  accepted routes at desktop and mobile viewports, plus exact-flag production exclusion. Customer
-  Chromium passed `36/36`, the retained Merchant gate passed `42/42`, Customer Vitest passed
-  `213/213`, PWA security passed `47/47`, and complete `pnpm verify` passed. It changes no
-  application source, Screen, fixture, API, Domain, database, permission, production activation,
-  deployment or Provider behavior. Exact implementation head `12eb10f` passed the complete GitHub
-  workflow as run/job `33745389353 / 100616550632` in `33m31s`; final evidence-head verification,
-  review and integration remain pending in PR #178. Exact scope and evidence are in
+- `WP-2205 — Automated Local Customer Demo Browser Acceptance` is implemented, verified and
+  integrated through PR #178 at squash `59183f4f216bd74126f6829afc2f00d3b9d82a9b`. It converts
+  WP-2204's manually executed Customer Chromium evidence into one finite, one-worker, zero-retry
+  Playwright gate across all 11 accepted routes at desktop and mobile viewports, plus exact-flag
+  production exclusion. Customer Chromium passed `36/36`, the retained Merchant gate passed
+  `42/42`, Customer Vitest passed `213/213`, PWA security passed `47/47`, and complete
+  `pnpm verify` passed. Exact implementation head `12eb10f` passed run/job
+  `33745389353 / 100616550632` in `33m31s`; final evidence head `ec9c8a4` passed run/job
+  `33751204691 / 100634925329` in `36m24s`; and exact merge commit `59183f4` passed run/job
+  `33754686414 / 100646148155` in `36m23s`. Section 91 findings were `0/0/0/0`, with no reviews,
+  comments or unresolved threads. It changes no application source, Screen, fixture, API, Domain,
+  database, permission, production activation, deployment or Provider behavior. Exact scope and
+  evidence are in
   [`WP-2205`](./work-packages/WP-2205.md).
 
 - `WP-2204 — Local-only Customer PWA Core Workflow Preview` is implemented, verified and
