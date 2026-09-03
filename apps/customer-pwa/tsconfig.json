@@ -5,12 +5,18 @@
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "types": ["vite/client", "react", "react-dom"],
+    "types": ["vite/client", "react", "react-dom", "node"],
     "paths": {
       "vite-plugin-pwa": ["./src/pwa/vite-plugin-pwa-shim.d.ts"]
     },
     "allowImportingTsExtensions": false
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "e2e/**/*.ts",
+    "playwright.config.ts",
+    "vite.config.ts"
+  ],
   "exclude": ["src/service-worker.ts"]
 }

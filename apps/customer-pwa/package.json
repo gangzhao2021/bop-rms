@@ -7,10 +7,12 @@
     "build": "vite build",
     "dev:demo": "VITE_BOP_LOCAL_CUSTOMER_DEMO=1 vite --host 127.0.0.1 --port 5174 --strictPort",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
-    "lint": "eslint src scripts vite.config.ts",
+    "lint": "eslint src scripts e2e playwright.config.ts vite.config.ts",
+    "preview:demo-proof": "VITE_BOP_LOCAL_CUSTOMER_DEMO=1 vite build && vite preview --host 127.0.0.1 --port 4174 --strictPort",
     "pwa:verify": "vite build && node scripts/verify-service-worker.mjs",
     "pwa-security:acceptance": "vitest run src/App.test.tsx src/pwa/service-worker-policy.test.ts src/pwa/update-store.test.ts src/cart/cart-state.test.ts src/checkout/checkout-client.test.ts src/payment/payment-controller.test.ts && pnpm pwa:verify",
     "test": "vitest run",
+    "test:browser": "playwright test",
     "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.service-worker.json"
   },
   "dependencies": {
@@ -22,6 +24,7 @@
     "react-router": "8.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@tailwindcss/vite": "4.3.2",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",

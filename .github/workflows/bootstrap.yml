@@ -85,10 +85,11 @@ jobs:
           pnpm test
           pnpm build
 
-      - name: Verify WP-2203 Merchant demo browser acceptance
+      - name: Verify local demo browser acceptance
         run: |
           pnpm --filter @bop-rms/merchant-web exec playwright install --with-deps chromium
           pnpm merchant-demo-browser:acceptance
+          pnpm customer-demo-browser:acceptance
 
       - name: Verify WP-0036 Realtime and Eventing regressions
         run: |

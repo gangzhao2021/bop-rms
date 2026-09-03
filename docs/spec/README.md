@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2204 — Local-only Customer PWA Core Workflow Preview`
+- Current discussion node: `WP-2205 — Automated Local Customer Demo Browser Acceptance`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,18 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2205 — Automated Local Customer Demo Browser Acceptance` is implemented and locally verified
+  on exact `main@8768b93ed1dc7685a561c1460cf872043d7bbeb2`. It converts WP-2204's manually executed
+  Customer Chromium evidence into one finite, one-worker, zero-retry Playwright gate across all 11
+  accepted routes at desktop and mobile viewports, plus exact-flag production exclusion. Customer
+  Chromium passed `36/36`, the retained Merchant gate passed `42/42`, Customer Vitest passed
+  `213/213`, PWA security passed `47/47`, and complete `pnpm verify` passed. It changes no
+  application source, Screen, fixture, API, Domain, database, permission, production activation,
+  deployment or Provider behavior. Exact implementation head `12eb10f` passed the complete GitHub
+  workflow as run/job `33745389353 / 100616550632` in `33m31s`; final evidence-head verification,
+  review and integration remain pending in PR #178. Exact scope and evidence are in
+  [`WP-2205`](./work-packages/WP-2205.md).
 
 - `WP-2204 — Local-only Customer PWA Core Workflow Preview` is implemented, verified and
   integrated through PR #176 at squash `c6afd957b89777e4ea781326d2e21ed7798878eb`. It composes the
