@@ -27,6 +27,7 @@ type ScreenState =
 interface MenuPageProps {
   readonly context?: MenuJourneyContext | undefined;
   readonly client?: CustomerMenuClient | undefined;
+  readonly readOnlyNotice?: React.ReactNode | undefined;
 }
 
 function useClient(
@@ -80,7 +81,7 @@ function useMenuLoad(
   return { state, heading, retry: () => setRevision((value) => value + 1) };
 }
 
-export function MenuBrowsePage({ context, client }: MenuPageProps) {
+export function MenuBrowsePage({ context, client, readOnlyNotice }: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const input = useMemo(() => ({}), []);
   const loaded = useMenuLoad(resolvedClient, input);
@@ -90,12 +91,13 @@ export function MenuBrowsePage({ context, client }: MenuPageProps) {
       headingRef={loaded.heading}
       mode="browse"
       onRetry={loaded.retry}
+      readOnlyNotice={readOnlyNotice}
       state={loaded.state}
     />
   );
 }
 
-export function MenuSearchPage({ context, client }: MenuPageProps) {
+export function MenuSearchPage({ context, client, readOnlyNotice }: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const [draft, setDraft] = useState("");
   const [term, setTerm] = useState<string | null>(null);
@@ -112,6 +114,7 @@ export function MenuSearchPage({ context, client }: MenuPageProps) {
       headingRef={loaded.heading}
       mode="search"
       onRetry={loaded.retry}
+      readOnlyNotice={readOnlyNotice}
       search={
         <form className="menu-search" role="search" onSubmit={submit}>
           <label htmlFor="menu-search-input">Search the menu</label>
@@ -143,7 +146,7 @@ export function MenuSearchPage({ context, client }: MenuPageProps) {
   );
 }
 
-export function SellableDetailPage({ context, client }: MenuPageProps) {
+export function SellableDetailPage({ context, client, readOnlyNotice }: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const input = useMemo(() => ({}), []);
   const loaded = useMenuLoad(resolvedClient, input);
@@ -164,6 +167,7 @@ export function SellableDetailPage({ context, client }: MenuPageProps) {
       headingRef={loaded.heading}
       mode="detail"
       onRetry={loaded.retry}
+      readOnlyNotice={readOnlyNotice}
       state={state}
     />
   );
@@ -175,6 +179,7 @@ export interface MenuScreenProps {
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
   readonly mode: "browse" | "search" | "detail";
   readonly onRetry?: (() => void) | undefined;
+  readonly readOnlyNotice?: React.ReactNode | undefined;
   readonly search?: React.ReactNode | undefined;
   readonly searchTerm?: string | null | undefined;
   readonly state: ScreenState;
@@ -186,6 +191,7 @@ export function MenuScreen({
   headingRef,
   mode,
   onRetry,
+  readOnlyNotice,
   search,
   searchTerm,
   state,
@@ -225,6 +231,7 @@ export function MenuScreen({
           headingRef={headingRef}
           mode={mode}
           onRetry={onRetry}
+          readOnlyNotice={readOnlyNotice}
           state={state}
         />
       </div>
@@ -260,6 +267,7 @@ function MenuState({
   headingRef,
   mode,
   onRetry,
+  readOnlyNotice,
   state,
 }: Omit<MenuScreenProps, "context" | "search" | "searchTerm">) {
   if (state.kind === "MissingContext")
@@ -326,7 +334,10 @@ function MenuState({
         </Link>
       </section>
     );
-  if (detail) return <SellableDetail sellable={detail} headingRef={headingRef} />;
+  if (detail)
+    return (
+      <SellableDetail sellable={detail} headingRef={headingRef} readOnlyNotice={readOnlyNotice} />
+    );
   return <MenuContents menu={state.menu} headingRef={headingRef} />;
 }
 
@@ -406,9 +417,11 @@ function SellableCard({ sellable }: { readonly sellable: MenuSellable }) {
 function SellableDetail({
   sellable,
   headingRef,
+  readOnlyNotice,
 }: {
   readonly sellable: MenuSellable;
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
+  readonly readOnlyNotice?: React.ReactNode | undefined;
 }) {
   const [configuring, setConfiguring] = useState(false);
   return (
@@ -455,7 +468,11 @@ function SellableDetail({
         </div>
       </dl>
       <AllergenSummary sellable={sellable} />
-      {configuring ? (
+      {readOnlyNotice ? (
+        <div className="menu-readonly-boundary" role="status">
+          {readOnlyNotice}
+        </div>
+      ) : configuring ? (
         <SellableConfigurator key={sellable.sellableReference} sellable={sellable} />
       ) : (
         <button className="menu-action" type="button" onClick={() => setConfiguring(true)}>

@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router";
+import { Route, Routes, useParams } from "react-router";
 import { useCallback, useState } from "react";
 import { CartPage } from "./cart/CartPage.js";
 import { CheckoutPage } from "./checkout/CheckoutPage.js";
@@ -13,16 +13,51 @@ import { ConnectivityBanner } from "./connectivity/ConnectivityBanner.js";
 import { PwaUpdateBanner } from "./pwa/PwaUpdateBanner.js";
 import { ReceiptPage } from "./receipt/ReceiptPage.js";
 import { DeliveryStatusPage } from "./delivery-status/DeliveryStatusPage.js";
+import type { CustomerDemoDependencies } from "./customer-demo.js";
+
+function useDemoForOrderRoute(
+  demo: CustomerDemoDependencies | undefined,
+): CustomerDemoDependencies | undefined {
+  const { orderReference = "" } = useParams();
+  return demo?.orderReference === orderReference ? demo : undefined;
+}
+
+function CustomerOrderStatusRoute({
+  demo,
+}: {
+  readonly demo: CustomerDemoDependencies | undefined;
+}) {
+  const matchedDemo = useDemoForOrderRoute(demo);
+  return (
+    <OrderStatusPage {...(matchedDemo ? { controller: matchedDemo.orderStatusController } : {})} />
+  );
+}
+
+function CustomerDeliveryStatusRoute({
+  demo,
+}: {
+  readonly demo: CustomerDemoDependencies | undefined;
+}) {
+  const matchedDemo = useDemoForOrderRoute(demo);
+  return <DeliveryStatusPage {...(matchedDemo ? { client: matchedDemo.deliveryClient } : {})} />;
+}
+
+function CustomerReceiptRoute({ demo }: { readonly demo: CustomerDemoDependencies | undefined }) {
+  const matchedDemo = useDemoForOrderRoute(demo);
+  return <ReceiptPage {...(matchedDemo ? { controller: matchedDemo.receiptController } : {})} />;
+}
 
 export function App({
   entryClient,
   initialMenuContext,
+  demo,
 }: Readonly<{
   entryClient?: CustomerEntryClient | undefined;
   initialMenuContext?: MenuJourneyContext | undefined;
+  demo?: CustomerDemoDependencies | undefined;
 }>) {
   const [menuContext, setMenuContext] = useState<MenuJourneyContext | undefined>(
-    initialMenuContext,
+    initialMenuContext ?? demo?.menuContext,
   );
   const establishMenuContext = useCallback((context: MenuJourneyContext) => {
     setMenuContext(
@@ -39,24 +74,70 @@ export function App({
     <>
       <ConnectivityBanner />
       <PwaUpdateBanner />
+      {demo ? <demo.Notice /> : null}
       <Routes>
         <Route
           path="/"
-          element={<EntryContextPage client={entryClient} onEstablished={establishMenuContext} />}
+          element={
+            <EntryContextPage
+              client={entryClient ?? demo?.entryClient}
+              onEstablished={establishMenuContext}
+            />
+          }
         />
-        <Route path="/menu" element={<MenuBrowsePage context={menuContext} />} />
-        <Route path="/menu/search" element={<MenuSearchPage context={menuContext} />} />
+        <Route
+          path="/menu"
+          element={
+            <MenuBrowsePage
+              context={menuContext}
+              client={demo?.menuClient}
+              readOnlyNotice={demo?.menuReadOnlyNotice}
+            />
+          }
+        />
+        <Route
+          path="/menu/search"
+          element={
+            <MenuSearchPage
+              context={menuContext}
+              client={demo?.menuClient}
+              readOnlyNotice={demo?.menuReadOnlyNotice}
+            />
+          }
+        />
         <Route
           path="/menu/items/:sellableId"
-          element={<SellableDetailPage context={menuContext} />}
+          element={
+            <SellableDetailPage
+              context={menuContext}
+              client={demo?.menuClient}
+              readOnlyNotice={demo?.menuReadOnlyNotice}
+            />
+          }
         />
-        <Route path="/cart" element={<CartPage />} />
-        <Route path="/checkout" element={<CheckoutPage />} />
+        <Route
+          path="/cart"
+          element={<CartPage {...(demo ? { controller: demo.cartController } : {})} />}
+        />
+        <Route
+          path="/checkout"
+          element={
+            <CheckoutPage
+              {...(demo ? { controller: demo.checkoutController, now: demo.now } : {})}
+            />
+          }
+        />
         <Route path="/checkout/payment" element={<PaymentPage mode="handoff" />} />
         <Route path="/checkout/result" element={<PaymentPage mode="result" />} />
-        <Route path="/orders/:orderReference" element={<OrderStatusPage />} />
-        <Route path="/orders/:orderReference/delivery" element={<DeliveryStatusPage />} />
-        <Route path="/orders/:orderReference/receipt" element={<ReceiptPage />} />
+        <Route path="/orders/:orderReference" element={<CustomerOrderStatusRoute demo={demo} />} />
+        <Route
+          path="/orders/:orderReference/delivery"
+          element={<CustomerDeliveryStatusRoute demo={demo} />}
+        />
+        <Route
+          path="/orders/:orderReference/receipt"
+          element={<CustomerReceiptRoute demo={demo} />}
+        />
         <Route path="*" element={<CustomerShell />} />
       </Routes>
     </>

@@ -38,6 +38,7 @@
     "dining-session:acceptance": "pnpm --filter @bop/public-capability test && pnpm --filter @rms/dining test && pnpm --filter @bop/identity guest-session:acceptance && vitest run --config packages/database/vitest.identity-session-store.config.ts",
     "db:migrate": "node packages/database/src/cli.ts",
     "demo:merchant": "pnpm --filter @bop-rms/merchant-web dev:demo",
+    "demo:customer": "pnpm --filter @bop-rms/customer-pwa dev:demo",
     "domain-layer-boundary:check": "vitest run tooling/domain-layer-boundary/validate.test.mjs && node tooling/domain-layer-boundary/validate.mjs",
     "event-catalog:acceptance": "pnpm --filter @bop-rms/contracts-events test && pnpm --filter @bop-rms/contracts-events event-catalog:check",
     "event-catalog:check": "pnpm --filter @bop-rms/contracts-events event-catalog:check",
