@@ -17,8 +17,9 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
 
-- `WP-2203 — Automated Local Merchant Demo Browser Acceptance` is locally implemented and verified
-  on exact `main@1a325973050f0c2bbd6ac3727e9cb6f57be5a42b`. It converts the manual browser evidence from
+- `WP-2203 — Automated Local Merchant Demo Browser Acceptance` is implemented, verified and
+  integrated through PR #174 at squash `34e10a39a031631c3f8f9eaecd4c93868a45fcc9`. It converts the
+  manual browser evidence from
   WP-2200 / WP-2201 into one deterministic Chromium acceptance gate over the existing local-only
   Merchant showcase: all 13 accepted overview, Store, Menu, Order, Kitchen, Compliance and Support
   routes at desktop and mobile viewports; explicit synthetic/read-only labelling; zero application
@@ -29,9 +30,11 @@ older historical snapshots retained later in this index.
   Merchant Vitest passed `458/458`, and the complete repository `pnpm verify` passed with all
   architecture, contract, migration, permission, isolated PostgreSQL and 40-package build gates.
   No Screen, route, fixture, application, Domain, database, authentication, permission, production
-  activation, deployment or external Provider behavior is changed. PR #174 corrected implementation
-  head `a558cee` passed complete run/job `33688814243 / 100442536570` in `34m41s`; final
-  evidence-head verification and merge remain pending. Exact scope and evidence are in
+  activation, deployment or external Provider behavior is changed. Corrected implementation head
+  `a558cee` passed complete run/job `33688814243 / 100442536570` in `34m41s`; final evidence head
+  `ee2a5f6` passed run/job `33693137669 / 100456144645` in `29m06s`; and exact merge commit
+  `34e10a3` passed the full `main` run/job `33695751384 / 100464115563` in `35m39s`. No deployment
+  or external Provider action was performed. Exact scope and evidence are in
   [`WP-2203`](./work-packages/WP-2203.md).
 
 - `WP-2202 — Restore finite GitHub cold-start verification` is implemented, verified and integrated
