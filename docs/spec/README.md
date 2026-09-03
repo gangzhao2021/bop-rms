@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2205 — Automated Local Customer Demo Browser Acceptance`
+- Current discussion node: `WP-2206 — Pilot Integration Readiness Inventory`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2206 — Pilot Integration Readiness Inventory` is active as a documentation-only inventory
+  from exact verified `main@ee54f68e1e0f7cb08ca975486d5ed780444202c4`. It consolidates accepted
+  Pilot planning boundaries, accountable owner roles, required evidence outcomes, repository
+  dependencies and exact unblock conditions while keeping every external item blocked and
+  unclaimed. It does not reproduce or replace external `IDR-0037`, collect evidence bytes, create a
+  real corporation/Store/account/Provider/environment, change runtime behavior or authorize
+  production. Exact scope is in [`WP-2206`](./work-packages/WP-2206.md); the actionable matrix is
+  the [Pilot Integration Readiness Inventory](../runbooks/pilot-integration-readiness-inventory.md).
 
 - `WP-2205 — Automated Local Customer Demo Browser Acceptance` is implemented, verified and
   integrated through PR #178 at squash `59183f4f216bd74126f6829afc2f00d3b9d82a9b`. It converts
