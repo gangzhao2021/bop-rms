@@ -478,6 +478,8 @@
   position: absolute;
   z-index: 10;
   inset: var(--bop-space-2) auto auto var(--bop-space-2);
+  clip-path: inset(50%);
+  overflow: hidden;
   padding: var(--bop-space-2) var(--bop-space-3);
   transform: translateY(-200%);
   color: var(--bop-color-on-primary);
@@ -485,6 +487,8 @@
 }
 
 .cart-skip-link:focus {
+  clip-path: none;
+  overflow: visible;
   transform: translateY(0);
 }
 

@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2203 — Automated Local Merchant Demo Browser Acceptance`
+- Current discussion node: `WP-2204 — Local-only Customer PWA Core Workflow Preview`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2204 — Local-only Customer PWA Core Workflow Preview` is resolved and approved for execution
+  from exact `main@200d6cc67ec814d3110c0785446cf8ed8960b573`. It will compose the existing Customer
+  entry, menu, Cart, Checkout, Provider-unavailable Payment, Order, Delivery and Receipt screens
+  with deterministic synthetic, read-only dependencies behind an exact Vite serve-only flag. It
+  changes no API, Domain, database, Screen Registry, production activation, deployment or Provider
+  behavior. Exact scope and evidence are in [`WP-2204`](./work-packages/WP-2204.md).
 
 - `WP-2203 — Automated Local Merchant Demo Browser Acceptance` is implemented, verified and
   integrated through PR #174 at squash `34e10a39a031631c3f8f9eaecd4c93868a45fcc9`. It converts the
