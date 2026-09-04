@@ -6,13 +6,20 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2207 - API Runtime Dependency Wiring and HTTP Regression`
+- Current discussion node: `WP-2208 - Customer Entry Domain Composition`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
 Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 
 ## Latest Work Package Status
+
+- `WP-2208 - Customer Entry Domain Composition` implements an opt-in adapter on the verified
+  WP-2207 baseline. Existing QR, Store and Guest Session services are composed through public
+  contracts with explicit admission and environment ports. API tests passed `178/178`, including
+  35 new composition/HTTP regressions, and complete local `pnpm verify` passed. Exact delivery
+  evidence is maintained in the associated PR; no production activation or full Customer journey
+  is claimed. See [`WP-2208`](./work-packages/WP-2208.md).
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
