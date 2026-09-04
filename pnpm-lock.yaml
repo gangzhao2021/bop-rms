@@ -68,9 +68,15 @@ importers:
       '@rms/catalog':
         specifier: workspace:*
         version: link:../../packages/rms/catalog
+      '@rms/dining':
+        specifier: workspace:*
+        version: link:../../packages/rms/dining
       '@rms/pricing':
         specifier: workspace:*
         version: link:../../packages/rms/pricing
+      '@rms/store':
+        specifier: workspace:*
+        version: link:../../packages/rms/store
       express:
         specifier: 5.2.1
         version: 5.2.1

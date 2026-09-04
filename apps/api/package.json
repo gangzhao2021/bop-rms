@@ -32,7 +32,9 @@
     "@bop/permission": "workspace:*",
     "@bop/tenant": "workspace:*",
     "@rms/catalog": "workspace:*",
+    "@rms/dining": "workspace:*",
     "@rms/pricing": "workspace:*",
+    "@rms/store": "workspace:*",
     "express": "5.2.1",
     "helmet": "8.3.0",
     "uuid": "14.0.1"
