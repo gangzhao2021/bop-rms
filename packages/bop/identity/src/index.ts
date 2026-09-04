@@ -225,3 +225,4 @@ export {
   type GuestSessionEntryTransaction,
   type GuestSessionEntryTransactionRunner,
 } from "./infrastructure/persistence/guest-session-entry-store.js";
+export { createGuestSessionCredentialProvider } from "./infrastructure/crypto/guest-session-credential-provider.js";

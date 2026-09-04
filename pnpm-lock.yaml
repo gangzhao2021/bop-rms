@@ -238,7 +238,11 @@ importers:
         specifier: workspace:*
         version: link:../tenant
 
-  packages/bop/identity: {}
+  packages/bop/identity:
+    dependencies:
+      uuid:
+        specifier: 14.0.1
+        version: 14.0.1
 
   packages/bop/media:
     dependencies:
