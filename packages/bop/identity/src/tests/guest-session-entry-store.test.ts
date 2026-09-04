@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGuestSessionRecord,
   createPostgresGuestSessionEntryStore,
+  createPostgresGuestSessionLegacyInspector,
   type GuestSessionEntryTransactionRunner,
 } from "../index.js";
 
@@ -150,6 +151,60 @@ describe("WP-2209 PostgreSQL Guest entry persistence", () => {
     expect(error).not.toHaveProperty("cause");
     expect(String(error)).not.toContain("private SQL");
     expect(h.query).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("WP-2213 legacy inspection", () => {
+  it.each([
+    [{ hasLegacy: false, hasLiveLegacy: false }, "NoLegacyRows"],
+    [{ hasLegacy: true, hasLiveLegacy: false }, "InactiveLegacyRowsOnly"],
+    [{ hasLegacy: true, hasLiveLegacy: true }, "LiveLegacyRowsPresent"],
+  ] as const)("returns only bounded classification for %j", async (row, classification) => {
+    const query = vi.fn<(sql: string, values: readonly unknown[]) => Promise<unknown>>(
+      async () => ({ rows: [row] }),
+    );
+    const inspector = createPostgresGuestSessionLegacyInspector(
+      { run: async (action) => action({ query }) },
+      scope,
+    );
+    expect(await inspector.inspect(fixture().session.createdAt)).toEqual({
+      classification,
+      observedAt: fixture().session.createdAt,
+    });
+    expect(query.mock.calls[1]?.[0]).toContain("s.brand_id = $1 AND s.store_id = $2");
+    expect(query.mock.calls[1]?.[0]).toContain("h.operation_intent_hash = s.operation_intent_hash");
+    expect(JSON.stringify(await inspector.inspect(fixture().session.createdAt))).not.toContain(
+      "hasLegacy",
+    );
+  });
+  it.each([
+    { rows: [] },
+    { rows: [{ hasLegacy: false, hasLiveLegacy: true }] },
+    { rows: [{ count: 1 }] },
+  ])("bounds malformed or contradictory results", async ({ rows }) => {
+    const inspector = createPostgresGuestSessionLegacyInspector(
+      {
+        run: async (action) => action({ query: async () => ({ rows }) }),
+      },
+      scope,
+    );
+    const error = await inspector.inspect(fixture().session.createdAt).catch((failure) => failure);
+    expect(error).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+    expect(error).not.toHaveProperty("cause");
+  });
+  it("rejects invalid scope/time without running the inspection query", async () => {
+    const run = vi.fn();
+    expect(() =>
+      createPostgresGuestSessionLegacyInspector({ run } as never, {
+        ...scope,
+        storeReference: "bad",
+      }),
+    ).toThrow();
+    const inspector = createPostgresGuestSessionLegacyInspector({ run } as never, scope);
+    await expect(inspector.inspect("bad")).rejects.toMatchObject({
+      code: "GUEST_SESSION_UNAVAILABLE",
+    });
+    expect(run).not.toHaveBeenCalled();
   });
 });
 

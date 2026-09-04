@@ -101,6 +101,15 @@ const databaseAccessManifestInput = {
   ],
   accesses: [
     {
+      id: "guest-session.legacy-inspection",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_identity", table: "guest_session" },
+      principal: { kind: "module", id: "@bop/identity" },
+      readPattern: "owner-repository",
+      source: "packages/bop/identity/src/infrastructure/persistence/guest-session-entry-store.ts",
+    },
+    {
       id: "guest-session.history-write",
       operation: "write",
       mechanism: "repository",
