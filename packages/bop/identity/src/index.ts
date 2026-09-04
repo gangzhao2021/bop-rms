@@ -217,3 +217,9 @@ export { moduleManifest } from "./module.manifest.js";
 export * from "./contracts/api-client.js";
 export * from "./application/api-client-service.js";
 export * from "./application/ports/api-client-ports.js";
+export {
+  createPostgresGuestSessionEntryStore,
+  type GuestSessionEntryStore,
+  type GuestSessionEntryTransaction,
+  type GuestSessionEntryTransactionRunner,
+} from "./infrastructure/persistence/guest-session-entry-store.js";

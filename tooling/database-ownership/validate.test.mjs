@@ -570,6 +570,39 @@ describe("Database Schema Ownership Architecture Test", () => {
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
 
+  it("accepts only the WP-2209 Identity entry asset and still rejects adjacent files and drivers", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "BOP", "identity", "bop_identity", ["guest_session"]);
+    const path = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/guest-session-entry-store.ts",
+    );
+    await writeFile(path, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(path, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(path, "export const synthetic = true;\n");
+    await writeFile(join(dirname(path), "other-store.ts"), "export const synthetic = true;\n");
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  it.each([
+    ["other-owner", "bop_identity", ["guest_session"]],
+    ["identity", "bop_other", ["guest_session"]],
+    ["identity", "bop_identity", ["other_table"]],
+  ])(
+    "does not transfer WP-2209 acceptance to a different owner/schema/table",
+    async (name, schema, tables) => {
+      const root = await fixture();
+      const context = await writeModule(root, "BOP", name, schema, tables);
+      await writeFile(
+        join(context.moduleRoot, "src/infrastructure/persistence/guest-session-entry-store.ts"),
+        "export const synthetic = true;\n",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
   it("sorts diagnostics and repeats identical output", async () => {
     const root = await fixture();
     await writeModule(root, "BOP", "synthetic-owner", "platform_audit", ["Record"], null);
