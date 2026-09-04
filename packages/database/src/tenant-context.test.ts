@@ -9,6 +9,7 @@ class FakeClient {
   readonly trace: { text: string; values?: readonly unknown[] }[] = [];
   failOn: string | undefined;
   released = 0;
+  destroyed = false;
 
   async query(text: string, values?: readonly unknown[]): Promise<QueryResult> {
     this.trace.push({ text, ...(values === undefined ? {} : { values }) });
@@ -16,8 +17,9 @@ class FakeClient {
     return { rows: [], rowCount: 0 } as unknown as QueryResult;
   }
 
-  release(): void {
+  release(destroy = false): void {
     this.released += 1;
+    this.destroyed = destroy;
   }
 }
 
@@ -146,7 +148,22 @@ describe("transaction-local Tenant database context", () => {
         }),
       );
       expect(client.released).toBe(1);
+      expect(client.destroyed).toBe(true);
       expect(client.trace.some((item) => item.text === "ROLLBACK")).toBe(true);
     }
+  });
+  it("discards rollback failures and preserves even an undefined callback rejection", async () => {
+    const client = new FakeClient();
+    client.failOn = "ROLLBACK";
+    let rejected = false;
+    await withTenantContextTransaction(pool(client), { brandId: BRAND }, async () => {
+      return Promise.reject(undefined);
+    }).catch((error: unknown) => {
+      rejected = true;
+      expect(error).toBeUndefined();
+    });
+    expect(rejected).toBe(true);
+    expect(client.destroyed).toBe(true);
+    expect(client.released).toBe(1);
   });
 });
