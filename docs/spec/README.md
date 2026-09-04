@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2206 — Pilot Integration Readiness Inventory`
+- Current discussion node: `WP-2207 - API Runtime Dependency Wiring and HTTP Regression`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,6 +16,14 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
 older historical snapshots retained later in this index.
+
+- `WP-2207 - API Runtime Dependency Wiring and HTTP Regression` implements, on the verified
+  WP-2206 baseline. It forwards three existing optional dependencies through the API runtime
+  factory and verifies real HTTP dispatch, denied requests and unconfigured fail-closed behavior.
+  Local API tests passed `143/143` and complete `pnpm verify` passed. Exact GitHub delivery evidence
+  is maintained in the associated WP-2207 pull request.
+  It introduces no live adapter, Provider, persistence or production activation. See
+  [`WP-2207`](./work-packages/WP-2207.md).
 
 - `WP-2206 — Pilot Integration Readiness Inventory` is integrated through PR #180 at squash
   `b3274672e4604786420e227c02c0f94bfce3d986` as a documentation-only inventory
