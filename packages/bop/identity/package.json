@@ -19,5 +19,8 @@
     "test": "vitest run --config vitest.config.ts",
     "workforce-identity-security:acceptance": "vitest run --config vitest.config.ts src/tests/workforce-identity-security.test.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "uuid": "14.0.1"
   }
 }
