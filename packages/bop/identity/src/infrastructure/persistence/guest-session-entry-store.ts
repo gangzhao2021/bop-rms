@@ -1,11 +1,12 @@
 import {
+  assertGuestSessionUsable,
   createGuestSessionRecord,
   GuestSessionError,
   parseGuestOperationReference,
   parseGuestSelectorHash,
   type GuestSessionRecord,
 } from "../../contracts/guest-session.js";
-import { parseOpaqueUuidV7 } from "../../contracts/identity-actor.js";
+import { parseCanonicalInstant, parseOpaqueUuidV7 } from "../../contracts/identity-actor.js";
 import type { GuestSessionStorePort } from "../../application/ports/guest-session-ports.js";
 
 export interface GuestSessionEntryTransaction {
@@ -19,7 +20,7 @@ export interface GuestSessionEntryTransactionRunner {
 
 export type GuestSessionEntryStore = Pick<
   GuestSessionStorePort,
-  "create" | "resolve" | "resolveOperation"
+  "create" | "resolve" | "resolveOperation" | "touchInteractive"
 >;
 
 const projection = `jsonb_build_object(
@@ -54,6 +55,13 @@ const insert = `INSERT INTO bop_identity.guest_session (
 ON CONFLICT DO NOTHING RETURNING ${projection}`;
 const select = `SELECT ${projection} FROM bop_identity.guest_session
 WHERE brand_id = $1 AND store_id = $2`;
+const touch = `UPDATE bop_identity.guest_session
+SET last_seen_at = $5, idle_expires_at = $6, version = version + 1
+WHERE brand_id = $1 AND store_id = $2 AND session_selector_hash = decode($3, 'hex')
+  AND version = $4 AND status = 'Active' AND last_seen_at <= $5
+  AND idle_expires_at > $5 AND absolute_expires_at > $5
+  AND (closure_expires_at IS NULL OR closure_expires_at > $5)
+RETURNING ${projection}`;
 const unavailable = () => new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
 
 export function createPostgresGuestSessionEntryStore(
@@ -88,6 +96,46 @@ export function createPostgresGuestSessionEntryStore(
   }
 
   return Object.freeze({
+    async touchInteractive(command) {
+      try {
+        const selector = parseGuestSelectorHash(command.selectorHash);
+        const observedAt = parseCanonicalInstant(command.observedAt);
+        const idleExpiresAt = parseCanonicalInstant(command.idleExpiresAt);
+        const version = command.expectedVersion;
+        if (
+          !Number.isInteger(version) ||
+          version < 1 ||
+          version >= 2_147_483_647 ||
+          Date.parse(idleExpiresAt) !== Date.parse(observedAt) + 4 * 60 * 60 * 1000
+        )
+          throw unavailable();
+        return await run(async (transaction) => {
+          const persisted = record(
+            await transaction.query(touch, [
+              brand,
+              store,
+              selector,
+              version,
+              observedAt,
+              idleExpiresAt,
+            ]),
+          );
+          if (persisted !== null) {
+            const session = assertGuestSessionUsable(persisted.session, observedAt);
+            if (
+              persisted.sessionSelectorHash !== selector ||
+              session.version !== version + 1 ||
+              session.lastSeenAt !== observedAt ||
+              session.idleExpiresAt !== idleExpiresAt
+            )
+              throw unavailable();
+          }
+          return persisted;
+        });
+      } catch {
+        throw unavailable();
+      }
+    },
     async create(command) {
       try {
         const input = createGuestSessionRecord(command.record);

@@ -20,11 +20,11 @@ import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client } = pg;
 const scope = { brandReference: id(1), storeReference: id(2) };
 
-it("WP-2209 persists real HTTP Guest entry with scoped transactions, reconnect, replay and failure isolation", async () => {
-  await withIsolatedDatabase({ caseId: "wp2209_entry" }, async (context) => {
+it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped failure isolation", async () => {
+  await withIsolatedDatabase({ caseId: "wp2210_entry" }, async (context) => {
     const admin = new Client(context.clientConfig);
-    const role = `wp2209_entry_${context.runId}`;
-    assert.match(role, /^wp2209_entry_[a-f0-9]+$/u);
+    const role = `wp2210_entry_${context.runId}`;
+    assert.match(role, /^wp2210_entry_[a-f0-9]+$/u);
     const f = fixture();
     const logs = [];
     const transactions = [];
@@ -40,6 +40,9 @@ it("WP-2209 persists real HTTP Guest entry with scoped transactions, reconnect, 
       await admin.query(`GRANT USAGE ON SCHEMA bop_identity, platform_helpers TO ${role}`);
       await admin.query(`GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ${role}`);
       await admin.query(`GRANT SELECT, INSERT ON bop_identity.guest_session TO ${role}`);
+      await admin.query(
+        `GRANT UPDATE (last_seen_at, idle_expires_at, version) ON bop_identity.guest_session TO ${role}`,
+      );
       await admin.query(
         `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid), platform_helpers.current_brand_id(), platform_helpers.current_store_id() TO ${role}`,
       );
@@ -58,7 +61,7 @@ it("WP-2209 persists real HTTP Guest entry with scoped transactions, reconnect, 
             await client.query("SET LOCAL idle_in_transaction_session_timeout = '5s'");
             const result = await action({
               async query(sql, values) {
-                if (sql.startsWith("INSERT INTO bop_identity.guest_session")) wrote = true;
+                if (/^(INSERT INTO|UPDATE) bop_identity\.guest_session/u.test(sql)) wrote = true;
                 return client.query(sql, [...values]);
               },
             });
@@ -90,13 +93,12 @@ it("WP-2209 persists real HTTP Guest entry with scoped transactions, reconnect, 
         },
       };
       const entryStore = createPostgresGuestSessionEntryStore(runner, scope);
-      // Only creation and reads are implemented by the real adapter. All lifecycle calls are denied.
+      // Rotation/revocation remain unconfigured; entry and interactive touch use real persistence.
       const deniedLifecycle = async () => {
         throw new Error("synthetic lifecycle not configured");
       };
       const store = {
         ...entryStore,
-        touchInteractive: deniedLifecycle,
         rotate: deniedLifecycle,
         revoke: deniedLifecycle,
       };
@@ -178,6 +180,75 @@ it("WP-2209 persists real HTTP Guest entry with scoped transactions, reconnect, 
         f.options.session.credentials.generateCredential.mock.calls.length,
         issuedCredentials,
       );
+      // WP-2210: background reads never renew; interactive reads persist exactly three fields.
+      const observedAt = new Date(Date.parse(now) + 60_000).toISOString();
+      assert.deepEqual(
+        await identity.resolve({ sessionCredential, activity: "Background", observedAt }),
+        record.session,
+      );
+      assert.deepEqual(await reconnected.resolve(selector), record);
+      const renewed = await identity.resolve({
+        sessionCredential,
+        activity: "Interactive",
+        observedAt,
+      });
+      const renewedRecord = await reconnected.resolve(selector);
+      assert.deepEqual(renewedRecord, {
+        ...record,
+        session: {
+          ...record.session,
+          version: 2,
+          lastSeenAt: observedAt,
+          idleExpiresAt: new Date(Date.parse(observedAt) + 4 * 60 * 60_000).toISOString(),
+        },
+      });
+      assert.deepEqual(renewed, renewedRecord.session);
+      assert.deepEqual(
+        await reconnected.resolveOperation(record.operationReference),
+        renewedRecord,
+      );
+      const touchCommand = {
+        selectorHash: selector,
+        expectedVersion: 2,
+        observedAt,
+        idleExpiresAt: renewed.idleExpiresAt,
+      };
+      const race = await Promise.all([
+        entryStore.touchInteractive(touchCommand),
+        reconnected.touchInteractive(touchCommand),
+      ]);
+      assert.equal(race.filter((result) => result !== null).length, 1);
+      assert.equal(race.filter((result) => result === null).length, 1);
+      const afterRace = await reconnected.resolve(selector);
+      assert.equal(afterRace.session.version, 3);
+      assert.equal(await entryStore.touchInteractive(touchCommand), null);
+      assert.equal(
+        await entryStore.touchInteractive({
+          ...touchCommand,
+          expectedVersion: 3,
+          observedAt: now,
+          idleExpiresAt: record.session.idleExpiresAt,
+        }),
+        null,
+      );
+      assert.deepEqual(await reconnected.resolve(selector), afterRace);
+
+      fault = "rollback";
+      await assert.rejects(entryStore.touchInteractive({ ...touchCommand, expectedVersion: 3 }), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      fault = null;
+      assert.deepEqual(await reconnected.resolve(selector), afterRace);
+      fault = "unknown";
+      await assert.rejects(entryStore.touchInteractive({ ...touchCommand, expectedVersion: 3 }), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      fault = null;
+      assert.equal((await reconnected.resolve(selector)).session.version, 4);
+      assert.equal(
+        await entryStore.touchInteractive({ ...touchCommand, expectedVersion: 3 }),
+        null,
+      );
       const count = async () =>
         (await admin.query("SELECT count(*)::int AS count FROM bop_identity.guest_session")).rows[0]
           .count;
@@ -190,6 +261,10 @@ it("WP-2209 persists real HTTP Guest entry with scoped transactions, reconnect, 
         const otherStore = createPostgresGuestSessionEntryStore(runner, otherScope);
         assert.equal(await otherStore.resolve(selector), null);
         assert.equal(await otherStore.resolveOperation(record.operationReference), null);
+        assert.equal(
+          await otherStore.touchInteractive({ ...touchCommand, expectedVersion: 4 }),
+          null,
+        );
         await assert.rejects(otherStore.create({ record }), { code: "GUEST_SESSION_UNAVAILABLE" });
       }
 
@@ -227,6 +302,10 @@ it("WP-2209 persists real HTTP Guest entry with scoped transactions, reconnect, 
           1,
         );
         await scoped.query("ROLLBACK");
+        await assert.rejects(
+          scoped.query("UPDATE bop_identity.guest_session SET status = 'Expired'"),
+          /permission denied/u,
+        );
         await assert.rejects(
           scoped.query("DELETE FROM bop_identity.guest_session"),
           /permission denied/u,
@@ -325,6 +404,71 @@ it("WP-2209 persists real HTTP Guest entry with scoped transactions, reconnect, 
       );
       assert.equal(await count(), 3);
       assert(transactions.includes("rolled_back"));
+
+      // Isolated setup only: place one synthetic record at each terminal/half-open boundary.
+      const boundarySelector = concurrent.sessionSelectorHash;
+      const baseTime = Date.parse(concurrent.session.createdAt);
+      const at = (hours) => new Date(baseTime + hours * 60 * 60_000).toISOString();
+      for (const scenario of [
+        { status: "Active", last: 0, observed: 4, closure: false },
+        { status: "Active", last: 21, observed: 24, closure: false },
+        { status: "Active", last: 0, observed: 2, closure: true },
+        { status: "Expired", last: 0, observed: 1, closure: false },
+        { status: "Revoked", last: 0, observed: 1, closure: false },
+      ]) {
+        await admin.query(
+          `UPDATE bop_identity.guest_session SET
+          status = $2, version = 1, last_seen_at = $3, idle_expires_at = $4,
+          order_closed_at = $5, closure_expires_at = $6,
+          revocation_reason = $7, revoked_at = $8
+          WHERE guest_session_id = $1`,
+          [
+            concurrent.session.sessionReference,
+            scenario.status,
+            at(scenario.last),
+            at(scenario.last + 4),
+            scenario.closure ? at(0) : null,
+            scenario.closure ? at(2) : null,
+            scenario.status === "Revoked" ? "Logout" : null,
+            scenario.status === "Revoked" ? at(0) : null,
+          ],
+        );
+        const before = await entryStore.resolve(boundarySelector);
+        assert.equal(
+          await entryStore.touchInteractive({
+            selectorHash: boundarySelector,
+            expectedVersion: 1,
+            observedAt: at(scenario.observed),
+            idleExpiresAt: at(scenario.observed + 4),
+          }),
+          null,
+        );
+        assert.deepEqual(await reconnected.resolve(boundarySelector), before);
+      }
+      const wrongTouchContext = createPostgresGuestSessionEntryStore(
+        {
+          run: (action) =>
+            runner.run((transaction) =>
+              action({
+                async query(sql, values) {
+                  if (sql.startsWith("UPDATE bop_identity.guest_session")) {
+                    await transaction.query("SELECT set_config('bop.store_id', $1, true)", [
+                      id(88),
+                    ]);
+                  }
+                  return transaction.query(sql, values);
+                },
+              }),
+            ),
+        },
+        scope,
+      );
+      const beforeRls = await reconnected.resolve(selector);
+      assert.equal(
+        await wrongTouchContext.touchInteractive({ ...touchCommand, expectedVersion: 4 }),
+        null,
+      );
+      assert.deepEqual(await reconnected.resolve(selector), beforeRls);
 
       const stored = JSON.stringify(
         (await admin.query("SELECT row_to_json(g) AS row FROM bop_identity.guest_session AS g"))

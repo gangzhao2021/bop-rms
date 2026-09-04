@@ -93,6 +93,15 @@ const databaseAccessManifestInput = {
   ],
   accesses: [
     {
+      id: "guest-entry.touch-interactive",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_identity", table: "guest_session" },
+      principal: { kind: "module", id: "@bop/identity" },
+      readPattern: null,
+      source: "packages/bop/identity/src/infrastructure/persistence/guest-session-entry-store.ts",
+    },
+    {
       id: "guest-entry.create",
       operation: "write",
       mechanism: "repository",
