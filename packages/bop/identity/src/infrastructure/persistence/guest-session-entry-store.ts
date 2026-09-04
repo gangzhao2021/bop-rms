@@ -19,6 +19,8 @@ export interface GuestSessionEntryTransactionRunner {
 }
 
 export type GuestSessionEntryStore = GuestSessionStorePort;
+export type GuestSessionLegacyClassification =
+  "NoLegacyRows" | "InactiveLegacyRowsOnly" | "LiveLegacyRowsPresent";
 
 const projection = `jsonb_build_object(
   'session', jsonb_build_object(
@@ -420,6 +422,74 @@ export function createPostgresGuestSessionEntryStore(
             );
           if (found !== null && found.operationReference !== operation) throw unavailable();
           return found;
+        });
+      } catch {
+        throw unavailable();
+      }
+    },
+  });
+}
+
+export function createPostgresGuestSessionLegacyInspector(
+  runner: GuestSessionEntryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+) {
+  const brand = parseOpaqueUuidV7(scope.brandReference, "IDENTITY_INPUT_INVALID");
+  const store = parseOpaqueUuidV7(scope.storeReference, "IDENTITY_INPUT_INVALID");
+  return Object.freeze({
+    async inspect(observedAtInput: unknown): Promise<
+      Readonly<{
+        classification: GuestSessionLegacyClassification;
+        observedAt: string;
+      }>
+    > {
+      try {
+        const observedAt = parseCanonicalInstant(observedAtInput);
+        const result = await runner.run(async (transaction) => {
+          await transaction.query(
+            "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+            [brand, store],
+          );
+          return transaction.query(
+            `WITH legacy AS (
+            SELECT s.status, s.idle_expires_at, s.absolute_expires_at, s.closure_expires_at
+            FROM bop_identity.guest_session AS s
+            WHERE s.brand_id = $1 AND s.store_id = $2 AND NOT EXISTS (
+              SELECT 1 FROM bop_identity.guest_session_operation AS h
+              WHERE h.brand_id = s.brand_id AND h.store_id = s.store_id
+                AND h.guest_session_id = s.guest_session_id AND h.operation_id = s.operation_id
+                AND h.operation_intent_hash = s.operation_intent_hash)
+          ) SELECT EXISTS (SELECT 1 FROM legacy) AS "hasLegacy",
+            EXISTS (SELECT 1 FROM legacy WHERE status = 'Active' AND idle_expires_at > $3
+              AND absolute_expires_at > $3
+              AND (closure_expires_at IS NULL OR closure_expires_at > $3)) AS "hasLiveLegacy"`,
+            [brand, store, observedAt],
+          );
+        });
+        if (
+          typeof result !== "object" ||
+          result === null ||
+          !("rows" in result) ||
+          !Array.isArray(result.rows) ||
+          result.rows.length !== 1
+        )
+          throw unavailable();
+        const row = result.rows[0];
+        if (
+          typeof row !== "object" ||
+          row === null ||
+          typeof row.hasLegacy !== "boolean" ||
+          typeof row.hasLiveLegacy !== "boolean" ||
+          (row.hasLiveLegacy && !row.hasLegacy)
+        )
+          throw unavailable();
+        return Object.freeze({
+          observedAt,
+          classification: row.hasLiveLegacy
+            ? "LiveLegacyRowsPresent"
+            : row.hasLegacy
+              ? "InactiveLegacyRowsOnly"
+              : "NoLegacyRows",
         });
       } catch {
         throw unavailable();

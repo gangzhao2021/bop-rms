@@ -4,6 +4,7 @@ import { it } from "vitest";
 import {
   createGuestSessionRecord,
   createPostgresGuestSessionEntryStore,
+  createPostgresGuestSessionLegacyInspector,
   GuestSessionService,
   parseGuestAdmissionEvidence,
 } from "../../bop/identity/src/index.ts";
@@ -670,6 +671,63 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
         assert.equal(await other.resolveOperation(id(913)), null);
         await assert.rejects(other.revoke(revokeCommand), { code: "GUEST_SESSION_UNAVAILABLE" });
       }
+      const inspector = createPostgresGuestSessionLegacyInspector(runner, scope);
+      assert.deepEqual(await inspector.inspect(now), {
+        classification: "NoLegacyRows",
+        observedAt: now,
+      });
+      const legacySelector = "a3".repeat(32);
+      await admin.query(
+        `INSERT INTO bop_identity.guest_session (${`
+        guest_session_id,session_selector_hash,csrf_selector_hash,operation_id,operation_intent_hash,
+        brand_id,store_id,public_store_id,public_table_id,channel,locale,qr_id,qr_revocation_version,
+        dining_state,status,created_at,last_seen_at,idle_expires_at,absolute_expires_at,
+        order_closed_at,closure_expires_at,rotated_from_guest_session_id,revocation_reason,revoked_at,
+        version,dining_session_id,dining_participant_id`})
+        SELECT $1,decode($2,'hex'),decode($3,'hex'),$4,decode($5,'hex'),brand_id,store_id,
+          public_store_id,public_table_id,channel,locale,qr_id,qr_revocation_version,dining_state,
+          status,created_at,last_seen_at,idle_expires_at,absolute_expires_at,order_closed_at,
+          closure_expires_at,rotated_from_guest_session_id,revocation_reason,revoked_at,version,
+          dining_session_id,dining_participant_id
+        FROM bop_identity.guest_session WHERE guest_session_id=$6`,
+        [
+          id(930),
+          legacySelector,
+          "b4".repeat(32),
+          id(931),
+          "c5".repeat(32),
+          replacement.session.sessionReference,
+        ],
+      );
+      assert.deepEqual(await inspector.inspect(now), {
+        classification: "LiveLegacyRowsPresent",
+        observedAt: now,
+      });
+      const afterAbsolute = new Date(
+        Date.parse(replacement.session.absoluteExpiresAt) + 1,
+      ).toISOString();
+      assert.deepEqual(await inspector.inspect(afterAbsolute), {
+        classification: "InactiveLegacyRowsOnly",
+        observedAt: afterAbsolute,
+      });
+      assert.deepEqual(
+        await createPostgresGuestSessionLegacyInspector(runner, {
+          ...scope,
+          storeReference: id(88),
+        }).inspect(now),
+        { classification: "NoLegacyRows", observedAt: now },
+      );
+      await assert.rejects(
+        reconnected.revoke({
+          selectorHash: legacySelector,
+          expectedVersion: 1,
+          reason: "Logout",
+          observedAt: now,
+          operationReference: id(932),
+          operationIntentHash: "d6".repeat(32),
+        }),
+        { code: "GUEST_SESSION_UNAVAILABLE" },
+      );
       fault = "unknown";
       await assert.rejects(reconnected.revoke(revokeCommand), {
         code: "GUEST_SESSION_UNAVAILABLE",

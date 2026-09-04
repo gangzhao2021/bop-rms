@@ -219,7 +219,9 @@ export * from "./application/api-client-service.js";
 export * from "./application/ports/api-client-ports.js";
 export {
   createPostgresGuestSessionEntryStore,
+  createPostgresGuestSessionLegacyInspector,
   type GuestSessionEntryStore,
+  type GuestSessionLegacyClassification,
   type GuestSessionEntryTransaction,
   type GuestSessionEntryTransactionRunner,
 } from "./infrastructure/persistence/guest-session-entry-store.js";
