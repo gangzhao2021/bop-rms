@@ -152,11 +152,18 @@ async function scanUnsupported(root, module, diagnostics) {
         if (!ignored.has(entry.name)) await walk(path);
       } else if (entry.isFile() && !file.endsWith(evidencePath)) {
         const moduleRelative = relative(module.root, path).replaceAll("\\", "/");
+        // WP-2209 accepts only this owner-scoped entry adapter; driver imports remain checked below.
+        const acceptedGuestEntryAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          module.manifest.ownedDatabase?.tables?.includes("guest_session") &&
+          moduleRelative === "src/infrastructure/persistence/guest-session-entry-store.ts";
         if (
           (moduleRelative.startsWith("src/infrastructure/persistence/") ||
             moduleRelative.startsWith("migrations/") ||
             extname(path).toLowerCase() === ".sql") &&
-          ![...sharedAuthorityModules.values()].includes(module.packageName)
+          ![...sharedAuthorityModules.values()].includes(module.packageName) &&
+          !acceptedGuestEntryAsset
         )
           diagnostics.push(
             diag(

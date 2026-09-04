@@ -91,7 +91,26 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "sensitive_personal"],
     },
   ],
-  accesses: [],
+  accesses: [
+    {
+      id: "guest-entry.create",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_identity", table: "guest_session" },
+      principal: { kind: "module", id: "@bop/identity" },
+      readPattern: null,
+      source: "packages/bop/identity/src/infrastructure/persistence/guest-session-entry-store.ts",
+    },
+    {
+      id: "guest-entry.resolve",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_identity", table: "guest_session" },
+      principal: { kind: "module", id: "@bop/identity" },
+      readPattern: "owner-repository",
+      source: "packages/bop/identity/src/infrastructure/persistence/guest-session-entry-store.ts",
+    },
+  ],
 } as const;
 
 export const databaseAccessManifest = databaseAccessManifestInput;
