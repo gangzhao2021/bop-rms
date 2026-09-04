@@ -57,6 +57,7 @@ describe("migration catalog", () => {
       "0200_009_create_operating_entity_administration",
       "0200_010_create_brand_administration",
       "0200_011_create_platform_tenant_administration",
+      "0200_012_create_guest_session_operation",
       "0300_001_create_permission",
       "0300_002_create_role_administration",
       "0400_001_create_feature_control_administration",
@@ -1110,6 +1111,7 @@ describe("migration catalog", () => {
       ],
       ["0200_010_create_brand_administration", "@bop/tenant", "bop_tenant"],
       ["0200_011_create_platform_tenant_administration", "@bop/tenant", "bop_tenant"],
+      ["0200_012_create_guest_session_operation", "@bop/identity", "bop_identity"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
       ["0300_002_create_role_administration", "@bop/permission", "bop_permission"],
     ]);

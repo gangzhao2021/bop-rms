@@ -18,6 +18,7 @@ const moduleManifestInput = {
       "api_client_operation",
       "authentication_session",
       "guest_session",
+      "guest_session_operation",
       "oidc_authorization_transaction",
       "session_revocation_request",
       "workforce_invitation",

@@ -61,12 +61,14 @@ describe("WP-2209 PostgreSQL Guest entry persistence", () => {
     expect(h.query.mock.calls[1]?.[0]).not.toContain(record.sessionSelectorHash);
     expect(h.query.mock.calls[1]?.[1]).toContain(record.sessionSelectorHash);
     expect(await h.store.resolve(record.sessionSelectorHash)).toEqual(record);
-    expect(h.query.mock.calls[3]?.[0]).toContain("WHERE brand_id = $1 AND store_id = $2");
+    expect(h.query.mock.calls[4]?.[0]).toContain("WHERE brand_id = $1 AND store_id = $2");
     expect(await h.store.resolveOperation(record.operationReference)).toEqual(record);
     expect(Object.keys(h.store).sort()).toEqual([
       "create",
       "resolve",
       "resolveOperation",
+      "revoke",
+      "rotate",
       "touchInteractive",
     ]);
   });
@@ -147,7 +149,7 @@ describe("WP-2209 PostgreSQL Guest entry persistence", () => {
     });
     expect(error).not.toHaveProperty("cause");
     expect(String(error)).not.toContain("private SQL");
-    expect(h.query).toHaveBeenCalledTimes(2);
+    expect(h.query).toHaveBeenCalledTimes(3);
   });
 });
 
@@ -234,5 +236,106 @@ describe("WP-2210 interactive persistence", () => {
     expect(error).not.toHaveProperty("cause");
     expect(String(error)).not.toContain("private");
     expect(attempted).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("WP-2211 lifecycle persistence", () => {
+  const current = fixture();
+  const next = createGuestSessionRecord({
+    ...current,
+    session: {
+      ...current.session,
+      sessionReference: id(30),
+      rotatedFromGuestSessionReference: current.session.sessionReference,
+    },
+    sessionSelectorHash: "4".repeat(64),
+    csrfSelectorHash: "5".repeat(64),
+    operationReference: id(31),
+  });
+  const rotation = {
+    currentSelectorHash: current.sessionSelectorHash,
+    expectedVersion: 1,
+    reason: "Rotated" as const,
+    observedAt: current.session.createdAt,
+    nextRecord: next,
+  };
+  const revoke = {
+    selectorHash: current.sessionSelectorHash,
+    expectedVersion: 1,
+    reason: "Logout" as const,
+    observedAt: current.session.createdAt,
+    operationReference: next.operationReference,
+    operationIntentHash: next.operationIntentHash,
+  };
+  function lifecycleHarness(options: { missingHistory?: boolean; mismatch?: boolean } = {}) {
+    const query = vi.fn(async (sql: string) => {
+      let result: unknown = current;
+      if (sql.startsWith("UPDATE"))
+        result = fixture({
+          status: "Revoked",
+          version: 2,
+          revocationReason: "Rotated",
+          revokedAt: current.session.createdAt,
+        });
+      if (sql.startsWith("INSERT")) result = options.mismatch ? current : next;
+      if (options.missingHistory && sql.includes("FROM bop_identity.guest_session_operation"))
+        return { rows: [] };
+      return { rows: [{ record: result }] };
+    });
+    const runner: GuestSessionEntryTransactionRunner = { run: async (action) => action({ query }) };
+    return { query, store: createPostgresGuestSessionEntryStore(runner, scope) };
+  }
+  it("locks the predecessor and writes the replacement/history in one transaction", async () => {
+    const h = lifecycleHarness();
+    expect(await h.store.rotate(rotation)).toEqual(next);
+    expect(h.query.mock.calls[1]?.[0]).toContain("FOR UPDATE");
+    expect(h.query.mock.calls.map(([sql]) => sql.split(" ")[0])).toEqual([
+      "SELECT",
+      "SELECT",
+      "SELECT",
+      "UPDATE",
+      "INSERT",
+      "INSERT",
+    ]);
+  });
+  it("rejects missing legacy history without a terminal update", async () => {
+    const h = lifecycleHarness({ missingHistory: true });
+    await expect(h.store.rotate(rotation)).rejects.toMatchObject({
+      code: "GUEST_SESSION_UNAVAILABLE",
+    });
+    expect(h.query.mock.calls.some(([sql]) => sql.startsWith("UPDATE"))).toBe(false);
+    await expect(h.store.revoke(revoke)).rejects.toMatchObject({
+      code: "GUEST_SESSION_UNAVAILABLE",
+    });
+  });
+  it("rejects an unrelated persisted replacement before credential issuance", async () => {
+    await expect(lifecycleHarness({ mismatch: true }).store.rotate(rotation)).rejects.toMatchObject(
+      { code: "GUEST_SESSION_UNAVAILABLE" },
+    );
+  });
+  it.each([
+    { session: { ...next.session, storeReference: id(88) } },
+    { session: { ...next.session, rotatedFromGuestSessionReference: id(88) } },
+    { session: { ...next.session, sessionReference: current.session.sessionReference } },
+    { sessionSelectorHash: current.sessionSelectorHash },
+    { csrfSelectorHash: current.csrfSelectorHash },
+  ])("rejects invalid replacement identity or credentials", async (override) => {
+    await expect(
+      lifecycleHarness().store.rotate({
+        ...rotation,
+        nextRecord: createGuestSessionRecord({ ...next, ...override }),
+      }),
+    ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+  });
+  it("rejects stale versions and backward time", async () => {
+    await expect(
+      lifecycleHarness().store.revoke({ ...revoke, expectedVersion: 2 }),
+    ).rejects.toMatchObject({ code: "GUEST_SESSION_VERSION_CONFLICT" });
+    await expect(
+      lifecycleHarness().store.revoke({
+        ...revoke,
+        observedAt: "2026-01-15T11:59:00.123Z" as typeof revoke.observedAt,
+      }),
+    ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
   });
 });

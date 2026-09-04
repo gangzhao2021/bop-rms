@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "identity", packageName: "@bop/identity", layer: "BOP" },
   tables: [
     {
+      table: "guest_session_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/identity" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "credential"],
+    },
+    {
       table: "api_client",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@bop/identity" },
@@ -92,6 +100,24 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "guest-session.history-write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_identity", table: "guest_session_operation" },
+      principal: { kind: "module", id: "@bop/identity" },
+      readPattern: null,
+      source: "packages/bop/identity/src/infrastructure/persistence/guest-session-entry-store.ts",
+    },
+    {
+      id: "guest-session.history-read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_identity", table: "guest_session_operation" },
+      principal: { kind: "module", id: "@bop/identity" },
+      readPattern: "owner-repository",
+      source: "packages/bop/identity/src/infrastructure/persistence/guest-session-entry-store.ts",
+    },
     {
       id: "guest-entry.touch-interactive",
       operation: "write",

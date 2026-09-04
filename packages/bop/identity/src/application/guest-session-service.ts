@@ -500,15 +500,12 @@ export class GuestSessionService {
     const currentSelectorHash = this.#selector("Session", credential);
     const current = await this.#storeCall(() => this.#store.resolve(currentSelectorHash));
     if (current === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
-    const currentSession = assertGuestSessionUsable(this.#record(current).session, requestedAt);
-    if (currentSession.version !== raw.expectedVersion) {
-      throw new GuestSessionError("GUEST_SESSION_VERSION_CONFLICT");
-    }
+    const resolvedCurrent = this.#record(current).session;
     const operationReference = parseGuestOperationReference(raw.operationReference);
     const entryRequestReference = parseGuestEntryRequestReference(raw.entryRequestReference);
     const reason = raw.reason as "Rotated" | "BindingChanged" | "RiskChanged";
     const intent = this.#intent(
-      `Rotate:${currentSession.sessionReference}:${raw.expectedVersion}:${entryRequestReference}:${reason}`,
+      `Rotate:${resolvedCurrent.sessionReference}:${raw.expectedVersion}:${entryRequestReference}:${reason}`,
     );
     const prior = await this.#storeCall(() => this.#store.resolveOperation(operationReference));
     if (prior !== null) {
@@ -520,6 +517,10 @@ export class GuestSessionService {
         session: prior.session,
         cookie: guestSessionCookie,
       });
+    }
+    const currentSession = assertGuestSessionUsable(resolvedCurrent, requestedAt);
+    if (currentSession.version !== raw.expectedVersion) {
+      throw new GuestSessionError("GUEST_SESSION_VERSION_CONFLICT");
     }
     const evidence = await this.#evidence(entryRequestReference, operationReference, requestedAt);
     let fresh: FreshGuestSessionRecord;

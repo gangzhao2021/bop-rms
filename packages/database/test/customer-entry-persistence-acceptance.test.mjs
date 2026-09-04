@@ -21,10 +21,10 @@ const { Client } = pg;
 const scope = { brandReference: id(1), storeReference: id(2) };
 
 it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped failure isolation", async () => {
-  await withIsolatedDatabase({ caseId: "wp2210_entry" }, async (context) => {
+  await withIsolatedDatabase({ caseId: "wp2211_entry" }, async (context) => {
     const admin = new Client(context.clientConfig);
-    const role = `wp2210_entry_${context.runId}`;
-    assert.match(role, /^wp2210_entry_[a-f0-9]+$/u);
+    const role = `wp2211_entry_${context.runId}`;
+    assert.match(role, /^wp2211_entry_[a-f0-9]+$/u);
     const f = fixture();
     const logs = [];
     const transactions = [];
@@ -40,6 +40,7 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
       await admin.query(`GRANT USAGE ON SCHEMA bop_identity, platform_helpers TO ${role}`);
       await admin.query(`GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ${role}`);
       await admin.query(`GRANT SELECT, INSERT ON bop_identity.guest_session TO ${role}`);
+      await admin.query(`GRANT SELECT, INSERT ON bop_identity.guest_session_operation TO ${role}`);
       await admin.query(
         `GRANT UPDATE (last_seen_at, idle_expires_at, version) ON bop_identity.guest_session TO ${role}`,
       );
@@ -203,10 +204,7 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
         },
       });
       assert.deepEqual(renewed, renewedRecord.session);
-      assert.deepEqual(
-        await reconnected.resolveOperation(record.operationReference),
-        renewedRecord,
-      );
+      assert.deepEqual(await reconnected.resolveOperation(record.operationReference), record);
       const touchCommand = {
         selectorHash: selector,
         expectedVersion: 2,
@@ -286,6 +284,14 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
           0,
         );
         await scoped.query("BEGIN");
+        assert.equal(
+          (
+            await scoped.query(
+              "SELECT count(*)::int AS count FROM bop_identity.guest_session_operation",
+            )
+          ).rows[0].count,
+          0,
+        );
         await scoped.query(
           "SELECT set_config('bop.brand_id',$1,true), set_config('bop.store_id',$2,true)",
           [scope.brandReference, id(88)],
@@ -469,6 +475,247 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
         null,
       );
       assert.deepEqual(await reconnected.resolve(selector), beforeRls);
+
+      // WP-2211: enable only lifecycle columns in this disposable role, never production grants.
+      await admin.query(
+        `GRANT UPDATE (status,revocation_reason,revoked_at) ON bop_identity.guest_session TO ${role}`,
+      );
+      const lifecycle = new GuestSessionService({
+        ...options.session,
+        store: reconnected,
+        admission: {
+          consume: async (input) =>
+            parseGuestAdmissionEvidence({
+              decision: "Allowed",
+              evidenceReference: id(901),
+              entryRequestReference: input.entryRequestReference,
+              ...scope,
+              publicStoreReference: record.session.publicStoreReference,
+              publicTableReference: record.session.publicTableReference,
+              channel: record.session.channel,
+              locale: record.session.locale,
+              qrReference: record.session.qrReference,
+              qrRevocationVersion: record.session.qrRevocationVersion,
+              evaluatedAt: now,
+              validUntil: new Date(Date.parse(now) + 300_000).toISOString(),
+            }),
+        },
+      });
+      const rotateInput = {
+        sessionCredential,
+        expectedVersion: 4,
+        entryRequestReference: id(902),
+        operationReference: id(903),
+        reason: "Rotated",
+        requestedAt: observedAt,
+      };
+      fault = "rollback";
+      await assert.rejects(lifecycle.rotate(rotateInput), { code: "GUEST_SESSION_UNAVAILABLE" });
+      fault = null;
+      assert.deepEqual(await reconnected.resolve(selector), beforeRls);
+      assert.equal(await reconnected.resolveOperation(id(903)), null);
+      const rotated = await lifecycle.rotate(rotateInput);
+      assert.equal(rotated.status, "Issued");
+      assert.notEqual(rotated.sessionCredential, sessionCredential);
+      assert.notEqual(rotated.csrfCredential, body.csrfToken);
+      assert.equal((await reconnected.resolve(selector)).session.status, "Revoked");
+      await assert.rejects(
+        lifecycle.authorize({ sessionCredential, csrfCredential: body.csrfToken, observedAt }),
+        { code: "GUEST_SESSION_UNAVAILABLE" },
+      );
+      assert.deepEqual(
+        await lifecycle.authorize({
+          sessionCredential: rotated.sessionCredential,
+          csrfCredential: rotated.csrfCredential,
+          observedAt,
+        }),
+        rotated.session,
+      );
+      const generated = options.session.credentials.generateCredential.mock.calls.length;
+      const rotationReplay = await lifecycle.rotate(rotateInput);
+      assert.equal(rotationReplay.status, "AlreadyApplied");
+      assert.deepEqual(rotationReplay.session, rotated.session);
+      assert(!("sessionCredential" in rotationReplay));
+      assert.equal(options.session.credentials.generateCredential.mock.calls.length, generated);
+      await assert.rejects(lifecycle.rotate({ ...rotateInput, reason: "RiskChanged" }), {
+        code: "GUEST_SESSION_IDEMPOTENCY_CONFLICT",
+      });
+      assert.deepEqual(await reconnected.resolveOperation(record.operationReference), record);
+
+      const revokeInput = {
+        sessionCredential: rotated.sessionCredential,
+        expectedVersion: 1,
+        operationReference: id(904),
+        reason: "Logout",
+        requestedAt: observedAt,
+      };
+      const nextSelector = options.session.credentials.hashCredential(
+        "Session",
+        rotated.sessionCredential,
+      );
+      const activeNext = await reconnected.resolve(nextSelector);
+      fault = "rollback";
+      await assert.rejects(lifecycle.revoke(revokeInput), { code: "GUEST_SESSION_UNAVAILABLE" });
+      fault = null;
+      assert.deepEqual(await reconnected.resolve(nextSelector), activeNext);
+      assert.equal(await reconnected.resolveOperation(id(904)), null);
+      fault = "unknown";
+      await assert.rejects(lifecycle.revoke(revokeInput), { code: "GUEST_SESSION_UNAVAILABLE" });
+      fault = null;
+      const revoked = await lifecycle.revoke(revokeInput);
+      assert.equal(revoked.status, "Revoked");
+      assert.equal(revoked.version, 2);
+      assert.deepEqual((await reconnected.resolveOperation(id(903))).session, rotated.session);
+      assert.deepEqual((await reconnected.resolveOperation(id(904))).session, revoked);
+      assert.equal((await reconnected.resolve(nextSelector)).operationReference, id(903));
+      await assert.rejects(
+        lifecycle.authorize({
+          sessionCredential: rotated.sessionCredential,
+          csrfCredential: rotated.csrfCredential,
+          observedAt,
+        }),
+        { code: "GUEST_SESSION_UNAVAILABLE" },
+      );
+      await assert.rejects(lifecycle.revoke({ ...revokeInput, reason: "Administrative" }), {
+        code: "GUEST_SESSION_IDEMPOTENCY_CONFLICT",
+      });
+
+      const fresh = createGuestSessionRecord({
+        ...record,
+        session: { ...record.session, sessionReference: id(910) },
+        operationReference: id(911),
+        sessionSelectorHash: "d".repeat(64),
+        csrfSelectorHash: "e".repeat(64),
+      });
+      await reconnected.create({ record: fresh });
+      const replacement = createGuestSessionRecord({
+        ...fresh,
+        session: {
+          ...fresh.session,
+          sessionReference: id(912),
+          rotatedFromGuestSessionReference: id(910),
+        },
+        operationReference: id(913),
+        sessionSelectorHash: "f".repeat(64),
+        csrfSelectorHash: "0".repeat(64),
+      });
+      const rotation = {
+        currentSelectorHash: fresh.sessionSelectorHash,
+        expectedVersion: 1,
+        reason: "Rotated",
+        observedAt: now,
+        nextRecord: replacement,
+      };
+      const raced = await Promise.allSettled([
+        reconnected.rotate(rotation),
+        entryStore.rotate(rotation),
+      ]);
+      assert.equal(raced.filter((r) => r.status === "fulfilled").length, 1);
+      assert.equal(raced.filter((r) => r.status === "rejected").length, 1);
+      assert.deepEqual(await reconnected.resolveOperation(id(913)), replacement);
+      const revokeCommand = {
+        selectorHash: replacement.sessionSelectorHash,
+        expectedVersion: 1,
+        reason: "Logout",
+        observedAt: now,
+        operationReference: id(914),
+        operationIntentHash: "5".repeat(64),
+      };
+      await assert.rejects(reconnected.revoke({ ...revokeCommand, expectedVersion: 2 }), {
+        code: "GUEST_SESSION_VERSION_CONFLICT",
+      });
+      // An operation collision must roll back the terminal update, not replace prior history.
+      await assert.rejects(reconnected.revoke({ ...revokeCommand, operationReference: id(911) }), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.deepEqual(await reconnected.resolve(replacement.sessionSelectorHash), replacement);
+      for (const otherScope of [
+        { ...scope, storeReference: id(88) },
+        { ...scope, brandReference: id(88) },
+      ]) {
+        const other = createPostgresGuestSessionEntryStore(runner, otherScope);
+        assert.equal(await other.resolveOperation(id(913)), null);
+        await assert.rejects(other.revoke(revokeCommand), { code: "GUEST_SESSION_UNAVAILABLE" });
+      }
+      fault = "unknown";
+      await assert.rejects(reconnected.revoke(revokeCommand), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      fault = null;
+      assert.equal((await reconnected.resolveOperation(id(914))).session.status, "Revoked");
+      await assert.rejects(
+        reconnected.revoke({ ...revokeCommand, expectedVersion: 2, operationReference: id(915) }),
+        { code: "GUEST_SESSION_UNAVAILABLE" },
+      );
+
+      const unknownSource = createGuestSessionRecord({
+        ...fresh,
+        session: { ...fresh.session, sessionReference: id(920) },
+        operationReference: id(921),
+        sessionSelectorHash: "6".repeat(64),
+        csrfSelectorHash: "7".repeat(64),
+      });
+      await reconnected.create({ record: unknownSource });
+      const unknownNext = createGuestSessionRecord({
+        ...unknownSource,
+        session: {
+          ...unknownSource.session,
+          sessionReference: id(922),
+          rotatedFromGuestSessionReference: id(920),
+          diningState: "DiningBound",
+          diningSessionReference: id(924),
+          diningParticipantReference: id(925),
+        },
+        operationReference: id(923),
+        sessionSelectorHash: "a".repeat(64),
+        csrfSelectorHash: "1".repeat(64),
+      });
+      fault = "unknown";
+      await assert.rejects(
+        reconnected.rotate({
+          currentSelectorHash: unknownSource.sessionSelectorHash,
+          expectedVersion: 1,
+          reason: "BindingChanged",
+          observedAt: now,
+          nextRecord: unknownNext,
+        }),
+        { code: "GUEST_SESSION_UNAVAILABLE" },
+      );
+      fault = null;
+      assert.deepEqual(await reconnected.resolveOperation(id(923)), unknownNext);
+      assert.equal(
+        (await reconnected.resolve(unknownSource.sessionSelectorHash)).session.status,
+        "Revoked",
+      );
+      const expiredRevocation = await reconnected.revoke({
+        selectorHash: unknownNext.sessionSelectorHash,
+        expectedVersion: 1,
+        reason: "Logout",
+        observedAt: new Date(Date.parse(now) + 25 * 60 * 60_000).toISOString(),
+        operationReference: id(926),
+        operationIntentHash: "2".repeat(64),
+      });
+      assert.equal(expiredRevocation.status, "Revoked");
+
+      // Even the test owner cannot mutate existing history through normal SQL.
+      for (const sql of [
+        "UPDATE bop_identity.guest_session_operation SET version = version + 1",
+        "DELETE FROM bop_identity.guest_session_operation",
+        "TRUNCATE bop_identity.guest_session_operation",
+      ])
+        await assert.rejects(admin.query(sql), (error) => error.code === "55000");
+      const history = JSON.stringify(
+        (await admin.query("SELECT row_to_json(h) FROM bop_identity.guest_session_operation h"))
+          .rows,
+      );
+      for (const secret of [
+        sessionCredential,
+        body.csrfToken,
+        rotated.sessionCredential,
+        rotated.csrfCredential,
+        qrToken,
+      ])
+        assert(!history.includes(secret));
 
       const stored = JSON.stringify(
         (await admin.query("SELECT row_to_json(g) AS row FROM bop_identity.guest_session AS g"))

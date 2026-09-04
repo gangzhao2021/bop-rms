@@ -515,6 +515,17 @@ describe("Guest Session contract", () => {
       expect(rotated.csrfCredential).toBe(nextCsrfCredential);
       expect(rotated.session.rotatedFromGuestSessionReference).toBe(ids.session);
     }
+    const replay = await service.rotate({
+      sessionCredential,
+      expectedVersion: 1,
+      entryRequestReference: ids.entry,
+      operationReference: ids.nextOperation,
+      reason: "BindingChanged",
+    });
+    expect(replay.status).toBe("AlreadyApplied");
+    expect(replay.session).toEqual(rotated.session);
+    expect(replay).not.toHaveProperty("sessionCredential");
+    expect(replay).not.toHaveProperty("csrfCredential");
     await expect(
       service.resolve({ sessionCredential, activity: "Background" }),
     ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });

@@ -18,10 +18,7 @@ export interface GuestSessionEntryTransactionRunner {
   run<T>(action: (transaction: GuestSessionEntryTransaction) => Promise<T>): Promise<T>;
 }
 
-export type GuestSessionEntryStore = Pick<
-  GuestSessionStorePort,
-  "create" | "resolve" | "resolveOperation" | "touchInteractive"
->;
+export type GuestSessionEntryStore = GuestSessionStorePort;
 
 const projection = `jsonb_build_object(
   'session', jsonb_build_object(
@@ -55,6 +52,29 @@ const insert = `INSERT INTO bop_identity.guest_session (
 ON CONFLICT DO NOTHING RETURNING ${projection}`;
 const select = `SELECT ${projection} FROM bop_identity.guest_session
 WHERE brand_id = $1 AND store_id = $2`;
+const historySelect = `SELECT ${projection} FROM bop_identity.guest_session_operation
+WHERE brand_id = $1 AND store_id = $2 AND operation_id = $3`;
+const columns = `guest_session_id, session_selector_hash, csrf_selector_hash, operation_id,
+operation_intent_hash, brand_id, store_id, public_store_id, public_table_id, channel, locale,
+qr_id, qr_revocation_version, dining_state, status, created_at, last_seen_at, idle_expires_at,
+absolute_expires_at, order_closed_at, closure_expires_at, rotated_from_guest_session_id,
+revocation_reason, revoked_at, version, dining_session_id, dining_participant_id`;
+const snapshot = `INSERT INTO bop_identity.guest_session_operation (${columns})
+SELECT guest_session_id, session_selector_hash, csrf_selector_hash, $4, decode($5, 'hex'),
+brand_id, store_id, public_store_id, public_table_id, channel, locale, qr_id, qr_revocation_version,
+dining_state, status, created_at, last_seen_at, idle_expires_at, absolute_expires_at,
+order_closed_at, closure_expires_at, rotated_from_guest_session_id, revocation_reason, revoked_at,
+version, dining_session_id, dining_participant_id
+FROM bop_identity.guest_session WHERE brand_id = $1 AND store_id = $2 AND guest_session_id = $3
+ON CONFLICT DO NOTHING RETURNING ${projection}`;
+const retire = `UPDATE bop_identity.guest_session
+SET status = 'Revoked', revocation_reason = $5, revoked_at = $6, version = version + 1
+WHERE brand_id = $1 AND store_id = $2 AND session_selector_hash = decode($3, 'hex')
+AND version = $4 AND status = 'Active' RETURNING ${projection}`;
+const rotatedInsert = `INSERT INTO bop_identity.guest_session (${columns})
+VALUES ($1,decode($2,'hex'),decode($3,'hex'),$4,decode($5,'hex'),$6,$7,$8,$9,$10,$11,$12,$13,
+$14,'Active',$15,$15,$16,$17,NULL,NULL,$18,NULL,NULL,1,$19,$20)
+ON CONFLICT DO NOTHING RETURNING ${projection}`;
 const touch = `UPDATE bop_identity.guest_session
 SET last_seen_at = $5, idle_expires_at = $6, version = version + 1
 WHERE brand_id = $1 AND store_id = $2 AND session_selector_hash = decode($3, 'hex')
@@ -95,7 +115,196 @@ export function createPostgresGuestSessionEntryStore(
     });
   }
 
-  return Object.freeze({
+  async function append(transaction: GuestSessionEntryTransaction, input: GuestSessionRecord) {
+    const saved = record(
+      await transaction.query(snapshot, [
+        brand,
+        store,
+        input.session.sessionReference,
+        input.operationReference,
+        input.operationIntentHash,
+      ]),
+    );
+    if (saved === null || JSON.stringify(saved) !== JSON.stringify(input)) throw unavailable();
+  }
+
+  async function lockCurrent(
+    transaction: GuestSessionEntryTransaction,
+    selector: string,
+    version: number,
+    observedAt: string,
+  ) {
+    if (!Number.isInteger(version) || version < 1 || version >= 2_147_483_647) throw unavailable();
+    const current = record(
+      await transaction.query(
+        `${select} AND session_selector_hash = decode($3, 'hex') FOR UPDATE`,
+        [brand, store, selector],
+      ),
+    );
+    if (
+      current === null ||
+      current.sessionSelectorHash !== selector ||
+      current.session.status !== "Active"
+    )
+      throw unavailable();
+    if (current.session.version !== version)
+      throw new GuestSessionError("GUEST_SESSION_VERSION_CONFLICT");
+    if (Date.parse(observedAt) < Date.parse(current.session.lastSeenAt)) throw unavailable();
+    const original = record(
+      await transaction.query(historySelect, [brand, store, current.operationReference]),
+    );
+    if (
+      original === null ||
+      original.operationReference !== current.operationReference ||
+      original.session.sessionReference !== current.session.sessionReference ||
+      original.operationIntentHash !== current.operationIntentHash
+    )
+      throw unavailable();
+    return current;
+  }
+
+  async function terminate(
+    transaction: GuestSessionEntryTransaction,
+    current: GuestSessionRecord,
+    reason: string,
+    observedAt: string,
+  ) {
+    const expected = createGuestSessionRecord({
+      ...current,
+      session: {
+        ...current.session,
+        status: "Revoked",
+        version: current.session.version + 1,
+        revocationReason: reason,
+        revokedAt: observedAt,
+      },
+    });
+    const saved = record(
+      await transaction.query(retire, [
+        brand,
+        store,
+        current.sessionSelectorHash,
+        current.session.version,
+        reason,
+        observedAt,
+      ]),
+    );
+    if (saved === null || JSON.stringify(saved) !== JSON.stringify(expected)) throw unavailable();
+    return saved;
+  }
+
+  function lifecycleError(error: unknown): never {
+    if (error instanceof GuestSessionError && error.code === "GUEST_SESSION_VERSION_CONFLICT")
+      throw new GuestSessionError("GUEST_SESSION_VERSION_CONFLICT");
+    throw unavailable();
+  }
+
+  return Object.freeze<GuestSessionEntryStore>({
+    async rotate(command) {
+      try {
+        const selector = parseGuestSelectorHash(command.currentSelectorHash);
+        const observedAt = parseCanonicalInstant(command.observedAt);
+        const next = createGuestSessionRecord(command.nextRecord);
+        const s = next.session;
+        if (
+          !["Rotated", "BindingChanged", "RiskChanged"].includes(command.reason) ||
+          s.brandReference !== brand ||
+          s.storeReference !== store ||
+          s.status !== "Active" ||
+          s.version !== 1 ||
+          s.createdAt !== observedAt ||
+          s.lastSeenAt !== observedAt ||
+          s.orderClosedAt !== null
+        )
+          throw unavailable();
+        return await run(async (transaction) => {
+          const current = await lockCurrent(
+            transaction,
+            selector,
+            command.expectedVersion,
+            observedAt,
+          );
+          const old = assertGuestSessionUsable(current.session, observedAt);
+          if (
+            s.rotatedFromGuestSessionReference !== old.sessionReference ||
+            s.sessionReference === old.sessionReference ||
+            next.sessionSelectorHash === selector ||
+            next.csrfSelectorHash === current.csrfSelectorHash
+          )
+            throw unavailable();
+          if (
+            s.diningState === "DiningBound" &&
+            (command.reason !== "BindingChanged" ||
+              old.diningState !== "ContextOnly" ||
+              s.channel !== old.channel ||
+              s.locale !== old.locale ||
+              s.publicStoreReference !== old.publicStoreReference ||
+              s.publicTableReference !== old.publicTableReference ||
+              s.qrReference !== old.qrReference ||
+              s.qrRevocationVersion !== old.qrRevocationVersion)
+          )
+            throw unavailable();
+          await terminate(transaction, current, command.reason, observedAt);
+          const saved = record(
+            await transaction.query(rotatedInsert, [
+              s.sessionReference,
+              next.sessionSelectorHash,
+              next.csrfSelectorHash,
+              next.operationReference,
+              next.operationIntentHash,
+              brand,
+              store,
+              s.publicStoreReference,
+              s.publicTableReference,
+              s.channel,
+              s.locale,
+              s.qrReference,
+              s.qrRevocationVersion,
+              s.diningState,
+              observedAt,
+              s.idleExpiresAt,
+              s.absoluteExpiresAt,
+              s.rotatedFromGuestSessionReference,
+              s.diningSessionReference,
+              s.diningParticipantReference,
+            ]),
+          );
+          if (saved === null || JSON.stringify(saved) !== JSON.stringify(next)) throw unavailable();
+          await append(transaction, saved);
+          return saved;
+        });
+      } catch (error) {
+        return lifecycleError(error);
+      }
+    },
+    async revoke(command) {
+      try {
+        const selector = parseGuestSelectorHash(command.selectorHash);
+        const observedAt = parseCanonicalInstant(command.observedAt);
+        const operation = parseGuestOperationReference(command.operationReference);
+        const intent = parseGuestSelectorHash(command.operationIntentHash);
+        return await run(async (transaction) => {
+          const current = await lockCurrent(
+            transaction,
+            selector,
+            command.expectedVersion,
+            observedAt,
+          );
+          const saved = await terminate(transaction, current, command.reason, observedAt);
+          await append(
+            transaction,
+            createGuestSessionRecord({
+              ...saved,
+              operationReference: operation,
+              operationIntentHash: intent,
+            }),
+          );
+          return saved.session;
+        });
+      } catch (error) {
+        return lifecycleError(error);
+      }
+    },
     async touchInteractive(command) {
       try {
         const selector = parseGuestSelectorHash(command.selectorHash);
@@ -175,6 +384,7 @@ export function createPostgresGuestSessionEntryStore(
           // Never hand a concurrent attempt the credentials generated for a different insert.
           if (persisted === null || JSON.stringify(persisted) !== JSON.stringify(input))
             throw unavailable();
+          await append(transaction, persisted);
           return persisted;
         });
       } catch {
@@ -203,9 +413,11 @@ export function createPostgresGuestSessionEntryStore(
       try {
         const operation = parseGuestOperationReference(operationInput);
         return await run(async (transaction) => {
-          const found = record(
-            await transaction.query(`${select} AND operation_id = $3`, [brand, store, operation]),
-          );
+          const found =
+            record(await transaction.query(historySelect, [brand, store, operation])) ??
+            record(
+              await transaction.query(`${select} AND operation_id = $3`, [brand, store, operation]),
+            );
           if (found !== null && found.operationReference !== operation) throw unavailable();
           return found;
         });
