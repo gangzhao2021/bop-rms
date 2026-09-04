@@ -16,15 +16,22 @@ import { createCustomerEntryComposition } from "../../../apps/api/src/customer-e
 import { CustomerEntryHandler } from "../../../apps/api/src/customer-entry.ts";
 import { createApiRuntimeLogger, createApiServerRuntime } from "../../../apps/api/src/server.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { createTenantTransactionRunner } from "../src/index.ts";
 
-const { Client } = pg;
+const { Client, Pool } = pg;
 const scope = { brandReference: id(1), storeReference: id(2) };
 
 it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped failure isolation", async () => {
-  await withIsolatedDatabase({ caseId: "wp2211_entry" }, async (context) => {
+  await withIsolatedDatabase({ caseId: "wp2212_entry" }, async (context) => {
     const admin = new Client(context.clientConfig);
-    const role = `wp2211_entry_${context.runId}`;
-    assert.match(role, /^wp2211_entry_[a-f0-9]+$/u);
+    const role = `wp2212_entry_${context.runId}`;
+    assert.match(role, /^wp2212_entry_[a-f0-9]+$/u);
+    const pool = new Pool({
+      ...context.clientConfig,
+      max: 2,
+      connectionTimeoutMillis: 2000,
+      query_timeout: 5000,
+    });
     const f = fixture();
     const logs = [];
     const transactions = [];
@@ -48,8 +55,34 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
         `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid), platform_helpers.current_brand_id(), platform_helpers.current_store_id() TO ${role}`,
       );
 
+      const pooled = createTenantTransactionRunner(
+        {
+          options: pool.options,
+          async connect() {
+            const client = await pool.connect();
+            try {
+              await client.query(`SET ROLE ${role}`);
+              return client;
+            } catch (error) {
+              client.release(true);
+              throw error;
+            }
+          },
+        },
+        { brandId: scope.brandReference, storeId: scope.storeReference },
+      );
       const runner = {
         async run(action) {
+          if (fault === null) {
+            try {
+              const value = await pooled.run(action);
+              transactions.push("committed");
+              return value;
+            } catch (error) {
+              failures.push({ code: "BOUNDED_FAILURE" });
+              throw error;
+            }
+          }
           const client = new Client(context.clientConfig);
           await client.connect();
           let committed = false;
@@ -374,7 +407,7 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
       await assert.rejects(wrongContextStore.create({ record: rlsDenied }), {
         code: "GUEST_SESSION_UNAVAILABLE",
       });
-      assert.equal(failures.at(-1).code, "42501");
+      assert.equal(failures.at(-1).code, "BOUNDED_FAILURE");
       assert.equal(await count(), 2);
 
       fault = "rollback";
@@ -739,8 +772,13 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
         "storeReference",
       ])
         assert(!(field in body));
+      const cleared = await pool.query(
+        "SELECT current_setting('bop.brand_id', true) AS brand, current_setting('bop.store_id', true) AS store",
+      );
+      assert(cleared.rows.every((row) => !row.brand && !row.store));
     } finally {
       if (runtime) await runtime.shutdown("SIGTERM");
+      await pool.end();
       await admin.end();
     }
     assert.equal(runtime.server.listening, false);

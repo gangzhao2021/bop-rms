@@ -88,6 +88,7 @@ export async function withTenantContextTransaction<T>(
   let callbackActive = false;
   let result: T | undefined;
   let primaryError: unknown;
+  let failed = false;
   try {
     await client.query("BEGIN");
     began = true;
@@ -99,6 +100,7 @@ export async function withTenantContextTransaction<T>(
     await client.query("COMMIT");
     began = false;
   } catch (error) {
+    failed = true;
     primaryError = callbackActive
       ? error
       : new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
@@ -106,10 +108,11 @@ export async function withTenantContextTransaction<T>(
   }
 
   try {
-    client.release();
+    client.release(failed);
   } catch {
+    failed = true;
     primaryError ??= new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
   }
-  if (primaryError !== undefined) throw primaryError;
+  if (failed) throw primaryError;
   return result as T;
 }

@@ -39,3 +39,8 @@ export {
   type TenantContextDatabaseErrorCode,
   type TenantDatabaseScope,
 } from "./tenant-context.ts";
+export {
+  createTenantTransactionRunner,
+  type DatabaseTransaction,
+  type DatabaseTransactionRunner,
+} from "./transaction-runner.ts";
