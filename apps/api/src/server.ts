@@ -12,8 +12,11 @@ import {
 } from "@bop-rms/observability";
 import { createApp } from "./app.js";
 import { customerCartRoutes, type CustomerCartHandler } from "./customer-cart.js";
+import type { CustomerEntryHandler } from "./customer-entry.js";
 import type { CustomerMenuHandler } from "./customer-menu.js";
+import type { CustomerQuoteHandler } from "./customer-quote.js";
 import { HealthReadinessController } from "./health-readiness.js";
+import type { MerchantBffRouterOptions } from "./merchant-bff.js";
 import { merchantCatalogRoutes, type MerchantCatalogRouterOptions } from "./merchant-catalog.js";
 import type { RealtimeTransport } from "./realtime.js";
 
@@ -54,11 +57,14 @@ export interface ApiServerRuntime {
 export interface ApiServerRuntimeOptions {
   coreTelemetry?: CoreTelemetry;
   customerCart?: CustomerCartHandler;
+  customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
+  customerQuote?: CustomerQuoteHandler;
   healthReadiness?: HealthReadinessController;
   host?: string;
   logger?: StructuredLogger;
   merchantCatalog?: MerchantCatalogRouterOptions;
+  merchantBff?: MerchantBffRouterOptions;
   nodeTelemetry?: NodeTelemetryRuntime;
   nowMilliseconds?: () => number;
   port?: number;
@@ -106,11 +112,14 @@ function runtimeDuration(startedAt: number, completedAt: number): number {
 export function createApiServerRuntime({
   coreTelemetry = createApiCoreTelemetry(),
   customerCart,
+  customerEntry,
   customerMenu,
+  customerQuote,
   healthReadiness = new HealthReadinessController(),
   host = "127.0.0.1",
   logger = createApiRuntimeLogger(),
   merchantCatalog,
+  merchantBff,
   nodeTelemetry = createNodeTelemetryRuntime({
     environment: runtimeEnvironment(),
     serviceName: "bop-rms-api",
@@ -124,10 +133,13 @@ export function createApiServerRuntime({
   const server = createServer(
     createApp({
       ...(customerCart === undefined ? {} : { customerCart }),
+      ...(customerEntry === undefined ? {} : { customerEntry }),
       healthReadiness,
       ...(customerMenu === undefined ? {} : { customerMenu }),
+      ...(customerQuote === undefined ? {} : { customerQuote }),
       deploymentEnvironment: runtimeEnvironment(),
       ...(merchantCatalog === undefined ? {} : { merchantCatalog }),
+      ...(merchantBff === undefined ? {} : { merchantBff }),
       errorLogger: logger,
       nowMilliseconds,
       ...(realtime === undefined ? {} : { realtime }),

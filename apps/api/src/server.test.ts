@@ -1,14 +1,33 @@
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { authorizationCookie } from "@bop/identity";
 import type {
   CoreTelemetry,
   NodeTelemetryRuntime,
   StructuredLogDestination,
 } from "@bop-rms/observability";
 import { HealthReadinessController } from "./health-readiness.js";
+import { CustomerEntryHandler } from "./customer-entry.js";
+import { CustomerQuoteHandler } from "./customer-quote.js";
+import type { MerchantBffService } from "./merchant-bff.js";
 import { createApiRuntimeLogger, createApiServerRuntime } from "./server.js";
 
 const runtimes: ReturnType<typeof createApiServerRuntime>[] = [];
+
+function merchantRequest(root: string, headers: Record<string, string> = {}) {
+  return new Promise<{ status: number; headers: IncomingHttpHeaders }>((resolve, reject) => {
+    const request = httpRequest(`${root}/merchant/login`, { headers }, (response) => {
+      response.on("error", reject);
+      response.resume();
+      response.on("end", () =>
+        resolve({ status: response.statusCode ?? 0, headers: response.headers }),
+      );
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -16,6 +35,146 @@ afterEach(async () => {
       if (runtime.server.listening) await runtime.shutdown("SIGTERM");
     }),
   );
+});
+
+describe("WP-2207 runtime dependency wiring", () => {
+  const syntheticOrigin = "https://merchant.invalid";
+  const cartId = "018fc000-0000-7000-8000-000000000004";
+  const quotePath = `/api/v1/carts/${cartId}/quote`;
+  const qrToken = `e30.e30.${Buffer.alloc(64, 7).toString("base64url")}`;
+  const guest = "g".repeat(43);
+  const csrf = "c".repeat(43);
+
+  it("dispatches injected dependencies, preserves guards and isolates unconfigured runtimes", async () => {
+    const establish = vi.fn(async () => ({ status: "EntryUnavailable" as const }));
+    const quoteCart = vi.fn(async () => ({ status: "VersionConflict" as const }));
+    const start = vi.fn(async () => ({
+      authorizationUrl: "https://synthetic-idp.invalid/authorize",
+      cookie: { value: "" as const, descriptor: authorizationCookie, clear: true },
+    }));
+    const unexpected = vi.fn(async (): Promise<never> => {
+      throw new Error("Unexpected synthetic service operation");
+    });
+    const service: MerchantBffService = {
+      start,
+      callback: unexpected,
+      bootstrap: unexpected,
+      authorize: unexpected,
+      logout: unexpected,
+      switchStore: unexpected,
+    };
+    let sequence = 10;
+    const now = () => "2026-09-03T12:00:00.000Z";
+    const output = logger();
+    const configured = createApiServerRuntime({
+      port: 0,
+      logger: output.logger,
+      customerEntry: new CustomerEntryHandler({
+        allowedOrigin: syntheticOrigin,
+        now,
+        port: { establish },
+        uuidV7Factory: () => `018fc000-0000-7000-8000-${(++sequence).toString().padStart(12, "0")}`,
+      }),
+      customerQuote: new CustomerQuoteHandler({
+        allowedOrigin: syntheticOrigin,
+        now,
+        port: { quoteCart },
+      }),
+      merchantBff: { exactOrigin: syntheticOrigin, acceptedHost: "merchant.invalid", service },
+    });
+    const unconfigured = createApiServerRuntime({ port: 0, logger: logger().logger });
+    runtimes.push(configured, unconfigured);
+    await configured.listen();
+    await unconfigured.listen();
+
+    const headers = {
+      origin: syntheticOrigin,
+      "sec-fetch-site": "same-origin",
+      "sec-fetch-mode": "cors",
+      "content-type": "application/json",
+    };
+    const entry = { method: "POST", headers, body: JSON.stringify({ qrToken }) };
+    const quote = {
+      method: "POST",
+      headers: {
+        ...headers,
+        cookie: `__Host-bop-guest=${guest}`,
+        "x-csrf-token": csrf,
+        "idempotency-key": "018fc000-0000-7000-8000-000000000090",
+      },
+      body: JSON.stringify({ cartVersion: 7 }),
+    };
+    const entryResponse = await fetch(`${origin(configured)}/bff/customer/entry`, entry);
+    expect(entryResponse.status).toBe(422);
+    expect(await entryResponse.json()).toMatchObject({ code: "entry_unavailable" });
+    expect(entryResponse.headers.get("cache-control")).toBe("no-store");
+    expect(establish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ qrToken, requestedAt: now() }),
+    );
+
+    const quoteResponse = await fetch(`${origin(configured)}${quotePath}`, quote);
+    expect(quoteResponse.status).toBe(409);
+    expect(await quoteResponse.json()).toMatchObject({ error: { code: "quote_version_conflict" } });
+    expect(quoteResponse.headers.get("cache-control")).toBe("no-store");
+    expect(quoteCart).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        cartReference: cartId,
+        expectedCartVersion: 7,
+        guestCredential: guest,
+      }),
+    );
+
+    const merchantHeaders = { ...headers, host: "merchant.invalid" };
+    const login = await merchantRequest(origin(configured), merchantHeaders);
+    expect(login.status).toBe(303);
+    expect(login.headers.location).toBe("https://synthetic-idp.invalid/authorize");
+    expect(login.headers["cache-control"]).toBe("no-store");
+    expect(login.headers["set-cookie"]?.join("")).toContain("Secure; HttpOnly; SameSite=Lax");
+    expect(start).toHaveBeenCalledExactlyOnceWith("/");
+
+    for (const [path, request] of [
+      ["/bff/customer/entry", entry],
+      [quotePath, quote],
+    ] as const) {
+      for (const deniedHeaders of [
+        { ...request.headers, origin: "https://other.invalid" },
+        { ...request.headers, "sec-fetch-site": "cross-site" },
+      ]) {
+        const denied = await fetch(`${origin(configured)}${path}`, {
+          ...request,
+          headers: deniedHeaders,
+        });
+        expect(denied.status).toBe(400);
+        await denied.text();
+      }
+      const unavailable = await fetch(`${origin(unconfigured)}${path}`, request);
+      expect(unavailable.status).toBe(503);
+      expect(unavailable.headers.get("cache-control")).toBe("no-store");
+      await unavailable.text();
+    }
+    for (const deniedHeaders of [
+      { ...merchantHeaders, host: "other.invalid" },
+      { ...merchantHeaders, origin: "https://other.invalid" },
+      { ...merchantHeaders, "sec-fetch-site": "cross-site" },
+    ]) {
+      const denied = await merchantRequest(origin(configured), deniedHeaders);
+      expect(denied.status).toBe(403);
+    }
+    const missing = await merchantRequest(origin(unconfigured));
+    expect(missing.status).toBe(404);
+    expect(establish).toHaveBeenCalledTimes(1);
+    expect(quoteCart).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(unexpected).not.toHaveBeenCalled();
+
+    await configured.shutdown("SIGTERM");
+    await unconfigured.shutdown("SIGTERM");
+    expect(configured.server.listening).toBe(false);
+    expect(unconfigured.server.listening).toBe(false);
+    for (const sensitive of [qrToken, guest, csrf, cartId]) {
+      expect(output.records.join("")).not.toContain(sensitive);
+    }
+  });
 });
 
 function logger() {
