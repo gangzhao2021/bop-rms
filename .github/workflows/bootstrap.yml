@@ -91,6 +91,7 @@ jobs:
           pnpm merchant-demo-browser:acceptance
           pnpm customer-demo-browser:acceptance
           pnpm customer-entry-browser:acceptance
+          pnpm customer-cart-browser:acceptance
 
       - name: Verify WP-0036 Realtime and Eventing regressions
         run: |

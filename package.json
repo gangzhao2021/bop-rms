@@ -147,6 +147,7 @@
     "correlation-context:acceptance": "vitest run --config packages/database/vitest.correlation-context.config.ts",
     "core-telemetry:acceptance": "pnpm --filter @bop/eventing build && pnpm --filter @bop-rms/observability build && pnpm --filter @bop-rms/observability test && pnpm --filter @bop-rms/observability sdk-smoke && pnpm --filter @bop-rms/api core-telemetry:acceptance && pnpm --filter @bop-rms/worker core-telemetry:acceptance",
     "customer-entry:acceptance": "pnpm --filter @bop/identity build && pnpm --filter @bop-rms/api customer-entry:acceptance",
+    "customer-cart-browser:acceptance": "pnpm --filter @bop-rms/customer-pwa build && vitest run --config packages/database/vitest.customer-cart-browser.config.ts",
     "customer-entry-browser:acceptance": "pnpm --filter @bop-rms/customer-pwa build && vitest run --config packages/database/vitest.customer-entry-browser.config.ts",
     "customer-menu:acceptance": "pnpm --filter @rms/catalog test && pnpm --filter @bop-rms/api customer-menu:acceptance",
     "e2e:qr-menu-cart-order": "vitest run tooling/e2e/qr-menu-cart-order/qr-menu-cart-order.test.ts",

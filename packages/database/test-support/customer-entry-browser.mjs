@@ -22,7 +22,7 @@ const mimeTypes = {
 };
 
 export function browserCheck(condition, code) {
-  if (!/^WP2215_[A-Z_]+$/u.test(code)) throw new Error("WP2215_INVALID_ASSERTION_CODE");
+  if (!/^WP(?:2215|2222)_[A-Z_]+$/u.test(code)) throw new Error("WP2215_INVALID_ASSERTION_CODE");
   if (!condition) throw new Error(code);
 }
 
@@ -92,7 +92,7 @@ async function loadAssets() {
   try {
     await visit(root);
   } catch (error) {
-    if (/^WP2215_[A-Z_]+$/u.test(error?.message ?? "")) throw error;
+    if (/^WP(?:2215|2222)_[A-Z_]+$/u.test(error?.message ?? "")) throw error;
     browserCheck(false, "WP2215_CUSTOMER_BUILD_REQUIRED");
   }
   browserCheck(assets.has("/index.html"), "WP2215_CUSTOMER_BUILD_REQUIRED");
@@ -113,9 +113,11 @@ async function closeServer(server) {
 }
 
 // All assets and requests stay within this test-owned origin. Application transport is unchanged.
-export async function withCustomerEntryBrowser(startApi, body) {
+export async function withCustomerEntryBrowser(startApi, body, { cartJourney = false } = {}) {
   const assets = await loadAssets();
-  const directory = await mkdtemp(path.join(tmpdir(), "bop-wp2215-entry-"));
+  const directory = await mkdtemp(
+    path.join(tmpdir(), cartJourney ? "bop-wp2222-cart-" : "bop-wp2215-entry-"),
+  );
   let server;
   let runtime;
   let browser;
@@ -127,13 +129,20 @@ export async function withCustomerEntryBrowser(startApi, body) {
     const tls = await createTls(directory);
     server = createHttpsServer(tls, (request, response) => {
       const url = new URL(request.url ?? "/", "https://127.0.0.1");
-      if (url.pathname === entryPath && url.search === "" && runtime !== undefined) {
+      const cartApi =
+        cartJourney &&
+        (/^\/bff\/customer\/cart$/.test(url.pathname) ||
+          /^\/api\/v1\/carts(?:\/[0-9a-f-]{36}(?:\/items(?:\/[0-9a-f-]{36})?)?)?$/.test(
+            url.pathname,
+          ) ||
+          /^\/api\/v1\/public\/stores\/[0-9a-f-]{36}\/menu$/.test(url.pathname));
+      if (((url.pathname === entryPath && url.search === "") || cartApi) && runtime !== undefined) {
         const address = runtime.server.address();
         const upstream = httpRequest(
           {
             host: "127.0.0.1",
             port: address.port,
-            path: entryPath,
+            path: url.pathname + url.search,
             method: request.method,
             headers: request.headers,
             agent: false,
@@ -153,7 +162,12 @@ export async function withCustomerEntryBrowser(startApi, body) {
         request.pipe(upstream);
         return;
       }
-      const asset = assets.get(url.pathname === "/" ? "/index.html" : url.pathname);
+      const spa =
+        cartJourney &&
+        (url.pathname === "/cart" ||
+          url.pathname === "/menu" ||
+          /^\/menu\/items\/[0-9a-f-]{36}$/.test(url.pathname));
+      const asset = assets.get(url.pathname === "/" || spa ? "/index.html" : url.pathname);
       const publicPrecacheRevision =
         url.searchParams.size === 1 &&
         /^[a-f0-9]{32}$/u.test(url.searchParams.get("__WB_REVISION__") ?? "");
@@ -214,11 +228,11 @@ export async function withCustomerEntryBrowser(startApi, body) {
           request.end(JSON.stringify({ qrToken: token }));
         });
       },
-      async newContext() {
+      async newContext(viewport = { width: 390, height: 844 }) {
         // The browser process permits only the disposable TLS public-key pin, never host trust.
         // No recordVideo, tracing, screenshots, HAR, or persistent browser profile is enabled.
         const context = await browser.newContext({
-          viewport: { width: 390, height: 844 },
+          viewport,
         });
         contexts.push(context);
         context.setDefaultTimeout(10_000);
@@ -242,7 +256,7 @@ export async function withCustomerEntryBrowser(startApi, body) {
   } catch (error) {
     // Browser navigation errors may embed a QR fragment. Never preserve them or their causes.
     bodyError = new Error(
-      /^WP2215_[A-Z_]+$/u.test(error?.message ?? "")
+      /^WP(?:2215|2222)_[A-Z_]+$/u.test(error?.message ?? "")
         ? error.message
         : "WP2215_BROWSER_EXECUTION_FAILED",
     );

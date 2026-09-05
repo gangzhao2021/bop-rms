@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2221 — Unquoted Pickup Cart Item HTTP Composition`
+- Current discussion node: `WP-2222 — Persisted Pickup Cart Browser Acceptance`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -59,6 +59,13 @@ Item HTTP writes, public source preparation, transactional Quote-absence checks 
 replay. Dedicated HTTP/PostgreSQL acceptance and complete local verification passed (root 358/358,
 Ordering 227/227, API 189/189, all 40 builds).
 Default runtime, real source publication, Pricing and DineIn shared visibility remain gated.
+
+[WP-2222](./work-packages/WP-2222.md) continues from local checkpoint `9016678` with a normal
+Customer production-browser gate covering persisted Pickup Entry, Menu and Cart on mobile and
+desktop. The dedicated gate passed, including offline recovery, refresh/CSRF refusal and private
+storage checks. Retained Entry (2/2) and complete local verification passed (root 358/358,
+Ordering 227/227, API 189/189, all 40 builds). Real sources, Quote/Pricing and default runtime
+activation remain gated.
 
 ## Work Package history (newest first)
 

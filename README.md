@@ -185,3 +185,9 @@ provide Quote/Pricing evidence. See [the work package](docs/spec/work-packages/W
 
 WP-2221 verifies Pickup Item HTTP mutations with isolated persistence and synthetic public sources.
 Default runtime activation and real Pricing remain gated; see [WP-2221](docs/spec/work-packages/WP-2221.md).
+
+WP-2222 adds `pnpm customer-cart-browser:acceptance`: normal production assets, signed synthetic
+Pickup entry, public Menu and persisted Cart Add/Update/Remove in Chromium at mobile and desktop
+sizes. The gate checks offline recovery, refresh/CSRF refusal, private storage and database/Audit
+results; CI runs it after Chromium installation. See [WP-2222](docs/spec/work-packages/WP-2222.md)
+for executed evidence. This does not supply real public sources, Session resume, Pricing or checkout.

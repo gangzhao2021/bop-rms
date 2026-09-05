@@ -10,8 +10,8 @@ those decisions or granting runtime, Provider or production authority.
 - Audit date: `2026-09-05`.
 - Integrated snapshot: `main@ac08c14d076ca76b71f55571605b61ef3ed1efde`.
 - Snapshot inventory: **264 `WP-*.md` records and one `SPIKE-1300.md` record**.
-- Current local work: [WP-2221 — Unquoted Pickup Cart Item HTTP Composition](./work-packages/WP-2221.md)
-  on `codex/wp-2221`, based on verified local WP-2220 checkpoint `d73aec2`.
+- Current local work: [WP-2222 — Persisted Pickup Cart Browser Acceptance](./work-packages/WP-2222.md)
+  on `codex/wp-2222`, based on verified local WP-2221 checkpoint `9016678`.
 - WP-2215's persisted Entry browser and full local gates passed; its local checkpoint is `7b43cf9`.
 - WP-2216's creation/current service and opt-in durable adapter passed the complete local gate
   (root 350/350, Ordering 174/174, all 40 builds) and are locally committed at `ed35fb7`.
@@ -34,6 +34,11 @@ those decisions or granting runtime, Provider or production authority.
 - WP-2221 supplies optional Pickup Item HTTP mutations and original response replay, with
   transaction-locked Quote absence evidence. Dedicated acceptance and complete verification
   passed (root 358/358, Ordering 227/227, API 189/189, all 40 builds). Real runtime/source wiring, Pricing and DineIn visibility are still unavailable.
+- WP-2222 passes a normal-assets Chromium journey from signed synthetic Pickup QR through Menu
+  and persisted Cart Add/Update/Remove, on mobile and desktop. It checks offline recovery,
+  refreshed reads, absent in-memory CSRF refusal, scoped Cart/operation/Audit results and private
+  cache/storage/URL/log handling. Retained Entry (2/2) and complete local verification passed
+  (root 358/358, Ordering 227/227, API 189/189, all 40 builds).
 - These local checkpoints are outside the fixed 264-WP integrated snapshot. No GitHub integration
   or production result is claimed by this local task.
 
@@ -110,7 +115,7 @@ that CI evidence; it means neither failure nor a newly verified pass.
 | [WP-2213](./work-packages/WP-2213.md) | Read-only legacy Session rollout inspection        | `c687106` / #188           | Brief delegates exact delivery evidence to PR; not refreshed |
 | [WP-2214](./work-packages/WP-2214.md) | Opt-in cryptographic credential provider           | `ac08c14` / #189           | Brief delegates exact delivery evidence to PR; not refreshed |
 
-The local WP-2216–2221 implementation is tracked separately from the integrated snapshot below.
+The local WP-2216–2222 implementation is tracked separately from the integrated snapshot below.
 The local catalog now contains 87 migrations; the baseline count of 85 remains historical.
 
 ## Capability layers at the integrated snapshot
@@ -156,7 +161,7 @@ permissions, expected versions, idempotency, Audit and immutable history.
    operation outcomes, with fresh-pool reads and isolated concurrency/rollback evidence. Full local
    verification passed. WP-2219 adds unquoted Pickup and changed-empty presentation through optional
    HTTP reads, with Catalog names and explicit unavailable estimates; complete local verification
-   passed. Nonempty DineIn still needs Host/Participant field-visibility authority. WP-2220 adds durable public labels for original operation replay. WP-2221 connects optional Pickup Item HTTP writes with original response replay and transactional Quote checks.
+   passed. Nonempty DineIn still needs Host/Participant field-visibility authority. WP-2220 adds durable public labels for original operation replay. WP-2221 connects optional Pickup Item HTTP writes with original response replay and transactional Quote checks. WP-2222 supplies browser evidence for this unquoted Pickup path using synthetic public sources; refresh preserves reads but cannot restore in-memory CSRF for writes. Session resume remains an explicit later increment.
    Lifecycle persistence and real Catalog/Store source wiring remain missing. A Pickup `ContextOnly` Session and a DineIn Session have different
    rules: DineIn mutations require `DiningBound`, the matching Dining Session and participant.
    A ContextOnly DineIn Entry cannot substitute for the accepted admission/binding flow.
