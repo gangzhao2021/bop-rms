@@ -14,7 +14,7 @@ const { Client, Pool } = pg;
 const id = (n) => `018f5100-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T14:00:00.000Z";
 function check(value, code) {
-  if (!value) throw new Error(`WP2218_${code}`);
+  if (!value) throw new Error(`WP2220_${code}`);
 }
 async function denied(action, code) {
   let result;
@@ -55,10 +55,10 @@ function guest(session = 4, store = 3, dining = false) {
 const command = (n) => ({ operationReference: id(n), requestedAt: at });
 
 it("persists Cart Item commands with original replay, CAS, scoped reads and atomic Audit", async () => {
-  await withIsolatedDatabase({ workPackage: "WP-2218" }, async (database) => {
+  await withIsolatedDatabase({ workPackage: "WP-2220" }, async (database) => {
     const admin = new Client(database.clientConfig);
     const pools = [];
-    const role = `bop_wp2218_${database.runId}`;
+    const role = `bop_wp2220_${database.runId}`;
     let roleCreated = false;
     let phase = "SETUP";
     let next = 1000;
@@ -106,7 +106,7 @@ it("persists Cart Item commands with original replay, CAS, scoped reads and atom
                 return client;
               } catch {
                 client.release(true);
-                throw new Error("WP2218_ROLE_FAILED");
+                throw new Error("WP2220_ROLE_FAILED");
               }
             },
           },
@@ -125,7 +125,7 @@ it("persists Cart Item commands with original replay, CAS, scoped reads and atom
               });
               if (fail && audited) {
                 rolledBackAudit = true;
-                throw new Error("WP2218_INJECTED_ROLLBACK");
+                throw new Error("WP2220_INJECTED_ROLLBACK");
               }
               return result;
             });
@@ -190,6 +190,30 @@ it("persists Cart Item commands with original replay, CAS, scoped reads and atom
           runner: runner(Number.parseInt(session.storeReference.slice(-12), 16), options.fail),
         });
         const service = createCartItemCommandService({
+          ...(options.presentation
+            ? {
+                presentation: {
+                  async prepare(cart) {
+                    if (options.presentationFailure)
+                      throw new Error("WP2220_SYNTHETIC_SOURCE_FAILURE");
+                    return {
+                      schemaVersion: 1,
+                      brandName: "Synthetic Brand",
+                      storeName: "Synthetic Store",
+                      serviceMode: "Pickup",
+                      items: cart.items.map((item) => ({
+                        cartItemReference: item.cartItemReference,
+                        displayName: options.presentationName ?? "Synthetic Item",
+                        configuration: item.optionSelections.map((option) => ({
+                          optionReference: option.optionReference,
+                          displayName: "Synthetic Option",
+                        })),
+                      })),
+                    };
+                  },
+                },
+              }
+            : {}),
           repository: {
             ...repository,
             async resolveOperation(reference) {
@@ -228,7 +252,7 @@ it("persists Cart Item commands with original replay, CAS, scoped reads and atom
               validations++;
               if (options.barrier) await options.barrier();
               if (options.reject) return { status: "Rejected", reason: "SELLABLE_UNAVAILABLE" };
-              if (options.unavailable) throw new Error("WP2218_SYNTHETIC_SOURCE_UNAVAILABLE");
+              if (options.unavailable) throw new Error("WP2220_SYNTHETIC_SOURCE_UNAVAILABLE");
               // Explicit synthetic public Catalog evidence, not a persisted Catalog or real Store fact.
               return {
                 status: "Accepted",
@@ -351,6 +375,7 @@ it("persists Cart Item commands with original replay, CAS, scoped reads and atom
       }
       equal(await counts(), beforeReplay, "REPLAY_DUPLICATED_WRITES");
       check(validations === validated, "REPLAY_REVALIDATED_CATALOG");
+
       await denied(() => fresh.service.add({ ...input, quantity: 3 }), "CART_IDEMPOTENCY_CONFLICT");
       await denied(
         () => fresh.service.add({ ...input, operationReference: id(34) }),
@@ -370,8 +395,16 @@ it("persists Cart Item commands with original replay, CAS, scoped reads and atom
       const sync = barrier();
       const request = add(removed.aggregate, 35, "2026-08-02T14:06:00.000Z");
       const concurrent = await Promise.all([
-        itemService(guest(), { barrier: sync }).service.add(request),
-        itemService(guest(), { barrier: sync }).service.add({
+        itemService(guest(), {
+          barrier: sync,
+          presentation: true,
+          presentationName: "Synthetic Candidate A",
+        }).service.add(request),
+        itemService(guest(), {
+          barrier: sync,
+          presentation: true,
+          presentationName: "Synthetic Candidate B",
+        }).service.add({
           ...request,
           requestedAt: "2026-08-02T14:06:01.000Z",
         }),
@@ -382,6 +415,12 @@ it("persists Cart Item commands with original replay, CAS, scoped reads and atom
         "CONCURRENT_STATUS",
       );
       equal(concurrent[0].aggregate, concurrent[1].aggregate, "CONCURRENT_RESULT");
+      equal(
+        concurrent[0].presentationSnapshot,
+        concurrent[1].presentationSnapshot,
+        "CONCURRENT_ORIGINAL_LABELS",
+      );
+      check(concurrent[0].presentationSnapshot !== undefined, "CONCURRENT_MISSING_LABELS");
       check(concurrent[0].cartItemReference === concurrent[1].cartItemReference, "LOSING_ITEM_ID");
       equal(await counts(), { lines: 1, operations: 4, audits: 5 }, "CONCURRENT_DUPLICATES");
       phase = "CONCURRENT_CHANGED_INTENT";
@@ -609,8 +648,109 @@ it("persists Cart Item commands with original replay, CAS, scoped reads and atom
       );
       await admin.query("ROLLBACK");
       equal(await fresh.repository.resolveOperation(id(31)), original, "ORIGINAL_REWRITTEN");
+      {
+        phase = "PRESENTATION";
+        const snapshotSession = guest(700);
+        const snapshotCart = (await service(snapshotSession).create(command(701))).aggregate;
+        const snapshotInput = {
+          ...input,
+          cartReference: snapshotCart.cartReference,
+          operationReference: id(702),
+        };
+        const beforeFailure = await counts();
+        await denied(
+          () =>
+            itemService(snapshotSession, {
+              presentation: true,
+              presentationFailure: true,
+            }).service.add(snapshotInput),
+          "CART_DEPENDENCY_UNAVAILABLE",
+        );
+        equal(await counts(), beforeFailure, "PREPARATION_FAILURE_WROTE");
+        await denied(
+          () =>
+            itemService(snapshotSession, { presentation: true, fail: true }).service.add(
+              snapshotInput,
+            ),
+          "CART_DEPENDENCY_UNAVAILABLE",
+        );
+        equal(await counts(), beforeFailure, "PRESENTATION_ROLLBACK_WROTE");
+        const snapshotApplied = await itemService(snapshotSession, {
+          presentation: true,
+        }).service.add(snapshotInput);
+        check(
+          snapshotApplied.presentationSnapshot.items[0].displayName === "Synthetic Item",
+          "SNAPSHOT_RESULT",
+        );
+        const snapshotStored = await itemService(snapshotSession).repository.resolveOperation(
+          snapshotInput.operationReference,
+        );
+        equal(
+          snapshotStored.presentationSnapshot,
+          snapshotApplied.presentationSnapshot,
+          "FRESH_SNAPSHOT_READ",
+        );
+        const snapshotUpdated = await itemService(snapshotSession, {
+          presentation: true,
+        }).service.update({
+          cartReference: snapshotCart.cartReference,
+          cartItemReference: snapshotApplied.cartItemReference,
+          expectedAggregateVersion: 2,
+          quantity: 3,
+          optionSelections: [],
+          customerNote: null,
+          operationReference: id(703),
+          requestedAt: "2026-08-02T14:02:00.000Z",
+        });
+        check(
+          snapshotUpdated.presentationSnapshot.items[0].configuration.length === 0,
+          "UPDATED_CONFIGURATION_SNAPSHOT",
+        );
+        const snapshotRemoveInput = {
+          cartReference: snapshotCart.cartReference,
+          cartItemReference: snapshotApplied.cartItemReference,
+          expectedAggregateVersion: 3,
+          operationReference: id(704),
+          requestedAt: "2026-08-02T14:03:00.000Z",
+        };
+        const snapshotRemoved = await itemService(snapshotSession, {
+          presentation: true,
+        }).service.remove(snapshotRemoveInput);
+        check(snapshotRemoved.presentationSnapshot.items.length === 0, "REMOVED_SNAPSHOT");
+        equal(
+          await itemService(snapshotSession, {
+            presentation: true,
+            presentationFailure: true,
+          }).service.remove({
+            ...snapshotRemoveInput,
+            requestedAt: "2026-08-02T14:05:00.000Z",
+          }),
+          { ...snapshotRemoved, status: "AlreadyApplied" },
+          "REMOVE_SNAPSHOT_REPLAY",
+        );
+        equal(
+          await itemService(snapshotSession, {
+            presentation: true,
+            presentationFailure: true,
+          }).service.add({ ...snapshotInput, requestedAt: "2026-08-02T14:05:00.000Z" }),
+          { ...snapshotApplied, status: "AlreadyApplied" },
+          "SOURCE_INDEPENDENT_REPLAY",
+        );
+        check(
+          !JSON.stringify(snapshotStored.presentationSnapshot).includes("customerNote"),
+          "SNAPSHOT_NOTE_LEAK",
+        );
+        await denied(
+          () => itemService(guest(), { presentation: true }).service.add(input),
+          "CART_DEPENDENCY_UNAVAILABLE",
+        );
+        const legacySnapshot = await itemService().repository.resolveOperation(
+          input.operationReference,
+        );
+        check(legacySnapshot.presentationSnapshot === undefined, "LEGACY_SNAPSHOT_FABRICATED");
+      }
     } catch {
-      throw new Error(`WP2218_ACCEPTANCE_${phase}_FAILED`);
+      throw new Error(`WP2220_ACCEPTANCE_${phase}_FAILED`);
     } finally {
       await Promise.all(pools.map((pool) => pool.end()));
       try {

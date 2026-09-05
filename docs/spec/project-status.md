@@ -10,8 +10,8 @@ those decisions or granting runtime, Provider or production authority.
 - Audit date: `2026-09-05`.
 - Integrated snapshot: `main@ac08c14d076ca76b71f55571605b61ef3ed1efde`.
 - Snapshot inventory: **264 `WP-*.md` records and one `SPIKE-1300.md` record**.
-- Current local work: [WP-2219 — Persisted Unquoted Customer Cart Presentation](./work-packages/WP-2219.md)
-  on `codex/wp-2219`, based on verified local WP-2218 checkpoint `9f5571e`.
+- Current local work: [WP-2220 — Durable Cart Item Presentation Snapshots](./work-packages/WP-2220.md)
+  on `codex/wp-2220`, based on verified local WP-2219 checkpoint `d04ad5e`.
 - WP-2215's persisted Entry browser and full local gates passed; its local checkpoint is `7b43cf9`.
 - WP-2216's creation/current service and opt-in durable adapter passed the complete local gate
   (root 350/350, Ordering 174/174, all 40 builds) and are locally committed at `ed35fb7`.
@@ -28,6 +28,9 @@ those decisions or granting runtime, Provider or production authority.
   and Ordering-owned database Quote-absence proof. Dedicated acceptance and complete local verification passed
   (root 358/358, Ordering 210/210, API 187/187, all 40 builds). Price remains explicitly unavailable; nonempty DineIn visibility,
   Item HTTP writes, actual source wiring and default runtime activation remain incomplete.
+- WP-2220 adds optional pre-commit public label preparation and atomic operation snapshots.
+  Complete local verification passed (root 358/358, Ordering 226/226, API 187/187, all 40 builds).
+  HTTP Item writes remain unavailable.
 - These local checkpoints are outside the fixed 264-WP integrated snapshot. No GitHub integration
   or production result is claimed by this local task.
 
@@ -104,8 +107,8 @@ that CI evidence; it means neither failure nor a newly verified pass.
 | [WP-2213](./work-packages/WP-2213.md) | Read-only legacy Session rollout inspection        | `c687106` / #188           | Brief delegates exact delivery evidence to PR; not refreshed |
 | [WP-2214](./work-packages/WP-2214.md) | Opt-in cryptographic credential provider           | `ac08c14` / #189           | Brief delegates exact delivery evidence to PR; not refreshed |
 
-The local WP-2216–2219 implementation is tracked separately from the integrated snapshot below.
-Its new migration brings the local catalog to 86; the baseline count of 85 remains historical.
+The local WP-2216–2220 implementation is tracked separately from the integrated snapshot below.
+The local catalog now contains 87 migrations; the baseline count of 85 remains historical.
 
 ## Capability layers at the integrated snapshot
 
@@ -150,7 +153,7 @@ permissions, expected versions, idempotency, Audit and immutable history.
    operation outcomes, with fresh-pool reads and isolated concurrency/rollback evidence. Full local
    verification passed. WP-2219 adds unquoted Pickup and changed-empty presentation through optional
    HTTP reads, with Catalog names and explicit unavailable estimates; complete local verification
-   passed. Nonempty DineIn still needs Host/Participant field-visibility authority. Item HTTP
+   passed. Nonempty DineIn still needs Host/Participant field-visibility authority. WP-2220 adds durable public labels for original operation replay. Item HTTP
    composition, lifecycle persistence and real Catalog/Store source wiring remain missing. A Pickup `ContextOnly` Session and a DineIn Session have different
    rules: DineIn mutations require `DiningBound`, the matching Dining Session and participant.
    A ContextOnly DineIn Entry cannot substitute for the accepted admission/binding flow.

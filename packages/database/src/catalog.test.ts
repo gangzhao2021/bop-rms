@@ -91,6 +91,7 @@ describe("migration catalog", () => {
       "1300_008_create_order_status_projection",
       "1300_009_create_order_amendment",
       "1300_010_create_customer_cart_ownership",
+      "1300_011_alter_cart_operation_presentation",
       "1400_001_create_payment_intent",
       "1400_002_create_provider_webhook_inbox",
       "1400_003_create_payment_terminal_fact",

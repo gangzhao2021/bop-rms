@@ -1,3 +1,4 @@
+import { parseCartItemPresentationSnapshot } from "./cart-item-presentation-snapshot.js";
 import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import { assertGuestSessionUsable, createGuestSession, type GuestSession } from "@bop/identity";
 import {
@@ -197,11 +198,25 @@ async function replay(
       status: "AlreadyApplied" as const,
       cartItemReference: prior.cartItemReference,
       aggregate: result,
+      ...presentationResult(prior, ports),
     });
   } catch (error) {
     if (error instanceof CartError) throw error;
     throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
   }
+}
+
+function presentationResult(record: CartItemOperationRecord, ports: CartItemCommandPorts) {
+  if (record.presentationSnapshot === undefined) {
+    if (ports.presentation !== undefined) throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+    return {};
+  }
+  return {
+    presentationSnapshot: parseCartItemPresentationSnapshot(
+      record.presentationSnapshot,
+      record.result,
+    ),
+  };
 }
 
 function verify(
@@ -219,7 +234,9 @@ function verify(
       saved.cartItemReference !== expected.cartItemReference ||
       !ports.references.equals(saved.operationIntentHash, expected.operationIntentHash) ||
       result.cartReference !== expected.result.cartReference ||
-      result.aggregateVersion !== expected.result.aggregateVersion
+      result.aggregateVersion !== expected.result.aggregateVersion ||
+      JSON.stringify(presentationResult(saved, ports)) !==
+        JSON.stringify(presentationResult(expected, ports))
     )
       throw new Error("bad result");
     return result;
@@ -382,6 +399,13 @@ async function commit(
     audit: AppendAuditRecordInput;
   },
 ) {
+  const presentationSnapshot =
+    ports.presentation === undefined
+      ? undefined
+      : parseCartItemPresentationSnapshot(
+          await ports.presentation.prepare(input.aggregate).catch(failure),
+          input.aggregate,
+        );
   const record: CartItemOperationRecord = Object.freeze({
     action: input.action,
     operationReference: input.operationReference,
@@ -390,6 +414,7 @@ async function commit(
     cartReference: input.aggregate.cartReference,
     cartItemReference: input.cartItemReference,
     result: input.aggregate,
+    ...(presentationSnapshot === undefined ? {} : { presentationSnapshot }),
     occurredAt: input.at,
     expiresAt: expiresAt(input.at),
   });
@@ -430,6 +455,7 @@ async function commit(
     status: "Applied" as const,
     cartItemReference: input.cartItemReference,
     aggregate: verify(saved, record, ports),
+    ...presentationResult(saved, ports),
   });
 }
 

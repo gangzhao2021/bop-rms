@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2219 — Persisted Unquoted Customer Cart Presentation`
+- Current discussion node: `WP-2220 — Durable Cart Item Presentation Snapshots`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -48,6 +48,11 @@ Catalog menu query and database Quote-absence evidence; price remains explicitly
 Dedicated local acceptance and complete local verification passed (root 358/358, Ordering
 210/210, API 187/187, all 40 builds). Nonempty DineIn visibility,
 Item HTTP writes, real source wiring and Quote/Pricing remain separate increments.
+
+[WP-2220](./work-packages/WP-2220.md) continues from local checkpoint `d04ad5e`. It adds optional
+public label preparation before Item commit and immutable snapshots for exact original replay.
+Complete local verification passed (root 358/358, Ordering 226/226, API 187/187, all 40 builds). HTTP Item writes, source composition
+and Quote-aware mutation guards remain later increments.
 
 ## Work Package history (newest first)
 

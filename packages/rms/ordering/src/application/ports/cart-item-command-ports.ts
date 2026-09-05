@@ -1,3 +1,4 @@
+import type { CartItemPresentationSnapshot } from "../cart-item-presentation-snapshot.js";
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { GuestSession } from "@bop/identity";
 import type { CatalogSelectionValidationResult, ValidateCatalogSelectionInput } from "@rms/catalog";
@@ -18,11 +19,15 @@ export interface CartItemOperationRecord {
   readonly cartReference: OrderingReference;
   readonly cartItemReference: OrderingReference;
   readonly result: CartAggregate;
+  readonly presentationSnapshot?: CartItemPresentationSnapshot;
   readonly occurredAt: OrderingInstant;
   readonly expiresAt: OrderingInstant;
 }
 
 export interface CartItemCommandPorts {
+  readonly presentation?: {
+    prepare(result: CartAggregate): Promise<unknown>;
+  };
   readonly catalog: {
     validateSelection(
       input: ValidateCatalogSelectionInput,

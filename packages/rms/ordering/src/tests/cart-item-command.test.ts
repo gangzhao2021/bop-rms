@@ -582,3 +582,182 @@ describe("WP-2026 concurrent Cart update scenario", () => {
     expect(state.validations()).toBe(2);
   });
 });
+
+function presentation(aggregate: CartAggregate) {
+  return {
+    schemaVersion: 1,
+    brandName: "Synthetic Brand",
+    storeName: "Synthetic Store",
+    serviceMode: "Pickup",
+    items: aggregate.items.map((item) => ({
+      cartItemReference: item.cartItemReference,
+      displayName: "Synthetic Item",
+      configuration: item.optionSelections.map((option) => ({
+        optionReference: option.optionReference,
+        displayName: "Synthetic Option",
+      })),
+    })),
+  };
+}
+
+describe("durable public presentation evidence", () => {
+  it("prepares before commit and returns original frozen labels without consulting changed sources", async () => {
+    const f = fixture();
+    let calls = 0;
+    const service = createCartItemCommandService({
+      ...f.ports,
+      presentation: {
+        async prepare(cart) {
+          calls++;
+          if (calls > 1) throw new Error("synthetic unavailable source");
+          expect(f.operations()).toBe(0);
+          return presentation(cart);
+        },
+      },
+    });
+    const applied = await service.add(addInput());
+    expect(applied.presentationSnapshot?.items[0]?.displayName).toBe("Synthetic Item");
+    expect(Object.isFrozen(applied.presentationSnapshot?.items)).toBe(true);
+    const replay = await service.add(addInput({ requestedAt: "2026-08-02T14:05:00.000Z" }));
+    expect(replay).toEqual({ ...applied, status: "AlreadyApplied" });
+    expect(calls).toBe(1);
+    expect(f.operations()).toBe(1);
+  });
+
+  it("reauthorizes before returning a stored snapshot", async () => {
+    const f = fixture();
+    const ports = {
+      ...f.ports,
+      presentation: { prepare: async (cart: CartAggregate) => presentation(cart) },
+    };
+    const service = createCartItemCommandService(ports);
+    await service.add(addInput());
+    ports.authorization.authorize = async () => null;
+    await expect(service.add(addInput())).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    expect(f.operations()).toBe(1);
+  });
+
+  it("rejects DineIn snapshots before committing", async () => {
+    const f = fixture({
+      session: guest({
+        channel: "DineIn",
+        diningState: "DiningBound",
+        diningSessionReference: ids.diningSession as never,
+        diningParticipantReference: ids.participant as never,
+        publicTableReference: id(32) as never,
+      }),
+      aggregate: cart({ orderType: "DineIn", diningSessionReference: ids.diningSession as never }),
+    });
+    const service = createCartItemCommandService({
+      ...f.ports,
+      presentation: { prepare: async (cart) => presentation(cart) },
+    });
+    await expect(service.add(addInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.operations()).toBe(0);
+  });
+
+  it("does not manufacture a snapshot for an existing operation", async () => {
+    const f = fixture();
+    await f.service.add(addInput());
+    let calls = 0;
+    const service = createCartItemCommandService({
+      ...f.ports,
+      presentation: {
+        async prepare(cart) {
+          calls++;
+          return presentation(cart);
+        },
+      },
+    });
+    await expect(service.add(addInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(calls).toBe(0);
+    expect(f.operations()).toBe(1);
+  });
+
+  for (const mode of [
+    "failure",
+    "extra",
+    "wrong-item",
+    "wrong-option",
+    "getter",
+    "array-getter",
+    "sparse",
+    "label",
+    "money",
+    "notes",
+    "mode",
+  ] as const) {
+    it(`rejects ${mode} before any mutation`, async () => {
+      const f = fixture();
+      const service = createCartItemCommandService({
+        ...f.ports,
+        presentation: {
+          async prepare(cart) {
+            if (mode === "failure") throw new Error("synthetic source failure");
+            const value = presentation(cart);
+            const item = value.items[0];
+            if (!item) throw new Error("missing synthetic item");
+            const option = item.configuration[0];
+            if (!option) throw new Error("missing synthetic option");
+            if (mode === "extra") Object.assign(value, { actorReference: ids.session });
+            if (mode === "wrong-item")
+              item.cartItemReference = id(999) as typeof item.cartItemReference;
+            if (mode === "wrong-option")
+              option.optionReference = id(999) as typeof item.cartItemReference;
+            if (mode === "getter")
+              Object.defineProperty(value, "brandName", {
+                enumerable: true,
+                get() {
+                  throw new Error("must not execute");
+                },
+              });
+            if (mode === "array-getter")
+              Object.defineProperty(value.items, "0", {
+                enumerable: true,
+                get() {
+                  throw new Error("must not execute");
+                },
+              });
+            if (mode === "sparse") delete value.items[0];
+            if (mode === "label") value.brandName = "bad\nlabel";
+            if (mode === "money") Object.assign(item, { amountMinor: "0" });
+            if (mode === "notes") Object.assign(item, { customerNote: "synthetic note" });
+            if (mode === "mode") value.serviceMode = "DineIn";
+            return value;
+          },
+        },
+      });
+      await expect(service.add(addInput())).rejects.toMatchObject({
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      expect(f.operations()).toBe(0);
+      expect(f.current().aggregateVersion).toBe(1);
+    });
+  }
+
+  it("does not return a repository-substituted snapshot", async () => {
+    const f = fixture();
+    const service = createCartItemCommandService({
+      ...f.ports,
+      presentation: { prepare: async (cart) => presentation(cart) },
+      repository: {
+        ...f.ports.repository,
+        async commit(input) {
+          const saved = await f.ports.repository.commit(input);
+          if (!saved.presentationSnapshot) throw new Error("missing synthetic snapshot");
+          return {
+            ...saved,
+            presentationSnapshot: { ...saved.presentationSnapshot, brandName: "Changed" },
+          };
+        },
+      },
+    });
+    await expect(service.add(addInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+});

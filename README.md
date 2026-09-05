@@ -178,3 +178,7 @@ lifecycle and Quote storage, then Payment-owned Order orchestration and the Work
 Kitchen / Pickup / Receipt path. Each increment retains its owning contracts,
 authorization, replay and failure checks. New horizontal features must not substitute for this
 end-to-end acceptance.
+
+WP-2220 adds optional pre-commit public label snapshots to persisted Cart Item operations, preserving
+original labels on authorized retries. This prerequisite does not enable Customer HTTP writes or
+provide Quote/Pricing evidence. See [the work package](docs/spec/work-packages/WP-2220.md).

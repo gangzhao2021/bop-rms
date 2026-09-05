@@ -1,3 +1,4 @@
+import { parseCartItemPresentationSnapshot } from "../../application/cart-item-presentation-snapshot.js";
 import { appendAuditRecordInTransaction, type AppendAuditRecordInput } from "@bop/audit";
 import type {
   CartItemCommandPorts,
@@ -43,6 +44,8 @@ function same(left: unknown, right: unknown) {
 }
 function assertRecord(record: CartItemOperationRecord, brand: string, store: string) {
   const cart = parseCartAggregate(record.result);
+  if (record.presentationSnapshot !== undefined)
+    parseCartItemPresentationSnapshot(record.presentationSnapshot, cart);
   parseOrderingReference(record.operationReference);
   parseOrderingReference(record.guestSessionReference);
   parseOrderingReference(record.cartItemReference);
@@ -207,6 +210,14 @@ export function createPostgresCartItemStore(input: {
       cartReference: parseOrderingReference(row.cart_id),
       cartItemReference: parseOrderingReference(row.cart_line_id),
       result: parseCartAggregate(row.result_cart_snapshot_json),
+      ...(row.result_presentation_snapshot_json == null
+        ? {}
+        : {
+            presentationSnapshot: parseCartItemPresentationSnapshot(
+              row.result_presentation_snapshot_json,
+              parseCartAggregate(row.result_cart_snapshot_json),
+            ),
+          }),
       occurredAt: instant(row.occurred_at),
       expiresAt: instant(row.expires_at),
     });
@@ -316,8 +327,8 @@ export function createPostgresCartItemStore(input: {
         await tx.query(
           `INSERT INTO rms_ordering.cart_operation_record
         (brand_id,store_id,operation_id,cart_id,cart_line_id,guest_session_id,action_code,intent_digest,
-         result_aggregate_version,result_cart_snapshot_json,occurred_at,expires_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)`,
+         result_aggregate_version,result_cart_snapshot_json,occurred_at,expires_at,result_presentation_snapshot_json)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13::jsonb)`,
           [
             brand,
             store,
@@ -331,6 +342,11 @@ export function createPostgresCartItemStore(input: {
             JSON.stringify(next),
             record.occurredAt,
             record.expiresAt,
+            record.presentationSnapshot === undefined
+              ? null
+              : JSON.stringify(
+                  parseCartItemPresentationSnapshot(record.presentationSnapshot, next),
+                ),
           ],
         );
         await appendAuditRecordInTransaction(tx, command.audit);
