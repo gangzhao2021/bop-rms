@@ -145,7 +145,7 @@ pnpm db:migrate -- apply --env-file .env --confirm-target local:bop_rms_local
 one transaction per migration. There is no down, repair, baseline, force or checksum-bypass path;
 applied migrations are immutable and corrected through reviewed forward migrations. The catalog
 now includes foundation, platform and restaurant Module schemas and tables. Identity Guest Session,
-Audit and Eventing have real persistence code; individual business repositories and runtime
+Ordering Cart creation/current ownership, Audit and Eventing have real persistence code; individual business repositories and runtime
 composition must be verified separately. Consult the catalog and owning Module manifests for the
 current inventory rather than the original WP-0021 foundation snapshot.
 
@@ -165,9 +165,10 @@ production data source is connected.
 ## Delivery sequence
 
 The [status ledger](docs/spec/project-status.md) maintains the evidence-backed integration record
-through WP-2214 and the separate state of the current work. The next priority is the persisted
-Customer journey: verify the existing Entry boundary in a real browser, resolve Cart creation and
-current-Cart ownership, connect Cart and Quote storage, then Payment-owned Order orchestration and
-the Worker / Kitchen / Pickup / Receipt path. Each increment retains its owning contracts,
+through WP-2214 and the separate local work. WP-2215 verifies persisted Entry in a real browser;
+WP-2216 adds Cart creation/current ownership and its opt-in PostgreSQL adapter. Consult each brief
+for actual verification and integration status. Next connect the Customer HTTP composition,
+Cart item/lifecycle and Quote storage, then Payment-owned Order orchestration and the Worker /
+Kitchen / Pickup / Receipt path. Each increment retains its owning contracts,
 authorization, replay and failure checks. New horizontal features must not substitute for this
 end-to-end acceptance.

@@ -56,6 +56,8 @@ const moduleManifestInput =
       schema: "rms_ordering",
       tables: [
         "cart",
+        "cart_customer_owner",
+        "cart_creation_operation",
         "cart_line",
         "cart_operation_record",
         "cart_quote_attachment",

@@ -158,12 +158,20 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
           module.manifest.ownedDatabase?.tables?.includes("guest_session") &&
           moduleRelative === "src/infrastructure/persistence/guest-session-entry-store.ts";
+        const acceptedCustomerCartAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "cart_line", "cart_customer_owner", "cart_creation_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/customer-cart-store.ts";
         if (
           (moduleRelative.startsWith("src/infrastructure/persistence/") ||
             moduleRelative.startsWith("migrations/") ||
             extname(path).toLowerCase() === ".sql") &&
           ![...sharedAuthorityModules.values()].includes(module.packageName) &&
-          !acceptedGuestEntryAsset
+          !acceptedGuestEntryAsset &&
+          !acceptedCustomerCartAsset
         )
           diagnostics.push(
             diag(

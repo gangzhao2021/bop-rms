@@ -10,12 +10,13 @@ those decisions or granting runtime, Provider or production authority.
 - Audit date: `2026-09-04`.
 - Integrated snapshot: `main@ac08c14d076ca76b71f55571605b61ef3ed1efde`.
 - Snapshot inventory: **264 `WP-*.md` records and one `SPIKE-1300.md` record**.
-- Current local work: [WP-2215 — Delivery Status Alignment and Persisted Customer Entry Browser
-  Acceptance](./work-packages/WP-2215.md), on `codex/wp-2215`; implemented and locally verified.
-- WP-2215 is outside the fixed 264-WP snapshot. Its current command outcomes and acceptance evidence
-  belong in its brief: persisted Entry browser `2/2`, full local `pnpm verify`, Merchant browser
-  `42/42` and Customer browser `36/36` passed. Its changes remain uncommitted; no GitHub integration
-  or production result is claimed.
+- Current local work: [WP-2216 — Customer Cart Creation and Current Ownership](./work-packages/WP-2216.md)
+  on `codex/wp-2216`, based on local WP-2215 checkpoint `7b43cf9`.
+- WP-2215's persisted Entry browser `2/2`, full local `pnpm verify`, Merchant browser `42/42` and
+  Customer browser `36/36` passed. Its 18 files are locally committed, not GitHub-integrated.
+- WP-2216 adds the creation/current service and opt-in durable adapter. Ordering `174/174`, the
+  first-stage full gate and dedicated PostgreSQL acceptance passed. The final expanded `pnpm verify` passed (root 350/350, all 40 builds); no HTTP Cart composition,
+  item-command persistence or production result is claimed.
 
 The software has broad Domain, application, schema, UI and isolated-test coverage. The remaining
 priority is a persisted Customer transaction journey through those owners. The ordinary API and
@@ -90,6 +91,9 @@ that CI evidence; it means neither failure nor a newly verified pass.
 | [WP-2213](./work-packages/WP-2213.md) | Read-only legacy Session rollout inspection        | `c687106` / #188           | Brief delegates exact delivery evidence to PR; not refreshed |
 | [WP-2214](./work-packages/WP-2214.md) | Opt-in cryptographic credential provider           | `ac08c14` / #189           | Brief delegates exact delivery evidence to PR; not refreshed |
 
+The local WP-2216 implementation is tracked separately from the integrated snapshot below.
+Its new migration brings the local catalog to 86; the baseline count of 85 remains historical.
+
 ## Capability layers at the integrated snapshot
 
 | Capability                                                               | Core implementation                                                                                        | Persistence evidence                                                                                                                                   | Runtime and browser integration                                                                                                                         | Production state                                                                               |
@@ -119,16 +123,14 @@ permissions, expected versions, idempotency, Audit and immutable history.
    Entry screen. Use synthetic QR/Store/admission inputs and ephemeral test key material. Verify
    secure cookie handling, fresh-adapter persistence, denied requests, unavailable storage and
    cleanup. No transaction-completion claim follows from Entry success.
-2. **Ordering-owned Cart creation and current-Cart resolution.** The Customer transport declares
-   `createCart` and `getCurrentCart`, and Staff order entry has a `CreateCart` handoff intent, but
-   those declarations do not supply a complete Customer Cart creation service. Resolve canonical
-   current-Cart ownership, session/channel scope, creation idempotency, concurrent creation/replay
-   and durable outcomes before wiring the transport. The existing
-   [Cart item operation contract](../../packages/rms/ordering/src/application/ports/cart-item-command-ports.ts)
-   and [immutable operation migration](../../migrations/1300-rms-ordering/1300_002_alter_cart_item_commands.sql)
-   support only `Add`, `Update` and `Remove`, not `Create`. Any necessary storage extension needs its
-   own accepted contract and forward migration; do not add an API-side repository, alternate
-   idempotency table or direct SQL bypass to make a demo succeed.
+2. **Ordering-owned Cart creation and current-Cart resolution.** WP-2216 implements the local
+   application service and opt-in PostgreSQL repository: Pickup Session ownership, shared Dining
+   Session ownership, exact operation replay, explicit lifecycle policy, atomic Audit and concurrent
+   creation. Its isolated database acceptance passed; final expanded `pnpm verify` passed.
+   Existing unmapped Cart data fails closed, with no arbitrary selection or duplicate creation.
+   Next connect the existing Customer transport to authorized Identity and public display/source
+   contracts. Current/creation API and the normal browser remain unconfigured until that composition.
+
 3. **Cart item/lifecycle persistence and authorized Catalog/Store sources.** Implement the owning
    repositories for the existing commands, exact scope and version conflicts, atomic Audit and
    operation outcomes, and reconstructable Cart reads. Supply public Catalog selection/menu and

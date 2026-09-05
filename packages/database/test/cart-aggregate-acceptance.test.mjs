@@ -28,6 +28,8 @@ async function prove(context) {
     );
     assert.deepEqual(tables.rows, [
       { table_name: "cart" },
+      { table_name: "cart_creation_operation" },
+      { table_name: "cart_customer_owner" },
       { table_name: "cart_lifecycle_operation_record" },
       { table_name: "cart_line" },
       { table_name: "cart_operation_record" },

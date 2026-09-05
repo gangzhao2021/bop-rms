@@ -603,6 +603,48 @@ describe("Database Schema Ownership Architecture Test", () => {
     },
   );
 
+  it("accepts only the WP-2216 Ordering Cart asset, retaining adjacent/driver denials", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "ordering", "rms_ordering", [
+      "cart",
+      "cart_line",
+      "cart_customer_owner",
+      "cart_creation_operation",
+    ]);
+    const path = join(context.moduleRoot, "src/infrastructure/persistence/customer-cart-store.ts");
+    await writeFile(path, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(path, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(path, "export const synthetic = true;\n");
+    await writeFile(join(dirname(path), "other-cart-store.ts"), "export const synthetic = true;\n");
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    [
+      "other-owner",
+      "rms_ordering",
+      ["cart", "cart_line", "cart_customer_owner", "cart_creation_operation"],
+    ],
+    [
+      "ordering",
+      "rms_other",
+      ["cart", "cart_line", "cart_customer_owner", "cart_creation_operation"],
+    ],
+    ["ordering", "rms_ordering", ["cart", "cart_line", "cart_customer_owner"]],
+  ])(
+    "does not transfer Cart asset acceptance to another owner/schema/table set",
+    async (name, schema, tables) => {
+      const root = await fixture();
+      const context = await writeModule(root, "RMS", name, schema, tables);
+      await writeFile(
+        join(context.moduleRoot, "src/infrastructure/persistence/customer-cart-store.ts"),
+        "export const synthetic = true;\n",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
   it("sorts diagnostics and repeats identical output", async () => {
     const root = await fixture();
     await writeModule(root, "BOP", "synthetic-owner", "platform_audit", ["Record"], null);

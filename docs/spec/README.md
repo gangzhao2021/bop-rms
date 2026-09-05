@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2215 — Delivery Status Alignment and Persisted Customer Entry Browser Acceptance`
+- Current discussion node: `WP-2216 — Customer Cart Creation and Current Ownership`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -27,6 +27,10 @@ The entries below preserve historical implementation, authorization and verifica
 Pre-integration `Deferred`, `Pending` and branch references are historical. The ledger's exact
 138-package set was subsequently integrated by PR #168 at `41ac34f`; this reconciles Git status only
 and does not advance external evidence, deployment or production authority.
+
+[WP-2216](./work-packages/WP-2216.md) implements Ordering-owned creation/current-Cart services and
+an opt-in PostgreSQL adapter with isolated concurrency, replay, RLS and atomic Audit acceptance.
+Its complete local verification passed; Customer HTTP composition is still a later increment.
 
 ## Work Package history (newest first)
 
