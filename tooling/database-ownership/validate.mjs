@@ -186,6 +186,13 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/cart-lifecycle-store.ts";
+        const acceptedCartQuoteAttachmentAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "cart_line", "cart_quote_attachment", "cart_quote_attachment_line"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/cart-quote-attachment-store.ts";
         if (
           (moduleRelative.startsWith("src/infrastructure/persistence/") ||
             moduleRelative.startsWith("migrations/") ||
@@ -195,6 +202,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedCustomerCartAsset &&
           !acceptedCartItemAsset &&
           !acceptedCartLifecycleAsset &&
+          !acceptedCartQuoteAttachmentAsset &&
           !acceptedCartPresentationAsset
         )
           diagnostics.push(

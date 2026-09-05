@@ -197,3 +197,8 @@ atomic Audit, exact retry and immutable Item/Quote history. Its dedicated gate i
 `pnpm cart-lifecycle-store:acceptance`, also included in `pnpm ordering-cart:acceptance`.
 HTTP, scheduler and real lifecycle policy sources remain unconfigured; see
 [WP-2223](docs/spec/work-packages/WP-2223.md) for verification evidence.
+
+WP-2224 implements optional Ordering quote-attachment storage with decimal-string/bigint money,
+immutable evidence, Cart version checks and atomic Audit. Focused database/browser checks passed;
+authorized exact-file ownership registration and full local verification passed. See
+[WP-2224](docs/spec/work-packages/WP-2224.md). Pricing-owned full Quote storage is a later increment.

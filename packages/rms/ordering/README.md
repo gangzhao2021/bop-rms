@@ -97,3 +97,12 @@ Audit, and returns the durable original for identical concurrent commits. Change
 snapshot conflicts, stale versions fail, and Item/Quote history is preserved. Authorization stays
 with `createCartLifecycleCommandService`; the adapter adds no HTTP, scheduler or default runtime
 wiring. Verify with `pnpm cart-lifecycle-store:acceptance` and `pnpm ordering-cart:acceptance`.
+
+WP-2224 exports `createPostgresCartQuoteAttachmentStore({ brandReference, storeReference, runner })`
+for the existing attachment repository port. It rechecks Cart version, active lifecycle and all
+Catalog line evidence under a Cart lock, then appends attachment/header lines and Audit atomically.
+PostgreSQL casts money to decimal text before JSON parsing; the adapter uses bigint throughout.
+Evidence lines are reference-sorted for identical initial/replay results. Exact candidate retries
+return the original, different candidates conflict, and distinct operations may append requote
+history without advancing Cart version. Authorization/Pricing remain with the existing service.
+Use `pnpm cart-quote-attachment-store:acceptance`; consult the WP for verification evidence.

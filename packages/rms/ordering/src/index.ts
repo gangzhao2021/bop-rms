@@ -70,3 +70,5 @@ export * from "./infrastructure/persistence/cart-presentation-store.js";
 export * from "./application/cart-item-presentation-snapshot.js";
 
 export * from "./infrastructure/persistence/cart-lifecycle-store.js";
+
+export * from "./infrastructure/persistence/cart-quote-attachment-store.js";

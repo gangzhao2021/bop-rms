@@ -10,8 +10,8 @@ those decisions or granting runtime, Provider or production authority.
 - Audit date: `2026-09-05`.
 - Integrated snapshot: `main@ac08c14d076ca76b71f55571605b61ef3ed1efde`.
 - Snapshot inventory: **264 `WP-*.md` records and one `SPIKE-1300.md` record**.
-- Current local work: [WP-2223 — Cart Lifecycle Persistence](./work-packages/WP-2223.md)
-  on `codex/wp-2223`, based on verified local WP-2222 checkpoint `55d8e47`.
+- Current local work: [WP-2224 — Cart Quote Attachment Persistence](./work-packages/WP-2224.md)
+  on `codex/wp-2224`, based on verified local WP-2223 checkpoint `4dd45e5`.
 - WP-2215's persisted Entry browser and full local gates passed; its local checkpoint is `7b43cf9`.
 - WP-2216's creation/current service and opt-in durable adapter passed the complete local gate
   (root 350/350, Ordering 174/174, all 40 builds) and are locally committed at `ed35fb7`.
@@ -45,6 +45,11 @@ those decisions or granting runtime, Provider or production authority.
   passed. Complete local verification passed (root 362/362, Ordering 234/234, API 189/189,
   all 40 builds).
   No HTTP, scheduler or real policy activation is added.
+- WP-2224 implements optional Ordering quote-attachment persistence: exact bigint amounts,
+  immutable header/line history, version checks and atomic Audit. Dedicated database and retained
+  Cart browser acceptance passed; Ordering 241/241 passed. Exact-file ownership registration was
+  explicitly authorized and its 53-test check passed. Complete local verification passed
+  (root 366/366, Ordering 241/241, API 189/189, all 40 builds).
 - These local checkpoints are outside the fixed 264-WP integrated snapshot. No GitHub integration
   or production result is claimed by this local task.
 
@@ -121,7 +126,7 @@ that CI evidence; it means neither failure nor a newly verified pass.
 | [WP-2213](./work-packages/WP-2213.md) | Read-only legacy Session rollout inspection        | `c687106` / #188           | Brief delegates exact delivery evidence to PR; not refreshed |
 | [WP-2214](./work-packages/WP-2214.md) | Opt-in cryptographic credential provider           | `ac08c14` / #189           | Brief delegates exact delivery evidence to PR; not refreshed |
 
-The local WP-2216–2223 implementation is tracked separately from the integrated snapshot below.
+The local WP-2216–2224 implementation is tracked separately from the integrated snapshot below.
 The local catalog now contains 87 migrations; the baseline count of 85 remains historical.
 
 ## Capability layers at the integrated snapshot
@@ -171,7 +176,7 @@ permissions, expected versions, idempotency, Audit and immutable history.
    WP-2223 supplies optional lifecycle persistence; lifecycle HTTP/scheduler composition and real Catalog/Store source wiring remain missing. A Pickup `ContextOnly` Session and a DineIn Session have different
    rules: DineIn mutations require `DiningBound`, the matching Dining Session and participant.
    A ContextOnly DineIn Entry cannot substitute for the accepted admission/binding flow.
-4. **Immutable Quote storage and Checkout sources.** Compose Pricing-owned Quote creation,
+4. **Immutable Quote storage and Checkout sources.** WP-2224 implements the optional Ordering attachment repository, with dedicated and complete local verification passed. Pricing-owned full Quote storage remains separate. Compose Pricing-owned Quote creation,
    lifecycle/recalculation and durable Quote retrieval with authorized Catalog/Pricing/Store
    sources, Cart version attachment and Checkout revalidation. Prove freshness, expiry, repricing,
    denied scope and reload behavior without client-supplied money, tax or manufactured Store facts.

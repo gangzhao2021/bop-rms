@@ -714,6 +714,54 @@ describe("Database Schema Ownership Architecture Test", () => {
     },
   );
 
+  it("accepts the exact WP-2224 quote attachment adapter while denying adjacent files and drivers", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "ordering", "rms_ordering", [
+      "cart",
+      "cart_line",
+      "cart_quote_attachment",
+      "cart_quote_attachment_line",
+    ]);
+    const path = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/cart-quote-attachment-store.ts",
+    );
+    await writeFile(path, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(path, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(path, "export const synthetic = true;\n");
+    await writeFile(
+      join(dirname(path), "other-quote-attachment-store.ts"),
+      "export const synthetic = true;\n",
+    );
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    [
+      "other-owner",
+      "rms_ordering",
+      ["cart", "cart_line", "cart_quote_attachment", "cart_quote_attachment_line"],
+    ],
+    [
+      "ordering",
+      "rms_other",
+      ["cart", "cart_line", "cart_quote_attachment", "cart_quote_attachment_line"],
+    ],
+    ["ordering", "rms_ordering", ["cart", "cart_line"]],
+  ])(
+    "does not transfer quote attachment adapter acceptance to another owner/schema/table set",
+    async (name, schema, tables) => {
+      const root = await fixture();
+      const context = await writeModule(root, "RMS", name, schema, tables);
+      await writeFile(
+        join(context.moduleRoot, "src/infrastructure/persistence/cart-quote-attachment-store.ts"),
+        "export const synthetic = true;\n",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
   it("accepts only the WP-2219 presentation adapter and retains adjacent/driver denial", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "ordering", "rms_ordering", [

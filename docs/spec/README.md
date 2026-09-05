@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2223 — Cart Lifecycle Persistence`
+- Current discussion node: `WP-2224 — Cart Quote Attachment Persistence`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -74,6 +74,12 @@ Ordering tests passed; the Owner authorized the exact-file database ownership re
 and its 49-test check passed. Complete local verification passed (root 362/362, Ordering 234/234,
 API 189/189, all 40 builds). HTTP, scheduler and real policies remain
 unconfigured.
+
+[WP-2224](./work-packages/WP-2224.md) continues from `4dd45e5` with an optional Ordering-owned
+quote attachment adapter. Dedicated PostgreSQL and retained Cart browser acceptance passed;
+Ordering tests passed 241/241. The Owner explicitly authorized the exact-file registration,
+and its 53-test check passed. Complete local verification passed (root 366/366, Ordering 241/241,
+API 189/189, all 40 builds). Full Pricing Quote storage and runtime composition remain separate.
 
 ## Work Package history (newest first)
 
