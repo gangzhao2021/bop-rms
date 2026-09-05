@@ -10,8 +10,8 @@ those decisions or granting runtime, Provider or production authority.
 - Audit date: `2026-09-05`.
 - Integrated snapshot: `main@ac08c14d076ca76b71f55571605b61ef3ed1efde`.
 - Snapshot inventory: **264 `WP-*.md` records and one `SPIKE-1300.md` record**.
-- Current local work: [WP-2224 — Cart Quote Attachment Persistence](./work-packages/WP-2224.md)
-  on `codex/wp-2224`, based on verified local WP-2223 checkpoint `4dd45e5`.
+- Current local work: [WP-2225 — Quote Requote Line Identity](./work-packages/WP-2225.md)
+  on `codex/wp-2225`, based on verified local WP-2224 checkpoint `f4ac897`.
 - WP-2215's persisted Entry browser and full local gates passed; its local checkpoint is `7b43cf9`.
 - WP-2216's creation/current service and opt-in durable adapter passed the complete local gate
   (root 350/350, Ordering 174/174, all 40 builds) and are locally committed at `ed35fb7`.
@@ -50,6 +50,14 @@ those decisions or granting runtime, Provider or production authority.
   Cart browser acceptance passed; Ordering 241/241 passed. Exact-file ownership registration was
   explicitly authorized and its 53-test check passed. Complete local verification passed
   (root 366/366, Ordering 241/241, API 189/189, all 40 builds).
+- WP-2225 corrects Pricing line/component uniqueness to permit immutable requotes retaining
+  Cart line references. Fresh-database constraints passed, but upgrading the full predecessor
+  database fails with `MIGRATION_OUT_OF_ORDER`: ADR-0031's global high-water rule prevents a new
+  Pricing migration after later namespaces have executed. The Owner subsequently authorized
+  namespace-local append checks with retained immutable-history protections. The real upgrade
+  and full verification now pass (root 377/377, Pricing 97/97, Quote database 2/2, all 40 builds).
+  Migration drift/lock/rollback and isolated lifecycle checks also pass. Full Pricing snapshot storage still needs lossless evidence fields, codec
+  and adapter; it is not complete.
 - These local checkpoints are outside the fixed 264-WP integrated snapshot. No GitHub integration
   or production result is claimed by this local task.
 

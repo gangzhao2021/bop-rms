@@ -250,14 +250,14 @@ async function readHistory(client: PgClient): Promise<readonly HistoryRow[]> {
   return result.rows;
 }
 
-function compareState(
+export function compareMigrationState(
   catalog: MigrationCatalog,
   history: readonly HistoryRow[],
 ): { diagnostics: MigrationDiagnostic[]; pending: MigrationFile[] } {
   const diagnostics: MigrationDiagnostic[] = [];
   const byId = new Map(catalog.migrations.map((migration) => [migration.id, migration]));
   const applied = new Set<string>();
-  let highWater = -1;
+  const highWaterByNamespace = new Map<number, number>();
   for (const row of history) {
     const migration = byId.get(row.migration_id);
     if (!migration) {
@@ -269,7 +269,10 @@ function compareState(
       continue;
     }
     applied.add(migration.id);
-    highWater = Math.max(highWater, catalog.migrations.indexOf(migration));
+    highWaterByNamespace.set(
+      migration.namespace,
+      Math.max(highWaterByNamespace.get(migration.namespace) ?? -1, migration.sequence),
+    );
     if (row.checksum_sha256 !== migration.checksumSha256)
       diagnostics.push({
         code: "MIGRATION_CHECKSUM_MISMATCH",
@@ -301,12 +304,14 @@ function compareState(
         migrationId: migration.id,
       });
   }
-  for (let index = 0; index <= highWater; index += 1) {
-    const migration = catalog.migrations[index];
-    if (migration && !applied.has(migration.id))
+  for (const migration of catalog.migrations) {
+    if (
+      !applied.has(migration.id) &&
+      migration.sequence <= (highWaterByNamespace.get(migration.namespace) ?? -1)
+    )
       diagnostics.push({
         code: "MIGRATION_OUT_OF_ORDER",
-        message: "pending migration exists below the applied high-water mark",
+        message: "pending migration exists at or below its namespace's applied high-water mark",
         migrationId: migration.id,
       });
   }
@@ -435,7 +440,7 @@ export async function runMigrationCommand(options: {
         state: "drift",
       };
     const history = initialized ? await readHistory(client) : [];
-    const comparison = compareState(catalog, history);
+    const comparison = compareMigrationState(catalog, history);
     if (comparison.diagnostics.length)
       return {
         applied: [],

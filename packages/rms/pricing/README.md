@@ -37,6 +37,12 @@ WP-1104/1105 work.
 Production seed and receipt semantics remain blocked on accountant-approved evidence under
 IDR-0024. All fixtures are synthetic and External Evidence is not claimed.
 
+WP-2225 corrects relational line identity for requotes: the same Cart line reference may occur in
+different Quotes, while lines and tax components remain unique within each Quote. A forward
+migration preserves existing rows, scoped foreign keys, forced RLS and immutable history.
+This prerequisite does not supply a full Quote repository: complete resolution/calculation
+evidence, currency exponent and ordering still require a lossless storage contract and codec.
+
 Verification:
 
 ```bash

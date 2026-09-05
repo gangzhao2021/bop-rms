@@ -80,6 +80,7 @@ describe("migration catalog", () => {
       "1200_004_create_price_book_admin_projection",
       "1200_005_create_tax_config_admin_projection",
       "1200_006_create_promotion_management",
+      "1200_007_alter_quote_line_identity",
       "1250_001_create_recipe_management",
       "1300_001_create_cart_aggregate",
       "1300_002_alter_cart_item_commands",

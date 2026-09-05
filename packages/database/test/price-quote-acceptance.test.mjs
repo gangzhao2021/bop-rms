@@ -4,16 +4,48 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { readMigrationCatalog } from "../src/catalog.ts";
+import { runMigrationCommand } from "../src/runner.ts";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const id = (n) => `018fd000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T16:00:00.000Z";
 const digest = (c) => `sha256:${c.repeat(64)}`;
+const migrationId = "1200_007_alter_quote_line_identity";
 
-async function prove(context) {
+// Database causes can contain SQL and bind values; retain only the synthetic test phase.
+function controlledFailure(phase) {
+  return new Error(`WP2225_${phase}_FAILED`);
+}
+
+async function denied(action, expectedCode) {
+  let code;
+  try {
+    await action();
+  } catch (error) {
+    code = error?.code;
+  }
+  assert.equal(code, expectedCode);
+}
+
+async function applyCatalog(context, catalog) {
+  const result = await runMigrationCommand({
+    catalog,
+    command: "apply",
+    config: { ...context.clientConfig, environment: "test" },
+    confirmTarget: `test:${context.databaseName}`,
+  });
+  if (result.diagnostics.some((diagnostic) => diagnostic.code === "MIGRATION_OUT_OF_ORDER")) {
+    throw new Error("WP2225_MIGRATION_OUT_OF_ORDER");
+  }
+  assert.equal(result.diagnostics.length, 0);
+  return result;
+}
+
+async function prove(context, catalog) {
   const admin = new Client(context.clientConfig);
-  const role = `wp1103_${context.runId}`;
+  const role = `wp2225_${context.runId}`;
   await admin.connect();
   try {
     await admin.query(
@@ -57,6 +89,70 @@ async function prove(context) {
        VALUES ($1,$2,$3,$4,$5,$6,'SYNTHETIC_TAX',$7,'Taxable','0.13','Exclusive','HalfUp',1,false,130,'CAD')`,
       [id(15), id(1), id(6), id(2), id(3), id(16), id(17)],
     );
+    const history = async () =>
+      (
+        await admin.query(`SELECT
+        (SELECT jsonb_agg(to_jsonb(q)) FROM rms_pricing.price_quote q) AS quotes,
+        (SELECT jsonb_agg(to_jsonb(l)) FROM rms_pricing.price_quote_line l) AS lines,
+        (SELECT jsonb_agg(to_jsonb(t)) FROM rms_pricing.price_quote_tax_line t) AS taxes`)
+      ).rows;
+    const before = await history();
+    if (catalog) {
+      assert.deepEqual((await applyCatalog(context, catalog)).applied, [migrationId]);
+      assert.deepEqual(await history(), before);
+      assert.deepEqual((await applyCatalog(context, catalog)).applied, []);
+    }
+
+    // A new immutable quote retains the same Cart line and tax component.
+    await admin.query(
+      `INSERT INTO rms_pricing.price_quote
+      SELECT (jsonb_populate_record(NULL::rms_pricing.price_quote,
+        to_jsonb(q) || jsonb_build_object('price_quote_id', $1::text))).*
+      FROM rms_pricing.price_quote q WHERE price_quote_id=$2`,
+      [id(30), id(1)],
+    );
+    const copyLine = (quote) =>
+      admin.query(
+        `INSERT INTO rms_pricing.price_quote_line
+      SELECT (jsonb_populate_record(NULL::rms_pricing.price_quote_line,
+        to_jsonb(l) || jsonb_build_object('price_quote_id', $1::text))).*
+      FROM rms_pricing.price_quote_line l WHERE price_quote_id=$2`,
+        [id(quote), id(1)],
+      );
+    const copyTax = (row, quote, store = 3) =>
+      admin.query(
+        `INSERT INTO rms_pricing.price_quote_tax_line
+      SELECT (jsonb_populate_record(NULL::rms_pricing.price_quote_tax_line,
+        to_jsonb(t) || jsonb_build_object('price_quote_tax_line_id', $1::text,
+              'price_quote_id', $2::text, 'store_id', $3::text,
+              'tax_component_code', $5::text))).*
+      FROM rms_pricing.price_quote_tax_line t WHERE price_quote_tax_line_id=$4`,
+        [
+          id(row),
+          id(quote),
+          id(store),
+          id(15),
+          store === 3 ? "SYNTHETIC_TAX" : "SYNTHETIC_FOREIGN",
+        ],
+      );
+    await denied(() => copyTax(31, 30), "23503");
+    await copyLine(30);
+    await copyTax(31, 30);
+    await denied(() => copyLine(30), "23505");
+    await denied(() => copyTax(32, 30), "23505");
+    await denied(() => copyTax(33, 30, 99), "23503");
+    await denied(() => copyLine(99), "23503");
+    for (const table of ["price_quote", "price_quote_line", "price_quote_tax_line"]) {
+      assert.equal(
+        (await admin.query(`UPDATE rms_pricing.${table} SET currency_code='USD'`)).rowCount,
+        0,
+      );
+      assert.equal((await admin.query(`DELETE FROM rms_pricing.${table}`)).rowCount, 0);
+      assert.equal(
+        (await admin.query(`SELECT count(*)::int AS n FROM rms_pricing.${table}`)).rows[0].n,
+        2,
+      );
+    }
     await admin.query(`UPDATE rms_pricing.price_quote SET total_minor=1 WHERE price_quote_id=$1`, [
       id(1),
     ]);
@@ -120,19 +216,66 @@ async function prove(context) {
     await admin.query(`SELECT set_config('bop.brand_id',$1,false)`, [id(2)]);
     assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote`)).rowCount, 0);
     await admin.query(`SELECT set_config('bop.store_id',$1,false)`, [id(3)]);
-    assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote`)).rowCount, 1);
-    assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote_line`)).rowCount, 1);
-    assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote_tax_line`)).rowCount, 1);
+    assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote`)).rowCount, 2);
+    assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote_line`)).rowCount, 2);
+    assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote_tax_line`)).rowCount, 2);
     await admin.query(`SELECT set_config('bop.store_id',$1,false)`, [id(99)]);
     assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote`)).rowCount, 0);
+    assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote_line`)).rowCount, 0);
+    assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote_tax_line`)).rowCount, 0);
+    await admin.query(`SELECT set_config('bop.store_id',$1,false)`, [id(3)]);
+    await admin.query(`SELECT set_config('bop.brand_id',$1,false)`, [id(99)]);
+    assert.equal((await admin.query(`SELECT * FROM rms_pricing.price_quote_line`)).rowCount, 0);
     await admin.query(`RESET ROLE`);
   } finally {
     await admin.query("RESET ROLE").catch(() => undefined);
+    await admin.query(`DROP OWNED BY ${role}`).catch(() => undefined);
     await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
     await admin.end();
   }
 }
 
-it("pins immutable Quote snapshots and exact Store RLS", async () => {
-  await withIsolatedDatabase({ caseId: "price_quote", root }, prove);
+it("permits immutable requote lines on a fresh database without weakening scoped constraints", async () => {
+  await withIsolatedDatabase({ caseId: "wp2225_fresh_quote", root }, async (context) => {
+    try {
+      await prove(context);
+    } catch {
+      throw new Error("WP2225_FRESH_CONSTRAINTS_FAILED");
+    }
+  });
+}, 120_000);
+
+it("upgrades existing Quote history and permits scoped immutable requote lines", async () => {
+  await withIsolatedDatabase({ caseId: "wp2225_quote", root }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    const databaseName = `bop_rms_test_${context.runId}_wp2225_upgrade`;
+    assert.match(databaseName, /^[a-z0-9_]+$/u);
+    const upgrade = {
+      ...context,
+      databaseName,
+      clientConfig: { ...context.clientConfig, database: databaseName },
+    };
+    await admin.connect();
+    let phase = "BOOTSTRAP";
+    try {
+      await admin.query(`CREATE DATABASE ${databaseName} TEMPLATE template0`);
+      const catalog = await readMigrationCatalog(root);
+      assert.equal(catalog.diagnostics.length, 0);
+      await applyCatalog(upgrade, {
+        ...catalog,
+        migrations: catalog.migrations.filter((migration) => migration.id !== migrationId),
+      });
+      phase = "UPGRADE_AND_REQUOTE";
+      await prove(upgrade, catalog);
+    } catch (error) {
+      if (error instanceof Error && error.message === "WP2225_MIGRATION_OUT_OF_ORDER") throw error;
+      throw controlledFailure(phase);
+    } finally {
+      try {
+        await admin.query(`DROP DATABASE IF EXISTS ${databaseName} WITH (FORCE)`);
+      } finally {
+        await admin.end();
+      }
+    }
+  });
 }, 120_000);

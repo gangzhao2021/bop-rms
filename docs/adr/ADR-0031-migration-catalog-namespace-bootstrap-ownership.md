@@ -21,7 +21,30 @@ The only executable catalog is the root `migrations/` directory。Its version-`1
 
 `packages/database` owns only common connection and migration mechanics。The sole WP-0020 DDL exception is the first migration：it creates the `platform_core` shell and append-only `platform_core.migration_history` control table，then records itself in the same transaction。WP-0021 retains every other Core / Eventing / Audit / Job schema and table。
 
-Migration files have deterministic directory、filename、metadata、encoding and one-schema ownership contracts。Global order is numeric namespace then sequence。Applied files are immutable and use byte-exact SHA-256；duplicate order、case collision、path escape、symlink、checksum mismatch、orphan history and out-of-order insertion fail closed。
+Migration files have deterministic directory、filename、metadata、encoding and one-schema ownership contracts。Pending execution order is numeric namespace then sequence; historical high-water checks use each namespace's applied sequence, as revised below。Applied files are immutable and use byte-exact SHA-256；duplicate order、case collision、path escape、symlink、checksum mismatch、orphan history and same-namespace out-of-order insertion fail closed。
+
+## Accepted ordering revision — WP-2225 / IDR-0044
+
+On 2026-09-05 the Owner explicitly authorized this narrow revision after a real predecessor
+database refused Pricing's new migration with `MIGRATION_OUT_OF_ORDER`. This supersedes only the
+global historical high-water interpretation of Section 94 / IDR-0044; the remaining contract stands.
+Historical records and their runner contract version are retained without rewrite.
+
+Each namespace may append a sequence greater than its own applied high-water sequence even when
+another namespace has advanced. An unapplied migration at or below its namespace's high-water
+sequence still fails closed. New namespaces have no applied high-water mark. Pending migrations
+remain deterministically ordered by namespace and sequence. Checksum, identity, schema, owner,
+orphan-history, advisory-lock, transaction and timeout checks remain mandatory.
+
+This revision does not add automatic dependency inference or reorder applied history. A migration
+must use already available dependencies or earlier pending migrations in the deterministic order;
+the owning WP must review those dependencies. WP-2225 only alters existing Pricing constraints and
+retains their existing foreign keys. It requires no new cross-namespace dependency. Existing
+databases must pass history verification; no baseline, repair, force or mark-applied path is added.
+
+Validation adds per-namespace append/backfill and retained drift refusal tests plus the real full
+predecessor-to-current Quote upgrade, immutable rows, repeat no-op and existing lock/rollback gates.
+No deployment or production migration authorization is implied.
 
 ## Consequences
 

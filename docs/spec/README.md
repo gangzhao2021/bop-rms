@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2224 — Cart Quote Attachment Persistence`
+- Current discussion node: `WP-2225 — Quote Requote Line Identity`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -80,6 +80,16 @@ quote attachment adapter. Dedicated PostgreSQL and retained Cart browser accepta
 Ordering tests passed 241/241. The Owner explicitly authorized the exact-file registration,
 and its 53-test check passed. Complete local verification passed (root 366/366, Ordering 241/241,
 API 189/189, all 40 builds). Full Pricing Quote storage and runtime composition remain separate.
+
+[WP-2225](./work-packages/WP-2225.md) continues from `f4ac897`. The full Quote storage
+investigation identified globally unique line/component keys that prevent preserving Cart line
+identity across requotes. A forward migration scopes those keys to Quote identity while retaining
+scoped foreign keys, RLS and immutable history. Fresh-database constraints passed, but the real
+predecessor-to-current upgrade fails with `MIGRATION_OUT_OF_ORDER` under ADR-0031's global
+high-water rule. The Owner subsequently authorized ADR-0031's namespace-local append revision.
+The real upgrade and retained drift/lock/rollback/isolation checks now pass; complete verification
+passed (root 377/377, Pricing 97/97, Quote database 2/2, all 40 builds). Lossless full Quote storage
+remains subsequent work.
 
 ## Work Package history (newest first)
 
