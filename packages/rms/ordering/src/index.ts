@@ -64,3 +64,5 @@ export {
 export * from "./contracts/customer-cart-view.js";
 export * from "./application/customer-cart-view.js";
 export * from "./infrastructure/persistence/cart-item-store.js";
+export * from "./application/customer-cart-presentation-service.js";
+export * from "./infrastructure/persistence/cart-presentation-store.js";

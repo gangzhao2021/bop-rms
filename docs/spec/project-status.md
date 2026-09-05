@@ -7,11 +7,11 @@ authority entry point; the accepted composite Handoff `0.5.3`, Sections 0–97 a
 Packages determine behavior and scope. This ledger reconciles delivery evidence without changing
 those decisions or granting runtime, Provider or production authority.
 
-- Audit date: `2026-09-04`.
+- Audit date: `2026-09-05`.
 - Integrated snapshot: `main@ac08c14d076ca76b71f55571605b61ef3ed1efde`.
 - Snapshot inventory: **264 `WP-*.md` records and one `SPIKE-1300.md` record**.
-- Current local work: [WP-2218 — Durable Customer Cart Item Commands](./work-packages/WP-2218.md)
-  on `codex/wp-2218`, based on verified local WP-2217 checkpoint `2f54a23`.
+- Current local work: [WP-2219 — Persisted Unquoted Customer Cart Presentation](./work-packages/WP-2219.md)
+  on `codex/wp-2219`, based on verified local WP-2218 checkpoint `9f5571e`.
 - WP-2215's persisted Entry browser and full local gates passed; its local checkpoint is `7b43cf9`.
 - WP-2216's creation/current service and opt-in durable adapter passed the complete local gate
   (root 350/350, Ordering 174/174, all 40 builds) and are locally committed at `ed35fb7`.
@@ -23,6 +23,11 @@ those decisions or granting runtime, Provider or production authority.
   persistence and retry reconciliation. Dedicated PostgreSQL acceptance and complete local verification
   passed (root 354/354, Ordering 189/189, API 185/185, all 40 builds). It does not activate
   Customer HTTP item mutations.
+- WP-2218 is locally checkpointed at `9f5571e`. WP-2219 adds optional HTTP reads of persisted
+  unquoted Pickup contents and changed-empty Carts, using the real public Catalog query contract
+  and Ordering-owned database Quote-absence proof. Dedicated acceptance and complete local verification passed
+  (root 358/358, Ordering 210/210, API 187/187, all 40 builds). Price remains explicitly unavailable; nonempty DineIn visibility,
+  Item HTTP writes, actual source wiring and default runtime activation remain incomplete.
 - These local checkpoints are outside the fixed 264-WP integrated snapshot. No GitHub integration
   or production result is claimed by this local task.
 
@@ -39,7 +44,7 @@ business transactions and production readiness.
 | Git-confirmed integration     | The named commit and WP records are present in the audited main history/tree             | Does not prove every acceptance criterion or deployment                           |
 | Recorded local verification   | An owning WP records commands and results for its bounded implementation                 | Historical evidence; not a new execution in this audit                            |
 | Recorded CI result            | A tracked WP records an exact head/main run and job outcome                              | Historical evidence; remote Actions were not independently refreshed by this work |
-| Current observed verification | WP-2215 records an actually executed command against this local change                   | Pending until the command completes; never inferred from historical counts        |
+| Current observed verification | The current owning WP records an actually executed command against its local change      | Pending until the command completes; never inferred from historical counts        |
 | Runtime composition           | An entry point supplies the required owner contracts and persistence dependencies        | A callable adapter or injectable factory alone is insufficient                    |
 | Browser acceptance            | A specific browser path was exercised with the stated assets, transport and dependencies | A synthetic read-only demo does not prove persisted transactions                  |
 | Production readiness          | Applicable external evidence, runtime controls and independent go/no-go are accepted     | Remains blocked; no local software result supplies those facts                    |
@@ -99,7 +104,7 @@ that CI evidence; it means neither failure nor a newly verified pass.
 | [WP-2213](./work-packages/WP-2213.md) | Read-only legacy Session rollout inspection        | `c687106` / #188           | Brief delegates exact delivery evidence to PR; not refreshed |
 | [WP-2214](./work-packages/WP-2214.md) | Opt-in cryptographic credential provider           | `ac08c14` / #189           | Brief delegates exact delivery evidence to PR; not refreshed |
 
-The local WP-2216–2218 implementation is tracked separately from the integrated snapshot below.
+The local WP-2216–2219 implementation is tracked separately from the integrated snapshot below.
 Its new migration brings the local catalog to 86; the baseline count of 85 remains historical.
 
 ## Capability layers at the integrated snapshot
@@ -143,8 +148,10 @@ permissions, expected versions, idempotency, Audit and immutable history.
 3. **Cart Item HTTP wiring, lifecycle persistence and authorized Catalog/Store sources.** WP-2218
    supplies the opt-in Ordering Item repository, exact version conflicts, atomic Audit and original
    operation outcomes, with fresh-pool reads and isolated concurrency/rollback evidence. Full local
-   verification passed. Item HTTP composition, nonempty presentation and lifecycle persistence
-   remain missing. Supply public Catalog selection/menu and Store eligibility sources. A Pickup `ContextOnly` Session and a DineIn Session have different
+   verification passed. WP-2219 adds unquoted Pickup and changed-empty presentation through optional
+   HTTP reads, with Catalog names and explicit unavailable estimates; complete local verification
+   passed. Nonempty DineIn still needs Host/Participant field-visibility authority. Item HTTP
+   composition, lifecycle persistence and real Catalog/Store source wiring remain missing. A Pickup `ContextOnly` Session and a DineIn Session have different
    rules: DineIn mutations require `DiningBound`, the matching Dining Session and participant.
    A ContextOnly DineIn Entry cannot substitute for the accepted admission/binding flow.
 4. **Immutable Quote storage and Checkout sources.** Compose Pricing-owned Quote creation,

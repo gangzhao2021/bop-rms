@@ -166,6 +166,24 @@ const databaseAccessManifestInput = {
   ],
   accesses: [
     {
+      id: "cart-presentation.cart.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "cart" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/cart-presentation-store.ts",
+    },
+    {
+      id: "cart-presentation.cart_quote_attachment.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "cart_quote_attachment" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/cart-presentation-store.ts",
+    },
+    {
       id: "cart-item.cart.read",
       operation: "read",
       mechanism: "repository",

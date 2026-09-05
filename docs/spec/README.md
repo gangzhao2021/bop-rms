@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2218 — Durable Customer Cart Item Commands`
+- Current discussion node: `WP-2219 — Persisted Unquoted Customer Cart Presentation`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -41,6 +41,13 @@ with Ordering-owned Item mutation persistence, stable retry fingerprints and ato
 Dedicated isolated PostgreSQL acceptance and complete local verification passed (root 354/354,
 Ordering 189/189, all 40 builds).
 HTTP mutation composition and nonempty presentation remain separate increments.
+
+[WP-2219](./work-packages/WP-2219.md) continues from local checkpoint `9f5571e` with optional
+HTTP reads of persisted unquoted Pickup contents and changed-empty Carts. Ordering uses the public
+Catalog menu query and database Quote-absence evidence; price remains explicitly unavailable.
+Dedicated local acceptance and complete local verification passed (root 358/358, Ordering
+210/210, API 187/187, all 40 builds). Nonempty DineIn visibility,
+Item HTTP writes, real source wiring and Quote/Pricing remain separate increments.
 
 ## Work Package history (newest first)
 

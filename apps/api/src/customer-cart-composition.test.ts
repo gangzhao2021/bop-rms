@@ -6,6 +6,7 @@ import {
   type CartAggregate,
   type CustomerCartCreationRecord,
   type CustomerCartPorts,
+  type CustomerCartPresentationPorts,
 } from "@rms/ordering";
 import { createCustomerCartComposition } from "./customer-cart-composition.js";
 const id = (n: number) => `018f5100-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -148,7 +149,7 @@ function domainFixture() {
   };
 }
 
-function fixture() {
+function fixture(presentation?: CustomerCartPresentationPorts) {
   const f = domainFixture();
   const authorize = vi.fn(async () => guest());
   const resolve = vi.fn(async () => guest());
@@ -164,6 +165,7 @@ function fixture() {
     session: { authorize, resolve },
     ordering: () => f.ports,
     display,
+    ...(presentation === undefined ? {} : { presentation: () => presentation }),
   });
   return { ...f, composition, authorize, resolve, display };
 }
@@ -267,5 +269,51 @@ describe("Customer Cart public composition", () => {
       }),
     ).toEqual({ status: "Unavailable" });
     expect(f.counts()).toMatchObject({ carts: 0, audits: 0 });
+  });
+});
+
+describe("optional unquoted Cart presentation", () => {
+  it("uses the presentation dependency for changed-empty reads, never for creation or its replay", async () => {
+    const quotes = { resolve: vi.fn(async (request) => ({ ...request, quoteStatus: "None" })) };
+    const catalog = { getPublishedMenu: vi.fn(async () => ({ status: "Unavailable" as const })) };
+    const f = fixture({ quotes, catalog });
+    expect((await f.composition.createCart(command)).status).toBe("Applied");
+    expect(quotes.resolve).not.toHaveBeenCalled();
+    f.corrupt((cart) => ({
+      ...cart,
+      aggregateVersion: 3,
+      updatedAt: "2026-08-02T14:01:00.000Z" as never,
+    }));
+    const before = f.counts();
+    const result = await f.composition.getCurrentCart({
+      guestCredential: command.guestCredential,
+      requestedAt: "2026-08-02T14:02:00.000Z",
+    });
+    expect(result).toMatchObject({
+      status: "Found",
+      view: { cart: { version: 3, items: [], quote: null } },
+    });
+    expect(f.counts().audits).toBe(before.audits);
+    expect(f.resolve).toHaveBeenCalledWith({
+      sessionCredential: command.guestCredential,
+      activity: "Background",
+      observedAt: "2026-08-02T14:02:00.000Z",
+    });
+    expect(catalog.getPublishedMenu).not.toHaveBeenCalled();
+    expect((await f.composition.createCart(command)).status).toBe("Current");
+    expect(quotes.resolve).toHaveBeenCalledOnce();
+  });
+  it("does not expose stored Quote state or query presentation for a foreign Cart", async () => {
+    const quotes = { resolve: vi.fn(async (request) => ({ ...request, quoteStatus: "Present" })) };
+    const catalog = { getPublishedMenu: vi.fn(async () => ({ status: "Unavailable" as const })) };
+    const f = fixture({ quotes, catalog });
+    await f.composition.createCart(command);
+    const read = { guestCredential: command.guestCredential, requestedAt: createdAt };
+    expect(await f.composition.getCart({ ...read, cartReference: id(99) })).toEqual({
+      status: "NotFound",
+    });
+    expect(quotes.resolve).not.toHaveBeenCalled();
+    expect(await f.composition.getCurrentCart(read)).toEqual({ status: "Unavailable" });
+    expect(catalog.getPublishedMenu).not.toHaveBeenCalled();
   });
 });

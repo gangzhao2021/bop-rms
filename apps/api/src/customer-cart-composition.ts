@@ -2,6 +2,8 @@ import { GuestSessionError, type GuestSession, type GuestSessionService } from "
 import {
   CartError,
   createCustomerCartService,
+  createCustomerCartPresentationService,
+  type CustomerCartPresentationPorts,
   createEmptyCustomerCartView,
   parseCustomerCartDisplay,
   type CustomerCartDisplayRequest,
@@ -12,6 +14,7 @@ import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.j
 export interface CustomerCartCompositionOptions {
   readonly session: Pick<GuestSessionService, "authorize" | "resolve">;
   readonly ordering: (session: GuestSession) => Omit<CustomerCartPorts, "authorization">;
+  readonly presentation?: (session: GuestSession) => CustomerCartPresentationPorts;
   readonly display: { resolve(request: CustomerCartDisplayRequest): Promise<unknown> };
 }
 const unavailable = Object.freeze({ status: "Unavailable" } as const);
@@ -83,7 +86,13 @@ export function createCustomerCartComposition(
         return { status: "NotFound" };
       return {
         status: create ? (result.status === "Created" ? "Applied" : "Current") : "Found",
-        view: createEmptyCustomerCartView(result.aggregate, display),
+        view:
+          !create && options.presentation !== undefined
+            ? await createCustomerCartPresentationService(options.presentation(session)).getView(
+                result.aggregate,
+                display,
+              )
+            : createEmptyCustomerCartView(result.aggregate, display),
       };
     } catch (error) {
       return failure(error);

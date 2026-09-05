@@ -171,8 +171,10 @@ for actual verification and integration status. WP-2217 adds opt-in HTTP composi
 empty Carts, with an explicit public display source prerequisite. WP-2218 adds opt-in durable
 Item commands and original-result replay; see its brief for current verification evidence.
 The dedicated regression runs with `pnpm cart-item-store:acceptance` and is included in
-`pnpm ordering-cart:acceptance`. Next connect nonempty Cart
-presentation and Item HTTP wiring, lifecycle and Quote storage, then Payment-owned Order orchestration and the Worker /
+`pnpm ordering-cart:acceptance`. WP-2219 adds optional persisted unquoted Pickup/changed-empty
+HTTP reads with public Catalog names and explicitly unavailable prices. Its regression is
+`pnpm customer-cart-presentation:acceptance`. Next connect Item HTTP writes, shared-Cart visibility,
+lifecycle and Quote storage, then Payment-owned Order orchestration and the Worker /
 Kitchen / Pickup / Receipt path. Each increment retains its owning contracts,
 authorization, replay and failure checks. New horizontal features must not substitute for this
 end-to-end acceptance.
