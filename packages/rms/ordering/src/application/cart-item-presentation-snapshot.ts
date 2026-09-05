@@ -1,3 +1,5 @@
+import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
+import type { CustomerCartView } from "../contracts/customer-cart-view.js";
 import { CartError, parseCartAggregate, type CartAggregate } from "../domain/cart.js";
 
 /** Immutable public label evidence for an original command result; never a price or Quote claim. */
@@ -107,4 +109,62 @@ export function parseCartItemPresentationSnapshot(
   } catch {
     return unavailable();
   }
+}
+
+/** Reconstruct the original command response only from persisted transaction evidence. */
+export function createCartItemResultView(result: {
+  aggregate: CartAggregate;
+  presentationSnapshot?: CartItemPresentationSnapshot;
+  quoteAbsenceVerified?: true;
+}): CustomerCartView {
+  if (result.quoteAbsenceVerified !== true) return unavailable();
+  const cart = parseCartAggregate(result.aggregate);
+  const snapshot = parseCartItemPresentationSnapshot(result.presentationSnapshot, cart);
+  const lifecycle = assertCartLifecycleActive(cart.lifecycle, cart.updatedAt);
+  return Object.freeze({
+    schemaVersion: 1,
+    cart: Object.freeze({
+      cartReference: cart.cartReference,
+      version: cart.aggregateVersion,
+      orderType: cart.orderType,
+      serviceMode: snapshot.serviceMode,
+      context: Object.freeze({ brandName: snapshot.brandName, storeName: snapshot.storeName }),
+      lifecycle: Object.freeze({
+        status: lifecycle.status,
+        idleExpiresAt: lifecycle.idleExpiresAt,
+        absoluteExpiresAt: lifecycle.absoluteExpiresAt,
+      }),
+      items: Object.freeze(
+        cart.items.map((item, index) => {
+          const labels = snapshot.items[index];
+          if (!labels) return unavailable();
+          return Object.freeze({
+            cartItemReference: item.cartItemReference,
+            sellableReference: item.sellableReference,
+            displayName: labels.displayName,
+            quantity: item.quantity,
+            customerNote: item.customerNote,
+            configuration: Object.freeze(
+              item.optionSelections.map((option, index) => {
+                const label = labels.configuration[index];
+                if (!label) return unavailable();
+                return Object.freeze({
+                  optionReference: option.optionReference,
+                  quantity: option.quantity,
+                  displayName: label.displayName,
+                });
+              }),
+            ),
+            lineEstimate: Object.freeze({
+              status: "Unavailable" as const,
+              reasonCode: "PRICE_UNAVAILABLE",
+            }),
+            warnings: Object.freeze([]),
+          });
+        }),
+      ),
+      quote: null,
+      warnings: Object.freeze([]),
+    }),
+  });
 }

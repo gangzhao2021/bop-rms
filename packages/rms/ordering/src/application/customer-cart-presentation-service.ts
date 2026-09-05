@@ -1,3 +1,4 @@
+import { parseCartItemPresentationSnapshot } from "./cart-item-presentation-snapshot.js";
 import type { CustomerMenuQuery, CustomerMenuQueryInput } from "@rms/catalog";
 import {
   CartError,
@@ -243,8 +244,91 @@ function lineView(
     return unavailable();
   return first;
 }
+async function catalogLines(
+  ports: Pick<CustomerCartPresentationPorts, "catalog">,
+  cart: CartAggregate,
+  display: ReturnType<typeof parseCustomerCartDisplay>,
+) {
+  let items: CustomerCartView["cart"]["items"] = Object.freeze([]);
+  if (cart.items.length > 0) {
+    const evidence = cart.items[0]?.catalogSelectionEvidence ?? unavailable();
+    if (
+      cart.items.some(
+        (item) =>
+          item.catalogSelectionEvidence?.menuVersionReference !== evidence.menuVersionReference ||
+          item.catalogSelectionEvidence.catalogChannelCode !== evidence.catalogChannelCode ||
+          item.catalogSelectionEvidence.catalogOrderTypeCode !== evidence.catalogOrderTypeCode,
+      )
+    )
+      return unavailable();
+    const query: CustomerMenuQueryInput = Object.freeze({
+      publicStoreReference: display.publicStoreReference as never,
+      channelCode: evidence.catalogChannelCode as never,
+      orderTypeCode: evidence.catalogOrderTypeCode as never,
+      locale: display.locale,
+      requestedAt: display.evaluatedAt as never,
+      searchTerm: null,
+      sectionReference: null,
+    });
+    const source = menuItems(
+      await ports.catalog.getPublishedMenu(query),
+      query,
+      evidence.menuVersionReference,
+    );
+    items = Object.freeze(cart.items.map((item) => lineView(item, source)));
+  }
+
+  return items;
+}
 export function createCustomerCartPresentationService(ports: CustomerCartPresentationPorts) {
   return Object.freeze({
+    async prepareSnapshot(value: unknown, content: ReturnType<typeof parseCustomerCartDisplay>) {
+      try {
+        const cart = parseCartAggregate(value);
+        const display = parseCustomerCartDisplay(content, content);
+        if (
+          cart.brandReference !== display.brandReference ||
+          cart.storeReference !== display.storeReference ||
+          cart.orderType !== display.orderType ||
+          !["Qr", "Web"].includes(cart.sourceChannel) ||
+          Date.parse(cart.updatedAt) > Date.parse(display.evaluatedAt)
+        )
+          return unavailable();
+        // Session binding alone does not establish Host/Participant field visibility for a shared Cart.
+        if (cart.orderType === "DineIn" && cart.items.length > 0) return unavailable();
+        if (
+          cart.items.some(
+            (item) =>
+              item.quantity > 100 ||
+              item.optionSelections.length > 50 ||
+              item.optionSelections.some((option) => option.quantity > 100),
+          )
+        )
+          return unavailable();
+        assertCartLifecycleActive(cart.lifecycle, parseOrderingInstant(display.evaluatedAt));
+
+        const items = await catalogLines(ports, cart, display);
+        return parseCartItemPresentationSnapshot(
+          {
+            schemaVersion: 1,
+            brandName: display.brandName,
+            storeName: display.storeName,
+            serviceMode: display.serviceMode,
+            items: items.map((item) => ({
+              cartItemReference: item.cartItemReference,
+              displayName: item.displayName,
+              configuration: item.configuration.map((option) => ({
+                optionReference: option.optionReference,
+                displayName: option.displayName,
+              })),
+            })),
+          },
+          cart,
+        );
+      } catch {
+        return unavailable();
+      }
+    },
     async getView(
       value: unknown,
       content: ReturnType<typeof parseCustomerCartDisplay>,
@@ -290,36 +374,7 @@ export function createCustomerCartPresentationService(ports: CustomerCartPresent
           Object.entries(request).some(([key, value]) => state[key] !== value)
         )
           return unavailable();
-        let items: CustomerCartView["cart"]["items"] = Object.freeze([]);
-        if (cart.items.length > 0) {
-          const evidence = cart.items[0]?.catalogSelectionEvidence ?? unavailable();
-          if (
-            cart.items.some(
-              (item) =>
-                item.catalogSelectionEvidence?.menuVersionReference !==
-                  evidence.menuVersionReference ||
-                item.catalogSelectionEvidence.catalogChannelCode !== evidence.catalogChannelCode ||
-                item.catalogSelectionEvidence.catalogOrderTypeCode !==
-                  evidence.catalogOrderTypeCode,
-            )
-          )
-            return unavailable();
-          const query: CustomerMenuQueryInput = Object.freeze({
-            publicStoreReference: display.publicStoreReference as never,
-            channelCode: evidence.catalogChannelCode as never,
-            orderTypeCode: evidence.catalogOrderTypeCode as never,
-            locale: display.locale,
-            requestedAt: display.evaluatedAt as never,
-            searchTerm: null,
-            sectionReference: null,
-          });
-          const source = menuItems(
-            await ports.catalog.getPublishedMenu(query),
-            query,
-            evidence.menuVersionReference,
-          );
-          items = Object.freeze(cart.items.map((item) => lineView(item, source)));
-        }
+        const items = await catalogLines(ports, cart, display);
         return Object.freeze({
           schemaVersion: 1,
           cart: Object.freeze({

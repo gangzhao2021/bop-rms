@@ -20,6 +20,7 @@ export interface CartItemOperationRecord {
   readonly cartItemReference: OrderingReference;
   readonly result: CartAggregate;
   readonly presentationSnapshot?: CartItemPresentationSnapshot;
+  readonly quoteAbsenceVerified?: true;
   readonly occurredAt: OrderingInstant;
   readonly expiresAt: OrderingInstant;
 }
@@ -50,6 +51,7 @@ export interface CartItemCommandPorts {
     equals(left: OrderingHash, right: OrderingHash): boolean;
   };
   readonly repository: {
+    readonly unquotedPresentation?: true;
     resolveOperation(
       operationReference: OrderingReference,
     ): Promise<CartItemOperationRecord | null>;

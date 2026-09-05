@@ -199,6 +199,7 @@ async function replay(
       cartItemReference: prior.cartItemReference,
       aggregate: result,
       ...presentationResult(prior, ports),
+      ...(prior.quoteAbsenceVerified === true ? { quoteAbsenceVerified: true as const } : {}),
     });
   } catch (error) {
     if (error instanceof CartError) throw error;
@@ -456,6 +457,7 @@ async function commit(
     cartItemReference: input.cartItemReference,
     aggregate: verify(saved, record, ports),
     ...presentationResult(saved, ports),
+    ...(saved.quoteAbsenceVerified === true ? { quoteAbsenceVerified: true as const } : {}),
   });
 }
 

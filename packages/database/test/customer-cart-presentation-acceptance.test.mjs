@@ -12,7 +12,6 @@ import {
   createPostgresCustomerCartStore,
   createPostgresCartPresentationStore,
   createPostgresCartItemStore,
-  createCartItemCommandService,
 } from "../../rms/ordering/src/index.ts";
 import { createCustomerCartComposition } from "../../../apps/api/src/customer-cart-composition.ts";
 import { CustomerCartHandler } from "../../../apps/api/src/customer-cart.ts";
@@ -23,13 +22,13 @@ const { Client, Pool } = pg;
 const id = (n) => `018f5300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T14:00:00.000Z";
 function check(value, code) {
-  if (!value) throw new Error(`WP2219_${code}`);
+  if (!value) throw new Error(`WP2221_${code}`);
 }
 it("reads real persisted Item mutations through authorized HTTP with unquoted state and public Catalog names", async () => {
-  await withIsolatedDatabase({ workPackage: "WP-2219" }, async (database) => {
+  await withIsolatedDatabase({ workPackage: "WP-2221" }, async (database) => {
     const admin = new Client(database.clientConfig);
     const pools = [];
-    const role = `bop_wp2219_${database.runId}`;
+    const role = `bop_wp2221_${database.runId}`;
     const logs = [];
     let runtime;
     let roleCreated = false;
@@ -38,6 +37,7 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
     let observedAt = at;
     let bindingCurrent = true;
     let displayAvailable = true;
+    let selectionRejected = false;
     let catalogState = "Current";
     await admin.connect();
     try {
@@ -71,7 +71,7 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
         const pool = new Pool({
           ...database.clientConfig,
           max: 2,
-          application_name: "bop_wp2219_acceptance",
+          application_name: "bop_wp2221_acceptance",
           connectionTimeoutMillis: 5000,
           query_timeout: 5000,
         });
@@ -86,7 +86,7 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
                 return client;
               } catch {
                 client.release(true);
-                throw new Error("WP2219_ROLE_FAILED");
+                throw new Error("WP2221_ROLE_FAILED");
               }
             },
           },
@@ -231,6 +231,7 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
       });
       // Fresh Identity pool, real credential verifier, and per-request Ordering pools.
       const composition = createCustomerCartComposition({
+        items: (session) => itemPorts(session),
         presentation: () => ({
           catalog,
           quotes: createPostgresCartPresentationStore({ ...scope, runner: runner() }),
@@ -314,9 +315,15 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
         "sec-fetch-site": "same-origin",
         "sec-fetch-mode": "cors",
       });
-      async function request(path, session = first, mutation = false, overrides = {}) {
+      async function request(
+        path,
+        session = first,
+        mutation = false,
+        overrides = {},
+        payload = {},
+      ) {
         const response = await globalThis.fetch(base + path, {
-          method: mutation ? "POST" : "GET",
+          method: typeof mutation === "string" ? mutation : mutation ? "POST" : "GET",
           headers: {
             ...headers(session),
             ...(mutation
@@ -329,7 +336,7 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
               : {}),
             ...overrides,
           },
-          ...(mutation ? { body: "{}" } : {}),
+          ...(mutation ? { body: JSON.stringify(payload) } : {}),
           signal: globalThis.AbortSignal.timeout(5000),
         });
         const text = await response.text();
@@ -344,62 +351,111 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
           "operationIntentHash",
           "createdByActorReference",
           "PRICING_NOT_INTEGRATED",
+          "quoteAbsenceVerified",
+          "presentationSnapshot",
         ])
           check(!text.includes(secret), "PRIVATE_RESPONSE");
         return { response, body: JSON.parse(text) };
       }
       const quoteStore = createPostgresCartPresentationStore({ ...scope, runner: runner() });
-      const mutations = createCartItemCommandService({
-        repository: createPostgresCartItemStore({ ...scope, runner: runner() }),
-        references: {
-          generate: () => id(sequence++),
-          hashIntent: (value) => `sha256:${createHash("sha256").update(value).digest("hex")}`,
-          equals: (left, right) => left === right,
-        },
-        authorization: {
-          async authorize(input) {
-            const session = await sessionService().authorize({
-              sessionCredential: first.sessionCredential,
-              csrfCredential: first.csrfCredential,
-              observedAt: input.observedAt,
-            });
+      function itemPorts(session) {
+        return {
+          repository: createPostgresCartItemStore({
+            ...scope,
+            runner: runner(),
+            requireUnquotedPresentation: true,
+          }),
+          references: {
+            generate: () => id(sequence++),
+            hashIntent: (value) => `sha256:${createHash("sha256").update(value).digest("hex")}`,
+            equals: (left, right) => left === right,
+          },
+          authorization: {
+            async authorize(input) {
+              return {
+                guestSession: session,
+                audit: {
+                  auditId: id(sequence++),
+                  brandId: scope.brandReference,
+                  storeId: scope.storeReference,
+                  actor: { type: "System" },
+                  actionCode: `ORDERING_CART_ITEM_${input.action.toUpperCase()}`,
+                  targetType: "OrderingCart",
+                  targetId: input.cartReference,
+                  reasonCode: "AUTHORIZED_CART_MUTATION",
+                  correlationId: input.operationReference,
+                  occurredAt: input.observedAt,
+                  sourceChannel: "CUSTOMER_PWA",
+                  dataClassification: "Restricted",
+                  retentionPolicyCode: "AUDIT_DEFAULT",
+                  retentionPolicyVersion: 1,
+                },
+              };
+            },
+          },
+          // Selection evidence is an explicit synthetic public-source fixture. The read uses the real Catalog query service.
+          catalog: {
+            async validateSelection(input) {
+              if (selectionRejected) return { status: "Rejected", reason: "SELLABLE_UNAVAILABLE" };
+              return {
+                status: "Accepted",
+                ...input,
+                menuVersionReference: id(519),
+                productVersionReference: id(520),
+                catalogChannelCode: "SYNTHETIC_QR",
+                catalogOrderTypeCode: "SYNTHETIC_PICKUP",
+                ruleEvidence: [{ bindingReference: id(521), optionSetVersionReference: id(522) }],
+                validatedAt: input.observedAt,
+              };
+            },
+          },
+        };
+      }
+      async function itemRequest(method, input, session = first, overrides = {}) {
+        const { cartReference, cartItemReference, expectedAggregateVersion, operationReference } =
+          input;
+        const payload =
+          method === "remove"
+            ? {}
+            : {
+                quantity: input.quantity,
+                optionSelections: input.optionSelections,
+                customerNote: input.customerNote,
+                ...(method === "add" ? { sellableReference: input.sellableReference } : {}),
+              };
+        const path = `/api/v1/carts/${cartReference}/items${method === "add" ? "" : `/${cartItemReference}`}`;
+        return request(
+          path,
+          session,
+          method === "add" ? "POST" : method === "update" ? "PATCH" : "DELETE",
+          {
+            "if-match": `"${expectedAggregateVersion}"`,
+            "idempotency-key": operationReference,
+            ...overrides,
+          },
+          payload,
+        );
+      }
+      const mutations = Object.fromEntries(
+        ["add", "update", "remove"].map((method) => [
+          method,
+          async (input) => {
+            const result = await itemRequest(method, input);
+            check(result.response.status === 200, "HTTP_ITEM_COMMAND");
+            check(
+              result.response.headers.get("etag") === `"${result.body.cart.version}"`,
+              "ITEM_ETAG",
+            );
             return {
-              guestSession: session,
-              audit: {
-                auditId: id(sequence++),
-                brandId: scope.brandReference,
-                storeId: scope.storeReference,
-                actor: { type: "System" },
-                actionCode: `ORDERING_CART_ITEM_${input.action.toUpperCase()}`,
-                targetType: "OrderingCart",
-                targetId: input.cartReference,
-                reasonCode: "AUTHORIZED_CART_MUTATION",
-                correlationId: input.operationReference,
-                occurredAt: input.observedAt,
-                sourceChannel: "CUSTOMER_PWA",
-                dataClassification: "Restricted",
-                retentionPolicyCode: "AUDIT_DEFAULT",
-                retentionPolicyVersion: 1,
-              },
+              cartItemReference:
+                method === "add"
+                  ? result.body.cart.items.at(-1).cartItemReference
+                  : input.cartItemReference,
+              view: result.body,
             };
           },
-        },
-        // Selection evidence is an explicit synthetic public-source fixture. The read uses the real Catalog query service.
-        catalog: {
-          async validateSelection(input) {
-            return {
-              status: "Accepted",
-              ...input,
-              menuVersionReference: id(519),
-              productVersionReference: id(520),
-              catalogChannelCode: "SYNTHETIC_QR",
-              catalogOrderTypeCode: "SYNTHETIC_PICKUP",
-              ruleEvidence: [{ bindingReference: id(521), optionSetVersionReference: id(522) }],
-              validatedAt: input.observedAt,
-            };
-          },
-        },
-      });
+        ]),
+      );
       async function counts() {
         return (
           await admin.query(`SELECT
@@ -501,6 +557,76 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
       });
       const empty = await readOnly("/bff/customer/cart");
       check(empty.cart.version === 4 && empty.cart.items.length === 0, "CHANGED_EMPTY_NOT_VISIBLE");
+      phase = "HTTP_RETRY_AND_DENIAL";
+      const mutationCounts = async () => {
+        const facts = await counts();
+        return JSON.stringify([facts.operations, facts.cart_versions, facts.audits]);
+      };
+      const beforeRetries = await mutationCounts();
+      catalogState = "Missing";
+      displayAvailable = false;
+      const replayed = await itemRequest("add", add);
+      check(
+        replayed.response.status === 200 &&
+          JSON.stringify(replayed.body) === JSON.stringify(added.view),
+        "ORIGINAL_HTTP_REPLAY",
+      );
+      check((await mutationCounts()) === beforeRetries, "REPLAY_MUTATED_CART");
+      const nextAdd = { ...add, expectedAggregateVersion: 4, operationReference: id(46) };
+      check(
+        (await itemRequest("add", nextAdd)).response.status === 503,
+        "SOURCE_FAILURE_ALLOWED_WRITE",
+      );
+      displayAvailable = true;
+      check(
+        (await itemRequest("add", nextAdd)).response.status === 503,
+        "CATALOG_FAILURE_ALLOWED_WRITE",
+      );
+      catalogState = "Current";
+      check(
+        (await itemRequest("add", { ...add, quantity: 3 })).response.status === 409,
+        "CHANGED_INTENT_ALLOWED",
+      );
+      check(
+        (await itemRequest("add", { ...add, operationReference: id(47) })).response.status === 409,
+        "STALE_VERSION_ALLOWED",
+      );
+      check(
+        (await itemRequest("add", nextAdd, second)).response.status === 404,
+        "FOREIGN_CART_WRITE",
+      );
+      check(
+        (
+          await itemRequest("remove", {
+            cartReference: cartId,
+            cartItemReference: id(999),
+            expectedAggregateVersion: 4,
+            operationReference: id(48),
+          })
+        ).response.status === 404,
+        "FOREIGN_ITEM_WRITE",
+      );
+      check(
+        (await itemRequest("add", nextAdd, first, { origin: "https://foreign.invalid" })).response
+          .status === 400,
+        "ORIGIN_WRITE_ALLOWED",
+      );
+      check(
+        (
+          await itemRequest("add", nextAdd, first, {
+            "x-csrf-token":
+              (first.csrfCredential[0] === "A" ? "B" : "A") + first.csrfCredential.slice(1),
+          })
+        ).response.status === 401,
+        "CSRF_WRITE_ALLOWED",
+      );
+      bindingCurrent = false;
+      check((await itemRequest("add", nextAdd)).response.status === 401, "REVOKED_WRITE_ALLOWED");
+      bindingCurrent = true;
+      selectionRejected = true;
+      check((await itemRequest("add", nextAdd)).response.status === 422, "SELECTION_WRITE_ALLOWED");
+      selectionRejected = false;
+      check((await mutationCounts()) === beforeRetries, "DENIAL_MUTATED_CART");
       phase = "PROOF_SCOPE";
       const proof = { ...scope, cartReference: cartId, cartVersion: 4 };
       await controlled(() => quoteStore.resolve({ ...proof, cartVersion: 1 }));
@@ -526,6 +652,14 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
         cartId,
       ]);
       phase = "WAIT_FOR_CART_LOCK";
+      const beforeQuoteWrite = await mutationCounts();
+      const quotedInput = {
+        ...add,
+        expectedAggregateVersion: 5,
+        operationReference: id(49),
+        requestedAt: observedAt,
+      };
+      const pendingMutation = itemRequest("add", quotedInput);
       const pending = quoteStore.resolve(currentProof);
       let waiting = false;
       for (let attempt = 0; attempt < 50; attempt++) {
@@ -563,6 +697,18 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
       );
       await admin.query("COMMIT");
       phase = "READ_AFTER_ATTACHMENT";
+      check((await pendingMutation).response.status === 503, "QUOTED_WRITE_ALLOWED");
+      check((await mutationCounts()) === beforeQuoteWrite, "QUOTED_WRITE_MUTATED");
+      catalogState = "Missing";
+      displayAvailable = false;
+      const originalAfterQuote = await itemRequest("add", add);
+      check(
+        originalAfterQuote.response.status === 200 &&
+          JSON.stringify(originalAfterQuote.body) === JSON.stringify(added.view),
+        "ORIGINAL_REPLAY_AFTER_QUOTE",
+      );
+      catalogState = "Current";
+      displayAvailable = true;
       check((await pending).quoteStatus === "Present", "ATTACHMENT_HIDDEN_BY_OLD_SNAPSHOT");
       await readOnly("/bff/customer/cart", 503);
       // A later Cart version must not hide earlier immutable attachments either.
@@ -574,6 +720,18 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
         "OLDER_QUOTE_HIDDEN",
       );
       await readOnly(`/api/v1/carts/${cartId}`, 503);
+      const beforeOldQuote = await mutationCounts();
+      check(
+        (
+          await itemRequest("add", {
+            ...quotedInput,
+            expectedAggregateVersion: 6,
+            operationReference: id(50),
+          })
+        ).response.status === 503,
+        "OLDER_QUOTE_WRITE_ALLOWED",
+      );
+      check((await mutationCounts()) === beforeOldQuote, "OLDER_QUOTE_WRITE_MUTATED");
       for (const secret of [
         first.sessionCredential,
         first.csrfCredential,
@@ -588,7 +746,7 @@ it("reads real persisted Item mutations through authorized HTTP with unquoted st
           "PRIVATE_LOG",
         );
     } catch {
-      throw new Error(`WP2219_HTTP_${phase}_FAILED`);
+      throw new Error(`WP2221_HTTP_${phase}_FAILED`);
     } finally {
       await admin.query("ROLLBACK");
       if (runtime) await runtime.shutdown("SIGTERM");

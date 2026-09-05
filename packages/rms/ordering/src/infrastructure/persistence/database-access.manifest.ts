@@ -229,6 +229,15 @@ const databaseAccessManifestInput = {
       source: "packages/rms/ordering/src/infrastructure/persistence/cart-item-store.ts",
     },
     {
+      id: "cart-item.cart_quote_attachment.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "cart_quote_attachment" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/cart-item-store.ts",
+    },
+    {
       id: "cart-item.cart_operation_record.write",
       operation: "write",
       mechanism: "repository",

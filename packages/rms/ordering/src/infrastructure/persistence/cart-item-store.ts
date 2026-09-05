@@ -146,10 +146,12 @@ export function createPostgresCartItemStore(input: {
   readonly brandReference: string;
   readonly storeReference: string;
   readonly runner: CustomerCartDatabaseRunner;
+  readonly requireUnquotedPresentation?: boolean;
 }): CartItemCommandPorts["repository"] {
   const brand = parseOrderingReference(input.brandReference);
   const store = parseOrderingReference(input.storeReference);
   const runner = input.runner;
+  const requireUnquotedPresentation = input.requireUnquotedPresentation === true;
   async function run<T>(action: (tx: CustomerCartDatabaseTransaction) => Promise<T>): Promise<T> {
     try {
       return await runner.run(action);
@@ -202,6 +204,20 @@ export function createPostgresCartItemStore(input: {
     if (result.length === 0) return null;
     if (result.length !== 1) return unavailable();
     const row = object(result[0]?.record);
+    const rawSnapshot = row.result_presentation_snapshot_json;
+    const envelope =
+      rawSnapshot != null && Object.hasOwn(object(rawSnapshot), "snapshot")
+        ? object(rawSnapshot)
+        : null;
+    if (
+      envelope !== null &&
+      (Object.keys(envelope).length !== 3 ||
+        envelope.schemaVersion !== 1 ||
+        envelope.quoteStatus !== "None")
+    )
+      return unavailable();
+    const snapshot = envelope === null ? rawSnapshot : envelope.snapshot;
+    if (envelope !== null && snapshot == null) return unavailable();
     const record: CartItemOperationRecord = Object.freeze({
       action: row.action_code as CartItemOperationRecord["action"],
       operationReference: parseOrderingReference(row.operation_id),
@@ -210,14 +226,15 @@ export function createPostgresCartItemStore(input: {
       cartReference: parseOrderingReference(row.cart_id),
       cartItemReference: parseOrderingReference(row.cart_line_id),
       result: parseCartAggregate(row.result_cart_snapshot_json),
-      ...(row.result_presentation_snapshot_json == null
+      ...(snapshot == null
         ? {}
         : {
             presentationSnapshot: parseCartItemPresentationSnapshot(
-              row.result_presentation_snapshot_json,
+              snapshot,
               parseCartAggregate(row.result_cart_snapshot_json),
             ),
           }),
+      ...(envelope === null ? {} : { quoteAbsenceVerified: true as const }),
       occurredAt: instant(row.occurred_at),
       expiresAt: instant(row.expires_at),
     });
@@ -232,11 +249,13 @@ export function createPostgresCartItemStore(input: {
     return record;
   }
   return Object.freeze({
+    ...(requireUnquotedPresentation ? { unquotedPresentation: true as const } : {}),
     load: (reference) => run((tx) => load(tx, reference)),
     resolveOperation: (reference) => run((tx) => resolve(tx, reference)),
     commit: (command) =>
       run(async (tx) => {
         const record = command.record;
+        if (record.quoteAbsenceVerified !== undefined) return unavailable();
         const next = assertRecord(record, brand, store);
         assertAudit(command.audit, record);
         if (
@@ -257,6 +276,17 @@ export function createPostgresCartItemStore(input: {
         if (current.aggregateVersion !== command.expectedAggregateVersion)
           throw new CartError("CART_VERSION_CONFLICT");
         assertTransition(current, record);
+        if (requireUnquotedPresentation) {
+          if (record.presentationSnapshot === undefined || current.orderType !== "Pickup")
+            return unavailable();
+          const attachments = rows(
+            await tx.query(
+              `SELECT operation_id FROM rms_ordering.cart_quote_attachment WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3 LIMIT 1`,
+              [brand, store, record.cartReference],
+            ),
+          );
+          if (attachments.length !== 0) return unavailable();
+        }
         // Identity-protection rules prohibit UPDATE RETURNING; verify the affected-row count.
         const changed = object(
           await tx.query(
@@ -345,12 +375,24 @@ export function createPostgresCartItemStore(input: {
             record.presentationSnapshot === undefined
               ? null
               : JSON.stringify(
-                  parseCartItemPresentationSnapshot(record.presentationSnapshot, next),
+                  requireUnquotedPresentation
+                    ? {
+                        schemaVersion: 1,
+                        quoteStatus: "None",
+                        snapshot: parseCartItemPresentationSnapshot(
+                          record.presentationSnapshot,
+                          next,
+                        ),
+                      }
+                    : parseCartItemPresentationSnapshot(record.presentationSnapshot, next),
                 ),
           ],
         );
         await appendAuditRecordInTransaction(tx, command.audit);
-        return record;
+        return Object.freeze({
+          ...record,
+          ...(requireUnquotedPresentation ? { quoteAbsenceVerified: true as const } : {}),
+        });
       }),
   });
 }

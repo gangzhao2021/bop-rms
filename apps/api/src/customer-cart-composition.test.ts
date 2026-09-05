@@ -7,6 +7,7 @@ import {
   type CustomerCartCreationRecord,
   type CustomerCartPorts,
   type CustomerCartPresentationPorts,
+  type CartItemCommandPorts,
 } from "@rms/ordering";
 import { createCustomerCartComposition } from "./customer-cart-composition.js";
 const id = (n: number) => `018f5100-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -316,4 +317,56 @@ describe("optional unquoted Cart presentation", () => {
     expect(await f.composition.getCurrentCart(read)).toEqual({ status: "Unavailable" });
     expect(catalog.getPublishedMenu).not.toHaveBeenCalled();
   });
+});
+
+describe("optional Item command activation", () => {
+  for (const mode of ["unguarded-repository", "DineIn"] as const) {
+    it(`denies ${mode} before reading or committing Cart facts`, async () => {
+      const f = domainFixture();
+      const load = vi.fn(async () => null);
+      const commit = vi.fn(
+        async (input: Parameters<CartItemCommandPorts["repository"]["commit"]>[0]) => input.record,
+      );
+      const ports: CartItemCommandPorts = {
+        repository: {
+          ...(mode === "DineIn" ? { unquotedPresentation: true as const } : {}),
+          load,
+          commit,
+          resolveOperation: async () => null,
+        },
+        authorization: { authorize: async () => null },
+        references: {
+          generate: () => id(90),
+          hashIntent: () => `sha256:${"a".repeat(64)}`,
+          equals: (a, b) => a === b,
+        },
+        catalog: {
+          validateSelection: async () => ({ status: "Rejected", reason: "SELLABLE_UNAVAILABLE" }),
+        },
+      };
+      const composition = createCustomerCartComposition({
+        session: {
+          authorize: async () => guest(mode === "DineIn" ? { channel: "DineIn" } : {}),
+          resolve: async () => guest(),
+        },
+        ordering: () => f.ports,
+        items: () => ports,
+        display: { resolve: async () => null },
+        presentation: () => ({
+          quotes: { resolve: async () => null },
+          catalog: { getPublishedMenu: async () => ({ status: "Unavailable" }) },
+        }),
+      });
+      expect(
+        await composition.removeItem({
+          ...command,
+          cartReference: id(80),
+          cartItemReference: id(81),
+          expectedCartVersion: 1,
+        }),
+      ).toEqual({ status: "Unavailable" });
+      expect(load).not.toHaveBeenCalled();
+      expect(commit).not.toHaveBeenCalled();
+    });
+  }
 });

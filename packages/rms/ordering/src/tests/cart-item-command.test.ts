@@ -1,3 +1,4 @@
+import { createCartItemResultView } from "../application/cart-item-presentation-snapshot.js";
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { GuestSession } from "@bop/identity";
 import { describe, expect, it } from "vitest";
@@ -760,4 +761,21 @@ describe("durable public presentation evidence", () => {
       code: "CART_DEPENDENCY_UNAVAILABLE",
     });
   });
+});
+
+it("requires durable Quote-absence evidence to reconstruct a public command response", async () => {
+  const f = fixture();
+  const service = createCartItemCommandService({
+    ...f.ports,
+    presentation: { prepare: async (cart) => presentation(cart) },
+  });
+  const result = await service.add(addInput());
+  expect(() => createCartItemResultView(result)).toThrowError(CartError);
+  const view = createCartItemResultView({ ...result, quoteAbsenceVerified: true });
+  expect(view.cart.quote).toBeNull();
+  expect(view.cart.items[0]?.lineEstimate).toEqual({
+    status: "Unavailable",
+    reasonCode: "PRICE_UNAVAILABLE",
+  });
+  expect(JSON.stringify(view)).not.toContain("addedByActorReference");
 });
