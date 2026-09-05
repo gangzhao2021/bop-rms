@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2222 — Persisted Pickup Cart Browser Acceptance`
+- Current discussion node: `WP-2223 — Cart Lifecycle Persistence`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -66,6 +66,14 @@ desktop. The dedicated gate passed, including offline recovery, refresh/CSRF ref
 storage checks. Retained Entry (2/2) and complete local verification passed (root 358/358,
 Ordering 227/227, API 189/189, all 40 builds). Real sources, Quote/Pricing and default runtime
 activation remain gated.
+
+[WP-2223](./work-packages/WP-2223.md) continues from `55d8e47` with an optional Ordering-owned
+PostgreSQL adapter for existing Abandon/Expire commands. It preserves Item/Quote history, commits
+operation and Audit atomically, and reconciles exact concurrent retries. Dedicated acceptance and
+Ordering tests passed; the Owner authorized the exact-file database ownership registration,
+and its 49-test check passed. Complete local verification passed (root 362/362, Ordering 234/234,
+API 189/189, all 40 builds). HTTP, scheduler and real policies remain
+unconfigured.
 
 ## Work Package history (newest first)
 

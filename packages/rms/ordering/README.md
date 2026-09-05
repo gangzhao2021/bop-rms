@@ -89,3 +89,11 @@ pnpm ordering-business-date:acceptance
 pnpm ordering-create-order:acceptance
 pnpm order-amendment:acceptance
 ```
+
+WP-2223 exports `createPostgresCartLifecycleStore({ brandReference, storeReference, runner })`
+for the existing `CartLifecycleCommandPorts.repository`. It locks the scoped Cart before reading
+Items, recomputes the existing terminal transition, atomically appends the original result and
+Audit, and returns the durable original for identical concurrent commits. Changed intent or
+snapshot conflicts, stale versions fail, and Item/Quote history is preserved. Authorization stays
+with `createCartLifecycleCommandService`; the adapter adds no HTTP, scheduler or default runtime
+wiring. Verify with `pnpm cart-lifecycle-store:acceptance` and `pnpm ordering-cart:acceptance`.

@@ -191,3 +191,9 @@ Pickup entry, public Menu and persisted Cart Add/Update/Remove in Chromium at mo
 sizes. The gate checks offline recovery, refresh/CSRF refusal, private storage and database/Audit
 results; CI runs it after Chromium installation. See [WP-2222](docs/spec/work-packages/WP-2222.md)
 for executed evidence. This does not supply real public sources, Session resume, Pricing or checkout.
+
+WP-2223 adds optional PostgreSQL persistence for the existing Cart Abandon/Expire commands with
+atomic Audit, exact retry and immutable Item/Quote history. Its dedicated gate is
+`pnpm cart-lifecycle-store:acceptance`, also included in `pnpm ordering-cart:acceptance`.
+HTTP, scheduler and real lifecycle policy sources remain unconfigured; see
+[WP-2223](docs/spec/work-packages/WP-2223.md) for verification evidence.
