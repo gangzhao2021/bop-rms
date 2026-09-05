@@ -195,6 +195,7 @@ function fixture(
     },
   };
   return {
+    ports,
     service: createCartItemCommandService(ports),
     current: () => aggregate,
     generated: () => generated,
@@ -236,6 +237,101 @@ describe("Cart Item Add / Update / Remove commands", () => {
     expect(state.generated()).toBe(1);
     expect(state.validations()).toBe(1);
   });
+
+  it("replays all three commands at later observation times without repeating Catalog validation", async () => {
+    const state = fixture();
+    const added = await state.service.add(addInput());
+    const update = {
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 2,
+      quantity: 3,
+      optionSelections: [],
+      customerNote: null,
+      operationReference: ids.secondOperation,
+      requestedAt: "2026-08-02T14:02:00.000Z",
+    };
+    const updated = await state.service.update(update);
+    const remove = {
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 3,
+      operationReference: ids.thirdOperation,
+      requestedAt: "2026-08-02T14:03:00.000Z",
+    };
+    const removed = await state.service.remove(remove);
+    const later = "2026-08-02T14:05:00.000Z";
+    expect(await state.service.add(addInput({ requestedAt: later }))).toEqual({
+      ...added,
+      status: "AlreadyApplied",
+    });
+    expect(await state.service.update({ ...update, requestedAt: later })).toEqual({
+      ...updated,
+      status: "AlreadyApplied",
+    });
+    expect(await state.service.remove({ ...remove, requestedAt: later })).toEqual({
+      ...removed,
+      status: "AlreadyApplied",
+    });
+    expect(state.validations()).toBe(2);
+    expect(state.operations()).toBe(3);
+    expect(state.current()).toEqual(removed.aggregate);
+  });
+
+  it("reconciles concurrent identical commands after the repository version conflict", async () => {
+    const state = fixture();
+    const results = await Promise.all([
+      state.service.add(addInput()),
+      state.service.add(addInput({ requestedAt: "2026-08-02T14:01:01.000Z" })),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual(["AlreadyApplied", "Applied"]);
+    expect(results[0]?.aggregate).toEqual(results[1]?.aggregate);
+    expect(state.operations()).toBe(1);
+    expect(state.current().items).toHaveLength(1);
+  });
+
+  it.each(["Revoked", "ChangedSession"])(
+    "rechecks %s authorization before conflict reconciliation",
+    async (mode) => {
+      const diningGuest = guest({
+        channel: "DineIn",
+        diningState: "DiningBound",
+        diningSessionReference: ids.diningSession as never,
+        diningParticipantReference: ids.participant as never,
+        publicTableReference: id(32) as never,
+      });
+      const state = fixture({
+        session: diningGuest,
+        aggregate: cart({
+          orderType: "DineIn",
+          diningSessionReference: ids.diningSession as never,
+        }),
+      });
+      let authorizations = 0;
+      state.ports.authorization.authorize = async (input) => {
+        authorizations++;
+        if (authorizations > 2 && mode === "Revoked") return null;
+        return {
+          guestSession:
+            authorizations > 2
+              ? guest({ ...diningGuest, sessionReference: ids.otherSession as never })
+              : diningGuest,
+          audit: audit(input.action, input.observedAt),
+        };
+      };
+      const results = await Promise.allSettled([
+        state.service.add(addInput()),
+        state.service.add(addInput()),
+      ]);
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      const denied = results.find((result) => result.status === "rejected");
+      expect(denied?.status === "rejected" ? denied.reason : null).toMatchObject({
+        code: mode === "Revoked" ? "CART_PERMISSION_DENIED" : "CART_IDEMPOTENCY_CONFLICT",
+      });
+      expect(state.operations()).toBe(1);
+      expect(state.current().items).toHaveLength(1);
+    },
+  );
 
   it("rejects one idempotency key reused with changed intent", async () => {
     const state = fixture();

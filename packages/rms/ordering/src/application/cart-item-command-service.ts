@@ -393,9 +393,39 @@ async function commit(
     occurredAt: input.at,
     expiresAt: expiresAt(input.at),
   });
-  const saved = await ports.repository
-    .commit({ record, expectedAggregateVersion: input.expectedVersion, audit: input.audit })
-    .catch(failure);
+  let saved: CartItemOperationRecord;
+  try {
+    saved = await ports.repository.commit({
+      record,
+      expectedAggregateVersion: input.expectedVersion,
+      audit: input.audit,
+    });
+  } catch (error) {
+    // A competing commit may have saved this exact operation after the initial lookup.
+    // Reconcile only a controlled conflict; never retry the mutation or infer a result.
+    if (
+      error instanceof CartError &&
+      ["CART_VERSION_CONFLICT", "CART_IDEMPOTENCY_CONFLICT"].includes(error.code)
+    ) {
+      const authorized = await context(
+        ports,
+        input.action,
+        input.aggregate.cartReference,
+        input.operationReference,
+        input.at,
+      );
+      const prior = await replay(ports, {
+        action: input.action,
+        operationReference: input.operationReference,
+        intent: input.intent,
+        cartReference: input.aggregate.cartReference,
+        guestSessionReference: parseOrderingReference(authorized.session.sessionReference),
+        requestedAt: input.at,
+      });
+      if (prior !== null) return prior;
+    }
+    return failure(error);
+  }
   return Object.freeze({
     status: "Applied" as const,
     cartItemReference: input.cartItemReference,
@@ -432,7 +462,6 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         optionSelections,
         customerNote,
         operationReference,
-        requestedAt,
       });
       const current = await context(ports, "Add", cartReference, operationReference, requestedAt);
       const prior = await replay(ports, {
@@ -518,7 +547,6 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         optionSelections,
         customerNote,
         operationReference,
-        requestedAt,
       });
       const current = await context(
         ports,
@@ -599,7 +627,6 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         cartItemReference,
         expectedAggregateVersion: expectedVersion,
         operationReference,
-        requestedAt,
       });
       const current = await context(
         ports,

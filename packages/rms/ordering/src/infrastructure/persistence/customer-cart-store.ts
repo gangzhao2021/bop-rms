@@ -39,7 +39,7 @@ function instant(value: unknown) {
   if (typeof value !== "string") return unavailable();
   return parseOrderingInstant(new Date(value).toISOString());
 }
-function aggregate(row: Record<string, unknown>): CartAggregate {
+export function decodeCartAggregateRow(row: Record<string, unknown>): CartAggregate {
   const c = object(row.cart);
   if (!Array.isArray(row.lines)) return unavailable();
   return parseCartAggregate({
@@ -153,7 +153,10 @@ export function createPostgresCustomerCartStore(input: {
                   [brand, store, cartId],
                 ),
               );
-              const cart = aggregate({ ...row, lines: lines.map((line) => line.line) });
+              const cart = decodeCartAggregateRow({
+                ...row,
+                lines: lines.map((line) => line.line),
+              });
               if (!matches(cart, owner)) return unavailable();
               current = cart;
               return cart;

@@ -168,8 +168,11 @@ The [status ledger](docs/spec/project-status.md) maintains the evidence-backed i
 through WP-2214 and the separate local work. WP-2215 verifies persisted Entry in a real browser;
 WP-2216 adds Cart creation/current ownership and its opt-in PostgreSQL adapter. Consult each brief
 for actual verification and integration status. WP-2217 adds opt-in HTTP composition for pristine
-empty Carts, with an explicit public display source prerequisite. Next connect nonempty Cart
-presentation, Cart item/lifecycle and Quote storage, then Payment-owned Order orchestration and the Worker /
+empty Carts, with an explicit public display source prerequisite. WP-2218 adds opt-in durable
+Item commands and original-result replay; see its brief for current verification evidence.
+The dedicated regression runs with `pnpm cart-item-store:acceptance` and is included in
+`pnpm ordering-cart:acceptance`. Next connect nonempty Cart
+presentation and Item HTTP wiring, lifecycle and Quote storage, then Payment-owned Order orchestration and the Worker /
 Kitchen / Pickup / Receipt path. Each increment retains its owning contracts,
 authorization, replay and failure checks. New horizontal features must not substitute for this
 end-to-end acceptance.

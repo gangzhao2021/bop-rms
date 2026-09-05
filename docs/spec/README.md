@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2217 — Authorized Customer Cart HTTP Composition`
+- Current discussion node: `WP-2218 — Durable Customer Cart Item Commands`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -35,6 +35,12 @@ Its complete local verification passed and it is checkpointed locally at `ed35fb
 [WP-2217](./work-packages/WP-2217.md) adds the Ordering-owned safe DTO and opt-in Customer HTTP
 composition for pristine empty Carts. Dedicated HTTP-to-PostgreSQL acceptance and final complete local verification passed. Nonempty Cart presentation, item mutations and production sources
 remain later increments.
+
+[WP-2218](./work-packages/WP-2218.md) continues from the verified local WP-2217 checkpoint `2f54a23`
+with Ordering-owned Item mutation persistence, stable retry fingerprints and atomic Audit.
+Dedicated isolated PostgreSQL acceptance and complete local verification passed (root 354/354,
+Ordering 189/189, all 40 builds).
+HTTP mutation composition and nonempty presentation remain separate increments.
 
 ## Work Package history (newest first)
 
