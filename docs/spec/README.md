@@ -6,13 +6,29 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2214 - Guest Session Cryptographic Credential Provider`
+- Current discussion node: `WP-2215 — Delivery Status Alignment and Persisted Customer Entry Browser Acceptance`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
 Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 
-## Latest Work Package Status
+## Current delivery status
+
+The [delivery status ledger](./project-status.md) separates Git-confirmed integration, recorded
+local/CI evidence, runtime connectivity and production authority. Its baseline is exact
+`main@ac08c14d076ca76b71f55571605b61ef3ed1efde`; the current WP's uncommitted work is tracked separately.
+
+[WP-2215](./work-packages/WP-2215.md) reconciles the documentation and verifies the first persisted
+Customer browser increment using normal assets, same-origin HTTPS, existing Domain composition and
+isolated PostgreSQL. Its own Status section records the actual implementation and verification
+outcome. It does not activate the default runtime or complete Cart, Payment, Order or Pilot readiness.
+
+The entries below preserve historical implementation, authorization and verification snapshots.
+Pre-integration `Deferred`, `Pending` and branch references are historical. The ledger's exact
+138-package set was subsequently integrated by PR #168 at `41ac34f`; this reconciles Git status only
+and does not advance external evidence, deployment or production authority.
+
+## Work Package history (newest first)
 
 - `WP-2214 - Guest Session Cryptographic Credential Provider` implements and locally verifies an
   opt-in Identity-owned Node adapter for 256-bit credentials, UUIDv7 references,
@@ -58,8 +74,8 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
   evidence is maintained in the associated PR; no production activation or full Customer journey
   is claimed. See [`WP-2208`](./work-packages/WP-2208.md).
 
-Entries are newest-first；the WP-1104 closeout and WP-1021 readiness / WP-1020–1000 closeout entries below supersede
-older historical snapshots retained later in this index.
+Entries are newest-first within their historical record. Consult the delivery status ledger for
+the reconciled current integration state rather than inferring it from an older pending statement.
 
 - `WP-2207 - API Runtime Dependency Wiring and HTTP Regression` implements, on the verified
   WP-2206 baseline. It forwards three existing optional dependencies through the API runtime
@@ -1889,7 +1905,11 @@ WP-0024 implementation commit `6371aa8cc96da021fc2a337a768039abce46548b`、PR #2
 
 Agents must read the root `AGENTS.md`, this index, and the active Work Package brief before editing. If this index or brief cites an older Handoff version than the current canonical Library file, stop, review the superseding sections, and refresh the bounded brief before implementation. A refresh records the new document version and only the authoritative sections needed by the active Work Package.
 
-## Current repository stage
+## Historical repository stage snapshots
+
+The following paragraphs retain their original stage and authorization context. They are not the
+current WP or integration state; use the [delivery status ledger](./project-status.md) and current
+WP pointer above. No historical verification result or approval is advanced by retaining it here.
 
 WP-2182 local implementation verification is complete from exact predecessor
 `WP-2181@3c121a6` on `codex/wp-2182`. The bounded expansion adds the rebuildable

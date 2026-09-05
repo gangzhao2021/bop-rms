@@ -76,7 +76,7 @@ real-data row below.
 | PILOT-ACC-02 | Accessibility       | Accessibility + Store Operations             | Real premises accessibility and accommodation process are reviewed                                                                        | Store/Dining configuration; WP-2194             | Blocked — evidence unavailable | Accepted premises/process references exist or reviewed non-applicability is recorded                                                         |
 | PILOT-OPS-01 | Staffing/operations | Store Operations + People Operations         | Named operating roles, shift coverage, training, escalation and segregation responsibilities are approved                                 | Permission/qualification workflows              | Blocked — evidence unavailable | Role owners accept minimized assignment/qualification references; no employee PII enters Git                                                 |
 | PILOT-OPS-02 | Staffing/operations | Support + Security                           | Support, incident, break-glass, on-call and rollback operators are named and exercised with audit evidence                                | Break-glass and observability runbooks          | Blocked — evidence unavailable | Current exercise/review references and escalation contacts are accepted in approved systems                                                  |
-| PILOT-DEV-01 | Devices/network     | Store Operations + Technology                | KDS, printer, scanner and network inventory, placement, connectivity, failure-mode and recovery UAT pass for real premises                | Device management; WP-1804/WP-1808 future gates | Blocked — evidence unavailable | Device owner accepts scoped real-premises UAT and contingency references                                                                     |
+| PILOT-DEV-01 | Devices/network     | Store Operations + Technology                | Pilot-enabled managed browser KDS and network inventory, placement, connectivity, failure-mode and recovery UAT pass for real premises    | Device management; WP-1804/WP-1808; IDR-0039    | Blocked — evidence unavailable | Device owner accepts scoped KDS/network UAT and contingency references; disabled output remains future-gated                                 |
 | PILOT-PLT-01 | Platform/security   | Platform + Security                          | Production account/environment, region, DNS/TLS, identity/MFA, secret/KMS, least-privilege and audit boundaries are approved              | Cloud/security policies; Platform Live Gate     | Blocked — evidence unavailable | Security/platform reviewers accept current environment and access-control evidence                                                           |
 | PILOT-PLT-02 | Platform/security   | SRE + Data                                   | Backup/restore, disaster recovery, retention, monitoring, alert routing, capacity and incident evidence meet approved objectives          | Backup/restore and observability runbooks       | Blocked — evidence unavailable | Named owners accept dated exercises, objective results and unresolved-risk disposition                                                       |
 | PILOT-PLT-03 | Platform/security   | Security + Release                           | Required SBOM, provenance, dependency, secret, SAST, container/IaC, owned-route DAST and license artifacts pass for the release candidate | `docs/security/release-evidence-policy.json`    | Blocked — evidence unavailable | Exact-candidate release evidence is accepted with tool versions and findings disposition                                                     |
@@ -86,7 +86,7 @@ real-data row below.
 
 ## Current software evidence — not external readiness
 
-The following repository evidence is valid for local software quality only:
+The [current delivery-status ledger](../spec/project-status.md) owns the software progress summary. The following dated repository evidence is retained from WP-2206 and is valid for local software quality only:
 
 - WP-2203 Merchant local demo browser acceptance: `42/42` deterministic Chromium tests.
 - WP-2205 Customer local demo browser acceptance: `36/36` deterministic Chromium tests.
@@ -96,6 +96,8 @@ The following repository evidence is valid for local software quality only:
 
 These results do not prove a deployed environment, real Store workflow, production accessibility,
 device/network behavior, Provider result, professional conclusion or operator readiness.
+
+For `PILOT-DEV-01`, the accepted first Pilot requires the managed browser KDS and its network/device UAT. Physical printers, scanner/peripheral integrations and Store Gateway output remain disabled under IDR-0039; they require an accepted scope revision before implementation or operation, or an owning review may record `Not applicable` for the disabled requirement. Stripe Terminal remains the separate `PILOT-PAY-03` boundary. This clarification changes no evidence state: all 26 initial inventory rows remain blocked.
 
 ## Owner action queue
 
