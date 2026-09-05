@@ -103,7 +103,7 @@
     "merchant-bff:acceptance": "pnpm --filter @bop-rms/api merchant-bff:acceptance",
     "merchant-catalog:acceptance": "pnpm --filter @rms/catalog test && pnpm --filter @bop-rms/api merchant-catalog:acceptance",
     "organization-aggregate:acceptance": "pnpm --filter @bop/tenant test && pnpm --filter @bop/operating-entity test && vitest run --config packages/database/vitest.organization-aggregate.config.ts",
-    "ordering-cart:acceptance": "pnpm --filter @rms/ordering test && vitest run --config packages/database/vitest.cart-aggregate.config.ts && pnpm customer-cart-store:acceptance",
+    "ordering-cart:acceptance": "pnpm --filter @rms/ordering test && vitest run --config packages/database/vitest.cart-aggregate.config.ts && pnpm customer-cart-store:acceptance && pnpm customer-cart-http:acceptance",
     "order-amendment:acceptance": "pnpm --filter @rms/ordering test && pnpm --filter @bop-rms/contracts-events test && pnpm --filter @bop-rms/merchant-web test && vitest run --config packages/database/vitest.order-amendment.config.ts",
     "production-batch:acceptance": "pnpm --filter @rms/kitchen test && pnpm --filter @bop-rms/contracts-events test && pnpm --filter @bop-rms/merchant-web test && vitest run --config packages/database/vitest.production-batch.config.ts",
     "device-management:acceptance": "pnpm --filter @rms/printing-device test && pnpm --filter @bop-rms/contracts-events test && pnpm --filter @bop-rms/merchant-web test && vitest run --config packages/database/vitest.device-management.config.ts",
@@ -182,7 +182,8 @@
     "tenant-context:acceptance": "pnpm --filter @bop/tenant test && pnpm --filter @bop-rms/api tenant-context:acceptance && vitest run packages/database/src/tenant-context.test.ts && vitest run --config packages/database/vitest.tenant-context.config.ts && pnpm organization-aggregate:acceptance && pnpm membership-aggregate:acceptance && pnpm outbox:acceptance && pnpm consumer-inbox:acceptance && pnpm retry-dead-letter:acceptance && pnpm audit-record:acceptance",
     "tenant-isolation-security:acceptance": "pnpm --filter @bop-rms/api exec vitest run src/tenant-context.test.ts src/merchant-object-authorization.test.ts src/merchant-store-switch.test.ts && pnpm --filter @bop/permission test && vitest run --config packages/database/vitest.tenant-context.config.ts && vitest run --config packages/database/vitest.permission-policy.config.ts",
     "workforce-identity-security:acceptance": "pnpm --filter @bop/identity workforce-identity-security:acceptance && pnpm --filter @bop-rms/api workforce-identity-security:acceptance && vitest run --config packages/database/vitest.workforce-identity-security.config.ts",
-    "customer-cart-store:acceptance": "vitest run --config packages/database/vitest.customer-cart-store.config.ts"
+    "customer-cart-store:acceptance": "vitest run --config packages/database/vitest.customer-cart-store.config.ts",
+    "customer-cart-http:acceptance": "vitest run --config packages/database/vitest.customer-cart-http.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

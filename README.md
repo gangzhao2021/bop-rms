@@ -167,8 +167,9 @@ production data source is connected.
 The [status ledger](docs/spec/project-status.md) maintains the evidence-backed integration record
 through WP-2214 and the separate local work. WP-2215 verifies persisted Entry in a real browser;
 WP-2216 adds Cart creation/current ownership and its opt-in PostgreSQL adapter. Consult each brief
-for actual verification and integration status. Next connect the Customer HTTP composition,
-Cart item/lifecycle and Quote storage, then Payment-owned Order orchestration and the Worker /
+for actual verification and integration status. WP-2217 adds opt-in HTTP composition for pristine
+empty Carts, with an explicit public display source prerequisite. Next connect nonempty Cart
+presentation, Cart item/lifecycle and Quote storage, then Payment-owned Order orchestration and the Worker /
 Kitchen / Pickup / Receipt path. Each increment retains its owning contracts,
 authorization, replay and failure checks. New horizontal features must not substitute for this
 end-to-end acceptance.

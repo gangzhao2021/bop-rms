@@ -71,6 +71,9 @@ importers:
       '@rms/dining':
         specifier: workspace:*
         version: link:../../packages/rms/dining
+      '@rms/ordering':
+        specifier: workspace:*
+        version: link:../../packages/rms/ordering
       '@rms/pricing':
         specifier: workspace:*
         version: link:../../packages/rms/pricing

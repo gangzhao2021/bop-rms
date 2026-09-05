@@ -10,13 +10,17 @@ those decisions or granting runtime, Provider or production authority.
 - Audit date: `2026-09-04`.
 - Integrated snapshot: `main@ac08c14d076ca76b71f55571605b61ef3ed1efde`.
 - Snapshot inventory: **264 `WP-*.md` records and one `SPIKE-1300.md` record**.
-- Current local work: [WP-2216 — Customer Cart Creation and Current Ownership](./work-packages/WP-2216.md)
-  on `codex/wp-2216`, based on local WP-2215 checkpoint `7b43cf9`.
-- WP-2215's persisted Entry browser `2/2`, full local `pnpm verify`, Merchant browser `42/42` and
-  Customer browser `36/36` passed. Its 18 files are locally committed, not GitHub-integrated.
-- WP-2216 adds the creation/current service and opt-in durable adapter. Ordering `174/174`, the
-  first-stage full gate and dedicated PostgreSQL acceptance passed. The final expanded `pnpm verify` passed (root 350/350, all 40 builds); no HTTP Cart composition,
-  item-command persistence or production result is claimed.
+- Current local work: [WP-2217 — Authorized Customer Cart HTTP Composition](./work-packages/WP-2217.md)
+  on `codex/wp-2217`, based on local WP-2216 checkpoint `ed35fb7`.
+- WP-2215's persisted Entry browser and full local gates passed; its local checkpoint is `7b43cf9`.
+- WP-2216's creation/current service and opt-in durable adapter passed the complete local gate
+  (root 350/350, Ordering 174/174, all 40 builds) and are locally committed at `ed35fb7`.
+- WP-2217 adds safe empty-Cart DTO and Identity-authorized HTTP composition. API 185/185, Ordering 185/185, real HTTP-to-PostgreSQL acceptance and the complete local
+  `pnpm verify` gate passed (root 350/350, all 40 builds). It does not
+  present nonempty Carts, implement item mutation persistence, supply real Store display sources,
+  configure the default runtime or establish a production transaction journey.
+- These local checkpoints are outside the fixed 264-WP integrated snapshot. No GitHub integration
+  or production result is claimed by this local task.
 
 The software has broad Domain, application, schema, UI and isolated-test coverage. The remaining
 priority is a persisted Customer transaction journey through those owners. The ordinary API and
@@ -91,7 +95,7 @@ that CI evidence; it means neither failure nor a newly verified pass.
 | [WP-2213](./work-packages/WP-2213.md) | Read-only legacy Session rollout inspection        | `c687106` / #188           | Brief delegates exact delivery evidence to PR; not refreshed |
 | [WP-2214](./work-packages/WP-2214.md) | Opt-in cryptographic credential provider           | `ac08c14` / #189           | Brief delegates exact delivery evidence to PR; not refreshed |
 
-The local WP-2216 implementation is tracked separately from the integrated snapshot below.
+The local WP-2216/2217 implementation is tracked separately from the integrated snapshot below.
 Its new migration brings the local catalog to 86; the baseline count of 85 remains historical.
 
 ## Capability layers at the integrated snapshot
@@ -128,8 +132,9 @@ permissions, expected versions, idempotency, Audit and immutable history.
    Session ownership, exact operation replay, explicit lifecycle policy, atomic Audit and concurrent
    creation. Its isolated database acceptance passed; final expanded `pnpm verify` passed.
    Existing unmapped Cart data fails closed, with no arbitrary selection or duplicate creation.
-   Next connect the existing Customer transport to authorized Identity and public display/source
-   contracts. Current/creation API and the normal browser remain unconfigured until that composition.
+   WP-2217 connects the existing transport to Identity and a strict purpose/scope-bound display
+   source port for pristine empty Carts, with real HTTP and database acceptance. Nonempty Cart
+   display and real public display sources remain missing; the default runtime stays unconfigured.
 
 3. **Cart item/lifecycle persistence and authorized Catalog/Store sources.** Implement the owning
    repositories for the existing commands, exact scope and version conflicts, atomic Audit and

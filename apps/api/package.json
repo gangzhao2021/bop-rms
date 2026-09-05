@@ -33,6 +33,7 @@
     "@bop/tenant": "workspace:*",
     "@rms/catalog": "workspace:*",
     "@rms/dining": "workspace:*",
+    "@rms/ordering": "workspace:*",
     "@rms/pricing": "workspace:*",
     "@rms/store": "workspace:*",
     "express": "5.2.1",

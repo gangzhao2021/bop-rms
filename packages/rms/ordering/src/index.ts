@@ -57,3 +57,5 @@ export * from "./application/ports/staff-order-entry-ports.js";
 export * from "./application/customer-cart-service.js";
 export * from "./application/ports/customer-cart-ports.js";
 export * from "./infrastructure/persistence/customer-cart-store.js";
+export * from "./contracts/customer-cart-view.js";
+export * from "./application/customer-cart-view.js";

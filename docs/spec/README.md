@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2216 — Customer Cart Creation and Current Ownership`
+- Current discussion node: `WP-2217 — Authorized Customer Cart HTTP Composition`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -16,7 +16,7 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 The [delivery status ledger](./project-status.md) separates Git-confirmed integration, recorded
 local/CI evidence, runtime connectivity and production authority. Its baseline is exact
-`main@ac08c14d076ca76b71f55571605b61ef3ed1efde`; the current WP's uncommitted work is tracked separately.
+`main@ac08c14d076ca76b71f55571605b61ef3ed1efde`; current local work is tracked separately.
 
 [WP-2215](./work-packages/WP-2215.md) reconciles the documentation and verifies the first persisted
 Customer browser increment using normal assets, same-origin HTTPS, existing Domain composition and
@@ -30,7 +30,11 @@ and does not advance external evidence, deployment or production authority.
 
 [WP-2216](./work-packages/WP-2216.md) implements Ordering-owned creation/current-Cart services and
 an opt-in PostgreSQL adapter with isolated concurrency, replay, RLS and atomic Audit acceptance.
-Its complete local verification passed; Customer HTTP composition is still a later increment.
+Its complete local verification passed and it is checkpointed locally at `ed35fb7`.
+
+[WP-2217](./work-packages/WP-2217.md) adds the Ordering-owned safe DTO and opt-in Customer HTTP
+composition for pristine empty Carts. Dedicated HTTP-to-PostgreSQL acceptance and final complete local verification passed. Nonempty Cart presentation, item mutations and production sources
+remain later increments.
 
 ## Work Package history (newest first)
 
