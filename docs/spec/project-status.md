@@ -10,8 +10,8 @@ those decisions or granting runtime, Provider or production authority.
 - Audit date: `2026-09-05`.
 - Integrated snapshot: `main@ac08c14d076ca76b71f55571605b61ef3ed1efde`.
 - Snapshot inventory: **264 `WP-*.md` records and one `SPIKE-1300.md` record**.
-- Current local work: [WP-2226 — Lossless Quote Snapshot Codec](./work-packages/WP-2226.md)
-  on `codex/wp-2226`, based on verified local WP-2225 checkpoint `2a9444b`.
+- Current local work: [WP-2227 — Durable Pricing Quote Snapshots](./work-packages/WP-2227.md)
+  on `codex/wp-2227`, based on verified local WP-2226 checkpoint `d687c78`.
 - WP-2215's persisted Entry browser and full local gates passed; its local checkpoint is `7b43cf9`.
 - WP-2216's creation/current service and opt-in durable adapter passed the complete local gate
   (root 350/350, Ordering 174/174, all 40 builds) and are locally committed at `ed35fb7`.
@@ -52,16 +52,21 @@ those decisions or granting runtime, Provider or production authority.
   (root 366/366, Ordering 241/241, API 189/189, all 40 builds).
 - WP-2225 corrects Pricing line/component uniqueness to permit immutable requotes retaining
   Cart line references. Fresh-database constraints passed, but upgrading the full predecessor
-  database fails with `MIGRATION_OUT_OF_ORDER`: ADR-0031's global high-water rule prevents a new
+  database initially failed with `MIGRATION_OUT_OF_ORDER`: ADR-0031's global high-water rule prevented a new
   Pricing migration after later namespaces have executed. The Owner subsequently authorized
   namespace-local append checks with retained immutable-history protections. The real upgrade
   and full verification now pass (root 377/377, Pricing 97/97, Quote database 2/2, all 40 builds).
-  Migration drift/lock/rollback and isolated lifecycle checks also pass. Full Pricing snapshot storage still needs lossless evidence fields, codec
-  and adapter; it is not complete.
+  Migration drift/lock/rollback and isolated lifecycle checks also pass. WP-2226/2227 subsequently
+  supply the lossless evidence codec and durable repository.
 - WP-2226 adds strict immutable Phase-1 Quote validation and lossless versioned encoding for
   monetary values and complete calculation evidence. Pricing 139/139 and complete local verification
   passed (root 377/377, all 40 builds); it does not
   add database fields, a Quote repository, HTTP wiring or real Price/Tax sources.
+- WP-2227 adds an optional scoped Pricing repository with atomic full snapshot/line/tax/Audit
+  writes, exact Quote-ID replay and legacy refusal. Dedicated PostgreSQL, independent migration/
+  isolation integration and complete verification passed (Pricing 146/146, root 381/381,
+  ownership 57/57, all 40 builds). Full Quote storage is available through the opt-in repository.
+  This does not compose the Customer Quote command or real sources.
 - These local checkpoints are outside the fixed 264-WP integrated snapshot. No GitHub integration
   or production result is claimed by this local task.
 

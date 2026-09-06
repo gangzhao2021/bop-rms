@@ -193,6 +193,13 @@ async function scanUnsupported(root, module, diagnostics) {
             (table) => module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/cart-quote-attachment-store.ts";
+        const acceptedPriceQuoteAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          ["price_quote", "price_quote_line", "price_quote_tax_line"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/price-quote-store.ts";
         if (
           (moduleRelative.startsWith("src/infrastructure/persistence/") ||
             moduleRelative.startsWith("migrations/") ||
@@ -203,6 +210,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedCartItemAsset &&
           !acceptedCartLifecycleAsset &&
           !acceptedCartQuoteAttachmentAsset &&
+          !acceptedPriceQuoteAsset &&
           !acceptedCartPresentationAsset
         )
           diagnostics.push(

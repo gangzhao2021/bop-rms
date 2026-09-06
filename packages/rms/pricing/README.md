@@ -49,7 +49,13 @@ rechecks totals and exclusive tax calculations from stored rules without current
 Objects are independent and deeply immutable. Unsupported adjustments, extra/missing fields and
 inconsistent evidence fail with `QUOTE_SNAPSHOT_INVALID`. These functions do not authenticate
 sources or authorize a Customer/Store; they are not the existing Customer HTTP response format.
-Database fields, atomic persistence and runtime composition remain separate work.
+WP-2227 adds an optional `createPostgresPriceQuoteStore` with fixed Brand/Store scope and injected
+transaction runner/technical tax-row ID generator. New immutable Quote snapshots, line/tax mirrors
+and System Audit commit together. Exact same-Quote replay returns original evidence, changed
+content conflicts, and reads validate relational mirrors without rounding bigint values. Old rows
+with null full snapshots remain unchanged and fail with `QUOTE_STORE_SNAPSHOT_UNAVAILABLE`.
+This repository does not authorize sources, validate current Cart state or implement Customer
+operation idempotency. Application/HTTP and default-runtime composition remain separate work.
 
 Verification:
 

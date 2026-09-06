@@ -13,6 +13,7 @@ const id = (n) => `018fd000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T16:00:00.000Z";
 const digest = (c) => `sha256:${c.repeat(64)}`;
 const migrationId = "1200_007_alter_quote_line_identity";
+const snapshotMigrationId = "1200_008_alter_quote_snapshot";
 
 // Database causes can contain SQL and bind values; retain only the synthetic test phase.
 function controlledFailure(phase) {
@@ -92,14 +93,22 @@ async function prove(context, catalog) {
     const history = async () =>
       (
         await admin.query(`SELECT
-        (SELECT jsonb_agg(to_jsonb(q)) FROM rms_pricing.price_quote q) AS quotes,
+        (SELECT jsonb_agg(to_jsonb(q) - 'snapshot_json') FROM rms_pricing.price_quote q) AS quotes,
         (SELECT jsonb_agg(to_jsonb(l)) FROM rms_pricing.price_quote_line l) AS lines,
         (SELECT jsonb_agg(to_jsonb(t)) FROM rms_pricing.price_quote_tax_line t) AS taxes`)
       ).rows;
     const before = await history();
     if (catalog) {
-      assert.deepEqual((await applyCatalog(context, catalog)).applied, [migrationId]);
+      assert.deepEqual((await applyCatalog(context, catalog)).applied, [
+        migrationId,
+        snapshotMigrationId,
+      ]);
       assert.deepEqual(await history(), before);
+      assert.equal(
+        (await admin.query(`SELECT snapshot_json FROM rms_pricing.price_quote`)).rows[0]
+          .snapshot_json,
+        null,
+      );
       assert.deepEqual((await applyCatalog(context, catalog)).applied, []);
     }
 
@@ -263,7 +272,9 @@ it("upgrades existing Quote history and permits scoped immutable requote lines",
       assert.equal(catalog.diagnostics.length, 0);
       await applyCatalog(upgrade, {
         ...catalog,
-        migrations: catalog.migrations.filter((migration) => migration.id !== migrationId),
+        migrations: catalog.migrations.filter(
+          (migration) => migration.id !== migrationId && migration.id !== snapshotMigrationId,
+        ),
       });
       phase = "UPGRADE_AND_REQUOTE";
       await prove(upgrade, catalog);

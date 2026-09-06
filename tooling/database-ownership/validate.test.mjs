@@ -714,6 +714,42 @@ describe("Database Schema Ownership Architecture Test", () => {
     },
   );
 
+  it("accepts only the WP-2227 Pricing quote adapter and retains adjacent/driver refusal", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "pricing", "rms_pricing", [
+      "price_quote",
+      "price_quote_line",
+      "price_quote_tax_line",
+    ]);
+    const path = join(context.moduleRoot, "src/infrastructure/persistence/price-quote-store.ts");
+    await writeFile(path, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(path, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(path, "export const synthetic = true;\n");
+    await writeFile(
+      join(dirname(path), "other-price-quote-store.ts"),
+      "export const synthetic = true;\n",
+    );
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    ["other-owner", "rms_pricing", ["price_quote", "price_quote_line", "price_quote_tax_line"]],
+    ["pricing", "rms_other", ["price_quote", "price_quote_line", "price_quote_tax_line"]],
+    ["pricing", "rms_pricing", ["price_quote", "price_quote_line"]],
+  ])(
+    "does not transfer Pricing quote acceptance to another owner/schema/table set",
+    async (name, schema, tables) => {
+      const root = await fixture();
+      const context = await writeModule(root, "RMS", name, schema, tables);
+      await writeFile(
+        join(context.moduleRoot, "src/infrastructure/persistence/price-quote-store.ts"),
+        "export const synthetic = true;\n",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
   it("accepts the exact WP-2224 quote attachment adapter while denying adjacent files and drivers", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "ordering", "rms_ordering", [

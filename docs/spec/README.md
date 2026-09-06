@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2226 — Lossless Quote Snapshot Codec`
+- Current discussion node: `WP-2227 — Durable Pricing Quote Snapshots`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -79,23 +79,31 @@ unconfigured.
 quote attachment adapter. Dedicated PostgreSQL and retained Cart browser acceptance passed;
 Ordering tests passed 241/241. The Owner explicitly authorized the exact-file registration,
 and its 53-test check passed. Complete local verification passed (root 366/366, Ordering 241/241,
-API 189/189, all 40 builds). Full Pricing Quote storage and runtime composition remain separate.
+API 189/189, all 40 builds). WP-2226/2227 subsequently supply full Pricing Quote storage;
+runtime composition remains separate.
 
 [WP-2225](./work-packages/WP-2225.md) continues from `f4ac897`. The full Quote storage
 investigation identified globally unique line/component keys that prevent preserving Cart line
 identity across requotes. A forward migration scopes those keys to Quote identity while retaining
 scoped foreign keys, RLS and immutable history. Fresh-database constraints passed, but the real
-predecessor-to-current upgrade fails with `MIGRATION_OUT_OF_ORDER` under ADR-0031's global
+predecessor-to-current upgrade initially failed with `MIGRATION_OUT_OF_ORDER` under ADR-0031's global
 high-water rule. The Owner subsequently authorized ADR-0031's namespace-local append revision.
 The real upgrade and retained drift/lock/rollback/isolation checks now pass; complete verification
-passed (root 377/377, Pricing 97/97, Quote database 2/2, all 40 builds). Lossless full Quote storage
-remains subsequent work.
+passed (root 377/377, Pricing 97/97, Quote database 2/2, all 40 builds). WP-2226/2227 supply the
+subsequent lossless Quote storage increment.
 
 [WP-2226](./work-packages/WP-2226.md) continues from `2a9444b` with a strict Phase-1 Quote
 snapshot parser and versioned JSON-compatible codec. It retains exact bigint money, complete
 Price/Tax evidence and ordering, and checks tax explanations against stored rules. Pricing 139/139
-and complete local verification passed (root 377/377, all 40 builds). Database fields/adapter and
-runtime composition remain separate increments.
+and complete local verification passed (root 377/377, all 40 builds). WP-2227 supplies database
+fields/adapter; runtime composition remains separate.
+
+[WP-2227](./work-packages/WP-2227.md) continues from `d687c78` with a nullable immutable Quote
+snapshot column and an optional Pricing repository. New writes atomically persist full snapshots,
+relational evidence and Audit; Quote-ID replay preserves the original. Legacy incomplete records
+fail closed. Dedicated acceptance, independent migration/isolation integration and complete
+verification passed (Pricing 146/146, root 381/381, ownership 57/57, all 40 builds). Customer
+command idempotency, source authorization and HTTP/default-runtime wiring remain separate work.
 
 ## Work Package history (newest first)
 

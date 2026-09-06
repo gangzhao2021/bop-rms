@@ -13,7 +13,7 @@ const history = catalog.migrations.map((migration) => ({
   checksum_sha256: migration.checksumSha256,
   runner_contract_version: 1,
 }));
-const quoteMigration = "1200_007_alter_quote_line_identity";
+const quoteMigration = "1200_008_alter_quote_snapshot";
 
 describe("namespace-local migration evolution", () => {
   it("allows a full predecessor to append Pricing after later namespaces advanced", () => {
