@@ -40,8 +40,16 @@ IDR-0024. All fixtures are synthetic and External Evidence is not claimed.
 WP-2225 corrects relational line identity for requotes: the same Cart line reference may occur in
 different Quotes, while lines and tax components remain unique within each Quote. A forward
 migration preserves existing rows, scoped foreign keys, forced RLS and immutable history.
-This prerequisite does not supply a full Quote repository: complete resolution/calculation
-evidence, currency exponent and ordering still require a lossless storage contract and codec.
+This prerequisite does not supply a full Quote repository.
+
+WP-2226 adds `parsePriceQuoteSnapshot`, `encodePriceQuoteSnapshot` and `decodePriceQuoteSnapshot`.
+The version-1 JSON-compatible envelope preserves all Phase-1 Quote fields, currency exponent,
+resolution/calculation evidence and array order; amounts use canonical decimal strings. Decoding
+rechecks totals and exclusive tax calculations from stored rules without current source lookups.
+Objects are independent and deeply immutable. Unsupported adjustments, extra/missing fields and
+inconsistent evidence fail with `QUOTE_SNAPSHOT_INVALID`. These functions do not authenticate
+sources or authorize a Customer/Store; they are not the existing Customer HTTP response format.
+Database fields, atomic persistence and runtime composition remain separate work.
 
 Verification:
 

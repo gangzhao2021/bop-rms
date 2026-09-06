@@ -17,3 +17,5 @@ export * from "./contracts/price-quote.js";
 export * from "./domain/price-quote.js";
 export * from "./contracts/price-quote-lifecycle.js";
 export * from "./domain/price-quote-lifecycle.js";
+export { parsePriceQuoteSnapshot, PriceQuoteSnapshotError } from "./domain/price-quote-snapshot.js";
+export * from "./contracts/price-quote-snapshot.js";

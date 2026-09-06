@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2225 — Quote Requote Line Identity`
+- Current discussion node: `WP-2226 — Lossless Quote Snapshot Codec`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -90,6 +90,12 @@ high-water rule. The Owner subsequently authorized ADR-0031's namespace-local ap
 The real upgrade and retained drift/lock/rollback/isolation checks now pass; complete verification
 passed (root 377/377, Pricing 97/97, Quote database 2/2, all 40 builds). Lossless full Quote storage
 remains subsequent work.
+
+[WP-2226](./work-packages/WP-2226.md) continues from `2a9444b` with a strict Phase-1 Quote
+snapshot parser and versioned JSON-compatible codec. It retains exact bigint money, complete
+Price/Tax evidence and ordering, and checks tax explanations against stored rules. Pricing 139/139
+and complete local verification passed (root 377/377, all 40 builds). Database fields/adapter and
+runtime composition remain separate increments.
 
 ## Work Package history (newest first)
 

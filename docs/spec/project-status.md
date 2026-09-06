@@ -10,8 +10,8 @@ those decisions or granting runtime, Provider or production authority.
 - Audit date: `2026-09-05`.
 - Integrated snapshot: `main@ac08c14d076ca76b71f55571605b61ef3ed1efde`.
 - Snapshot inventory: **264 `WP-*.md` records and one `SPIKE-1300.md` record**.
-- Current local work: [WP-2225 — Quote Requote Line Identity](./work-packages/WP-2225.md)
-  on `codex/wp-2225`, based on verified local WP-2224 checkpoint `f4ac897`.
+- Current local work: [WP-2226 — Lossless Quote Snapshot Codec](./work-packages/WP-2226.md)
+  on `codex/wp-2226`, based on verified local WP-2225 checkpoint `2a9444b`.
 - WP-2215's persisted Entry browser and full local gates passed; its local checkpoint is `7b43cf9`.
 - WP-2216's creation/current service and opt-in durable adapter passed the complete local gate
   (root 350/350, Ordering 174/174, all 40 builds) and are locally committed at `ed35fb7`.
@@ -58,6 +58,10 @@ those decisions or granting runtime, Provider or production authority.
   and full verification now pass (root 377/377, Pricing 97/97, Quote database 2/2, all 40 builds).
   Migration drift/lock/rollback and isolated lifecycle checks also pass. Full Pricing snapshot storage still needs lossless evidence fields, codec
   and adapter; it is not complete.
+- WP-2226 adds strict immutable Phase-1 Quote validation and lossless versioned encoding for
+  monetary values and complete calculation evidence. Pricing 139/139 and complete local verification
+  passed (root 377/377, all 40 builds); it does not
+  add database fields, a Quote repository, HTTP wiring or real Price/Tax sources.
 - These local checkpoints are outside the fixed 264-WP integrated snapshot. No GitHub integration
   or production result is claimed by this local task.
 
