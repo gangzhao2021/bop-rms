@@ -79,7 +79,7 @@ describe("CUST-CHECKOUT page contract", () => {
   it("renders only server Cart and Quote facts with the Payment boundary disabled", () => {
     const html = render({ status: "ready", cart, quote });
     expect(html).toContain("Synthetic tea");
-    expect(html).toContain("CAD 113 minor units");
+    expect(html).toContain("CAD 1.13");
     expect(html).toContain("SYNTHETIC_WARNING");
     expect(html).toContain("SYNTHETIC_BLOCK");
     expect(html).toContain("Price changed");

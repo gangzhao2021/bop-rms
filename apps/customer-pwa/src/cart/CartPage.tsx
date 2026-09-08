@@ -6,11 +6,8 @@ import {
   type CartState,
   type CartStateController,
 } from "./cart-state.js";
-import type { CartItemView, CartMoney, CartView } from "./types.js";
-
-function exactMoney(value: CartMoney): string {
-  return `${value.currency} ${value.amountMinor} minor units`;
-}
+import type { CartItemView, CartView } from "./types.js";
+import { formatCartMoney } from "./format-money.js";
 
 function StateMessage({
   heading,
@@ -74,7 +71,7 @@ function CartItem({
         <p className="cart-item__estimate">
           {unavailable
             ? `Estimate unavailable: ${item.lineEstimate.reasonCode}`
-            : exactMoney(item.lineEstimate.total)}
+            : formatCartMoney(item.lineEstimate.total)}
         </p>
       </div>
       {item.customerNote === null ? null : (
@@ -143,23 +140,23 @@ function CartSummary({ cart }: { readonly cart: CartView }) {
       <dl>
         <div>
           <dt>Subtotal</dt>
-          <dd>{exactMoney(quote.subtotal)}</dd>
+          <dd>{formatCartMoney(quote.subtotal)}</dd>
         </div>
         <div>
           <dt>Discount</dt>
-          <dd>{exactMoney(quote.discount)}</dd>
+          <dd>{formatCartMoney(quote.discount)}</dd>
         </div>
         <div>
           <dt>Tax</dt>
-          <dd>{exactMoney(quote.tax)}</dd>
+          <dd>{formatCartMoney(quote.tax)}</dd>
         </div>
         <div>
           <dt>Fee</dt>
-          <dd>{exactMoney(quote.fee)}</dd>
+          <dd>{formatCartMoney(quote.fee)}</dd>
         </div>
         <div className="cart-summary__total">
           <dt>Total</dt>
-          <dd>{exactMoney(quote.total)}</dd>
+          <dd>{formatCartMoney(quote.total)}</dd>
         </div>
       </dl>
       <p>
@@ -227,7 +224,7 @@ function ErrorState({
             Refresh cart
           </button>
         )}
-        <a href="/menu">Return to menu</a>
+        <Link to="/menu">Return to menu</Link>
       </div>
     </StateMessage>
   );
@@ -250,9 +247,9 @@ function CartContent({
     return (
       <StateMessage heading="Your cart is empty">
         <p>Add an available item from the current Store menu.</p>
-        <a className="cart-primary-link" href="/menu">
+        <Link className="cart-primary-link" to="/menu">
           Browse menu
-        </a>
+        </Link>
       </StateMessage>
     );
   const cart = "cart" in state ? state.cart : null;
@@ -264,7 +261,7 @@ function CartContent({
           <button type="button" onClick={() => void controller.load()}>
             Refresh after reconnecting
           </button>
-          <a href="/menu">Return to menu</a>
+          <Link to="/menu">Return to menu</Link>
         </StateMessage>
       );
     return <ErrorState state={state} controller={controller} />;
@@ -273,7 +270,7 @@ function CartContent({
     return (
       <StateMessage heading="Cart unavailable" tone="warning">
         <p>Cart ordering is not enabled for the current Store context.</p>
-        <a href="/menu">Return to menu</a>
+        <Link to="/menu">Return to menu</Link>
       </StateMessage>
     );
   const readOnly = state.status === "offline-readonly";
@@ -322,7 +319,7 @@ function CartContent({
         <CartSummary cart={cart} />
       </div>
       <section className="cart-next-actions" aria-label="Cart actions">
-        <a href="/menu">Continue shopping</a>
+        <Link to="/menu">Continue shopping</Link>
         <button type="button" disabled aria-describedby="clear-boundary">
           Clear cart
         </button>

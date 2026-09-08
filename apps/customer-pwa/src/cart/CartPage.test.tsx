@@ -82,7 +82,7 @@ describe("CUST-CART page contract", () => {
     expect(html).toContain("Synthetic Store");
     expect(html).toContain("Synthetic tea");
     expect(html).toContain("Synthetic size");
-    expect(html).toContain("CAD 1130 minor units");
+    expect(html).toContain("CAD 11.30");
     expect(html).toContain("Cart version 3");
     expect(html).toContain("Continue shopping");
     expect(html).toContain("Clear cart");

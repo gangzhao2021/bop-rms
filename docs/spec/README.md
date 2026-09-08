@@ -56,6 +56,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
   No business verification, commit, push, PR, merge or deployment is claimed. See
   [WP-2224](./work-packages/WP-2224.md) and the [design review package](./design/README.md).
 
+- `WP-2226 - Cart Navigation and Customer Money Presentation` preserves the in-memory Menu
+  journey through Router links and displays accepted CAD amounts exactly without binary-floating
+  point conversion. Existing transaction authority and offline boundaries remain intact.
+  PWA221/221, browser38/38, full `pnpm verify` and secret scan passed locally.
+  See [WP-2226](./work-packages/WP-2226.md).
+
 - `WP-2223 - Scoped PostgreSQL Cart Reader` is locally implemented and verified and aligned to
   verified WP-2222 `9ee4a87`. It only reads the accepted scoped Cart/Item facts; creation,
   Session binding and mutation remain outside this package. Ordering171/171, Cart PG2/2,

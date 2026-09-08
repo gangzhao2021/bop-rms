@@ -1,14 +1,12 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
-import type { CartMoney } from "../cart/types.js";
+import { formatCartMoney } from "../cart/format-money.js";
 import {
   createCheckoutClient,
   createCheckoutController,
   type CheckoutController,
 } from "./checkout-client.js";
-
-const amount = (money: CartMoney) => `${money.currency} ${money.amountMinor} minor units`;
 
 export function CheckoutPage({
   controller: provided,
@@ -102,7 +100,7 @@ export function CheckoutPage({
             ).map(([label, value]) => (
               <div key={label}>
                 <dt>{label}</dt>
-                <dd>{amount(value)}</dd>
+                <dd>{formatCartMoney(value)}</dd>
               </div>
             ))}
           </dl>
