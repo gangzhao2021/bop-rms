@@ -180,7 +180,9 @@
     "task:acceptance": "pnpm --filter @bop/task test",
     "tenant-context:acceptance": "pnpm --filter @bop/tenant test && pnpm --filter @bop-rms/api tenant-context:acceptance && vitest run packages/database/src/tenant-context.test.ts && vitest run --config packages/database/vitest.tenant-context.config.ts && pnpm organization-aggregate:acceptance && pnpm membership-aggregate:acceptance && pnpm outbox:acceptance && pnpm consumer-inbox:acceptance && pnpm retry-dead-letter:acceptance && pnpm audit-record:acceptance",
     "tenant-isolation-security:acceptance": "pnpm --filter @bop-rms/api exec vitest run src/tenant-context.test.ts src/merchant-object-authorization.test.ts src/merchant-store-switch.test.ts && pnpm --filter @bop/permission test && vitest run --config packages/database/vitest.tenant-context.config.ts && vitest run --config packages/database/vitest.permission-policy.config.ts",
-    "workforce-identity-security:acceptance": "pnpm --filter @bop/identity workforce-identity-security:acceptance && pnpm --filter @bop-rms/api workforce-identity-security:acceptance && vitest run --config packages/database/vitest.workforce-identity-security.config.ts"
+    "workforce-identity-security:acceptance": "pnpm --filter @bop/identity workforce-identity-security:acceptance && pnpm --filter @bop-rms/api workforce-identity-security:acceptance && vitest run --config packages/database/vitest.workforce-identity-security.config.ts",
+    "customer-lab:acceptance": "vitest run --config packages/database/vitest.local-customer-lab.config.ts",
+    "lab:customer": "BOP_LOCAL_CUSTOMER_INTERACTIVE=1 pnpm customer-lab:acceptance"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -11,6 +11,10 @@ export default defineConfig(({ command, mode }) => {
     command,
     process.env.VITE_BOP_LOCAL_CUSTOMER_DEMO,
   );
+  const useLocalLab =
+    command === "serve" &&
+    process.env.BOP_LOCAL_CUSTOMER_LAB === "1" &&
+    ["development", "test"].includes(process.env.NODE_ENV ?? "development");
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/u.test(candidate))
     throw new Error("BOP_DEPLOYMENT_ID must be a safe deployment label");
   return {
@@ -19,6 +23,7 @@ export default defineConfig(({ command, mode }) => {
       {
         name: "bop-local-customer-demo-entry",
         transformIndexHtml(html) {
+          if (useLocalLab) return html.replace("/src/main.tsx", "/src/main.lab.tsx");
           return useLocalDemo ? html.replace("/src/main.tsx", "/src/main.demo.tsx") : html;
         },
       },
