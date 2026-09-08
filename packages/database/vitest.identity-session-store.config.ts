@@ -6,6 +6,7 @@ export default defineConfig({
     include: [
       "packages/database/test/identity-session-store-acceptance.test.mjs",
       "packages/database/test/customer-entry-persistence-acceptance.test.mjs",
+      "packages/database/test/local-customer-runtime-acceptance.test.mjs",
     ],
     testTimeout: 180_000,
   },
