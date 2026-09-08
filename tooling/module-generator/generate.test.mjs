@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import process from "node:process";
@@ -23,7 +32,7 @@ async function loadFixture(name) {
 }
 
 async function createRepositoryRoot() {
-  const root = await mkdtemp(join(tmpdir(), "bop-module-generator-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "bop-module-generator-")));
   temporaryRoots.push(root);
   await mkdir(join(root, "packages"));
   return root;
@@ -130,6 +139,22 @@ describe("BOP-RMS Module Generator", () => {
     await expect(
       generateModule(await loadFixture("minimal-bop.json"), { outputRoot: root }),
     ).rejects.toThrow("case-insensitive path collision");
+  });
+
+  it("resolves an aliased repository root to its canonical generated target", async () => {
+    const root = await createRepositoryRoot();
+    const alias = join(root, "root-alias");
+    await symlink(root, alias);
+    const result = await generateModule(await loadFixture("minimal-bop.json"), {
+      outputRoot: alias,
+    });
+    expect(result.target).toBe(join(root, "packages/bop/synthetic-kernel"));
+    expect(await realpath(result.target)).toBe(result.target);
+    const tree = await snapshotTree(result.target);
+    expect(tree.filter((entry) => entry.startsWith("file:"))).toHaveLength(5);
+    expect(await readFile(join(result.target, "package.json"), "utf8")).toContain(
+      "@bop/synthetic-kernel",
+    );
   });
 
   it("rejects a symlinked layer path", async () => {

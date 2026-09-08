@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2216 - Guest Session Cryptographic End-to-End Acceptance`
+- Current discussion node: `WP-2217 - Canonical Temporary Paths in Architecture Acceptance`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,8 +14,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-- `WP-2216 - Guest Session Cryptographic End-to-End Acceptance` is active from exact-main verified
-  `40a1d19`. It retains the synthetic Guest Session HTTP/PostgreSQL lifecycle matrix and adds the
+- `WP-2217 - Canonical Temporary Paths in Architecture Acceptance` is active from exact-main
+  verified `db8c229`. It corrects synthetic fixture path identities and adds explicit root-alias
+  coverage while retaining generator/scanner security behavior. See [WP-2217](./work-packages/WP-2217.md).
+
+- `WP-2216 - Guest Session Cryptographic End-to-End Acceptance` is integrated through PR #191 at
+  `db8c229`; exact-head run `34188210162` and exact-main run `34190154186` passed all steps. It retains the synthetic Guest Session HTTP/PostgreSQL lifecycle matrix and adds the
   accepted Node credential provider, restart compatibility, credential denial and storage/log
   confidentiality checks using ephemeral test inputs. No runtime or production activation. See
   [`WP-2216`](./work-packages/WP-2216.md).

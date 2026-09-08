@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import process from "node:process";
@@ -94,7 +103,7 @@ async function writeModule(
 }
 
 async function fixture(options = {}) {
-  const root = await mkdtemp(join(tmpdir(), "bop-domain-layer-boundary-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "bop-domain-layer-boundary-")));
   roots.push(root);
   await writeRegistry(root, options.registry ?? []);
   const context = await writeModule(root, options.module);
@@ -431,20 +440,25 @@ describe("Domain Layer Technology Dependency Test", () => {
     expect(await codes(context.root)).toContain("CASE_CONFLICT");
   });
 
-  it("uses exit code 2 and a formatted diagnostic for unreadable Domain source", async () => {
-    const context = await fixture();
-    const file = await source(context, 'import "unknown-package";');
-    const result = await validateDomainLayerBoundaries({
-      root: context.root,
-      readSource: async (path, encoding) => {
-        if (path === file)
-          throw Object.assign(new Error("synthetic unreadable"), { code: "EACCES" });
-        return readFile(path, encoding);
-      },
-    });
-    expect(result.exitCode).toBe(2);
-    expect(result.output).toContain(":1 [UNREADABLE_DOMAIN_SOURCE]");
-  });
+  it.each([false, true])(
+    "reports unreadable Domain source with aliased root=%s",
+    async (aliased) => {
+      const context = await fixture();
+      const file = await source(context, 'import "unknown-package";');
+      const root = aliased ? join(context.root, "root-alias") : context.root;
+      if (aliased) await symlink(context.root, root);
+      const result = await validateDomainLayerBoundaries({
+        root,
+        readSource: async (path, encoding) => {
+          if (path === file)
+            throw Object.assign(new Error("synthetic unreadable"), { code: "EACCES" });
+          return readFile(path, encoding);
+        },
+      });
+      expect(result.exitCode).toBe(2);
+      expect(result.output).toContain(":1 [UNREADABLE_DOMAIN_SOURCE]");
+    },
+  );
 
   it("sorts by path, numeric line, code, message and repeats byte-identical output", async () => {
     const context = await fixture();
