@@ -158,12 +158,25 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
           module.manifest.ownedDatabase?.tables?.includes("guest_session") &&
           moduleRelative === "src/infrastructure/persistence/guest-session-entry-store.ts";
+        // WP-2219 accepts only the Catalog candidate reader over its complete owned projection set.
+        const acceptedPublishedMenuAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "published_menu_projection_generation",
+            "published_menu_projection",
+            "published_menu_projection_section",
+            "published_menu_projection_sellable",
+            "published_menu_projection_checkpoint",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/published-menu-query-store.ts";
         if (
           (moduleRelative.startsWith("src/infrastructure/persistence/") ||
             moduleRelative.startsWith("migrations/") ||
             extname(path).toLowerCase() === ".sql") &&
           ![...sharedAuthorityModules.values()].includes(module.packageName) &&
-          !acceptedGuestEntryAsset
+          !acceptedGuestEntryAsset &&
+          !acceptedPublishedMenuAsset
         )
           diagnostics.push(
             diag(

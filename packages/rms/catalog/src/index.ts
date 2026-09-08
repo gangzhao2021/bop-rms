@@ -34,3 +34,4 @@ export * from "./application/ports/selection-validation-ports.js";
 export * from "./contracts/bundle.js";
 export * from "./application/ports/bundle-ports.js";
 export * from "./application/bundle-service.js";
+export * from "./infrastructure/persistence/published-menu-query-store.js";
