@@ -71,6 +71,14 @@ The narrow WP-1301 correction is within this package. Canonical Screen mapping c
 explicit follow-up work because a replacement execution WP must actually own the required behavior;
 pointing every Screen to this documentation package would not close that gap.
 
+## Owner decisions recorded after the review
+
+[WP-2228](../work-packages/WP-2228.md) records the Owner's 2026-09-08 acceptance of a shared
+Dining Session Cart with Participant-owned item edits and one-time safe credential recovery.
+These resolve the two product choices within DC-01. Detailed recovery mechanics, owner-local
+persistence and source reconciliation remain implementation obligations; other DC entries are
+unchanged. The original WP-2224 proposal-status statements are historical review snapshots.
+
 ## Recommended execution order
 
 1. Reconcile the applicable Handoff sections for DC-01 and the source ownership/atomicity question

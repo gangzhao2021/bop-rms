@@ -43,9 +43,8 @@ Cart expiry values must come from accepted versioned policy; no duration is chos
 **Proposal DEC-H01.** Add an Ordering-owned current-Cart binding operation, separate from immutable
 Cart content. Its internal identity includes Brand, Store, channel, authorized Session or Dining
 context, operation reference, binding revision and Cart reference. Credentials never enter it.
-Recommend at most one selectable active Cart per exact authorized context. For DineIn, whether
-the selectable context is shared by the Dining Session or scoped to a Participant must first be
-reconciled with the source; no schema uniqueness or behavior is approved by this recommendation.
+Recommend at most one selectable active Cart per exact authorized context. For DineIn, the Owner decision below resolves the selectable context as the shared Dining Session;
+exact schema uniqueness and activation mechanics still belong to implementation.
 
 The proposed create/bind input is an operation reference plus expected Session/binding revisions
 resolved server-side. Identity supplies usable Session and binding authority; Ordering supplies
@@ -78,13 +77,39 @@ inside a Cart DTO. Cart and Session references remain locators, never credential
    activation leaves the Cart unavailable until exact receipts reconcile; never restore the old
    credential or silently attach a different Session. Duplicate/conflicting receipts converge or fail.
 
-**Proposal DEC-H02.** A lost response after credential rotation must not be solved by persisting
-plaintext credentials, replaying a revoked Cookie or treating the Cart ID as recovery proof.
-Recommend an explicit fresh-Entry path with no automatic old-Cart transfer when no accepted recovery
-grant exists. The prepared/activated Cart retains its history and expires under its own policy.
-This can lose the customer's unsubmitted basket and is a reviewable product tradeoff. If the source
-requires continuity, design the exact one-time recovery grant before activating this handoff;
-do not borrow a receipt-only resume grant or relax immutable Pickup attribution implicitly.
+**Accepted product decisions, 2026-09-08.** See [WP-2228](../work-packages/WP-2228.md).
+The Owner adopted a shared Cart for the same authorized Dining Session. Each Participant may
+modify only their own items under WP-1201. Sharing grants no host override, membership, cross-Store
+access or access merely from a Table/Cart identifier. Dining remains the membership authority;
+Ordering rechecks active Participant scope and exact Cart version on every mutation. Concurrent
+participants must observe a version conflict and refresh rather than overwrite another change.
+
+**DEC-H02: accepted continuity goal; mechanism requires implementation.** The Owner adopted
+one-time safe credential recovery to preserve the basket after a lost binding response. This
+supersedes the earlier recommendation to prefer fresh Entry and accept loss of the old basket.
+It does not authorize plaintext credential persistence, use of a revoked Cookie as proof, a Cart-ID
+recovery endpoint or reuse of a receipt-only resume grant. Identity must own purpose-separated,
+unpredictable recovery proof; server storage retains a keyed verifier, not its plaintext value.
+Proof must bind the exact operation and scope and be securely available to the browser before the
+binding response can be lost. Its delivery acknowledgement is therefore part of the protocol.
+
+The future recovery contract must specify a finite lifetime, same-origin/CSRF and abuse controls,
+atomic single consumption, exact activation reconciliation, and denial after expiry, revocation,
+scope drift or conflicting intent. A consumed proof must never restore an old Session. Repeating a
+recovery after its own response is lost must have an explicit safe continuation: neither unlimited
+replay nor silently abandoning the basket satisfies the accepted goal. Credential rotation must
+not silently rewrite Pickup creator attribution or transfer item ownership. Resolve this with
+Identity and Ordering public contracts before choosing a schema or activating an endpoint.
+
+Credential material is restricted to approved credential transport and ephemeral handling. It must
+not enter Cart DTOs, URLs, localStorage, logs, telemetry, Audit summaries or Event payloads. Audit
+records bounded outcomes and operation linkage through existing approved contracts.
+
+Required future synthetic acceptance includes: two Participants sharing one Cart while foreign-item
+edits deny; cross-Dining/Store denial; concurrent version conflict; lost initial binding response;
+lost recovery response; concurrent recovery with one consumption; expired/wrong-scope proof;
+revoked predecessor denial; crashes between owner-local commits; exact-operation reconciliation;
+and no credential persistence or disclosure. These cases are designed, not executed in WP-2228.
 
 Create/activate/abort each has a stable purpose-specific operation, expected local version and
 bounded Audit action/result. Reconciliation rechecks current authority and exact receipt digests;
