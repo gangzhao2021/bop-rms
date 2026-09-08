@@ -4,7 +4,7 @@ WP-0006 owns startup-time validation and orchestration of the services already i
 
 ## Commands
 
-Run all commands from the repository root in the same WSL/Linux distribution:
+Run all commands from the repository root in the same native macOS or Linux/WSL2 environment:
 
 ```bash
 pnpm environment:check
@@ -21,12 +21,12 @@ Runtime metadata lives under ignored `.local/environment/`. A status command tru
 
 The validator requires:
 
-- Linux and a repository real path outside `/mnt/*`
-- Linux-resolved Git, Node, Corepack, pnpm, and Docker executables; the Docker Desktop Linux CLI bridge under `/mnt/wsl/docker-desktop/` is accepted
+- Native macOS or Linux/WSL2 and a repository real path outside `/mnt/*`
+- Native Git, Node, Corepack, pnpm, and Docker executables; the Docker Desktop Linux CLI bridge under `/mnt/wsl/docker-desktop/` is accepted
 - Node `24.18.0`, Corepack `0.35.0`, pnpm `11.13.0`, and Turbo `2.10.5`
 - a reachable Linux Docker Engine and Compose
 - the complete `.env` contract, valid identifiers, and unique localhost ports
-- a non-empty, non-symlink PostgreSQL secret file with Linux mode `0600`
+- a non-empty, non-symlink PostgreSQL secret file with mode `0600`
 - free configured ports before startup
 
 The non-secret contract is documented by `.env.example`. The root supervisor passes only an individual `PORT` to the API and explicit CLI ports to Vite. It does not pass the PostgreSQL password or the rest of `.env` into application processes.
@@ -36,3 +36,11 @@ The non-secret contract is documented by `.env.example`. The root supervisor pas
 Startup requires API `/health`, both Vite shells, a live Worker process, and a healthy Compose PostgreSQL service. API `/ready` must still return `503`, `not_ready`, and database `not_configured`; no driver, ORM, migration, schema, seed, Repository, or application database connection is present.
 
 The normal stop command preserves the WP-0005 volume. `pnpm environment:verify` instead uses a dedicated `bop-rms-wp0006-verify` Compose project, synthetic temporary credentials under ignored `.local/`, alternate localhost ports, and final `down --volumes` cleanup. It does not inspect, stop, or delete another Compose project's resources.
+
+## Host process inspection
+
+WP-2215 adds native macOS support to the existing lifecycle. Linux reads process identity from
+`/proc`; macOS uses bounded `/bin/ps` queries. Both require the expected Node invocation (`node` from the validated PATH or the
+resolved Node path), script and supervisor `start` argument before signalling a PID. Invalid or unavailable process identity
+fails closed. Verification checks environment-key isolation on both hosts without printing process
+arguments or environment values. Windows still requires WSL2, and Docker must run Linux containers.

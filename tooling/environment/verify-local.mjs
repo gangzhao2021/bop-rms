@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { processHasEnvironmentVariable } from "./process.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const local = path.join(root, "tooling", "environment", "local.mjs");
@@ -228,9 +229,8 @@ try {
     fs.readFileSync(path.join(root, ".local", "environment", `${projectName}.json`), "utf8"),
   );
   for (const [name, pid] of Object.entries(runtime.childPids)) {
-    const childEnvironment = fs.readFileSync(`/proc/${pid}/environ`, "utf8");
     assert(
-      !childEnvironment.includes("BOP_RMS_WP0006_SENTINEL="),
+      !processHasEnvironmentVariable(pid, "BOP_RMS_WP0006_SENTINEL"),
       `${name} inherited a BOP_RMS_* environment variable`,
     );
   }

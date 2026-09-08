@@ -10,7 +10,7 @@ This repository is implemented one reviewed Work Package at a time. WP-0001 thro
 - Node.js 24.18.0
 - Corepack 0.35.0
 - pnpm 11.13.0
-- Git and Docker available inside the same WSL distribution
+- Native Git and Docker CLI available in the same macOS/Linux environment (on Windows, inside WSL2), with a Linux-container Docker backend
 
 On Windows, keep the checkout in the WSL Linux filesystem, normally `~/src/bop-rms`. Do not run repository commands from `/mnt/c`, `/mnt/d`, OneDrive, or a mixed Windows/Linux toolchain.
 
@@ -19,6 +19,7 @@ On Windows, keep the checkout in the WSL Linux filesystem, normally `~/src/bop-r
 ```bash
 corepack install --global pnpm@11.13.0
 pnpm install --frozen-lockfile
+pnpm build
 pnpm verify
 ```
 
@@ -31,20 +32,18 @@ Create the ignored local configuration and a unique local-only PostgreSQL passwo
 ```bash
 cp .env.example .env
 install -d -m 0700 .local/postgres
-read -r -s -p 'Local PostgreSQL password: ' BOP_RMS_LOCAL_POSTGRES_PASSWORD
-printf '%s' "$BOP_RMS_LOCAL_POSTGRES_PASSWORD" > .local/postgres/password
-unset BOP_RMS_LOCAL_POSTGRES_PASSWORD
+node --input-type=module -e 'import { writeFileSync } from "node:fs"; import { randomBytes } from "node:crypto"; writeFileSync(".local/postgres/password", randomBytes(32).toString("hex"), { flag: "wx", mode: 0o600 });'
 chmod 0600 .local/postgres/password
 ```
 
-Validate the exact WSL/Linux toolchain, configuration, secret-file permissions, Docker backend, and available localhost ports, then start PostgreSQL and all four application skeletons with one foreground command:
+Validate the exact native macOS or Linux/WSL2 toolchain, configuration, secret-file permissions, Docker backend, and available localhost ports, then start PostgreSQL and all four application skeletons with one foreground command:
 
 ```bash
 pnpm environment:check
 pnpm dev
 ```
 
-From another WSL terminal, inspect or stop that environment:
+From another terminal in the same environment, inspect or stop that environment:
 
 ```bash
 pnpm local:status
