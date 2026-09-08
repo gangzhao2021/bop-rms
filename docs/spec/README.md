@@ -14,11 +14,12 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-- `WP-2220 - Customer Menu HTTP Persistence Acceptance` is in local development on a separate
-  branch from WP-2219 head `c641d14`, under explicit authorization to develop while predecessor CI
-  runs. PR194 integration remains pending; no delivery gate is claimed passed. See [WP-2220](./work-packages/WP-2220.md).
+- `WP-2220 - Customer Menu HTTP Persistence Acceptance` is locally implemented and verified,
+  aligned to verified WP-2219 main `6e105ce`. Post-alignment affected checks passed; its own exact-head/main CI
+  remains pending. See [WP-2220](./work-packages/WP-2220.md).
 
-- `WP-2219 - PostgreSQL Published Menu Query Adapter` is active from verified `72bc5b4`.
+- `WP-2219 - PostgreSQL Published Menu Query Adapter` is integrated through PR194 at `6e105ce`;
+  exact-head run `34206701060` and exact-main run `34209230331` passed all17 steps.
   It connects the existing Catalog candidate-query port to its own scoped active projection tables,
   preserving strict parsing and existing query policies. See [WP-2219](./work-packages/WP-2219.md).
 
