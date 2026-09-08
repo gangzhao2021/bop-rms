@@ -1,12 +1,13 @@
 import { createServer, type Server } from "node:http";
 import type {
   CoreTelemetry,
+  CoreTelemetryBackend,
   CoreTelemetryCompletion,
   StructuredLogDestination,
 } from "@bop-rms/observability";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
-import { createApiRuntimeLogger } from "./server.js";
+import { createApiCoreTelemetry, createApiRuntimeLogger } from "./server.js";
 
 const servers: Server[] = [];
 
@@ -63,6 +64,75 @@ async function start(
 }
 
 describe("WP-0044 API core telemetry", () => {
+  it("WP-2227 records Entry, Quote and Merchant routes through the actual runtime factory", async () => {
+    const recorded: (string | undefined)[] = [];
+    const failures: string[] = [];
+    let discarded = 0;
+    const backend: CoreTelemetryBackend = {
+      start() {
+        return {
+          complete: (record) => recorded.push(record.attributes["http.route"]),
+          discard: () => {
+            discarded += 1;
+          },
+          run: (callback) => callback(),
+        };
+      },
+    };
+    const unavailable = async () => {
+      throw new Error("synthetic service unavailable");
+    };
+    const merchantBff = {
+      exactOrigin: "",
+      acceptedHost: "",
+      service: {
+        start: unavailable,
+        callback: unavailable,
+        bootstrap: unavailable,
+        authorize: unavailable,
+        logout: unavailable,
+        switchStore: unavailable,
+      },
+    };
+    const origin = await start(
+      createApiCoreTelemetry({ backend, onSafeFailure: (code) => failures.push(code) }),
+      { merchantBff },
+    );
+    merchantBff.exactOrigin = origin;
+    merchantBff.acceptedHost = new URL(origin).host;
+    const cases = [
+      ["POST", "/bff/customer/entry", "/bff/customer/entry"],
+      [
+        "POST",
+        "/api/v1/carts/018f0000-0000-7000-8000-000000000004/quote",
+        "/api/v1/carts/:cart_id/quote",
+      ],
+      ["GET", "/merchant/login", "/merchant/login"],
+      ["GET", "/merchant/callback", "/merchant/callback"],
+      ["GET", "/merchant/session", "/merchant/session"],
+      ["POST", "/merchant/store-context", "/merchant/store-context"],
+      ["POST", "/merchant/logout", "/merchant/logout"],
+      ["GET", "/not-a-registered-route", "unmatched"],
+    ] as const;
+    for (const [method, path] of cases) {
+      const response = await fetch(`${origin}${path}?probe=synthetic-query`, {
+        method,
+        redirect: "manual",
+        headers: {
+          origin,
+          "sec-fetch-site": "same-origin",
+        },
+      });
+      await response.arrayBuffer();
+    }
+    expect(recorded).toEqual(cases.map(([, , template]) => template));
+    expect(discarded).toBe(0);
+    expect(failures).toEqual([]);
+    expect(JSON.stringify(recorded)).not.toMatch(
+      /018f0000|synthetic-query|not-a-registered-route/u,
+    );
+  });
+
   it("uses only registered route templates and collapses unknown paths", async () => {
     const output = recorder();
     const origin = await start(output.telemetry);

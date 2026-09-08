@@ -12,6 +12,7 @@ import {
 } from "./customer-cart.js";
 import { type CustomerMenuHandler, unavailableCustomerMenuHandler } from "./customer-menu.js";
 import { type CustomerQuoteHandler, unavailableCustomerQuoteHandler } from "./customer-quote.js";
+import { apiRouteTemplates } from "./http-route-templates.js";
 import { HealthReadinessController } from "./health-readiness.js";
 import {
   createHttpRequestLimitMiddleware,
@@ -22,7 +23,6 @@ import {
   createUnavailableMerchantCatalogRouter,
   type MerchantCatalogRouterOptions,
   createMerchantCatalogRouter,
-  merchantCatalogRoutes,
 } from "./merchant-catalog.js";
 import { createMerchantBffRouter, type MerchantBffRouterOptions } from "./merchant-bff.js";
 import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
@@ -32,28 +32,6 @@ import {
   markRequestError,
   type RequestCompletionLogger,
 } from "./request-correlation.js";
-
-const routeTemplates = [
-  "/__acceptance/request-command-event",
-  "/bff/customer/entry",
-  customerCartRoutes.current,
-  "/bff/realtime",
-  "/api/v1/public/stores/:store_public_id/menu",
-  customerCartRoutes.create,
-  customerCartRoutes.read,
-  customerCartRoutes.addItem,
-  customerCartRoutes.updateItem,
-  "/api/v1/carts/:cart_id/quote",
-  ...Object.values(merchantCatalogRoutes),
-  "/merchant/login",
-  "/merchant/callback",
-  "/merchant/session",
-  "/merchant/store-context",
-  "/merchant/logout",
-  "/health",
-  "/ready",
-  "unmatched",
-] as const;
 
 export interface RequestErrorLogger {
   error(input: {
@@ -145,7 +123,7 @@ export function createApp({
     createRequestCorrelationMiddleware({
       ...(nowMilliseconds === undefined ? {} : { nowMilliseconds }),
       ...(requestLogger === undefined ? {} : { logger: requestLogger }),
-      routeTemplates,
+      routeTemplates: apiRouteTemplates,
       ...(telemetry === undefined ? {} : { telemetry }),
       ...(uuidV7Factory === undefined ? {} : { uuidV7Factory }),
     }),
