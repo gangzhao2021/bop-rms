@@ -174,7 +174,7 @@ async function replay(
   input: {
     action: CartItemOperationAction;
     operationReference: OrderingReference;
-    intent: ReturnType<typeof parseOrderingHash>;
+    intentAt: (at: OrderingInstant) => ReturnType<typeof parseOrderingHash>;
     cartReference: OrderingReference;
     guestSessionReference: OrderingReference;
     requestedAt: OrderingInstant;
@@ -184,12 +184,16 @@ async function replay(
   if (prior === null) return null;
   try {
     const result = parseCartAggregate(prior.result);
+    // Preserve stored digest encoding; only the original observation belongs to that record.
     if (
       prior.action !== input.action ||
       prior.operationReference !== input.operationReference ||
       prior.cartReference !== input.cartReference ||
       prior.guestSessionReference !== input.guestSessionReference ||
-      !ports.references.equals(prior.operationIntentHash, input.intent) ||
+      !ports.references.equals(
+        prior.operationIntentHash,
+        input.intentAt(parseOrderingInstant(prior.occurredAt)),
+      ) ||
       Date.parse(input.requestedAt) >= Date.parse(parseOrderingInstant(prior.expiresAt))
     )
       throw new CartError("CART_IDEMPOTENCY_CONFLICT");
@@ -424,21 +428,23 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const quantity = itemQuantity(raw.quantity);
       const optionSelections = selections(raw.optionSelections);
       const customerNote = parseCustomerNote(raw.customerNote);
-      const intent = intentHash(ports, "Add", {
-        cartReference,
-        expectedAggregateVersion: expectedVersion,
-        sellableReference,
-        quantity,
-        optionSelections,
-        customerNote,
-        operationReference,
-        requestedAt,
-      });
+      const intentAt = (at: OrderingInstant) =>
+        intentHash(ports, "Add", {
+          cartReference,
+          expectedAggregateVersion: expectedVersion,
+          sellableReference,
+          quantity,
+          optionSelections,
+          customerNote,
+          operationReference,
+          requestedAt: at,
+        });
+      const intent = intentAt(requestedAt);
       const current = await context(ports, "Add", cartReference, operationReference, requestedAt);
       const prior = await replay(ports, {
         action: "Add",
         operationReference,
-        intent,
+        intentAt,
         cartReference,
         guestSessionReference: parseOrderingReference(current.session.sessionReference),
         requestedAt,
@@ -510,16 +516,18 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const quantity = itemQuantity(raw.quantity);
       const optionSelections = selections(raw.optionSelections);
       const customerNote = parseCustomerNote(raw.customerNote);
-      const intent = intentHash(ports, "Update", {
-        cartReference,
-        cartItemReference,
-        expectedAggregateVersion: expectedVersion,
-        quantity,
-        optionSelections,
-        customerNote,
-        operationReference,
-        requestedAt,
-      });
+      const intentAt = (at: OrderingInstant) =>
+        intentHash(ports, "Update", {
+          cartReference,
+          cartItemReference,
+          expectedAggregateVersion: expectedVersion,
+          quantity,
+          optionSelections,
+          customerNote,
+          operationReference,
+          requestedAt: at,
+        });
+      const intent = intentAt(requestedAt);
       const current = await context(
         ports,
         "Update",
@@ -530,7 +538,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const prior = await replay(ports, {
         action: "Update",
         operationReference,
-        intent,
+        intentAt,
         cartReference,
         guestSessionReference: parseOrderingReference(current.session.sessionReference),
         requestedAt,
@@ -594,13 +602,15 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const operationReference = parseOrderingReference(raw.operationReference);
       const requestedAt = parseOrderingInstant(raw.requestedAt);
       const expectedVersion = version(raw.expectedAggregateVersion);
-      const intent = intentHash(ports, "Remove", {
-        cartReference,
-        cartItemReference,
-        expectedAggregateVersion: expectedVersion,
-        operationReference,
-        requestedAt,
-      });
+      const intentAt = (at: OrderingInstant) =>
+        intentHash(ports, "Remove", {
+          cartReference,
+          cartItemReference,
+          expectedAggregateVersion: expectedVersion,
+          operationReference,
+          requestedAt: at,
+        });
+      const intent = intentAt(requestedAt);
       const current = await context(
         ports,
         "Remove",
@@ -611,7 +621,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const prior = await replay(ports, {
         action: "Remove",
         operationReference,
-        intent,
+        intentAt,
         cartReference,
         guestSessionReference: parseOrderingReference(current.session.sessionReference),
         requestedAt,

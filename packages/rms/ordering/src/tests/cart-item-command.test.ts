@@ -199,6 +199,7 @@ function fixture(
     current: () => aggregate,
     generated: () => generated,
     operations: () => operations.size,
+    operation: (reference: string) => operations.get(reference),
     validations: () => validations,
   };
 }
@@ -436,6 +437,59 @@ describe("Cart Item Add / Update / Remove commands", () => {
       { code: "CART_DEPENDENCY_UNAVAILABLE" },
     );
   });
+});
+
+describe("WP-2225 stable Cart retry", () => {
+  it.each(["add", "update", "remove"] as const)(
+    "%s replays its persisted result at a later observation time without extending history",
+    async (action) => {
+      const state = fixture();
+      if (action !== "add") await state.service.add(addInput());
+      const command =
+        action === "add"
+          ? addInput()
+          : {
+              cartReference: ids.cart,
+              cartItemReference: ids.item,
+              expectedAggregateVersion: 2,
+              ...(action === "update"
+                ? { quantity: 3, optionSelections: [], customerNote: null }
+                : {}),
+              operationReference: ids.secondOperation,
+              requestedAt: "2026-08-02T14:02:00.000Z",
+            };
+      const execute = state.service[action];
+      const first = await execute(command);
+      const record = state.operation(command.operationReference as string);
+      const originalRecord = structuredClone(record);
+      const validations = state.validations();
+      const operations = state.operations();
+      // Pin the pre-fix timestamp-bearing encoding for compatibility with existing records.
+      const actionName = { add: "Add", update: "Update", remove: "Remove" }[action];
+      expect(record?.operationIntentHash).toBe(digest(`${actionName}:${JSON.stringify(command)}`));
+      const retry = await execute({ ...command, requestedAt: "2026-08-02T14:10:00.000Z" });
+      expect(retry).toEqual({ ...first, status: "AlreadyApplied" });
+      expect(state.current()).toEqual(first.aggregate);
+      expect(state.operation(command.operationReference as string)).toEqual(originalRecord);
+      expect(state.validations()).toBe(validations);
+      expect(state.operations()).toBe(operations);
+      const changed = action === "remove" ? { cartItemReference: id(90) } : { quantity: 4 };
+      await expect(
+        execute({ ...command, ...changed, requestedAt: "2026-08-02T14:11:00.000Z" }),
+      ).rejects.toMatchObject({ code: "CART_IDEMPOTENCY_CONFLICT" });
+      await expect(
+        execute({
+          ...command,
+          expectedAggregateVersion: 99,
+          requestedAt: "2026-08-02T14:11:00.000Z",
+        }),
+      ).rejects.toMatchObject({ code: "CART_IDEMPOTENCY_CONFLICT" });
+      await expect(
+        execute({ ...command, requestedAt: "2026-08-02T18:00:00.000Z" }),
+      ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+      expect(state.operation(command.operationReference as string)).toEqual(originalRecord);
+    },
+  );
 });
 
 describe("WP-2026 concurrent Cart update scenario", () => {

@@ -220,9 +220,12 @@ function fixture(
       },
     },
     authorization: {
-      async authorize() {
+      async authorize(input) {
         if (options.denied) return null;
-        return { guestSession: options.guest ?? guest(), audit: options.audit ?? audit() };
+        return {
+          guestSession: options.guest ?? guest(),
+          audit: options.audit ?? audit({ occurredAt: input.observedAt }),
+        };
       },
     },
     references: { hashIntent: hash, equals: (left, right) => left === right },
@@ -298,8 +301,46 @@ describe("WP-1203 Cart Quote attachment", () => {
     });
     await state.service.attach(input());
     await expect(
-      state.service.attach(input({ requestedAt: "2026-08-02T15:00:01.000Z" })),
+      state.service.attach(
+        input({ expectedCartVersion: 5, requestedAt: "2026-08-02T15:00:01.000Z" }),
+      ),
     ).rejects.toMatchObject({ code: "CART_IDEMPOTENCY_CONFLICT" });
+  });
+
+  it("WP-2225 replays the original attachment after time advances without renewing its Quote", async () => {
+    const state = fixture();
+    const first = await state.service.attach(input());
+    expect(first.attachment.operationIntentHash).toBe(
+      hash(`AttachQuote:${JSON.stringify(input())}`),
+    );
+    const original = structuredClone(first.attachment);
+    const retry = await state.service.attach(input({ requestedAt: "2026-08-02T15:00:01.000Z" }));
+    expect(retry).toEqual({ status: "AlreadyAttached", attachment: original });
+    // Replay is historical evidence, not a fresh Quote or an extension of price validity.
+    const afterQuoteExpiry = await state.service.attach(
+      input({ requestedAt: "2026-08-02T15:05:00.000Z" }),
+    );
+    expect(afterQuoteExpiry.attachment).toEqual(original);
+    expect(state.pricingCalls()).toBe(1);
+    await expect(
+      state.service.attach(input({ requestedAt: "2026-08-02T18:00:00.000Z" })),
+    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    expect(state.pricingCalls()).toBe(1);
+  });
+
+  it("WP-2225 checks current authorization and Audit evidence on delayed replay", async () => {
+    const options: { denied?: boolean; audit?: AppendAuditRecordInput } = {};
+    const state = fixture(options);
+    await state.service.attach(input());
+    options.audit = audit();
+    await expect(
+      state.service.attach(input({ requestedAt: "2026-08-02T15:00:01.000Z" })),
+    ).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
+    options.denied = true;
+    await expect(
+      state.service.attach(input({ requestedAt: "2026-08-02T15:00:01.000Z" })),
+    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    expect(state.pricingCalls()).toBe(1);
   });
 
   it("fails closed for empty or legacy unvalidated Carts", async () => {

@@ -410,11 +410,13 @@ export function createCartQuoteAttachmentService(ports: CartQuoteAttachmentPorts
       const expectedCartVersion = version(raw.expectedCartVersion);
       const operationReference = parseOrderingReference(raw.operationReference);
       const requestedAt = parseOrderingInstant(raw.requestedAt);
-      const intent = parseOrderingHash(
-        ports.references.hashIntent(
-          `AttachQuote:${JSON.stringify({ cartReference, expectedCartVersion, operationReference, requestedAt })}`,
-        ),
-      );
+      const intentAt = (at: OrderingInstant) =>
+        parseOrderingHash(
+          ports.references.hashIntent(
+            `AttachQuote:${JSON.stringify({ cartReference, expectedCartVersion, operationReference, requestedAt: at })}`,
+          ),
+        );
+      const intent = intentAt(requestedAt);
       const authorized = await ports.authorization
         .authorize({
           action: "AttachQuote",
@@ -439,11 +441,15 @@ export function createCartQuoteAttachmentService(ports: CartQuoteAttachmentPorts
         try {
           const attachment = parseCartQuoteAttachment(prior);
           sessionScope(session, attachment, requestedAt);
+          // Reuse the original observation for the digest, not for authorization or expiry.
           if (
             attachment.cartReference !== cartReference ||
             attachment.cartVersion !== expectedCartVersion ||
             attachment.guestSessionReference !== guestSessionReference ||
-            !ports.references.equals(attachment.operationIntentHash, intent) ||
+            !ports.references.equals(
+              attachment.operationIntentHash,
+              intentAt(attachment.attachedAt),
+            ) ||
             Date.parse(requestedAt) >= Date.parse(attachment.idempotencyExpiresAt)
           )
             throw new CartError("CART_IDEMPOTENCY_CONFLICT");
