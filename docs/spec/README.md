@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2215 - Native macOS Local Environment Compatibility`
+- Current discussion node: `WP-2216 - Guest Session Cryptographic End-to-End Acceptance`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,14 +14,20 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
+- `WP-2216 - Guest Session Cryptographic End-to-End Acceptance` is active from exact-main verified
+  `40a1d19`. It retains the synthetic Guest Session HTTP/PostgreSQL lifecycle matrix and adds the
+  accepted Node credential provider, restart compatibility, credential denial and storage/log
+  confidentiality checks using ephemeral test inputs. No runtime or production activation. See
+  [`WP-2216`](./work-packages/WP-2216.md).
+
 - `WP-2215 - Native macOS Local Environment Compatibility` is implemented and locally verified on
   `codex/wp-2215` from `main@ac08c14`. Native macOS startup/status/stop and repeated environment
   lifecycle verification pass while retaining exact versions, Linux Docker, secret protection and
   truthful API readiness. Focused regressions passed 28/28, final root tests 374/374, forced package
   checks 200/200 and complete `pnpm verify` passed. Real Linux process inspection also passed in an
-  isolated container; full Linux lifecycle and GitHub CI remain unrun. See
-  [`WP-2215`](./work-packages/WP-2215.md). Delivery is authorized and in progress; exact-head/main
-  Actions and integration evidence belong in the PR. Production and Provider actions remain excluded.
+  isolated container; full Linux lifecycle subsequently passed in exact-head/main CI. See
+  [`WP-2215`](./work-packages/WP-2215.md). Integrated through PR #190 at `40a1d19`; exact-head run
+  `34184098872` and exact-main run `34185600117` passed all steps. Delivery evidence is in the PR. Production and Provider actions remain excluded.
 
 - `WP-2214 - Guest Session Cryptographic Credential Provider` implements and locally verifies an
   opt-in Identity-owned Node adapter for 256-bit credentials, UUIDv7 references,

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
+import { randomBytes } from "node:crypto";
 import pg from "pg";
-import { it } from "vitest";
+import { it, vi } from "vitest";
 import {
+  createGuestSessionCredentialProvider,
   createGuestSessionRecord,
   createPostgresGuestSessionEntryStore,
   createPostgresGuestSessionLegacyInspector,
@@ -22,11 +25,11 @@ import { createTenantTransactionRunner } from "../src/index.ts";
 const { Client, Pool } = pg;
 const scope = { brandReference: id(1), storeReference: id(2) };
 
-it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped failure isolation", async () => {
-  await withIsolatedDatabase({ caseId: "wp2212_entry" }, async (context) => {
+it.each(["synthetic", "crypto"])("HTTP Guest lifecycle with %s", async (mode) => {
+  await withIsolatedDatabase({ caseId: `wp2216_${mode}` }, async (context) => {
     const admin = new Client(context.clientConfig);
-    const role = `wp2212_entry_${context.runId}`;
-    assert.match(role, /^wp2212_entry_[a-f0-9]+$/u);
+    const role = `wp2216_${mode}_${context.runId}`;
+    assert.match(role, /^wp2216_(?:synthetic|crypto)_[a-f0-9]+$/u);
     const pool = new Pool({
       ...context.clientConfig,
       max: 2,
@@ -34,6 +37,12 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
       query_timeout: 5000,
     });
     const f = fixture();
+    const selectorKey = randomBytes(32);
+    const provider = createGuestSessionCredentialProvider(selectorKey);
+    const credentials =
+      mode === "crypto"
+        ? { ...provider, generateCredential: vi.fn(provider.generateCredential) }
+        : f.options.session.credentials;
     const logs = [];
     const transactions = [];
     const failures = [];
@@ -137,7 +146,7 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
         rotate: deniedLifecycle,
         revoke: deniedLifecycle,
       };
-      const options = { ...f.options, session: { ...f.options.session, store } };
+      const options = { ...f.options, session: { ...f.options.session, credentials, store } };
       const port = createCustomerEntryComposition(options);
       runtime = createApiServerRuntime({
         port: 0,
@@ -203,7 +212,58 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
         }),
         record.session,
       );
-      const issuedCredentials = f.options.session.credentials.generateCredential.mock.calls.length;
+      assert.match(sessionCredential, /^[A-Za-z0-9_-]{43}$/u);
+      assert.match(body.csrfToken, /^[A-Za-z0-9_-]{43}$/u);
+      assert.equal(Buffer.from(sessionCredential, "base64url").byteLength, 32);
+      assert.equal(Buffer.from(body.csrfToken, "base64url").byteLength, 32);
+      assert(sessionCredential !== body.csrfToken);
+      assert.match(
+        record.session.sessionReference,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+      );
+      assert.equal(record.csrfSelectorHash, credentials.hashCredential("Csrf", body.csrfToken));
+      assert(selector !== credentials.hashCredential("Csrf", sessionCredential));
+      const tamperedCsrf = `${body.csrfToken[0] === "A" ? "B" : "A"}${body.csrfToken.slice(1)}`;
+      for (const deniedInput of [
+        { sessionCredential: body.csrfToken, csrfCredential: sessionCredential, observedAt: now },
+        { sessionCredential, csrfCredential: sessionCredential, observedAt: now },
+        { sessionCredential, csrfCredential: tamperedCsrf, observedAt: now },
+      ])
+        await assert.rejects(identity.authorize(deniedInput), {
+          code: "GUEST_SESSION_UNAVAILABLE",
+        });
+      if (mode === "crypto") {
+        const restarted = new GuestSessionService({
+          ...options.session,
+          credentials: createGuestSessionCredentialProvider(Buffer.from(selectorKey)),
+          store: reconnected,
+          admission: { consume: async () => null },
+        });
+        assert.deepEqual(
+          await restarted.authorize({
+            sessionCredential,
+            csrfCredential: body.csrfToken,
+            observedAt: now,
+          }),
+          record.session,
+        );
+        const otherKey = new GuestSessionService({
+          ...options.session,
+          credentials: createGuestSessionCredentialProvider(randomBytes(32)),
+          store: reconnected,
+          admission: { consume: async () => null },
+        });
+        await assert.rejects(
+          otherKey.authorize({
+            sessionCredential,
+            csrfCredential: body.csrfToken,
+            observedAt: now,
+          }),
+          { code: "GUEST_SESSION_UNAVAILABLE" },
+        );
+      }
+      assert.deepEqual(await reconnected.resolve(selector), record);
+      const issuedCredentials = credentials.generateCredential.mock.calls.length;
       const replay = await identity.create({
         entryRequestReference: id(601),
         operationReference: record.operationReference,
@@ -211,10 +271,7 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
       });
       assert.equal(replay.status, "AlreadyApplied");
       assert(!("sessionCredential" in replay));
-      assert.equal(
-        f.options.session.credentials.generateCredential.mock.calls.length,
-        issuedCredentials,
-      );
+      assert.equal(credentials.generateCredential.mock.calls.length, issuedCredentials);
       // WP-2210: background reads never renew; interactive reads persist exactly three fields.
       const observedAt = new Date(Date.parse(now) + 60_000).toISOString();
       assert.deepEqual(
@@ -297,7 +354,9 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
           await otherStore.touchInteractive({ ...touchCommand, expectedVersion: 4 }),
           null,
         );
-        await assert.rejects(otherStore.create({ record }), { code: "GUEST_SESSION_UNAVAILABLE" });
+        await assert.rejects(otherStore.create({ record }), {
+          code: "GUEST_SESSION_UNAVAILABLE",
+        });
       }
 
       const scoped = new Client(context.clientConfig);
@@ -425,8 +484,7 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
       assert(!(await unknown.text()).includes("acknowledgement"));
       assert.equal(await count(), 3);
       fault = null;
-      const credentialsAfterUnknown =
-        f.options.session.credentials.generateCredential.mock.calls.length;
+      const credentialsAfterUnknown = credentials.generateCredential.mock.calls.length;
       // Re-enter the exact operation through composition: it must not issue replacement credentials.
       f.admission.mockImplementation(async (input) =>
         parseGuestAdmissionEvidence(f.admissionEvidence(input)),
@@ -438,10 +496,7 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
         qrToken,
       });
       assert.deepEqual(lost, { status: "EntryUnavailable" });
-      assert.equal(
-        f.options.session.credentials.generateCredential.mock.calls.length,
-        credentialsAfterUnknown,
-      );
+      assert.equal(credentials.generateCredential.mock.calls.length, credentialsAfterUnknown);
       assert.equal(await count(), 3);
       assert(transactions.includes("rolled_back"));
 
@@ -799,22 +854,31 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
         (await admin.query("SELECT row_to_json(h) FROM bop_identity.guest_session_operation h"))
           .rows,
       );
-      for (const secret of [
-        sessionCredential,
-        body.csrfToken,
-        rotated.sessionCredential,
-        rotated.csrfCredential,
-        qrToken,
-      ])
-        assert(!history.includes(secret));
-
       const stored = JSON.stringify(
         (await admin.query("SELECT row_to_json(g) AS row FROM bop_identity.guest_session AS g"))
           .rows,
       );
-      for (const secret of [qrToken, sessionCredential, body.csrfToken]) {
-        assert(!stored.includes(secret));
-        assert(!logs.join("").includes(secret));
+      const generatedCredentials = credentials.generateCredential.mock.results
+        .filter((result) => result.type === "return")
+        .map((result) => result.value);
+      const sensitiveInputs = [
+        qrToken,
+        ...generatedCredentials,
+        selectorKey.toString("hex"),
+        selectorKey.toString("base64"),
+        selectorKey.toString("base64url"),
+      ];
+      for (const secret of sensitiveInputs) {
+        assert(typeof secret === "string" && secret.length > 0);
+        assert(
+          !history.includes(secret),
+          "Session operation history must not contain credential material",
+        );
+        assert(!stored.includes(secret), "Session rows must not contain credential material");
+        assert(
+          !logs.join("").includes(secret),
+          "Structured logs must not contain credential material",
+        );
       }
       for (const internal of [
         scope.brandReference,
@@ -835,6 +899,7 @@ it("WP-2209/WP-2210 persist HTTP Guest entry and interactive renewal with scoped
       );
       assert(cleared.rows.every((row) => !row.brand && !row.store));
     } finally {
+      selectorKey.fill(0);
       if (runtime) await runtime.shutdown("SIGTERM");
       await pool.end();
       await admin.end();
