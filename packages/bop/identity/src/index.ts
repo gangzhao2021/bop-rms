@@ -245,3 +245,12 @@ export {
   type GuestBindingAuditPort,
   type GuestBindingAuditDescriptor,
 } from "./infrastructure/persistence/guest-binding-store.js";
+
+export { createGuestBindingService } from "./application/guest-binding-service.js";
+export type {
+  GuestBindingStorePort,
+  GuestBindingServiceOptions,
+  GuestBindingOwnerPort,
+  GuestBindingTargetReceipt,
+  GuestBindingCompletion,
+} from "./application/ports/guest-binding-ports.js";

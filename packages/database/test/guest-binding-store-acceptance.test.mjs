@@ -3,6 +3,10 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createGuestSessionRecord,
+  createGuestBindingService,
+  createGuestSessionCredentialProvider,
+  createGuestBindingCredentialProvider,
+  GuestSessionService,
   createPostgresGuestSessionEntryStore,
   createPostgresGuestBindingStore,
   prepareGuestBinding,
@@ -345,6 +349,130 @@ it("atomically persists binding delivery, activation, Audit and response-loss co
       });
       assert.equal(await count("bop_identity.guest_binding_preparation"), 7);
       assert.equal(await count("platform_audit.audit_record"), 7);
+
+      const credentials = createGuestSessionCredentialProvider(new Uint8Array(32).fill(8));
+      const recovery = createGuestBindingCredentialProvider(new Uint8Array(32).fill(8));
+      const oldCredential = credentials.generateCredential("Session");
+      const oldCsrf = credentials.generateCredential("Csrf");
+      const servicePredecessor = createGuestSessionRecord({
+        ...fixture(500).predecessor,
+        sessionSelectorHash: credentials.hashCredential("Session", oldCredential),
+        csrfSelectorHash: credentials.hashCredential("Csrf", oldCsrf),
+      });
+      await sessions.create({ record: servicePredecessor });
+      let clock = 0;
+      let ownerActivations = 0;
+      const ownerPreparations = [];
+      const options = {
+        credentials,
+        recovery,
+        sessions,
+        bindings: store,
+        preparationLifetimeSeconds: 300,
+        now: () => at(clock),
+        authorization: new GuestSessionService({
+          credentials,
+          store: sessions,
+          binding: {
+            async validate() {
+              return "Current";
+            },
+          },
+          admission: {
+            async consume() {
+              return null;
+            },
+          },
+        }),
+        owner: {
+          async reserveTarget(input) {
+            return {
+              operationReference: input.operationReference,
+              targetReference: id(509),
+              sessionReference: input.session.sessionReference,
+              ...scope,
+              expectedVersion: input.session.version,
+              validUntil: at(300),
+            };
+          },
+          async prepare(input) {
+            ownerPreparations.push(input);
+            return {
+              operationReference: input.operationReference,
+              targetReference: input.targetReference,
+              sessionReference: input.sessionReference,
+              ...scope,
+              bindingVersion: 1,
+              preparedAt: at(clock),
+              validUntil: input.validUntil,
+            };
+          },
+          async activate() {
+            ownerActivations++;
+            if (ownerActivations === 1) throw new Error("synthetic owner unavailable");
+            return "Activated";
+          },
+        },
+      };
+      const service = createGuestBindingService(options);
+      const prepareInput = {
+        operationReference: id(508),
+        sessionCredential: oldCredential,
+        csrfCredential: oldCsrf,
+      };
+      const issued = await service.prepare(prepareInput);
+      const storedText = JSON.stringify(
+        (
+          await admin.query(
+            "SELECT record FROM bop_identity.guest_binding_preparation WHERE operation_id=$1",
+            [id(508)],
+          )
+        ).rows,
+      );
+      for (const raw of [
+        oldCredential,
+        oldCsrf,
+        issued.sessionCredential,
+        issued.csrfCredential,
+        issued.recoveryProof,
+      ])
+        assert.equal(storedText.includes(raw), false);
+      clock = 1;
+      const activationInput = {
+        ...prepareInput,
+        candidateSessionCredential: issued.sessionCredential,
+        candidateCsrfCredential: issued.csrfCredential,
+        recoveryProof: issued.recoveryProof,
+      };
+      await assert.rejects(service.activate(activationInput), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.equal(
+        (await sessions.resolve(servicePredecessor.sessionSelectorHash)).session.status,
+        "Revoked",
+      );
+      await assert.rejects(service.activate(activationInput), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      const resumed = createGuestBindingService({
+        ...options,
+        bindings: createPostgresGuestBindingStore(runner(), scope, audit, credentials.equals),
+      });
+      const completionInput = {
+        operationReference: id(508),
+        sessionCredential: issued.sessionCredential,
+        csrfCredential: issued.csrfCredential,
+      };
+      for (const instant of [2, 301]) {
+        clock = instant;
+        assert.equal((await resumed.complete(completionInput)).status, "Activated");
+      }
+      assert.equal(ownerPreparations.length, 1);
+      assert.equal(ownerActivations, 3);
+      for (const raw of [issued.sessionCredential, issued.csrfCredential, issued.recoveryProof])
+        assert.equal(JSON.stringify(ownerPreparations).includes(raw), false);
+      assert.equal(await count("bop_identity.guest_binding_preparation"), 10);
+      assert.equal(await count("platform_audit.audit_record"), 10);
       assert.equal(active, 0);
     } finally {
       await admin.query(`DROP OWNED BY ${role}`);
