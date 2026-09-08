@@ -63,6 +63,34 @@ async function filesBelow(root: string): Promise<string[]> {
 }
 
 test.describe("@demo local-only Customer preview", () => {
+  test("WP-2226 Continue shopping retains the document and displays exact CAD amounts", async ({
+    page,
+  }) => {
+    const violations = monitorDemoBoundary(page);
+    await page.goto("/cart");
+    const main = page.getByRole("main");
+    await expect(main.getByText("CAD 14.68", { exact: true }).first()).toBeVisible();
+    await expect(main).not.toContainText("minor units");
+    await page.evaluate(() =>
+      document.documentElement.setAttribute("data-navigation-probe", "retained"),
+    );
+    const continueShopping = main.getByRole("link", { name: "Continue shopping", exact: true });
+    await continueShopping.focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/menu$/u);
+    await expect(
+      page.getByRole("main").getByRole("heading", { name: "Synthetic all-day menu", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-navigation-probe", "retained");
+    await expectNoHorizontalOverflow(page);
+    await page.goto("/checkout");
+    await expect(
+      page.getByRole("main").getByText("CAD 14.68", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.getByRole("main")).not.toContainText("minor units");
+    expect(violations).toEqual([]);
+  });
+
   for (const route of routes) {
     test(`${route.heading} stays synthetic, local, and responsive`, async ({ page }) => {
       const violations = monitorDemoBoundary(page);
