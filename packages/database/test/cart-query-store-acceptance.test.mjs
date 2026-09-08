@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
-import { createPostgresCartQueryStore } from "../../rms/ordering/src/index.ts";
+import {
+  createPostgresCartQueryStore,
+  createPostgresCartItemOperationStore,
+} from "../../rms/ordering/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
@@ -19,7 +22,9 @@ it("reads scoped Cart facts through a least-privilege read-only PostgreSQL adapt
         `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`,
       );
       await admin.query(`GRANT USAGE ON SCHEMA platform_helpers, rms_ordering TO ${role}`);
-      await admin.query(`GRANT SELECT ON rms_ordering.cart, rms_ordering.cart_line TO ${role}`);
+      await admin.query(
+        `GRANT SELECT ON rms_ordering.cart, rms_ordering.cart_line, rms_ordering.cart_operation_record TO ${role}`,
+      );
       await admin.query(
         `GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(), platform_helpers.current_store_id() TO ${role}`,
       );
@@ -141,6 +146,80 @@ it("reads scoped Cart facts through a least-privilege read-only PostgreSQL adapt
             id(1),
           ])
         ).rows[0].aggregate_version,
+        1,
+      );
+      // WP-2230: immutable operation history is independent of the current aggregate.
+      const snapshot = { ...legacy, aggregateVersion: 2 };
+      await admin.query(
+        `INSERT INTO rms_ordering.cart_operation_record
+        (operation_id,brand_id,store_id,cart_id,cart_line_id,guest_session_id,action_code,
+         intent_digest,result_aggregate_version,result_cart_snapshot_json,occurred_at,expires_at)
+        VALUES ($1,$2,$3,$4,$5,$6,'Add',$7,2,$8::jsonb,$9,$9::timestamptz + interval '24 hours')`,
+        [
+          id(30),
+          id(2),
+          id(3),
+          id(1),
+          id(5),
+          id(4),
+          `sha256:${"a".repeat(64)}`,
+          JSON.stringify(snapshot),
+          at,
+        ],
+      );
+      await admin.query("UPDATE rms_ordering.cart SET aggregate_version=3 WHERE cart_id=$1", [
+        id(1),
+      ]);
+      const operations = createPostgresCartItemOperationStore(runner, scope);
+      const historical = await operations.resolveOperation(id(30));
+      assert.deepEqual(historical.result, snapshot);
+      assert.equal(historical.expiresAt, "2026-08-03T14:00:00.000Z");
+      assert.equal((await reader.load(id(1))).aggregateVersion, 3);
+      assert.deepEqual(
+        await createPostgresCartItemOperationStore(runner, scope).resolveOperation(id(30)),
+        historical,
+      );
+      assert.equal(await operations.resolveOperation(id(90)), null);
+      for (const foreign of [
+        { ...scope, brandReference: id(91) },
+        { ...scope, storeReference: id(92) },
+      ]) {
+        assert.equal(
+          await createPostgresCartItemOperationStore(runner, foreign).resolveOperation(id(30)),
+          null,
+        );
+        await runner.run(async (transaction) => {
+          await transaction.query(
+            "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+            [foreign.brandReference, foreign.storeReference],
+          );
+          // Omitting SQL scope predicates still cannot bypass forced RLS.
+          assert.equal(
+            (
+              await transaction.query(
+                "SELECT operation_id FROM rms_ordering.cart_operation_record WHERE operation_id=$1",
+                [id(30)],
+              )
+            ).rows.length,
+            0,
+          );
+        });
+      }
+      await assert.rejects(
+        runner.run((transaction) =>
+          transaction.query(
+            "INSERT INTO rms_ordering.cart_operation_record SELECT * FROM rms_ordering.cart_operation_record",
+            [],
+          ),
+        ),
+        (error) => ["25006", "42501"].includes(error.code),
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::integer AS count FROM rms_ordering.cart_operation_record",
+          )
+        ).rows[0].count,
         1,
       );
     } finally {

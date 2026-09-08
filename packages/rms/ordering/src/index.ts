@@ -60,3 +60,7 @@ export {
   type CartQueryTransaction,
   type CartQueryTransactionRunner,
 } from "./infrastructure/persistence/cart-query-store.js";
+export {
+  createPostgresCartItemOperationStore,
+  type CartItemOperationStore,
+} from "./infrastructure/persistence/cart-item-operation-store.js";

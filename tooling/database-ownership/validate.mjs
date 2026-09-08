@@ -178,6 +178,12 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/cart-query-store.ts";
+        // WP-2230 accepts only the reader of existing Ordering operation history.
+        const acceptedCartOperationAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          module.manifest.ownedDatabase?.tables?.includes("cart_operation_record") &&
+          moduleRelative === "src/infrastructure/persistence/cart-item-operation-store.ts";
         if (
           (moduleRelative.startsWith("src/infrastructure/persistence/") ||
             moduleRelative.startsWith("migrations/") ||
@@ -185,7 +191,8 @@ async function scanUnsupported(root, module, diagnostics) {
           ![...sharedAuthorityModules.values()].includes(module.packageName) &&
           !acceptedGuestEntryAsset &&
           !acceptedPublishedMenuAsset &&
-          !acceptedCartQueryAsset
+          !acceptedCartQueryAsset &&
+          !acceptedCartOperationAsset
         )
           diagnostics.push(
             diag(
