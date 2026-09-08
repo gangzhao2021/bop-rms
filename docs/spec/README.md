@@ -6,7 +6,7 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2220 - Customer Menu HTTP Persistence Acceptance`
+- Current discussion node: `WP-2221 - Scoped Local Customer Runtime Composition`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
@@ -14,9 +14,15 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-- `WP-2220 - Customer Menu HTTP Persistence Acceptance` is locally implemented and verified,
-  aligned to verified WP-2219 main `6e105ce`. Post-alignment affected checks passed; its own exact-head/main CI
-  remains pending. See [WP-2220](./work-packages/WP-2220.md).
+- `WP-2221 - Scoped Local Customer Runtime Composition` is locally implemented and verified from
+  main `af3c72d`. It composes existing scoped Session and menu persistence with both Customer
+  handlers in an explicitly configured development/test loopback runtime. API 190/190, Session
+  acceptance 4/4 and complete local verification passed. Exact-head/main delivery remains pending.
+  See [WP-2221](./work-packages/WP-2221.md).
+
+- `WP-2220 - Customer Menu HTTP Persistence Acceptance` is integrated through PR #195 at
+  `af3c72d`; exact-head run `34212092079` and exact-main run `34214723687` passed all 17 steps.
+  See [WP-2220](./work-packages/WP-2220.md) and its PR for final delivery evidence.
 
 - `WP-2219 - PostgreSQL Published Menu Query Adapter` is integrated through PR194 at `6e105ce`;
   exact-head run `34206701060` and exact-main run `34209230331` passed all17 steps.
