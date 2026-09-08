@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, URLSearchParams } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresPublishedMenuQueryStore,
   createCustomerMenuQueryService,
 } from "../../rms/catalog/src/index.ts";
+import { CustomerMenuHandler } from "../../../apps/api/src/customer-menu.ts";
+import { createApiServerRuntime, createApiRuntimeLogger } from "../../../apps/api/src/server.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -34,7 +36,9 @@ const optionRules = [
 const digest = `sha256:${"a".repeat(64)}`;
 async function prove(context) {
   const admin = new Client(context.clientConfig);
-  const role = `wp2219_${context.runId}`;
+  const role = `wp2220_${context.runId}`;
+  let runtime;
+  const logs = [];
   await admin.connect();
   try {
     await admin.query(
@@ -115,8 +119,10 @@ async function prove(context) {
     await admin.query("RESET bop.brand_id");
     const scope = { brandReference: id(2), storeReference: id(20) };
     let reads = 0;
+    let readFailure = false;
     const runner = {
       async run(action) {
+        if (readFailure) throw new Error("synthetic_menu_driver_fault");
         await admin.query("BEGIN READ ONLY");
         try {
           await admin.query(`SET LOCAL ROLE ${role}`);
@@ -162,7 +168,10 @@ async function prove(context) {
         [],
       );
     const query = createCustomerMenuQueryService({
-      stores: { resolvePublic: async () => ({ ...scope, status: "Active" }) },
+      stores: {
+        resolvePublic: async (reference) =>
+          reference === id(21) ? { ...scope, status: "Active" } : null,
+      },
       projections: store,
     });
     const request = {
@@ -178,23 +187,78 @@ async function prove(context) {
     assert.equal(found.status, "Found");
     assert.equal(found.menu.sections[0].sellables[0].name, "Latte");
     assert.equal(found.menu.sections[0].sellables[0].displayPrice.status, "Unavailable");
+    runtime = createApiServerRuntime({
+      host: "127.0.0.1",
+      port: 0,
+      logger: createApiRuntimeLogger({ write: (line) => logs.push(String(line)) }),
+      customerMenu: new CustomerMenuHandler({ port: query, now: () => at }),
+    });
+    await runtime.listen();
+    const address = runtime.server.address();
+    assert(address && typeof address === "object");
+    const menuRequest = (parameters = {}, publicStore = id(21)) => {
+      const queryString = new URLSearchParams({
+        channel: "DINE_IN",
+        orderType: "TABLE_SERVICE",
+        locale: "en-CA",
+        ...parameters,
+      });
+      return globalThis.fetch(
+        `http://127.0.0.1:${address.port}/api/v1/public/stores/${publicStore}/menu?${queryString}`,
+      );
+    };
+    const menuError = async (response, status, code) => {
+      assert.equal(response.status, status);
+      assert.deepEqual(await response.json(), {
+        schemaVersion: 1,
+        error: { code, messageKey: `customer.menu.${code.slice(5)}` },
+      });
+      if (status === 503) assert.equal(response.headers.get("retry-after"), "5");
+    };
+    const response = await menuRequest();
+    assert.equal(response.status, 200);
+    const publicMenu = await response.json();
+    assert.deepEqual(publicMenu, found);
+    for (const internal of [id(2), id(20), id(9), digest, "snapshotDigest", "internalCode"])
+      assert(
+        !JSON.stringify(publicMenu).includes(internal),
+        "menu response must use the public contract",
+      );
+    const beforeInvalid = reads;
+    await menuError(
+      await menuRequest({ internal: "PRIVATE_QUERY_SENTINEL" }),
+      400,
+      "menu_request_invalid",
+    );
+    await menuError(await menuRequest({ locale: "invalid_locale" }), 400, "menu_request_invalid");
+    await menuError(await menuRequest({}, "invalid-store"), 400, "menu_request_invalid");
+    await menuError(await menuRequest({}, id(99)), 404, "menu_not_found");
+    assert.equal(reads, beforeInvalid);
+    await menuError(await menuRequest({ channel: "PICKUP" }), 404, "menu_not_found");
+    await menuError(await menuRequest({ orderType: "PICKUP" }), 404, "menu_not_found");
+    readFailure = true;
+    await menuError(await menuRequest(), 503, "menu_service_unavailable");
+    readFailure = false;
     for (const state of ["Stale", "Rebuilding", "Failed"]) {
       await admin.query(
         "UPDATE rms_catalog.published_menu_projection_generation SET freshness_status=$1 WHERE generation_id=$2",
         [state, id(9)],
       );
       assert.deepEqual(await query.getPublishedMenu(request), { status: "ProjectionStale" });
+      await menuError(await menuRequest(), 503, "menu_projection_stale");
     }
     await admin.query(
       "UPDATE rms_catalog.published_menu_projection_generation SET freshness_status='Fresh', generation_status='Building' WHERE generation_id=$1",
       [id(9)],
     );
     assert.deepEqual(await query.getPublishedMenu(request), { status: "Unavailable" });
+    await menuError(await menuRequest(), 503, "menu_service_unavailable");
     await admin.query(
       "UPDATE rms_catalog.published_menu_projection_generation SET generation_status='Active', source_checkpoint=$1 WHERE generation_id=$2",
       [id(99), id(9)],
     );
     assert.deepEqual(await query.getPublishedMenu(request), { status: "Unavailable" });
+    await menuError(await menuRequest(), 503, "menu_service_unavailable");
     await admin.query(
       "UPDATE rms_catalog.published_menu_projection_generation SET source_checkpoint=$1 WHERE generation_id=$2",
       [id(10), id(9)],
@@ -219,6 +283,7 @@ async function prove(context) {
       [id(40), id(41), id(2), id(1)],
     );
     assert.deepEqual(await query.getPublishedMenu(request), { status: "Unavailable" });
+    await menuError(await menuRequest(), 503, "menu_service_unavailable");
     await admin.query(
       `INSERT INTO rms_catalog.published_menu_projection
       (generation_id,brand_id,menu_id,menu_version_id,release_id,snapshot_digest,default_locale,
@@ -252,12 +317,25 @@ async function prove(context) {
       "SELECT current_setting('bop.brand_id',true) AS brand, current_setting('bop.store_id',true) AS store",
     );
     assert(!contextAfter.rows[0].brand && !contextAfter.rows[0].store);
+    for (const forbidden of [
+      "PRIVATE_QUERY_SENTINEL",
+      "synthetic_menu_driver_fault",
+      id(2),
+      id(20),
+      digest,
+      "rms_catalog.",
+    ])
+      assert(
+        !logs.join("").includes(forbidden),
+        "structured logs must exclude menu internals and request values",
+      );
   } finally {
+    if (runtime) await runtime.shutdown("SIGTERM");
     await admin.query("RESET ROLE").catch(() => undefined);
     await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
     await admin.end();
   }
 }
 it("enforces Published Menu projection generation, checkpoint, immutability and Brand RLS", async () => {
-  await withIsolatedDatabase({ caseId: "wp2219_menu", root }, prove);
+  await withIsolatedDatabase({ caseId: "wp2220_menu", root }, prove);
 }, 120_000);
