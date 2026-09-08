@@ -403,7 +403,83 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
   ],
-  accesses: [],
+  accesses: [
+    {
+      id: "published-menu.read.published_menu_projection_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "published_menu_projection_generation",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
+    },
+    {
+      id: "published-menu.read.published_menu_projection",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "published_menu_projection",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
+    },
+    {
+      id: "published-menu.read.published_menu_projection_section",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "published_menu_projection_section",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
+    },
+    {
+      id: "published-menu.read.published_menu_projection_sellable",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "published_menu_projection_sellable",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
+    },
+    {
+      id: "published-menu.read.published_menu_projection_checkpoint",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "published_menu_projection_checkpoint",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
+    },
+  ],
 } as const;
 
 export const databaseAccessManifest = databaseAccessManifestInput;
