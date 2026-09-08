@@ -219,6 +219,7 @@ function verify(
   saved: CartItemOperationRecord,
   expected: CartItemOperationRecord,
   ports: CartItemCommandPorts,
+  intentAt: (at: OrderingInstant) => ReturnType<typeof parseOrderingHash>,
 ) {
   try {
     const result = parseCartAggregate(saved.result);
@@ -227,9 +228,17 @@ function verify(
       saved.operationReference !== expected.operationReference ||
       saved.guestSessionReference !== expected.guestSessionReference ||
       saved.cartReference !== expected.cartReference ||
-      saved.cartItemReference !== expected.cartItemReference ||
-      !ports.references.equals(saved.operationIntentHash, expected.operationIntentHash) ||
+      (expected.action !== "Add" && saved.cartItemReference !== expected.cartItemReference) ||
+      (expected.action === "Add" &&
+        result.items.find((item) => item.cartItemReference === saved.cartItemReference)
+          ?.addedByActorReference !== expected.guestSessionReference) ||
+      !ports.references.equals(
+        saved.operationIntentHash,
+        intentAt(parseOrderingInstant(saved.occurredAt)),
+      ) ||
       result.cartReference !== expected.result.cartReference ||
+      result.brandReference !== expected.result.brandReference ||
+      result.storeReference !== expected.result.storeReference ||
       result.aggregateVersion !== expected.result.aggregateVersion
     )
       throw new Error("bad result");
@@ -385,6 +394,7 @@ async function commit(
     action: CartItemOperationAction;
     operationReference: OrderingReference;
     intent: ReturnType<typeof parseOrderingHash>;
+    intentAt: (at: OrderingInstant) => ReturnType<typeof parseOrderingHash>;
     cartItemReference: OrderingReference;
     aggregate: CartAggregate;
     session: GuestSession;
@@ -407,10 +417,11 @@ async function commit(
   const saved = await ports.repository
     .commit({ record, expectedAggregateVersion: input.expectedVersion, audit: input.audit })
     .catch(failure);
+  const aggregate = verify(saved, record, ports, input.intentAt);
   return Object.freeze({
     status: "Applied" as const,
-    cartItemReference: input.cartItemReference,
-    aggregate: verify(saved, record, ports),
+    cartItemReference: saved.cartItemReference,
+    aggregate,
   });
 }
 
@@ -495,6 +506,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         action: "Add",
         operationReference,
         intent,
+        intentAt,
         cartItemReference,
         aggregate,
         session: current.session,
@@ -587,6 +599,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         action: "Update",
         operationReference,
         intent,
+        intentAt,
         cartItemReference,
         aggregate,
         session: current.session,
@@ -656,6 +669,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         action: "Remove",
         operationReference,
         intent,
+        intentAt,
         cartItemReference,
         aggregate,
         session: current.session,

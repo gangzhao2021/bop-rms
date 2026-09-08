@@ -10,7 +10,9 @@ export interface CartQueryTransaction {
 }
 
 export interface CartQueryTransactionRunner {
-  // Own a bounded read-only transaction and release its connection/context on every outcome.
+  // Standalone readers own a bounded read-only transaction and release connection/context.
+  // An owner-local writer may lend its existing transaction for these read operations;
+  // the outer writer runner then owns commit, rollback and connection/context cleanup.
   run<T>(action: (transaction: CartQueryTransaction) => Promise<T>): Promise<T>;
 }
 

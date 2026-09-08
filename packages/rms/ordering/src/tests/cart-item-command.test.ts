@@ -627,3 +627,40 @@ describe("Cart authority before persistence", () => {
     expect(state.current().items).toHaveLength(1);
   });
 });
+
+describe("canonical concurrent Cart commit result", () => {
+  it("returns the winning generated Item identity", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "commit").mockImplementation(async ({ record }) => ({
+      ...record,
+      cartItemReference: id(90) as never,
+      result: parseCartAggregate({
+        ...record.result,
+        items: record.result.items.map((item) => ({ ...item, cartItemReference: id(90) })),
+      }),
+    }));
+    const result = await state.service.add(addInput());
+    expect(result.cartItemReference).toBe(id(90));
+    expect(result.aggregate.items[0]?.cartItemReference).toBe(id(90));
+  });
+  it("bounds malformed canonical commit time", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "commit").mockImplementation(async ({ record }) => ({
+      ...record,
+      occurredAt: "invalid" as never,
+    }));
+    await expect(state.service.add(addInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it("still rejects a foreign committed snapshot", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "commit").mockImplementation(async ({ record }) => ({
+      ...record,
+      result: parseCartAggregate({ ...record.result, storeReference: id(90) }),
+    }));
+    await expect(state.service.add(addInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+});

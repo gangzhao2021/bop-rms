@@ -184,6 +184,14 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
           module.manifest.ownedDatabase?.tables?.includes("cart_operation_record") &&
           moduleRelative === "src/infrastructure/persistence/cart-item-operation-store.ts";
+        // WP-2231 accepts one writer over the existing Cart/line/operation tables.
+        const acceptedCartItemWriterAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "cart_line", "cart_operation_record"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/cart-item-command-store.ts";
         if (
           (moduleRelative.startsWith("src/infrastructure/persistence/") ||
             moduleRelative.startsWith("migrations/") ||
@@ -192,7 +200,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedGuestEntryAsset &&
           !acceptedPublishedMenuAsset &&
           !acceptedCartQueryAsset &&
-          !acceptedCartOperationAsset
+          !acceptedCartOperationAsset &&
+          !acceptedCartItemWriterAsset
         )
           diagnostics.push(
             diag(

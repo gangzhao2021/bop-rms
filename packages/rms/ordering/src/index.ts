@@ -64,3 +64,8 @@ export {
   createPostgresCartItemOperationStore,
   type CartItemOperationStore,
 } from "./infrastructure/persistence/cart-item-operation-store.js";
+export {
+  createPostgresCartItemCommandStore,
+  type CartItemCommandStore,
+  type CartItemWriteTransactionRunner,
+} from "./infrastructure/persistence/cart-item-command-store.js";
