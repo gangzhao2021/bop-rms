@@ -226,3 +226,16 @@ export {
   type GuestSessionEntryTransactionRunner,
 } from "./infrastructure/persistence/guest-session-entry-store.js";
 export { createGuestSessionCredentialProvider } from "./infrastructure/crypto/guest-session-credential-provider.js";
+
+export {
+  prepareGuestBinding,
+  parseGuestBindingPreparation,
+  acknowledgeGuestBinding,
+  activateGuestBinding,
+  completeGuestBinding,
+  type GuestBindingPreparation,
+  type GuestBindingProof,
+  type GuestBindingOwnerEvidence,
+  type GuestBindingHashEquals,
+} from "./contracts/guest-binding-preparation.js";
+export { createGuestBindingCredentialProvider } from "./infrastructure/crypto/guest-binding-credential-provider.js";
