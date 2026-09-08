@@ -90,6 +90,7 @@ jobs:
           pnpm --filter @bop-rms/merchant-web exec playwright install --with-deps chromium
           pnpm merchant-demo-browser:acceptance
           pnpm customer-demo-browser:acceptance
+          pnpm customer-lab:acceptance
 
       - name: Verify WP-0036 Realtime and Eventing regressions
         run: |
