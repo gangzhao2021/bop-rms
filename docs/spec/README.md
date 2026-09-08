@@ -14,16 +14,17 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 
 ## Latest Work Package Status
 
-- `WP-2223 - Scoped PostgreSQL Cart Reader` is locally implemented and verified on a dependency branch from
-  locally verified WP-2222 `c9d5e31`. It only reads the accepted scoped Cart/Item facts; creation,
+- `WP-2223 - Scoped PostgreSQL Cart Reader` is locally implemented and verified and aligned to
+  verified WP-2222 `9ee4a87`. It only reads the accepted scoped Cart/Item facts; creation,
   Session binding and mutation remain outside this package. Ordering171/171, Cart PG2/2,
-  ownership46/46 and full verification passed. Predecessor PR #197 main CI is pending.
+  ownership46/46 and full verification passed. Predecessor PR #197 head/main CI passed all17 steps each.
   See [WP-2223](./work-packages/WP-2223.md).
 
-- `WP-2222 - Interactive Local Customer Persistence Lab` is locally implemented and verified from clean
-  `main@63f53bc` on `codex/wp-2222`. It adds an opt-in, finite synthetic HTTPS browser lab with
+- `WP-2222 - Interactive Local Customer Persistence Lab` is integrated through PR #197 at
+  `9ee4a87`. It adds an opt-in, finite synthetic HTTPS browser lab with
   real Session/menu PostgreSQL persistence. No real Store or production readiness is claimed.
-  Full verification and desktop/mobile persistence checks passed; remote delivery is pending.
+  Full verification and desktop/mobile persistence checks passed. Exact-head run34238505032
+  and exact-main run34241415900 passed all17 steps each.
   See [WP-2222](./work-packages/WP-2222.md).
 
 - `WP-2221 - Scoped Local Customer Runtime Composition` is integrated through PR #196 at
