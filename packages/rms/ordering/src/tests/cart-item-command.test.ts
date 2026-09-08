@@ -1,6 +1,6 @@
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { GuestSession } from "@bop/identity";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createCartItemCommandService } from "../application/cart-item-command-service.js";
 import type {
   CartItemCommandPorts,
@@ -195,6 +195,7 @@ function fixture(
     },
   };
   return {
+    ports,
     service: createCartItemCommandService(ports),
     current: () => aggregate,
     generated: () => generated,
@@ -538,5 +539,91 @@ describe("WP-2026 concurrent Cart update scenario", () => {
     );
     expect(state.operations()).toBe(1);
     expect(state.validations()).toBe(2);
+  });
+});
+
+describe("Cart authority before persistence", () => {
+  const commands = ["add", "update", "remove"] as const;
+  function input(command: (typeof commands)[number]) {
+    if (command === "add") return addInput();
+    const common = {
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 1,
+      operationReference: ids.operation,
+      requestedAt,
+    };
+    return command === "remove"
+      ? common
+      : {
+          ...common,
+          quantity: 2,
+          optionSelections: [],
+          customerNote: null,
+        };
+  }
+  it.each(commands)("%s denies before any persistence read", async (command) => {
+    const state = fixture({ denied: true });
+    const load = vi.spyOn(state.ports.repository, "load");
+    const resolve = vi.spyOn(state.ports.repository, "resolveOperation");
+    await expect(state.service[command](input(command))).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(load).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(state.validations()).toBe(0);
+  });
+  it.each(commands)("%s rejects expired Session before reading Cart", async (command) => {
+    const state = fixture({ session: guest({ idleExpiresAt: requestedAt as never }) });
+    const load = vi.spyOn(state.ports.repository, "load");
+    await expect(state.service[command](input(command))).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(load).not.toHaveBeenCalled();
+  });
+  it.each(commands)("%s rejects malformed Session before reading Cart", async (command) => {
+    const state = fixture({ session: guest({ version: 0 }) });
+    const load = vi.spyOn(state.ports.repository, "load");
+    const resolve = vi.spyOn(state.ports.repository, "resolveOperation");
+    await expect(state.service[command](input(command))).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(load).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+  });
+  it.each(commands)("%s bounds authorization failure without reading Cart", async (command) => {
+    const state = fixture();
+    vi.spyOn(state.ports.authorization, "authorize").mockRejectedValue(
+      new Error("synthetic dependency detail"),
+    );
+    const load = vi.spyOn(state.ports.repository, "load");
+    await expect(state.service[command](input(command))).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(load).not.toHaveBeenCalled();
+  });
+  it.each(commands)("%s rejects a substituted Cart identity", async (command) => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "load").mockResolvedValue(
+      cart({ cartReference: id(99) as never }),
+    );
+    const commit = vi.spyOn(state.ports.repository, "commit");
+    await expect(state.service[command](input(command))).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(commit).not.toHaveBeenCalled();
+    expect(state.validations()).toBe(0);
+  });
+  it("authorizes a valid Add before loading its exact Cart", async () => {
+    const state = fixture();
+    const authorize = vi.spyOn(state.ports.authorization, "authorize");
+    const load = vi.spyOn(state.ports.repository, "load");
+    await state.service.add(addInput());
+    const authorizedAt = authorize.mock.invocationCallOrder[0];
+    const loadedAt = load.mock.invocationCallOrder[0];
+    if (authorizedAt === undefined || loadedAt === undefined)
+      throw new Error("expected both calls");
+    expect(authorizedAt).toBeLessThan(loadedAt);
+    expect(state.current().items).toHaveLength(1);
   });
 });

@@ -158,14 +158,21 @@ async function context(
   operationReference: OrderingReference,
   at: OrderingInstant,
 ) {
-  const cart = await ports.repository.load(cartReference).catch(failure);
-  if (cart === null) throw new CartError("CART_UNAVAILABLE");
-  const aggregate = parseCartAggregate(cart);
   const evidence = await ports.authorization
     .authorize({ action, cartReference, operationReference, observedAt: at })
     .catch(failure);
   if (evidence === null) throw new CartError("CART_PERMISSION_DENIED");
-  const session = authorizeSession(evidence.guestSession, aggregate, at);
+  let usableSession: GuestSession;
+  try {
+    usableSession = assertGuestSessionUsable(createGuestSession(evidence.guestSession), at);
+  } catch {
+    throw new CartError("CART_PERMISSION_DENIED");
+  }
+  const cart = await ports.repository.load(cartReference).catch(failure);
+  if (cart === null) throw new CartError("CART_UNAVAILABLE");
+  const aggregate = parseCartAggregate(cart);
+  if (aggregate.cartReference !== cartReference) throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  const session = authorizeSession(usableSession, aggregate, at);
   return Object.freeze({ aggregate, session, audit: audit(evidence.audit, action, aggregate, at) });
 }
 
