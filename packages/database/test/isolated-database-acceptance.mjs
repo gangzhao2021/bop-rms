@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { chmod, lstat, mkdir, mkdtemp, readdir, realpath, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { clearTimeout, setTimeout } from "node:timers";
@@ -86,6 +88,7 @@ async function runSignal(signal, expectedExit) {
 }
 
 async function main() {
+  for (const mode of ["safe", "linked-lease", "public-lease"]) await temporaryPathCase(mode);
   await Promise.all([
     withIsolatedDatabase({ caseId: "parallel_a", root }, proveDatabase),
     withIsolatedDatabase({ caseId: "parallel_b", root }, proveDatabase),
@@ -116,7 +119,73 @@ async function main() {
   );
 }
 
-if (process.argv[2] === "--signal-child") {
+async function temporaryPathCase(mode) {
+  const parent = await realpath(await mkdtemp(path.join(tmpdir(), "bop-wp2218-")));
+  const target = path.join(parent, "target");
+  const alias = path.join(parent, "alias");
+  const lease = path.join(target, "bop-rms-isolated-db-leases");
+  try {
+    await mkdir(target);
+    await symlink(target, alias);
+    if (mode === "linked-lease") {
+      const outside = path.join(parent, "outside");
+      await mkdir(outside, { mode: 0o700 });
+      await symlink(outside, lease);
+    } else if (mode === "public-lease") {
+      await mkdir(lease, { mode: 0o700 });
+      await chmod(lease, 0o755);
+    }
+    await new Promise((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [fileURLToPath(import.meta.url), "--temp-child", mode],
+        {
+          cwd: root,
+          env: { ...process.env, TMPDIR: alias },
+          stdio: ["ignore", "ignore", "pipe"],
+        },
+      );
+      let emittedStderr = false;
+      const timer = setTimeout(() => child.kill("SIGTERM"), 180_000);
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", () => (emittedStderr = true));
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.once("close", (code) => {
+        clearTimeout(timer);
+        try {
+          assert.equal(code, 0, `temporary path case ${mode} failed`);
+          assert(!emittedStderr, "temporary path case must not disclose diagnostics");
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    assert.deepEqual(await readdir(target), ["bop-rms-isolated-db-leases"]);
+    assert.deepEqual(await readdir(lease), []);
+    const state = await lstat(lease);
+    if (mode === "linked-lease") assert(state.isSymbolicLink());
+    else assert.equal(state.mode & 0o777, mode === "public-lease" ? 0o755 : 0o700);
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+}
+
+if (process.argv[2] === "--temp-child") {
+  if (process.argv[3] === "safe") {
+    await withIsolatedDatabase({ caseId: "wp2218_alias", root }, proveDatabase);
+  } else {
+    await assert.rejects(
+      withIsolatedDatabase({ caseId: "wp2218_denied", root }, () =>
+        assert.fail("unsafe lease admitted"),
+      ),
+      { code: "ISOLATED_DB_LEASE_FAILED", phase: "lease" },
+    );
+  }
+} else if (process.argv[2] === "--signal-child") {
   await signalChild();
 } else {
   try {
