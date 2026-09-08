@@ -64,12 +64,7 @@ await withIsolatedDatabase({ caseId: "integration", root }, async (isolated) => 
     });
     if (extraSql)
       await writeFile(
-        path.join(
-          fixtureRoot,
-          "migrations",
-          "0000-platform",
-          "0000_010_create_synthetic_rollback_probe.sql",
-        ),
+        path.join(fixtureRoot, "migrations", "0000-platform", `${syntheticId}.sql`),
         extraSql,
       );
     const catalog = await readMigrationCatalog(fixtureRoot);
@@ -79,6 +74,21 @@ await withIsolatedDatabase({ caseId: "integration", root }, async (isolated) => 
 
   const catalog = await readMigrationCatalog(root);
   assert.deepEqual(catalog.diagnostics, []);
+  const platformMigrations = catalog.migrations.filter((migration) => migration.namespace === 0);
+  const syntheticSequence =
+    Math.max(...platformMigrations.map((migration) => migration.sequence)) + 1;
+  const syntheticId = `0000_${String(syntheticSequence).padStart(3, "0")}_create_synthetic_rollback_probe`;
+  const lifecycleClient = await targetClient(lifecycleDatabase);
+  const objectQuery = `SELECT table_schema, table_name
+    FROM information_schema.tables
+    WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY table_schema, table_name`;
+  const initialObjects = await lifecycleClient.query(objectQuery);
+  assert(
+    initialObjects.rows.some(
+      (row) => row.table_schema === "platform_core" && row.table_name === "migration_history",
+    ),
+  );
   const initial = await runMigrationCommand({
     catalog,
     command: "status",
@@ -123,26 +133,43 @@ await withIsolatedDatabase({ caseId: "integration", root }, async (isolated) => 
     pending: [],
     state: "current",
   });
-  const lifecycleClient = await targetClient(lifecycleDatabase);
-  const objects = await lifecycleClient.query(`SELECT table_schema, table_name
-    FROM information_schema.tables
-    WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-    ORDER BY table_schema, table_name`);
-  assert.deepEqual(objects.rows, [
-    { table_name: "migration_history", table_schema: "platform_core" },
-  ]);
-  assert.equal(
-    (
-      await lifecycleClient.query(
-        "SELECT count(*)::integer AS count FROM platform_core.migration_history",
-      )
-    ).rows[0].count,
-    9,
+  assert.deepEqual((await lifecycleClient.query(objectQuery)).rows, initialObjects.rows);
+  const history = await lifecycleClient.query(`SELECT migration_id, namespace, sequence,
+    relative_path, owner_id, schema_name, checksum_sha256, runner_contract_version
+    FROM platform_core.migration_history ORDER BY namespace, sequence`);
+  assert.deepEqual(
+    history.rows,
+    catalog.migrations.map((migration) => ({
+      migration_id: migration.id,
+      namespace: migration.namespace,
+      sequence: migration.sequence,
+      relative_path: migration.relativePath,
+      owner_id: migration.metadata.owner,
+      schema_name: migration.metadata.schema,
+      checksum_sha256: migration.checksumSha256,
+      runner_contract_version: 1,
+    })),
   );
-  assert.deepEqual(await verifyFoundation(lifecycleClient, user), {
+  // Section 95 verifies the bootstrap shape, before later platform aggregate tables.
+  const foundationDatabase = await createDatabase("foundation");
+  const foundationCatalog = {
+    diagnostics: [],
+    migrations: platformMigrations.filter((migration) => migration.sequence <= 9),
+  };
+  assert.equal(foundationCatalog.migrations.length, 9);
+  const foundationApplied = await runMigrationCommand({
+    catalog: foundationCatalog,
+    command: "apply",
+    config: config(foundationDatabase),
+    confirmTarget: `test:${foundationDatabase}`,
+  });
+  assert.deepEqual(foundationApplied.diagnostics, []);
+  const foundationClient = await targetClient(foundationDatabase);
+  assert.deepEqual(await verifyFoundation(foundationClient, user), {
     diagnostics: [],
     status: "compliant",
   });
+  await foundationClient.end();
   assert.deepEqual(await verifyHelpers(lifecycleClient, user), []);
 
   const helperBehavior = await lifecycleClient.query(`SELECT
@@ -376,10 +403,9 @@ await withIsolatedDatabase({ caseId: "integration", root }, async (isolated) => 
     `INSERT INTO platform_core.migration_history
       (migration_id, namespace, sequence, relative_path, owner_id, schema_name,
        checksum_sha256, runner_contract_version)
-     VALUES ('0000_010_alter_orphan_history', 0, 10,
-       'migrations/0000-platform/0000_010_alter_orphan_history.sql',
-       'shared-infrastructure/platform-core', 'platform_core', $1, 1)`,
-    ["0".repeat(64)],
+     VALUES ($1, 0, $2, $3,
+       'shared-infrastructure/platform-core', 'platform_core', $4, 1)`,
+    [syntheticId, syntheticSequence, `migrations/0000-platform/${syntheticId}.sql`, "0".repeat(64)],
   );
   await lifecycleClient.end();
   const orphaned = await runMigrationCommand({
@@ -458,7 +484,10 @@ SELECT 1 / 0;
   const rollbackState = await rollbackClient.query(`SELECT
       to_regclass('platform_core.synthetic_rollback_probe')::text AS probe,
       (SELECT count(*)::integer FROM platform_core.migration_history) AS history_count`);
-  assert.deepEqual(rollbackState.rows[0], { history_count: 9, probe: null });
+  assert.deepEqual(rollbackState.rows[0], {
+    history_count: platformMigrations.length,
+    probe: null,
+  });
   await rollbackClient.end();
 
   const orderDatabase = await createDatabase("order");
@@ -559,6 +588,15 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
   assert.equal(cliVerify.status, 0);
   assert.equal(JSON.parse(cliVerify.stdout).state, "current");
 
+  const foundationEnv = path.join(controlRoot, "foundation.env");
+  await writeFile(
+    foundationEnv,
+    (await readFile(cliEnv, "utf8")).replace(
+      `BOP_RMS_POSTGRES_DB=${cliDatabase}`,
+      `BOP_RMS_POSTGRES_DB=${foundationDatabase}`,
+    ),
+    { mode: 0o600 },
+  );
   const foundationCli = path.join(root, "packages", "database", "src", "foundation-cli.ts");
   const foundationInvoke = (...args) =>
     spawnSync(process.execPath, [foundationCli, ...args], {
@@ -566,7 +604,7 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
       encoding: "utf8",
       env: childEnvironment,
     });
-  const foundationCompliant = foundationInvoke("--env-file", cliEnv, "--json");
+  const foundationCompliant = foundationInvoke("--env-file", foundationEnv, "--json");
   assert.equal(foundationCompliant.status, 0);
   assert.deepEqual(JSON.parse(foundationCompliant.stdout), {
     diagnostics: [],
@@ -599,7 +637,7 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
   await helperRestoreClient.query("REVOKE ALL ON SCHEMA platform_helpers FROM PUBLIC");
   await helperRestoreClient.end();
 
-  const violationClient = await targetClient(cliDatabase);
+  const violationClient = await targetClient(foundationDatabase);
   await violationClient.query("GRANT USAGE ON SCHEMA platform_core TO PUBLIC");
   await violationClient.query(
     'CREATE COLLATION platform_audit.synthetic_unexpected FROM pg_catalog."C"',
@@ -607,7 +645,7 @@ CREATE TABLE platform_core.synthetic_order_probe (id integer PRIMARY KEY);
   await violationClient.query("CREATE TABLE platform_eventing.synthetic_unexpected (id integer)");
   await violationClient.query("CREATE SCHEMA platform_projection AUTHORIZATION CURRENT_USER");
   await violationClient.end();
-  const foundationViolation = foundationInvoke("--env-file", cliEnv, "--json");
+  const foundationViolation = foundationInvoke("--env-file", foundationEnv, "--json");
   assert.equal(foundationViolation.status, 1);
   assert.deepEqual(
     JSON.parse(foundationViolation.stderr).diagnostics.map((item) => item.code),
