@@ -5,6 +5,7 @@ import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { loadEnvironment, runtimeFile } from "./config.mjs";
+import { processMatches } from "./process.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const [command, ...args] = process.argv.slice(2);
@@ -19,17 +20,7 @@ if (!new Set(["start", "status", "stop"]).has(command))
   throw new Error("Usage: local.mjs <start|status|stop> [--env-file <path>]");
 
 function processAlive(pid) {
-  if (!Number.isInteger(pid) || pid < 1) return false;
-  try {
-    process.kill(pid, 0);
-    const commandLine = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
-    return (
-      commandLine.includes("tooling/environment/local.mjs") &&
-      commandLine.split("\0").includes("start")
-    );
-  } catch {
-    return false;
-  }
+  return processMatches(pid, root, "tooling/environment/local.mjs", "start");
 }
 
 function readRuntime(file) {
@@ -233,15 +224,11 @@ async function status(config) {
     state?.projectName === config.projectName &&
     JSON.stringify(state?.ports) === JSON.stringify(config.ports);
   const supervisor = stateMatches && processAlive(state.supervisorPid) ? "running" : "stopped";
-  let worker = "stopped";
-  if (supervisor === "running" && Number.isInteger(state.childPids?.Worker)) {
-    try {
-      const workerCommand = fs.readFileSync(`/proc/${state.childPids.Worker}/cmdline`, "utf8");
-      if (workerCommand.includes("apps/worker/dist/index.js")) worker = "running";
-    } catch {
-      worker = "stopped";
-    }
-  }
+  const worker =
+    supervisor === "running" &&
+    processMatches(state.childPids?.Worker, root, "apps/worker/dist/index.js")
+      ? "running"
+      : "stopped";
   let postgres = "stopped";
   try {
     const services = run(

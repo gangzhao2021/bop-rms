@@ -126,7 +126,7 @@ function validateSecret(root, value) {
   if (!stat.isFile()) fail("PostgreSQL secret path must be a regular file");
   if ((stat.mode & 0o777) !== 0o600) fail("PostgreSQL secret file mode must be 0600");
   if (typeof process.getuid === "function" && stat.uid !== process.getuid())
-    fail("PostgreSQL secret file must be owned by the current Linux user");
+    fail("PostgreSQL secret file must be owned by the current user");
   if (stat.size < 1 || stat.size > 4096)
     fail("PostgreSQL secret file must contain 1 to 4096 bytes");
   return secretFile;
@@ -146,7 +146,7 @@ function findExecutable(name) {
   fail(`Required executable is missing from PATH: ${name}`);
 }
 
-function ensureLinuxExecutable(name) {
+function ensureHostExecutable(name) {
   const executable = findExecutable(name);
   const dockerDesktopWslBridge =
     name === "docker" && executable.startsWith("/mnt/wsl/docker-desktop/cli-tools/");
@@ -154,7 +154,7 @@ function ensureLinuxExecutable(name) {
     (executable.startsWith("/mnt/") && !dockerDesktopWslBridge) ||
     executable.toLowerCase().endsWith(".exe")
   )
-    fail(`${name} must resolve to a Linux executable, not ${executable}`);
+    fail(`${name} must resolve to a native Linux/macOS executable, not ${executable}`);
   return executable;
 }
 
@@ -173,20 +173,21 @@ function version(executable, args) {
 }
 
 export function validateToolchain(root) {
-  if (process.platform !== "linux") fail("BOP-RMS repository commands require Linux/WSL2");
+  if (!["linux", "darwin"].includes(process.platform))
+    fail("BOP-RMS repository commands require Linux/WSL2 or native macOS");
   const realRoot = fs.realpathSync(root);
   if (realRoot.startsWith("/mnt/"))
-    fail("Repository must be in the WSL/Linux filesystem, not /mnt/*");
+    fail("Repository must be in the native Linux/macOS filesystem, not /mnt/*");
   if (process.version !== EXPECTED.node)
     fail(`Node.js must be ${EXPECTED.node}; received ${process.version}`);
   if (process.execPath.startsWith("/mnt/") || process.execPath.toLowerCase().endsWith(".exe"))
-    fail(`Node.js must resolve to a Linux executable, not ${process.execPath}`);
+    fail(`Node.js must resolve to a native Linux/macOS executable, not ${process.execPath}`);
 
   const executables = {
-    git: ensureLinuxExecutable("git"),
-    corepack: ensureLinuxExecutable("corepack"),
-    pnpm: ensureLinuxExecutable("pnpm"),
-    docker: ensureLinuxExecutable("docker"),
+    git: ensureHostExecutable("git"),
+    corepack: ensureHostExecutable("corepack"),
+    pnpm: ensureHostExecutable("pnpm"),
+    docker: ensureHostExecutable("docker"),
   };
   const actual = {
     corepack: version(executables.corepack, ["--version"]),
