@@ -170,6 +170,7 @@ function parseRecord(value: CartLifecycleOperationRecord): CartLifecycleOperatio
       !["Abandon", "Expire"].includes(String(raw.action)) ||
       parseOrderingReference(raw.cartReference) !== result.cartReference ||
       Date.parse(expiresAt) !== Date.parse(occurredAt) + dayMilliseconds ||
+      result.updatedAt !== occurredAt ||
       result.lifecycle === null ||
       (raw.action === "Abandon" && result.lifecycle.status !== "Abandoned") ||
       (raw.action === "Expire" && result.lifecycle.status !== "Expired")
@@ -209,15 +210,25 @@ async function execute(
   const expectedAggregateVersion = version(raw.expectedAggregateVersion);
   const operationReference = parseOrderingReference(raw.operationReference);
   const observedAt = parseOrderingInstant(raw[timeField]);
-  const intent = parseOrderingHash(
-    ports.references.hashIntent(
-      `${action}:${JSON.stringify({ cartReference, expectedAggregateVersion, operationReference, observedAt })}`,
-    ),
-  );
+  const intentAt = (observedAt: OrderingInstant) =>
+    parseOrderingHash(
+      ports.references.hashIntent(
+        `${action}:${JSON.stringify({ cartReference, expectedAggregateVersion, operationReference, observedAt })}`,
+      ),
+    );
+  const intent = intentAt(observedAt);
   const authorization = await ports.authorization
     .authorize({ action, cartReference, operationReference, observedAt })
     .catch(failure);
-  if (authorization === null) throw new CartError("CART_PERMISSION_DENIED");
+  if (authorization === null || (action === "Abandon") !== (authorization.guestSession !== null))
+    throw new CartError("CART_PERMISSION_DENIED");
+  if (authorization.guestSession !== null) {
+    try {
+      assertGuestSessionUsable(createGuestSession(authorization.guestSession), observedAt);
+    } catch {
+      throw new CartError("CART_PERMISSION_DENIED");
+    }
+  }
   const prior = await ports.repository.resolveOperation(operationReference).catch(failure);
   if (prior !== null) {
     const record = parseRecord(prior);
@@ -228,11 +239,12 @@ async function execute(
             guestForCart(authorization.guestSession, record.result, observedAt).sessionReference,
           );
     if (
+      record.operationReference !== operationReference ||
       record.action !== action ||
       record.cartReference !== cartReference ||
       record.result.aggregateVersion !== expectedAggregateVersion + 1 ||
       record.guestSessionReference !== sessionReference ||
-      !ports.references.equals(record.operationIntentHash, intent) ||
+      !ports.references.equals(record.operationIntentHash, intentAt(record.occurredAt)) ||
       Date.parse(observedAt) >= Date.parse(record.expiresAt)
     )
       throw new CartError("CART_IDEMPOTENCY_CONFLICT");
@@ -244,8 +256,7 @@ async function execute(
   const loaded = await ports.repository.load(cartReference).catch(failure);
   if (loaded === null) throw new CartError("CART_UNAVAILABLE");
   const cart = parseCartAggregate(loaded);
-  if (cart.aggregateVersion !== expectedAggregateVersion)
-    throw new CartError("CART_VERSION_CONFLICT");
+  if (cart.cartReference !== cartReference) throw new CartError("CART_UNAVAILABLE");
   let guestSessionReference: OrderingReference | null = null;
   if (action === "Abandon") {
     if (authorization.guestSession === null) throw new CartError("CART_PERMISSION_DENIED");
@@ -256,6 +267,8 @@ async function execute(
     throw new CartError("CART_PERMISSION_DENIED");
   }
   const auditRecord = audit(authorization.audit, action, cart, observedAt);
+  if (cart.aggregateVersion !== expectedAggregateVersion)
+    throw new CartError("CART_VERSION_CONFLICT");
   const lifecycle =
     action === "Abandon"
       ? terminateCartLifecycle(cart.lifecycle, { status: "Abandoned", terminalAt: observedAt })
@@ -281,6 +294,10 @@ async function execute(
     .catch(failure);
   const verified = parseRecord(saved);
   if (
+    verified.action !== action ||
+    verified.guestSessionReference !== guestSessionReference ||
+    verified.occurredAt !== observedAt ||
+    JSON.stringify(verified.result) !== JSON.stringify(result) ||
     verified.operationReference !== operationReference ||
     verified.cartReference !== cartReference ||
     verified.result.aggregateVersion !== result.aggregateVersion ||

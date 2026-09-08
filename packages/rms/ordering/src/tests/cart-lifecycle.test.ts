@@ -1,6 +1,6 @@
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { GuestSession } from "@bop/identity";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createCartLifecycleCommandService } from "../application/cart-lifecycle-command-service.js";
 import type {
   CartLifecycleAction,
@@ -179,6 +179,7 @@ function fixture(
     },
   };
   return {
+    ports,
     service: createCartLifecycleCommandService(ports),
     current: () => aggregate,
     commits: () => commits,
@@ -330,5 +331,151 @@ describe("WP-1204 Cart lifecycle", () => {
         requestedAt: "2026-08-02T14:31:00.000Z",
       }),
     ).rejects.toMatchObject({ code: "CART_EXPIRED" });
+  });
+});
+
+describe("WP-2233 lifecycle authority and delayed retry", () => {
+  const input = (
+    action: CartLifecycleAction,
+    at = action === "Abandon" ? abandonAt : idleDueAt,
+  ) => ({
+    cartReference: ids.cart,
+    expectedAggregateVersion: 1,
+    operationReference: ids.operation,
+    [action === "Abandon" ? "requestedAt" : "evaluatedAt"]: at,
+  });
+  const run = (state: ReturnType<typeof fixture>, action: CartLifecycleAction, value: unknown) =>
+    action === "Abandon" ? state.service.abandon(value) : state.service.expire(value);
+
+  it.each(["Abandon", "Expire"] as const)(
+    "replays delayed %s without rewriting history",
+    async (action) => {
+      const state = fixture();
+      const first = await run(state, action, input(action));
+      const replay = await run(state, action, input(action, "2026-08-02T15:00:00.000Z"));
+      expect(replay).toEqual({ status: "AlreadyApplied", aggregate: first.aggregate });
+      expect(state.commits()).toBe(1);
+    },
+  );
+
+  it.each(["Abandon", "Expire"] as const)(
+    "denies wrong %s authority before reads",
+    async (action) => {
+      const state = fixture({ wrongAuthority: true });
+      const resolve = vi.spyOn(state.ports.repository, "resolveOperation");
+      const load = vi.spyOn(state.ports.repository, "load");
+      await expect(run(state, action, input(action))).rejects.toMatchObject({
+        code: "CART_PERMISSION_DENIED",
+      });
+      expect(resolve).not.toHaveBeenCalled();
+      expect(load).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["Revoked", "Expired", "Malformed"])("denies %s Session before reads", async (kind) => {
+    const state = fixture();
+    const invalidGuest =
+      kind === "Revoked"
+        ? guest({ status: "Revoked" })
+        : kind === "Expired"
+          ? guest({ idleExpiresAt: abandonAt as never })
+          : { ...guest(), version: 0 };
+    vi.spyOn(state.ports.authorization, "authorize").mockResolvedValue({
+      guestSession: invalidGuest,
+      audit: audit("Abandon", abandonAt),
+    });
+    const resolve = vi.spyOn(state.ports.repository, "resolveOperation");
+    await expect(state.service.abandon(input("Abandon"))).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("rejects a substituted Cart before revealing its version", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "load").mockResolvedValue(
+      cart({ cartReference: id(90) as never, items: [], aggregateVersion: 2 }),
+    );
+    await expect(state.service.abandon(input("Abandon"))).rejects.toMatchObject({
+      code: "CART_UNAVAILABLE",
+    });
+    expect(state.commits()).toBe(0);
+  });
+
+  it("denies foreign scope before a version conflict", async () => {
+    const state = fixture({ cart: cart({ storeReference: id(90) as never, aggregateVersion: 2 }) });
+    await expect(state.service.abandon(input("Abandon"))).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+  });
+
+  it.each(["guest", "scope", "time", "items"])("rejects substituted commit %s", async (kind) => {
+    const state = fixture();
+    const commit = state.ports.repository.commit;
+    vi.spyOn(state.ports.repository, "commit").mockImplementation(async (value) => {
+      const saved = await commit(value);
+      if (kind === "guest") return { ...saved, guestSessionReference: id(90) as never };
+      if (kind === "scope")
+        return { ...saved, result: { ...saved.result, storeReference: id(90) as never } };
+      if (kind === "time")
+        return {
+          ...saved,
+          occurredAt: "2026-08-02T14:11:00.000Z" as never,
+          expiresAt: "2026-08-03T14:11:00.000Z" as never,
+        };
+      return { ...saved, result: { ...saved.result, items: [] } };
+    });
+    await expect(state.service.abandon(input("Abandon"))).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+
+  it("rejects exact expiry and changed version on delayed replay", async () => {
+    const state = fixture();
+    await state.service.expire(input("Expire"));
+    await expect(
+      state.service.expire(input("Expire", "2026-08-03T14:30:00.000Z")),
+    ).rejects.toMatchObject({ code: "CART_IDEMPOTENCY_CONFLICT" });
+    await expect(
+      state.service.expire({
+        ...input("Expire", "2026-08-02T15:00:00.000Z"),
+        expectedAggregateVersion: 2,
+      }),
+    ).rejects.toMatchObject({ code: "CART_IDEMPOTENCY_CONFLICT" });
+    expect(state.commits()).toBe(1);
+  });
+  it("checks current Audit and Session authority on delayed replay", async () => {
+    const state = fixture();
+    await state.service.abandon(input("Abandon"));
+    const resolve = vi.spyOn(state.ports.repository, "resolveOperation");
+    const authorize = vi.spyOn(state.ports.authorization, "authorize");
+    authorize.mockResolvedValue({ guestSession: guest(), audit: audit("Abandon", abandonAt) });
+    await expect(
+      state.service.abandon(input("Abandon", "2026-08-02T15:00:00.000Z")),
+    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    resolve.mockClear();
+    authorize.mockResolvedValue({
+      guestSession: guest({ status: "Revoked" }),
+      audit: audit("Abandon", abandonAt),
+    });
+    await expect(state.service.abandon(input("Abandon"))).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(state.commits()).toBe(1);
+  });
+
+  it("rejects an operation reader substituting the operation identity", async () => {
+    const state = fixture();
+    await state.service.expire(input("Expire"));
+    const resolve = state.ports.repository.resolveOperation;
+    vi.spyOn(state.ports.repository, "resolveOperation").mockImplementation(async (reference) => {
+      const saved = await resolve(reference);
+      if (saved === null) throw new Error("missing synthetic operation");
+      return { ...saved, operationReference: id(90) as never };
+    });
+    await expect(state.service.expire(input("Expire"))).rejects.toMatchObject({
+      code: "CART_IDEMPOTENCY_CONFLICT",
+    });
   });
 });
