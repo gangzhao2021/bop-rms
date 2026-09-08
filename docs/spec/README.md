@@ -15,7 +15,8 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 ## Latest Work Package Status
 
 - [WP-2232](./work-packages/WP-2232.md) integrates the verified local WP-2224–2231 sources on an
-  independent branch under explicit Owner authorization. Joint verification is pending. This entry
+  independent branch under explicit Owner authorization. Full joint verification, standalone database
+  integration, browser38/38, Realtime15/15, telemetry, correlation and secret checks pass locally. This entry
   supersedes historical statements below about uncommitted or separate branches; source-package
   results remain their original verification snapshots. No main merge, push or deployment.
 
@@ -61,6 +62,13 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
   point conversion. Existing transaction authority and offline boundaries remain intact.
   PWA221/221, browser38/38, full `pnpm verify` and secret scan passed locally.
   See [WP-2226](./work-packages/WP-2226.md).
+
+- `WP-2227 - API Telemetry Coverage and Bounded Realtime Cleanup` shares the registered HTTP
+  template inventory, resolves registered Merchant mount prefixes and bounds lease cleanup to
+  the accepted 25 seconds. Streams close before registry release; incomplete cleanup is reported
+  without false release evidence. API197/197, Realtime15/15, telemetry/correlation acceptance,
+  full `pnpm verify` and secret scan passed locally. See
+  [WP-2227](./work-packages/WP-2227.md).
 
 - `WP-2223 - Scoped PostgreSQL Cart Reader` is locally implemented and verified and aligned to
   verified WP-2222 `9ee4a87`. It only reads the accepted scoped Cart/Item facts; creation,

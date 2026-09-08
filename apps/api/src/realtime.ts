@@ -78,6 +78,7 @@ export interface RealtimeTransportOptions {
   authorizer: RealtimeAuthorizer;
   connectionRegistry: RealtimeConnectionRegistry;
   expectedOrigin: string;
+  drainMs?: number;
   heartbeatMs?: number;
   lifetimeMs?: number;
   merchantConnectionLimit?: number;
@@ -88,6 +89,7 @@ export interface RealtimeTransportOptions {
 
 interface ActiveStream {
   closed: boolean;
+  cleanup?: Promise<boolean>;
   heartbeat: ReturnType<typeof setInterval>;
   lease: RealtimeConnectionLease;
   lifetime: ReturnType<typeof setTimeout>;
@@ -251,6 +253,9 @@ export class RealtimeTransport {
   readonly #active = new Map<string, ActiveStream>();
   readonly #authorizer: RealtimeAuthorizer;
   readonly #expectedOrigin: string;
+  readonly #drainMs: number;
+  readonly #pendingReleases = new Set<Promise<boolean>>();
+  readonly #releaseTimers = new Set<ReturnType<typeof setTimeout>>();
   readonly #guestConnectionLimit: number;
   readonly #heartbeatMs: number;
   readonly #lifetimeMs: number;
@@ -259,12 +264,14 @@ export class RealtimeTransport {
   readonly #registry: RealtimeConnectionRegistry;
   readonly #revalidateMs: number;
   #draining = false;
+  #drainPromise: Promise<void> | undefined;
 
   constructor(options: RealtimeTransportOptions) {
     const origin = new URL(options.expectedOrigin);
     if (origin.origin !== options.expectedOrigin || !["http:", "https:"].includes(origin.protocol))
       throw new Error("expectedOrigin must be an exact HTTP(S) origin");
     this.#expectedOrigin = options.expectedOrigin;
+    this.#drainMs = boundedPositiveInteger(options.drainMs, 25_000, 25_000);
     this.#authorizer = options.authorizer;
     this.#registry = options.connectionRegistry;
     this.#metrics = options.metrics;
@@ -289,7 +296,7 @@ export class RealtimeTransport {
     return {
       activeStreams: this.#active.size,
       draining: this.#draining,
-      ownedTimers: this.#active.size * 3,
+      ownedTimers: this.#active.size * 3 + this.#releaseTimers.size,
     };
   }
 
@@ -317,17 +324,23 @@ export class RealtimeTransport {
     return delivered;
   }
 
-  async beginDrain(): Promise<void> {
-    if (this.#draining) return;
+  beginDrain(): Promise<void> {
+    if (this.#drainPromise !== undefined) return this.#drainPromise;
     this.#draining = true;
-    await Promise.all(
-      [...this.#active.values()].map(async (stream) => {
+    const closures = [...this.#active.values()].map((stream) => {
+      try {
         if (!stream.closed && !stream.response.destroyed) {
           stream.response.write(controlFrame("system.reconnect", "deployment"));
         }
-        await this.#close(stream, "drained");
-      }),
-    );
+      } catch {
+        // Hints are best-effort; a failed write must not prevent cleanup of any stream.
+      }
+      return this.#close(stream, "drained");
+    });
+    this.#drainPromise = Promise.all([...closures, ...this.#pendingReleases]).then((results) => {
+      if (results.some((released) => !released)) throw new Error("realtime cleanup incomplete");
+    });
+    return this.#drainPromise;
   }
 
   async #admit(request: Request, response: Response): Promise<void> {
@@ -424,19 +437,15 @@ export class RealtimeTransport {
       return;
     }
     if (!OPAQUE_KEY.test(lease.connectionId) || this.#active.has(lease.connectionId)) {
-      try {
-        await lease.release();
-      } catch {
-        // Admission still fails closed when a registry cannot release an invalid lease.
-      }
       this.#metric({ operation: "admission", result: "unavailable" });
       safeJsonError(response, 503, "realtime_registry_unavailable");
+      await this.#releaseLease(lease);
       return;
     }
     if (this.#draining) {
-      await lease.release();
       this.#metric({ operation: "admission", result: "unavailable" });
       safeJsonError(response, 503, "realtime_draining");
+      await this.#releaseLease(lease);
       return;
     }
 
@@ -504,28 +513,63 @@ export class RealtimeTransport {
     }
   }
 
-  async #close(
+  #releaseLease(lease: RealtimeConnectionLease): Promise<boolean> {
+    const pending = new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (released: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.#releaseTimers.delete(timer);
+        resolve(released);
+      };
+      const timer = setTimeout(() => finish(false), this.#drainMs);
+      this.#releaseTimers.add(timer);
+      // Attach rejection handling even when the deadline wins; the port cannot cancel release.
+      void Promise.resolve()
+        .then(() => lease.release())
+        .then(
+          () => finish(true),
+          () => finish(false),
+        );
+    });
+    this.#pendingReleases.add(pending);
+    void pending.then(() => this.#pendingReleases.delete(pending));
+    return pending;
+  }
+
+  #close(
     stream: ActiveStream,
     result: "aborted" | "drained" | "expired" | "revoked",
-  ): Promise<void> {
-    if (stream.closed) return;
+  ): Promise<boolean> {
+    if (stream.closed) return stream.cleanup ?? Promise.resolve(true);
     stream.closed = true;
     clearInterval(stream.heartbeat);
     clearInterval(stream.revalidation);
     clearTimeout(stream.lifetime);
-    stream.unsubscribe?.();
     stream.response.off("close", stream.onClose);
     this.#active.delete(stream.lease.connectionId);
+    let localCleanup = true;
     try {
-      await stream.lease.release();
-    } finally {
+      stream.unsubscribe?.();
+    } catch {
+      localCleanup = false;
+    }
+    try {
       if (!stream.response.writableEnded) stream.response.end();
+    } catch {
+      localCleanup = false;
+    }
+    stream.cleanup = this.#releaseLease(stream.lease).then((released) => {
+      const complete = released && localCleanup;
       this.#metric({
         operation: "lifecycle",
-        result,
+        result: complete ? result : "unavailable",
         sessionKind: stream.session.kind,
       });
-    }
+      return complete;
+    });
+    return stream.cleanup;
   }
 
   #metric(metric: RealtimeMetric): void {

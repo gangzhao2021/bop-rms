@@ -63,7 +63,9 @@ function resultCode(
 
 function routeTemplate(request: Request, registered: ReadonlySet<string>): string {
   const route = (request.route as { path?: unknown } | undefined)?.path;
-  return typeof route === "string" && registered.has(route) ? route : "unmatched";
+  if (typeof route !== "string") return "unmatched";
+  const template = `${request.baseUrl}${route}`;
+  return registered.has(template) ? template : "unmatched";
 }
 
 export function getRequestCorrelationContext(request: Request): RequestCorrelationContext {

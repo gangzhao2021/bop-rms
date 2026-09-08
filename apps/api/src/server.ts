@@ -5,19 +5,21 @@ import {
   createNodeTelemetryRuntime,
   createStructuredLogger,
   type CoreTelemetry,
+  type CoreTelemetryOptions,
   type LoggerEnvironment,
   type NodeTelemetryRuntime,
   type StructuredLogDestination,
   type StructuredLogger,
 } from "@bop-rms/observability";
 import { createApp } from "./app.js";
-import { customerCartRoutes, type CustomerCartHandler } from "./customer-cart.js";
+import { apiRouteTemplates } from "./http-route-templates.js";
+import type { CustomerCartHandler } from "./customer-cart.js";
 import type { CustomerEntryHandler } from "./customer-entry.js";
 import type { CustomerMenuHandler } from "./customer-menu.js";
 import type { CustomerQuoteHandler } from "./customer-quote.js";
 import { HealthReadinessController } from "./health-readiness.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff.js";
-import { merchantCatalogRoutes, type MerchantCatalogRouterOptions } from "./merchant-catalog.js";
+import type { MerchantCatalogRouterOptions } from "./merchant-catalog.js";
 import type { RealtimeTransport } from "./realtime.js";
 
 const apiLogEvents = [
@@ -71,36 +73,26 @@ export interface ApiServerRuntimeOptions {
   realtime?: RealtimeTransport;
 }
 
-export function createApiCoreTelemetry(): CoreTelemetry {
-  return createCoreTelemetry({
-    allowedErrorCodes: ["API_SHUTDOWN_FAILED", "API_START_FAILED", "INTERNAL_ERROR"],
-    allowedOperations: ["api_shutdown", "api_startup", "http_request"],
-    allowedResultCodes: [
-      "API_SHUTDOWN_FAILED",
-      "API_START_FAILED",
-      "HTTP_CLIENT_ERROR",
-      "HTTP_SERVER_ERROR",
-      "HTTP_SUCCESS",
-      "SUCCESS",
-    ],
-    environment: runtimeEnvironment(),
-    module: "api-runtime",
-    routes: [
-      "/__acceptance/request-command-event",
-      customerCartRoutes.current,
-      "/bff/realtime",
-      "/api/v1/public/stores/:store_public_id/menu",
-      customerCartRoutes.create,
-      customerCartRoutes.read,
-      customerCartRoutes.addItem,
-      customerCartRoutes.updateItem,
-      ...Object.values(merchantCatalogRoutes),
-      "/health",
-      "/ready",
-      "unmatched",
-    ],
-    service: "bop-rms-api",
-  });
+export function createApiCoreTelemetry(options: CoreTelemetryOptions = {}): CoreTelemetry {
+  return createCoreTelemetry(
+    {
+      allowedErrorCodes: ["API_SHUTDOWN_FAILED", "API_START_FAILED", "INTERNAL_ERROR"],
+      allowedOperations: ["api_shutdown", "api_startup", "http_request"],
+      allowedResultCodes: [
+        "API_SHUTDOWN_FAILED",
+        "API_START_FAILED",
+        "HTTP_CLIENT_ERROR",
+        "HTTP_SERVER_ERROR",
+        "HTTP_SUCCESS",
+        "SUCCESS",
+      ],
+      environment: runtimeEnvironment(),
+      module: "api-runtime",
+      routes: apiRouteTemplates,
+      service: "bop-rms-api",
+    },
+    options,
+  );
 }
 
 function runtimeDuration(startedAt: number, completedAt: number): number {
