@@ -29,6 +29,7 @@ async function prove(context) {
       { table_name: "api_client_credential_metadata" },
       { table_name: "api_client_operation" },
       { table_name: "authentication_session" },
+      { table_name: "guest_binding_preparation" },
       { table_name: "guest_session" },
       { table_name: "guest_session_operation" },
       { table_name: "oidc_authorization_transaction" },
@@ -307,7 +308,7 @@ async function prove(context) {
        FROM pg_class
        WHERE relnamespace = 'bop_identity'::regnamespace AND relrowsecurity`,
     );
-    assert.deepEqual(rls.rows, [{ count: 6 }]);
+    assert.deepEqual(rls.rows, [{ count: 7 }]);
     const dynamicObjects = await client.query(
       `SELECT
          (SELECT count(*)::int FROM pg_proc
@@ -319,7 +320,7 @@ async function prove(context) {
             'bop_identity.guest_session'::regclass
           ) AND NOT tgisinternal) AS triggers`,
     );
-    assert.deepEqual(dynamicObjects.rows, [{ functions: 3, triggers: 0 }]);
+    assert.deepEqual(dynamicObjects.rows, [{ functions: 4, triggers: 0 }]);
 
     await client.query(
       `CREATE ROLE ${deniedRole} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`,

@@ -239,3 +239,9 @@ export {
   type GuestBindingHashEquals,
 } from "./contracts/guest-binding-preparation.js";
 export { createGuestBindingCredentialProvider } from "./infrastructure/crypto/guest-binding-credential-provider.js";
+
+export {
+  createPostgresGuestBindingStore,
+  type GuestBindingAuditPort,
+  type GuestBindingAuditDescriptor,
+} from "./infrastructure/persistence/guest-binding-store.js";
