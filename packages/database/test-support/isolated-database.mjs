@@ -12,7 +12,6 @@ import { runMigrationCommand } from "../src/runner.ts";
 
 const { Client } = pg;
 const owner = "wp-0024-isolated-database";
-const leaseRoot = path.join(tmpdir(), "bop-rms-isolated-db-leases");
 const databasePattern = /^bop_rms_test_([a-z0-9]{8,20})_([a-z][a-z0-9_]{0,19})$/u;
 const casePattern = /^[a-z][a-z0-9_]{0,19}$/u;
 const failureStages = new Set([
@@ -98,6 +97,7 @@ async function run(command, args, options = {}) {
 }
 
 async function allocatePort(runId) {
+  const leaseRoot = path.join(await realpath(tmpdir()), "bop-rms-isolated-db-leases");
   await mkdir(leaseRoot, { mode: 0o700, recursive: true });
   const leaseState = await lstat(leaseRoot);
   const canonicalLeaseRoot = await realpath(leaseRoot);
