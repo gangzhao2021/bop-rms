@@ -664,3 +664,53 @@ describe("canonical concurrent Cart commit result", () => {
     });
   });
 });
+
+describe("WP-2270 Cart commands across revision999", () => {
+  it("adds, updates and removes with exact original replay and stable attribution", async () => {
+    const state = fixture({ aggregate: cart({ aggregateVersion: 999 }) });
+    const input = addInput({ expectedAggregateVersion: 999 });
+    const added = await state.service.add(input);
+    expect(added.aggregate.aggregateVersion).toBe(1000);
+    const updated = await state.service.update({
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 1000,
+      quantity: 3,
+      optionSelections: [],
+      customerNote: null,
+      operationReference: ids.secondOperation,
+      requestedAt,
+    });
+    expect(updated.aggregate.aggregateVersion).toBe(1001);
+    expect(updated.aggregate.items[0]).toMatchObject({
+      addedAt: requestedAt,
+      addedByActorReference: ids.session,
+    });
+    const removed = await state.service.remove({
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 1001,
+      operationReference: ids.thirdOperation,
+      requestedAt,
+    });
+    expect(removed.aggregate).toMatchObject({ aggregateVersion: 1002, items: [] });
+    const retry = await state.service.add(input);
+    expect(retry).toMatchObject({ status: "AlreadyApplied", aggregate: added.aggregate });
+    expect(state.current()).toEqual(removed.aggregate);
+    expect(state.operations()).toBe(3);
+    await expect(
+      state.service.add(addInput({ expectedAggregateVersion: 999, operationReference: id(91) })),
+    ).rejects.toMatchObject({ code: "CART_VERSION_CONFLICT" });
+    expect(state.operations()).toBe(3);
+  });
+  it("fails before persistence when the next revision exceeds storage", async () => {
+    const state = fixture({ aggregate: cart({ aggregateVersion: 2_147_483_647 }) });
+    const commit = vi.spyOn(state.ports.repository, "commit");
+    await expect(
+      state.service.add(addInput({ expectedAggregateVersion: 2_147_483_647 })),
+    ).rejects.toBeInstanceOf(CartError);
+    expect(commit).not.toHaveBeenCalled();
+    expect(state.current().aggregateVersion).toBe(2_147_483_647);
+    expect(state.operations()).toBe(0);
+  });
+});

@@ -211,6 +211,13 @@ export function parseCatalogSelectionEvidence(value: unknown): CatalogSelectionE
   });
 }
 
+// Cart revisions follow the current PostgreSQL integer storage contract, not item quantities.
+function aggregateVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 2_147_483_647)
+    return invalid();
+  return value as number;
+}
+
 function quantity(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 999)
     return invalid();
@@ -316,7 +323,7 @@ export function parseCartAggregate(value: unknown): CartAggregate {
     sourceChannel: raw.sourceChannel as CartSourceChannel,
     diningSessionReference,
     createdByActorReference: parseOrderingReference(raw.createdByActorReference),
-    aggregateVersion: quantity(raw.aggregateVersion),
+    aggregateVersion: aggregateVersion(raw.aggregateVersion),
     createdAt,
     updatedAt,
     lifecycle,

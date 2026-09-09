@@ -237,3 +237,6 @@ uncached integration pass; this is local synthetic-source persistence acceptance
 WP-2269 adds the Dining-owned current participation query required before shared Cart decisions.
 Dining97/97, full verification and forced uncached integration pass. Identity authorization and
 the coherent Dining persistence producer remain separate.
+
+WP-2270 corrects the accidental Cart revision999 limit; quantity limits remain unchanged.
+Ordering535/535, Cart PostgreSQL7/7, full verification and forced uncached integration pass.
