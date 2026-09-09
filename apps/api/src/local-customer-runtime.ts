@@ -1,4 +1,8 @@
 import {
+  createCustomerCartRemovalComposition,
+  type CustomerCartRemovalCompositionOptions,
+} from "./customer-cart-removal-composition.js";
+import {
   createCustomerCartBindingComposition,
   type CustomerCartBindingCompositionOptions,
 } from "./customer-cart-binding-composition.js";
@@ -53,6 +57,10 @@ export interface LocalCustomerRuntimeOptions {
     CustomerCartBindingCompositionOptions,
     "scope" | "session" | "sessionTransactions" | "now"
   >;
+  readonly cartRemoval?: Omit<
+    CustomerCartRemovalCompositionOptions,
+    "scope" | "session" | "sessionTransactions" | "cartTransactions" | "query" | "now"
+  >;
   readonly allowedOrigin: string;
   readonly now: () => string;
   readonly uuidV7Factory: () => string;
@@ -65,6 +73,8 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     throw new Error("LOCAL_CUSTOMER_RUNTIME_UNAVAILABLE");
   if (options.cartBinding !== undefined && options.cartTransactions === undefined)
     throw new Error("LOCAL_CART_BINDING_READS_REQUIRED");
+  if (options.cartRemoval !== undefined && options.cartTransactions === undefined)
+    throw new Error("LOCAL_CART_REMOVAL_READS_REQUIRED");
   const scope = Object.freeze({
     brandReference: parseCatalogReference(options.scope.brandReference),
     storeReference: parseCatalogReference(options.scope.storeReference),
@@ -96,40 +106,49 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     },
     projections,
   });
-  const customerCart =
-    options.cartTransactions === undefined
-      ? undefined
-      : new CustomerCartHandler({
-          allowedOrigin: options.allowedOrigin,
+  let customerCart: CustomerCartHandler | undefined;
+  if (options.cartTransactions !== undefined) {
+    const query = createCustomerCartViewQuery({
+      reads: createPickupCartReadService({
+        sessions: new GuestSessionService({
+          ...entry.session,
+          store,
+          admission: { consume: async () => null },
           now,
-          port: createCustomerCartReadPort(
-            createCustomerCartViewQuery({
-              reads: createPickupCartReadService({
-                sessions: new GuestSessionService({
-                  ...entry.session,
-                  store,
-                  // This private instance only resolves existing sessions; creation always denies.
-                  admission: { consume: async () => null },
-                  now,
-                }),
-                binding: createPostgresPickupCartBindingReader(options.cartTransactions, scope),
-                scope,
-                now,
-              }),
-              catalog: createCatalogSelectionDisplayQuery(projections),
-              stores: createPublicStoreProfileService({
-                ...entry.profile,
-                resolution: {
-                  async resolve(request) {
-                    const resolved = await entry.profile.resolution.resolve(request);
-                    return resolved !== null && sameScope(resolved) ? resolved : null;
-                  },
-                },
-              }),
-              quotes: createPostgresCartQuoteReader(options.cartTransactions, scope),
+        }),
+        binding: createPostgresPickupCartBindingReader(options.cartTransactions, scope),
+        scope,
+        now,
+      }),
+      catalog: createCatalogSelectionDisplayQuery(projections),
+      stores: createPublicStoreProfileService({
+        ...entry.profile,
+        resolution: {
+          async resolve(request) {
+            const resolved = await entry.profile.resolution.resolve(request);
+            return resolved !== null && sameScope(resolved) ? resolved : null;
+          },
+        },
+      }),
+      quotes: createPostgresCartQuoteReader(options.cartTransactions, scope),
+    });
+    customerCart = new CustomerCartHandler({
+      allowedOrigin: options.allowedOrigin,
+      now,
+      port:
+        options.cartRemoval === undefined
+          ? createCustomerCartReadPort(query)
+          : createCustomerCartRemovalComposition({
+              ...options.cartRemoval,
+              scope,
+              session: entry.session,
+              sessionTransactions: options.sessionTransactions,
+              cartTransactions: options.cartTransactions,
+              query,
+              now,
             }),
-          ),
-        });
+    });
+  }
   const customerCartBinding =
     options.cartBinding === undefined
       ? undefined

@@ -1,3 +1,5 @@
+import { createCustomerCartRemovalComposition } from "../../../apps/api/src/customer-cart-removal-composition.ts";
+import { createHash } from "node:crypto";
 import { createPickupCartCreationCoordinator } from "../../../apps/customer-pwa/src/cart/pickup-cart-creation.ts";
 import { createBrowserCustomerCartClient } from "../../../apps/customer-pwa/src/cart/cart-client.ts";
 import { createCustomerCartBindingComposition } from "../../../apps/api/src/customer-cart-binding-composition.ts";
@@ -17,6 +19,9 @@ import {
   createCustomerCartViewQuery,
   createPostgresCartQuoteReader,
   createPostgresCartQueryStore,
+  createPostgresCartItemCommandStore,
+  createPostgresCartItemOperationStore,
+  createCartItemCommandService,
 } from "../../rms/ordering/src/index.ts";
 import {
   createGuestSessionRecord,
@@ -93,6 +98,12 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
       );
       await admin.query(`GRANT USAGE ON SCHEMA rms_ordering TO ${orderingRole}`);
       await admin.query(`GRANT SELECT,INSERT,UPDATE ON rms_ordering.cart TO ${orderingRole}`);
+      await admin.query(
+        `GRANT SELECT,INSERT,UPDATE,DELETE ON rms_ordering.cart_line TO ${orderingRole}`,
+      );
+      await admin.query(
+        `GRANT SELECT,INSERT ON rms_ordering.cart_operation_record TO ${orderingRole}`,
+      );
       await admin.query(
         `GRANT SELECT ON rms_ordering.cart_line,rms_ordering.cart_quote_attachment,rms_ordering.cart_quote_attachment_line TO ${orderingRole}`,
       );
@@ -815,6 +826,201 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
           );
         } finally {
           globalThis.fetch = networkFetch;
+        }
+
+        // WP-2251: actual authorized removal; Catalog eligibility below is explicitly synthetic seed evidence.
+        clock = 1200;
+        const removalSession = guest(950);
+        const removalCredential = credentials.generateCredential("Session");
+        const removalCsrf = credentials.generateCredential("Csrf");
+        await sessions.create({
+          record: createGuestSessionRecord({
+            session: removalSession,
+            sessionSelectorHash: credentials.hashCredential("Session", removalCredential),
+            csrfSelectorHash: credentials.hashCredential("Csrf", removalCsrf),
+            operationReference: id(951),
+            operationIntentHash: "e".repeat(64),
+          }),
+        });
+        await httpOwner.prepare({
+          ...scope,
+          operationReference: id(952),
+          targetReference: id(953),
+          sessionReference: id(950),
+          predecessorSessionReference: id(954),
+          acknowledgedAt: at(1199),
+          observedAt: at(1200),
+          validUntil: at(1500),
+        });
+        await httpOwner.activate({
+          ...scope,
+          operationReference: id(952),
+          targetReference: id(953),
+          sessionReference: id(950),
+          activatedAt: at(1200),
+        });
+        const references = {
+          hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+          equals: (a, b) => a === b,
+        };
+        const itemAudit = (descriptor) => ({
+          ...auditRecord({ ...descriptor, occurredAt: descriptor.observedAt }),
+          actionCode: "ORDERING_CART_ITEM_" + descriptor.action.toUpperCase(),
+          reasonCode: "AUTHORIZED_CART_MUTATION",
+        });
+        const itemReader = createPostgresCartQueryStore(runner(orderingRole), scope);
+        const itemWriter = createPostgresCartItemCommandStore(
+          runner(orderingRole),
+          scope,
+          references,
+        );
+        const itemOperations = createPostgresCartItemOperationStore(runner(orderingRole), scope);
+        const seeded = await createCartItemCommandService({
+          references: { ...references, generate: () => id(955) },
+          authorization: {
+            authorize: async (descriptor) => ({
+              guestSession: removalSession,
+              audit: itemAudit(descriptor),
+            }),
+          },
+          catalog: {
+            validateSelection: async (request) => ({
+              status: "Accepted",
+              ...request,
+              menuVersionReference: id(956),
+              productVersionReference: id(957),
+              catalogChannelCode: "PILOT_CHANNEL",
+              catalogOrderTypeCode: "PILOT_ORDER_TYPE",
+              ruleEvidence: [],
+              validatedAt: request.observedAt,
+            }),
+          },
+          repository: {
+            load: itemReader.load,
+            resolveOperation: itemOperations.resolveOperation,
+            commit: itemWriter.commit,
+          },
+        }).add({
+          cartReference: id(953),
+          expectedAggregateVersion: 1,
+          sellableReference: id(958),
+          quantity: 1,
+          optionSelections: [],
+          customerNote: null,
+          operationReference: id(959),
+          requestedAt: at(clock),
+        });
+        assert.equal(seeded.aggregate.aggregateVersion, 2);
+        let failRead = true;
+        const removalServer = createServer(
+          createApp({
+            customerCart: new CustomerCartHandler({
+              allowedOrigin: "https://customer.example.test",
+              now: () => at(clock),
+              port: createCustomerCartRemovalComposition({
+                scope,
+                session: { credentials, binding: { validate: async () => "Current" } },
+                sessionTransactions: runner(identityRole),
+                cartTransactions: runner(orderingRole),
+                writeTransactions: runner(orderingRole),
+                references,
+                audit: itemAudit,
+                query: {
+                  read: async (input) => {
+                    if (failRead) throw new Error("synthetic post-commit read outage");
+                    return displayQuery.read(input);
+                  },
+                },
+                now: () => at(clock),
+              }),
+            }),
+          }),
+        );
+        try {
+          await new Promise((resolve) => removalServer.listen(0, "127.0.0.1", resolve));
+          const removalAddress = removalServer.address();
+          assert.equal(typeof removalAddress, "object");
+          assert.ok(removalAddress);
+          const remove = ({ csrf = removalCsrf, cart = id(953), operation = id(960) } = {}) =>
+            networkFetch(
+              "http://127.0.0.1:" +
+                removalAddress.port +
+                "/api/v1/carts/" +
+                cart +
+                "/items/" +
+                id(955),
+              {
+                method: "DELETE",
+                headers: {
+                  origin: "https://customer.example.test",
+                  "sec-fetch-site": "same-origin",
+                  "sec-fetch-mode": "cors",
+                  "x-csrf-token": csrf,
+                  "if-match": '"2"',
+                  "idempotency-key": operation,
+                  cookie: "__Host-bop-guest=" + removalCredential,
+                },
+              },
+            );
+          const beforeRemoval = await counts();
+          const operationsBefore = Number(
+            (await admin.query("SELECT count(*) FROM rms_ordering.cart_operation_record")).rows[0]
+              .count,
+          );
+          const denied = await remove({ csrf: credentials.generateCredential("Csrf") });
+          assert.equal(denied.status, 401);
+          await denied.text();
+          const foreign = await remove({ cart: id(961) });
+          assert.equal(foreign.status, 404);
+          await foreign.text();
+          assert.deepEqual(await counts(), beforeRemoval);
+          const uncertain = await remove();
+          assert.equal(uncertain.status, 503);
+          assert.equal(uncertain.headers.get("cache-control"), "no-store");
+          await uncertain.text();
+          assert.equal((await itemReader.load(id(953))).items.length, 0);
+          failRead = false;
+          clock = 1201;
+          const retry = await remove();
+          assert.equal(retry.status, 200);
+          const safe = await retry.json();
+          assert.equal(safe.cart.version, 3);
+          assert.deepEqual(safe.cart.items, []);
+          for (const privateValue of [
+            removalCredential,
+            removalCsrf,
+            id(950),
+            scope.brandReference,
+            scope.storeReference,
+          ])
+            assert.equal(JSON.stringify(safe).includes(privateValue), false);
+          assert.deepEqual(await counts(), { ...beforeRemoval, audits: beforeRemoval.audits + 1 });
+          assert.equal(
+            Number(
+              (await admin.query("SELECT count(*) FROM rms_ordering.cart_operation_record")).rows[0]
+                .count,
+            ),
+            operationsBefore + 1,
+          );
+          const repeated = await remove();
+          assert.equal(repeated.status, 200);
+          await repeated.text();
+          assert.deepEqual(await counts(), { ...beforeRemoval, audits: beforeRemoval.audits + 1 });
+          await sessions.revoke({
+            selectorHash: credentials.hashCredential("Session", removalCredential),
+            expectedVersion: 1,
+            reason: "Rotated",
+            observedAt: at(clock),
+            operationReference: id(962),
+            operationIntentHash: "f".repeat(64),
+          });
+          const revoked = await remove();
+          assert.equal(revoked.status, 401);
+          await revoked.text();
+          assert.deepEqual(await counts(), { ...beforeRemoval, audits: beforeRemoval.audits + 1 });
+        } finally {
+          removalServer.closeAllConnections();
+          await new Promise((resolve) => removalServer.close(() => resolve()));
         }
       } finally {
         httpServer.closeAllConnections();

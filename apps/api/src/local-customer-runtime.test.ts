@@ -268,3 +268,80 @@ describe("optional local Cart binding runtime", () => {
     expect(f.options.session.credentials.generateCredential).not.toHaveBeenCalled();
   });
 });
+
+describe("optional local Cart removal runtime", () => {
+  function removalOptions(): NonNullable<LocalCustomerRuntimeOptions["cartRemoval"]> {
+    return {
+      writeTransactions: {
+        run: vi.fn(async (): Promise<never> => {
+          throw new Error("unexpected write");
+        }),
+      },
+      references: {
+        hashIntent: () => {
+          throw new Error("unexpected hash");
+        },
+        equals: (a, b) => a === b,
+      },
+      audit: vi.fn(() => {
+        throw new Error("unexpected audit");
+      }),
+    };
+  }
+  it("requires reads before enabling removal", () => {
+    const { options, run } = setup();
+    expect(() => createLocalCustomerRuntime({ ...options, cartRemoval: removalOptions() })).toThrow(
+      "LOCAL_CART_REMOVAL_READS_REQUIRED",
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("keeps default removal unavailable", async () => {
+    const { options, run } = setup();
+    const { root } = await start(options);
+    const result = await fetch(root + "/api/v1/carts/" + id(30) + "/items/" + id(31), {
+      method: "DELETE",
+    });
+    expect(result.status).toBe(503);
+    await result.text();
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("constructs without resources and preserves Origin and Session guards", async () => {
+    const { options, run, f } = setup();
+    const removal = removalOptions();
+    const cartRun = vi.fn(async (): Promise<never> => {
+      throw new Error("unexpected Cart read");
+    });
+    const { root } = await start({
+      ...options,
+      cartTransactions: { run: cartRun },
+      cartRemoval: removal,
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(cartRun).not.toHaveBeenCalled();
+    const send = (origin: string) =>
+      fetch(root + "/api/v1/carts/" + id(30) + "/items/" + id(31), {
+        method: "DELETE",
+        headers: {
+          origin,
+          "sec-fetch-site": "same-origin",
+          "sec-fetch-mode": "cors",
+          "idempotency-key": id(32),
+          "if-match": '"1"',
+          "x-csrf-token": "b".repeat(43),
+          cookie: "__Host-bop-guest=" + "a".repeat(43),
+        },
+      });
+    const wrong = await send("https://wrong.invalid");
+    expect(wrong.status).toBe(400);
+    await wrong.text();
+    expect(run).not.toHaveBeenCalled();
+    const denied = await send(options.allowedOrigin);
+    expect(denied.status).toBe(401);
+    expect(await denied.text()).not.toContain("synthetic");
+    expect(run).toHaveBeenCalledOnce();
+    expect(cartRun).not.toHaveBeenCalled();
+    expect(removal.writeTransactions.run).not.toHaveBeenCalled();
+    expect(removal.audit).not.toHaveBeenCalled();
+    expect(f.options.session.credentials.generateCredential).not.toHaveBeenCalled();
+  });
+});

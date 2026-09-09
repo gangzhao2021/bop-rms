@@ -151,3 +151,8 @@ consumption and cleanup. It preserves foreground-only retries and does not provi
 [WP-2250](../work-packages/WP-2250.md) connects private browser binding transport and current-Cart
 reads in an opt-in foreground coordinator. Its evidence remains bounded; default App integration,
 item writes, shared DineIn and general reload recovery are separate.
+
+### BC-03 authorized removal integration
+
+[WP-2251](../work-packages/WP-2251.md) adds current-Session/CSRF removal authorization and optional
+local HTTP write composition. Current Catalog eligibility for Add/Update remains separate.
