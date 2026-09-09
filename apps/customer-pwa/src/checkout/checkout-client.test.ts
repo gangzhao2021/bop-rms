@@ -790,3 +790,124 @@ describe("foreground Checkout intent continuity", () => {
     expect(parseInt(recorded.replaceAll("-", "").slice(0, 12), 16)).toBe(instant);
   });
 });
+
+describe("durable original Quote expiry receipt", () => {
+  const expired = (
+    operationReference = id(90),
+    cartReference = cart.cart.cartReference,
+    cartVersion = cart.cart.version,
+  ) => ({
+    schemaVersion: 1,
+    error: { code: "quote_operation_expired", messageKey: "customer.quote.operation_expired" },
+    resolution: { operationReference, cartReference, cartVersion },
+  });
+  it("accepts only the complete matching receipt under current Session context", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify(expired()), { status: 410 })),
+    );
+    await expect(
+      createCheckoutClient({} as CustomerCartClient).quote(cart, id(90)),
+    ).rejects.toMatchObject({ code: "quote_operation_expired" });
+  });
+  it.each(["operation", "cart", "version", "extra", "code", "status", "body"])(
+    "retains uncertainty for %s mismatch",
+    async (kind) => {
+      setCustomerCsrfCredential("c".repeat(43));
+      const body =
+        kind === "operation"
+          ? expired(id(99))
+          : kind === "cart"
+            ? expired(id(90), id(99))
+            : kind === "version"
+              ? expired(id(90), cart.cart.cartReference, 4)
+              : kind === "extra"
+                ? { ...expired(), extra: true }
+                : kind === "code"
+                  ? {
+                      ...expired(),
+                      error: {
+                        code: "quote_configuration_invalid",
+                        messageKey: "customer.quote.configuration_invalid",
+                      },
+                    }
+                  : expired();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(kind === "body" ? "{" : JSON.stringify(body), {
+            status: kind === "status" ? 422 : 410,
+          }),
+        ),
+      );
+      await expect(
+        createCheckoutClient({} as CustomerCartClient).quote(cart, id(90)),
+      ).rejects.toMatchObject({ code: "network_unknown" });
+    },
+  );
+  it("releases the original unknown key only after terminal proof and refreshes before explicit pricing", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    const newer = { ...cart, cart: { ...cart.cart, version: 4 } };
+    const loadCart = vi.fn().mockResolvedValueOnce(cart).mockResolvedValue(newer);
+    const quoteCall = vi
+      .fn()
+      .mockRejectedValueOnce(new CartClientError("network_unknown"))
+      .mockRejectedValueOnce(new CartClientError("quote_operation_expired"))
+      .mockResolvedValue({ ...quote, cartVersion: 4 });
+    const keys = vi.fn().mockReturnValueOnce(id(90)).mockReturnValue(id(91));
+    const controller = createCheckoutController({ loadCart, quote: quoteCall }, keys);
+    await controller.load();
+    await controller.quote();
+    await controller.retry();
+    expect(controller.getState()).toMatchObject({
+      status: "quote-expired",
+      cart: newer,
+      canRetry: false,
+    });
+    expect(keys).toHaveBeenCalledOnce();
+    expect(quoteCall).toHaveBeenCalledTimes(2);
+    expect(quoteCall.mock.calls[0]?.[1]).toBe(id(90));
+    expect(quoteCall.mock.calls[1]?.[1]).toBe(id(90));
+    await controller.retry();
+    expect(quoteCall).toHaveBeenCalledTimes(2);
+    await controller.quote();
+    expect(quoteCall.mock.calls[2]).toEqual([newer, id(91)]);
+    expect(controller.getState().status).toBe("ready");
+  });
+  it("keeps a late expiry receipt from a replaced Session unknown", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    const quoteCall = vi.fn(async () => {
+      setCustomerCsrfCredential("d".repeat(43));
+      throw new CartClientError("quote_operation_expired");
+    });
+    const loadCart = vi.fn(async () => cart);
+    const controller = createCheckoutController({ loadCart, quote: quoteCall }, () => id(90));
+    await controller.load();
+    await controller.quote();
+    expect(controller.getState()).toMatchObject({
+      status: "outcome-unknown",
+      cart: null,
+      canRetry: false,
+    });
+    expect(loadCart).toHaveBeenCalledOnce();
+  });
+  it("does not replay a released operation after Cart refresh fails", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    const loadCart = vi
+      .fn()
+      .mockResolvedValueOnce(cart)
+      .mockRejectedValue(new Error("synthetic unavailable read"));
+    const quoteCall = vi.fn().mockRejectedValue(new CartClientError("quote_operation_expired"));
+    const controller = createCheckoutController({ loadCart, quote: quoteCall }, () => id(90));
+    await controller.load();
+    await controller.quote();
+    await controller.retry();
+    expect(controller.getState()).toMatchObject({
+      status: "unavailable",
+      cart: null,
+      canRetry: false,
+    });
+    expect(quoteCall).toHaveBeenCalledOnce();
+  });
+});

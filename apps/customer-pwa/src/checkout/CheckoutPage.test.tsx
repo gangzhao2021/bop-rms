@@ -125,3 +125,12 @@ it("disables the retained Quote retry while offline", () => {
     new RegExp("<button[^>]*disabled[^>]*>Retry the same Quote request</button>", "u"),
   );
 });
+
+it("offers explicit new pricing only after a confirmed expired operation", () => {
+  const html = render({ status: "quote-expired", cart, canRetry: false });
+  expect(html).toContain("Your previous quote expired");
+  expect(html).toContain("Get a new quote");
+  expect(html).toContain('role="alert"');
+  expect(html).not.toContain("Retry the same Quote request");
+  expect(html).not.toContain("Quote summary");
+});

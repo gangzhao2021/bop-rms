@@ -81,6 +81,7 @@ describe("scoped local Customer runtime", () => {
           equals: (a, b) => a === b,
         },
         audit: () => ({}) as never,
+        expiryAudit: () => ({}) as never,
         candidate,
       },
     });

@@ -10,6 +10,10 @@ import { parseCanonicalInstant } from "@bop/tenant";
 import {
   CartError,
   createPickupCartQuoteService,
+  createPickupCartQuoteExpiryService,
+  createPostgresCartQuoteExpiryStore,
+  parseCartQuoteExpiryRecord,
+  type PickupCartQuoteExpiryOptions,
   createPostgresCartQueryStore,
   createPostgresCartQuoteStore,
   createPostgresPickupCartBindingReader,
@@ -148,6 +152,7 @@ function copyPricingInput(input: PricingCartInput): PricingCartInput {
 export function createCustomerQuotePort(options: {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
   readonly attachment: AttachmentEntry;
+  readonly expiry?: Pick<ReturnType<typeof createPickupCartQuoteExpiryService>, "reconcile">;
   readonly requests: Pick<PriceQuoteRequestStore, "resolve">;
   readonly now: () => string;
 }): CustomerQuotePort {
@@ -162,6 +167,38 @@ export function createCustomerQuotePort(options: {
         command = copyCommand(input);
       } catch {
         return unavailable;
+      }
+      if (options.expiry !== undefined) {
+        try {
+          const result = await options.expiry.reconcile(command);
+          if (result.status === "Expired") {
+            const raw = closed(result, ["status", "record"]);
+            const record = parseCartQuoteExpiryRecord(raw.record);
+            const observedAt = parseCanonicalInstant(options.now());
+            if (
+              record.brandReference !== scope.brandReference ||
+              record.storeReference !== scope.storeReference ||
+              record.cartReference !== command.cartReference ||
+              record.cartVersion !== command.expectedCartVersion ||
+              record.operationReference !== command.operationReference ||
+              String(observedAt) < record.expiredAt ||
+              String(observedAt) >= record.requestExpiresAt
+            )
+              return unavailable;
+            return Object.freeze({
+              status: "Expired",
+              resolution: Object.freeze({
+                operationReference: record.operationReference,
+                cartReference: record.cartReference,
+                cartVersion: record.cartVersion,
+              }),
+            });
+          }
+          if (result.status !== "NoExpiredRequest" && result.status !== "AlreadyAttached")
+            return unavailable;
+        } catch (error) {
+          return initialFailure(error);
+        }
       }
       let saved: unknown;
       try {
@@ -242,6 +279,7 @@ export interface CustomerQuoteCompositionOptions {
   readonly references: PickupCartQuoteOptions["references"];
   readonly pricingReferences: Parameters<typeof createPostgresPriceQuoteRequestStore>[2];
   readonly audit: PickupCartQuoteOptions["audit"];
+  readonly expiryAudit: PickupCartQuoteExpiryOptions["audit"];
   readonly candidate: (
     input: PricingCartInput,
     identity: Parameters<PickupCartQuoteOptions["pricing"]["quoteCart"]>[1],
@@ -349,5 +387,14 @@ export function createCustomerQuoteComposition(
       },
     },
   });
-  return createCustomerQuotePort({ scope, attachment, requests, now: options.now });
+  const expiry = createPickupCartQuoteExpiryService({
+    scope,
+    sessions,
+    binding: createPostgresPickupCartBindingReader(options.cartTransactions, scope),
+    requests,
+    expiry: createPostgresCartQuoteExpiryStore(options.attachmentTransactions, scope),
+    audit: options.expiryAudit,
+    now: options.now,
+  });
+  return createCustomerQuotePort({ scope, attachment, requests, expiry, now: options.now });
 }

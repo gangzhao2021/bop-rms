@@ -18,6 +18,30 @@ describe("WP-2000 OpenAPI contract", () => {
     expect(Object.keys(document.paths)).not.toContain("/merchant/session");
     expect(Object.keys(document.paths)).not.toContain("/bff/realtime");
   });
+  it("documents the exact Quote version, authorization and terminal receipt", () => {
+    const document = JSON.parse(renderOpenApi());
+    const quote = document.paths["/api/v1/carts/{cart_id}/quote"].post;
+    expect(quote.parameters.map((p: { name: string }) => p.name)).toEqual(
+      expect.arrayContaining([
+        "idempotency-key",
+        "x-csrf-token",
+        "__Host-bop-guest",
+        "sec-fetch-site",
+      ]),
+    );
+    expect(quote.parameters.map((p: { name: string }) => p.name)).not.toContain("if-match");
+    expect(quote.requestBody.content["application/json"].schema.required).toEqual(["cartVersion"]);
+    expect(quote.responses["410"].content["application/json"].schema.$ref).toContain(
+      "QuoteOperationExpiredResponse",
+    );
+    const schema = document.components.schemas.QuoteOperationExpiredResponse;
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties.resolution.required).toEqual([
+      "operationReference",
+      "cartReference",
+      "cartVersion",
+    ]);
+  });
   it("requires idempotency and expected-version headers for mutations", () => {
     const document = JSON.parse(renderOpenApi()) as {
       paths: Record<
@@ -39,7 +63,8 @@ describe("WP-2000 OpenAPI contract", () => {
       expect(operation.operationId).toBe(operationId);
       const names = (operation.parameters ?? []).map((item) => item.name);
       if (mutation) expect(names).toContain("idempotency-key");
-      if (mutation && operationId !== "createCart") expect(names).toContain("if-match");
+      if (mutation && !["createCart", "quoteCart"].includes(operationId))
+        expect(names).toContain("if-match");
       expect(operation.responses["500"]?.content["application/json"]?.schema.$ref).toContain(
         "ErrorResponse",
       );

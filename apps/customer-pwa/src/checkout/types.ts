@@ -32,6 +32,7 @@ export type CheckoutState =
         | "conflict"
         | "validation"
         | "unavailable"
+        | "quote-expired"
         | "outcome-unknown";
       cart: CartView | null;
       canRetry: boolean;

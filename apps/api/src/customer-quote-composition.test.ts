@@ -317,6 +317,7 @@ function compositionOptions(f: ReturnType<typeof fixture>): CustomerQuoteComposi
       equals: (a, b) => a === b,
     },
     audit: () => ({}) as never,
+    expiryAudit: () => ({}) as never,
     candidate: async () => ({ quote: f.quote, audit: {} as never }),
     now: () => at,
   };
@@ -444,6 +445,78 @@ describe("explicit owner Quote composition", () => {
           : 0,
       );
       expect(append).toHaveBeenCalledTimes(kind === "new" ? 1 : 0);
+    },
+  );
+});
+
+describe("authorized expiry result transport composition", () => {
+  function expiryFixture() {
+    const f = fixture();
+    const expiredAt = new Date(Date.parse(f.quote.expiresAt) + 1000).toISOString();
+    const record = Ordering.parseCartQuoteExpiryRecord({
+      ...f.scope,
+      resolutionVersion: 1,
+      operationReference: f.input.idempotencyKey,
+      guestSessionReference: f.attachment.guestSessionReference,
+      cartReference: f.input.cartReference,
+      cartVersion: f.input.expectedCartVersion,
+      quoteReference: f.quote.quoteReference,
+      quoteInputDigest: f.quote.inputDigest,
+      requestIntentDigest: f.record.intentDigest,
+      quoteCreatedAt: f.quote.createdAt,
+      quoteExpiresAt: f.quote.expiresAt,
+      requestCreatedAt: f.record.createdAt,
+      requestExpiresAt: f.record.idempotencyExpiresAt,
+      expiredAt,
+    });
+    const reconcile = vi.fn(async (): Promise<Ordering.PickupCartQuoteExpiryResult> => ({
+      status: "Expired",
+      record,
+    }));
+    const port = createCustomerQuotePort({
+      scope: f.scope,
+      attachment: { attach: f.attach },
+      requests: { resolve: f.resolve },
+      expiry: { reconcile },
+      now: () => expiredAt,
+    });
+    return { ...f, record, reconcile, port };
+  }
+  it("returns the minimal original-operation receipt without another attach or Pricing query", async () => {
+    const f = expiryFixture();
+    expect(await f.port.quoteCart(f.input)).toEqual({
+      status: "Expired",
+      resolution: {
+        operationReference: f.input.idempotencyKey,
+        cartReference: f.input.cartReference,
+        cartVersion: f.input.expectedCartVersion,
+      },
+    });
+    expect(f.attach).not.toHaveBeenCalled();
+    expect(f.resolve).not.toHaveBeenCalled();
+  });
+  it.each(["operationReference", "cartReference", "storeReference"])(
+    "bounds substituted expiry %s",
+    async (field) => {
+      const f = expiryFixture();
+      f.reconcile.mockResolvedValue({
+        status: "Expired",
+        record: Ordering.parseCartQuoteExpiryRecord({ ...f.record, [field]: id(999) }),
+      });
+      const result = await f.port.quoteCart(f.input);
+      expect(result.status).toBe("Unavailable");
+      expect(f.attach).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["CART_PERMISSION_DENIED", "CART_DEPENDENCY_UNAVAILABLE"] as const)(
+    "keeps owner denial %s nonterminal",
+    async (code) => {
+      const f = expiryFixture();
+      f.reconcile.mockRejectedValue(new Ordering.CartError(code));
+      expect(await f.port.quoteCart(f.input)).toEqual({
+        status: code === "CART_PERMISSION_DENIED" ? "NotFound" : "Unavailable",
+      });
+      expect(f.attach).not.toHaveBeenCalled();
     },
   );
 });

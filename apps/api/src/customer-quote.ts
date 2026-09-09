@@ -1,3 +1,4 @@
+import { readClosedRecord } from "@bop/identity";
 import type { PriceQuoteRequoteResult, PriceQuoteSnapshot, PricingReference } from "@rms/pricing";
 import type { Request, RequestHandler, Response } from "express";
 
@@ -19,6 +20,14 @@ export type QuoteCartResult =
   | { readonly status: "Created"; readonly quote: PriceQuoteSnapshot }
   | { readonly status: "Current"; readonly quote: PriceQuoteSnapshot }
   | { readonly status: "Requoted"; readonly requote: PriceQuoteRequoteResult }
+  | {
+      readonly status: "Expired";
+      readonly resolution: {
+        readonly operationReference: string;
+        readonly cartReference: string;
+        readonly cartVersion: number;
+      };
+    }
   | { readonly status: "NotFound" }
   | { readonly status: "VersionConflict" }
   | { readonly status: "IdempotencyConflict" }
@@ -91,7 +100,8 @@ function parse(request: Request, now: () => string, allowedOrigin: string): Quot
     keys.length !== 1 ||
     keys[0] !== "cartVersion" ||
     !Number.isSafeInteger(cartVersion) ||
-    Number(cartVersion) < 1
+    Number(cartVersion) < 1 ||
+    Number(cartVersion) > 2147483647
   )
     throw new TypeError("invalid body");
   const cartReference = request.params.cart_id;
@@ -186,6 +196,41 @@ export class CustomerQuoteHandler {
         result = await this.#port.quoteCart(command);
       } catch {
         sendError(response, "quote_service_unavailable");
+        return;
+      }
+      if (result.status === "Expired") {
+        try {
+          const envelope = readClosedRecord(
+            result,
+            ["status", "resolution"],
+            "ACTOR_SHAPE_INVALID",
+          );
+          const resolution = readClosedRecord(
+            envelope.resolution,
+            ["operationReference", "cartReference", "cartVersion"],
+            "ACTOR_SHAPE_INVALID",
+          );
+          if (
+            resolution.operationReference !== command.idempotencyKey ||
+            resolution.cartReference !== command.cartReference ||
+            resolution.cartVersion !== command.expectedCartVersion
+          )
+            throw new Error();
+          response.status(410).json({
+            schemaVersion: 1,
+            error: {
+              code: "quote_operation_expired",
+              messageKey: "customer.quote.operation_expired",
+            },
+            resolution: {
+              operationReference: resolution.operationReference,
+              cartReference: resolution.cartReference,
+              cartVersion: resolution.cartVersion,
+            },
+          });
+        } catch {
+          sendError(response, "quote_service_unavailable");
+        }
         return;
       }
       if (

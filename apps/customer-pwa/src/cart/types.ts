@@ -76,6 +76,7 @@ export type CartErrorCode =
   | "cart_abandoned"
   | "cart_rate_limited"
   | "cart_service_unavailable"
+  | "quote_operation_expired"
   | "network_unknown";
 
 export class CartClientError extends Error {

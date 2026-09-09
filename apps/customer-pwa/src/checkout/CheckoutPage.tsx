@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
 import { formatCartMoney } from "../cart/format-money.js";
@@ -24,6 +24,11 @@ export function CheckoutPage({
     controller.getState,
     controller.getState,
   );
+  const quoteAction = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (state.status === "quote-expired" && document.activeElement === document.body)
+      quoteAction.current?.focus();
+  }, [state.status]);
   const [, setClockRevision] = useState(0);
   useEffect(() => {
     void controller.load();
@@ -81,9 +86,9 @@ export function CheckoutPage({
       ) : null}
       {cart &&
       quote === null &&
-      ["ready", "conflict", "validation", "unavailable"].includes(state.status) ? (
-        <button type="button" onClick={() => void controller.quote()}>
-          Get current quote
+      ["ready", "conflict", "validation", "unavailable", "quote-expired"].includes(state.status) ? (
+        <button ref={quoteAction} type="button" onClick={() => void controller.quote()}>
+          {state.status === "quote-expired" ? "Get a new quote" : "Get current quote"}
         </button>
       ) : null}
       {state.status === "pending" ? <p role="status">Requesting the server Quote…</p> : null}
@@ -139,15 +144,18 @@ export function CheckoutPage({
         "validation",
         "unavailable",
         "outcome-unknown",
+        "quote-expired",
       ].includes(state.status) ? (
         <section role="alert">
           <h2>Checkout needs attention</h2>
           <p>
-            {state.status === "offline"
-              ? "Offline read-only. Nothing will replay."
-              : state.status === "outcome-unknown"
-                ? "The Quote outcome is unknown; no success was assumed."
-                : `Checkout state: ${state.status}`}
+            {state.status === "quote-expired"
+              ? "Your previous quote expired. You can request a new quote."
+              : state.status === "offline"
+                ? "Offline read-only. Nothing will replay."
+                : state.status === "outcome-unknown"
+                  ? "The Quote outcome is unknown; no success was assumed."
+                  : `Checkout state: ${state.status}`}
           </p>
           {"canRetry" in state && state.canRetry ? (
             <button

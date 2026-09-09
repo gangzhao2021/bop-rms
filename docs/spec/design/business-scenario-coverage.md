@@ -211,3 +211,8 @@ WP-2263 implements an Ordering-owned expiry fence for the WP-2262 partial-commit
 Expiry and late attachment serialize with atomic Audit; Ordering455/455, Quote PostgreSQL5/5,
 Cart PostgreSQL6/6, full verification and forced uncached integration pass.
 Current authorized reconciliation and an explicit browser terminal receipt remain future work.
+
+WP-2264 connects the committed expiry fence to current authorization, an exact HTTP terminal
+receipt and explicit Checkout recovery. Ordering490/490, API326/326, PWA404/404, browser42/42,
+Quote PostgreSQL5/5, full verification and forced uncached integration pass. Generic errors remain
+insufficient to release an unknown request. Commercial and Provider evidence remain gated.

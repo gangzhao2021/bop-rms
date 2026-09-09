@@ -213,6 +213,7 @@ describe("WP-1103/1104 Customer Quote API", () => {
       { cartVersion: 7, price: 1 },
       {},
       { cartVersion: 0 },
+      { cartVersion: 2147483648 },
     ])
       expect((await post(port, body)).status).toBe(400);
     expect(service.calls).toEqual([]);
@@ -264,4 +265,30 @@ describe("WP-1103/1104 Customer Quote API", () => {
   it("defaults to unavailable when the Pricing service is not wired", async () => {
     expect((await post(await listen())).status).toBe(503);
   });
+});
+
+it("returns only a matching closed expiry receipt and no private history", async () => {
+  const service = new Port();
+  service.result = {
+    status: "Expired",
+    resolution: { operationReference: key, cartReference: id(4), cartVersion: 7 },
+  };
+  const port = await listen(service);
+  const response = await post(port);
+  expect(response.status).toBe(410);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "quote_operation_expired", messageKey: "customer.quote.operation_expired" },
+    resolution: service.result.resolution,
+  });
+  for (const resolution of [
+    { operationReference: id(99), cartReference: id(4), cartVersion: 7 },
+    { operationReference: key, cartReference: id(4), cartVersion: 8 },
+    { operationReference: key, cartReference: id(99), cartVersion: 7 },
+    { operationReference: key, cartReference: id(4), cartVersion: 7, private: true },
+  ]) {
+    service.result = { status: "Expired", resolution };
+    expect((await post(port)).status).toBe(503);
+  }
 });

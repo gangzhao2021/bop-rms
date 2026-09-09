@@ -245,6 +245,25 @@ export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutCl
         if (!contextCurrent()) throw new CartClientError("network_unknown");
         if (response.status === 200 || response.status === 201)
           return parseQuote(payload, cartVersion);
+        if (response.status === 410) {
+          const root = exact(payload, ["schemaVersion", "error", "resolution"]);
+          const error = exact(root.error, ["code", "messageKey"]);
+          const resolution = exact(root.resolution, [
+            "operationReference",
+            "cartReference",
+            "cartVersion",
+          ]);
+          if (
+            root.schemaVersion !== 1 ||
+            error.code !== "quote_operation_expired" ||
+            error.messageKey !== "customer.quote.operation_expired" ||
+            resolution.operationReference !== operationReference ||
+            resolution.cartReference !== cartReference ||
+            resolution.cartVersion !== cartVersion
+          )
+            throw new Error("invalid");
+          throw new CartClientError("quote_operation_expired");
+        }
         const errorRoot = exact(payload, ["schemaVersion", "error"]);
         if (errorRoot.schemaVersion !== 1) throw new Error("invalid");
         const error = exact(errorRoot.error, ["code", "messageKey"]);
@@ -398,6 +417,30 @@ export function createCheckoutController(
           : { status: "offline", cart: active.cart, canRetry: false },
       );
     } catch (error) {
+      if (
+        active.contextCurrent() &&
+        error instanceof CartClientError &&
+        error.code === "quote_operation_expired"
+      ) {
+        plan = null;
+        try {
+          const refreshed = await client.loadCart();
+          if (!active.contextCurrent()) {
+            fail(new CartClientError("cart_session_expired"), null);
+            return;
+          }
+          publish(
+            !online
+              ? { status: "offline", cart: refreshed, canRetry: false }
+              : refreshed === null || refreshed.cart.items.length === 0
+                ? { status: "empty" }
+                : { status: "quote-expired", cart: refreshed, canRetry: false },
+          );
+        } catch (refreshError) {
+          fail(refreshError, null);
+        }
+        return;
+      }
       if (
         active.outcomeUnknown ||
         !active.contextCurrent() ||

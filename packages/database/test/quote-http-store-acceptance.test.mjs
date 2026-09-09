@@ -31,11 +31,11 @@ import { input as quoteInput } from "../../rms/pricing/src/tests/price-quote.fix
 const { Client } = pg;
 const id = (n) => `01902262-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Audit", async () => {
-  await withIsolatedDatabase({ caseId: "wp2262_quote_http" }, async (context) => {
+  await withIsolatedDatabase({ caseId: "wp2264_quote_http" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
-    const roles = ["i", "o", "p"].map((kind) => `wp2262_${kind}_${context.runId}`);
-    roles.forEach((role) => assert.match(role, /^wp2262_[iop]_[a-f0-9]+$/u));
+    const roles = ["i", "o", "p"].map((kind) => `wp2264_${kind}_${context.runId}`);
+    roles.forEach((role) => assert.match(role, /^wp2264_[iop]_[a-f0-9]+$/u));
     const [identityRole, orderingRole, pricingRole] = roles;
     let active = 0;
     let sequence = 1000;
@@ -59,7 +59,7 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
           await client.connect();
           active++;
           let committed = false;
-          let wrote = false;
+          let wrote = null;
           try {
             await client.query("BEGIN");
             await client.query(`SET LOCAL ROLE ${role}`);
@@ -68,14 +68,20 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
             const result = await action({
               async query(sql, values) {
                 if (
-                  (kind === "pricing" &&
-                    sql.startsWith("INSERT INTO rms_pricing.price_quote_request")) ||
-                  (kind === "expiry" &&
-                    sql.startsWith("INSERT INTO rms_ordering.cart_quote_expiry_record")) ||
-                  (kind === "attachment" &&
-                    sql.startsWith("INSERT INTO rms_ordering.cart_quote_attachment"))
+                  kind === "pricing" &&
+                  sql.startsWith("INSERT INTO rms_pricing.price_quote_request")
                 )
-                  wrote = true;
+                  wrote = "pricing";
+                if (
+                  kind === "attachment" &&
+                  sql.startsWith("INSERT INTO rms_ordering.cart_quote_attachment")
+                )
+                  wrote = "attachment";
+                if (
+                  ["attachment", "expiry"].includes(kind) &&
+                  sql.startsWith("INSERT INTO rms_ordering.cart_quote_expiry_record")
+                )
+                  wrote = "expiry";
                 return client.query(sql, [...values]);
               },
             });
@@ -87,7 +93,7 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
               )
             ).rows[0];
             assert.ok(!cleared.brand && !cleared.store);
-            if (wrote && loseAck === kind) {
+            if (wrote && loseAck === wrote) {
               loseAck = null;
               throw new Error("synthetic lost commit acknowledgement");
             }
@@ -305,6 +311,14 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
       assert.equal(seeded.aggregate.aggregateVersion, 2);
       const baseline = await counts();
       const port = createCustomerQuoteComposition({
+        expiryAudit: (record) =>
+          audit(
+            "ORDERING_CART_QUOTE_EXPIRE",
+            "QUOTE_VALIDITY_ENDED",
+            "OrderingCart",
+            record.cartReference,
+            record.expiredAt,
+          ),
         scope,
         session: { credentials, binding: { validate: async () => "Current" } }, // Synthetic Store/QR authority only.
         sessionTransactions: runner(identityRole),
@@ -673,6 +687,39 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
         storeReference: id(99),
       });
       assert.equal(await foreignExpiry.resolveOperation(id(32)), null);
+      const expiredHttp = await send({ operation: id(32) });
+      assert.equal(expiredHttp.status, 410);
+      const terminalBody = await expiredHttp.json();
+      assert.deepEqual(terminalBody, {
+        schemaVersion: 1,
+        error: { code: "quote_operation_expired", messageKey: "customer.quote.operation_expired" },
+        resolution: {
+          operationReference: id(32),
+          cartReference: source.cartReference,
+          cartVersion: 2,
+        },
+      });
+      for (const privateValue of [
+        sessionCredential,
+        csrfCredential,
+        id(1),
+        scope.brandReference,
+        scope.storeReference,
+      ])
+        assert.equal(JSON.stringify(terminalBody).includes(privateValue), false);
+      await pending(id(35));
+      const beforeHttpExpiry = await counts();
+      loseAck = "expiry";
+      const lostExpiry = await send({ operation: id(35) });
+      assert.equal(lostExpiry.status, 503);
+      await lostExpiry.text();
+      assert.equal((await counts()).audits, beforeHttpExpiry.audits + 1);
+      const recoveredExpiry = await send({ operation: id(35) });
+      assert.equal(recoveredExpiry.status, 410);
+      assert.equal(recoveredExpiry.headers.get("cache-control"), "no-store");
+      assert.equal((await recoveredExpiry.json()).resolution.operationReference, id(35));
+      assert.equal((await counts()).audits, beforeHttpExpiry.audits + 1);
+      assert.equal(await quoteStore.resolveOperation(id(35)), null);
       const finalCounts = await counts();
       const finalCandidates = candidates;
       await sessions.revoke({
@@ -683,6 +730,9 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
         operationReference: id(40),
         operationIntentHash: "f".repeat(64),
       });
+      const revokedExpiry = await send({ operation: id(35) });
+      assert.equal(revokedExpiry.status, 404);
+      await revokedExpiry.text();
       const revoked = await send();
       assert.equal(revoked.status, 404);
       await revoked.text();

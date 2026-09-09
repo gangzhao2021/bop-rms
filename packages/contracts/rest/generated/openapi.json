@@ -50,6 +50,110 @@
           "schemaVersion"
         ],
         "additionalProperties": {}
+      },
+      "QuoteErrorResponse": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "quote_request_invalid",
+                  "quote_not_found",
+                  "quote_version_conflict",
+                  "quote_idempotency_conflict",
+                  "quote_configuration_invalid",
+                  "quote_service_unavailable"
+                ]
+              },
+              "messageKey": {
+                "type": "string",
+                "pattern": "^customer\\.quote\\.[a-z_]+$/u"
+              }
+            },
+            "required": [
+              "code",
+              "messageKey"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "QuoteOperationExpiredResponse": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "quote_operation_expired"
+                ]
+              },
+              "messageKey": {
+                "type": "string",
+                "enum": [
+                  "customer.quote.operation_expired"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "messageKey"
+            ],
+            "additionalProperties": false
+          },
+          "resolution": {
+            "type": "object",
+            "properties": {
+              "operationReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "cartReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "cartVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              }
+            },
+            "required": [
+              "operationReference",
+              "cartReference",
+              "cartVersion"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "error",
+          "resolution"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -590,6 +694,7 @@
     },
     "/api/v1/carts/{cart_id}/quote": {
       "post": {
+        "description": "Current Guest Session and exact Store/Cart authorization required. Ordering owns the expiry resolution; Checkout consumes this no-store, request-bound receipt. Internal scoped references only; no credentials or personal facts in responses. Repeat the original operation while unknown. A persisted expiry permits an explicit new operation; it never renews the original Quote.",
         "operationId": "quoteCart",
         "parameters": [
           {
@@ -605,8 +710,7 @@
           {
             "schema": {
               "type": "string",
-              "format": "uuid",
-              "example": "018f0f58-767a-7f3b-a1d0-000000000001"
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
             },
             "required": true,
             "name": "idempotency-key",
@@ -615,11 +719,40 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^\"[1-9][0-9]{0,8}\"$/u"
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
             },
             "required": true,
-            "name": "if-match",
+            "name": "x-csrf-token",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "same-origin"
+              ]
+            },
+            "required": true,
+            "name": "sec-fetch-site",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "__Host-bop-guest",
+            "in": "cookie"
           }
         ],
         "requestBody": {
@@ -627,8 +760,17 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {},
-                "additionalProperties": {}
+                "properties": {
+                  "cartVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  }
+                },
+                "required": [
+                  "cartVersion"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -644,12 +786,22 @@
               }
             }
           },
+          "201": {
+            "description": "Original immutable Quote created or replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Safe request rejection",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/QuoteErrorResponse"
                 }
               }
             }
@@ -664,12 +816,42 @@
               }
             }
           },
+          "404": {
+            "description": "Current Session or Cart not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
             "description": "Idempotency or expected-version conflict",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/QuoteErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Original operation is durably expired; late attachment is fenced. Explicit new operation is allowed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOperationExpiredResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Quote configuration invalid; not an expiry receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteErrorResponse"
                 }
               }
             }
@@ -680,6 +862,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Outcome unavailable or unknown; preserve original operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteErrorResponse"
                 }
               }
             }

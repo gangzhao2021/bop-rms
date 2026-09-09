@@ -103,3 +103,8 @@ export {
   createPostgresCartQuoteExpiryStore,
   type CartQuoteExpiryResult,
 } from "./infrastructure/persistence/cart-quote-expiry-store.js";
+export {
+  createPickupCartQuoteExpiryService,
+  type PickupCartQuoteExpiryOptions,
+  type PickupCartQuoteExpiryResult,
+} from "./application/pickup-cart-quote-expiry-service.js";
