@@ -9,6 +9,7 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresPickupCartBindingStore,
+  createPickupCartReadService,
   createPostgresCartQueryStore,
 } from "../../rms/ordering/src/index.ts";
 import {
@@ -534,6 +535,39 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
         clock = 702;
         const repeated = await send("complete", publishedCookie, preparedBody.candidateCsrfToken);
         assert.equal(repeated.status, 200);
+        const reader = createPickupCartReadService({
+          sessions: authorization,
+          binding: httpOwner,
+          scope,
+          now: () => at(clock),
+        });
+        const readCredential = pendingCookie.split("=")[1];
+        const sessionBeforeRead = await sessions.resolve(
+          credentials.hashCredential("Session", readCredential),
+        );
+        const currentRead = await reader.read({ sessionCredential: readCredential });
+        assert.ok(currentRead);
+        assert.equal(currentRead.effectiveStatus, "Expired");
+        assert.equal(currentRead.cart.lifecycle.status, "Active");
+        assert.equal(currentRead.cart.createdAt, at(401));
+        assert.deepEqual(
+          await reader.read({
+            sessionCredential: readCredential,
+            cartReference: currentRead.cart.cartReference,
+          }),
+          currentRead,
+        );
+        assert.equal(
+          await reader.read({ sessionCredential: readCredential, cartReference: id(9999) }),
+          null,
+        );
+        await assert.rejects(reader.read({ sessionCredential: httpCredential }), {
+          code: "CART_PERMISSION_DENIED",
+        });
+        assert.deepEqual(
+          await sessions.resolve(credentials.hashCredential("Session", readCredential)),
+          sessionBeforeRead,
+        );
         assert.deepEqual(await repeated.json(), completedBody);
         assert.deepEqual(await counts(), {
           carts: beforeHttp.carts + 1,

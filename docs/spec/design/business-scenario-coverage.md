@@ -96,3 +96,17 @@ a demo injects data, a command name exists or the Screen Registry passes its str
 New in-scope business scenarios must be added here before claiming overall design coverage. A
 negative source result, blocked gate or dependency is recorded explicitly with its owner and next
 action in the [decision register](./README.md); no blank cell is interpreted as not applicable.
+
+### BC-02 implementation evidence after the baseline
+
+WP-2228 accepted shared Dining Session ownership and credential recovery. WP-2234–2240 implement
+initial Pickup credential preparation, persistence, activation and same-origin transport; they do
+not implement general basket recovery or the browser journey. WP-2241 adds Ordering's authorized
+current-binding reader: live Identity resolution before and after reading, exact immutable Pickup
+creator/scope, uniform missing/other-reference result and effective expiry without Session renewal
+or Cart mutation. The owning [WP-2241](../work-packages/WP-2241.md) records actual final verification.
+Unit acceptance is `packages/rms/ordering/src/tests/pickup-cart-read-service.test.ts`; real isolated
+Identity/Ordering/HTTP composition is `packages/database/test/cart-binding-store-acceptance.test.mjs`.
+Store/QR and policy evidence remains synthetic. Safe display DTO production, PWA recovery,
+DineIn shared binding, replacement/cancellation and production evidence remain unfinished; BC-02
+is not complete merely because this internal reader exists.

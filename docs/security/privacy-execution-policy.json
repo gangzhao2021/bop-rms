@@ -1,6 +1,11 @@
 {
   "schemaVersion": 1,
-  "authority": ["BOP-RMS Handoff 86.9", "BOP-RMS Handoff 87.10.1", "BOP-RMS Handoff 87.10.2"],
+  "authority": [
+    "BOP-RMS Handoff 86.9",
+    "BOP-RMS Handoff 87.10.1",
+    "BOP-RMS Handoff 87.10.2",
+    "Repository-accepted WP-2234 and WP-2240 credential handoff"
+  ],
   "unknownClassification": "Confidential",
   "prohibitedData": ["PAN", "CVV", "raw-authentication-credential"],
   "necessaryCookies": [
@@ -126,5 +131,22 @@
       "legalHoldExtends": false
     }
   ],
-  "externalEvidenceRequired": true
+  "externalEvidenceRequired": true,
+  "necessaryCookieFamilies": [
+    {
+      "prefix": "__Host-bop-guest-candidate-",
+      "suffixFormat": "uuid-v7-operation-reference",
+      "purpose": "guest-binding-candidate-handoff",
+      "sourceFiles": ["apps/api/src/customer-cart-binding.ts"],
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null,
+      "persistence": "browser-session",
+      "serverAuthority": "Identity preparation and Session deadlines",
+      "clearOn": "successful activation or completion of the same operation",
+      "webStorage": false
+    }
+  ]
 }
