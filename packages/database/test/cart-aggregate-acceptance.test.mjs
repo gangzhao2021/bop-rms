@@ -28,6 +28,7 @@ async function prove(context) {
     );
     assert.deepEqual(tables.rows, [
       { table_name: "cart" },
+      { table_name: "cart_binding_record" },
       { table_name: "cart_lifecycle_operation_record" },
       { table_name: "cart_line" },
       { table_name: "cart_operation_record" },
@@ -50,6 +51,7 @@ async function prove(context) {
       `SELECT relname, relforcerowsecurity FROM pg_class
        WHERE oid IN (
          'rms_ordering.cart'::regclass,
+         'rms_ordering.cart_binding_record'::regclass,
          'rms_ordering.cart_lifecycle_operation_record'::regclass,
          'rms_ordering.cart_line'::regclass,
          'rms_ordering.cart_operation_record'::regclass,

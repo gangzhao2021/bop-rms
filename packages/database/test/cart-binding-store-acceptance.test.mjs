@@ -1,0 +1,453 @@
+import assert from "node:assert/strict";
+import pg from "pg";
+import { it } from "vitest";
+import {
+  createPostgresPickupCartBindingStore,
+  createPostgresCartQueryStore,
+} from "../../rms/ordering/src/index.ts";
+import {
+  createGuestSessionRecord,
+  createGuestBindingService,
+  createGuestSessionCredentialProvider,
+  createGuestBindingCredentialProvider,
+  GuestSessionService,
+  createPostgresGuestSessionEntryStore,
+  createPostgresGuestBindingStore,
+} from "../../bop/identity/src/index.ts";
+import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
+import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+const { Client } = pg;
+const id = (n) => `018f5500-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+const at = (n) => new Date(Date.parse("2026-09-08T12:00:00.000Z") + n * 1000).toISOString();
+const scope = { brandReference: id(2), storeReference: id(3) };
+function guest(n) {
+  return {
+    ...scope,
+    sessionReference: id(n),
+    status: "Active",
+    version: 1,
+    publicStoreReference: id(4),
+    publicTableReference: null,
+    channel: "Pickup",
+    locale: "en-CA",
+    qrReference: id(5),
+    qrRevocationVersion: 1,
+    diningState: "ContextOnly",
+    diningSessionReference: null,
+    diningParticipantReference: null,
+    createdAt: at(-60),
+    lastSeenAt: at(-60),
+    idleExpiresAt: at(14340),
+    absoluteExpiresAt: at(86340),
+    orderClosedAt: null,
+    closureExpiresAt: null,
+    rotatedFromGuestSessionReference: null,
+    revocationReason: null,
+    revokedAt: null,
+  };
+}
+it("composes actual Identity and Ordering stores with atomic, isolated and repeatable binding", async () => {
+  await withIsolatedDatabase({ caseId: "wp2237_binding" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const identityRole = `wp2237_i_${context.runId}`;
+    const orderingRole = `wp2237_o_${context.runId}`;
+    for (const role of [identityRole, orderingRole]) assert.match(role, /^wp2237_[io]_[a-f0-9]+$/u);
+    let active = 0;
+    let generated = 1000;
+    let clock = 0;
+    try {
+      for (const role of [identityRole, orderingRole]) {
+        await admin.query(
+          `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`,
+        );
+        await admin.query(`GRANT USAGE ON SCHEMA platform_helpers,platform_audit TO ${role}`);
+        await admin.query(`GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ${role}`);
+        await admin.query(
+          `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
+        );
+        await admin.query(`GRANT SELECT,INSERT ON platform_audit.audit_record TO ${role}`);
+        await admin.query(
+          `GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`,
+        );
+      }
+      await admin.query(`GRANT USAGE ON SCHEMA bop_identity TO ${identityRole}`);
+      await admin.query(
+        `GRANT SELECT,INSERT ON bop_identity.guest_session,bop_identity.guest_session_operation,bop_identity.guest_binding_preparation TO ${identityRole}`,
+      );
+      await admin.query(
+        `GRANT UPDATE (status,revocation_reason,revoked_at,version) ON bop_identity.guest_session TO ${identityRole}`,
+      );
+      await admin.query(`GRANT USAGE ON SCHEMA rms_ordering TO ${orderingRole}`);
+      await admin.query(`GRANT SELECT,INSERT,UPDATE ON rms_ordering.cart TO ${orderingRole}`);
+      await admin.query(`GRANT SELECT ON rms_ordering.cart_line TO ${orderingRole}`);
+      await admin.query(
+        `GRANT SELECT,INSERT ON rms_ordering.cart_binding_record TO ${orderingRole}`,
+      );
+      function runner(role, { failAudit = false, loseAck = false } = {}) {
+        return {
+          async run(action) {
+            const client = new Client({
+              ...context.clientConfig,
+              query_timeout: 5000,
+              connectionTimeoutMillis: 2000,
+            });
+            await client.connect();
+            active++;
+            let committed = false;
+            try {
+              await client.query("BEGIN");
+              await client.query(`SET LOCAL ROLE ${role}`);
+              await client.query("SET LOCAL lock_timeout='5s'");
+              await client.query("SET LOCAL statement_timeout='5s'");
+              const result = await action({
+                async query(sql, values) {
+                  if (failAudit && sql.startsWith("UPDATE platform_audit.audit_chain_head"))
+                    throw new Error("synthetic Audit failure");
+                  return client.query(sql, [...values]);
+                },
+              });
+              await client.query("COMMIT");
+              committed = true;
+              const cleared = (
+                await client.query(
+                  "SELECT current_setting('bop.brand_id',true) AS brand,current_setting('bop.store_id',true) AS store",
+                )
+              ).rows[0];
+              assert.ok(!cleared.brand && !cleared.store);
+              if (loseAck) throw new Error("synthetic lost commit acknowledgement");
+              return result;
+            } catch (error) {
+              if (!committed) await client.query("ROLLBACK");
+              throw error;
+            } finally {
+              await client.end();
+              active--;
+            }
+          },
+        };
+      }
+      const auditRecord = (descriptor, identity = false) => ({
+        auditId: id(generated++),
+        brandId: scope.brandReference,
+        storeId: scope.storeReference,
+        actor: { type: "System" },
+        actionCode: `${identity ? "IDENTITY_GUEST" : "ORDERING_CART"}_BINDING_${descriptor.action.toUpperCase()}`,
+        targetType: identity ? "GuestBindingPreparation" : "OrderingCart",
+        targetId: identity ? descriptor.operationReference : descriptor.cartReference,
+        reasonCode: identity ? "AUTHORIZED_GUEST_BINDING" : "AUTHORIZED_CART_BINDING",
+        correlationId: id(999),
+        occurredAt: descriptor.occurredAt,
+        sourceChannel: "CUSTOMER_PWA",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "AUDIT_DEFAULT",
+        retentionPolicyVersion: 1,
+      });
+      const options = {
+        ...scope,
+        policy: {
+          policyVersionReference: id(10),
+          policyDigest: `sha256:${"a".repeat(64)}`,
+          idleTimeoutSeconds: 60,
+          absoluteTimeoutSeconds: 86400,
+          validFrom: at(-60),
+          validUntil: at(86400),
+        },
+        sourceChannel: "Qr",
+        generateReference: () => id(generated++),
+        now: () => at(clock),
+        audit: auditRecord,
+      };
+      const owner = (behavior = {}) =>
+        createPostgresPickupCartBindingStore(runner(orderingRole, behavior), options);
+      const counts = async () =>
+        (
+          await admin.query(`SELECT
+        (SELECT count(*)::integer FROM rms_ordering.cart) AS carts,
+        (SELECT count(*)::integer FROM rms_ordering.cart_binding_record) AS bindings,
+        (SELECT count(*)::integer FROM platform_audit.audit_record) AS audits`)
+        ).rows[0];
+      const prepare = (n, predecessor = n + 3) => ({
+        ...scope,
+        operationReference: id(n),
+        targetReference: id(n + 1),
+        sessionReference: id(n + 2),
+        predecessorSessionReference: id(predecessor),
+        acknowledgedAt: at(0),
+        observedAt: at(1),
+        validUntil: at(300),
+      });
+      const p = prepare(100);
+      await assert.rejects(owner({ failAudit: true }).prepare(p), {
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { carts: 0, bindings: 0, audits: 0 });
+      const [first, concurrent] = await Promise.all([
+        owner().prepare(p),
+        owner().prepare({ ...p, observedAt: at(2) }),
+      ]);
+      assert.deepEqual(first, concurrent);
+      assert.deepEqual(await owner().prepare({ ...p, observedAt: at(3) }), first);
+      assert.deepEqual(await counts(), { carts: 1, bindings: 1, audits: 1 });
+      assert.equal(await owner().current(guest(102), at(3)), null);
+      const reader = createPostgresCartQueryStore(runner(orderingRole), scope);
+      const original = await reader.load(id(101));
+      assert.equal(original.createdByActorReference, id(102));
+      assert.equal(original.items.length, 0);
+      assert.equal(
+        original.lifecycle.idleExpiresAt,
+        at(Date.parse(first.preparedAt) === Date.parse(at(1)) ? 61 : 62),
+      );
+      for (const change of [
+        { targetReference: id(999) },
+        { sessionReference: id(999) },
+        { predecessorSessionReference: id(999) },
+        { acknowledgedAt: at(-1) },
+        { validUntil: at(301) },
+        { storeReference: id(99) },
+      ]) {
+        await assert.rejects(owner().prepare({ ...p, ...change }), {
+          code: "CART_DEPENDENCY_UNAVAILABLE",
+        });
+      }
+      const completion = {
+        ...scope,
+        operationReference: id(100),
+        targetReference: id(101),
+        sessionReference: id(102),
+        activatedAt: at(4),
+      };
+      clock = 5;
+      await assert.rejects(owner({ failAudit: true }).activate(completion), {
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { carts: 1, bindings: 1, audits: 1 });
+      await assert.rejects(owner({ loseAck: true }).activate(completion), {
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      assert.deepEqual(
+        await Promise.all([owner().activate(completion), owner().activate(completion)]),
+        ["Activated", "Activated"],
+      );
+      assert.deepEqual(await owner().current(guest(102), at(5)), original);
+      assert.equal(
+        await owner().reserveTarget({
+          session: guest(102),
+          operationReference: id(110),
+          observedAt: at(5),
+        }),
+        null,
+      );
+      assert.equal(await owner().current(guest(103), at(5)), null);
+      clock = 301;
+      assert.equal(await owner().activate(completion), "Activated");
+      assert.deepEqual(await owner().current(guest(102), at(clock)), original);
+      await assert.rejects(owner().activate({ ...completion, activatedAt: at(6) }), {
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { carts: 1, bindings: 2, audits: 2 });
+      // Another candidate can prepare, but cannot publish for the same already-consumed predecessor.
+      await owner().prepare(prepare(120, 103));
+      await assert.rejects(
+        owner().activate({
+          ...scope,
+          operationReference: id(120),
+          targetReference: id(121),
+          sessionReference: id(122),
+          activatedAt: at(4),
+        }),
+        { code: "CART_DEPENDENCY_UNAVAILABLE" },
+      );
+      assert.equal(await owner().current(guest(122), at(301)), null);
+      // Expired unactivated records do not block a fresh target reservation for the predecessor.
+      await owner().prepare(prepare(140));
+      assert.ok(
+        await owner().reserveTarget({
+          session: guest(143),
+          operationReference: id(150),
+          observedAt: at(301),
+        }),
+      );
+      for (const sql of [
+        "UPDATE rms_ordering.cart_binding_record SET prepared_at=prepared_at",
+        "DELETE FROM rms_ordering.cart_binding_record",
+        "TRUNCATE rms_ordering.cart_binding_record",
+      ]) {
+        await assert.rejects(admin.query(sql), (error) => error.code === "55000");
+      }
+      await assert.rejects(
+        admin.query(
+          `INSERT INTO rms_ordering.cart_binding_record
+        (operation_id,revision,brand_id,store_id,cart_id,guest_session_id,predecessor_session_id,acknowledged_at,prepared_at,valid_until,activated_at)
+        SELECT operation_id,2,brand_id,store_id,cart_id,$1,predecessor_session_id,acknowledged_at,prepared_at,valid_until,$2
+        FROM rms_ordering.cart_binding_record WHERE operation_id=$3 AND revision=1`,
+          [id(998), at(4), id(140)],
+        ),
+        (error) => error.code === "23503",
+      );
+      await runner(orderingRole).run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [id(2), id(99)],
+        );
+        assert.deepEqual(
+          (await tx.query("SELECT cart_id FROM rms_ordering.cart_binding_record", [])).rows,
+          [],
+        );
+      });
+      // A losing candidate cannot leave a second Cart or orphaned Audit; FK checks run at commit.
+      const beforeConflict = await counts();
+      await assert.rejects(owner().prepare({ ...prepare(160), sessionReference: id(142) }), {
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), beforeConflict);
+      await admin.query("BEGIN");
+      await admin.query(
+        `INSERT INTO rms_ordering.cart_binding_record
+        (operation_id,revision,brand_id,store_id,cart_id,guest_session_id,predecessor_session_id,acknowledged_at,prepared_at,valid_until)
+        VALUES ($1,1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [id(180), id(2), id(3), id(181), id(182), id(183), at(0), at(1), at(300)],
+      );
+      await assert.rejects(admin.query("COMMIT"), (error) => error.code === "23503");
+      await admin.query("ROLLBACK");
+      assert.deepEqual(await counts(), beforeConflict);
+      // The roles cannot cross private Domain boundaries, even in a combined application process.
+      await assert.rejects(
+        runner(orderingRole).run((tx) =>
+          tx.query("SELECT guest_session_id FROM bop_identity.guest_session", []),
+        ),
+        (error) => error.code === "42501",
+      );
+      await assert.rejects(
+        runner(identityRole).run((tx) => tx.query("SELECT cart_id FROM rms_ordering.cart", [])),
+        (error) => error.code === "42501",
+      );
+
+      const credentials = createGuestSessionCredentialProvider(new Uint8Array(32).fill(9));
+      const recovery = createGuestBindingCredentialProvider(new Uint8Array(32).fill(9));
+      const sessions = createPostgresGuestSessionEntryStore(runner(identityRole), scope);
+      const bindings = createPostgresGuestBindingStore(
+        runner(identityRole),
+        scope,
+        {
+          append: (tx, descriptor) =>
+            appendAuditRecordInTransaction(tx, auditRecord(descriptor, true)),
+        },
+        credentials.equals,
+      );
+      const oldCredential = credentials.generateCredential("Session");
+      const oldCsrf = credentials.generateCredential("Csrf");
+      const oldRecord = createGuestSessionRecord({
+        session: guest(500),
+        sessionSelectorHash: credentials.hashCredential("Session", oldCredential),
+        csrfSelectorHash: credentials.hashCredential("Csrf", oldCsrf),
+        operationReference: id(501),
+        operationIntentHash: "a".repeat(64),
+      });
+      await sessions.create({ record: oldRecord });
+      // Store/QR authority is synthetic evidence; credential authorization and both owner stores are real.
+      const authorization = new GuestSessionService({
+        credentials,
+        store: sessions,
+        binding: {
+          async validate() {
+            return "Current";
+          },
+        },
+        admission: {
+          async consume() {
+            return null;
+          },
+        },
+      });
+      const serviceOptions = {
+        credentials,
+        recovery,
+        sessions,
+        bindings,
+        preparationLifetimeSeconds: 300,
+        now: () => at(clock),
+        authorization,
+        owner: owner(),
+      };
+      clock = 0;
+      const input = {
+        operationReference: id(502),
+        sessionCredential: oldCredential,
+        csrfCredential: oldCsrf,
+      };
+      const before = await counts();
+      const issued = await createGuestBindingService(serviceOptions).prepare(input);
+      assert.equal((await counts()).carts, before.carts);
+      const activation = {
+        ...input,
+        candidateSessionCredential: issued.sessionCredential,
+        candidateCsrfCredential: issued.csrfCredential,
+        recoveryProof: issued.recoveryProof,
+      };
+      clock = 1;
+      const interruptedOwner = owner();
+      const interrupted = createGuestBindingService({
+        ...serviceOptions,
+        owner: {
+          ...interruptedOwner,
+          activate: (receipt) => owner({ failAudit: true }).activate(receipt),
+        },
+      });
+      await assert.rejects(interrupted.activate(activation), { code: "GUEST_SESSION_UNAVAILABLE" });
+      assert.equal(
+        (await sessions.resolve(oldRecord.sessionSelectorHash)).session.status,
+        "Revoked",
+      );
+      const candidate = (
+        await sessions.resolve(credentials.hashCredential("Session", issued.sessionCredential))
+      ).session;
+      assert.equal(await owner().current(candidate, at(1)), null);
+      await assert.rejects(interrupted.activate(activation), { code: "GUEST_SESSION_UNAVAILABLE" });
+      const completedInput = {
+        operationReference: id(502),
+        sessionCredential: issued.sessionCredential,
+        csrfCredential: issued.csrfCredential,
+      };
+      clock = 301;
+      const resumed = createGuestBindingService({ ...serviceOptions, owner: owner() });
+      assert.equal((await resumed.complete(completedInput)).status, "Activated");
+      const cart = await owner().current(candidate, at(clock));
+      assert.equal(cart.createdByActorReference, candidate.sessionReference);
+      assert.equal(cart.createdAt, at(1));
+      assert.equal(cart.lifecycle.idleExpiresAt, at(61)); // Completion never renews expired Cart lifetime.
+      assert.equal((await resumed.complete(completedInput)).status, "Activated");
+      assert.deepEqual(await counts(), {
+        carts: before.carts + 1,
+        bindings: before.bindings + 2,
+        audits: before.audits + 5,
+      });
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::integer AS n FROM bop_identity.guest_binding_preparation",
+          )
+        ).rows[0].n,
+        3,
+      );
+      const stored = JSON.stringify(
+        (await admin.query("SELECT * FROM rms_ordering.cart_binding_record")).rows,
+      );
+      for (const raw of [
+        oldCredential,
+        oldCsrf,
+        issued.sessionCredential,
+        issued.csrfCredential,
+        issued.recoveryProof,
+      ])
+        assert.equal(stored.includes(raw), false);
+      assert.equal(active, 0);
+    } finally {
+      for (const role of [identityRole, orderingRole]) {
+        await admin.query(`DROP OWNED BY ${role}`);
+        await admin.query(`DROP ROLE ${role}`);
+      }
+      await admin.end();
+    }
+  });
+});

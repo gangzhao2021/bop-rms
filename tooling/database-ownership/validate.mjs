@@ -199,6 +199,13 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/cart-item-command-store.ts";
+        const acceptedPickupBindingAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "cart_line", "cart_binding_record"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/pickup-cart-binding-store.ts";
         if (
           (moduleRelative.startsWith("src/infrastructure/persistence/") ||
             moduleRelative.startsWith("migrations/") ||
@@ -209,7 +216,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPublishedMenuAsset &&
           !acceptedCartQueryAsset &&
           !acceptedCartOperationAsset &&
-          !acceptedCartItemWriterAsset
+          !acceptedCartItemWriterAsset &&
+          !acceptedPickupBindingAsset
         )
           diagnostics.push(
             diag(

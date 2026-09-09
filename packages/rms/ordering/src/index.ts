@@ -69,3 +69,9 @@ export {
   type CartItemCommandStore,
   type CartItemWriteTransactionRunner,
 } from "./infrastructure/persistence/cart-item-command-store.js";
+
+export {
+  createPostgresPickupCartBindingStore,
+  type PickupCartBindingStore,
+  type PickupCartBindingOptions,
+} from "./infrastructure/persistence/pickup-cart-binding-store.js";
