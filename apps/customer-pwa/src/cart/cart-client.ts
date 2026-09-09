@@ -1,5 +1,6 @@
 import { CartClientError, type CartErrorCode, type CartItemDraft, type CartView } from "./types.js";
 import {
+  captureCustomerCsrfContext,
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
@@ -199,7 +200,6 @@ function parse(response: Response, payload: unknown): CartView | null {
       ? (error?.code as CartErrorCode)
       : "cart_service_unavailable";
   if (code === "cart_not_found" && response.status === 404) return null;
-  if (code === "cart_session_expired") setCustomerCartCsrfCredential(null);
   const retryHeader = response.headers.get("retry-after");
   throw new CartClientError(code, {
     ...(Number.isSafeInteger(error?.currentVersion)
@@ -219,6 +219,7 @@ function parse(response: Response, payload: unknown): CartView | null {
 }
 
 async function request(url: string, init: RequestInit): Promise<CartView | null> {
+  const contextCurrent = captureCustomerCsrfContext();
   const controller = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let rejectCancellation: (error: CartClientError) => void = () => undefined;
@@ -233,7 +234,8 @@ async function request(url: string, init: RequestInit): Promise<CartView | null>
   if (init.signal?.aborted) cancel();
   else init.signal?.addEventListener("abort", cancel, { once: true });
   const operation = async () => {
-    if (controller.signal.aborted) throw new CartClientError("network_unknown");
+    if (controller.signal.aborted || !contextCurrent())
+      throw new CartClientError("network_unknown");
     const response = await globalThis.fetch(url, {
       ...init,
       signal: controller.signal,
@@ -243,8 +245,8 @@ async function request(url: string, init: RequestInit): Promise<CartView | null>
       redirect: "error",
       referrerPolicy: "no-referrer",
     });
-    // A late, abort-insensitive response must not parse a Session error or acquire a reader.
-    if (controller.signal.aborted) {
+    // An aborted or superseded response must not reveal an old Cart or clear newer Session state.
+    if (controller.signal.aborted || !contextCurrent()) {
       void response.body?.cancel().catch(() => undefined);
       throw new CartClientError("network_unknown");
     }
@@ -256,14 +258,16 @@ async function request(url: string, init: RequestInit): Promise<CartView | null>
     const chunks: Uint8Array[] = [];
     let size = 0;
     while (true) {
-      if (controller.signal.aborted) throw new CartClientError("network_unknown");
+      if (controller.signal.aborted || !contextCurrent())
+        throw new CartClientError("network_unknown");
       const part = await reader.read();
       if (part.done) break;
       size += part.value.byteLength;
       if (size > 16 * 1024 * 1024) throw new CartClientError("cart_service_unavailable");
       chunks.push(part.value);
     }
-    if (controller.signal.aborted) throw new CartClientError("network_unknown");
+    if (controller.signal.aborted || !contextCurrent())
+      throw new CartClientError("network_unknown");
     const bytes = new Uint8Array(size);
     let offset = 0;
     for (const chunk of chunks) {
@@ -279,9 +283,13 @@ async function request(url: string, init: RequestInit): Promise<CartView | null>
     return parse(response, payload);
   };
   try {
-    return await Promise.race([operation(), cancellation]);
+    const result = await Promise.race([operation(), cancellation]);
+    if (!contextCurrent()) throw new CartClientError("network_unknown");
+    return result;
   } catch (error) {
+    if (!contextCurrent()) throw new CartClientError("network_unknown");
     if (error instanceof CartClientError) {
+      if (error.code === "cart_session_expired") setCustomerCartCsrfCredential(null);
       // An unavailable or malformed write response may follow a committed command.
       if (init.method !== "GET" && error.code === "cart_service_unavailable")
         throw new CartClientError("network_unknown");
@@ -304,15 +312,18 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
     loadCurrent: (signal?: AbortSignal) =>
       request("/bff/customer/cart", { method: "GET", ...(signal === undefined ? {} : { signal }) }),
     async createCart(input) {
+      const contextCurrent = captureCustomerCsrfContext();
       const result = await request("/api/v1/carts", {
         method: "POST",
         headers: createHeaders(input.operationReference),
         body: "{}",
       });
+      if (!contextCurrent()) throw new CartClientError("network_unknown");
       if (result === null) throw new CartClientError("cart_not_found");
       return result;
     },
     async addItem(input) {
+      const contextCurrent = captureCustomerCsrfContext();
       const result = await request(`/api/v1/carts/${input.cart.cart.cartReference}/items`, {
         method: "POST",
         headers: headers({
@@ -324,10 +335,12 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
           ...input.draft,
         }),
       });
+      if (!contextCurrent()) throw new CartClientError("network_unknown");
       if (result === null) throw new CartClientError("cart_not_found");
       return result;
     },
     async updateItem(input) {
+      const contextCurrent = captureCustomerCsrfContext();
       const result = await request(
         `/api/v1/carts/${input.cart.cart.cartReference}/items/${input.cartItemReference}`,
         {
@@ -339,10 +352,12 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
           body: JSON.stringify(input.draft),
         },
       );
+      if (!contextCurrent()) throw new CartClientError("network_unknown");
       if (result === null) throw new CartClientError("cart_not_found");
       return result;
     },
     async removeItem(input) {
+      const contextCurrent = captureCustomerCsrfContext();
       const result = await request(
         `/api/v1/carts/${input.cart.cart.cartReference}/items/${input.cartItemReference}`,
         {
@@ -353,6 +368,7 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
           }),
         },
       );
+      if (!contextCurrent()) throw new CartClientError("network_unknown");
       if (result === null) throw new CartClientError("cart_not_found");
       return result;
     },

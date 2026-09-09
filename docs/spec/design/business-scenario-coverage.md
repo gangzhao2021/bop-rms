@@ -156,3 +156,8 @@ item writes, shared DineIn and general reload recovery are separate.
 
 [WP-2251](../work-packages/WP-2251.md) adds current-Session/CSRF removal authorization and optional
 local HTTP write composition. Current Catalog eligibility for Add/Update remains separate.
+
+### BC-03 foreground response isolation
+
+[WP-2252](../work-packages/WP-2252.md) prevents old Cart responses from changing a newer
+Session context or returning an old Cart after credential replacement. Reload recovery stays separate.

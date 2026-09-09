@@ -474,3 +474,226 @@ it("does not parse a session-expiry body completed by timeout cancellation", asy
   expect(body.locked).toBe(false);
   expect(vi.getTimerCount()).toBe(0);
 });
+
+describe("Cart response Session isolation", () => {
+  const original = "c".repeat(43);
+  const replacement = "d".repeat(43);
+  function deferredResponse() {
+    let resolve: (value: Response) => void = () => undefined;
+    let reject: (error: Error) => void = () => undefined;
+    const promise = new Promise<Response>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  }
+  function response(status: number) {
+    return new Response(
+      JSON.stringify(
+        status === 200
+          ? cart()
+          : { error: { code: status === 401 ? "cart_session_expired" : "cart_not_found" } },
+      ),
+      { status },
+    );
+  }
+  it.each([200, 401, 404])(
+    "discards old %s headers without changing the newer credential",
+    async (status) => {
+      const old = deferredResponse();
+      const fetch = vi
+        .fn()
+        .mockReturnValueOnce(old.promise)
+        .mockImplementation(async () => response(200));
+      vi.stubGlobal("fetch", fetch);
+      setCustomerCartCsrfCredential(original);
+      const client = createBrowserCustomerCartClient();
+      const stale = client.loadCurrent();
+      const rejected = expect(stale).rejects.toMatchObject({ code: "network_unknown" });
+      setCustomerCartCsrfCredential(replacement);
+      expect(await client.loadCurrent()).toEqual(cart());
+      const late = response(status);
+      const cancel = vi.spyOn(late.body as ReadableStream<Uint8Array>, "cancel");
+      old.resolve(late);
+      await rejected;
+      expect(getCustomerCsrfCredential()).toBe(replacement);
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(late.body?.locked).toBe(false);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    },
+  );
+  it.each([200, 401])("discards old %s body after a context switch", async (status) => {
+    vi.useFakeTimers();
+    let finish: () => void = () => undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        finish = () => {
+          controller.enqueue(
+            new TextEncoder().encode(
+              JSON.stringify(status === 200 ? cart() : { error: { code: "cart_session_expired" } }),
+            ),
+          );
+          controller.close();
+        };
+      },
+    });
+    const acquire = vi.spyOn(body, "getReader");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status })),
+    );
+    setCustomerCartCsrfCredential(original);
+    const pending = createBrowserCustomerCartClient().loadCurrent();
+    const rejected = expect(pending).rejects.toMatchObject({ code: "network_unknown" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(acquire).toHaveBeenCalledOnce();
+    setCustomerCartCsrfCredential(replacement);
+    finish();
+    await rejected;
+    expect(getCustomerCsrfCredential()).toBe(replacement);
+    expect(body.locked).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each(["reinstall", "reset-and-reinstall", "null-reset"])(
+    "detects %s without relying on raw credential equality",
+    async (mode) => {
+      const pending = deferredResponse();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => pending.promise),
+      );
+      setCustomerCartCsrfCredential(mode === "null-reset" ? null : original);
+      const result = createBrowserCustomerCartClient().loadCurrent();
+      const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+      if (mode === "reset-and-reinstall") setCustomerCartCsrfCredential(null);
+      setCustomerCartCsrfCredential(mode === "null-reset" ? null : original);
+      pending.resolve(response(200));
+      await rejected;
+      expect(getCustomerCsrfCredential()).toBe(mode === "null-reset" ? null : original);
+    },
+  );
+  it("keeps a stale committed write uncertain and never submits again", async () => {
+    const old = deferredResponse();
+    const fetch = vi.fn(() => old.promise);
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCartCsrfCredential(original);
+    const result = createBrowserCustomerCartClient().removeItem({
+      cart: cart(),
+      cartItemReference: id(2),
+      operationReference: id(30),
+    });
+    const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+    setCustomerCartCsrfCredential(replacement);
+    old.resolve(response(200));
+    await rejected;
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(getCustomerCsrfCredential()).toBe(replacement);
+  });
+  it("bounds a transport failure from the old context", async () => {
+    const old = deferredResponse();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => old.promise),
+    );
+    setCustomerCartCsrfCredential(original);
+    const result = createBrowserCustomerCartClient().loadCurrent();
+    const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+    setCustomerCartCsrfCredential(replacement);
+    old.reject(new Error("synthetic transport detail"));
+    await rejected;
+    expect(getCustomerCsrfCredential()).toBe(replacement);
+  });
+  it("lets a current401 clear CSRF while another old request becomes stale", async () => {
+    const old = deferredResponse();
+    const second = deferredResponse();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(second.promise),
+    );
+    setCustomerCartCsrfCredential(original);
+    const client = createBrowserCustomerCartClient();
+    const first = client.loadCurrent();
+    const firstRejected = expect(first).rejects.toMatchObject({ code: "cart_session_expired" });
+    const other = client.loadCurrent();
+    const otherRejected = expect(other).rejects.toMatchObject({ code: "network_unknown" });
+    old.resolve(response(401));
+    await firstRejected;
+    second.resolve(response(200));
+    await otherRejected;
+    expect(getCustomerCsrfCredential()).toBeNull();
+  });
+});
+
+it("rechecks Session context when a stream completes", async () => {
+  let delivered = false;
+  const body = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        if (!delivered) {
+          delivered = true;
+          controller.enqueue(new TextEncoder().encode(JSON.stringify(cart())));
+        } else {
+          controller.close();
+          queueMicrotask(() => setCustomerCartCsrfCredential("d".repeat(43)));
+        }
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(body)),
+  );
+  setCustomerCartCsrfCredential("c".repeat(43));
+  await expect(createBrowserCustomerCartClient().loadCurrent()).rejects.toMatchObject({
+    code: "network_unknown",
+  });
+  expect(getCustomerCsrfCredential()).toBe("d".repeat(43));
+});
+
+it("rejects a context replaced after parsing but before the Promise delivers the Cart", async () => {
+  const parse = JSON.parse;
+  vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+    const value = parse(text, reviver);
+    queueMicrotask(() => setCustomerCartCsrfCredential("d".repeat(43)));
+    return value;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify(cart()))),
+  );
+  setCustomerCartCsrfCredential("c".repeat(43));
+  await expect(createBrowserCustomerCartClient().loadCurrent()).rejects.toMatchObject({
+    code: "network_unknown",
+  });
+  expect(getCustomerCsrfCredential()).toBe("d".repeat(43));
+});
+
+it.each(["createCart", "addItem", "updateItem", "removeItem"] as const)(
+  "rejects replacement before %s result delivery",
+  async (method) => {
+    const parse = JSON.parse;
+    vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+      const value = parse(text, reviver);
+      queueMicrotask(() =>
+        queueMicrotask(() => queueMicrotask(() => setCustomerCartCsrfCredential("d".repeat(43)))),
+      );
+      return value;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(cart()))),
+    );
+    setCustomerCartCsrfCredential("c".repeat(43));
+    const client = createBrowserCustomerCartClient();
+    const input = {
+      cart: cart(),
+      cartItemReference: id(2),
+      operationReference: id(30),
+      sellableReference: id(3),
+      draft: { quantity: 1, optionSelections: [], customerNote: null },
+    };
+    await expect(client[method](input)).rejects.toMatchObject({ code: "network_unknown" });
+    expect(getCustomerCsrfCredential()).toBe("d".repeat(43));
+  },
+);
