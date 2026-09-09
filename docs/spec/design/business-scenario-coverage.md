@@ -181,3 +181,8 @@ without floating-point money or current-configuration reconstruction. Atomic per
 
 [WP-2256](../work-packages/WP-2256.md) reads complete historical snapshots with exact Brand/Store
 isolation and rejects partial legacy or inconsistent data. Atomic application writes remain separate.
+
+### BC-03 atomic Quote snapshot persistence
+
+[WP-2257](../work-packages/WP-2257.md) appends complete Quote facts and Audit atomically, preserves
+logical Cart line identity across Quotes and rejects conflicting history. Application wiring remains separate.

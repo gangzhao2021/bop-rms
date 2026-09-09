@@ -183,6 +183,14 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_pricing" &&
           module.manifest.ownedDatabase?.tables?.includes("price_quote") &&
           moduleRelative === "src/infrastructure/persistence/price-quote-query-store.ts";
+        // WP-2257 admits one append adapter over the existing complete Quote aggregate.
+        const acceptedPriceQuoteWriterAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          ["price_quote", "price_quote_line", "price_quote_tax_line"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/price-quote-store.ts";
         // WP-2223 accepts only the Ordering reader over its existing Cart and line tables.
         const acceptedCartQueryAsset =
           module.packageName === "@rms/ordering" &&
@@ -235,6 +243,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedGuestBindingAsset &&
           !acceptedPublishedMenuAsset &&
           !acceptedPriceQuoteQueryAsset &&
+          !acceptedPriceQuoteWriterAsset &&
           !acceptedCartQueryAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&
