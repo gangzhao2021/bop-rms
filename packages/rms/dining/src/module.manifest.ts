@@ -50,6 +50,7 @@ const moduleManifestInput =
         "dining_participant",
         "dining_identity_admission",
         "dining_session_join_operation",
+        "dining_closing_operation",
       ],
     },
     ownedJobs: [],

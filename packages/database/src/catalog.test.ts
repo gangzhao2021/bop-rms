@@ -115,6 +115,7 @@ describe("migration catalog", () => {
       "1001_002_create_dining_session_start",
       "1001_003_create_dining_join_regeneration",
       "1001_004_create_dining_session_join",
+      "1001_005_create_dining_closing_operation",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
       "1102_001_create_option_set_binding",
@@ -1344,6 +1345,47 @@ $unsafe$;
     await writeFile(file, `${await readFile(file, "utf8")}SELECT 1::integer;\n`);
     expect((await readMigrationCatalog(root)).diagnostics).toEqual([]);
   });
+
+  it("WP-2282 accepts quoted Closing data, date formats and CASE END expressions", async () => {
+    const root = await fixture();
+    const file = migrationPath(root);
+    await writeFile(
+      file,
+      `${await readFile(file, "utf8")}SELECT 'Begin', 'END', 'HH24:MI:SS', CASE WHEN true THEN 'Closing' ELSE 'Active' END;\n`,
+    );
+    expect((await readMigrationCatalog(root)).diagnostics).toEqual([]);
+  });
+  it.each([
+    "SELECT 'Begin'; COMMIT;",
+    "SELECT '餐厅'; COMMIT;",
+    "SELECT CASE WHEN true THEN CASE WHEN false THEN 1 ELSE 2 END ELSE 3 END; COMMIT;",
+    "SELECT 'can''t hide'; ROLLBACK;",
+    "-- 'quoted comment\nCOMMIT;",
+    "/* outer ' /* nested */ */ BEGIN;",
+    "SELECT CASE WHEN true THEN 1 ELSE 2 END; END TRANSACTION;",
+    "DO $unsafe$ BEGIN COMMIT; END; $unsafe$;",
+    "DO 'BEGIN COMMIT; END';",
+    "END",
+    "END /* comment */ WORK",
+  ])("WP-2282 still rejects executable transaction SQL: %s", async (sql) => {
+    const root = await fixture();
+    const file = migrationPath(root);
+    await writeFile(file, `${await readFile(file, "utf8")}${sql}\n`);
+    expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
+      "MIGRATION_TRANSACTION_UNSUPPORTED",
+    );
+  });
+  it.each(["SELECT :placeholder;", "SELECT '${value}';", "SELECT '{{value}}';"])(
+    "WP-2282 retains substitution denial: %s",
+    async (sql) => {
+      const root = await fixture();
+      const file = migrationPath(root);
+      await writeFile(file, `${await readFile(file, "utf8")}${sql}\n`);
+      expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
+        "MIGRATION_METADATA_INVALID",
+      );
+    },
+  );
 
   it("rejects duplicate global order", async () => {
     const root = await fixture();

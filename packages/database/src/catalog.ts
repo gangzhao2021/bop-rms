@@ -216,6 +216,46 @@ function parsePositiveInteger(
   return value;
 }
 
+/** Preserve executable tokens while masking quoted data and SQL comments. */
+function executableSql(sql: string): string {
+  const output = sql.split("");
+  const blank = (from: number, to: number) => {
+    for (let index = from; index < to; index++) if (output[index] !== "\n") output[index] = " ";
+  };
+  let index = 0;
+  while (index < sql.length) {
+    const start = index;
+    if (sql.startsWith("--", index)) {
+      while (index < sql.length && sql[index] !== "\n") index++;
+      blank(start, index);
+    } else if (sql.startsWith("/*", index)) {
+      let depth = 1;
+      index += 2;
+      while (index < sql.length && depth > 0) {
+        if (sql.startsWith("/*", index)) {
+          depth++;
+          index += 2;
+        } else if (sql.startsWith("*/", index)) {
+          depth--;
+          index += 2;
+        } else index++;
+      }
+      blank(start, index);
+    } else if (sql[index] === "'" || sql[index] === '"') {
+      const quote = sql[index];
+      const escaped = quote === "'" && /(?:^|[^A-Za-z0-9_$])[eE]$/u.test(sql.slice(0, index));
+      index++;
+      while (index < sql.length) {
+        if (escaped && sql[index] === "\\") index += 2;
+        else if (sql[index] === quote && sql[index + 1] === quote) index += 2;
+        else if (sql[index++] === quote) break;
+      }
+      blank(start, Math.min(index, sql.length));
+    } else index++;
+  }
+  return output.join("");
+}
+
 function validateSql(
   sql: string,
   file: string,
@@ -246,9 +286,22 @@ function validateSql(
     /\bCREATE\s+FUNCTION\b[\s\S]*?\bAS\s+(\$[A-Za-z0-9_]*\$)[\s\S]*?\1\s*;/giu,
     "CREATE FUNCTION AS $$function-body$$;",
   );
+  let caseDepth = 0;
+  const transactionTokens = executableSql(withoutFunctionBodies).replace(
+    /\bCASE\b|\bEND(?:\s+CASE)?\b/giu,
+    (token) => {
+      if (token.toUpperCase() === "CASE") caseDepth++;
+      else if (caseDepth > 0) {
+        caseDepth--;
+        return " ".repeat(token.length);
+      }
+      return token;
+    },
+  );
   if (
-    /\b(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT)\b/iu.test(
-      withoutFunctionBodies,
+    /(?:^|;)\s*DO\b/iu.test(transactionTokens) ||
+    /\b(?:BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|ABORT|SAVEPOINT)\b|\bEND(?:\s+(?:WORK|TRANSACTION))?\s*(?:;|$)/iu.test(
+      transactionTokens,
     )
   )
     diagnostics.push(
@@ -284,7 +337,7 @@ function validateSql(
         metadataKeys.length + 1,
       ),
     );
-  if (/\$\{|\{\{|(?<!:):[A-Za-z][A-Za-z0-9_]*/u.test(body))
+  if (/\$\{|\{\{/u.test(body) || /(?<!:):[A-Za-z][A-Za-z0-9_]*/u.test(executableSql(body)))
     diagnostics.push(
       diagnostic(
         "MIGRATION_METADATA_INVALID",
