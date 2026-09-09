@@ -1,7 +1,7 @@
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { DiningSession } from "../../contracts/dining-session.js";
 import type { DiningTable } from "../../domain/dining-table.js";
-import type { DiningReference } from "../../contracts/dining-session.js";
+import type { DiningReference, DiningInstant } from "../../contracts/dining-session.js";
 
 export type DiningTableAction =
   "CreateDraft" | "ReplaceDraft" | "Publish" | "IssueQr" | "RevokeQr" | "SetBlock" | "ClearBlock";
@@ -37,7 +37,20 @@ export interface DiningTableOperationRecord {
   readonly event: DiningTableEvent;
 }
 
+export interface DiningSessionMoveCommand {
+  readonly operationReference: DiningReference;
+  readonly diningSessionReference: DiningReference;
+  readonly sourceTableReference: DiningReference;
+  readonly targetTableReference: DiningReference;
+  readonly expectedSessionVersion: number;
+  readonly expectedSourceTableVersion: number;
+  readonly expectedTargetTableVersion: number;
+  readonly partySize: number;
+  readonly observedAt: DiningInstant;
+}
+
 export interface DiningSessionMoveRecord {
+  readonly command: DiningSessionMoveCommand;
   readonly operationReference: DiningReference;
   readonly intentDigest: string;
   readonly session: DiningSession;

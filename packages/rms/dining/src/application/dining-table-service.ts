@@ -1,4 +1,9 @@
 import {
+  parseDiningMoveCommand,
+  diningMoveCommandIntent,
+  parseDiningSessionMoveRecord,
+} from "./dining-move-record.js";
+import {
   DiningTableWorkflowError,
   actions,
   closed,
@@ -274,37 +279,13 @@ export function createDiningTableService(ports: DiningTablePorts) {
     },
 
     async moveSession(input: unknown) {
-      const raw = closed(input, [
-        "operationReference",
-        "diningSessionReference",
-        "sourceTableReference",
-        "targetTableReference",
-        "expectedSessionVersion",
-        "expectedSourceTableVersion",
-        "expectedTargetTableVersion",
-        "partySize",
-        "observedAt",
-      ]);
-      const operationReference = parseInput(() => parseDiningReference(raw.operationReference));
-      const sessionReference = parseInput(() => parseDiningReference(raw.diningSessionReference));
-      const sourceReference = parseInput(() => parseDiningReference(raw.sourceTableReference));
-      const targetReference = parseInput(() => parseDiningReference(raw.targetTableReference));
-      const observedAt = parseInput(() => parseDiningInstant(raw.observedAt));
-      for (const value of [
-        raw.expectedSessionVersion,
-        raw.expectedSourceTableVersion,
-        raw.expectedTargetTableVersion,
-        raw.partySize,
-      ])
-        if (!Number.isSafeInteger(value) || (value as number) < 1)
-          throw new DiningTableWorkflowError("DINING_TABLE_INPUT_INVALID");
-      let intentDigest: string;
-      try {
-        intentDigest = ports.references.hashIntent(JSON.stringify(raw));
-      } catch {
-        return dependency();
-      }
-      if (!/^sha256:[0-9a-f]{64}$/u.test(intentDigest)) return dependency();
+      const raw = parseDiningMoveCommand(input);
+      const operationReference = raw.operationReference;
+      const sessionReference = raw.diningSessionReference;
+      const sourceReference = raw.sourceTableReference;
+      const targetReference = raw.targetTableReference;
+      const observedAt = raw.observedAt;
+      const intentDigest = diningMoveCommandIntent(ports.references, raw);
       const evidence = authorizationSnapshot(
         await ports.authorization
           .authorize({ action: "MoveSession", targetReference: sessionReference, observedAt })
@@ -357,7 +338,6 @@ export function createDiningTableService(ports: DiningTablePorts) {
         observedAt,
         targetType: "DiningSession",
       });
-      const rawInput = raw;
       const prior = await ports.repository
         .resolveMoveOperation(operationReference)
         .catch(dependency);
@@ -365,6 +345,7 @@ export function createDiningTableService(ports: DiningTablePorts) {
         const captured = replayInput(
           prior,
           [
+            "command",
             "operationReference",
             "intentDigest",
             "session",
@@ -376,66 +357,17 @@ export function createDiningTableService(ports: DiningTablePorts) {
           operationReference,
           intentDigest,
         );
-        const record = parseState((): DiningSessionMoveRecord => {
-          const raw = captured;
-          const movedSession = parseDiningSession(raw.session);
-          const movedSource = createDiningTable(raw.sourceTable);
-          const movedTarget = createDiningTable(raw.targetTable);
-          const recordedEvent = closed(raw.event, [
-            "eventType",
-            "diningSessionReference",
-            "sourceTableReference",
-            "targetTableReference",
-            "aggregateVersion",
-            "occurredAt",
-          ]);
-          const expectedEvent = Object.freeze({
-            eventType: "DiningSessionTableMoved" as const,
-            diningSessionReference: sessionReference,
-            sourceTableReference: sourceReference,
-            targetTableReference: targetReference,
-            aggregateVersion: movedSession.version.toString(),
-            occurredAt: observedAt,
-          });
-          if (
-            movedSession.diningSessionReference !== sessionReference ||
-            movedSession.tableReference !== targetReference ||
-            movedSession.startedAt !== session.startedAt ||
-            movedSession.startedByActorReference !== session.startedByActorReference ||
-            movedSession.brandReference !== source.brandReference ||
-            movedSession.storeReference !== source.storeReference ||
-            movedSession.version !== (rawInput.expectedSessionVersion as number) + 1 ||
-            movedSession.phase !== "Active" ||
-            movedSource.tableReference !== sourceReference ||
-            movedTarget.tableReference !== targetReference ||
-            [movedSource, movedTarget].some(
-              (table) =>
-                table.tenantReference !== source.tenantReference ||
-                table.brandReference !== source.brandReference ||
-                table.storeReference !== source.storeReference ||
-                table.observedAt !== observedAt,
-            ) ||
-            movedSource.aggregateVersion !== (rawInput.expectedSourceTableVersion as number) + 1 ||
-            movedTarget.aggregateVersion !== (rawInput.expectedTargetTableVersion as number) + 1 ||
-            movedSession.tableAssignmentVersion !== movedTarget.aggregateVersion ||
-            movedSource.activeDiningSessionReference !== null ||
-            movedTarget.activeDiningSessionReference !== sessionReference ||
-            movedTarget.lifecycle !== "Published" ||
-            movedTarget.operationalState !== "Available" ||
-            movedTarget.capacity < (rawInput.partySize as number) ||
-            !same(recordedEvent, expectedEvent)
-          )
-            return dependency();
-          return Object.freeze({
-            operationReference,
-            intentDigest: raw.intentDigest,
-            session: movedSession,
-            sourceTable: movedSource,
-            targetTable: movedTarget,
-            audit: historicalAudit(raw.audit, audit, observedAt),
-            event: expectedEvent,
-          });
-        });
+        const record = parseDiningSessionMoveRecord(captured, ports.references);
+        if (
+          !same(record.command, raw) ||
+          record.session.startedAt !== session.startedAt ||
+          record.session.startedByActorReference !== session.startedByActorReference ||
+          record.sourceTable.tenantReference !== source.tenantReference ||
+          record.sourceTable.brandReference !== source.brandReference ||
+          record.sourceTable.storeReference !== source.storeReference
+        )
+          return dependency();
+        parseState(() => historicalAudit(record.audit, audit, observedAt));
         return Object.freeze({ status: "AlreadyApplied" as const, result: record });
       }
       if (
@@ -456,20 +388,24 @@ export function createDiningTableService(ports: DiningTablePorts) {
       } catch {
         throw new DiningTableWorkflowError("DINING_TABLE_LIFECYCLE_CONFLICT");
       }
-      const record: DiningSessionMoveRecord = Object.freeze({
-        operationReference,
-        intentDigest,
-        ...moved,
-        audit,
-        event: Object.freeze({
-          eventType: "DiningSessionTableMoved",
-          diningSessionReference: moved.session.diningSessionReference,
-          sourceTableReference: source.tableReference,
-          targetTableReference: target.tableReference,
-          aggregateVersion: moved.session.version.toString(),
-          occurredAt: observedAt,
-        }),
-      });
+      const record: DiningSessionMoveRecord = parseDiningSessionMoveRecord(
+        {
+          command: raw,
+          operationReference,
+          intentDigest,
+          ...moved,
+          audit,
+          event: Object.freeze({
+            eventType: "DiningSessionTableMoved",
+            diningSessionReference: moved.session.diningSessionReference,
+            sourceTableReference: source.tableReference,
+            targetTableReference: target.tableReference,
+            aggregateVersion: moved.session.version.toString(),
+            occurredAt: observedAt,
+          }),
+        },
+        ports.references,
+      );
       await ports.repository.commitMove(record).catch(dependency);
       return Object.freeze({ status: "Applied" as const, result: record });
     },

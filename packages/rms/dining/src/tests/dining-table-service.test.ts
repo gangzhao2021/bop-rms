@@ -1,3 +1,8 @@
+import {
+  parseDiningMoveCommand,
+  diningMoveCommandIntent,
+  parseDiningSessionMoveRecord,
+} from "../application/dining-move-record.js";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
@@ -637,4 +642,165 @@ describe("WP-2272 canonical Table persistence handoff", () => {
       ).rejects.toMatchObject({ code });
     },
   );
+});
+
+describe("WP-2283 complete Move intent history", () => {
+  const hashes = {
+    hashIntent: (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`,
+    equals: (left: string, right: string) => left === right,
+  };
+  it("preserves original digest bytes and canonical command order", () => {
+    const input = moveInput();
+    const reversed = Object.fromEntries(Object.entries(input).reverse());
+    const parsed = parseDiningMoveCommand(reversed);
+    expect(parsed).toEqual(input);
+    expect(Object.keys(parsed)).toEqual(Object.keys(input));
+    expect(diningMoveCommandIntent(hashes, parsed)).toBe(hashes.hashIntent(JSON.stringify(input)));
+    expect(Object.isFrozen(parsed)).toBe(true);
+  });
+  it("stores the complete original command independently of source mutation", async () => {
+    const state = moveFixture();
+    Object.assign(state.ports.references, hashes);
+    const input = moveInput();
+    const result = await createDiningTableService(state.ports).moveSession(input);
+    const original = { ...input };
+    input.partySize = 99;
+    expect(result.result.command).toEqual(original);
+    expect(Object.isFrozen(result.result.command)).toBe(true);
+    expect(parseDiningSessionMoveRecord(result.result, hashes)).toEqual(result.result);
+  });
+  it.each([
+    "operationReference",
+    "diningSessionReference",
+    "sourceTableReference",
+    "targetTableReference",
+    "expectedSessionVersion",
+    "expectedSourceTableVersion",
+    "expectedTargetTableVersion",
+    "partySize",
+    "observedAt",
+  ])("rejects altered original command %s even if supplied digest matches", async (field) => {
+    const state = await moveHistory();
+    const changed = {
+      ...state.record,
+      command: {
+        ...state.record.command,
+        [field]:
+          field.includes("Version") || field === "partySize"
+            ? 99
+            : field === "observedAt"
+              ? "2026-08-13T13:00:00.000Z"
+              : ref("99"),
+      },
+    };
+    state.moveOperations.set(ids.operation, changed as never);
+    const commit = vi.spyOn(state.ports.repository, "commitMove");
+    await expect(state.service.moveSession(moveInput())).rejects.toMatchObject({
+      code: "DINING_TABLE_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(commit).not.toHaveBeenCalled();
+  });
+  it("rejects a changed but still capacity-eligible party size under a colliding test digest", async () => {
+    const state = await moveHistory();
+    state.moveOperations.set(ids.operation, {
+      ...state.record,
+      command: { ...state.record.command, partySize: 1 },
+    });
+    await expect(state.service.moveSession(moveInput())).rejects.toMatchObject({
+      code: "DINING_TABLE_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it("requires the stored command rather than reconstructing missing party facts", async () => {
+    const state = await moveHistory();
+    const { command: omitted, ...legacy } = state.record;
+    void omitted;
+    state.moveOperations.set(ids.operation, legacy as never);
+    await expect(state.service.moveSession(moveInput())).rejects.toMatchObject({
+      code: "DINING_TABLE_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it("rejects forged canonical history intent", async () => {
+    const state = moveFixture();
+    Object.assign(state.ports.references, hashes);
+    const result = await createDiningTableService(state.ports).moveSession(moveInput());
+    expect(() =>
+      parseDiningSessionMoveRecord(
+        { ...result.result, intentDigest: `sha256:${"f".repeat(64)}` },
+        hashes,
+      ),
+    ).toThrowError(DiningTableWorkflowError);
+  });
+  it("does not evaluate stored command getters", async () => {
+    const state = await moveHistory();
+    const getter = vi.fn(() => 1);
+    const command = Object.defineProperty({ ...state.record.command }, "partySize", {
+      get: getter,
+      enumerable: true,
+    });
+    state.moveOperations.set(ids.operation, { ...state.record, command });
+    await expect(state.service.moveSession(moveInput())).rejects.toMatchObject({
+      code: "DINING_TABLE_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(getter).not.toHaveBeenCalled();
+  });
+  it("bounds hash failures and rejects non-string digests without coercion", () => {
+    const toString = vi.fn(() => `sha256:${"a".repeat(64)}`);
+    expect(() =>
+      diningMoveCommandIntent(
+        { ...hashes, hashIntent: () => ({ toString }) as never },
+        parseDiningMoveCommand(moveInput()),
+      ),
+    ).toThrowError(DiningTableWorkflowError);
+    expect(toString).not.toHaveBeenCalled();
+    expect(() =>
+      diningMoveCommandIntent(
+        {
+          ...hashes,
+          hashIntent: () => {
+            throw new Error("private dependency");
+          },
+        },
+        parseDiningMoveCommand(moveInput()),
+      ),
+    ).toThrowError("Dining Table operation is unavailable");
+  });
+  it("validates the new record before writing when a hash dependency becomes inconsistent", async () => {
+    const state = moveFixture();
+    let calls = 0;
+    Object.assign(state.ports.references, {
+      ...hashes,
+      hashIntent: (value: string) =>
+        ++calls === 1 ? hashes.hashIntent(value) : `sha256:${"f".repeat(64)}`,
+    });
+    const commit = vi.spyOn(state.ports.repository, "commitMove");
+    await expect(
+      createDiningTableService(state.ports).moveSession(moveInput()),
+    ).rejects.toMatchObject({ code: "DINING_TABLE_DEPENDENCY_UNAVAILABLE" });
+    expect(commit).not.toHaveBeenCalled();
+  });
+});
+
+it.each(["partySize", "expectedSourceTableVersion", "observedAt"])(
+  "WP-2283 rejects missing command %s",
+  async (field) => {
+    const state = await moveHistory();
+    const command = Object.fromEntries(
+      Object.entries(state.record.command).filter(([key]) => key !== field),
+    );
+    state.moveOperations.set(ids.operation, { ...state.record, command } as never);
+    await expect(state.service.moveSession(moveInput())).rejects.toMatchObject({
+      code: "DINING_TABLE_DEPENDENCY_UNAVAILABLE",
+    });
+  },
+);
+it("WP-2283 bounds equality callback failures in stored Move validation", async () => {
+  const state = await moveHistory();
+  expect(() =>
+    parseDiningSessionMoveRecord(state.record, {
+      ...state.ports.references,
+      equals: () => {
+        throw new Error("private equality failure");
+      },
+    }),
+  ).toThrowError("Dining Table operation is unavailable");
 });

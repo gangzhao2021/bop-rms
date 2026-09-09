@@ -289,3 +289,7 @@ WP-2282 implements atomic Closing Session/history/Audit storage and original-res
 Dining526/526, Dining PostgreSQL6/6, full verification and forced uncached integration pass.
 Join/Closing competition is serialized on the Dining Session. Shared Cart coordination,
 Table release/cleaning policy and live operational authority remain separate.
+
+WP-2283 retains the full Move command and verifies its canonical digest against complete result
+facts. Current actor/scope authorization remains required. Dining547/547, full verification and
+forced uncached integration pass. Atomic Move storage and post-move Join credentials remain separate.
