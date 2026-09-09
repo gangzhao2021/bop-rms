@@ -83,6 +83,7 @@ describe("migration catalog", () => {
       "1200_006_create_promotion_management",
       "1200_007_alter_price_quote_snapshot",
       "1200_008_alter_price_quote_line_source",
+      "1200_009_create_price_quote_request",
       "1250_001_create_recipe_management",
       "1300_001_create_cart_aggregate",
       "1300_002_alter_cart_item_commands",

@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: [
+      "packages/database/test/price-quote-request-acceptance.test.mjs",
       "packages/database/test/price-quote-acceptance.test.mjs",
       "packages/database/test/price-quote-store-acceptance.test.mjs",
     ],

@@ -20,3 +20,5 @@ export * from "./domain/price-quote-lifecycle.js";
 export * from "./domain/price-quote-snapshot-codec.js";
 export * from "./infrastructure/persistence/price-quote-query-store.js";
 export * from "./infrastructure/persistence/price-quote-store.js";
+export * from "./domain/price-quote-request.js";
+export * from "./infrastructure/persistence/price-quote-request-store.js";

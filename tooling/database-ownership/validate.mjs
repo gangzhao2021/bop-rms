@@ -191,6 +191,14 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/price-quote-store.ts";
+        // WP-2258 admits one scoped request-history coordinator over owned Quote persistence.
+        const acceptedPriceQuoteRequestAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          ["price_quote_request", "price_quote", "price_quote_line", "price_quote_tax_line"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/price-quote-request-store.ts";
         // WP-2223 accepts only the Ordering reader over its existing Cart and line tables.
         const acceptedCartQueryAsset =
           module.packageName === "@rms/ordering" &&
@@ -244,6 +252,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPublishedMenuAsset &&
           !acceptedPriceQuoteQueryAsset &&
           !acceptedPriceQuoteWriterAsset &&
+          !acceptedPriceQuoteRequestAsset &&
           !acceptedCartQueryAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&

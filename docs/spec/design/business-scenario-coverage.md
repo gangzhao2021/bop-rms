@@ -186,3 +186,8 @@ isolation and rejects partial legacy or inconsistent data. Atomic application wr
 
 [WP-2257](../work-packages/WP-2257.md) appends complete Quote facts and Audit atomically, preserves
 logical Cart line identity across Quotes and rejects conflicting history. Application wiring remains separate.
+
+### BC-03 original Quote request recovery
+
+[WP-2258](../work-packages/WP-2258.md) persists exact scoped request identity and original Quote
+result in one transaction. Current Session authorization and runtime composition remain separate.

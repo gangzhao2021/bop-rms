@@ -76,6 +76,7 @@ const moduleManifestInput =
         "price_quote",
         "price_quote_line",
         "price_quote_tax_line",
+        "price_quote_request",
       ],
     },
     ownedJobs: [],

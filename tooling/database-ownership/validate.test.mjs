@@ -728,6 +728,51 @@ describe("Database Schema Ownership Architecture Test", () => {
     },
   );
 
+  it("accepts only the WP-2258 Pricing request adapter without driver imports", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "pricing", "rms_pricing", [
+      "price_quote_request",
+      "price_quote",
+      "price_quote_line",
+      "price_quote_tax_line",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/price-quote-request-store.ts",
+    );
+    await writeFile(asset, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, "export const synthetic = true;\n");
+    await writeFile(join(dirname(asset), "other-store.ts"), "export const synthetic = true;\n");
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "owner",
+    "schema",
+    "price_quote_request",
+    "price_quote",
+    "price_quote_line",
+    "price_quote_tax_line",
+  ])("does not transfer WP-2258 admission with changed %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "pricing",
+      changed === "schema" ? "rms_other" : "rms_pricing",
+      ["price_quote_request", "price_quote", "price_quote_line", "price_quote_tax_line"].filter(
+        (table) => table !== changed,
+      ),
+    );
+    await writeFile(
+      join(context.moduleRoot, "src/infrastructure/persistence/price-quote-request-store.ts"),
+      "export const synthetic = true;\n",
+    );
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
   it("accepts only the WP-2223 owned Cart reader without driver imports", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "ordering", "rms_ordering", [
