@@ -107,3 +107,21 @@ describe("CUST-CHECKOUT page contract", () => {
     expect(render({ status, cart, canRetry: status === "outcome-unknown" })).toContain(message);
   });
 });
+
+it.each(["pending", "offline", "outcome-unknown", "session-expired"] as const)(
+  "does not offer a new Quote while %s",
+  (status) => {
+    const state: CheckoutState =
+      status === "pending"
+        ? { status, cart }
+        : { status, cart, canRetry: status === "outcome-unknown" };
+    const html = render(state);
+    expect(html).not.toContain("Get current quote");
+    if (status === "outcome-unknown") expect(html).toContain("Retry the same Quote request");
+  },
+);
+it("disables the retained Quote retry while offline", () => {
+  expect(render({ status: "offline", cart, canRetry: true })).toMatch(
+    new RegExp("<button[^>]*disabled[^>]*>Retry the same Quote request</button>", "u"),
+  );
+});

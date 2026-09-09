@@ -79,7 +79,9 @@ export function CheckoutPage({
           ))}
         </section>
       ) : null}
-      {cart && quote === null && state.status !== "pending" ? (
+      {cart &&
+      quote === null &&
+      ["ready", "conflict", "validation", "unavailable"].includes(state.status) ? (
         <button type="button" onClick={() => void controller.quote()}>
           Get current quote
         </button>
@@ -148,7 +150,11 @@ export function CheckoutPage({
                 : `Checkout state: ${state.status}`}
           </p>
           {"canRetry" in state && state.canRetry ? (
-            <button type="button" onClick={() => void controller.retry()}>
+            <button
+              type="button"
+              disabled={state.status === "offline"}
+              onClick={() => void controller.retry()}
+            >
               Retry the same Quote request
             </button>
           ) : null}

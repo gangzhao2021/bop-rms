@@ -260,7 +260,7 @@ describe("WP-1703 Checkout state", () => {
     await controller.quote();
     controller.setOnline(true);
     expect(calls).toBe(0);
-    expect(controller.getState()).toMatchObject({ status: "offline" });
+    expect(controller.getState()).toMatchObject({ status: "ready", quote: null });
   });
 });
 
@@ -540,3 +540,253 @@ it.each([{ cartReference: "invalid" }, { version: 0 }])(
     expect(fetch).not.toHaveBeenCalled();
   },
 );
+
+describe("foreground Checkout intent continuity", () => {
+  function deferred<T>() {
+    let resolve: (value: T) => void = () => undefined;
+    const promise = new Promise<T>((yes) => {
+      resolve = yes;
+    });
+    return { promise, resolve };
+  }
+  function setup() {
+    let recover = false;
+    const loadCart = vi.fn(async () => cart);
+    const send = vi.fn<CheckoutClient["quote"]>(async () => {
+      if (!recover) throw new CartClientError("network_unknown");
+      return quote;
+    });
+    const keys = vi.fn(() => id(9));
+    const controller = createCheckoutController({ loadCart, quote: send }, keys);
+    return {
+      controller,
+      loadCart,
+      send,
+      keys,
+      recover: () => {
+        recover = true;
+      },
+    };
+  }
+  it("keeps the original Cart/version and key after unknown outcome and refresh", async () => {
+    const f = setup();
+    const initial = {
+      ...cart,
+      cart: { ...cart.cart, items: cart.cart.items.map((item) => ({ ...item })) },
+    };
+    f.loadCart.mockResolvedValueOnce(initial);
+    await f.controller.load();
+    await f.controller.quote();
+    initial.cart.version = 99;
+    const initialItem = initial.cart.items[0];
+    if (initialItem === undefined) throw new Error("synthetic item missing");
+    initialItem.quantity = 99;
+    f.loadCart.mockResolvedValue({
+      ...cart,
+      cart: { ...cart.cart, cartReference: id(90), version: 4 },
+    });
+    await f.controller.load();
+    expect(f.controller.getState()).toMatchObject({
+      status: "outcome-unknown",
+      cart: { cart: { cartReference: id(1), version: 3 } },
+    });
+    f.recover();
+    await f.controller.retry();
+    expect(f.keys).toHaveBeenCalledOnce();
+    expect(f.send).toHaveBeenCalledTimes(2);
+    for (const call of f.send.mock.calls) {
+      expect(call[0].cart.version).toBe(3);
+      expect(call[0].cart.items[0]?.quantity).toBe(1);
+      expect(Object.isFrozen(call[0].cart.items[0])).toBe(true);
+      expect(call[1]).toBe(id(9));
+    }
+  });
+  it.each([
+    "cart_version_conflict",
+    "cart_idempotency_conflict",
+    "cart_request_invalid",
+    "cart_session_expired",
+    "cart_service_unavailable",
+  ] as const)("retains unknown history after later %s", async (code) => {
+    const f = setup();
+    await f.controller.load();
+    await f.controller.quote();
+    f.send.mockRejectedValueOnce(new CartClientError(code));
+    await f.controller.retry();
+    expect(f.controller.getState()).toMatchObject({ status: "outcome-unknown", canRetry: true });
+    expect(f.loadCart).toHaveBeenCalledOnce();
+    f.recover();
+    await f.controller.retry();
+    expect(f.keys).toHaveBeenCalledOnce();
+    expect(f.controller.getState()).toMatchObject({ status: "ready", quote });
+  });
+  it("does not replace a pending Quote through a concurrent load", async () => {
+    const f = setup();
+    const gate = deferred<CheckoutQuote>();
+    f.send.mockImplementationOnce(() => gate.promise);
+    await f.controller.load();
+    const active = f.controller.quote();
+    await f.controller.load();
+    expect(f.loadCart).toHaveBeenCalledOnce();
+    expect(f.controller.getState()).toMatchObject({ status: "pending" });
+    gate.resolve(quote);
+    await active;
+    expect(f.controller.getState()).toMatchObject({ status: "ready", quote });
+  });
+  it("discards a load started before a newer Quote finishes", async () => {
+    const f = setup();
+    f.recover();
+    await f.controller.load();
+    const gate = deferred<CartView>();
+    f.loadCart.mockImplementationOnce(() => gate.promise);
+    const stale = f.controller.load();
+    await f.controller.quote();
+    gate.resolve({ ...cart, cart: { ...cart.cart, version: 8 } });
+    await stale;
+    expect(f.controller.getState()).toMatchObject({
+      status: "ready",
+      quote,
+      cart: { cart: { version: 3 } },
+    });
+  });
+  it("lets only the latest overlapping load publish", async () => {
+    const f = setup();
+    const first = deferred<CartView>();
+    const second = deferred<CartView>();
+    f.loadCart
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    const older = f.controller.load();
+    const newer = f.controller.load();
+    second.resolve({ ...cart, cart: { ...cart.cart, version: 4 } });
+    await newer;
+    first.resolve(cart);
+    await older;
+    expect(f.controller.getState()).toMatchObject({
+      status: "ready",
+      cart: { cart: { version: 4 } },
+    });
+  });
+  it("keeps failed refresh from discarding unknown intent", async () => {
+    const f = setup();
+    await f.controller.load();
+    await f.controller.quote();
+    f.loadCart.mockRejectedValueOnce(new CartClientError("cart_session_expired"));
+    await f.controller.load();
+    expect(f.controller.getState()).toMatchObject({ status: "outcome-unknown", canRetry: true });
+    f.recover();
+    await f.controller.retry();
+    expect(f.keys).toHaveBeenCalledOnce();
+  });
+  it("blocks retry in a replacement Session context without clearing its credential", async () => {
+    const f = setup();
+    setCustomerCsrfCredential("c".repeat(43));
+    await f.controller.load();
+    await f.controller.quote();
+    setCustomerCsrfCredential("d".repeat(43));
+    await f.controller.retry();
+    expect(f.send).toHaveBeenCalledOnce();
+    expect(f.keys).toHaveBeenCalledOnce();
+    expect(f.controller.getState()).toMatchObject({
+      status: "outcome-unknown",
+      cart: null,
+      canRetry: false,
+    });
+    expect(getCustomerCsrfCredential()).toBe("d".repeat(43));
+  });
+  it("does not publish a loaded Cart after its Session context changes", async () => {
+    const f = setup();
+    const gate = deferred<CartView>();
+    f.loadCart.mockImplementationOnce(() => gate.promise);
+    const load = f.controller.load();
+    setCustomerCsrfCredential("d".repeat(43));
+    gate.resolve(cart);
+    await load;
+    expect(f.controller.getState()).toMatchObject({ status: "unavailable", cart: null });
+  });
+  it("retains a pending plan across offline/reconnect without automatic replay", async () => {
+    const f = setup();
+    await f.controller.load();
+    await f.controller.quote();
+    f.controller.setOnline(false);
+    await f.controller.retry();
+    expect(f.controller.getState()).toMatchObject({ status: "offline", canRetry: true });
+    expect(f.send).toHaveBeenCalledOnce();
+    f.controller.setOnline(true);
+    expect(f.send).toHaveBeenCalledOnce();
+    expect(f.controller.getState()).toMatchObject({ status: "outcome-unknown", canRetry: true });
+    f.recover();
+    await f.controller.retry();
+    expect(f.keys).toHaveBeenCalledOnce();
+  });
+  it("allocates no key offline and a retry with no pending plan sends nothing", async () => {
+    const f = setup();
+    await f.controller.load();
+    f.controller.setOnline(false);
+    await f.controller.quote();
+    expect(f.keys).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+    f.controller.setOnline(true);
+    await f.controller.retry();
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.controller.getState()).toMatchObject({ status: "ready", quote: null });
+  });
+  it("does not infer an empty Cart after an interrupted initial load", async () => {
+    const f = setup();
+    const gate = deferred<CartView>();
+    f.loadCart.mockImplementationOnce(() => gate.promise);
+    const active = f.controller.load();
+    f.controller.setOnline(false);
+    f.controller.setOnline(true);
+    gate.resolve(cart);
+    await active;
+    expect(f.controller.getState()).toMatchObject({ status: "unavailable", cart: null });
+  });
+  it("installs the command flight before notifying reentrant subscribers", async () => {
+    const f = setup();
+    const gate = deferred<CheckoutQuote>();
+    f.send.mockImplementationOnce(() => gate.promise);
+    await f.controller.load();
+    let nested: Promise<void> | undefined;
+    const unsubscribe = f.controller.subscribe(() => {
+      if (f.controller.getState().status === "pending") nested = f.controller.quote();
+    });
+    const active = f.controller.quote();
+    expect(nested).toBe(active);
+    expect(f.send).toHaveBeenCalledOnce();
+    gate.resolve(quote);
+    await active;
+    unsubscribe();
+  });
+  it("keeps an in-flight confirmed result read-only after going offline", async () => {
+    const f = setup();
+    const gate = deferred<CheckoutQuote>();
+    f.send.mockImplementationOnce(() => gate.promise);
+    await f.controller.load();
+    const active = f.controller.quote();
+    f.controller.setOnline(false);
+    gate.resolve(quote);
+    await active;
+    expect(f.controller.getState()).toMatchObject({ status: "offline", canRetry: false });
+    f.controller.setOnline(true);
+    expect(f.controller.getState()).toMatchObject({ status: "ready", quote: null });
+    expect(f.send).toHaveBeenCalledOnce();
+  });
+  it("encodes the actual creation instant in a default UUIDv7 operation", async () => {
+    vi.useFakeTimers();
+    const instant = Date.parse("2026-09-09T12:00:00.000Z");
+    vi.setSystemTime(instant);
+    const send = vi.fn<CheckoutClient["quote"]>(async () => quote);
+    const controller = createCheckoutController({ loadCart: async () => cart, quote: send });
+    await controller.load();
+    await controller.quote();
+    expect(send).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+      ),
+    );
+    const recorded = send.mock.calls[0]?.[1] ?? "";
+    expect(parseInt(recorded.replaceAll("-", "").slice(0, 12), 16)).toBe(instant);
+  });
+});

@@ -166,3 +166,8 @@ Session context or returning an old Cart after credential replacement. Reload re
 
 [WP-2253](../work-packages/WP-2253.md) bounds the complete foreground Checkout Quote response
 and isolates Session context changes. Controller orchestration and live pricing wiring stay separate.
+
+### BC-03 Checkout intent continuity
+
+[WP-2254](../work-packages/WP-2254.md) retains the original foreground Quote request across
+uncertainty, refresh and reconnect. Synthetic browser evidence does not enable live payment.

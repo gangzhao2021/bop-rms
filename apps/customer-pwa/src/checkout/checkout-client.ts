@@ -282,10 +282,36 @@ export interface CheckoutController {
 }
 function key(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let timestamp = Date.now();
+  for (let index = 5; index >= 0; index -= 1) {
+    bytes[index] = timestamp & 255;
+    timestamp = Math.floor(timestamp / 256);
+  }
   bytes[6] = ((bytes[6] ?? 0) & 15) | 112;
   bytes[8] = ((bytes[8] ?? 0) & 63) | 128;
   const hex = [...bytes].map((v) => v.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+interface QuotePlan {
+  readonly cart: CartView;
+  readonly operationReference: string;
+  readonly contextCurrent: () => boolean;
+  outcomeUnknown: boolean;
+}
+function snapshotCart(current: CartView): CartView {
+  const copy = structuredClone(current);
+  const pending: object[] = [copy];
+  const seen = new WeakSet<object>();
+  while (pending.length) {
+    const value = pending.pop();
+    if (value === undefined || seen.has(value)) continue;
+    seen.add(value);
+    for (const field of Object.values(value))
+      if (field !== null && typeof field === "object") pending.push(field);
+    Object.freeze(value);
+  }
+  return copy;
 }
 export function createCheckoutController(
   client: CheckoutClient,
@@ -293,102 +319,224 @@ export function createCheckoutController(
 ): CheckoutController {
   let state: CheckoutState = { status: "loading" };
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
-  let pendingKey: string | null = null;
+  let plan: QuotePlan | null = null;
   let quoteFlight: Promise<void> | null = null;
+  let revision = 0;
+  let querySequence = 0;
+  let offlineWasEmpty = false;
   const listeners = new Set<() => void>();
   const publish = (next: CheckoutState) => {
     state = next;
     listeners.forEach((listener) => listener());
   };
   const cart = () => ("cart" in state ? state.cart : null);
+  const unresolved = () => {
+    const available = plan?.contextCurrent() === true;
+    publish({
+      status: online ? "outcome-unknown" : "offline",
+      cart: available ? (plan?.cart ?? null) : null,
+      canRetry: available,
+    });
+  };
   const fail = (error: unknown, current: CartView | null) => {
     const parsed = error instanceof CartClientError ? error.code : "cart_service_unavailable";
-    if (parsed !== "network_unknown") pendingKey = null;
     publish({
-      status:
-        parsed === "cart_session_expired"
+      status: !online
+        ? "offline"
+        : parsed === "cart_session_expired"
           ? "session-expired"
-          : parsed === "cart_version_conflict"
+          : parsed === "cart_version_conflict" || parsed === "cart_idempotency_conflict"
             ? "conflict"
             : parsed === "cart_selection_invalid" || parsed === "cart_request_invalid"
               ? "validation"
-              : parsed === "network_unknown"
-                ? "outcome-unknown"
-                : "unavailable",
-      cart: current,
-      canRetry: parsed === "network_unknown",
+              : "unavailable",
+      cart: parsed === "cart_session_expired" ? null : current,
+      canRetry: false,
     });
   };
   const executeQuote = async () => {
-    const current = cart();
+    const current = plan?.cart ?? cart();
     if (!online) {
-      publish({ status: "offline", cart: current, canRetry: pendingKey !== null });
+      publish({
+        status: "offline",
+        cart: plan !== null && !plan.contextCurrent() ? null : current,
+        canRetry: plan !== null && plan.contextCurrent(),
+      });
       return;
     }
-    if (current === null) return;
-    pendingKey ??= keyFactory();
-    publish({ status: "pending", cart: current });
+    if (current === null || current.cart.items.length === 0) return;
+    revision += 1;
+    if (plan === null) {
+      const contextCurrent = captureCustomerCsrfContext();
+      try {
+        plan = {
+          cart: snapshotCart(current),
+          operationReference: keyFactory(),
+          contextCurrent,
+          outcomeUnknown: false,
+        };
+      } catch (error) {
+        fail(error, current);
+        return;
+      }
+    }
+    const active = plan;
+    if (!active.contextCurrent()) {
+      active.outcomeUnknown = true;
+      unresolved();
+      return;
+    }
+    publish({ status: "pending", cart: active.cart });
     try {
-      const result = await client.quote(current, pendingKey);
-      pendingKey = null;
-      publish({ status: "ready", cart: current, quote: result });
+      const result = await client.quote(active.cart, active.operationReference);
+      if (!active.contextCurrent() || result.cartVersion !== active.cart.cart.version)
+        throw new CartClientError("network_unknown");
+      plan = null;
+      publish(
+        online
+          ? { status: "ready", cart: active.cart, quote: result }
+          : { status: "offline", cart: active.cart, canRetry: false },
+      );
     } catch (error) {
-      if (error instanceof CartClientError && error.code === "cart_version_conflict") {
-        pendingKey = null;
+      if (
+        active.outcomeUnknown ||
+        !active.contextCurrent() ||
+        (error instanceof CartClientError && error.code === "network_unknown")
+      ) {
+        active.outcomeUnknown = true;
+        unresolved();
+        return;
+      }
+      plan = null;
+      if (error instanceof CartClientError && error.code === "cart_version_conflict" && online) {
         try {
           const refreshed = await client.loadCart();
-          publish({ status: "conflict", cart: refreshed, canRetry: false });
-          return;
-        } catch {
-          publish({ status: "unavailable", cart: current, canRetry: false });
-          return;
+          if (!active.contextCurrent()) {
+            fail(new CartClientError("cart_session_expired"), null);
+            return;
+          }
+          publish({ status: online ? "conflict" : "offline", cart: refreshed, canRetry: false });
+        } catch (refreshError) {
+          fail(refreshError, active.cart);
         }
+        return;
       }
-      fail(error, current);
+      fail(error, active.cart);
     }
   };
   const quote = (): Promise<void> => {
     if (quoteFlight !== null) return quoteFlight;
-    const current = executeQuote();
-    quoteFlight = current;
-    void current.then(
-      () => {
-        if (quoteFlight === current) quoteFlight = null;
-      },
-      () => {
-        if (quoteFlight === current) quoteFlight = null;
-      },
-    );
-    return current;
+    // Install the flight before publishing or calling injected providers/listeners.
+    let complete: () => void = () => undefined;
+    const flight = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    quoteFlight = flight;
+    const settle = () => {
+      if (quoteFlight === flight) quoteFlight = null;
+      complete();
+    };
+    void executeQuote().then(settle, (error) => {
+      if (plan?.outcomeUnknown) unresolved();
+      else fail(error, cart());
+      settle();
+    });
+    return flight;
   };
   return Object.freeze({
     getState: () => state,
     async load() {
+      if (quoteFlight !== null) return;
       if (!online) {
-        publish({ status: "offline", cart: cart(), canRetry: false });
+        if (plan !== null) unresolved();
+        else publish({ status: "offline", cart: cart(), canRetry: false });
         return;
       }
+      const observedRevision = revision;
+      const query = ++querySequence;
+      const contextCurrent = captureCustomerCsrfContext();
       try {
         const current = await client.loadCart();
-        pendingKey = null;
+        if (
+          observedRevision !== revision ||
+          query !== querySequence ||
+          quoteFlight !== null ||
+          !online
+        )
+          return;
+        if (plan !== null) {
+          unresolved();
+          return;
+        }
+        if (!contextCurrent()) {
+          fail(new CartClientError("cart_service_unavailable"), null);
+          return;
+        }
         publish(
           current === null || current.cart.items.length === 0
             ? { status: "empty" }
             : { status: "ready", cart: current, quote: null },
         );
       } catch (error) {
-        fail(error, null);
+        if (
+          observedRevision !== revision ||
+          query !== querySequence ||
+          quoteFlight !== null ||
+          !online
+        )
+          return;
+        if (plan !== null) unresolved();
+        else fail(error, null);
       }
     },
     quote,
-    retry: quote,
+    retry: () => (plan === null ? Promise.resolve() : quote()),
     setOnline(value: boolean) {
+      if (online === value) return;
       online = value;
-      if (!value) publish({ status: "offline", cart: cart(), canRetry: pendingKey !== null });
+      revision += 1;
+      if (!value) {
+        offlineWasEmpty = state.status === "empty";
+        publish({
+          status: "offline",
+          cart: plan !== null && !plan.contextCurrent() ? null : cart(),
+          canRetry: plan !== null && plan.contextCurrent(),
+        });
+        return;
+      }
+      if (quoteFlight !== null) {
+        if (plan !== null && !plan.contextCurrent()) {
+          unresolved();
+          return;
+        }
+        const current = plan?.cart ?? cart();
+        publish(
+          current === null
+            ? { status: "unavailable", cart: null, canRetry: false }
+            : { status: "pending", cart: current },
+        );
+        return;
+      }
+      if (plan !== null) {
+        unresolved();
+        return;
+      }
+      const current = cart();
+      publish(
+        current === null
+          ? offlineWasEmpty
+            ? { status: "empty" }
+            : { status: "unavailable", cart: null, canRetry: false }
+          : current.cart.items.length === 0
+            ? { status: "empty" }
+            : { status: "ready", cart: current, quote: null },
+      );
     },
     subscribe(listener: () => void) {
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   });
 }
