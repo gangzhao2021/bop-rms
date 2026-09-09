@@ -293,3 +293,8 @@ Table release/cleaning policy and live operational authority remain separate.
 WP-2283 retains the full Move command and verifies its canonical digest against complete result
 facts. Current actor/scope authorization remains required. Dining547/547, full verification and
 forced uncached integration pass. Atomic Move storage and post-move Join credentials remain separate.
+
+WP-2284 persists source/target Tables, Session, immutable Move history and Audit atomically.
+Concurrent retries return the actual original receipt; Closing and target competition are fenced.
+Dining573/573, Dining PostgreSQL7/7, full verification and forced uncached integration pass. Post-move Join credential
+reissuance, shared Cart write coordination and UI activation remain separate.

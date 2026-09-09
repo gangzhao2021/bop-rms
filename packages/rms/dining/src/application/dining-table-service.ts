@@ -17,7 +17,7 @@ import {
 } from "./dining-table-record.js";
 export { DiningTableWorkflowError } from "./dining-table-record.js";
 export type { DiningTableWorkflowErrorCode } from "./dining-table-record.js";
-import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
+import { canonicalizeRfc8785, validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import {
   parseDiningInstant,
   parseDiningReference,
@@ -406,8 +406,36 @@ export function createDiningTableService(ports: DiningTablePorts) {
         },
         ports.references,
       );
-      await ports.repository.commitMove(record).catch(dependency);
-      return Object.freeze({ status: "Applied" as const, result: record });
+      const receipt = await Promise.resolve()
+        .then(() => ports.repository.commitMove(record))
+        .catch((error: unknown) => {
+          if (
+            error instanceof DiningTableWorkflowError &&
+            (error.code === "DINING_TABLE_VERSION_CONFLICT" ||
+              error.code === "DINING_TABLE_IDEMPOTENCY_CONFLICT")
+          )
+            throw new DiningTableWorkflowError(error.code);
+          return dependency();
+        });
+      return parseState(() => {
+        const rawReceipt = closed(snapshot(receipt), ["status", "record"]);
+        if (rawReceipt.status !== "Applied" && rawReceipt.status !== "AlreadyApplied")
+          return dependency();
+        const actual = parseDiningSessionMoveRecord(rawReceipt.record, ports.references);
+        if (
+          !same(actual.command, record.command) ||
+          actual.intentDigest !== record.intentDigest ||
+          !same(actual.session, record.session) ||
+          !same(actual.sourceTable, record.sourceTable) ||
+          !same(actual.targetTable, record.targetTable) ||
+          !same(actual.event, record.event) ||
+          (rawReceipt.status === "Applied" &&
+            canonicalizeRfc8785(actual.audit) !== canonicalizeRfc8785(record.audit))
+        )
+          return dependency();
+        historicalAudit(actual.audit, record.audit, observedAt);
+        return Object.freeze({ status: rawReceipt.status, result: actual });
+      });
     },
   });
 }

@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "dining", packageName: "@rms/dining", layer: "RMS" },
   tables: [
     {
+      table: "dining_session_move_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/dining" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "dining_closing_operation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/dining" },

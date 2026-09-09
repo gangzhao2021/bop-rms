@@ -150,6 +150,7 @@ function fixture(options: { denied?: boolean } = {}) {
         tables.set(record.sourceTable.tableReference, record.sourceTable);
         tables.set(record.targetTable.tableReference, record.targetTable);
         moveOperations.set(record.operationReference, record);
+        return { status: "Applied", record };
       },
     },
   };
@@ -803,4 +804,62 @@ it("WP-2283 bounds equality callback failures in stored Move validation", async 
       },
     }),
   ).toThrowError("Dining Table operation is unavailable");
+});
+
+it("WP-2284 returns the stored original Audit from a converged commit", async () => {
+  const state = moveFixture();
+  state.ports.repository.commitMove = async (record) => ({
+    status: "AlreadyApplied",
+    record: { ...record, audit: { ...record.audit, auditId: ref("99") } },
+  });
+  const result = await createDiningTableService(state.ports).moveSession(moveInput());
+  expect(result.status).toBe("AlreadyApplied");
+  expect(result.result.audit.auditId).toBe(ref("99"));
+});
+it.each(["status", "command", "audit", "session", "extra"])(
+  "WP-2284 rejects corrupt commit %s",
+  async (field) => {
+    const state = moveFixture();
+    state.ports.repository.commitMove = async (record) =>
+      ({
+        status: field === "status" ? "Unknown" : "Applied",
+        record:
+          field === "command"
+            ? { ...record, command: { ...record.command, partySize: 1 } }
+            : field === "audit"
+              ? { ...record, audit: { ...record.audit, auditId: ref("99") } }
+              : field === "session"
+                ? { ...record, session: { ...record.session, hostParticipantReference: ref("99") } }
+                : record,
+        ...(field === "extra" ? { raw: "forbidden" } : {}),
+      }) as never;
+    await expect(
+      createDiningTableService(state.ports).moveSession(moveInput()),
+    ).rejects.toMatchObject({ code: "DINING_TABLE_DEPENDENCY_UNAVAILABLE" });
+  },
+);
+it("WP-2284 accepts equivalent Audit key ordering", async () => {
+  const state = moveFixture();
+  state.ports.repository.commitMove = async (record) => ({
+    status: "Applied",
+    record: {
+      ...record,
+      audit: Object.fromEntries(Object.entries(record.audit).reverse()) as never,
+    },
+  });
+  await expect(
+    createDiningTableService(state.ports).moveSession(moveInput()),
+  ).resolves.toMatchObject({ status: "Applied" });
+});
+it("WP-2284 bounds synchronous commit errors", async () => {
+  const state = moveFixture();
+  state.ports.repository.commitMove = () => {
+    throw new Error("private persistence");
+  };
+  await expect(
+    createDiningTableService(state.ports).moveSession(moveInput()),
+  ).rejects.toMatchObject({
+    code: "DINING_TABLE_DEPENDENCY_UNAVAILABLE",
+    message: "Dining Table operation is unavailable",
+  });
 });

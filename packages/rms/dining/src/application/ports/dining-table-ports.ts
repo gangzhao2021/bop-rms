@@ -92,6 +92,11 @@ export interface DiningTablePorts {
     commitTable(record: DiningTableOperationRecord): Promise<void>;
     resolveMoveOperation(reference: DiningReference): Promise<DiningSessionMoveRecord | null>;
     loadSession(reference: DiningReference): Promise<DiningSession | null>;
-    commitMove(record: DiningSessionMoveRecord): Promise<void>;
+    commitMove(record: DiningSessionMoveRecord): Promise<
+      Readonly<{
+        status: "Applied" | "AlreadyApplied";
+        record: DiningSessionMoveRecord;
+      }>
+    >;
   };
 }
