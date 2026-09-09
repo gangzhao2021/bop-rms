@@ -1,4 +1,8 @@
 import {
+  createCustomerCartItemComposition,
+  type CustomerCartItemCompositionOptions,
+} from "./customer-cart-item-composition.js";
+import {
   createCustomerCartRemovalComposition,
   type CustomerCartRemovalCompositionOptions,
 } from "./customer-cart-removal-composition.js";
@@ -62,6 +66,10 @@ export interface LocalCustomerRuntimeOptions {
     CustomerCartBindingCompositionOptions,
     "scope" | "session" | "sessionTransactions" | "now"
   >;
+  readonly cartItems?: Omit<
+    CustomerCartItemCompositionOptions,
+    "scope" | "session" | "sessionTransactions" | "cartTransactions" | "query" | "now" | "fallback"
+  >;
   readonly cartRemoval?: Omit<
     CustomerCartRemovalCompositionOptions,
     "scope" | "session" | "sessionTransactions" | "cartTransactions" | "query" | "now"
@@ -82,6 +90,8 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     throw new Error("LOCAL_CUSTOMER_RUNTIME_UNAVAILABLE");
   if (options.cartBinding !== undefined && options.cartTransactions === undefined)
     throw new Error("LOCAL_CART_BINDING_READS_REQUIRED");
+  if (options.cartItems !== undefined && options.cartTransactions === undefined)
+    throw new Error("LOCAL_CART_ITEM_READS_REQUIRED");
   if (options.cartRemoval !== undefined && options.cartTransactions === undefined)
     throw new Error("LOCAL_CART_REMOVAL_READS_REQUIRED");
   if (options.cartQuote !== undefined && options.cartTransactions === undefined)
@@ -143,22 +153,32 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       }),
       quotes: createPostgresCartQuoteReader(options.cartTransactions, scope),
     });
-    customerCart = new CustomerCartHandler({
-      allowedOrigin: options.allowedOrigin,
-      now,
-      port:
-        options.cartRemoval === undefined
-          ? createCustomerCartReadPort(query)
-          : createCustomerCartRemovalComposition({
-              ...options.cartRemoval,
-              scope,
-              session: entry.session,
-              sessionTransactions: options.sessionTransactions,
-              cartTransactions: options.cartTransactions,
-              query,
-              now,
-            }),
-    });
+    const fallback =
+      options.cartRemoval === undefined
+        ? createCustomerCartReadPort(query)
+        : createCustomerCartRemovalComposition({
+            ...options.cartRemoval,
+            scope,
+            session: entry.session,
+            sessionTransactions: options.sessionTransactions,
+            cartTransactions: options.cartTransactions,
+            query,
+            now,
+          });
+    const port =
+      options.cartItems === undefined
+        ? fallback
+        : createCustomerCartItemComposition({
+            ...options.cartItems,
+            scope,
+            session: entry.session,
+            sessionTransactions: options.sessionTransactions,
+            cartTransactions: options.cartTransactions,
+            query,
+            now,
+            fallback,
+          });
+    customerCart = new CustomerCartHandler({ allowedOrigin: options.allowedOrigin, now, port });
   }
   const customerCartBinding =
     options.cartBinding === undefined

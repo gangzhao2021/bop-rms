@@ -1,3 +1,4 @@
+import { createCustomerCartItemComposition } from "../../../apps/api/src/customer-cart-item-composition.ts";
 import { createCustomerCartRemovalComposition } from "../../../apps/api/src/customer-cart-removal-composition.ts";
 import { createHash } from "node:crypto";
 import { createPickupCartCreationCoordinator } from "../../../apps/customer-pwa/src/cart/pickup-cart-creation.ts";
@@ -546,8 +547,19 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
         },
         catalog: {
           async describeMany(requests) {
-            assert.deepEqual(requests, []);
-            return [];
+            // WP-2265 synthetic display results only; never evidence of current eligibility.
+            return requests.map((request) => {
+              assert.equal(request.sellableReference, id(958));
+              assert.deepEqual(request.optionReferences, []);
+              return {
+                status: "Found",
+                menuVersionReference: request.menuVersionReference,
+                productVersionReference: request.productVersionReference,
+                sellableReference: request.sellableReference,
+                displayName: "Synthetic item",
+                options: [],
+              };
+            });
           },
         },
         quotes: createPostgresCartQuoteReader(runner(orderingRole), scope),
@@ -1021,6 +1033,224 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
         } finally {
           removalServer.closeAllConnections();
           await new Promise((resolve) => removalServer.close(() => resolve()));
+        }
+        // WP-2265: actual Identity/Ordering/Audit with an explicitly synthetic Catalog owner port.
+        clock = 1300;
+        const itemSession = guest(970);
+        const itemCredential = credentials.generateCredential("Session");
+        const itemCsrf = credentials.generateCredential("Csrf");
+        await sessions.create({
+          record: createGuestSessionRecord({
+            session: itemSession,
+            sessionSelectorHash: credentials.hashCredential("Session", itemCredential),
+            csrfSelectorHash: credentials.hashCredential("Csrf", itemCsrf),
+            operationReference: id(971),
+            operationIntentHash: "a".repeat(64),
+          }),
+        });
+        await httpOwner.prepare({
+          ...scope,
+          operationReference: id(972),
+          targetReference: id(973),
+          sessionReference: id(970),
+          predecessorSessionReference: id(974),
+          acknowledgedAt: at(1299),
+          observedAt: at(1300),
+          validUntil: at(1500),
+        });
+        await httpOwner.activate({
+          ...scope,
+          operationReference: id(972),
+          targetReference: id(973),
+          sessionReference: id(970),
+          activatedAt: at(1300),
+        });
+        let loseItemAck = true;
+        let failItemRead = false;
+        let itemAllocations = 0;
+        let catalogValidations = 0;
+        const itemWriteRunner = runner(orderingRole);
+        const itemServer = createServer(
+          createApp({
+            customerCart: new CustomerCartHandler({
+              allowedOrigin: "https://customer.example.test",
+              now: () => at(clock),
+              port: createCustomerCartItemComposition({
+                scope,
+                session: { credentials, binding: { validate: async () => "Current" } },
+                sessionTransactions: runner(identityRole),
+                cartTransactions: runner(orderingRole),
+                writeTransactions: {
+                  async run(work) {
+                    const result = await itemWriteRunner.run(work);
+                    if (loseItemAck) {
+                      loseItemAck = false;
+                      throw new Error("synthetic acknowledgement loss after actual COMMIT");
+                    }
+                    return result;
+                  },
+                },
+                references: {
+                  ...references,
+                  generate: () => {
+                    itemAllocations++;
+                    return id(975);
+                  },
+                },
+                audit: itemAudit,
+                catalog: {
+                  validateSelection: async (request) => {
+                    catalogValidations++;
+                    return {
+                      ...request,
+                      status: "Accepted",
+                      menuVersionReference: id(956),
+                      productVersionReference: id(957),
+                      catalogChannelCode: "PILOT_CHANNEL",
+                      catalogOrderTypeCode: "PILOT_ORDER_TYPE",
+                      ruleEvidence: [],
+                      validatedAt: request.observedAt,
+                    };
+                  },
+                },
+                query: {
+                  read: async (request) => {
+                    if (failItemRead) throw new Error("synthetic readback failure");
+                    return displayQuery.read(request);
+                  },
+                },
+                now: () => at(clock),
+              }),
+            }),
+          }),
+        );
+        try {
+          await new Promise((resolve) => itemServer.listen(0, "127.0.0.1", resolve));
+          const address = itemServer.address();
+          assert.ok(address && typeof address === "object");
+          const sendItem = ({
+            action = "Add",
+            quantity = 1,
+            version = 1,
+            operation = id(979),
+            csrf = itemCsrf,
+            cart = id(973),
+          } = {}) =>
+            networkFetch(
+              `http://127.0.0.1:${address.port}/api/v1/carts/${cart}/items${action === "Add" ? "" : "/" + id(975)}`,
+              {
+                method: action === "Add" ? "POST" : "PATCH",
+                headers: {
+                  origin: "https://customer.example.test",
+                  "sec-fetch-site": "same-origin",
+                  "sec-fetch-mode": "cors",
+                  "content-type": "application/json",
+                  "if-match": `"${version}"`,
+                  "idempotency-key": operation,
+                  "x-csrf-token": csrf,
+                  cookie: "__Host-bop-guest=" + itemCredential,
+                },
+                body: JSON.stringify({
+                  ...(action === "Add" ? { sellableReference: id(958) } : {}),
+                  quantity,
+                  optionSelections: [],
+                  customerNote: null,
+                }),
+              },
+            );
+          const itemFacts = async () => ({
+            audits: (await counts()).audits,
+            operations: Number(
+              (await admin.query("SELECT count(*) FROM rms_ordering.cart_operation_record")).rows[0]
+                .count,
+            ),
+          });
+          const beforeItems = await itemFacts();
+          for (const [request, status] of [
+            [{ csrf: credentials.generateCredential("Csrf") }, 401],
+            [{ cart: id(976) }, 404],
+            [{ version: 2 }, 409],
+          ]) {
+            const response = await sendItem(request);
+            assert.equal(response.status, status);
+            await response.text();
+          }
+          assert.deepEqual(await itemFacts(), beforeItems);
+          assert.equal(catalogValidations, 0);
+          const lost = await sendItem();
+          assert.equal(lost.status, 503);
+          await lost.text();
+          assert.equal((await itemReader.load(id(973))).aggregateVersion, 2);
+          assert.equal((await itemReader.load(id(973))).items.length, 1);
+          clock = 1301;
+          for (const response of await Promise.all([sendItem(), sendItem(), sendItem()])) {
+            assert.equal(response.status, 200);
+            assert.equal(response.headers.get("cache-control"), "no-store");
+            const body = await response.json();
+            assert.equal(body.cart.version, 2);
+            assert.equal(body.cart.items[0].quantity, 1);
+            for (const privateValue of [
+              itemCredential,
+              itemCsrf,
+              id(970),
+              scope.brandReference,
+              scope.storeReference,
+            ])
+              assert.equal(JSON.stringify(body).includes(privateValue), false);
+          }
+          assert.equal(itemAllocations, 1);
+          assert.equal(catalogValidations, 1);
+          assert.deepEqual(await itemFacts(), {
+            audits: beforeItems.audits + 1,
+            operations: beforeItems.operations + 1,
+          });
+          const changed = await sendItem({ quantity: 2 });
+          assert.equal(changed.status, 409);
+          await changed.text();
+          failItemRead = true;
+          const updateRequest = { action: "Update", quantity: 2, version: 2, operation: id(980) };
+          const unread = await sendItem(updateRequest);
+          assert.equal(unread.status, 503);
+          await unread.text();
+          assert.equal((await itemReader.load(id(973))).aggregateVersion, 3);
+          failItemRead = false;
+          clock = 1302;
+          const updated = await sendItem(updateRequest);
+          assert.equal(updated.status, 200);
+          const updatedBody = await updated.json();
+          assert.equal(updatedBody.cart.version, 3);
+          assert.equal(updatedBody.cart.items[0].quantity, 2);
+          const changedUpdate = await sendItem({ ...updateRequest, quantity: 3 });
+          assert.equal(changedUpdate.status, 409);
+          await changedUpdate.text();
+          const oldAdd = await sendItem();
+          assert.equal(oldAdd.status, 200);
+          assert.equal((await oldAdd.json()).cart.items[0].quantity, 2);
+          assert.equal(itemAllocations, 1);
+          assert.equal(catalogValidations, 2);
+          const finalItems = {
+            audits: beforeItems.audits + 2,
+            operations: beforeItems.operations + 2,
+          };
+          assert.deepEqual(await itemFacts(), finalItems);
+          await sessions.revoke({
+            selectorHash: credentials.hashCredential("Session", itemCredential),
+            expectedVersion: 1,
+            reason: "Rotated",
+            observedAt: at(clock),
+            operationReference: id(981),
+            operationIntentHash: "b".repeat(64),
+          });
+          for (const request of [{}, updateRequest]) {
+            const revoked = await sendItem(request);
+            assert.equal(revoked.status, 401);
+            await revoked.text();
+          }
+          assert.deepEqual(await itemFacts(), finalItems);
+          assert.equal(catalogValidations, 2);
+        } finally {
+          itemServer.closeAllConnections();
+          await new Promise((resolve) => itemServer.close(() => resolve()));
         }
       } finally {
         httpServer.closeAllConnections();

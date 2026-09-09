@@ -401,3 +401,95 @@ describe("optional local Cart removal runtime", () => {
     expect(f.options.session.credentials.generateCredential).not.toHaveBeenCalled();
   });
 });
+
+describe("optional local Cart item runtime", () => {
+  function itemOptions(): NonNullable<LocalCustomerRuntimeOptions["cartItems"]> {
+    return {
+      writeTransactions: {
+        run: vi.fn(async (): Promise<never> => {
+          throw new Error("unexpected write");
+        }),
+      },
+      catalog: {
+        validateSelection: vi.fn(async () => {
+          throw new Error("unexpected Catalog read");
+        }),
+      },
+      references: {
+        generate: () => {
+          throw new Error("unexpected item allocation");
+        },
+        hashIntent: () => {
+          throw new Error("unexpected hash");
+        },
+        equals: (a, b) => a === b,
+      },
+      audit: vi.fn(() => {
+        throw new Error("unexpected audit");
+      }),
+    };
+  }
+  it("requires reads before enabling items", () => {
+    const { options, run } = setup();
+    expect(() => createLocalCustomerRuntime({ ...options, cartItems: itemOptions() })).toThrow(
+      "LOCAL_CART_ITEM_READS_REQUIRED",
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("keeps default items unavailable", async () => {
+    const { options, run } = setup();
+    const { root } = await start(options);
+    const result = await fetch(root + "/api/v1/carts/" + id(30) + "/items", {
+      method: "POST",
+    });
+    expect(result.status).toBe(503);
+    await result.text();
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("constructs without resources and preserves Origin and Session guards", async () => {
+    const { options, run, f } = setup();
+    const items = itemOptions();
+    const cartRun = vi.fn(async (): Promise<never> => {
+      throw new Error("unexpected Cart read");
+    });
+    const { root } = await start({
+      ...options,
+      cartTransactions: { run: cartRun },
+      cartItems: items,
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(cartRun).not.toHaveBeenCalled();
+    const send = (origin: string) =>
+      fetch(root + "/api/v1/carts/" + id(30) + "/items", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin,
+          "sec-fetch-site": "same-origin",
+          "sec-fetch-mode": "cors",
+          "idempotency-key": id(32),
+          "if-match": '"1"',
+          "x-csrf-token": "b".repeat(43),
+          cookie: "__Host-bop-guest=" + "a".repeat(43),
+        },
+        body: JSON.stringify({
+          sellableReference: id(31),
+          quantity: 1,
+          optionSelections: [],
+          customerNote: null,
+        }),
+      });
+    const wrong = await send("https://wrong.invalid");
+    expect(wrong.status).toBe(400);
+    await wrong.text();
+    expect(run).not.toHaveBeenCalled();
+    const denied = await send(options.allowedOrigin);
+    expect(denied.status).toBe(401);
+    expect(await denied.text()).not.toContain("synthetic");
+    expect(run).toHaveBeenCalledOnce();
+    expect(cartRun).not.toHaveBeenCalled();
+    expect(items.writeTransactions.run).not.toHaveBeenCalled();
+    expect(items.audit).not.toHaveBeenCalled();
+    expect(f.options.session.credentials.generateCredential).not.toHaveBeenCalled();
+  });
+});

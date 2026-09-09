@@ -108,3 +108,8 @@ export {
   type PickupCartQuoteExpiryOptions,
   type PickupCartQuoteExpiryResult,
 } from "./application/pickup-cart-quote-expiry-service.js";
+export {
+  createPickupCartItemService,
+  type PickupCartItemOptions,
+  type PickupCartItemResult,
+} from "./application/pickup-cart-item-service.js";

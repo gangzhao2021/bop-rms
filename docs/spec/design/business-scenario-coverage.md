@@ -216,3 +216,8 @@ WP-2264 connects the committed expiry fence to current authorization, an exact H
 receipt and explicit Checkout recovery. Ordering490/490, API326/326, PWA404/404, browser42/42,
 Quote PostgreSQL5/5, full verification and forced uncached integration pass. Generic errors remain
 insufficient to release an unknown request. Commercial and Provider evidence remain gated.
+
+WP-2265 connects current-authorized Pickup Add/Update with original-operation recovery and
+optional local HTTP providers. Ordering518/518, API360/360, Cart PostgreSQL6/6, full verification
+and forced uncached integration pass. Displayed menu data does not establish
+current Catalog eligibility, conditional activation or option prices; those authorities remain explicit.
