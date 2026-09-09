@@ -47,6 +47,61 @@ async function start(options: LocalCustomerRuntimeOptions) {
 }
 
 describe("scoped local Customer runtime", () => {
+  it("keeps an unconfigured Quote endpoint unavailable without database access", async () => {
+    const { options, run } = setup();
+    const { root } = await start(options);
+    const response = await fetch(`${root}/api/v1/carts/${id(901)}/quote`, { method: "POST" });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "quote_service_unavailable" } });
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("requires Cart reads before enabling local Quote composition", () => {
+    const { options, run } = setup();
+    expect(() => createLocalCustomerRuntime({ ...options, cartQuote: {} as never })).toThrow(
+      "LOCAL_CART_QUOTE_READS_REQUIRED",
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("enables Quote only with explicit providers and denies unavailable Session before Pricing", async () => {
+    const { options, run } = setup();
+    const candidate = vi.fn(async (): Promise<never> => {
+      throw new Error("synthetic candidate unavailable");
+    });
+    const { root } = await start({
+      ...options,
+      cartTransactions: { run },
+      cartQuote: {
+        attachmentTransactions: { run },
+        pricingTransactions: { run },
+        references: { hashIntent: () => `sha256:${"a".repeat(64)}`, equals: (a, b) => a === b },
+        pricingReferences: {
+          generateReference: () => id(900),
+          hashIntent: () => `sha256:${"a".repeat(64)}`,
+          equals: (a, b) => a === b,
+        },
+        audit: () => ({}) as never,
+        candidate,
+      },
+    });
+    expect(run).not.toHaveBeenCalled();
+    const response = await fetch(`${root}/api/v1/carts/${id(901)}/quote`, {
+      method: "POST",
+      headers: {
+        origin: options.allowedOrigin,
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+        cookie: `__Host-bop-guest=${"g".repeat(43)}`,
+        "x-csrf-token": "c".repeat(43),
+        "idempotency-key": id(902),
+      },
+      body: JSON.stringify({ cartVersion: 1 }),
+    });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "quote_not_found" } });
+    expect(run).toHaveBeenCalled();
+    expect(candidate).not.toHaveBeenCalled();
+  });
   it.each(["production", "staging", "unknown", ""])(
     "rejects environment %s before construction",
     (environment) => {

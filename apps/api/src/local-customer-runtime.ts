@@ -7,6 +7,11 @@ import {
   type CustomerCartBindingCompositionOptions,
 } from "./customer-cart-binding-composition.js";
 import { CustomerCartBindingHandler } from "./customer-cart-binding.js";
+import {
+  createCustomerQuoteComposition,
+  type CustomerQuoteCompositionOptions,
+} from "./customer-quote-composition.js";
+import { CustomerQuoteHandler } from "./customer-quote.js";
 import { createPublicStoreProfileService } from "@rms/store";
 import {
   createCustomerCartViewQuery,
@@ -62,6 +67,10 @@ export interface LocalCustomerRuntimeOptions {
     "scope" | "session" | "sessionTransactions" | "cartTransactions" | "query" | "now"
   >;
   readonly allowedOrigin: string;
+  readonly cartQuote?: Omit<
+    CustomerQuoteCompositionOptions,
+    "scope" | "session" | "sessionTransactions" | "cartTransactions" | "now"
+  >;
   readonly now: () => string;
   readonly uuidV7Factory: () => string;
   readonly runtime?: Pick<ApiServerRuntimeOptions, "port" | "logger">;
@@ -75,6 +84,8 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     throw new Error("LOCAL_CART_BINDING_READS_REQUIRED");
   if (options.cartRemoval !== undefined && options.cartTransactions === undefined)
     throw new Error("LOCAL_CART_REMOVAL_READS_REQUIRED");
+  if (options.cartQuote !== undefined && options.cartTransactions === undefined)
+    throw new Error("LOCAL_CART_QUOTE_READS_REQUIRED");
   const scope = Object.freeze({
     brandReference: parseCatalogReference(options.scope.brandReference),
     storeReference: parseCatalogReference(options.scope.storeReference),
@@ -164,6 +175,22 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
           }),
         });
   return createApiServerRuntime({
+    ...(options.cartQuote === undefined || options.cartTransactions === undefined
+      ? {}
+      : {
+          customerQuote: new CustomerQuoteHandler({
+            allowedOrigin: options.allowedOrigin,
+            now,
+            port: createCustomerQuoteComposition({
+              ...options.cartQuote,
+              scope,
+              session: entry.session,
+              sessionTransactions: options.sessionTransactions,
+              cartTransactions: options.cartTransactions,
+              now,
+            }),
+          }),
+        }),
     ...(customerCartBinding === undefined ? {} : { customerCartBinding }),
     ...(customerCart === undefined ? {} : { customerCart }),
     port: options.runtime?.port ?? 0,

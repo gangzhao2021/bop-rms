@@ -199,3 +199,7 @@ is unchanged. Versioned option-price facts and their authoritative producer rema
 [WP-2260](../work-packages/WP-2260.md) supplies Ordering's current Session/CSRF-authorized Pickup
 Quote entry, including authorization before original-history lookup and request-local Pricing identity.
 Authoritative pricing facts, HTTP composition and end-to-end customer journey remain separate.
+
+[WP-2261](../work-packages/WP-2261.md) supplies explicit local Quote HTTP composition with current
+authorization before and after original-result lookup. It requires an authoritative candidate
+producer; default Quote creation remains unavailable. Real Store facts and full journey are unclaimed.
