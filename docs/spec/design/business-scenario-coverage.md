@@ -268,3 +268,7 @@ Join/regeneration persistence remains separate.
 WP-2277 implements atomic Join regeneration, original-operation recovery and Audit storage.
 Dining380/380, Dining PostgreSQL3/3, full verification and forced uncached integration pass.
 Guest Join/Closing persistence and live activation remain separate.
+
+WP-2278 implements atomic Guest Join, Participant/Host and admission issuance persistence.
+Dining410/410, Dining PostgreSQL4/4, full verification and forced uncached integration pass.
+Identity rotation, shared Cart and live activation remain separate.

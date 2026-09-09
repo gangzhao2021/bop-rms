@@ -114,6 +114,7 @@ describe("migration catalog", () => {
       "1001_001_create_dining_table",
       "1001_002_create_dining_session_start",
       "1001_003_create_dining_join_regeneration",
+      "1001_004_create_dining_session_join",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
       "1102_001_create_option_set_binding",

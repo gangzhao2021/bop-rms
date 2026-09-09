@@ -229,6 +229,19 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_join_regeneration_operation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-join-regeneration-store.ts";
+        // WP-2278 admits only the scoped Guest Join owner transaction.
+        const acceptedDiningSessionJoinAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          [
+            "dining_table",
+            "dining_session",
+            "dining_join_capability",
+            "dining_participant",
+            "dining_identity_admission",
+            "dining_session_join_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/dining-session-join-store.ts";
         // WP-2223 accepts only the Ordering reader over its existing Cart and line tables.
         const acceptedCartQueryAsset =
           module.packageName === "@rms/ordering" &&
@@ -293,6 +306,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningTableAsset &&
           !acceptedDiningSessionStartAsset &&
           !acceptedDiningJoinRegenerationAsset &&
+          !acceptedDiningSessionJoinAsset &&
           !acceptedCartQueryAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&
