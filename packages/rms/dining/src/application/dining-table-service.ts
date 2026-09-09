@@ -1,4 +1,4 @@
-import { validateAuditRecord } from "@bop/audit";
+import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import {
   parseDiningInstant,
   parseDiningReference,
@@ -162,7 +162,111 @@ function same(value: unknown, expected: unknown) {
   return JSON.stringify(value) === JSON.stringify(expected);
 }
 
+// Snapshot dependency data before invoking any later port. Descriptors never execute accessors.
+function snapshot(value: unknown): unknown {
+  let nodes = 0;
+  const copy = (input: unknown, depth: number): unknown => {
+    if (++nodes > 20_000 || depth > 12) return dependency();
+    if (input === null || typeof input === "boolean") return input;
+    if (typeof input === "string" && input.length <= 65_536) return input;
+    if (typeof input === "number" && Number.isFinite(input)) return input;
+    if (typeof input !== "object" || input === null) return dependency();
+    const array = Array.isArray(input);
+    if (Object.getPrototypeOf(input) !== (array ? Array.prototype : Object.prototype))
+      return dependency();
+    const keys = Reflect.ownKeys(input);
+    if (keys.length > 10_000) return dependency();
+    if (array) {
+      const length = Object.getOwnPropertyDescriptor(input, "length")?.value;
+      if (!Number.isSafeInteger(length) || length < 0 || keys.length !== length + 1)
+        return dependency();
+      const result: unknown[] = [];
+      for (let index = 0; index < length; index++) {
+        const field = Object.getOwnPropertyDescriptor(input, String(index));
+        if (!field?.enumerable || !("value" in field)) return dependency();
+        result.push(copy(field.value, depth + 1));
+      }
+      return Object.freeze(result);
+    }
+    return Object.freeze(
+      Object.fromEntries(
+        keys.map((key) => {
+          const field = Object.getOwnPropertyDescriptor(input, key);
+          if (typeof key !== "string" || !field?.enumerable || !("value" in field))
+            return dependency();
+          return [key, copy(field.value, depth + 1)];
+        }),
+      ),
+    );
+  };
+  return copy(value, 0);
+}
+
+function authorizationSnapshot(value: DiningTableAuthorizationEvidence | null) {
+  if (value === null) return null;
+  try {
+    const raw = closed(snapshot(value), [
+      "tenantReference",
+      "brandReference",
+      "storeReference",
+      "actorReference",
+      "purpose",
+      "permission",
+      "audit",
+    ]);
+    for (const key of ["tenantReference", "brandReference", "storeReference", "actorReference"])
+      parseDiningReference(raw[key]);
+    closed(raw.permission, ["effect", "action", "scopeKind"]);
+    return Object.freeze(raw) as unknown as DiningTableAuthorizationEvidence;
+  } catch {
+    throw new DiningTableWorkflowError("DINING_TABLE_PERMISSION_DENIED");
+  }
+}
+
+function historicalAudit(value: unknown, current: AppendAuditRecordInput, at: string) {
+  const result = validateAuditRecord(value, Date.parse(at));
+  if (
+    result.brandId !== current.brandId ||
+    result.storeId !== current.storeId ||
+    result.actionCode !== current.actionCode ||
+    result.targetType !== current.targetType ||
+    result.targetId !== current.targetId ||
+    result.occurredAt !== at ||
+    result.actor.type !== "User" ||
+    current.actor.type !== "User" ||
+    result.actor.reference !== current.actor.reference
+  )
+    return dependency();
+  return result;
+}
+
+function recordInput(
+  value: unknown,
+  keys: readonly string[],
+  operationReference: DiningReference,
+): Record<string, unknown> & { operationReference: DiningReference; intentDigest: string } {
+  const raw = closed(snapshot(value), keys);
+  if (
+    parseDiningReference(raw.operationReference) !== operationReference ||
+    typeof raw.intentDigest !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/u.test(raw.intentDigest)
+  )
+    return dependency();
+  return { ...raw, operationReference, intentDigest: raw.intentDigest };
+}
+
 export function createDiningTableService(ports: DiningTablePorts) {
+  const replayInput = (
+    prior: unknown,
+    keys: readonly string[],
+    operationReference: DiningReference,
+    intentDigest: string,
+  ) => {
+    const record = parseState(() => recordInput(prior, keys, operationReference));
+    if (parseState(() => ports.references.equals(record.intentDigest, intentDigest)) !== true)
+      throw new DiningTableWorkflowError("DINING_TABLE_IDEMPOTENCY_CONFLICT");
+    return record;
+  };
   return Object.freeze({
     async executeTable(input: unknown) {
       const raw = closed(input, [
@@ -194,9 +298,11 @@ export function createDiningTableService(ports: DiningTablePorts) {
         return dependency();
       }
       if (!/^sha256:[0-9a-f]{64}$/u.test(intentDigest)) return dependency();
-      const evidence = await ports.authorization
-        .authorize({ action, targetReference: candidate.tableReference, observedAt })
-        .catch(dependency);
+      const evidence = authorizationSnapshot(
+        await ports.authorization
+          .authorize({ action, targetReference: candidate.tableReference, observedAt })
+          .catch(dependency),
+      );
       const audit = authorize(evidence, {
         action,
         targetReference: candidate.tableReference,
@@ -210,12 +316,41 @@ export function createDiningTableService(ports: DiningTablePorts) {
         .resolveTableOperation(operationReference)
         .catch(dependency);
       if (prior !== null) {
-        if (!ports.references.equals(prior.intentDigest, intentDigest))
-          throw new DiningTableWorkflowError("DINING_TABLE_IDEMPOTENCY_CONFLICT");
-        return Object.freeze({ status: "AlreadyApplied" as const, table: prior.table });
+        const captured = replayInput(
+          prior,
+          ["operationReference", "intentDigest", "table", "audit", "event"],
+          operationReference,
+          intentDigest,
+        );
+        const record = parseState(() => {
+          const raw = captured;
+          const table = createDiningTable(raw.table);
+          const recordedEvent = closed(raw.event, [
+            "eventType",
+            "tableReference",
+            "aggregateVersion",
+            "lifecycle",
+            "qrStatus",
+            "operationalState",
+            "occurredAt",
+          ]);
+          historicalAudit(raw.audit, audit, table.observedAt);
+          if (
+            table.tableReference !== candidate.tableReference ||
+            table.tenantReference !== candidate.tenantReference ||
+            table.brandReference !== candidate.brandReference ||
+            table.storeReference !== candidate.storeReference ||
+            !same(recordedEvent, event(action, table))
+          )
+            return dependency();
+          return { table, intentDigest: raw.intentDigest };
+        });
+        if (!same(record.table, candidate)) return dependency();
+        return Object.freeze({ status: "AlreadyApplied" as const, table: record.table });
       }
       const loaded = await ports.repository.loadTable(candidate.tableReference).catch(dependency);
-      const current = loaded === null ? null : parseState(() => createDiningTable(loaded));
+      const current =
+        loaded === null ? null : parseState(() => createDiningTable(snapshot(loaded)));
       if (action === "CreateDraft") {
         if (
           raw.expectedAggregateVersion !== null ||
@@ -298,9 +433,11 @@ export function createDiningTableService(ports: DiningTablePorts) {
         return dependency();
       }
       if (!/^sha256:[0-9a-f]{64}$/u.test(intentDigest)) return dependency();
-      const evidence = await ports.authorization
-        .authorize({ action: "MoveSession", targetReference: sessionReference, observedAt })
-        .catch(dependency);
+      const evidence = authorizationSnapshot(
+        await ports.authorization
+          .authorize({ action: "MoveSession", targetReference: sessionReference, observedAt })
+          .catch(dependency),
+      );
       authorize(evidence, {
         action: "MoveSession",
         targetReference: sessionReference,
@@ -308,15 +445,37 @@ export function createDiningTableService(ports: DiningTablePorts) {
         targetType: "DiningSession",
       });
       const [sessionInput, sourceInput, targetInput] = await Promise.all([
-        ports.repository.loadSession(sessionReference).catch(dependency),
-        ports.repository.loadTable(sourceReference).catch(dependency),
-        ports.repository.loadTable(targetReference).catch(dependency),
+        ports.repository
+          .loadSession(sessionReference)
+          .then((value) =>
+            value === null ? null : parseState(() => parseDiningSession(snapshot(value))),
+          )
+          .catch(dependency),
+        ports.repository
+          .loadTable(sourceReference)
+          .then((value) =>
+            value === null ? null : parseState(() => createDiningTable(snapshot(value))),
+          )
+          .catch(dependency),
+        ports.repository
+          .loadTable(targetReference)
+          .then((value) =>
+            value === null ? null : parseState(() => createDiningTable(snapshot(value))),
+          )
+          .catch(dependency),
       ]);
       if (sessionInput === null || sourceInput === null || targetInput === null)
         throw new DiningTableWorkflowError("DINING_TABLE_VERSION_CONFLICT");
       const session = parseState(() => parseDiningSession(sessionInput));
       const source = parseState(() => createDiningTable(sourceInput));
       const target = parseState(() => createDiningTable(targetInput));
+      if (
+        session.diningSessionReference !== sessionReference ||
+        source.tableReference !== sourceReference ||
+        target.tableReference !== targetReference ||
+        sourceReference === targetReference
+      )
+        return dependency();
       const audit = authorize(evidence, {
         action: "MoveSession",
         targetReference: sessionReference,
@@ -326,13 +485,86 @@ export function createDiningTableService(ports: DiningTablePorts) {
         observedAt,
         targetType: "DiningSession",
       });
+      const rawInput = raw;
       const prior = await ports.repository
         .resolveMoveOperation(operationReference)
         .catch(dependency);
       if (prior !== null) {
-        if (!ports.references.equals(prior.intentDigest, intentDigest))
-          throw new DiningTableWorkflowError("DINING_TABLE_IDEMPOTENCY_CONFLICT");
-        return Object.freeze({ status: "AlreadyApplied" as const, result: prior });
+        const captured = replayInput(
+          prior,
+          [
+            "operationReference",
+            "intentDigest",
+            "session",
+            "sourceTable",
+            "targetTable",
+            "audit",
+            "event",
+          ],
+          operationReference,
+          intentDigest,
+        );
+        const record = parseState((): DiningSessionMoveRecord => {
+          const raw = captured;
+          const movedSession = parseDiningSession(raw.session);
+          const movedSource = createDiningTable(raw.sourceTable);
+          const movedTarget = createDiningTable(raw.targetTable);
+          const recordedEvent = closed(raw.event, [
+            "eventType",
+            "diningSessionReference",
+            "sourceTableReference",
+            "targetTableReference",
+            "aggregateVersion",
+            "occurredAt",
+          ]);
+          const expectedEvent = Object.freeze({
+            eventType: "DiningSessionTableMoved" as const,
+            diningSessionReference: sessionReference,
+            sourceTableReference: sourceReference,
+            targetTableReference: targetReference,
+            aggregateVersion: movedSession.version.toString(),
+            occurredAt: observedAt,
+          });
+          if (
+            movedSession.diningSessionReference !== sessionReference ||
+            movedSession.tableReference !== targetReference ||
+            movedSession.startedAt !== session.startedAt ||
+            movedSession.startedByActorReference !== session.startedByActorReference ||
+            movedSession.brandReference !== source.brandReference ||
+            movedSession.storeReference !== source.storeReference ||
+            movedSession.version !== (rawInput.expectedSessionVersion as number) + 1 ||
+            movedSession.phase !== "Active" ||
+            movedSource.tableReference !== sourceReference ||
+            movedTarget.tableReference !== targetReference ||
+            [movedSource, movedTarget].some(
+              (table) =>
+                table.tenantReference !== source.tenantReference ||
+                table.brandReference !== source.brandReference ||
+                table.storeReference !== source.storeReference ||
+                table.observedAt !== observedAt,
+            ) ||
+            movedSource.aggregateVersion !== (rawInput.expectedSourceTableVersion as number) + 1 ||
+            movedTarget.aggregateVersion !== (rawInput.expectedTargetTableVersion as number) + 1 ||
+            movedSession.tableAssignmentVersion !== movedTarget.aggregateVersion ||
+            movedSource.activeDiningSessionReference !== null ||
+            movedTarget.activeDiningSessionReference !== sessionReference ||
+            movedTarget.lifecycle !== "Published" ||
+            movedTarget.operationalState !== "Available" ||
+            movedTarget.capacity < (rawInput.partySize as number) ||
+            !same(recordedEvent, expectedEvent)
+          )
+            return dependency();
+          return Object.freeze({
+            operationReference,
+            intentDigest: raw.intentDigest,
+            session: movedSession,
+            sourceTable: movedSource,
+            targetTable: movedTarget,
+            audit: historicalAudit(raw.audit, audit, observedAt),
+            event: expectedEvent,
+          });
+        });
+        return Object.freeze({ status: "AlreadyApplied" as const, result: record });
       }
       if (
         raw.expectedSessionVersion !== session.version ||

@@ -240,3 +240,7 @@ the coherent Dining persistence producer remain separate.
 
 WP-2270 corrects the accidental Cart revision999 limit; quantity limits remain unchanged.
 Ordering535/535, Cart PostgreSQL7/7, full verification and forced uncached integration pass.
+
+WP-2271 hardens Dining Table/Move replay scope and object identity. Dining154/154, full verification
+and forced uncached integration pass.
+Dining persistence still requires schema/namespace authority under WP-2112.
