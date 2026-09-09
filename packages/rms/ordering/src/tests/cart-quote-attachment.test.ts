@@ -356,6 +356,95 @@ describe("WP-1203 Cart Quote attachment", () => {
     });
   });
 
+  it.each([1, 2])("WP-2259 denies %i selected options before Pricing or writes", async (count) => {
+    const source = cart();
+    const selected = cart({
+      items: source.items.map((item) => ({
+        ...item,
+        optionSelections: Array.from({ length: count }, (_, index) => ({
+          optionReference: id(200 + index) as never,
+          quantity: 1,
+        })),
+      })),
+    });
+    const original = structuredClone(selected);
+    const state = fixture({ cart: selected });
+    const write = vi.spyOn(state.ports.repository, "attach");
+    await expect(state.service.attach(input())).rejects.toMatchObject({
+      code: "CART_QUOTE_INVALID",
+    });
+    expect(state.pricingCalls()).toBe(0);
+    expect(write).not.toHaveBeenCalled();
+    expect(selected).toEqual(original);
+  });
+
+  it("WP-2259 denies the entire mixed Cart without pricing its plain items", async () => {
+    const plain = cart().items[0];
+    if (plain === undefined) throw new Error("synthetic Cart item missing");
+    const selected = cart({
+      items: [
+        plain,
+        {
+          ...plain,
+          cartItemReference: id(201) as never,
+          optionSelections: [{ optionReference: id(202) as never, quantity: 2 }],
+        },
+      ],
+    });
+    const state = fixture({ cart: selected });
+    const write = vi.spyOn(state.ports.repository, "attach");
+    await expect(state.service.attach(input())).rejects.toMatchObject({
+      code: "CART_QUOTE_INVALID",
+    });
+    expect(state.pricingCalls()).toBe(0);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it.each(["permission", "version"] as const)(
+    "WP-2259 preserves %s failure priority",
+    async (kind) => {
+      const selected = cart({
+        items: cart().items.map((item) => ({
+          ...item,
+          optionSelections: [{ optionReference: id(202) as never, quantity: 1 }],
+        })),
+      });
+      const state = fixture({ cart: selected, denied: kind === "permission" });
+      const write = vi.spyOn(state.ports.repository, "attach");
+      await expect(
+        state.service.attach(input({ expectedCartVersion: kind === "version" ? 3 : 4 })),
+      ).rejects.toMatchObject({
+        code: kind === "permission" ? "CART_PERMISSION_DENIED" : "CART_VERSION_CONFLICT",
+      });
+      expect(state.pricingCalls()).toBe(0);
+      expect(write).not.toHaveBeenCalled();
+    },
+  );
+
+  it("WP-2259 keeps original authorized replay when a later Cart has options", async () => {
+    const state = fixture();
+    const original = await state.service.attach(input());
+    const selected = cart({
+      aggregateVersion: 5,
+      items: cart().items.map((item) => ({
+        ...item,
+        optionSelections: [{ optionReference: id(202) as never, quantity: 1 }],
+      })),
+    });
+    const load = vi.spyOn(state.ports.repository, "loadCart").mockResolvedValue(selected);
+    const write = vi.spyOn(state.ports.repository, "attach");
+    const replay = await state.service.attach(input({ requestedAt: "2026-08-02T15:05:00.000Z" }));
+    expect(replay).toEqual({ status: "AlreadyAttached", attachment: original.attachment });
+    expect(load).not.toHaveBeenCalled();
+    expect(state.pricingCalls()).toBe(1);
+    await expect(
+      state.service.attach(input({ expectedCartVersion: 5, operationReference: id(203) })),
+    ).rejects.toMatchObject({ code: "CART_QUOTE_INVALID" });
+    expect(write).not.toHaveBeenCalled();
+    expect(state.pricingCalls()).toBe(1);
+    expect((await state.service.attach(input())).attachment).toEqual(original.attachment);
+  });
+
   it("fails closed for legacy, due and terminal Cart lifecycle", async () => {
     await expect(
       fixture({ cart: cart({ lifecycle: null }) }).service.attach(input()),

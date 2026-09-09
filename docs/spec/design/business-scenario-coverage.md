@@ -191,3 +191,7 @@ logical Cart line identity across Quotes and rejects conflicting history. Applic
 
 [WP-2258](../work-packages/WP-2258.md) persists exact scoped request identity and original Quote
 result in one transaction. Current Session authorization and runtime composition remain separate.
+
+[WP-2259](../work-packages/WP-2259.md) denies new attachment for selected options that the v1
+Quote cannot price explicitly. Empty selections remain supported; exact authorized history replay
+is unchanged. Versioned option-price facts and their authoritative producer remain required.

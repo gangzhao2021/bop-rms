@@ -472,7 +472,10 @@ export function createCartQuoteAttachmentService(ports: CartQuoteAttachmentPorts
       assertCartLifecycleActive(cart.lifecycle, requestedAt);
       if (
         cart.items.length === 0 ||
-        cart.items.some((item) => item.catalogSelectionEvidence === null)
+        // v1 Quote facts cannot attest selected-option prices, including an explicit zero.
+        cart.items.some(
+          (item) => item.catalogSelectionEvidence === null || item.optionSelections.length !== 0,
+        )
       )
         throw new CartError("CART_QUOTE_INVALID");
       const quote = await ports.pricing
