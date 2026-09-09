@@ -6,6 +6,7 @@ import { it } from "vitest";
 import {
   createPostgresPublishedMenuQueryStore,
   createCustomerMenuQueryService,
+  createCatalogSelectionDisplayQuery,
 } from "../../rms/catalog/src/index.ts";
 import { CustomerMenuHandler } from "../../../apps/api/src/customer-menu.ts";
 import { createApiServerRuntime, createApiRuntimeLogger } from "../../../apps/api/src/server.ts";
@@ -251,11 +252,19 @@ async function prove(context) {
       "UPDATE rms_catalog.published_menu_projection_generation SET freshness_status='Fresh', generation_status='Building' WHERE generation_id=$1",
       [id(9)],
     );
+    assert.deepEqual(
+      await store.loadVersionCandidates({ ...scope, menuVersionReference: id(4) }),
+      [],
+    );
     assert.deepEqual(await query.getPublishedMenu(request), { status: "Unavailable" });
     await menuError(await menuRequest(), 503, "menu_service_unavailable");
     await admin.query(
       "UPDATE rms_catalog.published_menu_projection_generation SET generation_status='Active', source_checkpoint=$1 WHERE generation_id=$2",
       [id(99), id(9)],
+    );
+    assert.deepEqual(
+      await store.loadVersionCandidates({ ...scope, menuVersionReference: id(4) }),
+      [],
     );
     assert.deepEqual(await query.getPublishedMenu(request), { status: "Unavailable" });
     await menuError(await menuRequest(), 503, "menu_service_unavailable");
@@ -264,6 +273,25 @@ async function prove(context) {
       [id(10), id(9)],
     );
     assert.deepEqual(await store.loadCandidates(scope), [candidate]);
+    const versionRequest = { ...scope, menuVersionReference: id(4) };
+    assert.deepEqual(await store.loadVersionCandidates(versionRequest), [candidate]);
+    assert.deepEqual(
+      await store.loadVersionCandidates({ ...versionRequest, menuVersionReference: id(99) }),
+      [],
+    );
+    const display = createCatalogSelectionDisplayQuery(store);
+    const displayInput = {
+      ...versionRequest,
+      productVersionReference: id(14),
+      sellableReference: id(13),
+      channelCode: "DINE_IN",
+      orderTypeCode: "TABLE_SERVICE",
+      locale: "en-CA",
+      ruleEvidence: [{ bindingReference: id(31), optionSetVersionReference: id(32) }],
+      optionReferences: [id(33)],
+    };
+    const beforeDisplay = await display.describe(displayInput);
+    assert.equal(beforeDisplay.status, "Found");
     // A newly selected incomplete generation must never fall back to the retired content.
     await admin.query(
       "UPDATE rms_catalog.published_menu_projection_generation SET generation_status='Retired' WHERE generation_id=$1",
@@ -292,6 +320,15 @@ async function prove(context) {
         localized_names_json,'[]'::jsonb,channel_codes_json,order_type_codes_json,time_zone,effective_from,effective_until
       FROM rms_catalog.published_menu_projection WHERE generation_id=$2`,
       [id(40), id(9)],
+    );
+    assert.deepEqual(await store.loadVersionCandidates(versionRequest), [candidate]);
+    assert.deepEqual(await display.describe(displayInput), beforeDisplay);
+    assert.deepEqual(
+      await createPostgresPublishedMenuQueryStore(runner, {
+        ...scope,
+        storeReference: id(99),
+      }).loadVersionCandidates({ ...versionRequest, storeReference: id(99) }),
+      [],
     );
     const global = await store.loadCandidates(scope);
     assert.equal(global.length, 1);

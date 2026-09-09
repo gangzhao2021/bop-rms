@@ -110,3 +110,9 @@ Identity/Ordering/HTTP composition is `packages/database/test/cart-binding-store
 Store/QR and policy evidence remains synthetic. Safe display DTO production, PWA recovery,
 DineIn shared binding, replacement/cancellation and production evidence remain unfinished; BC-02
 is not complete merely because this internal reader exists.
+
+[WP-2242](../work-packages/WP-2242.md) supplies the next Catalog dependency for BC-02: an internal
+version-pinned display query backed by Active/Retired projection generations. It returns historical
+item/option names only and preserves the existing current-menu query's failure behavior. Its owning
+WP records unit and actual PostgreSQL evidence. This does not establish Ordering display DTO or
+browser integration, current availability, prices, allergen decisions or complete Cart recovery.
