@@ -263,3 +263,37 @@ export function moveActiveDiningSession(
     }),
   });
 }
+
+/** Staff start retains the supplied assignment fact while advancing the occupied Table aggregate. */
+export function assignStartedDiningSession(
+  sessionInput: DiningSession,
+  tableInput: DiningTable,
+  expectedAssignmentVersion: number,
+): DiningTable {
+  const session = parseDiningSession(sessionInput);
+  const table = createDiningTable(tableInput);
+  if (
+    !Number.isSafeInteger(expectedAssignmentVersion) ||
+    expectedAssignmentVersion < 1 ||
+    table.aggregateVersion !== expectedAssignmentVersion ||
+    session.tableAssignmentVersion !== expectedAssignmentVersion ||
+    session.brandReference !== table.brandReference ||
+    session.storeReference !== table.storeReference ||
+    session.tableReference !== table.tableReference ||
+    session.phase !== "Active" ||
+    session.version !== 1 ||
+    session.hostParticipantReference !== null ||
+    table.observedAt < table.createdAt ||
+    session.startedAt < table.observedAt ||
+    table.activeDiningSessionReference !== null ||
+    table.lifecycle !== "Published" ||
+    table.operationalState !== "Available"
+  )
+    return fail("DINING_TABLE_SESSION_CONFLICT");
+  return createDiningTable({
+    ...table,
+    activeDiningSessionReference: session.diningSessionReference,
+    aggregateVersion: table.aggregateVersion + 1,
+    observedAt: session.startedAt,
+  });
+}

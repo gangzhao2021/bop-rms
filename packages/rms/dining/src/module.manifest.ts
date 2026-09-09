@@ -40,13 +40,19 @@ const moduleManifestInput =
     publishedEvents: [],
     ownedDatabase: {
       schema: "rms_dining",
-      tables: ["dining_table", "dining_table_operation"],
+      tables: [
+        "dining_table",
+        "dining_table_operation",
+        "dining_session",
+        "dining_join_capability",
+        "dining_session_start_operation",
+      ],
     },
     ownedJobs: [],
     featureFlags: [],
     killSwitches: [],
     piiClassification: {
-      classes: ["indirect_identifier"],
+      classes: ["indirect_identifier", "credential"],
       handling: {
         logs: "prohibited",
         urls: "prohibited",

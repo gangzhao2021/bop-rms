@@ -24,6 +24,23 @@ afterEach(async () => {
 });
 
 describe("migration catalog", () => {
+  it("registers WP-2275 scoped Session, capability and append-only start history", async () => {
+    const catalog = await readMigrationCatalog(repositoryRoot);
+    const migration = catalog.migrations.find(
+      (value) => value.id === "1001_002_create_dining_session_start",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/dining", schema: "rms_dining" });
+    for (const table of [
+      "dining_session",
+      "dining_join_capability",
+      "dining_session_start_operation",
+    ])
+      expect(migration?.sql).toContain(`ALTER TABLE rms_dining.${table} FORCE ROW LEVEL SECURITY`);
+    expect(migration?.sql).toContain("dining_session_open_table_idx");
+    expect(migration?.sql).toContain("dining_session_start_operation_no_update");
+    expect(migration?.sql).toContain("IS TRUE");
+  });
+
   it("declares only the WP-2272 scoped Dining Table and immutable operation storage", async () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
     const migration = catalog.migrations.find(
@@ -83,6 +100,7 @@ describe("migration catalog", () => {
       "0400_003_create_support_case",
       "1000_001_create_store_configuration",
       "1001_001_create_dining_table",
+      "1001_002_create_dining_session_start",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
       "1102_001_create_option_set_binding",

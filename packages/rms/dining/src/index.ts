@@ -16,3 +16,4 @@ export * from "./application/dining-closing-service.js";
 export * from "./application/ports/dining-closing-ports.js";
 export * from "./application/dining-cart-participation-query.js";
 export * from "./infrastructure/persistence/dining-table-store.js";
+export * from "./infrastructure/persistence/dining-session-start-store.js";

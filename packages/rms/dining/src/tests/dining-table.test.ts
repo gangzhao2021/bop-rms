@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createDiningTable,
+  assignStartedDiningSession,
   moveActiveDiningSession,
   parseDiningInstant,
   parseDiningReference,
@@ -101,5 +102,71 @@ describe("Dining Table", () => {
     const accessor = { ...table() } as Record<string, unknown>;
     Object.defineProperty(accessor, "stableLabel", { enumerable: true, get: () => "T-01" });
     expect(() => createDiningTable(accessor)).toThrow();
+  });
+});
+
+describe("WP-2275 atomic Table start assignment", () => {
+  const session = () =>
+    parseDiningSession({
+      diningSessionReference: id(9),
+      brandReference: id(3),
+      storeReference: id(4),
+      tableReference: id(1),
+      tableAssignmentVersion: 1,
+      phase: "Active",
+      version: 1,
+      startedByActorReference: id(8),
+      startedAt: at,
+      hostParticipantReference: null,
+    });
+  it("keeps the assignment version distinct from later Table configuration revisions", () => {
+    const original = session();
+    const occupied = assignStartedDiningSession(original, table(id(1), "Published"), 1);
+    expect(occupied).toMatchObject({ activeDiningSessionReference: id(9), aggregateVersion: 2 });
+    expect(original.tableAssignmentVersion).toBe(1);
+    expect(transitionDiningTable(occupied, "IssueQr", at).aggregateVersion).toBe(3);
+    expect(original.tableAssignmentVersion).toBe(1);
+    expect(Object.isFrozen(occupied)).toBe(true);
+  });
+  it.each([
+    ["brandReference", id(90)],
+    ["storeReference", id(90)],
+    ["tableReference", id(90)],
+    ["tableAssignmentVersion", 2],
+    ["version", 2],
+    ["phase", "Closing"],
+    ["hostParticipantReference", id(90)],
+    ["startedAt", "2026-08-14T03:59:00.000Z"],
+  ])("rejects mismatched start %s", (field, value) => {
+    expect(() =>
+      assignStartedDiningSession(
+        { ...session(), [field]: value } as never,
+        table(id(1), "Published"),
+        1,
+      ),
+    ).toThrow();
+  });
+  it.each([0, 2, 1.5, Number.NaN])("rejects stale/invalid assignment %s", (version) => {
+    expect(() =>
+      assignStartedDiningSession(session(), table(id(1), "Published"), version),
+    ).toThrow();
+  });
+  it("rejects a source Table observed before its own creation", () => {
+    expect(() =>
+      assignStartedDiningSession(
+        session(),
+        { ...table(id(1), "Published"), createdAt: parseDiningInstant("2026-08-14T04:01:00.000Z") },
+        1,
+      ),
+    ).toThrow();
+  });
+  it("rejects draft, occupied and blocked Tables", () => {
+    const published = table(id(1), "Published");
+    for (const candidate of [
+      table(),
+      { ...published, activeDiningSessionReference: id(90) },
+      { ...published, operationalState: "TemporarilyBlocked", blockReasonCode: "MAINTENANCE" },
+    ])
+      expect(() => assignStartedDiningSession(session(), candidate as never, 1)).toThrow();
   });
 });

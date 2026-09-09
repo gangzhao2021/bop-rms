@@ -207,6 +207,17 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/dining-table-store.ts";
+        // WP-2275 admits only the initial Session transaction over Dining-owned storage.
+        const acceptedDiningSessionStartAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          [
+            "dining_table",
+            "dining_session",
+            "dining_join_capability",
+            "dining_session_start_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/dining-session-start-store.ts";
         // WP-2223 accepts only the Ordering reader over its existing Cart and line tables.
         const acceptedCartQueryAsset =
           module.packageName === "@rms/ordering" &&
@@ -269,6 +280,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPriceQuoteWriterAsset &&
           !acceptedPriceQuoteRequestAsset &&
           !acceptedDiningTableAsset &&
+          !acceptedDiningSessionStartAsset &&
           !acceptedCartQueryAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&

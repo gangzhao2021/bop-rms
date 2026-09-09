@@ -38,7 +38,7 @@ async function proveDatabase(context) {
       count(*)::integer AS migration_count
       FROM platform_core.migration_history
       GROUP BY current_database()`);
-    assert.deepEqual(evidence.rows, [{ database_name: context.databaseName, migration_count: 92 }]);
+    assert.deepEqual(evidence.rows, [{ database_name: context.databaseName, migration_count: 93 }]);
   } finally {
     await client.end();
   }
