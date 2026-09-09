@@ -221,3 +221,7 @@ WP-2265 connects current-authorized Pickup Add/Update with original-operation re
 optional local HTTP providers. Ordering518/518, API360/360, Cart PostgreSQL6/6, full verification
 and forced uncached integration pass. Displayed menu data does not establish
 current Catalog eligibility, conditional activation or option prices; those authorities remain explicit.
+
+WP-2266 adds explicit Session generation ownership to opt-in Pickup creation plans. PWA417/417,
+Cart PostgreSQL6/6, PWA security111/111, full verification and forced uncached integration pass.
+Original-candidate recovery remains possible only within the owning context.

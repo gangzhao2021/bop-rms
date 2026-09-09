@@ -5,7 +5,12 @@ import { CartClientError, type CartView } from "./types.js";
 export interface PickupCartCreationOptions {
   readonly binding: CartBindingClient;
   readonly cart: Pick<CustomerCartClient, "loadCurrent">;
-  readonly csrf: { get(): string | null; set(value: string): void };
+  readonly csrf: {
+    get(): string | null;
+    set(value: string): void;
+    /** Capture an opaque generation; every external set, including same-value resets, invalidates it. */
+    capture(): () => boolean;
+  };
   readonly generatePreparationReference: () => string;
   readonly online: () => boolean;
 }
@@ -13,6 +18,7 @@ interface Plan {
   readonly logicalReference: string;
   readonly sourceCsrf: string;
   readCsrf: string;
+  contextCurrent: () => boolean;
   phase: "Locate" | "Prepare" | "Activate" | "Recover" | "Read";
   preparationReference: string | null;
   prepared: CartBindingPrepared | null;
@@ -97,14 +103,18 @@ export function createPickupCartCreationCoordinator(
   const online = () => {
     if (options.online() !== true) return unknown();
   };
-  const context = (csrf: string) => {
+  const generation = (current: Plan) => {
+    if (current.contextCurrent() !== true) return unknown();
+  };
+  const context = (csrf: string, current: Plan) => {
+    generation(current);
     if (options.csrf.get() !== csrf) return unknown();
   };
   const read = async (current: Plan) => {
     online();
-    context(current.readCsrf);
+    context(current.readCsrf, current);
     const result = await options.cart.loadCurrent();
-    context(current.readCsrf);
+    context(current.readCsrf, current);
     if (
       result !== null &&
       (result.schemaVersion !== 1 ||
@@ -117,7 +127,7 @@ export function createPickupCartCreationCoordinator(
   };
   const activate = (current: Plan, candidate: CartBindingPrepared) => {
     online();
-    context(current.sourceCsrf);
+    context(current.sourceCsrf, current);
     return options.binding.activate({
       operationReference: candidate.operationReference,
       csrfToken: current.sourceCsrf,
@@ -133,6 +143,7 @@ export function createPickupCartCreationCoordinator(
       raw.csrfToken !== candidate.candidateCsrfToken
     )
       return unknown();
+    generation(current);
     const existing = options.csrf.get();
     if (
       existing !== null &&
@@ -141,7 +152,8 @@ export function createPickupCartCreationCoordinator(
     )
       return unknown();
     options.csrf.set(candidate.candidateCsrfToken);
-    context(candidate.candidateCsrfToken);
+    current.contextCurrent = options.csrf.capture();
+    context(candidate.candidateCsrfToken, current);
     current.readCsrf = candidate.candidateCsrfToken;
     current.phase = "Read";
     current.prepared = null;
@@ -149,6 +161,7 @@ export function createPickupCartCreationCoordinator(
   const execute = async (current: Plan): Promise<CartView> => {
     try {
       online();
+      generation(current);
       if (current.phase === "Locate") {
         const existing = await read(current);
         if (existing !== null) {
@@ -161,7 +174,7 @@ export function createPickupCartCreationCoordinator(
       }
       if (current.phase === "Prepare") {
         online();
-        context(current.sourceCsrf);
+        context(current.sourceCsrf, current);
         const operationReference = reference(options.generatePreparationReference());
         if (
           operationReference === current.logicalReference ||
@@ -173,18 +186,20 @@ export function createPickupCartCreationCoordinator(
           operationReference,
           csrfToken: current.sourceCsrf,
         });
+        context(current.sourceCsrf, current);
         current.prepared = prepared(result, operationReference, current.sourceCsrf);
         current.phase = "Activate";
       }
       if (current.phase === "Activate") {
         online();
-        context(current.sourceCsrf);
+        context(current.sourceCsrf, current);
         const candidate = current.prepared;
         if (candidate === null) return unknown();
         current.phase = "Recover";
         confirm(current, candidate, await activate(current, candidate));
       } else if (current.phase === "Recover") {
         online();
+        generation(current);
         const candidate = current.prepared;
         if (candidate === null) return unknown();
         let result: unknown;
@@ -206,6 +221,11 @@ export function createPickupCartCreationCoordinator(
       current.completed = true;
       return result;
     } catch (error) {
+      try {
+        generation(current);
+      } catch {
+        return unknown();
+      }
       if (current.phase === "Locate" && error instanceof CartClientError) throw error;
       return unknown();
     }
@@ -234,6 +254,7 @@ export function createPickupCartCreationCoordinator(
             logicalReference,
             sourceCsrf,
             readCsrf: sourceCsrf,
+            contextCurrent: options.csrf.capture(),
             phase: "Locate",
             preparationReference: null,
             prepared: null,

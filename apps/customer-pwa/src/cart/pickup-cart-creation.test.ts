@@ -1,3 +1,8 @@
+import {
+  captureCustomerCsrfContext,
+  getCustomerCsrfCredential,
+  setCustomerCsrfCredential,
+} from "../session/customer-transaction-context.js";
 import { describe, expect, it } from "vitest";
 import type { CartBindingClient } from "./cart-binding-client.js";
 import { createPickupCartCreationCoordinator } from "./pickup-cart-creation.js";
@@ -28,6 +33,7 @@ const view: CartView = {
 function fixture() {
   const state = {
     csrf: source as string | null,
+    epoch: 0,
     online: true,
     current: null as CartView | null,
     prepareFailures: 0,
@@ -39,6 +45,7 @@ function fixture() {
     next: 90,
     afterPrepare: (): void => undefined,
     afterActivate: (): void => undefined,
+    afterComplete: (): void => undefined,
     afterRead: (): void => undefined,
   };
   const calls: { name: string; input?: unknown }[] = [];
@@ -79,6 +86,7 @@ function fixture() {
       calls.push({ name: "complete", input });
       if (state.completeFailure || !state.installed)
         throw new Error("synthetic completion unavailable");
+      state.afterComplete();
       return confirmed(input);
     },
   };
@@ -94,7 +102,12 @@ function fixture() {
     },
     csrf: {
       get: () => state.csrf,
+      capture: () => {
+        const epoch = state.epoch;
+        return () => epoch === state.epoch;
+      },
       set(value: string) {
+        state.epoch++;
         calls.push({ name: "csrf" });
         state.csrf = value;
       },
@@ -388,4 +401,169 @@ it("rechecks connectivity before the completion-to-activation fallback", async (
   await expect(f.coordinator.createCart(input)).rejects.toMatchObject({ code: "network_unknown" });
   expect(f.calls.filter((call) => call.name === "activate")).toHaveLength(1);
   expect(f.calls.filter((call) => call.name === "prepare")).toHaveLength(1);
+});
+
+describe("Pickup creation Session generation ownership", () => {
+  it("keeps a late definitive failure from a superseded generation unknown", async () => {
+    const f = fixture();
+    f.options.cart.loadCurrent = async () => {
+      f.state.epoch++;
+      throw new CartClientError("cart_session_expired");
+    };
+    await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+      code: "network_unknown",
+    });
+    expect(f.calls).toEqual([]);
+  });
+  it("rejects an invalidated plan before its scheduled execution", async () => {
+    const f = fixture();
+    const pending = f.coordinator.createCart(input);
+    f.state.epoch++;
+    await expect(pending).rejects.toMatchObject({ code: "network_unknown" });
+    expect(f.calls).toEqual([]);
+  });
+  it.each(["afterRead", "afterPrepare", "afterActivate"] as const)(
+    "rejects a same-value generation reset at %s",
+    async (hook) => {
+      const f = fixture();
+      f.state[hook] = () => {
+        f.state.epoch++;
+      };
+      await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+        code: "network_unknown",
+      });
+      const before = f.calls.length;
+      await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+        code: "network_unknown",
+      });
+      expect(f.calls).toHaveLength(before);
+      expect(f.calls.some((x) => x.name === "csrf")).toBe(false);
+      expect(f.state.csrf).toBe(source);
+      if (hook !== "afterActivate") expect(f.calls.some((x) => x.name === "activate")).toBe(false);
+    },
+  );
+  it("does not recover an old candidate after the Session generation changes", async () => {
+    const f = fixture();
+    f.state.activateFailure = "after";
+    await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+      code: "network_unknown",
+    });
+    f.state.epoch++;
+    const before = f.calls.length;
+    await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+      code: "network_unknown",
+    });
+    expect(f.calls).toHaveLength(before);
+    expect(f.state.csrf).toBe(source);
+  });
+  it("does not publish a late recovery response into a newer Session", async () => {
+    const f = fixture();
+    f.state.activateFailure = "after";
+    await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+      code: "network_unknown",
+    });
+    f.state.afterComplete = () => {
+      f.state.epoch++;
+    };
+    await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+      code: "network_unknown",
+    });
+    expect(f.calls.filter((x) => x.name === "complete")).toHaveLength(1);
+    expect(f.calls.filter((x) => x.name === "activate")).toHaveLength(1);
+    expect(f.calls.some((x) => x.name === "csrf")).toBe(false);
+  });
+  it("does not fall back to activation after failed recovery under a superseded context", async () => {
+    const f = fixture();
+    f.state.activateFailure = "before";
+    await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+      code: "network_unknown",
+    });
+    f.options.binding.complete = async () => {
+      f.state.epoch++;
+      throw new Error("synthetic failure");
+    };
+    await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+      code: "network_unknown",
+    });
+    expect(f.calls.filter((x) => x.name === "activate")).toHaveLength(1);
+  });
+  it("owns the new generation after its own credential handoff and checks final readback", async () => {
+    const f = fixture();
+    let reads = 0;
+    f.state.afterRead = () => {
+      if (++reads === 2) f.state.epoch++;
+    };
+    await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+      code: "network_unknown",
+    });
+    expect(f.state.creates).toBe(1);
+    expect(f.state.csrf).toBe(candidate);
+    expect(f.calls.filter((x) => x.name === "csrf")).toHaveLength(1);
+    const before = f.calls.length;
+    await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+      code: "network_unknown",
+    });
+    expect(f.calls).toHaveLength(before);
+  });
+  it("does not replay a completed plan in a different generation", async () => {
+    const f = fixture();
+    expect(await f.coordinator.createCart(input)).toEqual(view);
+    f.state.epoch++;
+    const before = f.calls.length;
+    await expect(f.coordinator.createCart(input)).rejects.toMatchObject({
+      code: "network_unknown",
+    });
+    expect(f.calls).toHaveLength(before);
+  });
+  it.each(["same-value", "ABA"] as const)(
+    "uses the real shared context to reject %s reset after activation",
+    async (mode) => {
+      const f = fixture();
+      setCustomerCsrfCredential(source);
+      const coordinator = createPickupCartCreationCoordinator({
+        ...f.options,
+        csrf: {
+          get: getCustomerCsrfCredential,
+          set: setCustomerCsrfCredential,
+          capture: captureCustomerCsrfContext,
+        },
+      });
+      f.state.afterActivate = () => {
+        if (mode === "ABA") setCustomerCsrfCredential("x".repeat(43));
+        setCustomerCsrfCredential(source);
+      };
+      try {
+        await expect(coordinator.createCart(input)).rejects.toMatchObject({
+          code: "network_unknown",
+        });
+        expect(getCustomerCsrfCredential()).toBe(source);
+        expect(f.calls.filter((x) => x.name === "read")).toHaveLength(1);
+      } finally {
+        setCustomerCsrfCredential(null);
+      }
+    },
+  );
+  it("preserves original response-loss recovery under the real owning generation", async () => {
+    const f = fixture();
+    setCustomerCsrfCredential(source);
+    f.state.activateFailure = "after";
+    const coordinator = createPickupCartCreationCoordinator({
+      ...f.options,
+      csrf: {
+        get: getCustomerCsrfCredential,
+        set: setCustomerCsrfCredential,
+        capture: captureCustomerCsrfContext,
+      },
+    });
+    try {
+      await expect(coordinator.createCart(input)).rejects.toMatchObject({
+        code: "network_unknown",
+      });
+      expect(await coordinator.createCart(input)).toEqual(view);
+      expect(getCustomerCsrfCredential()).toBe(candidate);
+      expect(f.state.creates).toBe(1);
+    } finally {
+      setCustomerCsrfCredential(null);
+    }
+  });
 });

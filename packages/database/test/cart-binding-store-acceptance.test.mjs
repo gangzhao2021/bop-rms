@@ -768,12 +768,18 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
         try {
           // Only the test cookie/header adapter sees raw Session cookies; both clients are production code.
           globalThis.fetch = browserFetch;
+          let csrfGeneration = Symbol();
           const coordinator = createPickupCartCreationCoordinator({
             binding: createBrowserCartBindingClient({ fetch: browserFetch, online: () => true }),
             cart: createBrowserCustomerCartClient(),
             csrf: {
               get: () => currentCsrf,
+              capture: () => {
+                const captured = csrfGeneration;
+                return () => captured === csrfGeneration;
+              },
               set: (value) => {
+                csrfGeneration = Symbol();
                 currentCsrf = value;
               },
             },
