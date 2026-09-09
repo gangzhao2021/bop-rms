@@ -248,3 +248,7 @@ At WP-2271, Dining persistence still required a separate owning schema/namespace
 WP-2272 materializes Table configuration and immutable operation history in Dining-owned storage.
 Dining179/179, actual PostgreSQL acceptance1/1, full verification and forced uncached integration pass.
 Session, Join, shared Cart and live activation remain separate.
+
+WP-2273 repairs Staff start/regeneration authorization and exact original-result validation.
+Dining238/238, full verification and forced uncached integration pass.
+Guest Join recovery and Session persistence remain separate.

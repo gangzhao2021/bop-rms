@@ -1,3 +1,9 @@
+import {
+  captureStaffData,
+  parseStaffStartRecord,
+  parseStaffRegenerationRecord,
+  staffDependency,
+} from "./dining-staff-record.js";
 import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import {
   diningJoinMaximumLifetimeMs,
@@ -110,17 +116,24 @@ function staffEvidence(
   let table;
   let audit;
   try {
-    context = revalidateTenantContext(value.tenantContext);
-    table = parseDiningTableStartEvidence(value.table);
-    permission(value.permission);
-    audit = validateAuditRecord(value.audit, Date.parse(expected.observedAt));
+    const raw = closed(value, ["tenantContext", "table", "permission", "audit"]);
+    if (!Object.isFrozen(raw.tenantContext) || !Object.isFrozen(raw.permission))
+      throw new DiningSessionError("DINING_SESSION_PERMISSION_DENIED");
+    const captured = captureStaffData(raw);
+    context = revalidateTenantContext(
+      captured.tenantContext as DiningStaffAuthorizationEvidence["tenantContext"],
+    );
+    table = parseDiningTableStartEvidence(captured.table);
+    permission(captured.permission as PermissionDecision);
+    audit = validateAuditRecord(captured.audit, Date.parse(expected.observedAt));
   } catch (error) {
-    if (error instanceof DiningSessionError) throw error;
+    void error;
     throw new DiningSessionError("DINING_SESSION_PERMISSION_DENIED");
   }
   const actorReference = context.actor.actorReference;
   if (
     context.scopeKind !== "Store" ||
+    String(context.resolvedAt) !== expected.observedAt ||
     actorReference === null ||
     String(context.brand.brandReference) !== table.brandReference ||
     String(context.store?.storeReference) !== table.storeReference ||
@@ -177,7 +190,7 @@ function storeFailure(error: unknown): never {
     (error.code === "DINING_SESSION_VERSION_CONFLICT" ||
       error.code === "DINING_SESSION_IDEMPOTENCY_CONFLICT")
   ) {
-    throw error;
+    throw new DiningSessionError(error.code);
   }
   throw new DiningSessionError("DINING_SESSION_DEPENDENCY_UNAVAILABLE");
 }
@@ -212,6 +225,22 @@ export type RegenerateDiningJoinResult =
     }
   | { readonly status: "AlreadyApplied"; readonly capability: DiningJoinCapability };
 
+function staffPort<T>(action: () => T): T {
+  try {
+    return action();
+  } catch {
+    return staffDependency();
+  }
+}
+
+async function staffAsync<T>(action: () => Promise<T>): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    return storeFailure(error);
+  }
+}
+
 export function createDiningSessionService(ports: DiningSessionPorts) {
   if (!Number.isSafeInteger(ports.pepperVersion) || ports.pepperVersion < 1) {
     throw new DiningSessionError("DINING_SESSION_INPUT_INVALID");
@@ -235,31 +264,22 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
         throw new DiningSessionError("DINING_SESSION_INPUT_INVALID");
       }
       const joinKind = raw.joinKind;
-      const intent = parseDiningHash(
-        ports.credentials.hashOperationIntent(
-          `Start:${tableReference}:${expectedAssignmentVersion}:${joinKind}`,
+      const intent = staffPort(() =>
+        parseDiningHash(
+          ports.credentials.hashOperationIntent(
+            `Start:${tableReference}:${expectedAssignmentVersion}:${joinKind}`,
+          ),
         ),
       );
-      const prior = await ports.store.resolveStartOperation(operationReference).catch(storeFailure);
-      if (prior !== null) {
-        if (!ports.credentials.equals(prior.operationIntentHash, intent)) {
-          throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
-        }
-        return Object.freeze({
-          status: "AlreadyApplied",
-          session: parseDiningSession(prior.session),
-          capability: parseDiningJoinCapability(prior.capability),
-        });
-      }
       const staff = staffEvidence(
-        await ports.staff
-          .authorize({
+        await staffAsync(() =>
+          ports.staff.authorize({
             operation: "StartSession",
             tableReference,
             operationReference,
             observedAt: requestedAt,
-          })
-          .catch(storeFailure),
+          }),
+        ),
         {
           tableReference,
           assignmentVersion: expectedAssignmentVersion,
@@ -267,39 +287,63 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
           auditAction: "DINING_SESSION_START",
         },
       );
+      const scope = {
+        operationReference,
+        brandReference: staff.table.brandReference,
+        storeReference: staff.table.storeReference,
+        tableReference,
+        assignmentVersion: expectedAssignmentVersion,
+        observedAt: requestedAt,
+        actorReference: staff.actorReference,
+      };
+      const priorValue = await staffAsync(() =>
+        ports.store.resolveStartOperation(operationReference),
+      );
+      if (priorValue !== null) {
+        const prior = parseStaffStartRecord(priorValue, scope);
+        if (staffPort(() => ports.credentials.equals(prior.operationIntentHash, intent)) !== true)
+          throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+        if (prior.capability.kind !== joinKind) return staffDependency();
+        return Object.freeze({
+          status: "AlreadyApplied",
+          session: prior.session,
+          capability: prior.capability,
+        });
+      }
       if (
         staff.table.tableState !== "Eligible" ||
         staff.table.activeDiningSessionReference !== null
       ) {
         throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
       }
-      const diningSessionReference = parseDiningReference(
-        ports.credentials.generateReference("DiningSession"),
+      const diningSessionReference = staffPort(() =>
+        parseDiningReference(ports.credentials.generateReference("DiningSession")),
       );
-      const joinCredential = rawCredential(
-        joinKind,
-        ports.credentials.generateJoinCredential(joinKind),
+      const joinCredential = staffPort(() =>
+        rawCredential(joinKind, ports.credentials.generateJoinCredential(joinKind)),
       );
-      const capability = parseDiningJoinCapability({
-        capabilityReference: parsePublicCapabilityReference(
-          ports.credentials.generateReference("JoinCapability"),
-        ),
-        purpose: "DiningJoin",
-        kind: joinKind,
-        storeReference: parsePublicCapabilityScopeReference(staff.table.storeReference),
-        tableReference: parsePublicCapabilityScopeReference(staff.table.tableReference),
-        diningSessionReference: parsePublicCapabilityScopeReference(diningSessionReference),
-        selectorHash: ports.credentials.hashJoinCredential(joinKind, joinCredential),
-        pepperVersion: ports.pepperVersion,
-        assignmentVersion: staff.table.assignmentVersion,
-        generation: 1,
-        status: "Active",
-        version: 1,
-        issuedAt: requestedAt,
-        expiresAt: plus(requestedAt, fifteenMinutes),
-        consumedAt: null,
-        revokedAt: null,
-      });
+      const capability = staffPort(() =>
+        parseDiningJoinCapability({
+          capabilityReference: parsePublicCapabilityReference(
+            ports.credentials.generateReference("JoinCapability"),
+          ),
+          purpose: "DiningJoin",
+          kind: joinKind,
+          storeReference: parsePublicCapabilityScopeReference(staff.table.storeReference),
+          tableReference: parsePublicCapabilityScopeReference(staff.table.tableReference),
+          diningSessionReference: parsePublicCapabilityScopeReference(diningSessionReference),
+          selectorHash: ports.credentials.hashJoinCredential(joinKind, joinCredential),
+          pepperVersion: ports.pepperVersion,
+          assignmentVersion: staff.table.assignmentVersion,
+          generation: 1,
+          status: "Active",
+          version: 1,
+          issuedAt: requestedAt,
+          expiresAt: plus(requestedAt, fifteenMinutes),
+          consumedAt: null,
+          revokedAt: null,
+        }),
+      );
       const session = parseDiningSession({
         diningSessionReference,
         brandReference: staff.table.brandReference,
@@ -312,18 +356,29 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
         startedAt: requestedAt,
         hostParticipantReference: null,
       });
-      const persisted = await ports.store
-        .start({
-          record: Object.freeze({
-            session,
-            capability,
-            operationReference,
-            operationIntentHash: intent,
-          }),
+      const generated = Object.freeze({
+        session,
+        capability,
+        operationReference,
+        operationIntentHash: intent,
+      });
+      const persistedValue = await staffAsync(() =>
+        ports.store.start({
+          record: generated,
           expectedAssignmentVersion,
           audit: staff.audit,
-        })
-        .catch(storeFailure);
+        }),
+      );
+      const persisted = parseStaffStartRecord(persistedValue, scope);
+      if (staffPort(() => ports.credentials.equals(persisted.operationIntentHash, intent)) !== true)
+        throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+      if (persisted.capability.kind !== joinKind) return staffDependency();
+      if (JSON.stringify(persisted) !== JSON.stringify(generated))
+        return Object.freeze({
+          status: "AlreadyApplied",
+          session: persisted.session,
+          capability: persisted.capability,
+        });
       return Object.freeze({
         status: "Issued",
         session: parseDiningSession(persisted.session),
@@ -505,32 +560,22 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       const expectedCapabilityVersion = positive(raw.expectedCapabilityVersion);
       const operationReference = parseDiningReference(raw.operationReference);
       const requestedAt = parseDiningInstant(raw.requestedAt);
-      const intent = parseDiningHash(
-        ports.credentials.hashOperationIntent(
-          `Regenerate:${diningSessionReference}:${tableReference}:${expectedAssignmentVersion}`,
+      const intent = staffPort(() =>
+        parseDiningHash(
+          ports.credentials.hashOperationIntent(
+            `Regenerate:${diningSessionReference}:${tableReference}:${expectedAssignmentVersion}`,
+          ),
         ),
       );
-      const prior = await ports.store
-        .resolveRegenerationOperation(operationReference)
-        .catch(storeFailure);
-      if (prior !== null) {
-        if (!ports.credentials.equals(prior.operationIntentHash, intent)) {
-          throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
-        }
-        return Object.freeze({
-          status: "AlreadyApplied",
-          capability: parseDiningJoinCapability(prior.capability),
-        });
-      }
       const staff = staffEvidence(
-        await ports.staff
-          .authorize({
+        await staffAsync(() =>
+          ports.staff.authorize({
             operation: "RegenerateJoinCredential",
             tableReference,
             operationReference,
             observedAt: requestedAt,
-          })
-          .catch(storeFailure),
+          }),
+        ),
         {
           tableReference,
           assignmentVersion: expectedAssignmentVersion,
@@ -538,11 +583,43 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
           auditAction: "DINING_JOIN_CREDENTIAL_REGENERATE",
         },
       );
-      const state = await ports.store.resolveActiveJoin(diningSessionReference).catch(storeFailure);
+      const scope = {
+        operationReference,
+        brandReference: staff.table.brandReference,
+        storeReference: staff.table.storeReference,
+        tableReference,
+        assignmentVersion: expectedAssignmentVersion,
+        observedAt: requestedAt,
+        diningSessionReference,
+      };
+      const priorValue = await staffAsync(() =>
+        ports.store.resolveRegenerationOperation(operationReference),
+      );
+      if (priorValue !== null) {
+        const prior = parseStaffRegenerationRecord(priorValue, scope);
+        if (staffPort(() => ports.credentials.equals(prior.operationIntentHash, intent)) !== true)
+          throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+        return Object.freeze({ status: "AlreadyApplied", capability: prior.capability });
+      }
+      const state = await staffAsync(() => ports.store.resolveActiveJoin(diningSessionReference));
       if (state === null) throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
-      const session = parseDiningSession(state.session);
-      const previous = parseDiningJoinCapability(state.capability);
+      let session;
+      let previous;
+      try {
+        const captured = closed(captureStaffData(state), ["session", "capability"]);
+        session = parseDiningSession(captured.session);
+        previous = parseDiningJoinCapability(captured.capability);
+      } catch {
+        return staffDependency();
+      }
       if (
+        session.diningSessionReference !== diningSessionReference ||
+        session.brandReference !== staff.table.brandReference ||
+        session.startedAt > requestedAt ||
+        String(previous.storeReference) !== session.storeReference ||
+        String(previous.tableReference) !== session.tableReference ||
+        String(previous.diningSessionReference) !== session.diningSessionReference ||
+        previous.assignmentVersion !== session.tableAssignmentVersion ||
         session.phase !== "Active" ||
         staff.table.tableState !== "Eligible" ||
         staff.table.activeDiningSessionReference !== diningSessionReference ||
@@ -554,29 +631,32 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       ) {
         throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
       }
-      const joinCredential = rawCredential(
-        previous.kind,
-        ports.credentials.generateJoinCredential(previous.kind),
+      const joinCredential = staffPort(() =>
+        rawCredential(previous.kind, ports.credentials.generateJoinCredential(previous.kind)),
       );
-      const replacement = parseDiningJoinCapability({
-        ...previous,
-        capabilityReference: ports.credentials.generateReference("JoinCapability"),
-        selectorHash: ports.credentials.hashJoinCredential(previous.kind, joinCredential),
-        generation: previous.generation + 1,
-        status: "Active",
-        version: 1,
-        issuedAt: requestedAt,
-        expiresAt: plus(requestedAt, fifteenMinutes),
-        consumedAt: null,
-        revokedAt: null,
-      });
-      const transition = regenerateDiningJoinCapability({
-        previous,
-        replacement,
-        observedAt: requestedAt,
-      });
-      const persisted = await ports.store
-        .regenerate({
+      const replacement = staffPort(() =>
+        parseDiningJoinCapability({
+          ...previous,
+          capabilityReference: ports.credentials.generateReference("JoinCapability"),
+          selectorHash: ports.credentials.hashJoinCredential(previous.kind, joinCredential),
+          generation: previous.generation + 1,
+          status: "Active",
+          version: 1,
+          issuedAt: requestedAt,
+          expiresAt: plus(requestedAt, fifteenMinutes),
+          consumedAt: null,
+          revokedAt: null,
+        }),
+      );
+      const transition = staffPort(() =>
+        regenerateDiningJoinCapability({
+          previous,
+          replacement,
+          observedAt: requestedAt,
+        }),
+      );
+      const persistedValue = await staffAsync(() =>
+        ports.store.regenerate({
           session,
           previous: transition.previous,
           replacement: transition.current,
@@ -584,8 +664,13 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
           operationReference,
           operationIntentHash: intent,
           audit: staff.audit,
-        })
-        .catch(storeFailure);
+        }),
+      );
+      const persisted = parseStaffRegenerationRecord(persistedValue, scope);
+      if (staffPort(() => ports.credentials.equals(persisted.operationIntentHash, intent)) !== true)
+        throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+      if (JSON.stringify(persisted.capability) !== JSON.stringify(replacement))
+        return Object.freeze({ status: "AlreadyApplied", capability: persisted.capability });
       return Object.freeze({
         status: "Issued",
         capability: parseDiningJoinCapability(persisted.capability),
