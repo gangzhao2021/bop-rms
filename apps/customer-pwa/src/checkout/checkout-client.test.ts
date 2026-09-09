@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartView } from "../cart/types.js";
-import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import {
+  getCustomerCsrfCredential,
+  setCustomerCsrfCredential,
+} from "../session/customer-transaction-context.js";
 import {
   createCheckoutClient,
   createCheckoutController,
@@ -74,6 +77,8 @@ const publicQuote = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   setCustomerCsrfCredential(null);
   vi.unstubAllGlobals();
 });
@@ -127,7 +132,7 @@ describe("WP-1703 Checkout transport", () => {
     const client = createCheckoutClient({} as CustomerCartClient);
 
     await expect(client.quote(cart, id(9))).rejects.toMatchObject({
-      code: "cart_service_unavailable",
+      code: "network_unknown",
     });
   });
 
@@ -258,3 +263,280 @@ describe("WP-1703 Checkout state", () => {
     expect(controller.getState()).toMatchObject({ status: "offline" });
   });
 });
+
+describe("bounded foreground Quote responses", () => {
+  const original = "c".repeat(43);
+  const replacement = "d".repeat(43);
+  const client = () => createCheckoutClient({} as CustomerCartClient);
+  const success = () => new Response(JSON.stringify(publicQuote), { status: 201 });
+  const error = (code: string, status: number) =>
+    new Response(
+      JSON.stringify({ schemaVersion: 1, error: { code, messageKey: "customer.quote.synthetic" } }),
+      { status },
+    );
+  function pendingResponse() {
+    let resolve: (response: Response) => void = () => undefined;
+    const promise = new Promise<Response>((yes) => {
+      resolve = yes;
+    });
+    return { promise, resolve };
+  }
+  it.each(["headers", "body"])("bounds stalled %s even when abort is ignored", async (stage) => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    const fetch = vi.fn(async () =>
+      stage === "headers" ? new Promise<Response>(() => undefined) : new Response(body),
+    );
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCsrfCredential(original);
+    const result = client().quote(cart, id(9));
+    const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+    await vi.advanceTimersByTimeAsync(15000);
+    await rejected;
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        mode: "cors",
+        cache: "no-store",
+        credentials: "same-origin",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+      }),
+    );
+    if (stage === "body") {
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(body.locked).toBe(false);
+    }
+  });
+  it("shares one deadline across delayed headers and body", async () => {
+    vi.useFakeTimers();
+    const pending = pendingResponse();
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => pending.promise),
+    );
+    setCustomerCsrfCredential(original);
+    const result = client().quote(cart, id(9));
+    const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+    await vi.advanceTimersByTimeAsync(14000);
+    pending.resolve(new Response(body));
+    await vi.advanceTimersByTimeAsync(1000);
+    await rejected;
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(body.locked).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("cancels a late successful body without parsing or replaying it", async () => {
+    vi.useFakeTimers();
+    const pending = pendingResponse();
+    const fetch = vi.fn(() => pending.promise);
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCsrfCredential(original);
+    const result = client().quote(cart, id(9));
+    const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+    await vi.advanceTimersByTimeAsync(15000);
+    await rejected;
+    const response = success();
+    const cancel = vi.spyOn(response.body as ReadableStream<Uint8Array>, "cancel");
+    pending.resolve(response);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(response.body?.locked).toBe(false);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(getCustomerCsrfCredential()).toBe(original);
+  });
+  it.each(["json", "utf8", "oversize", "interrupted", "redirect"])(
+    "keeps %s output uncertain",
+    async (mode) => {
+      const bytes =
+        mode === "oversize"
+          ? new Uint8Array(16 * 1024 * 1024 + 1)
+          : mode === "utf8"
+            ? new Uint8Array([0xc3, 0x28])
+            : new TextEncoder().encode("{");
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (mode === "interrupted") controller.error(new Error("synthetic stream failure"));
+          else {
+            controller.enqueue(bytes);
+            controller.close();
+          }
+        },
+      });
+      const response = new Response(body);
+      if (mode === "redirect") Object.defineProperty(response, "redirected", { value: true });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => response),
+      );
+      setCustomerCsrfCredential(original);
+      await expect(client().quote(cart, id(9))).rejects.toMatchObject({ code: "network_unknown" });
+      expect(body.locked).toBe(false);
+      expect(getCustomerCsrfCredential()).toBe(original);
+    },
+  );
+  it.each([
+    ["quote_version_conflict", 409, "cart_version_conflict"],
+    ["quote_idempotency_conflict", 409, "cart_idempotency_conflict"],
+    ["quote_configuration_invalid", 422, "cart_selection_invalid"],
+    ["quote_request_invalid", 400, "cart_request_invalid"],
+  ] as const)("retains matching %s rejection", async (code, status, mapped) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => error(code, status)),
+    );
+    setCustomerCsrfCredential(original);
+    await expect(client().quote(cart, id(9))).rejects.toMatchObject({ code: mapped });
+  });
+  it.each([
+    ["quote_version_conflict", 503],
+    ["quote_configuration_invalid", 400],
+    ["quote_service_unavailable", 503],
+    ["quote_not_found", 404],
+    ["unrecognized", 422],
+  ] as const)("keeps unmatched or unavailable %s uncertain", async (code, status) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => error(code, status)),
+    );
+    setCustomerCsrfCredential(original);
+    await expect(client().quote(cart, id(9))).rejects.toMatchObject({ code: "network_unknown" });
+  });
+  it.each(["success", "rejection", "same-value", "reset-and-reinstall"])(
+    "isolates superseded %s replies",
+    async (mode) => {
+      const pending = pendingResponse();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => pending.promise),
+      );
+      setCustomerCsrfCredential(original);
+      const result = client().quote(cart, id(9));
+      const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+      if (mode === "reset-and-reinstall") setCustomerCsrfCredential(null);
+      const next = mode === "same-value" || mode === "reset-and-reinstall" ? original : replacement;
+      setCustomerCsrfCredential(next);
+      pending.resolve(mode === "rejection" ? error("quote_version_conflict", 409) : success());
+      await rejected;
+      expect(getCustomerCsrfCredential()).toBe(next);
+    },
+  );
+  it("rejects replacement during body consumption and releases the reader", async () => {
+    vi.useFakeTimers();
+    let finish: () => void = () => undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        finish = () => {
+          controller.enqueue(new TextEncoder().encode(JSON.stringify(publicQuote)));
+          controller.close();
+        };
+      },
+    });
+    const acquire = vi.spyOn(body, "getReader");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body)),
+    );
+    setCustomerCsrfCredential(original);
+    const result = client().quote(cart, id(9));
+    const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(acquire).toHaveBeenCalledOnce();
+    setCustomerCsrfCredential(replacement);
+    finish();
+    await rejected;
+    expect(body.locked).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("checks the final Quote delivery boundary after body parsing", async () => {
+    const parse = JSON.parse;
+    vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+      const value = parse(text, reviver);
+      queueMicrotask(() =>
+        queueMicrotask(() => queueMicrotask(() => setCustomerCsrfCredential(replacement))),
+      );
+      return value;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => success()),
+    );
+    setCustomerCsrfCredential(original);
+    await expect(client().quote(cart, id(9))).rejects.toMatchObject({ code: "network_unknown" });
+    expect(getCustomerCsrfCredential()).toBe(replacement);
+  });
+  it("validates against the requested Cart version despite caller mutation", async () => {
+    const pending = pendingResponse();
+    const fetch = vi.fn(() => pending.promise);
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCsrfCredential(original);
+    const mutable = { ...cart, cart: { ...cart.cart } };
+    const result = client().quote(mutable, id(9));
+    mutable.cart.version = 99;
+    mutable.cart.cartReference = id(90);
+    pending.resolve(success());
+    expect(await result).toEqual(quote);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/carts/" + id(1) + "/quote",
+      expect.objectContaining({ body: JSON.stringify({ cartVersion: 3 }) }),
+    );
+  });
+  it("keeps unknown server results retryable under the original controller key", async () => {
+    let recover = false;
+    const fetch = vi.fn(async () =>
+      recover ? success() : error("quote_service_unavailable", 503),
+    );
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCsrfCredential(original);
+    const keys = vi.fn(() => id(9));
+    const controller = createCheckoutController(
+      createCheckoutClient({ loadCurrent: async () => cart } as CustomerCartClient),
+      keys,
+    );
+    await controller.load();
+    await controller.quote();
+    expect(controller.getState()).toMatchObject({ status: "outcome-unknown", canRetry: true });
+    recover = true;
+    await controller.retry();
+    expect(controller.getState()).toMatchObject({ status: "ready", quote });
+    expect(keys).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    for (const attempt of [1, 2])
+      expect(fetch).toHaveBeenNthCalledWith(
+        attempt,
+        expect.any(String),
+        expect.objectContaining({ headers: expect.objectContaining({ "idempotency-key": id(9) }) }),
+      );
+  });
+});
+
+it.each([202, 206])("does not treat HTTP%s as a completed Quote", async (status) => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify(publicQuote), { status })),
+  );
+  setCustomerCsrfCredential("c".repeat(43));
+  await expect(
+    createCheckoutClient({} as CustomerCartClient).quote(cart, id(9)),
+  ).rejects.toMatchObject({ code: "network_unknown" });
+});
+it.each([{ cartReference: "invalid" }, { version: 0 }])(
+  "rejects malformed Cart identity/version before transport",
+  async (change) => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCsrfCredential("c".repeat(43));
+    await expect(
+      createCheckoutClient({} as CustomerCartClient).quote(
+        { ...cart, cart: { ...cart.cart, ...change } },
+        id(9),
+      ),
+    ).rejects.toMatchObject({ code: "cart_request_invalid" });
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);

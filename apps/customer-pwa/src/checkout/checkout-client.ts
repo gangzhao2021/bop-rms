@@ -1,7 +1,10 @@
 import type { CustomerCartClient } from "../cart/cart-client.js";
-import { boundedFetch } from "../network/bounded-fetch.js";
+import { browserRequestTimeoutMs } from "../network/bounded-fetch.js";
 import { CartClientError, type CartMoney, type CartView } from "../cart/types.js";
-import { getCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import {
+  captureCustomerCsrfContext,
+  getCustomerCsrfCredential,
+} from "../session/customer-transaction-context.js";
 import type { CheckoutQuote, CheckoutState } from "./types.js";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -44,7 +47,7 @@ function codes(value: unknown): readonly string[] {
     throw new Error("invalid");
   return Object.freeze([...value]);
 }
-function parseQuote(value: unknown, cart: CartView): CheckoutQuote {
+function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote {
   const root = exact(value, ["schemaVersion", "quote"]);
   const raw = exact(root.quote, [
     "quoteReference",
@@ -62,7 +65,8 @@ function parseQuote(value: unknown, cart: CartView): CheckoutQuote {
     "priceChange",
   ]);
   const quoteCurrency = text(raw.currency, currency);
-  if (root.schemaVersion !== 1 || raw.cartVersion !== cart.cart.version) throw new Error("invalid");
+  if (root.schemaVersion !== 1 || raw.cartVersion !== expectedCartVersion)
+    throw new Error("invalid");
   const price =
     raw.priceChange === null
       ? null
@@ -133,59 +137,136 @@ export interface CheckoutClient {
   quote(cart: CartView, operationReference: string): Promise<CheckoutQuote>;
 }
 
+/** Quote writes remain uncertain when the complete response cannot be confirmed. */
+async function requestQuote(url: string, init: RequestInit, contextCurrent: () => boolean) {
+  const controller = new AbortController();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let rejectCancellation: (error: CartClientError) => void = () => undefined;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const timer = setTimeout(() => {
+    controller.abort();
+    rejectCancellation(new CartClientError("network_unknown"));
+  }, browserRequestTimeoutMs);
+  const check = () => {
+    if (controller.signal.aborted || !contextCurrent())
+      throw new CartClientError("network_unknown");
+  };
+  const operation = async () => {
+    check();
+    const response = await globalThis.fetch(url, {
+      ...init,
+      signal: controller.signal,
+      mode: "cors",
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "error",
+      referrerPolicy: "no-referrer",
+    });
+    if (
+      controller.signal.aborted ||
+      !contextCurrent() ||
+      response.redirected ||
+      response.body === null
+    ) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new CartClientError("network_unknown");
+    }
+    reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      check();
+      const part = await reader.read();
+      check();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > 16 * 1024 * 1024) throw new CartClientError("network_unknown");
+      chunks.push(part.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const payload: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    check();
+    return { response, payload };
+  };
+  try {
+    const result = await Promise.race([operation(), cancellation]);
+    check();
+    return result;
+  } catch {
+    throw new CartClientError("network_unknown");
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+    if (reader !== undefined) {
+      void reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
+  }
+}
+
 export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutClient {
   return Object.freeze({
     loadCart: () => cartClient.loadCurrent(),
     async quote(cart: CartView, operationReference: string) {
+      const contextCurrent = captureCustomerCsrfContext();
       const csrf = getCustomerCsrfCredential();
       if (csrf === null) throw new CartClientError("cart_session_expired");
       if (!credential.test(csrf) || !uuidV7.test(operationReference))
         throw new CartClientError("cart_request_invalid");
-      let response: Response;
+      let cartReference: string;
+      let cartVersion: number;
       try {
-        response = await boundedFetch(
-          globalThis.fetch,
-          `/api/v1/carts/${cart.cart.cartReference}/quote`,
-          {
-            method: "POST",
-            credentials: "same-origin",
-            cache: "no-store",
-            headers: {
-              "content-type": "application/json",
-              "idempotency-key": operationReference,
-              "x-csrf-token": csrf,
-            },
-            body: JSON.stringify({ cartVersion: cart.cart.version }),
+        cartReference = text(cart.cart.cartReference, uuidV7);
+        cartVersion = integer(cart.cart.version);
+      } catch {
+        throw new CartClientError("cart_request_invalid");
+      }
+      const { response, payload } = await requestQuote(
+        "/api/v1/carts/" + cartReference + "/quote",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": operationReference,
+            "x-csrf-token": csrf,
           },
-        );
-      } catch {
-        throw new CartClientError("network_unknown");
-      }
-      let body: unknown;
+          body: JSON.stringify({ cartVersion }),
+        },
+        contextCurrent,
+      );
       try {
-        body = await response.json();
-      } catch {
-        throw new CartClientError("cart_service_unavailable");
-      }
-      try {
-        if (response.ok) return parseQuote(body, cart);
-        const errorRoot = exact(body, ["schemaVersion", "error"]);
-        if (errorRoot.schemaVersion !== 1) throw new CartClientError("cart_service_unavailable");
+        if (!contextCurrent()) throw new CartClientError("network_unknown");
+        if (response.status === 200 || response.status === 201)
+          return parseQuote(payload, cartVersion);
+        const errorRoot = exact(payload, ["schemaVersion", "error"]);
+        if (errorRoot.schemaVersion !== 1) throw new Error("invalid");
         const error = exact(errorRoot.error, ["code", "messageKey"]);
         text(error.messageKey, /^[a-z][a-z0-9_.-]{0,127}$/u);
-        const code = String(error.code);
+        const known = {
+          quote_version_conflict: [409, "cart_version_conflict"],
+          quote_idempotency_conflict: [409, "cart_idempotency_conflict"],
+          quote_configuration_invalid: [422, "cart_selection_invalid"],
+          quote_request_invalid: [400, "cart_request_invalid"],
+        } as const;
+        const contract = Object.hasOwn(known, String(error.code))
+          ? known[error.code as keyof typeof known]
+          : undefined;
         throw new CartClientError(
-          code === "quote_version_conflict"
-            ? "cart_version_conflict"
-            : code === "quote_configuration_invalid"
-              ? "cart_selection_invalid"
-              : code === "quote_request_invalid"
-                ? "cart_request_invalid"
-                : "cart_service_unavailable",
+          contract !== undefined && response.status === contract[0]
+            ? contract[1]
+            : "network_unknown",
         );
       } catch (error) {
+        if (!contextCurrent()) throw new CartClientError("network_unknown");
         if (error instanceof CartClientError) throw error;
-        throw new CartClientError("cart_service_unavailable");
+        throw new CartClientError("network_unknown");
       }
     },
   });

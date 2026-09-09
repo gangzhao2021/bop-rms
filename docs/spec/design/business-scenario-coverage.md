@@ -161,3 +161,8 @@ local HTTP write composition. Current Catalog eligibility for Add/Update remains
 
 [WP-2252](../work-packages/WP-2252.md) prevents old Cart responses from changing a newer
 Session context or returning an old Cart after credential replacement. Reload recovery stays separate.
+
+### BC-03 Quote response boundary
+
+[WP-2253](../work-packages/WP-2253.md) bounds the complete foreground Checkout Quote response
+and isolates Session context changes. Controller orchestration and live pricing wiring stay separate.
