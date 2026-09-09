@@ -128,3 +128,8 @@ DineIn ownership and complete recovery remain unfinished; this is not a full cus
 [WP-2245](../work-packages/WP-2245.md) adds an optional local-runtime Cart read composition and
 the production API bridge. Its owning WP records bounded local HTTP/Identity/Ordering persistence
 evidence. No Cart/item write, recovery, DineIn, browser or production completion is inferred.
+
+[WP-2246](../work-packages/WP-2246.md) supplies strict browser credential transport for initial
+Pickup binding, with explicit calls and bounded unknown outcomes. Its owning WP records actual
+HTTP/Identity/Ordering evidence under a synthetic cookie boundary. Page orchestration, reload
+recovery, shared DineIn and overall browser journey acceptance remain unfinished.

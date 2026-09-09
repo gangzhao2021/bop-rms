@@ -1,11 +1,9 @@
+import { createBrowserCartBindingClient } from "../../../apps/customer-pwa/src/cart/cart-binding-client.ts";
 import { createCustomerCartReadPort } from "../../../apps/api/src/customer-cart-read-composition.ts";
 import { CustomerCartHandler } from "../../../apps/api/src/customer-cart.ts";
 import { createServer } from "node:http";
 import { createApp } from "../../../apps/api/src/app.ts";
-import {
-  CustomerCartBindingHandler,
-  customerCartBindingRoutes,
-} from "../../../apps/api/src/customer-cart-binding.ts";
+import { CustomerCartBindingHandler } from "../../../apps/api/src/customer-cart-binding.ts";
 import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
@@ -542,37 +540,52 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
         await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
         const address = httpServer.address();
         assert.ok(address && typeof address === "object");
-        const send = (action, cookie, csrfToken, body = {}) =>
-          globalThis.fetch(`http://127.0.0.1:${address.port}${customerCartBindingRoutes[action]}`, {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              origin: "https://customer.example.test",
-              "sec-fetch-site": "same-origin",
-              "sec-fetch-mode": "cors",
-              "idempotency-key": id(702),
-              "x-csrf-token": csrfToken,
-              cookie,
-            },
-            body: JSON.stringify(body),
-          });
         clock = 400;
         const oldCookie = `__Host-bop-guest=${httpCredential}`;
-        const preparedResponse = await send("prepare", oldCookie, httpCsrf);
-        assert.equal(preparedResponse.status, 200);
-        assert.equal(preparedResponse.headers.get("cache-control"), "no-store");
-        const pendingCookie = preparedResponse.headers.getSetCookie()[0].split(";")[0];
+        let browserCookie = oldCookie;
+        let latestResponse;
+        // Synthetic browser cookie/header boundary; the production client never sees raw Session JSON.
+        const browser = createBrowserCartBindingClient({
+          online: () => true,
+          async fetch(path, init) {
+            assert.match(path, /^\/bff\/customer\/cart-binding\/(prepare|activate|complete)$/u);
+            const response = await globalThis.fetch(`http://127.0.0.1:${address.port}${path}`, {
+              ...init,
+              headers: {
+                ...init.headers,
+                origin: "https://customer.example.test",
+                "sec-fetch-site": "same-origin",
+                "sec-fetch-mode": "cors",
+                cookie: browserCookie,
+              },
+            });
+            latestResponse = response;
+            return response;
+          },
+        });
+        const preparedBody = await browser.prepare({
+          operationReference: id(702),
+          csrfToken: httpCsrf,
+        });
+        assert.equal(latestResponse.status, 200);
+        assert.equal(latestResponse.headers.get("cache-control"), "no-store");
+        const pendingCookie = latestResponse.headers.getSetCookie()[0].split(";")[0];
         assert.ok(pendingCookie.startsWith(`__Host-bop-guest-candidate-${id(702)}=`));
-        const preparedBody = await preparedResponse.json();
         assert.equal(JSON.stringify(preparedBody).includes(pendingCookie.split("=")[1]), false);
         assert.equal((await counts()).carts, beforeHttp.carts);
+        browserCookie = `${oldCookie}; ${pendingCookie}`;
         clock = 401;
-        const failedResponse = await send("activate", `${oldCookie}; ${pendingCookie}`, httpCsrf, {
-          candidateCsrfToken: preparedBody.candidateCsrfToken,
-          recoveryProof: preparedBody.recoveryProof,
-        });
-        assert.equal(failedResponse.status, 503);
-        assert.deepEqual(failedResponse.headers.getSetCookie(), []);
+        await assert.rejects(
+          browser.activate({
+            operationReference: id(702),
+            csrfToken: httpCsrf,
+            candidateCsrfToken: preparedBody.candidateCsrfToken,
+            recoveryProof: preparedBody.recoveryProof,
+          }),
+          { code: "unavailable" },
+        );
+        assert.equal(latestResponse.status, 503);
+        assert.deepEqual(latestResponse.headers.getSetCookie(), []);
         assert.equal(
           (await sessions.resolve(credentials.hashCredential("Session", httpCredential))).session
             .status,
@@ -580,20 +593,22 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
         );
         failPublication = false;
         clock = 701;
-        const completedResponse = await send(
-          "complete",
-          `${oldCookie}; ${pendingCookie}`,
-          preparedBody.candidateCsrfToken,
-        );
-        assert.equal(completedResponse.status, 200);
-        const publishedCookie = completedResponse.headers.getSetCookie()[0].split(";")[0];
+        const completedBody = await browser.complete({
+          operationReference: id(702),
+          csrfToken: preparedBody.candidateCsrfToken,
+        });
+        assert.equal(latestResponse.status, 200);
+        const publishedCookie = latestResponse.headers.getSetCookie()[0].split(";")[0];
         assert.equal(publishedCookie, `__Host-bop-guest=${pendingCookie.split("=")[1]}`);
-        const completedBody = await completedResponse.json();
         assert.equal(completedBody.csrfToken, preparedBody.candidateCsrfToken);
         assert.equal(JSON.stringify(completedBody).includes(pendingCookie.split("=")[1]), false);
         clock = 702;
-        const repeated = await send("complete", publishedCookie, preparedBody.candidateCsrfToken);
-        assert.equal(repeated.status, 200);
+        browserCookie = publishedCookie;
+        const repeatedBody = await browser.complete({
+          operationReference: id(702),
+          csrfToken: preparedBody.candidateCsrfToken,
+        });
+        assert.equal(latestResponse.status, 200);
         const reader = createPickupCartReadService({
           sessions: authorization,
           binding: httpOwner,
@@ -648,7 +663,7 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
           await sessions.resolve(credentials.hashCredential("Session", readCredential)),
           sessionBeforeRead,
         );
-        assert.deepEqual(await repeated.json(), completedBody);
+        assert.deepEqual(repeatedBody, completedBody);
         assert.deepEqual(await counts(), {
           carts: beforeHttp.carts + 1,
           bindings: beforeHttp.bindings + 2,
