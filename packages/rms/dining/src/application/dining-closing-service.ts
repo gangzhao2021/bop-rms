@@ -30,13 +30,15 @@ import type {
   DiningClosingPorts,
 } from "./ports/dining-closing-ports.js";
 
+import { captureSessionData } from "./dining-session-snapshot.js";
+
 function dependencyFailure(error: unknown): never {
   if (
     error instanceof DiningClosingError &&
     (error.code === "DINING_CLOSING_VERSION_CONFLICT" ||
       error.code === "DINING_CLOSING_IDEMPOTENCY_CONFLICT")
   )
-    throw error;
+    throw new DiningClosingError(error.code);
   throw new DiningClosingError("DINING_CLOSING_DEPENDENCY_UNAVAILABLE");
 }
 
@@ -49,6 +51,7 @@ function authority(
   if (value === null) throw new DiningClosingError("DINING_CLOSING_PERMISSION_DENIED");
   const expectedAction = `DINING_SESSION_CLOSING_${operation.toUpperCase()}`;
   try {
+    if (value.kind !== "Staff" && value.kind !== "Host") throw new Error("denied");
     exactObject(
       value,
       value.kind === "Staff"
@@ -73,6 +76,9 @@ function authority(
         value.permission.scopeKind !== "Store" ||
         value.permission.action !== "dining.session.close" ||
         context.scopeKind !== "Store" ||
+        String(context.resolvedAt) !== observedAt ||
+        context.actor.actorType !== "User" ||
+        audit.actor.type !== "User" ||
         String(context.brand.brandReference) !== session.brandReference ||
         String(context.store?.storeReference) !== session.storeReference
       )
@@ -87,14 +93,22 @@ function authority(
         value.observedAt !== observedAt
       )
         throw new Error("denied");
-      actorReference = value.guestSessionReference;
+      parseDiningReference(value.guestSessionReference);
+      if (
+        audit.actor.type !== "System" ||
+        audit.sourceChannel !== "CUSTOMER_PWA" ||
+        audit.dataClassification !== "Restricted" ||
+        Object.keys(audit.beforeSummary ?? {}).length !== 0 ||
+        Object.keys(audit.afterSummary ?? {}).length !== 0
+      )
+        throw new Error("denied");
+      actorReference = null;
     }
     if (
-      actorReference === null ||
       audit.brandId !== session.brandReference ||
       audit.storeId !== session.storeReference ||
-      audit.actor.type === "System" ||
-      audit.actor.reference !== actorReference ||
+      (value.kind === "Staff" &&
+        (audit.actor.type === "System" || audit.actor.reference !== actorReference)) ||
       audit.actionCode !== expectedAction ||
       audit.targetType !== "DiningSession" ||
       audit.targetId !== session.diningSessionReference ||
@@ -141,27 +155,47 @@ function intent(
 
 async function replay(
   ports: DiningClosingPorts,
-  operationReference: DiningReference,
+  parsed: ReturnType<typeof input>,
+  action: DiningClosingOperationRecord["action"],
+  session: DiningSession,
   expectedIntent: ReturnType<typeof parseDiningHash>,
 ): Promise<DiningClosingOperationRecord | null> {
-  const prior = await ports.store.resolveOperation(operationReference).catch(dependencyFailure);
+  const prior = await ports.store
+    .resolveOperation(parsed.operationReference)
+    .catch(dependencyFailure);
   if (prior === null) return null;
-  const record = parseDiningClosingOperationRecord(prior);
+  const record = bounded(() => parseDiningClosingOperationRecord(prior));
   if (!ports.hashes.equals(record.operationIntentHash, expectedIntent))
     throw new DiningClosingError("DINING_CLOSING_IDEMPOTENCY_CONFLICT");
+  const historical = record.session;
+  if (
+    record.action !== action ||
+    record.operationReference !== parsed.operationReference ||
+    historical.diningSessionReference !== session.diningSessionReference ||
+    historical.brandReference !== session.brandReference ||
+    historical.storeReference !== session.storeReference ||
+    historical.startedAt !== session.startedAt ||
+    historical.startedByActorReference !== session.startedByActorReference ||
+    historical.version !== parsed.expectedVersion + 1 ||
+    historical.version > session.version ||
+    historical.phase !==
+      ({ Begin: "Closing", Cancel: "Active", Finalize: "Closed" } as const)[action] ||
+    (action === "Finalize"
+      ? record.closureEvidenceDigest === null
+      : record.closureEvidenceDigest !== null || record.taskReferences.length !== 0) ||
+    (historical.version === session.version && !sameSession(historical, session))
+  )
+    throw new DiningClosingError("DINING_CLOSING_DEPENDENCY_UNAVAILABLE");
+
   return record;
 }
 
-async function current(
-  ports: DiningClosingPorts,
-  reference: DiningReference,
-  expectedVersion: number,
-) {
+async function current(ports: DiningClosingPorts, reference: DiningReference) {
   const session = await ports.store.load(reference).catch(dependencyFailure);
   if (session === null) throw new DiningClosingError("DINING_CLOSING_UNAVAILABLE");
-  const parsed = parseDiningSession(session);
-  if (parsed.version !== expectedVersion)
-    throw new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT");
+  const parsed = bounded(() => parseDiningSession(session));
+  if (parsed.diningSessionReference !== reference)
+    throw new DiningClosingError("DINING_CLOSING_DEPENDENCY_UNAVAILABLE");
   return parsed;
 }
 
@@ -200,8 +234,9 @@ function verifiedCommit(
   expected: DiningClosingOperationRecord,
   ports: DiningClosingPorts,
 ): DiningClosingOperationRecord {
-  const committed = parseDiningClosingOperationRecord(value);
+  const committed = bounded(() => parseDiningClosingOperationRecord(value));
   if (
+    !sameSession(committed.session, expected.session) ||
     committed.action !== expected.action ||
     committed.operationReference !== expected.operationReference ||
     !ports.hashes.equals(committed.operationIntentHash, expected.operationIntentHash) ||
@@ -220,14 +255,53 @@ function verifiedCommit(
   return committed;
 }
 
-export function createDiningClosingService(ports: DiningClosingPorts) {
+function bounded<T>(call: () => T): T {
+  try {
+    return call();
+  } catch (error) {
+    return dependencyFailure(error);
+  }
+}
+function sameSession(left: DiningSession, right: DiningSession): boolean {
+  return (Object.keys(left) as (keyof DiningSession)[]).every((key) => left[key] === right[key]);
+}
+async function dependency<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return captureSessionData(await call());
+  } catch (error) {
+    return dependencyFailure(error);
+  }
+}
+
+export function createDiningClosingService(source: DiningClosingPorts) {
+  const ports: DiningClosingPorts = {
+    store: {
+      load: (value) => dependency(() => source.store.load(value)),
+      resolveOperation: (value) => dependency(() => source.store.resolveOperation(value)),
+      commit: (value) => dependency(() => source.store.commit(value)),
+    },
+    authorization: {
+      authorize: (value) => dependency(() => source.authorization.authorize(value)),
+    },
+    closureEvidence: {
+      resolve: (value) => dependency(() => source.closureEvidence.resolve(value)),
+    },
+    reversibility: { evaluate: (value) => dependency(() => source.reversibility.evaluate(value)) },
+    tasks: { ensure: (value) => dependency(() => source.tasks.ensure(value)) },
+    hashes: {
+      hashIntent: (value) => bounded(() => parseDiningHash(source.hashes.hashIntent(value))),
+      equals: (left, right) =>
+        bounded(() => {
+          const equal = source.hashes.equals(left, right);
+          if (typeof equal !== "boolean") throw new Error("invalid");
+          return equal;
+        }),
+    },
+  };
   return Object.freeze({
     async begin(value: unknown): Promise<DiningClosingResult> {
       const parsed = input(value);
-      const operationIntentHash = intent(ports, "Begin", parsed);
-      const prior = await replay(ports, parsed.operationReference, operationIntentHash);
-      if (prior !== null) return result("AlreadyApplied", prior);
-      const session = await current(ports, parsed.sessionReference, parsed.expectedVersion);
+      const session = await current(ports, parsed.sessionReference);
       const audit = await authorized(
         ports,
         "Begin",
@@ -235,6 +309,12 @@ export function createDiningClosingService(ports: DiningClosingPorts) {
         parsed.operationReference,
         parsed.requestedAt,
       );
+      const operationIntentHash = intent(ports, "Begin", parsed);
+      const prior = await replay(ports, parsed, "Begin", session, operationIntentHash);
+      if (prior !== null) return result("AlreadyApplied", prior);
+      if (session.version !== parsed.expectedVersion)
+        throw new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT");
+
       const record = parseDiningClosingOperationRecord({
         action: "Begin",
         session: beginDiningClosing(session),
@@ -251,10 +331,7 @@ export function createDiningClosingService(ports: DiningClosingPorts) {
 
     async cancel(value: unknown): Promise<DiningClosingResult> {
       const parsed = input(value);
-      const operationIntentHash = intent(ports, "Cancel", parsed);
-      const prior = await replay(ports, parsed.operationReference, operationIntentHash);
-      if (prior !== null) return result("AlreadyApplied", prior);
-      const session = await current(ports, parsed.sessionReference, parsed.expectedVersion);
+      const session = await current(ports, parsed.sessionReference);
       const audit = await authorized(
         ports,
         "Cancel",
@@ -262,6 +339,12 @@ export function createDiningClosingService(ports: DiningClosingPorts) {
         parsed.operationReference,
         parsed.requestedAt,
       );
+      const operationIntentHash = intent(ports, "Cancel", parsed);
+      const prior = await replay(ports, parsed, "Cancel", session, operationIntentHash);
+      if (prior !== null) return result("AlreadyApplied", prior);
+      if (session.version !== parsed.expectedVersion)
+        throw new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT");
+
       const reversibility = await ports.reversibility
         .evaluate({
           diningSessionReference: session.diningSessionReference,
@@ -285,10 +368,21 @@ export function createDiningClosingService(ports: DiningClosingPorts) {
 
     async finalize(value: unknown): Promise<DiningClosingResult> {
       const parsed = input(value);
+      const session = await current(ports, parsed.sessionReference);
+      const audit = await authorized(
+        ports,
+        "Finalize",
+        session,
+        parsed.operationReference,
+        parsed.requestedAt,
+      );
       const operationIntentHash = intent(ports, "Finalize", parsed);
-      const prior = await replay(ports, parsed.operationReference, operationIntentHash);
+      const prior = await replay(ports, parsed, "Finalize", session, operationIntentHash);
       if (prior !== null) return result("AlreadyApplied", prior);
-      const session = await current(ports, parsed.sessionReference, parsed.expectedVersion);
+      if (session.version !== parsed.expectedVersion)
+        throw new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT");
+      if (session.phase !== "Closing")
+        throw new DiningClosingError("DINING_CLOSING_PHASE_CONFLICT");
       const evidenceValue = await ports.closureEvidence
         .resolve({
           diningSessionReference: session.diningSessionReference,
@@ -298,16 +392,16 @@ export function createDiningClosingService(ports: DiningClosingPorts) {
         .catch(dependencyFailure);
       if (evidenceValue === null)
         throw new DiningClosingError("DINING_CLOSING_DEPENDENCY_UNAVAILABLE");
-      const evidence = parseDiningClosureEvidence(evidenceValue);
+      const evidence = bounded(() => parseDiningClosureEvidence(evidenceValue));
       if (evidence.observedAt !== parsed.requestedAt)
         throw new DiningClosingError("DINING_CLOSING_UNAVAILABLE");
-      const audit = await authorized(
-        ports,
-        "Finalize",
-        session,
-        parsed.operationReference,
-        parsed.requestedAt,
-      );
+
+      if (
+        evidence.diningSessionReference !== session.diningSessionReference ||
+        evidence.brandReference !== session.brandReference ||
+        evidence.storeReference !== session.storeReference
+      )
+        throw new DiningClosingError("DINING_CLOSING_UNAVAILABLE");
       const unresolved = unresolvedDiningOrders(evidence);
       const receipts = [];
       for (const order of unresolved) {
@@ -316,21 +410,20 @@ export function createDiningClosingService(ports: DiningClosingPorts) {
             `DINING_UNPAID_BATCH_EXCEPTION:${session.storeReference}:${session.diningSessionReference}:${order.orderReference}:${evidence.evidenceVersion}`,
           ),
         );
-        const receipt = parseDiningExceptionTaskReceipt(
-          await ports.tasks
-            .ensure({
-              purpose: "DINING_UNPAID_BATCH_EXCEPTION",
-              brandReference: session.brandReference,
-              storeReference: session.storeReference,
-              diningSessionReference: session.diningSessionReference,
-              orderReference: order.orderReference,
-              evidenceVersion: evidence.evidenceVersion,
-              evidenceDigest: evidence.evidenceDigest,
-              intentHash: taskIntentHash,
-              requestedAt: parsed.requestedAt,
-            })
-            .catch(dependencyFailure),
-        );
+        const receiptValue = await ports.tasks
+          .ensure({
+            purpose: "DINING_UNPAID_BATCH_EXCEPTION",
+            brandReference: session.brandReference,
+            storeReference: session.storeReference,
+            diningSessionReference: session.diningSessionReference,
+            orderReference: order.orderReference,
+            evidenceVersion: evidence.evidenceVersion,
+            evidenceDigest: evidence.evidenceDigest,
+            intentHash: taskIntentHash,
+            requestedAt: parsed.requestedAt,
+          })
+          .catch(dependencyFailure);
+        const receipt = bounded(() => parseDiningExceptionTaskReceipt(receiptValue));
         const task = receipt.task;
         if (
           receipt.orderReference !== order.orderReference ||

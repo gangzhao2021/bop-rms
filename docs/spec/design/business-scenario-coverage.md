@@ -280,3 +280,7 @@ Durable consumption and Identity flow activation remain separate.
 WP-2280 supplies coherent current Session/Participant/Table evidence for the Cart Query.
 Dining442/442, Dining PostgreSQL5/5, full verification and forced uncached integration pass.
 Caller authorization and Closing/write coordination remain separate.
+
+WP-2281 corrects Closing current authority, scoped history and complete commit acknowledgements.
+Guest Host Audit uses Restricted System identity. Dining489/489, Task32/32, full verification
+and forced uncached integration pass. Durable Closing commands and shared Cart fencing remain separate.

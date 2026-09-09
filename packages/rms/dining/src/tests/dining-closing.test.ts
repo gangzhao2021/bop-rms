@@ -1,6 +1,6 @@
 import { createTaskRecord } from "@bop/task";
 import { createBrand, createStore, createTenantContext } from "@bop/tenant";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   beginDiningClosing,
@@ -12,6 +12,11 @@ import {
   type DiningClosingPorts,
   type DiningSession,
 } from "../index.js";
+
+function required<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("missing fixture");
+  return value;
+}
 
 const id = (sequence: number) =>
   `018f3000-0000-7000-8000-${sequence.toString(16).padStart(12, "0")}`;
@@ -248,7 +253,13 @@ function fixture(
           storeReference: ids.store,
           status: "CurrentHost",
           observedAt: input.observedAt,
-          audit: audit(input.operation),
+          audit: {
+            ...audit(input.operation),
+            occurredAt: input.observedAt,
+            actor: { type: "System" },
+            sourceChannel: "CUSTOMER_PWA",
+            dataClassification: "Restricted",
+          },
         } as never;
       },
     },
@@ -298,6 +309,8 @@ function fixture(
   return {
     service: createDiningClosingService(ports),
     ensured,
+    ports,
+    operations,
     current: () => current,
   };
 }
@@ -455,4 +468,264 @@ describe("Dining close evidence and Task boundary", () => {
       expect.objectContaining({ code: "DINING_CLOSING_INPUT_INVALID" }),
     );
   });
+});
+
+describe("WP-2281 current Closing authority and complete results", () => {
+  it.each(["begin", "cancel", "finalize"] as const)(
+    "reauthorizes %s before historical replay",
+    async (action) => {
+      const state = fixture({ phase: action === "begin" ? "Active" : "Closing" });
+      const request = command(ids[action], 2);
+      await state.service[action](request);
+      state.ports.authorization.authorize = vi.fn(async () => null);
+      const history = vi.spyOn(state.ports.store, "resolveOperation");
+      await expect(state.service[action](request)).rejects.toMatchObject({
+        code: "DINING_CLOSING_PERMISSION_DENIED",
+      });
+      expect(history).not.toHaveBeenCalled();
+    },
+  );
+  it("does not read finances or ensure Tasks before authority", async () => {
+    const state = fixture({ phase: "Closing", authority: "Denied" });
+    const read = vi.spyOn(state.ports.closureEvidence, "resolve");
+    await expect(state.service.finalize(command(ids.finalize, 2))).rejects.toMatchObject({
+      code: "DINING_CLOSING_PERMISSION_DENIED",
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(state.ensured).toEqual([]);
+  });
+  it("preserves an original result after a later successful phase transition", async () => {
+    const state = fixture();
+    await state.service.begin(command(ids.begin, 2));
+    await state.service.cancel(command(ids.cancel, 3));
+    await expect(state.service.begin(command(ids.begin, 2))).resolves.toMatchObject({
+      status: "AlreadyApplied",
+      session: { phase: "Closing", version: 3 },
+    });
+  });
+  it("rejects a wrong current Session before authorization", async () => {
+    const state = fixture();
+    state.ports.store.load = async () =>
+      ({ ...session(), diningSessionReference: id(99) }) as never;
+    const auth = vi.spyOn(state.ports.authorization, "authorize");
+    await expect(state.service.begin(command(ids.begin, 2))).rejects.toMatchObject({
+      code: "DINING_CLOSING_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(auth).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["action", "Cancel"],
+    ["operationReference", id(99)],
+    ["closureEvidenceDigest", evidenceDigest],
+    ["taskReferences", [ids.taskOne]],
+  ])("rejects corrupt historical %s", async (field, value) => {
+    const state = fixture();
+    await state.service.begin(command(ids.begin, 2));
+    state.operations.set(ids.begin, {
+      ...required(state.operations.get(ids.begin)),
+      [field as string]: value,
+    } as never);
+    await expect(state.service.begin(command(ids.begin, 2))).rejects.toMatchObject({
+      code: "DINING_CLOSING_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it.each([
+    ["diningSessionReference", id(99)],
+    ["brandReference", id(99)],
+    ["storeReference", id(99)],
+    ["tableReference", id(99)],
+    ["tableAssignmentVersion", 99],
+    ["hostParticipantReference", id(99)],
+    ["startedByActorReference", id(99)],
+    ["startedAt", at],
+    ["phase", "Active"],
+    ["version", 4],
+  ])("rejects corrupt historical Session %s", async (field, value) => {
+    const state = fixture();
+    await state.service.begin(command(ids.begin, 2));
+    const prior = required(state.operations.get(ids.begin));
+    state.operations.set(ids.begin, {
+      ...prior,
+      session: { ...prior.session, [field as string]: value },
+    } as never);
+    await expect(state.service.begin(command(ids.begin, 2))).rejects.toMatchObject({
+      code: "DINING_CLOSING_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it.each([
+    ["tableReference", id(99)],
+    ["tableAssignmentVersion", 99],
+    ["hostParticipantReference", id(99)],
+    ["startedByActorReference", id(99)],
+    ["startedAt", at],
+  ])("rejects incomplete committed Session %s", async (field, value) => {
+    const state = fixture();
+    state.ports.store.commit = async ({ record }) =>
+      ({ ...record, session: { ...record.session, [field as string]: value } }) as never;
+    await expect(state.service.begin(command(ids.begin, 2))).rejects.toMatchObject({
+      code: "DINING_CLOSING_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it.each([
+    "unknownKind",
+    "guestAsUser",
+    "foreignHost",
+    "staleHost",
+    "guestFormat",
+    "privateSummary",
+  ])("rejects %s authority", async (variant) => {
+    const state = fixture();
+    const original = state.ports.authorization.authorize;
+    state.ports.authorization.authorize = async (input) => {
+      const value = await original(input);
+      return {
+        ...value,
+        ...(variant === "unknownKind"
+          ? { kind: "Other" }
+          : variant === "foreignHost"
+            ? { participantReference: id(99) }
+            : variant === "staleHost"
+              ? { observedAt: later }
+              : variant === "guestFormat"
+                ? { guestSessionReference: "invalid" }
+                : {
+                    audit:
+                      variant === "guestAsUser"
+                        ? audit(input.operation)
+                        : { ...required(value).audit, afterSummary: { detail: "private" } },
+                  }),
+      } as never;
+    };
+    await expect(state.service.begin(command(ids.begin, 2))).rejects.toMatchObject({
+      code: "DINING_CLOSING_PERMISSION_DENIED",
+    });
+  });
+  it.each(["load", "authorize", "history", "commit", "hash", "equals"])(
+    "bounds synchronous %s errors",
+    async (dependency) => {
+      const state = fixture();
+      const fail = () => {
+        throw new Error("private-dependency-payload");
+      };
+      if (dependency === "load") state.ports.store.load = fail;
+      if (dependency === "authorize") state.ports.authorization.authorize = fail;
+      if (dependency === "history") state.ports.store.resolveOperation = fail;
+      if (dependency === "commit") state.ports.store.commit = fail;
+      if (dependency === "hash") state.ports.hashes.hashIntent = fail;
+      if (dependency === "equals") state.ports.hashes.equals = fail;
+      await expect(state.service.begin(command(ids.begin, 2))).rejects.toMatchObject({
+        code: "DINING_CLOSING_DEPENDENCY_UNAVAILABLE",
+        message: new DiningClosingError("DINING_CLOSING_DEPENDENCY_UNAVAILABLE").message,
+      });
+    },
+  );
+  it("captures the current Session before callbacks can mutate its source", async () => {
+    const state = fixture();
+    const mutable = { ...session() };
+    state.ports.store.load = async () => mutable;
+    const original = state.ports.authorization.authorize;
+    state.ports.authorization.authorize = async (input) => {
+      mutable.tableReference = id(99) as never;
+      return original(input);
+    };
+    await expect(state.service.begin(command(ids.begin, 2))).resolves.toMatchObject({
+      session: { tableReference: ids.table },
+    });
+  });
+  it("does not invoke getters in dependency facts", async () => {
+    const state = fixture();
+    const getter = vi.fn(() => ids.table);
+    state.ports.store.load = async () =>
+      Object.defineProperty({ ...session() }, "tableReference", { get: getter, enumerable: true });
+    await expect(state.service.begin(command(ids.begin, 2))).rejects.toMatchObject({
+      code: "DINING_CLOSING_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(getter).not.toHaveBeenCalled();
+  });
+});
+
+describe("WP-2281 remaining dependency fences", () => {
+  it("reauthorizes revoked Staff on retry", async () => {
+    const state = fixture({ authority: "Staff" });
+    await state.service.begin(command(ids.begin, 2));
+    state.ports.authorization.authorize = async () => null;
+    const history = vi.spyOn(state.ports.store, "resolveOperation");
+    await expect(state.service.begin(command(ids.begin, 2))).rejects.toMatchObject({
+      code: "DINING_CLOSING_PERMISSION_DENIED",
+    });
+    expect(history).not.toHaveBeenCalled();
+  });
+  it("rejects foreign financial evidence before exception Task creation", async () => {
+    const state = fixture({
+      phase: "Closing",
+      closure: {
+        ...closure([order(ids.orderOne, ids.batchOne, "Unpaid")]),
+        storeReference: id(99),
+      },
+    });
+    await expect(state.service.finalize(command(ids.finalize, 2))).rejects.toMatchObject({
+      code: "DINING_CLOSING_UNAVAILABLE",
+    });
+    expect(state.ensured).toEqual([]);
+  });
+  it.each(["resolve", "ensure", "evaluate"] as const)(
+    "bounds asynchronous %s failures",
+    async (method) => {
+      const state = fixture({
+        phase: "Closing",
+        closure: closure([order(ids.orderOne, ids.batchOne, "Unpaid")]),
+      });
+      const fail = async () => {
+        throw new Error("private-financial-payload");
+      };
+      if (method === "resolve") state.ports.closureEvidence.resolve = fail;
+      if (method === "ensure") state.ports.tasks.ensure = fail;
+      if (method === "evaluate") state.ports.reversibility.evaluate = fail;
+      await expect(
+        state.service[method === "evaluate" ? "cancel" : "finalize"](command(ids.finalize, 2)),
+      ).rejects.toMatchObject({
+        code: "DINING_CLOSING_DEPENDENCY_UNAVAILABLE",
+        message: new DiningClosingError("DINING_CLOSING_DEPENDENCY_UNAVAILABLE").message,
+      });
+    },
+  );
+  it("recreates owned conflicts without dependency private messages", async () => {
+    const state = fixture();
+    const error = new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT");
+    error.message = "private-store-payload";
+    state.ports.store.commit = async () => {
+      throw error;
+    };
+    try {
+      await state.service.begin(command(ids.begin, 2));
+      throw new Error("expected denial");
+    } catch (received) {
+      expect(received).not.toBe(error);
+      expect(received).toMatchObject({
+        code: error.code,
+        message: new DiningClosingError(error.code).message,
+      });
+    }
+  });
+  it("rejects a finalize history without its closure digest", async () => {
+    const state = fixture({ phase: "Closing" });
+    await state.service.finalize(command(ids.finalize, 2));
+    state.operations.set(ids.finalize, {
+      ...required(state.operations.get(ids.finalize)),
+      closureEvidenceDigest: null,
+    });
+    await expect(state.service.finalize(command(ids.finalize, 2))).rejects.toMatchObject({
+      code: "DINING_CLOSING_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+});
+
+it("WP-2281 rejects finalize outside Closing before financial work", async () => {
+  const state = fixture({ closure: closure([order(ids.orderOne, ids.batchOne, "Unpaid")]) });
+  const read = vi.spyOn(state.ports.closureEvidence, "resolve");
+  await expect(state.service.finalize(command(ids.finalize, 2))).rejects.toMatchObject({
+    code: "DINING_CLOSING_PHASE_CONFLICT",
+  });
+  expect(read).not.toHaveBeenCalled();
+  expect(state.ensured).toEqual([]);
 });

@@ -21,6 +21,7 @@ export interface DiningClosingStaffEvidence {
   readonly audit: AppendAuditRecordInput;
 }
 
+/** Current Guest Host evidence requires Restricted CUSTOMER_PWA System Audit; Guest IDs are not User actors. */
 export interface DiningClosingHostEvidence {
   readonly kind: "Host";
   readonly guestSessionReference: DiningReference;
