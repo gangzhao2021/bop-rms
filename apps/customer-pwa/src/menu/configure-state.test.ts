@@ -180,3 +180,166 @@ describe("WP-1702 in-memory Configurator state", () => {
     expect(state.calls).toEqual([]);
   });
 });
+
+describe("Configurator unresolved intent", () => {
+  it("pins add payload and version and blocks a superseding submission", async () => {
+    const original = cart(3);
+    const inputDraft = {
+      quantity: 1,
+      customerNote: null,
+      optionSelections: [{ optionReference: id(4), quantity: 1 }],
+    };
+    const requests: unknown[] = [];
+    let keys = 0;
+    const client: CustomerCartClient = {
+      loadCurrent: async () => original,
+      createCart: async () => cart(1),
+      updateItem: async () => cart(1),
+      removeItem: async () => cart(1),
+      addItem: async (input) => {
+        requests.push(structuredClone(input));
+        if (requests.length === 1) throw new CartClientError("network_unknown");
+        return cart(4, [addedItem]);
+      },
+    };
+    const controller = createConfigureController({ client, keyFactory: () => id(20 + keys++) });
+    await controller.submit(id(3), inputDraft);
+    inputDraft.quantity = 9;
+    Object.assign(inputDraft.optionSelections[0] ?? {}, { quantity: 4 });
+    Object.assign(original.cart, { version: 99 });
+    await controller.submit(id(8), inputDraft);
+    expect(requests).toHaveLength(1);
+    expect(keys).toBe(2);
+    controller.setOnline(false);
+    await controller.retry();
+    controller.setOnline(true);
+    expect(requests).toHaveLength(1);
+    await controller.retry();
+    expect(requests[1]).toEqual(requests[0]);
+    expect(controller.getState()).toMatchObject({ status: "added" });
+  });
+
+  it("does not replace an unknown create and releases a known rejected plan", async () => {
+    const state = fixture(null);
+    state.failCreate(new CartClientError("network_unknown"));
+    await state.controller.submit(id(3), draft);
+    await state.controller.submit(id(8), draft);
+    expect(state.calls).toEqual([{ name: "load" }, { name: "create", key: id(20) }]);
+    state.failCreate(null);
+    state.failAdd(new CartClientError("cart_selection_invalid"));
+    await state.controller.retry();
+    await state.controller.retry();
+    expect(state.calls.filter((call) => call.name === "add")).toHaveLength(1);
+    state.failAdd(null);
+    await state.controller.submit(id(3), draft);
+    expect(state.calls.filter((call) => call.name === "add")).toHaveLength(2);
+  });
+
+  it("drops an unsent offline submission and permits fresh intent after reconnect", async () => {
+    const state = fixture(cart(3));
+    state.controller.setOnline(false);
+    await state.controller.submit(id(3), draft);
+    expect(state.controller.getState()).toEqual({ status: "offline", canRetry: false });
+    state.controller.setOnline(true);
+    await state.controller.retry();
+    expect(state.calls).toEqual([]);
+    expect(state.controller.getState()).toEqual({ status: "idle" });
+    await state.controller.submit(id(3), draft);
+    expect(state.calls).toEqual([{ name: "load" }, { name: "add", key: id(21) }]);
+  });
+
+  it("does not infer add success from an unadvanced response", async () => {
+    let calls = 0;
+    const client: CustomerCartClient = {
+      loadCurrent: async () => cart(3),
+      createCart: async () => cart(1),
+      updateItem: async () => cart(1),
+      removeItem: async () => cart(1),
+      addItem: async () => {
+        calls++;
+        return cart(3, [addedItem]);
+      },
+    };
+    const controller = createConfigureController({ client, keyFactory: () => id(20) });
+    await controller.submit(id(3), draft);
+    await controller.submit(id(3), draft);
+    expect(calls).toBe(1);
+    expect(controller.getState()).toMatchObject({ status: "outcome-unknown", canRetry: true });
+  });
+});
+
+it("retains an uncertain add even when its later attempt is rejected", async () => {
+  const state = fixture(cart(3));
+  state.failAdd(new CartClientError("network_unknown"));
+  await state.controller.submit(id(3), draft);
+  state.failAdd(new CartClientError("cart_selection_invalid"));
+  await state.controller.retry();
+  await state.controller.submit(id(3), draft);
+  expect(state.calls.filter((call) => call.name === "add")).toHaveLength(2);
+  expect(state.controller.getState()).toMatchObject({ status: "outcome-unknown", canRetry: true });
+  state.failAdd(null);
+  await state.controller.retry();
+  expect(state.controller.getState()).toMatchObject({ status: "added" });
+});
+
+it("settles an uncertain locate before evaluating a definitive add rejection", async () => {
+  let loads = 0;
+  let adds = 0;
+  const client: CustomerCartClient = {
+    loadCurrent: async () => {
+      if (++loads === 1) throw new CartClientError("network_unknown");
+      return cart(3);
+    },
+    createCart: async () => cart(1),
+    updateItem: async () => cart(1),
+    removeItem: async () => cart(1),
+    addItem: async () => {
+      adds++;
+      throw new CartClientError("cart_selection_invalid");
+    },
+  };
+  const controller = createConfigureController({ client, keyFactory: () => id(20) });
+  await controller.submit(id(3), draft);
+  await controller.retry();
+  expect(controller.getState()).toMatchObject({ status: "validation", canRetry: false });
+  await controller.submit(id(3), draft);
+  expect(adds).toBe(2);
+});
+
+it.each(["locate", "create"] as const)(
+  "pauses after %s if connectivity changes between foreground stages",
+  async (stage) => {
+    let release!: (value: CartView | null) => void;
+    const gate = new Promise<CartView | null>((resolve) => {
+      release = resolve;
+    });
+    let creates = 0;
+    let adds = 0;
+    const client: CustomerCartClient = {
+      loadCurrent: async () => (stage === "locate" ? gate : null),
+      createCart: async () => {
+        creates++;
+        return stage === "create" ? ((await gate) ?? cart(1)) : cart(1);
+      },
+      addItem: async () => {
+        adds++;
+        return cart(2, [addedItem]);
+      },
+      updateItem: async () => cart(1),
+      removeItem: async () => cart(1),
+    };
+    const controller = createConfigureController({ client, keyFactory: () => id(20) });
+    const submit = controller.submit(id(3), draft);
+    await Promise.resolve();
+    controller.setOnline(false);
+    release(stage === "locate" ? null : cart(1));
+    await submit;
+    expect(creates).toBe(stage === "create" ? 1 : 0);
+    expect(adds).toBe(0);
+    controller.setOnline(true);
+    expect(adds).toBe(0);
+    await controller.retry();
+    expect(adds).toBe(1);
+    expect(creates).toBe(1);
+  },
+);

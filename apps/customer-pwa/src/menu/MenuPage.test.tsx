@@ -141,3 +141,26 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).not.toContain(configurable.optionRules[0]?.options[0]?.optionReference);
   });
 });
+
+it("disables Configurator edits and add while keeping unknown-outcome retry", () => {
+  const controller: ConfigureController = {
+    getState: () => ({
+      status: "outcome-unknown",
+      issueCodes: [],
+      retryAfterSeconds: null,
+      canRetry: true,
+    }),
+    retry: vi.fn(),
+    setOnline: vi.fn(),
+    submit: vi.fn(),
+    subscribe: () => () => undefined,
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <SellableConfigurator sellable={sellable} controller={controller} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Retry");
+  expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/u);
+  expect(html).toMatch(/<textarea[^>]*disabled=""/u);
+});

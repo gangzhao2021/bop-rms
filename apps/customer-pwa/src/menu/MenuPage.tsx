@@ -603,6 +603,7 @@ export function SellableConfigurator({
   );
   const issues = configurationIssues(sellable, selected, quantity, note);
   const busy = state.status === "pending";
+  const unresolved = state.status === "outcome-unknown" || state.status === "offline";
   useEffect(() => {
     const offline = () => controller.setOnline(false);
     const online = () => controller.setOnline(true);
@@ -615,7 +616,7 @@ export function SellableConfigurator({
   }, [controller]);
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (issues.length > 0 || busy || state.status === "added") return;
+    if (issues.length > 0 || busy || unresolved || state.status === "added") return;
     const draft: CartItemDraft = Object.freeze({
       quantity,
       optionSelections: Object.freeze(
@@ -649,7 +650,7 @@ export function SellableConfigurator({
         max={100}
         inputMode="numeric"
         value={quantity}
-        disabled={busy || state.status === "added"}
+        disabled={busy || unresolved || state.status === "added"}
         onChange={(event) => setQuantity(event.currentTarget.valueAsNumber)}
       />
       {sellable.optionRules.map((rule, groupIndex) => (
@@ -664,7 +665,7 @@ export function SellableConfigurator({
                 <input
                   type="checkbox"
                   checked={selected.has(option.optionReference)}
-                  disabled={busy || state.status === "added"}
+                  disabled={busy || unresolved || state.status === "added"}
                   onChange={() => {
                     const next = new Map(selected);
                     if (next.has(option.optionReference)) next.delete(option.optionReference);
@@ -684,7 +685,7 @@ export function SellableConfigurator({
                     max={Math.min(option.maximumQuantity, 100)}
                     inputMode="numeric"
                     value={selected.get(option.optionReference)}
-                    disabled={busy || state.status === "added"}
+                    disabled={busy || unresolved || state.status === "added"}
                     onChange={(event) => {
                       const next = new Map(selected);
                       next.set(option.optionReference, event.currentTarget.valueAsNumber);
@@ -703,7 +704,7 @@ export function SellableConfigurator({
         id="configure-note"
         maxLength={500}
         value={note}
-        disabled={busy || state.status === "added"}
+        disabled={busy || unresolved || state.status === "added"}
         aria-describedby="configure-note-help"
         onChange={(event) => setNote(event.currentTarget.value)}
       />
@@ -721,7 +722,7 @@ export function SellableConfigurator({
       <button
         className="menu-action"
         type="submit"
-        disabled={issues.length > 0 || busy || state.status === "added"}
+        disabled={issues.length > 0 || busy || unresolved || state.status === "added"}
       >
         Add to cart
       </button>

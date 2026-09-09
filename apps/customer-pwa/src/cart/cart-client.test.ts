@@ -191,3 +191,59 @@ describe("Customer Cart browser client", () => {
     } satisfies Partial<CartClientError>);
   });
 });
+
+const writeCases = ["createCart", "addItem", "updateItem", "removeItem"] as const;
+describe("uncertain Cart response transport", () => {
+  it.each(writeCases)("keeps %s malformed/unavailable responses unknown", async (method) => {
+    const client = createBrowserCustomerCartClient();
+    const input = {
+      cart: cart(),
+      cartItemReference: id(2),
+      sellableReference: id(3),
+      operationReference: id(20),
+      draft: { quantity: 2, optionSelections: [], customerNote: null },
+    };
+    setCustomerCartCsrfCredential("c".repeat(43));
+    for (const response of [
+      new Response("broken", { status: 200 }),
+      new Response("{}", { status: 200 }),
+      new Response(JSON.stringify({ error: { code: "cart_service_unavailable" } }), {
+        status: 503,
+      }),
+      new Response(JSON.stringify({ error: { code: "cart_session_expired" } }), { status: 503 }),
+      new Response(JSON.stringify({ error: { code: "cart_selection_invalid" } }), { status: 500 }),
+    ]) {
+      const fetch = vi.fn(async () => response);
+      vi.stubGlobal("fetch", fetch);
+      await expect(client[method](input)).rejects.toMatchObject({ code: "network_unknown" });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    }
+    const fetch = vi.fn(async () => new Response(JSON.stringify(cart())));
+    vi.stubGlobal("fetch", fetch);
+    await expect(client[method](input)).resolves.toEqual(cart());
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [400, "cart_request_invalid"],
+    [401, "cart_session_expired"],
+    [404, "cart_not_found"],
+    [409, "cart_version_conflict"],
+    [409, "cart_idempotency_conflict"],
+    [422, "cart_selection_invalid"],
+    [409, "cart_expired"],
+    [409, "cart_abandoned"],
+    [429, "cart_rate_limited"],
+  ])("retains matching %s/%s rejection semantics", async (status, code) => {
+    setCustomerCartCsrfCredential("c".repeat(43));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response(JSON.stringify({ error: { code } }), { status: Number(status) }),
+      ),
+    );
+    await expect(
+      createBrowserCustomerCartClient().createCart({ operationReference: id(20) }),
+    ).rejects.toMatchObject({ code });
+  });
+});

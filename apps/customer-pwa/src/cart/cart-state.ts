@@ -27,12 +27,14 @@ export type CartState =
 type PendingOperation =
   | {
       readonly kind: "update";
+      readonly cart: CartView;
       readonly cartItemReference: string;
       readonly draft: CartItemDraft;
       readonly operationReference: string;
     }
   | {
       readonly kind: "remove";
+      readonly cart: CartView;
       readonly cartItemReference: string;
       readonly operationReference: string;
     };
@@ -72,6 +74,8 @@ export function createCartStateController({
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
   let pending: PendingOperation | null = null;
   let commandFlight: Promise<void> | null = null;
+  let readRevision = 0;
+  let outcomeUnknown = false;
   const listeners = new Set<() => void>();
 
   const publish = (next: CartState) => {
@@ -81,18 +85,25 @@ export function createCartStateController({
   const currentCart = () => ("cart" in state ? state.cart : null);
 
   const load = async () => {
+    if (commandFlight !== null) return commandFlight;
     if (!online) {
       publish({ status: "offline-readonly", cart: currentCart() });
       return;
     }
     const priorCart = currentCart();
-    publish({ status: "loading" });
+    const revision = ++readRevision;
+    if (pending === null) publish({ status: "loading" });
     try {
       const cart = await client.loadCurrent();
-      pending = null;
-      publish(cart === null ? { status: "empty" } : { status: "ready", cart });
+      if (revision !== readRevision) return;
+      if (!online) publish({ status: "offline-readonly", cart });
+      else if (pending !== null) mapError(new CartClientError("network_unknown"), cart, true);
+      else publish(cart === null ? { status: "empty" } : { status: "ready", cart });
     } catch (error) {
-      mapError(error, priorCart, false);
+      if (revision !== readRevision) return;
+      if (!online) publish({ status: "offline-readonly", cart: priorCart });
+      else if (pending !== null) mapError(new CartClientError("network_unknown"), priorCart, true);
+      else mapError(error, priorCart, false);
     }
   };
 
@@ -127,27 +138,28 @@ export function createCartStateController({
   };
 
   const execute = async (operation: PendingOperation) => {
-    const cart = currentCart();
+    const cart = operation.cart;
     if (!online) {
-      pending = operation;
       publish({ status: "offline-readonly", cart });
       return;
     }
-    if (cart === null) {
-      mapError(new CartClientError("cart_not_found"), null, false);
-      return;
-    }
+    readRevision += 1;
     pending = operation;
     publish({ status: "command-pending", cart });
     try {
       const result =
         operation.kind === "update"
-          ? await client.updateItem({ cart, ...operation })
-          : await client.removeItem({ cart, ...operation });
+          ? await client.updateItem(operation)
+          : await client.removeItem(operation);
       pending = null;
-      publish({ status: "ready", cart: result });
+      publish({ status: online ? "ready" : "offline-readonly", cart: result });
     } catch (error) {
-      if (error instanceof CartClientError && error.code === "cart_version_conflict") {
+      let parsed =
+        error instanceof CartClientError ? error : new CartClientError("network_unknown");
+      outcomeUnknown ||= parsed.code === "network_unknown";
+      if (outcomeUnknown) parsed = new CartClientError("network_unknown");
+      else pending = null;
+      if (parsed.code === "cart_version_conflict") {
         try {
           const refreshed = await client.loadCurrent();
           mapError(error, refreshed, false);
@@ -157,12 +169,25 @@ export function createCartStateController({
           return;
         }
       }
-      mapError(error, cart, true);
+      mapError(parsed, cart, true);
     }
   };
-  const begin = (createOperation: () => PendingOperation): Promise<void> => {
+  const begin = (
+    createOperation: (cart: CartView) => PendingOperation,
+    retry = false,
+  ): Promise<void> => {
     if (commandFlight !== null) return commandFlight;
-    const current = execute(createOperation());
+    if (pending !== null && !retry) return Promise.resolve();
+    if (!online) {
+      publish({ status: "offline-readonly", cart: currentCart() });
+      return Promise.resolve();
+    }
+    const cart = retry && pending !== null ? pending.cart : currentCart();
+    if (cart === null) return Promise.resolve();
+    if (!retry) outcomeUnknown = false;
+    const current = execute(
+      createOperation(Object.freeze({ ...cart, cart: Object.freeze({ ...cart.cart }) })),
+    );
     commandFlight = current;
     void current.then(
       () => {
@@ -179,21 +204,39 @@ export function createCartStateController({
     getState: () => state,
     load,
     removeItem: (cartItemReference: string) =>
-      begin(() => ({ kind: "remove", cartItemReference, operationReference: keyFactory() })),
+      begin((cart) => ({
+        kind: "remove",
+        cart,
+        cartItemReference,
+        operationReference: keyFactory(),
+      })),
     retry: () => {
-      if (pending === null || state.status !== "command-failed" || !state.canRetrySameOperation)
-        return Promise.resolve();
-      return begin(() => pending as PendingOperation);
+      if (pending === null) return Promise.resolve();
+      return begin(() => pending as PendingOperation, true);
     },
     setOnline: (value: boolean) => {
       online = value;
       if (!value) publish({ status: "offline-readonly", cart: currentCart() });
+      else if (pending !== null && commandFlight === null)
+        mapError(new CartClientError("network_unknown"), currentCart(), true);
     },
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
     updateItem: (cartItemReference: string, draft: CartItemDraft) =>
-      begin(() => ({ kind: "update", cartItemReference, draft, operationReference: keyFactory() })),
+      begin((cart) => ({
+        kind: "update",
+        cart,
+        cartItemReference,
+        draft: Object.freeze({
+          quantity: draft.quantity,
+          customerNote: draft.customerNote,
+          optionSelections: Object.freeze(
+            draft.optionSelections.map((option) => Object.freeze({ ...option })),
+          ),
+        }),
+        operationReference: keyFactory(),
+      })),
   });
 }

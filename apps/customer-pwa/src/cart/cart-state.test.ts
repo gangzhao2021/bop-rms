@@ -218,3 +218,144 @@ describe("WP-1205 in-memory Cart state", () => {
     expect(state.controller.getState()).toMatchObject({ status: expected });
   });
 });
+
+describe("retained foreground Cart intent", () => {
+  it.each(["update", "remove"] as const)(
+    "pins %s through unknown, refresh, caller edits and reconnect",
+    async (kind) => {
+      const original = cart();
+      const draft = {
+        quantity: 2,
+        customerNote: null,
+        optionSelections: [{ optionReference: id(4), quantity: 1 }],
+      };
+      const requests: unknown[] = [];
+      let reject = true;
+      let keyCount = 0;
+      let loads = 0;
+      const mutate = async (
+        input:
+          | Parameters<CustomerCartClient["updateItem"]>[0]
+          | Parameters<CustomerCartClient["removeItem"]>[0],
+      ) => {
+        requests.push(structuredClone(input));
+        if (reject) throw new CartClientError("network_unknown");
+        return cart(4);
+      };
+      const client: CustomerCartClient = {
+        loadCurrent: async () => (++loads === 1 ? original : cart(9)),
+        createCart: async () => cart(),
+        addItem: async () => cart(),
+        updateItem: mutate,
+        removeItem: mutate,
+      };
+      const controller = createCartStateController({
+        client,
+        keyFactory: () => id(20 + keyCount++),
+      });
+      await controller.load();
+      if (kind === "update") await controller.updateItem(id(2), draft);
+      else await controller.removeItem(id(2));
+      draft.quantity = 7;
+      Object.assign(draft.optionSelections[0] ?? {}, { quantity: 3 });
+      Object.assign(original.cart, { version: 90 });
+      await controller.load();
+      expect(controller.getState()).toMatchObject({
+        status: "command-failed",
+        cart: { cart: { version: 9 } },
+        canRetrySameOperation: true,
+      });
+      await controller.updateItem(id(2), draft);
+      await controller.removeItem(id(2));
+      expect(requests).toHaveLength(1);
+      expect(keyCount).toBe(1);
+      controller.setOnline(false);
+      await controller.retry();
+      controller.setOnline(true);
+      expect(requests).toHaveLength(1);
+      expect(controller.getState()).toMatchObject({
+        status: "command-failed",
+        canRetrySameOperation: true,
+      });
+      reject = false;
+      await controller.retry();
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toEqual(requests[0]);
+      expect(requests[1]).toMatchObject({
+        cart: { cart: { version: 3 } },
+        operationReference: id(20),
+      });
+      expect(controller.getState()).toMatchObject({ status: "ready" });
+      await controller.removeItem(id(2));
+      expect(keyCount).toBe(2);
+    },
+  );
+
+  it("does not allow a late refresh to overwrite a completed retry", async () => {
+    let release!: (value: CartView | null) => void;
+    let loads = 0;
+    let calls = 0;
+    const client: CustomerCartClient = {
+      loadCurrent: async () =>
+        ++loads === 1
+          ? cart()
+          : new Promise((resolve) => {
+              release = resolve;
+            }),
+      createCart: async () => cart(),
+      addItem: async () => cart(),
+      updateItem: async () => cart(),
+      removeItem: async () => {
+        if (++calls === 1) throw new CartClientError("network_unknown");
+        return cart(4);
+      },
+    };
+    const controller = createCartStateController({ client, keyFactory: () => id(20) });
+    await controller.load();
+    await controller.removeItem(id(2));
+    const refresh = controller.load();
+    await controller.retry();
+    release(cart(3));
+    await refresh;
+    expect(controller.getState()).toMatchObject({
+      status: "ready",
+      cart: { cart: { version: 4 } },
+    });
+  });
+
+  it("allocates no offline intent and allows reviewed input after a known rejection", async () => {
+    const state = fixture();
+    await state.controller.load();
+    state.controller.setOnline(false);
+    await state.controller.removeItem(id(2));
+    state.controller.setOnline(true);
+    await state.controller.retry();
+    expect(state.calls).toEqual([{ name: "load" }]);
+    await state.controller.load();
+    state.failRemove(new CartClientError("cart_selection_invalid"));
+    await state.controller.removeItem(id(2));
+    await state.controller.retry();
+    expect(state.calls.filter((call) => call.name === "remove")).toHaveLength(1);
+    state.failRemove(null);
+    await state.controller.removeItem(id(2));
+    expect(state.calls.filter((call) => call.name === "remove")).toHaveLength(2);
+  });
+});
+
+it("does not treat a later rejection as proof an earlier Cart command failed", async () => {
+  const state = fixture();
+  await state.controller.load();
+  state.failRemove(new CartClientError("network_unknown"));
+  await state.controller.removeItem(id(2));
+  state.failRemove(new CartClientError("cart_session_expired"));
+  await state.controller.retry();
+  await state.controller.removeItem(id(2));
+  expect(state.calls.filter((call) => call.name === "remove")).toHaveLength(2);
+  expect(state.controller.getState()).toMatchObject({
+    status: "command-failed",
+    canRetrySameOperation: true,
+  });
+  state.failRemove(null);
+  await state.controller.retry();
+  expect(state.calls.filter((call) => call.name === "remove")).toHaveLength(3);
+});

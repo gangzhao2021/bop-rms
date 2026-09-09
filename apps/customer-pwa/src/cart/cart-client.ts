@@ -5,18 +5,18 @@ import {
 } from "../session/customer-transaction-context.js";
 import { boundedFetch } from "../network/bounded-fetch.js";
 
-const errorCodes = new Set<CartErrorCode>([
-  "cart_request_invalid",
-  "cart_session_expired",
-  "cart_not_found",
-  "cart_version_conflict",
-  "cart_idempotency_conflict",
-  "cart_selection_invalid",
-  "cart_expired",
-  "cart_abandoned",
-  "cart_rate_limited",
-  "cart_service_unavailable",
-]);
+const errorStatuses: Partial<Record<CartErrorCode, number>> = {
+  cart_request_invalid: 400,
+  cart_session_expired: 401,
+  cart_not_found: 404,
+  cart_version_conflict: 409,
+  cart_idempotency_conflict: 409,
+  cart_selection_invalid: 422,
+  cart_expired: 409,
+  cart_abandoned: 409,
+  cart_rate_limited: 429,
+  cart_service_unavailable: 503,
+};
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const canonicalInstant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const currency = /^[A-Z]{3}$/u;
@@ -199,9 +199,11 @@ async function parse(response: Response): Promise<CartView | null> {
       ? (payload as { error?: { code?: unknown; currentVersion?: unknown; issueCodes?: unknown } })
           .error
       : undefined;
-  const code = errorCodes.has(String(error?.code) as CartErrorCode)
-    ? (error?.code as CartErrorCode)
-    : "cart_service_unavailable";
+  const code =
+    Object.hasOwn(errorStatuses, String(error?.code)) &&
+    errorStatuses[String(error?.code) as CartErrorCode] === response.status
+      ? (error?.code as CartErrorCode)
+      : "cart_service_unavailable";
   if (code === "cart_not_found" && response.status === 404) return null;
   if (code === "cart_session_expired") setCustomerCartCsrfCredential(null);
   const retryHeader = response.headers.get("retry-after");
@@ -232,7 +234,12 @@ async function request(url: string, init: RequestInit): Promise<CartView | null>
       }),
     );
   } catch (error) {
-    if (error instanceof CartClientError) throw error;
+    if (error instanceof CartClientError) {
+      // An unavailable or malformed write response may follow a committed command.
+      if (init.method !== "GET" && error.code === "cart_service_unavailable")
+        throw new CartClientError("network_unknown");
+      throw error;
+    }
     throw new CartClientError("network_unknown");
   }
 }

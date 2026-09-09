@@ -311,7 +311,12 @@ function CartContent({
               cart={cart}
               item={item}
               pending={pending}
-              readOnly={readOnly || terminal || cart.cart.warnings.includes("PROJECTION_STALE")}
+              readOnly={
+                readOnly ||
+                state.status === "command-failed" ||
+                terminal ||
+                cart.cart.warnings.includes("PROJECTION_STALE")
+              }
               controller={controller}
             />
           ))}

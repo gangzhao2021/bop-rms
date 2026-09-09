@@ -28,6 +28,7 @@ interface AddPlan {
   readonly addOperationReference: string;
   stage: "locate" | "create" | "add";
   cart: CartView | null;
+  outcomeUnknown: boolean;
 }
 
 export interface ConfigureController {
@@ -96,8 +97,7 @@ export function createConfigureController({
   };
   const execute = async (plan: AddPlan): Promise<void> => {
     if (!online) {
-      pending = plan;
-      publish({ status: "offline", canRetry: true });
+      publish({ status: "offline", canRetry: pending !== null });
       return;
     }
     pending = plan;
@@ -105,14 +105,27 @@ export function createConfigureController({
       if (plan.stage === "locate") {
         publish({ status: "pending", stage: "locate" });
         plan.cart = await client.loadCurrent();
+        if (plan.cart !== null)
+          plan.cart = Object.freeze({ ...plan.cart, cart: Object.freeze({ ...plan.cart.cart }) });
         plan.stage = plan.cart === null ? "create" : "add";
+        plan.outcomeUnknown = false;
+      }
+      if (!online) {
+        publish({ status: "offline", canRetry: true });
+        return;
       }
       if (plan.stage === "create") {
         publish({ status: "pending", stage: "create" });
         plan.cart = await client.createCart({
           operationReference: plan.createOperationReference,
         });
+        plan.cart = Object.freeze({ ...plan.cart, cart: Object.freeze({ ...plan.cart.cart }) });
         plan.stage = "add";
+        plan.outcomeUnknown = false;
+      }
+      if (!online) {
+        publish({ status: "offline", canRetry: true });
+        return;
       }
       if (plan.cart === null) throw new CartClientError("cart_service_unavailable");
       const priorVersion = plan.cart.cart.version;
@@ -127,22 +140,32 @@ export function createConfigureController({
         result.cart.version <= priorVersion ||
         !result.cart.items.some((item) => item.sellableReference === plan.sellableReference)
       )
-        throw new CartClientError("cart_service_unavailable");
+        throw new CartClientError("network_unknown");
       pending = null;
       publish({ status: "added", cart: result });
     } catch (error) {
-      if (error instanceof CartClientError && error.code === "cart_version_conflict") {
+      let parsed =
+        error instanceof CartClientError ? error : new CartClientError("network_unknown");
+      plan.outcomeUnknown ||= parsed.code === "network_unknown";
+      if (plan.outcomeUnknown) parsed = new CartClientError("network_unknown");
+      else pending = null;
+      if (parsed.code === "cart_version_conflict") {
         try {
           await client.loadCurrent();
         } catch {
           // A failed canonical refresh must not replace the original conflict semantics.
         }
       }
-      fail(error, true);
+      fail(parsed, true);
     }
   };
-  const begin = (createPlan: () => AddPlan): Promise<void> => {
+  const begin = (createPlan: () => AddPlan, retry = false): Promise<void> => {
     if (commandFlight !== null) return commandFlight;
+    if (pending !== null && !retry) return Promise.resolve();
+    if (!online) {
+      publish({ status: "offline", canRetry: pending !== null });
+      return Promise.resolve();
+    }
     const current = execute(createPlan());
     commandFlight = current;
     void current.then(
@@ -159,21 +182,32 @@ export function createConfigureController({
     getState: () => state,
     retry: () => {
       if (pending !== null && (state.status === "outcome-unknown" || state.status === "offline"))
-        return begin(() => pending as AddPlan);
+        return begin(() => pending as AddPlan, true);
       return Promise.resolve();
     },
     setOnline: (value: boolean) => {
       online = value;
       if (!value) publish({ status: "offline", canRetry: pending !== null });
+      else if (state.status === "offline" && commandFlight === null) {
+        if (pending !== null) fail(new CartClientError("network_unknown"), true);
+        else publish({ status: "idle" });
+      }
     },
     submit: (sellableReference: string, draft: CartItemDraft) =>
       begin(() => ({
         sellableReference,
-        draft,
+        draft: Object.freeze({
+          quantity: draft.quantity,
+          customerNote: draft.customerNote,
+          optionSelections: Object.freeze(
+            draft.optionSelections.map((option) => Object.freeze({ ...option })),
+          ),
+        }),
         createOperationReference: keyFactory(),
         addOperationReference: keyFactory(),
         stage: "locate",
         cart: null,
+        outcomeUnknown: false,
       })),
     subscribe: (listener: () => void) => {
       listeners.add(listener);

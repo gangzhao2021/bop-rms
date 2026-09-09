@@ -137,3 +137,8 @@ recovery, shared DineIn and overall browser journey acceptance remain unfinished
 [WP-2247](../work-packages/WP-2247.md) connects explicit binding write/policy/audit providers
 to the optional local runtime. Its owning WP records bounded production-composition evidence;
 no default configuration, full browser orchestration or real Store readiness is inferred.
+
+### BC-03 foreground retry hardening
+
+[WP-2248](../work-packages/WP-2248.md) hardens in-memory Cart/Configurator uncertain-outcome
+retry and disables superseding mutations. This does not supply reload recovery or live item writes.

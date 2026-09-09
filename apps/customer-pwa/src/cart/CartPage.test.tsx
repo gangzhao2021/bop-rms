@@ -147,3 +147,18 @@ describe("CUST-CART page contract", () => {
     expect(renderPage(state)).toContain(message);
   });
 });
+
+it("disables superseding Cart changes while retaining explicit retry", () => {
+  const html = renderPage({
+    status: "command-failed",
+    cart: cart(),
+    issueCodes: [],
+    retryAfterSeconds: null,
+    canRetrySameOperation: true,
+  });
+  expect(html).toContain("Outcome not confirmed");
+  expect(html).toContain("Retry the same operation");
+  expect(html).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
+  expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+  expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Remove<\/button>/u);
+});
