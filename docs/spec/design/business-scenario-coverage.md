@@ -229,3 +229,7 @@ Original-candidate recovery remains possible only within the owning context.
 WP-2267 connects Pickup product configuration to foreground Cart binding and creation. PWA430/430,
 browser48/48, PWA security111/111, full verification and forced uncached integration pass. All
 public menu and browser interception evidence remains explicitly synthetic.
+
+WP-2268 verifies current Cart views across item changes, historical Quote retries and a delayed
+Pricing candidate. Pricing248/248, Quote API9/9, Quote PostgreSQL5/5, full verification and forced
+uncached integration pass; this is local synthetic-source persistence acceptance.

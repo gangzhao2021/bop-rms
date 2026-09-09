@@ -1,3 +1,5 @@
+import { createCustomerCartItemComposition } from "../../../apps/api/src/customer-cart-item-composition.ts";
+import { CustomerCartHandler } from "../../../apps/api/src/customer-cart.ts";
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -9,12 +11,17 @@ import { createCustomerQuoteComposition } from "../../../apps/api/src/customer-q
 import { CustomerQuoteHandler } from "../../../apps/api/src/customer-quote.ts";
 import { createApp } from "../../../apps/api/src/app.ts";
 import {
+  GuestSessionService,
   createGuestSessionRecord,
   createGuestSessionCredentialProvider,
   createPostgresGuestSessionEntryStore,
 } from "../../bop/identity/src/index.ts";
 import {
   createPostgresPickupCartBindingStore,
+  createPostgresPickupCartBindingReader,
+  createPickupCartReadService,
+  createCustomerCartViewQuery,
+  createPostgresCartQuoteReader,
   createPostgresCartQueryStore,
   createPostgresCartItemCommandStore,
   createPostgresCartItemOperationStore,
@@ -31,17 +38,18 @@ import { input as quoteInput } from "../../rms/pricing/src/tests/price-quote.fix
 const { Client } = pg;
 const id = (n) => `01902262-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Audit", async () => {
-  await withIsolatedDatabase({ caseId: "wp2264_quote_http" }, async (context) => {
+  await withIsolatedDatabase({ caseId: "wp2268_quote_http" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
-    const roles = ["i", "o", "p"].map((kind) => `wp2264_${kind}_${context.runId}`);
-    roles.forEach((role) => assert.match(role, /^wp2264_[iop]_[a-f0-9]+$/u));
+    const roles = ["i", "o", "p"].map((kind) => `wp2268_${kind}_${context.runId}`);
+    roles.forEach((role) => assert.match(role, /^wp2268_[iop]_[a-f0-9]+$/u));
     const [identityRole, orderingRole, pricingRole] = roles;
     let active = 0;
     let sequence = 1000;
     let clock = 0;
     let loseAck = "pricing";
     let candidates = 0;
+    let holdCandidate = null;
     let server;
     const source = quoteInput();
     const at = (seconds = clock) =>
@@ -309,6 +317,100 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
         requestedAt: at(),
       });
       assert.equal(seeded.aggregate.aggregateVersion, 2);
+      // Synthetic Store/Catalog descriptions; current authority and reads use actual Identity/Ordering.
+      const authorization = new GuestSessionService({
+        credentials,
+        store: sessions,
+        binding: { validate: async () => "Current" },
+        admission: { consume: async () => null },
+        now: () => at(),
+      });
+      const cartView = createCustomerCartViewQuery({
+        reads: createPickupCartReadService({
+          sessions: authorization,
+          binding: createPostgresPickupCartBindingReader(runner(orderingRole), scope),
+          scope,
+          now: () => at(),
+        }),
+        stores: {
+          async getPublicStore(request) {
+            assert.equal(request.publicStoreReference, id(2));
+            assert.equal(request.purpose, "CustomerCart");
+            return {
+              status: "Available",
+              profile: {
+                profileReference: id(810),
+                profileVersion: 1,
+                releaseReference: id(811),
+                contentDigest: "sha256:" + "a".repeat(64),
+                defaultLocale: "en-CA",
+                selectedLocale: "en-CA",
+                currencyCode: "CAD",
+                timeZone: "America/Toronto",
+                brandDisplayName: "Synthetic Brand",
+                storeDisplayName: "Synthetic Store",
+                address: {
+                  countryCode: "CA",
+                  regionCode: "ON",
+                  locality: "Exampleville",
+                  postalCode: "A1A 1A1",
+                  addressLines: ["100 Example Avenue"],
+                },
+                businessPhone: null,
+                website: null,
+                logoAssetVersionReference: null,
+              },
+            };
+          },
+        },
+        catalog: {
+          async describeMany(requests) {
+            return requests.map((request) => {
+              assert.equal(request.sellableReference, line.sellableReference);
+              assert.deepEqual(request.optionReferences, []);
+              return {
+                status: "Found",
+                menuVersionReference: request.menuVersionReference,
+                productVersionReference: request.productVersionReference,
+                sellableReference: request.sellableReference,
+                displayName: "Synthetic item",
+                options: [],
+              };
+            });
+          },
+        },
+        quotes: createPostgresCartQuoteReader(runner(orderingRole), scope),
+      });
+      const itemPort = createCustomerCartItemComposition({
+        scope,
+        session: { credentials, binding: { validate: async () => "Current" } },
+        sessionTransactions: runner(identityRole),
+        cartTransactions: runner(orderingRole),
+        writeTransactions: runner(orderingRole),
+        references: { ...references, generate: () => id(sequence++) },
+        audit: (descriptor) =>
+          audit(
+            "ORDERING_CART_ITEM_" + descriptor.action.toUpperCase(),
+            "AUTHORIZED_CART_MUTATION",
+            "OrderingCart",
+            descriptor.cartReference,
+            descriptor.observedAt,
+          ),
+        catalog: {
+          validateSelection: async (request) => ({
+            ...request,
+            status: "Accepted",
+            menuVersionReference: line.menuVersionReference,
+            productVersionReference: line.productVersionReference,
+            catalogChannelCode: "SYNTHETIC_WEB",
+            catalogOrderTypeCode: "SYNTHETIC_PICKUP",
+            ruleEvidence: [],
+            validatedAt: request.observedAt,
+          }),
+        },
+        query: cartView,
+        now: () => at(),
+      });
       const baseline = await counts();
       const port = createCustomerQuoteComposition({
         expiryAudit: (record) =>
@@ -351,14 +453,23 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
                 amount: { ...entry.amount, amountMinor: 9007199254740993n },
               })),
             },
-            lines: source.lines.map((item) => ({
-              ...item,
-              quantity: 1,
-              priceContext: { ...item.priceContext, evaluatedAt: input.requestedAt },
-              taxContext: { ...item.taxContext, evaluatedAt: input.requestedAt },
-            })),
+            lines: input.lines.map((item) => {
+              const template = source.lines.find(
+                (candidate) => candidate.sellableReference === item.sellableReference,
+              );
+              assert.ok(template);
+              assert.deepEqual(item.optionSelections, []);
+              return {
+                ...template,
+                lineReference: item.lineReference,
+                quantity: item.quantity,
+                priceContext: { ...template.priceContext, evaluatedAt: input.requestedAt },
+                taxContext: { ...template.taxContext, evaluatedAt: input.requestedAt },
+              };
+            }),
           });
           quotes.push(quote);
+          if (holdCandidate !== null) await holdCandidate();
           return {
             quote,
             audit: audit(
@@ -373,6 +484,11 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
       });
       server = createServer(
         createApp({
+          customerCart: new CustomerCartHandler({
+            port: itemPort,
+            allowedOrigin: "https://customer.example.test",
+            now: () => at(),
+          }),
           customerQuote: new CustomerQuoteHandler({
             port,
             allowedOrigin: "https://customer.example.test",
@@ -394,6 +510,7 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
           headers: {
             origin: "https://customer.example.test",
             "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "cors",
             "content-type": "application/json",
             cookie: `__Host-bop-guest=${sessionCredential}`,
             "x-csrf-token": csrf,
@@ -720,6 +837,128 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
       assert.equal((await recoveredExpiry.json()).resolution.operationReference, id(35));
       assert.equal((await counts()).audits, beforeHttpExpiry.audits + 1);
       assert.equal(await quoteStore.resolveOperation(id(35)), null);
+      // WP-2268: same authenticated Cart, actual item HTTP writes and version-specific Quote display.
+      const currentCart = async () => {
+        const response = await globalThis.fetch(
+          `http://127.0.0.1:${address.port}/bff/customer/cart`,
+          {
+            headers: {
+              cookie: `__Host-bop-guest=${sessionCredential}`,
+              "sec-fetch-site": "same-origin",
+              "sec-fetch-mode": "cors",
+            },
+          },
+        );
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get("cache-control"), "no-store");
+        return (await response.json()).cart;
+      };
+      const updateItem = ({
+        quantity = 2,
+        version = 2,
+        operation = id(51),
+        csrf = csrfCredential,
+      } = {}) =>
+        globalThis.fetch(
+          `http://127.0.0.1:${address.port}/api/v1/carts/${source.cartReference}/items/${line.lineReference}`,
+          {
+            method: "PATCH",
+            headers: {
+              origin: "https://customer.example.test",
+              "sec-fetch-site": "same-origin",
+              "sec-fetch-mode": "cors",
+              "content-type": "application/json",
+              cookie: `__Host-bop-guest=${sessionCredential}`,
+              "x-csrf-token": csrf,
+              "idempotency-key": operation,
+              "if-match": `"${version}"`,
+            },
+            body: JSON.stringify({ quantity, optionSelections: [], customerNote: null }),
+          },
+        );
+      clock++;
+      const freshResponse = await send({ operation: id(50) });
+      assert.equal(freshResponse.status, 201);
+      const fresh = await freshResponse.json();
+      assert.equal((await currentCart()).quote.quoteReference, fresh.quote.quoteReference);
+      clock++;
+      const changedCart = await updateItem();
+      assert.equal(changedCart.status, 200);
+      const changedBody = await changedCart.json();
+      assert.equal(changedBody.cart.version, 3);
+      assert.equal(changedBody.cart.quote, null);
+      assert.equal(changedBody.cart.items[0].quantity, 2);
+      const afterChange = await counts();
+      const oldReplay = await send({ operation: id(50) });
+      assert.equal(oldReplay.status, 201);
+      assert.deepEqual(await oldReplay.json(), fresh);
+      assert.equal((await currentCart()).quote, null);
+      assert.deepEqual(await counts(), afterChange);
+      const sameUpdate = await updateItem();
+      assert.equal(sameUpdate.status, 200);
+      await sameUpdate.text();
+      assert.deepEqual(await counts(), afterChange);
+      const newResponse = await send({ operation: id(52), version: 3 });
+      assert.equal(newResponse.status, 201);
+      const newQuote = await newResponse.json();
+      assert.equal(newQuote.quote.cartVersion, 3);
+      assert.equal(newQuote.quote.subtotal.amountMinor, (9007199254740993n * 2n).toString());
+      const currentWithQuote = await currentCart();
+      assert.equal(currentWithQuote.quote.quoteReference, newQuote.quote.quoteReference);
+      assert.equal(currentWithQuote.quote.cartVersion, 3);
+      assert.equal(currentWithQuote.items[0].quantity, 2);
+      const beforeRace = await counts();
+      let candidateReady;
+      let releaseCandidate;
+      const ready = new Promise((resolve) => {
+        candidateReady = resolve;
+      });
+      const released = new Promise((resolve) => {
+        releaseCandidate = resolve;
+      });
+      holdCandidate = () => {
+        holdCandidate = null;
+        candidateReady();
+        return released;
+      };
+      clock++;
+      const delayed = send({ operation: id(54), version: 3 });
+      await Promise.race([
+        ready,
+        delayed.then((response) => {
+          throw new Error(`candidate barrier not reached (HTTP ${response.status})`);
+        }),
+      ]);
+      try {
+        const intervening = await updateItem({ quantity: 3, version: 3, operation: id(53) });
+        assert.equal(intervening.status, 200);
+        const body = await intervening.json();
+        assert.equal(body.cart.version, 4);
+        assert.equal(body.cart.quote, null);
+      } finally {
+        releaseCandidate();
+      }
+      const staleCandidate = await delayed;
+      assert.equal(staleCandidate.status, 409);
+      await staleCandidate.text();
+      assert.equal(await quoteStore.resolveOperation(id(54)), null);
+      const afterRace = await counts();
+      assert.equal(afterRace.quotes, beforeRace.quotes + 1);
+      assert.equal(afterRace.requests, beforeRace.requests + 1);
+      assert.equal(afterRace.attachments, beforeRace.attachments);
+      assert.equal(afterRace.audits, beforeRace.audits + 2);
+      assert.equal((await currentCart()).quote, null);
+      const staleReplay = await send({ operation: id(54), version: 3 });
+      assert.equal(staleReplay.status, 409);
+      await staleReplay.text();
+      assert.deepEqual(await counts(), afterRace);
+      clock += 301;
+      const expiredCandidate = await send({ operation: id(54), version: 3 });
+      assert.equal(expiredCandidate.status, 410);
+      assert.equal((await expiredCandidate.json()).resolution.cartVersion, 3);
+      assert.equal(await quoteStore.resolveOperation(id(54)), null);
+      assert.equal((await currentCart()).quote, null);
+      assert.equal((await counts()).audits, afterRace.audits + 1);
       const finalCounts = await counts();
       const finalCandidates = candidates;
       await sessions.revoke({
@@ -730,6 +969,9 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
         operationReference: id(40),
         operationIntentHash: "f".repeat(64),
       });
+      const revokedItem = await updateItem({ quantity: 3, version: 3, operation: id(53) });
+      assert.equal(revokedItem.status, 401);
+      await revokedItem.text();
       const revokedExpiry = await send({ operation: id(35) });
       assert.equal(revokedExpiry.status, 404);
       await revokedExpiry.text();
