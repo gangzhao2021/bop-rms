@@ -54,7 +54,7 @@ const databaseAccessManifestInput = {
       table: "dining_participant",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@rms/dining" },
-      allowedReadPatterns: ["owner-repository"],
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
     },

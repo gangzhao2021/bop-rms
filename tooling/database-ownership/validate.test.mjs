@@ -773,6 +773,43 @@ describe("Database Schema Ownership Architecture Test", () => {
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
 
+  it("admits only the WP-2280 owner participation reader without driver access", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "dining", "rms_dining", [
+      "dining_table",
+      "dining_session",
+      "dining_participant",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/dining-participation-store.ts",
+    );
+    await writeFile(asset, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each(["owner", "schema", "dining_table", "dining_session", "dining_participant"])(
+    "rejects WP-2280 changed %s admission",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other" : "dining",
+        changed === "schema" ? "rms_other" : "rms_dining",
+        ["dining_table", "dining_session", "dining_participant"].filter(
+          (table) => table !== changed,
+        ),
+      );
+      await writeFile(
+        join(context.moduleRoot, "src/infrastructure/persistence/dining-participation-store.ts"),
+        "export const synthetic = true;\n",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
   it("accepts only the WP-2278 Guest Join adapter without broadening driver admission", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "dining", "rms_dining", [

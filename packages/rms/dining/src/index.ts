@@ -20,3 +20,5 @@ export * from "./infrastructure/persistence/dining-session-start-store.js";
 export * from "./infrastructure/persistence/dining-join-regeneration-store.js";
 
 export * from "./infrastructure/persistence/dining-session-join-store.js";
+
+export * from "./infrastructure/persistence/dining-participation-store.js";

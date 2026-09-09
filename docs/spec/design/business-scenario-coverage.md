@@ -276,3 +276,7 @@ Identity rotation, shared Cart and live activation remain separate.
 WP-2279 binds admission consumption and evidence to the exact current Guest Session.
 Identity200/200, Guest22/22, joint acceptance, full verification and forced integration pass.
 Durable consumption and Identity flow activation remain separate.
+
+WP-2280 supplies coherent current Session/Participant/Table evidence for the Cart Query.
+Dining442/442, Dining PostgreSQL5/5, full verification and forced uncached integration pass.
+Caller authorization and Closing/write coordination remain separate.
