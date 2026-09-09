@@ -1,52 +1,14 @@
+import { captureSessionData, sessionDependency } from "./dining-session-snapshot.js";
 import { parseDiningJoinCapability } from "@bop/public-capability";
 import {
-  DiningSessionError,
   parseDiningHash,
   parseDiningReference,
   parseDiningSession,
 } from "../contracts/dining-session.js";
 import type { DiningRegenerationRecord, DiningStartRecord } from "./ports/dining-session-ports.js";
 
-export function staffDependency(): never {
-  throw new DiningSessionError("DINING_SESSION_DEPENDENCY_UNAVAILABLE");
-}
-
-/** Capture only bounded plain data without invoking dependency accessors. */
-export function captureStaffData<T>(value: T): T {
-  let count = 0;
-  const copy = (input: unknown, depth: number): unknown => {
-    if (++count > 20_000 || depth > 12) return staffDependency();
-    if (input === null || typeof input === "boolean") return input;
-    if (typeof input === "string" && input.length <= 65_536) return input;
-    if (typeof input === "number" && Number.isFinite(input)) return input;
-    if (typeof input !== "object" || input === null) return staffDependency();
-    const array = Array.isArray(input);
-    if (Object.getPrototypeOf(input) !== (array ? Array.prototype : Object.prototype))
-      return staffDependency();
-    const keys = Reflect.ownKeys(input);
-    if (keys.length > 10_000) return staffDependency();
-    const length = array ? Object.getOwnPropertyDescriptor(input, "length")?.value : 0;
-    if (array && (!Number.isSafeInteger(length) || length < 0 || keys.length !== length + 1))
-      return staffDependency();
-    const entries = (array ? Array.from({ length }, (_, index) => String(index)) : keys).map(
-      (key) => {
-        const field = Object.getOwnPropertyDescriptor(input, key);
-        if (typeof key !== "string" || !field?.enumerable || !("value" in field))
-          return staffDependency();
-        return [key, copy(field.value, depth + 1)] as const;
-      },
-    );
-    return Object.freeze(array ? entries.map((entry) => entry[1]) : Object.fromEntries(entries));
-  };
-  try {
-    return copy(value, 0) as T;
-  } catch {
-    return staffDependency();
-  }
-}
-
 function record(value: unknown, keys: readonly string[]) {
-  const captured = captureStaffData(value);
+  const captured = captureSessionData(value);
   if (
     captured === null ||
     typeof captured !== "object" ||
@@ -54,7 +16,7 @@ function record(value: unknown, keys: readonly string[]) {
     Object.keys(captured).length !== keys.length ||
     keys.some((key) => !Object.hasOwn(captured, key))
   )
-    return staffDependency();
+    return sessionDependency();
   return captured as Record<string, unknown>;
 }
 
@@ -104,10 +66,10 @@ export function parseStaffStartRecord(
       capability.generation !== 1 ||
       String(capability.issuedAt) !== session.startedAt
     )
-      return staffDependency();
+      return sessionDependency();
     return Object.freeze({ session, capability, operationReference, operationIntentHash });
   } catch {
-    return staffDependency();
+    return sessionDependency();
   }
 }
 
@@ -131,9 +93,9 @@ export function parseStaffRegenerationRecord(
       capability.generation < 2 ||
       capability.issuedAt > scope.observedAt
     )
-      return staffDependency();
+      return sessionDependency();
     return Object.freeze({ capability, operationReference, operationIntentHash });
   } catch {
-    return staffDependency();
+    return sessionDependency();
   }
 }
