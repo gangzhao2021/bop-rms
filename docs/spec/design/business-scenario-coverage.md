@@ -206,3 +206,8 @@ producer; default Quote creation remains unavailable. Real Store facts and full 
 
 [WP-2262](../work-packages/WP-2262.md) exercises the actual multi-owner Quote HTTP composition in
 isolated PostgreSQL, including lost commit acknowledgements. Commercial and policy inputs remain synthetic.
+
+WP-2263 implements an Ordering-owned expiry fence for the WP-2262 partial-commit boundary.
+Expiry and late attachment serialize with atomic Audit; Ordering455/455, Quote PostgreSQL5/5,
+Cart PostgreSQL6/6, full verification and forced uncached integration pass.
+Current authorized reconciliation and an explicit browser terminal receipt remain future work.

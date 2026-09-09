@@ -247,6 +247,9 @@ export function createPostgresCartQuoteStore(
         )
           fail();
         return await run(async (tx) => {
+          await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+            `ordering.quote.operation:${brand}:${store}:${next.operationReference}`,
+          ]);
           if (
             rows(
               await tx.query(
@@ -267,6 +270,31 @@ export function createPostgresCartQuoteStore(
             )
               throw new CartError("CART_IDEMPOTENCY_CONFLICT");
             return prior;
+          }
+          const expired = rows(
+            await tx.query(
+              "SELECT cart_id,cart_version,guest_session_id,quote_id,quote_input_digest FROM rms_ordering.cart_quote_expiry_record WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+              [brand, store, next.operationReference],
+            ),
+          );
+          if (expired.length > 1) fail();
+          if (expired.length === 1) {
+            const fence = closed(expired[0], [
+              "cart_id",
+              "cart_version",
+              "guest_session_id",
+              "quote_id",
+              "quote_input_digest",
+            ]);
+            if (
+              fence.cart_id !== next.cartReference ||
+              fence.cart_version !== next.cartVersion ||
+              fence.guest_session_id !== next.guestSessionReference ||
+              fence.quote_id !== next.quoteReference ||
+              fence.quote_input_digest !== next.quoteInputDigest
+            )
+              throw new CartError("CART_IDEMPOTENCY_CONFLICT");
+            throw new CartError("CART_QUOTE_EXPIRED");
           }
           const cart = await createPostgresCartQueryStore(
             {
@@ -366,7 +394,9 @@ export function createPostgresCartQuoteStore(
       } catch (error) {
         if (
           error instanceof CartError &&
-          ["CART_VERSION_CONFLICT", "CART_IDEMPOTENCY_CONFLICT"].includes(error.code)
+          ["CART_VERSION_CONFLICT", "CART_IDEMPOTENCY_CONFLICT", "CART_QUOTE_EXPIRED"].includes(
+            error.code,
+          )
         )
           throw error;
         return fail();

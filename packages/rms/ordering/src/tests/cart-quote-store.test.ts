@@ -181,3 +181,67 @@ describe.each(["full", "read-only"])("latest Cart Quote reader %s", (mode) => {
       });
   });
 });
+
+it.each([false, true])(
+  "rejects a committed expiry fence before any Cart write (changed intent %s)",
+  async (changed) => {
+    const raw = attachment();
+    const next = {
+      ...raw,
+      ...Object.fromEntries(
+        (["subtotal", "discount", "tax", "fee", "total"] as const).map((field) => [
+          field,
+          {
+            amountMinor: BigInt(raw[field].amountMinor as string),
+            currencyCode: "CAD",
+          },
+        ]),
+      ),
+    };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM rms_ordering.cart_quote_expiry_record"))
+        return {
+          rows: [
+            {
+              cart_id: id(4),
+              cart_version: 1,
+              guest_session_id: id(5),
+              quote_id: id(changed ? 99 : 6),
+              quote_input_digest: raw.quoteInputDigest,
+            },
+          ],
+        };
+      if (sql.includes("FOR UPDATE")) return { rows: [{ cart_id: id(4) }] };
+      return { rows: [] };
+    });
+    const store = createPostgresCartQuoteStore(
+      { run: async (action) => action({ query }) },
+      scope,
+      { hashIntent: () => raw.operationIntentHash, equals: (a, b) => a === b },
+    );
+    await expect(
+      store.attach({
+        attachment: next as never,
+        expectedCartVersion: 1,
+        audit: {
+          auditId: id(12),
+          brandId: id(2),
+          storeId: id(3),
+          actor: { type: "System" },
+          actionCode: "ORDERING_CART_ATTACH_QUOTE",
+          reasonCode: "AUTHORIZED_CART_QUOTE",
+          targetType: "OrderingCart",
+          targetId: id(4),
+          occurredAt: raw.attachedAt,
+          correlationId: id(13),
+          sourceChannel: "CUSTOMER_PWA",
+          dataClassification: "Restricted",
+          retentionPolicyCode: "AUDIT_DEFAULT",
+          retentionPolicyVersion: 1,
+        },
+      }),
+    ).rejects.toMatchObject({ code: changed ? "CART_IDEMPOTENCY_CONFLICT" : "CART_QUOTE_EXPIRED" });
+    expect(query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
+    expect(query.mock.calls[1]?.[0]).toContain("pg_advisory_xact_lock");
+  },
+);

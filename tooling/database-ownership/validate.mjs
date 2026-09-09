@@ -224,10 +224,17 @@ async function scanUnsupported(root, module, diagnostics) {
         const acceptedCartQuoteAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
-          ["cart", "cart_line", "cart_quote_attachment", "cart_quote_attachment_line"].every(
-            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
-          ) &&
-          moduleRelative === "src/infrastructure/persistence/cart-quote-store.ts";
+          [
+            "cart",
+            "cart_line",
+            "cart_quote_attachment",
+            "cart_quote_attachment_line",
+            "cart_quote_expiry_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          [
+            "src/infrastructure/persistence/cart-quote-store.ts",
+            "src/infrastructure/persistence/cart-quote-expiry-store.ts",
+          ].includes(moduleRelative);
         const acceptedCartLifecycleAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&

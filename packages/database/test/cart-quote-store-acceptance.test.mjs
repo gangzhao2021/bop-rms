@@ -63,7 +63,9 @@ it("atomically attaches Quotes with exact bigint roundtrip, concurrent replay an
         `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
       );
       await admin.query(`GRANT SELECT,UPDATE ON rms_ordering.cart TO ${role}`);
-      await admin.query(`GRANT SELECT ON rms_ordering.cart_line TO ${role}`);
+      await admin.query(
+        `GRANT SELECT ON rms_ordering.cart_line,rms_ordering.cart_quote_expiry_record TO ${role}`,
+      );
       await admin.query(
         `GRANT SELECT,INSERT ON rms_ordering.cart_quote_attachment,rms_ordering.cart_quote_attachment_line,platform_audit.audit_record TO ${role}`,
       );

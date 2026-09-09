@@ -6,13 +6,17 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2262 - Quote HTTP PostgreSQL Acceptance`
+- Current discussion node: `WP-2263 - Cart Quote Expiry Fence`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
 Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 
 ## Latest Work Package Status
+
+- [WP-2263](./work-packages/WP-2263.md) adds the immutable Ordering expiry fence and atomic
+  Audit, excluding late attachment. Ordering455/455, Quote PostgreSQL5/5, Cart PostgreSQL6/6,
+  full verification and forced uncached integration pass. Authorized browser recovery remains separate.
 
 - [WP-2262](./work-packages/WP-2262.md) verifies actual Quote HTTP persistence and lost-commit
   acknowledgement recovery across Identity, Ordering, Pricing and Audit. Quote PostgreSQL5/5,

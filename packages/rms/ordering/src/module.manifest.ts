@@ -60,6 +60,7 @@ const moduleManifestInput =
         "cart_line",
         "cart_operation_record",
         "cart_quote_attachment",
+        "cart_quote_expiry_record",
         "cart_quote_attachment_line",
         "cart_lifecycle_operation_record",
         "order_number_counter",

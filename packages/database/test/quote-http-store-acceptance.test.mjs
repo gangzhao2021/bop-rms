@@ -19,8 +19,14 @@ import {
   createPostgresCartItemCommandStore,
   createPostgresCartItemOperationStore,
   createCartItemCommandService,
+  createPostgresCartQuoteStore,
+  createPostgresCartQuoteExpiryStore,
+  parseCartQuoteExpiryRecord,
 } from "../../rms/ordering/src/index.ts";
-import { createPriceQuote } from "../../rms/pricing/src/index.ts";
+import {
+  createPriceQuote,
+  createPostgresPriceQuoteRequestStore,
+} from "../../rms/pricing/src/index.ts";
 import { input as quoteInput } from "../../rms/pricing/src/tests/price-quote.fixture.ts";
 const { Client } = pg;
 const id = (n) => `01902262-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -64,6 +70,8 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
                 if (
                   (kind === "pricing" &&
                     sql.startsWith("INSERT INTO rms_pricing.price_quote_request")) ||
+                  (kind === "expiry" &&
+                    sql.startsWith("INSERT INTO rms_ordering.cart_quote_expiry_record")) ||
                   (kind === "attachment" &&
                     sql.startsWith("INSERT INTO rms_ordering.cart_quote_attachment"))
                 )
@@ -153,7 +161,7 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
         `GRANT SELECT,INSERT,UPDATE,DELETE ON rms_ordering.cart_line TO ${orderingRole}`,
       );
       await admin.query(
-        `GRANT SELECT,INSERT ON rms_ordering.cart_operation_record,rms_ordering.cart_binding_record,rms_ordering.cart_quote_attachment,rms_ordering.cart_quote_attachment_line TO ${orderingRole}`,
+        `GRANT SELECT,INSERT ON rms_ordering.cart_operation_record,rms_ordering.cart_binding_record,rms_ordering.cart_quote_attachment,rms_ordering.cart_quote_attachment_line,rms_ordering.cart_quote_expiry_record TO ${orderingRole}`,
       );
       await admin.query(`GRANT USAGE ON SCHEMA rms_pricing TO ${pricingRole}`);
       await admin.query(
@@ -464,6 +472,209 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
         scope.storeReference,
       ])
         assert.equal(JSON.stringify(original).includes(privateValue), false);
+      // WP-2263: reconcile only original public Pricing evidence; no private cross-owner reads.
+      const quoteStore = createPostgresCartQuoteStore(runner(orderingRole), scope, references);
+      const expiryStore = createPostgresCartQuoteExpiryStore(runner(orderingRole, "expiry"), scope);
+      const requestStore = createPostgresPriceQuoteRequestStore(runner(pricingRole), scope, {
+        ...references,
+        generateReference: () => id(sequence++),
+      });
+      const template = await quoteStore.resolveOperation(id(30));
+      const expiryAudit = (record) =>
+        audit(
+          "ORDERING_CART_QUOTE_EXPIRE",
+          "QUOTE_VALIDITY_ENDED",
+          "OrderingCart",
+          record.cartReference,
+          record.expiredAt,
+        );
+      const attachAudit = (value) =>
+        audit(
+          "ORDERING_CART_ATTACH_QUOTE",
+          "AUTHORIZED_CART_QUOTE",
+          "OrderingCart",
+          value.cartReference,
+          value.attachedAt,
+        );
+      async function pending(operation) {
+        loseAck = "pricing";
+        const response = await send({ operation });
+        assert.equal(response.status, 503);
+        await response.text();
+        const history = await requestStore.resolve({
+          operationReference: operation,
+          guestSessionReference: id(1),
+          cartReference: source.cartReference,
+          cartVersion: 2,
+          observedAt: at(),
+        });
+        assert.ok(history);
+        const attachedAt = history.record.createdAt;
+        const late = {
+          ...template,
+          operationReference: operation,
+          quoteReference: history.quote.quoteReference,
+          quoteInputDigest: history.quote.inputDigest,
+          quoteCreatedAt: history.quote.createdAt,
+          quoteExpiresAt: history.quote.expiresAt,
+          attachedAt,
+          idempotencyExpiresAt: new Date(Date.parse(attachedAt) + 86400000).toISOString(),
+          operationIntentHash: references.hashIntent(
+            "AttachQuote:" +
+              JSON.stringify({
+                cartReference: source.cartReference,
+                expectedCartVersion: 2,
+                operationReference: operation,
+                requestedAt: attachedAt,
+              }),
+          ),
+        };
+        clock += 301;
+        const record = parseCartQuoteExpiryRecord({
+          ...scope,
+          resolutionVersion: 1,
+          operationReference: operation,
+          guestSessionReference: id(1),
+          cartReference: source.cartReference,
+          cartVersion: 2,
+          quoteReference: history.quote.quoteReference,
+          quoteInputDigest: history.quote.inputDigest,
+          requestIntentDigest: history.record.intentDigest,
+          quoteCreatedAt: history.quote.createdAt,
+          quoteExpiresAt: history.quote.expiresAt,
+          requestCreatedAt: history.record.createdAt,
+          requestExpiresAt: history.record.idempotencyExpiresAt,
+          expiredAt: at(),
+        });
+        return { record, late };
+      }
+      const firstPending = await pending(id(32));
+      const beforeExpiry = await counts();
+      loseAck = "expiry";
+      await assert.rejects(
+        expiryStore.expire({
+          record: firstPending.record,
+          audit: expiryAudit(firstPending.record),
+        }),
+        { code: "CART_DEPENDENCY_UNAVAILABLE" },
+      );
+      assert.deepEqual(await expiryStore.resolveOperation(id(32)), firstPending.record);
+      const expired = await expiryStore.expire({
+        record: firstPending.record,
+        audit: expiryAudit(firstPending.record),
+      });
+      assert.equal(expired.status, "Expired");
+      assert.equal((await counts()).audits, beforeExpiry.audits + 1);
+      const replayRecord = parseCartQuoteExpiryRecord({
+        ...firstPending.record,
+        expiredAt: at(clock + 1),
+      });
+      assert.deepEqual(
+        await expiryStore.expire({ record: replayRecord, audit: expiryAudit(replayRecord) }),
+        expired,
+      );
+      await assert.rejects(
+        quoteStore.attach({
+          attachment: firstPending.late,
+          expectedCartVersion: 2,
+          audit: attachAudit(firstPending.late),
+        }),
+        { code: "CART_QUOTE_EXPIRED" },
+      );
+      assert.equal(await quoteStore.resolveOperation(id(32)), null);
+      assert.equal((await counts()).audits, beforeExpiry.audits + 1);
+      const changed = parseCartQuoteExpiryRecord({
+        ...firstPending.record,
+        requestIntentDigest: references.hashIntent("different"),
+      });
+      await assert.rejects(expiryStore.expire({ record: changed, audit: expiryAudit(changed) }), {
+        code: "CART_IDEMPOTENCY_CONFLICT",
+      });
+      const oldRequest = await requestStore.resolve({
+        operationReference: id(30),
+        guestSessionReference: id(1),
+        cartReference: source.cartReference,
+        cartVersion: 2,
+        observedAt: at(),
+      });
+      const alreadyRecord = parseCartQuoteExpiryRecord({
+        ...firstPending.record,
+        operationReference: id(30),
+        quoteReference: template.quoteReference,
+        quoteInputDigest: template.quoteInputDigest,
+        quoteCreatedAt: template.quoteCreatedAt,
+        quoteExpiresAt: template.quoteExpiresAt,
+        requestCreatedAt: oldRequest.record.createdAt,
+        requestExpiresAt: oldRequest.record.idempotencyExpiresAt,
+        requestIntentDigest: oldRequest.record.intentDigest,
+      });
+      assert.deepEqual(
+        await expiryStore.expire({ record: alreadyRecord, audit: expiryAudit(alreadyRecord) }),
+        { status: "AlreadyAttached", attachment: template },
+      );
+      assert.equal(await expiryStore.resolveOperation(id(30)), null);
+      const concurrent = await pending(id(33));
+      const beforeConcurrent = await counts();
+      const raced = await Promise.allSettled([
+        quoteStore.attach({
+          attachment: concurrent.late,
+          expectedCartVersion: 2,
+          audit: attachAudit(concurrent.late),
+        }),
+        expiryStore.expire({ record: concurrent.record, audit: expiryAudit(concurrent.record) }),
+      ]);
+      assert.equal(raced[1].status, "fulfilled");
+      if (raced[1].value.status === "Expired") {
+        assert.equal(raced[0].status, "rejected");
+        assert.equal(raced[0].reason.code, "CART_QUOTE_EXPIRED");
+      } else assert.equal(raced[0].status, "fulfilled");
+      assert.equal(
+        Number((await quoteStore.resolveOperation(id(33))) !== null) +
+          Number((await expiryStore.resolveOperation(id(33))) !== null),
+        1,
+      );
+      assert.equal((await counts()).audits, beforeConcurrent.audits + 1);
+      const rollback = await pending(id(34));
+      const beforeRollback = await counts();
+      const auditHeads = (
+        await admin.query(
+          "SELECT * FROM platform_audit.audit_chain_head ORDER BY brand_id,store_id",
+        )
+      ).rows;
+      await admin.query(`REVOKE INSERT ON platform_audit.audit_record FROM ${orderingRole}`);
+      await assert.rejects(
+        expiryStore.expire({ record: rollback.record, audit: expiryAudit(rollback.record) }),
+        { code: "CART_DEPENDENCY_UNAVAILABLE" },
+      );
+      assert.equal(await expiryStore.resolveOperation(id(34)), null);
+      assert.deepEqual(await counts(), beforeRollback);
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT * FROM platform_audit.audit_chain_head ORDER BY brand_id,store_id",
+          )
+        ).rows,
+        auditHeads,
+      );
+      await admin.query(`GRANT INSERT ON platform_audit.audit_record TO ${orderingRole}`);
+      await quoteStore.attach({
+        attachment: rollback.late,
+        expectedCartVersion: 2,
+        audit: attachAudit(rollback.late),
+      });
+      assert.equal(await expiryStore.resolveOperation(id(34)), null);
+      await admin.query(
+        "UPDATE rms_ordering.cart_quote_expiry_record SET expired_at=expired_at+interval '1 second'",
+      );
+      await admin.query("DELETE FROM rms_ordering.cart_quote_expiry_record");
+      assert.deepEqual(await expiryStore.resolveOperation(id(32)), expired.record);
+      const foreignExpiry = createPostgresCartQuoteExpiryStore(runner(orderingRole), {
+        ...scope,
+        storeReference: id(99),
+      });
+      assert.equal(await foreignExpiry.resolveOperation(id(32)), null);
+      const finalCounts = await counts();
+      const finalCandidates = candidates;
       await sessions.revoke({
         selectorHash: credentials.hashCredential("Session", sessionCredential),
         expectedVersion: 1,
@@ -475,8 +686,8 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
       const revoked = await send();
       assert.equal(revoked.status, 404);
       await revoked.text();
-      assert.deepEqual(await counts(), twice);
-      assert.equal(candidates, 2);
+      assert.deepEqual(await counts(), finalCounts);
+      assert.equal(candidates, finalCandidates);
       assert.equal(active, 0);
     } finally {
       if (server !== undefined) {

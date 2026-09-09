@@ -94,3 +94,12 @@ export {
 
 export * from "./application/pickup-cart-read-service.js";
 export * from "./application/customer-cart-view-query.js";
+
+export {
+  parseCartQuoteExpiryRecord,
+  type CartQuoteExpiryRecord,
+} from "./domain/cart-quote-expiry.js";
+export {
+  createPostgresCartQuoteExpiryStore,
+  type CartQuoteExpiryResult,
+} from "./infrastructure/persistence/cart-quote-expiry-store.js";

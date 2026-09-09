@@ -1003,23 +1003,27 @@ describe("Database Schema Ownership Architecture Test", () => {
     },
   );
 
-  it("accepts only the WP-2239 owner asset without a driver", async () => {
-    const root = await fixture();
-    const context = await writeModule(root, "RMS", "ordering", "rms_ordering", [
-      "cart",
-      "cart_line",
-      "cart_quote_attachment",
-      "cart_quote_attachment_line",
-    ]);
-    const asset = join(context.moduleRoot, "src/infrastructure/persistence/cart-quote-store.ts");
-    await writeFile(asset, "export const synthetic = true;\n");
-    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
-    await writeFile(asset, 'import pg from "pg";\nexport { pg };\n');
-    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
-    await writeFile(asset, "export const synthetic = true;\n");
-    await writeFile(join(dirname(asset), "other-writer.ts"), "export const synthetic = true;\n");
-    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
-  });
+  it.each(["cart-quote-store.ts", "cart-quote-expiry-store.ts"])(
+    "accepts only the WP-2263 owner asset %s without a driver",
+    async (filename) => {
+      const root = await fixture();
+      const context = await writeModule(root, "RMS", "ordering", "rms_ordering", [
+        "cart",
+        "cart_line",
+        "cart_quote_attachment",
+        "cart_quote_attachment_line",
+        "cart_quote_expiry_record",
+      ]);
+      const asset = join(context.moduleRoot, "src/infrastructure/persistence", filename);
+      await writeFile(asset, "export const synthetic = true;\n");
+      expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      await writeFile(asset, 'import pg from "pg";\nexport { pg };\n');
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+      await writeFile(asset, "export const synthetic = true;\n");
+      await writeFile(join(dirname(asset), "other-writer.ts"), "export const synthetic = true;\n");
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
   it.each([
     "owner",
     "schema",
@@ -1027,6 +1031,7 @@ describe("Database Schema Ownership Architecture Test", () => {
     "cart_line",
     "cart_quote_attachment",
     "cart_quote_attachment_line",
+    "cart_quote_expiry_record",
   ])("keeps WP-2239 restricted when %s changes", async (changed) => {
     const root = await fixture();
     const context = await writeModule(
@@ -1034,15 +1039,21 @@ describe("Database Schema Ownership Architecture Test", () => {
       "RMS",
       changed === "owner" ? "other-owner" : "ordering",
       changed === "schema" ? "rms_other" : "rms_ordering",
-      ["cart", "cart_line", "cart_quote_attachment", "cart_quote_attachment_line"].filter(
-        (table) => table !== changed,
-      ),
+      [
+        "cart",
+        "cart_line",
+        "cart_quote_attachment",
+        "cart_quote_attachment_line",
+        "cart_quote_expiry_record",
+      ].filter((table) => table !== changed),
     );
-    await writeFile(
-      join(context.moduleRoot, "src/infrastructure/persistence/cart-quote-store.ts"),
-      "export const synthetic = true;\n",
-    );
-    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    for (const file of ["cart-quote-store.ts", "cart-quote-expiry-store.ts"]) {
+      await writeFile(
+        join(context.moduleRoot, "src/infrastructure/persistence", file),
+        "export const synthetic = true;\n",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    }
   });
 
   it("sorts diagnostics and repeats identical output", async () => {

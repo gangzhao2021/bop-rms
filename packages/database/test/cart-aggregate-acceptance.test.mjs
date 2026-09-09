@@ -34,6 +34,7 @@ async function prove(context) {
       { table_name: "cart_operation_record" },
       { table_name: "cart_quote_attachment" },
       { table_name: "cart_quote_attachment_line" },
+      { table_name: "cart_quote_expiry_record" },
       { table_name: "order_amendment" },
       { table_name: "order_amendment_change" },
       { table_name: "order_amendment_operation_record" },
