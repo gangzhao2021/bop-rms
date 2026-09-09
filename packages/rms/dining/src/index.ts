@@ -14,3 +14,4 @@ export * from "./application/dining-table-service.js";
 export * from "./application/ports/dining-table-ports.js";
 export * from "./application/dining-closing-service.js";
 export * from "./application/ports/dining-closing-ports.js";
+export * from "./application/dining-cart-participation-query.js";

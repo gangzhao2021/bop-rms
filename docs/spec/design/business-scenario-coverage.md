@@ -233,3 +233,7 @@ public menu and browser interception evidence remains explicitly synthetic.
 WP-2268 verifies current Cart views across item changes, historical Quote retries and a delayed
 Pricing candidate. Pricing248/248, Quote API9/9, Quote PostgreSQL5/5, full verification and forced
 uncached integration pass; this is local synthetic-source persistence acceptance.
+
+WP-2269 adds the Dining-owned current participation query required before shared Cart decisions.
+Dining97/97, full verification and forced uncached integration pass. Identity authorization and
+the coherent Dining persistence producer remain separate.
