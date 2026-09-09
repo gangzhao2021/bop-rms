@@ -243,4 +243,8 @@ Ordering535/535, Cart PostgreSQL7/7, full verification and forced uncached integ
 
 WP-2271 hardens Dining Table/Move replay scope and object identity. Dining154/154, full verification
 and forced uncached integration pass.
-Dining persistence still requires schema/namespace authority under WP-2112.
+At WP-2271, Dining persistence still required a separate owning schema/namespace declaration.
+
+WP-2272 materializes Table configuration and immutable operation history in Dining-owned storage.
+Dining179/179, actual PostgreSQL acceptance1/1, full verification and forced uncached integration pass.
+Session, Join, shared Cart and live activation remain separate.

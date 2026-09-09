@@ -24,6 +24,23 @@ afterEach(async () => {
 });
 
 describe("migration catalog", () => {
+  it("declares only the WP-2272 scoped Dining Table and immutable operation storage", async () => {
+    const catalog = await readMigrationCatalog(repositoryRoot);
+    const migration = catalog.migrations.find(
+      (value) => value.id === "1001_001_create_dining_table",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/dining", schema: "rms_dining" });
+    for (const table of ["dining_table", "dining_table_operation"]) {
+      expect(migration?.sql).toContain(`CREATE TABLE rms_dining.${table}`);
+      expect(migration?.sql).toContain(`ALTER TABLE rms_dining.${table} FORCE ROW LEVEL SECURITY`);
+      expect(migration?.sql).toContain(`REVOKE ALL ON TABLE rms_dining.${table} FROM PUBLIC`);
+    }
+    expect(migration?.sql).toContain("version bigint NOT NULL");
+    expect(migration?.sql).toContain("IS TRUE");
+    expect(migration?.sql).toContain("dining_table_operation_no_update");
+    expect(migration?.sql).toContain("dining_table_operation_no_delete");
+  });
+
   it("loads the committed Canonical catalog deterministically", async () => {
     const first = await readMigrationCatalog(repositoryRoot);
     const second = await readMigrationCatalog(repositoryRoot);
@@ -65,6 +82,7 @@ describe("migration catalog", () => {
       "0400_002_create_live_gate_workflow",
       "0400_003_create_support_case",
       "1000_001_create_store_configuration",
+      "1001_001_create_dining_table",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
       "1102_001_create_option_set_binding",

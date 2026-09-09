@@ -1,3 +1,17 @@
+import {
+  DiningTableWorkflowError,
+  actions,
+  closed,
+  dependency,
+  event,
+  parseState,
+  recordInput,
+  snapshot,
+  diningTableCommandIntent,
+  parseDiningTableOperationRecord,
+} from "./dining-table-record.js";
+export { DiningTableWorkflowError } from "./dining-table-record.js";
+export type { DiningTableWorkflowErrorCode } from "./dining-table-record.js";
 import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import {
   parseDiningInstant,
@@ -17,86 +31,15 @@ import type {
   DiningSessionMoveRecord,
   DiningTableAction,
   DiningTableAuthorizationEvidence,
-  DiningTableEvent,
   DiningTableOperationRecord,
   DiningTablePorts,
 } from "./ports/dining-table-ports.js";
-
-export type DiningTableWorkflowErrorCode =
-  | "DINING_TABLE_INPUT_INVALID"
-  | "DINING_TABLE_PERMISSION_DENIED"
-  | "DINING_TABLE_VERSION_CONFLICT"
-  | "DINING_TABLE_IDEMPOTENCY_CONFLICT"
-  | "DINING_TABLE_LIFECYCLE_CONFLICT"
-  | "DINING_TABLE_DEPENDENCY_UNAVAILABLE";
-
-export class DiningTableWorkflowError extends Error {
-  constructor(readonly code: DiningTableWorkflowErrorCode) {
-    super("Dining Table operation is unavailable");
-    this.name = "DiningTableWorkflowError";
-  }
-}
-
-const dependency = (): never => {
-  throw new DiningTableWorkflowError("DINING_TABLE_DEPENDENCY_UNAVAILABLE");
-};
-const actions = new Set<DiningTableAction>([
-  "CreateDraft",
-  "ReplaceDraft",
-  "Publish",
-  "IssueQr",
-  "RevokeQr",
-  "SetBlock",
-  "ClearBlock",
-]);
-const eventType: Record<DiningTableAction, DiningTableEvent["eventType"]> = {
-  CreateDraft: "DiningTableDrafted",
-  ReplaceDraft: "DiningTableDrafted",
-  Publish: "DiningTableConfigurationPublished",
-  IssueQr: "DiningTableQrLifecycleChanged",
-  RevokeQr: "DiningTableQrLifecycleChanged",
-  SetBlock: "DiningTableOperationalStateChanged",
-  ClearBlock: "DiningTableOperationalStateChanged",
-};
-
-function closed(value: unknown, keys: readonly string[]) {
-  try {
-    if (
-      value === null ||
-      typeof value !== "object" ||
-      Array.isArray(value) ||
-      Object.getPrototypeOf(value) !== Object.prototype ||
-      Reflect.ownKeys(value).length !== keys.length ||
-      Reflect.ownKeys(value).some((key) => typeof key !== "string" || !keys.includes(key))
-    )
-      throw new Error("invalid");
-    const descriptors = Object.getOwnPropertyDescriptors(value);
-    const result: Record<string, unknown> = {};
-    for (const key of keys) {
-      const descriptor = descriptors[key];
-      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
-        throw new Error("invalid");
-      result[key] = descriptor.value;
-    }
-    return result;
-  } catch {
-    throw new DiningTableWorkflowError("DINING_TABLE_INPUT_INVALID");
-  }
-}
 
 function parseInput<T>(parse: () => T): T {
   try {
     return parse();
   } catch {
     throw new DiningTableWorkflowError("DINING_TABLE_INPUT_INVALID");
-  }
-}
-
-function parseState<T>(parse: () => T): T {
-  try {
-    return parse();
-  } catch {
-    return dependency();
   }
 }
 
@@ -146,60 +89,8 @@ function authorize(
   }
 }
 
-function event(action: DiningTableAction, table: DiningTable): DiningTableEvent {
-  return Object.freeze({
-    eventType: eventType[action],
-    tableReference: table.tableReference,
-    aggregateVersion: table.aggregateVersion.toString(),
-    lifecycle: table.lifecycle,
-    qrStatus: table.qrStatus,
-    operationalState: table.operationalState,
-    occurredAt: table.observedAt,
-  });
-}
-
 function same(value: unknown, expected: unknown) {
   return JSON.stringify(value) === JSON.stringify(expected);
-}
-
-// Snapshot dependency data before invoking any later port. Descriptors never execute accessors.
-function snapshot(value: unknown): unknown {
-  let nodes = 0;
-  const copy = (input: unknown, depth: number): unknown => {
-    if (++nodes > 20_000 || depth > 12) return dependency();
-    if (input === null || typeof input === "boolean") return input;
-    if (typeof input === "string" && input.length <= 65_536) return input;
-    if (typeof input === "number" && Number.isFinite(input)) return input;
-    if (typeof input !== "object" || input === null) return dependency();
-    const array = Array.isArray(input);
-    if (Object.getPrototypeOf(input) !== (array ? Array.prototype : Object.prototype))
-      return dependency();
-    const keys = Reflect.ownKeys(input);
-    if (keys.length > 10_000) return dependency();
-    if (array) {
-      const length = Object.getOwnPropertyDescriptor(input, "length")?.value;
-      if (!Number.isSafeInteger(length) || length < 0 || keys.length !== length + 1)
-        return dependency();
-      const result: unknown[] = [];
-      for (let index = 0; index < length; index++) {
-        const field = Object.getOwnPropertyDescriptor(input, String(index));
-        if (!field?.enumerable || !("value" in field)) return dependency();
-        result.push(copy(field.value, depth + 1));
-      }
-      return Object.freeze(result);
-    }
-    return Object.freeze(
-      Object.fromEntries(
-        keys.map((key) => {
-          const field = Object.getOwnPropertyDescriptor(input, key);
-          if (typeof key !== "string" || !field?.enumerable || !("value" in field))
-            return dependency();
-          return [key, copy(field.value, depth + 1)];
-        }),
-      ),
-    );
-  };
-  return copy(value, 0);
 }
 
 function authorizationSnapshot(value: DiningTableAuthorizationEvidence | null) {
@@ -240,21 +131,6 @@ function historicalAudit(value: unknown, current: AppendAuditRecordInput, at: st
   return result;
 }
 
-function recordInput(
-  value: unknown,
-  keys: readonly string[],
-  operationReference: DiningReference,
-): Record<string, unknown> & { operationReference: DiningReference; intentDigest: string } {
-  const raw = closed(snapshot(value), keys);
-  if (
-    parseDiningReference(raw.operationReference) !== operationReference ||
-    typeof raw.intentDigest !== "string" ||
-    !/^sha256:[0-9a-f]{64}$/u.test(raw.intentDigest)
-  )
-    return dependency();
-  return { ...raw, operationReference, intentDigest: raw.intentDigest };
-}
-
 export function createDiningTableService(ports: DiningTablePorts) {
   const replayInput = (
     prior: unknown,
@@ -293,7 +169,15 @@ export function createDiningTableService(ports: DiningTablePorts) {
         throw new DiningTableWorkflowError("DINING_TABLE_INPUT_INVALID");
       let intentDigest: string;
       try {
-        intentDigest = ports.references.hashIntent(JSON.stringify(raw));
+        intentDigest = ports.references.hashIntent(
+          diningTableCommandIntent(
+            action,
+            operationReference,
+            raw.expectedAggregateVersion as number | null,
+            candidate,
+            observedAt,
+          ),
+        );
       } catch {
         return dependency();
       }
@@ -322,29 +206,8 @@ export function createDiningTableService(ports: DiningTablePorts) {
           operationReference,
           intentDigest,
         );
-        const record = parseState(() => {
-          const raw = captured;
-          const table = createDiningTable(raw.table);
-          const recordedEvent = closed(raw.event, [
-            "eventType",
-            "tableReference",
-            "aggregateVersion",
-            "lifecycle",
-            "qrStatus",
-            "operationalState",
-            "occurredAt",
-          ]);
-          historicalAudit(raw.audit, audit, table.observedAt);
-          if (
-            table.tableReference !== candidate.tableReference ||
-            table.tenantReference !== candidate.tenantReference ||
-            table.brandReference !== candidate.brandReference ||
-            table.storeReference !== candidate.storeReference ||
-            !same(recordedEvent, event(action, table))
-          )
-            return dependency();
-          return { table, intentDigest: raw.intentDigest };
-        });
+        const record = parseDiningTableOperationRecord(captured);
+        parseState(() => historicalAudit(record.audit, audit, record.table.observedAt));
         if (!same(record.table, candidate)) return dependency();
         return Object.freeze({ status: "AlreadyApplied" as const, table: record.table });
       }
@@ -397,7 +260,16 @@ export function createDiningTableService(ports: DiningTablePorts) {
         audit,
         event: event(action, candidate),
       });
-      await ports.repository.commitTable(record).catch(dependency);
+      await ports.repository.commitTable(record).catch((error: unknown) => {
+        if (
+          error instanceof DiningTableWorkflowError &&
+          ["DINING_TABLE_VERSION_CONFLICT", "DINING_TABLE_IDEMPOTENCY_CONFLICT"].includes(
+            error.code,
+          )
+        )
+          throw new DiningTableWorkflowError(error.code);
+        return dependency();
+      });
       return Object.freeze({ status: "Applied" as const, table: candidate });
     },
 

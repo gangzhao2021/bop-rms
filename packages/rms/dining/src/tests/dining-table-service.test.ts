@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createDiningTable,
   createDiningTableService,
+  DiningTableWorkflowError,
   type DiningSessionMoveRecord,
   type DiningTableOperationRecord,
   type DiningTablePorts,
@@ -601,4 +603,38 @@ describe("WP-2271 Move historical and current object isolation", () => {
       message: "Dining Table operation is unavailable",
     });
   });
+});
+
+describe("WP-2272 canonical Table persistence handoff", () => {
+  it("replays the same parsed command despite candidate key and attribute ordering", async () => {
+    const state = fixture();
+    state.ports.references.hashIntent = (value) =>
+      `sha256:${createHash("sha256").update(value).digest("hex")}`;
+    const service = createDiningTableService(state.ports);
+    const candidate = { ...table(ids.source), accessibilityAttributes: ["WIDE_DOOR", "STEP_FREE"] };
+    const input = { ...tableInput(), candidate };
+    const commit = vi.spyOn(state.ports.repository, "commitTable");
+    const first = await service.executeTable(input);
+    const reordered = Object.fromEntries(
+      Object.entries({
+        ...candidate,
+        accessibilityAttributes: ["STEP_FREE", "WIDE_DOOR"],
+      }).reverse(),
+    );
+    const retry = await service.executeTable({ ...input, candidate: reordered });
+    expect(retry).toEqual({ status: "AlreadyApplied", table: first.table });
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+  it.each(["DINING_TABLE_VERSION_CONFLICT", "DINING_TABLE_IDEMPOTENCY_CONFLICT"] as const)(
+    "preserves the owning writer's %s",
+    async (code) => {
+      const state = fixture();
+      state.ports.repository.commitTable = async () => {
+        throw new DiningTableWorkflowError(code);
+      };
+      await expect(
+        createDiningTableService(state.ports).executeTable(tableInput()),
+      ).rejects.toMatchObject({ code });
+    },
+  );
 });
