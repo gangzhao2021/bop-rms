@@ -96,6 +96,7 @@ export interface GuestAdmissionEvidence {
 }
 
 export interface GuestDiningAdmissionEvidence {
+  readonly guestSessionReference: GuestSessionReference;
   readonly decision: "Allowed";
   readonly admissionReference: GuestDiningAdmissionReference;
   readonly operationReference: GuestOperationReference;
@@ -267,6 +268,7 @@ export function parseGuestAdmissionEvidence(value: unknown): GuestAdmissionEvide
 export function parseGuestDiningAdmissionEvidence(value: unknown): GuestDiningAdmissionEvidence {
   const raw = closed(value, [
     "decision",
+    "guestSessionReference",
     "admissionReference",
     "operationReference",
     "storeReference",
@@ -286,6 +288,7 @@ export function parseGuestDiningAdmissionEvidence(value: unknown): GuestDiningAd
   }
   return Object.freeze({
     decision: "Allowed",
+    guestSessionReference: parseGuestSessionReference(raw.guestSessionReference),
     admissionReference: uuid<GuestDiningAdmissionReference>(raw.admissionReference),
     operationReference: parseGuestOperationReference(raw.operationReference),
     storeReference: uuid<GuestStoreReference>(raw.storeReference),

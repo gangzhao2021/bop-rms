@@ -59,6 +59,7 @@ const evidence = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const diningEvidence = (overrides: Record<string, unknown> = {}) => ({
+  guestSessionReference: ids.session,
   decision: "Allowed",
   admissionReference: ids.diningAdmission,
   operationReference: ids.nextOperation,
@@ -260,6 +261,7 @@ const fixture = (
   const store = new MemoryStore();
   const credentials = new SyntheticCredentials();
   const admissionCalls: unknown[] = [];
+  const diningAdmissionCalls: unknown[] = [];
   const service = new GuestSessionService({
     admission: {
       async consume(command) {
@@ -268,7 +270,8 @@ const fixture = (
       },
     },
     diningAdmission: {
-      async consume() {
+      async consume(command) {
+        diningAdmissionCalls.push(command);
         return diningAdmissionValue as never;
       },
     },
@@ -277,7 +280,7 @@ const fixture = (
     credentials,
     now: () => now,
   });
-  return { service, store, credentials, admissionCalls };
+  return { service, store, credentials, admissionCalls, diningAdmissionCalls };
 };
 
 const issue = async (service: GuestSessionService) => {
@@ -531,8 +534,8 @@ describe("Guest Session contract", () => {
     ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
   });
 
-  it("atomically binds a DineIn guest to the consumed Dining admission and rotates both credentials", async () => {
-    const { service } = fixture();
+  it("binds exact Guest admission evidence and rotates both credentials", async () => {
+    const { service, diningAdmissionCalls } = fixture();
     await issue(service);
     const bound = await service.bindDining({
       sessionCredential,
@@ -541,6 +544,14 @@ describe("Guest Session contract", () => {
       operationReference: ids.nextOperation,
       requestedAt: "2026-07-29T12:01:00.000Z",
     });
+    expect(diningAdmissionCalls).toEqual([
+      {
+        guestSessionReference: ids.session,
+        admissionReference: ids.diningAdmission,
+        operationReference: ids.nextOperation,
+        requestedAt: "2026-07-29T12:01:00.000Z",
+      },
+    ]);
     expect(bound).toMatchObject({
       status: "Issued",
       sessionCredential: nextSessionCredential,
@@ -580,6 +591,7 @@ describe("Guest Session contract", () => {
         requestedAt: "2026-07-29T12:01:00.000Z",
       }),
     ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+    expect(diningAdmissionCalls).toHaveLength(1);
   });
 
   it("fails Dining binding closed for mismatched or stale server admission evidence", async () => {
@@ -600,6 +612,59 @@ describe("Guest Session contract", () => {
         }),
       ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
     }
+  });
+
+  it.each([
+    ["foreign", ids.nextSession],
+    ["malformed", "invalid"],
+    ["null", null],
+    ["number", 17],
+    ["missing", undefined],
+  ])(
+    "WP-2279 refuses %s Guest evidence without generating credentials or rotating state",
+    async (label, guest) => {
+      const admission = diningEvidence({ guestSessionReference: guest });
+      if (label === "missing") Reflect.deleteProperty(admission, "guestSessionReference");
+      const { service, store, credentials, diningAdmissionCalls } = fixture(
+        parseGuestAdmissionEvidence(evidence()),
+        "Current",
+        admission,
+      );
+      await issue(service);
+      const before = store.records.get(hash("a"));
+      await expect(
+        service.bindDining({
+          sessionCredential,
+          expectedVersion: 1,
+          diningAdmissionReference: ids.diningAdmission,
+          operationReference: ids.nextOperation,
+          requestedAt: "2026-07-29T12:01:00.000Z",
+        }),
+      ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+      expect(diningAdmissionCalls).toHaveLength(1);
+      expect(store.records.size).toBe(1);
+      expect(store.records.get(hash("a"))).toEqual(before);
+      expect(store.operations.size).toBe(1);
+      expect(
+        credentials.purposes.filter((purpose) => purpose === "Session" || purpose === "Csrf"),
+      ).toEqual(["Session", "Csrf"]);
+    },
+  );
+  it("WP-2279 refuses client-selected Guest identity before calling admission", async () => {
+    const { service, store, diningAdmissionCalls } = fixture();
+    await issue(service);
+    await expect(
+      service.bindDining({
+        sessionCredential,
+        expectedVersion: 1,
+        diningAdmissionReference: ids.diningAdmission,
+        operationReference: ids.nextOperation,
+        guestSessionReference: ids.session,
+        requestedAt: "2026-07-29T12:01:00.000Z",
+      } as never),
+    ).rejects.toMatchObject({ code: "GUEST_SESSION_INPUT_INVALID" });
+    expect(diningAdmissionCalls).toEqual([]);
+    expect(store.records.size).toBe(1);
   });
 
   it("returns a bounded replay without reissuing raw credentials and rejects changed intent", async () => {

@@ -272,3 +272,7 @@ Guest Join/Closing persistence and live activation remain separate.
 WP-2278 implements atomic Guest Join, Participant/Host and admission issuance persistence.
 Dining410/410, Dining PostgreSQL4/4, full verification and forced uncached integration pass.
 Identity rotation, shared Cart and live activation remain separate.
+
+WP-2279 binds admission consumption and evidence to the exact current Guest Session.
+Identity200/200, Guest22/22, joint acceptance, full verification and forced integration pass.
+Durable consumption and Identity flow activation remain separate.

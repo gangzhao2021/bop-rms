@@ -403,12 +403,14 @@ export class GuestSessionService {
     try {
       evidence = parseGuestDiningAdmissionEvidence(
         await this.#diningAdmission.consume({
+          guestSessionReference: currentSession.sessionReference,
           admissionReference,
           operationReference,
           requestedAt,
         }),
       );
       if (
+        evidence.guestSessionReference !== currentSession.sessionReference ||
         evidence.admissionReference !== admissionReference ||
         evidence.operationReference !== operationReference ||
         evidence.storeReference !== currentSession.storeReference ||
