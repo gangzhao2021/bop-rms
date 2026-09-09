@@ -443,6 +443,7 @@ export function createCartQuoteAttachmentService(ports: CartQuoteAttachmentPorts
           sessionScope(session, attachment, requestedAt);
           // Reuse the original observation for the digest, not for authorization or expiry.
           if (
+            attachment.operationReference !== operationReference ||
             attachment.cartReference !== cartReference ||
             attachment.cartVersion !== expectedCartVersion ||
             attachment.guestSessionReference !== guestSessionReference ||
@@ -463,11 +464,12 @@ export function createCartQuoteAttachmentService(ports: CartQuoteAttachmentPorts
       const loaded = await ports.repository.loadCart(cartReference).catch(dependency);
       if (loaded === null) throw new CartError("CART_UNAVAILABLE");
       const cart = parseCartAggregate(loaded);
+      if (cart.cartReference !== cartReference) throw new CartError("CART_UNAVAILABLE");
+      sessionScope(session, cart, requestedAt);
+      const auditRecord = audit(authorized.audit, cart, requestedAt);
       if (cart.aggregateVersion !== expectedCartVersion)
         throw new CartError("CART_VERSION_CONFLICT");
       assertCartLifecycleActive(cart.lifecycle, requestedAt);
-      sessionScope(session, cart, requestedAt);
-      const auditRecord = audit(authorized.audit, cart, requestedAt);
       if (
         cart.items.length === 0 ||
         cart.items.some((item) => item.catalogSelectionEvidence === null)
@@ -508,12 +510,31 @@ export function createCartQuoteAttachmentService(ports: CartQuoteAttachmentPorts
         .catch(dependency);
       try {
         const result = parseCartQuoteAttachment(saved);
+        assertCartLifecycleActive(cart.lifecycle, result.attachedAt);
         if (
           result.operationReference !== operationReference ||
-          result.quoteReference !== attachment.quoteReference ||
+          result.brandReference !== cart.brandReference ||
+          result.storeReference !== cart.storeReference ||
+          result.guestSessionReference !== guestSessionReference ||
           result.cartReference !== cartReference ||
           result.cartVersion !== expectedCartVersion ||
-          !ports.references.equals(result.operationIntentHash, intent)
+          Date.parse(result.attachedAt) < Date.parse(cart.updatedAt) ||
+          Date.parse(requestedAt) >= Date.parse(result.idempotencyExpiresAt) ||
+          !ports.references.equals(result.operationIntentHash, intentAt(result.attachedAt)) ||
+          result.lines.length !== cart.items.length ||
+          cart.items.some((item) => {
+            const line = result.lines.find(
+              (candidate) => candidate.lineReference === item.cartItemReference,
+            );
+            return (
+              line === undefined ||
+              line.quantity !== item.quantity ||
+              line.sellableReference !== item.sellableReference ||
+              line.productVersionReference !==
+                item.catalogSelectionEvidence?.productVersionReference ||
+              line.menuVersionReference !== item.catalogSelectionEvidence?.menuVersionReference
+            );
+          })
         )
           throw new Error("mismatch");
         return Object.freeze({ status: "Attached" as const, attachment: result });

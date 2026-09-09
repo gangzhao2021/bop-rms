@@ -1,7 +1,7 @@
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { GuestSession } from "@bop/identity";
 import type { PriceQuoteSnapshot } from "@rms/pricing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createCartQuoteAttachmentService } from "../application/cart-quote-attachment-service.js";
 import type {
   CartQuoteAttachmentPorts,
@@ -245,6 +245,7 @@ function fixture(
     },
   };
   return {
+    ports,
     service: createCartQuoteAttachmentService(ports),
     pricingCalls: () => pricingCalls,
     pricingInput: () => pricingInput,
@@ -429,5 +430,62 @@ describe("WP-1203 Cart Quote attachment", () => {
       fixture({ quote: hostile as unknown as PriceQuoteSnapshot }).service.attach(input()),
     ).rejects.toMatchObject({ code: "CART_QUOTE_INVALID" });
     expect(executed).toBe(false);
+  });
+});
+
+describe("WP-2239 scoped and concurrent Quote persistence", () => {
+  it("denies a substituted Cart before revealing version or calling Pricing", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "loadCart").mockResolvedValue(
+      cart({ cartReference: id(90) as never, aggregateVersion: 99, items: [] }),
+    );
+    await expect(state.service.attach(input())).rejects.toMatchObject({ code: "CART_UNAVAILABLE" });
+    expect(state.pricingCalls()).toBe(0);
+  });
+  it("checks scope before version and lifecycle", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "loadCart").mockResolvedValue(
+      cart({ storeReference: id(90) as never, aggregateVersion: 99 }),
+    );
+    await expect(state.service.attach(input())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(state.pricingCalls()).toBe(0);
+  });
+  it("denies a substituted operation on replay", async () => {
+    const state = fixture();
+    const first = await state.service.attach(input());
+    vi.spyOn(state.ports.repository, "resolveOperation").mockResolvedValue({
+      ...first.attachment,
+      operationReference: id(90) as never,
+    });
+    await expect(state.service.attach(input())).rejects.toMatchObject({
+      code: "CART_IDEMPOTENCY_CONFLICT",
+    });
+  });
+  it("accepts the exact concurrent winner when the losing request generated a different Quote", async () => {
+    const state = fixture();
+    const first = await state.service.attach(input());
+    vi.spyOn(state.ports.repository, "resolveOperation").mockResolvedValue(null);
+    vi.spyOn(state.ports.pricing, "quoteCart").mockResolvedValue(quote({ quoteReference: id(90) }));
+    vi.spyOn(state.ports.repository, "attach").mockResolvedValue(first.attachment);
+    const next = await state.service.attach(input({ requestedAt: "2026-08-02T15:00:01.000Z" }));
+    expect(next.attachment).toEqual(first.attachment);
+  });
+  it.each(["scope", "guest", "line"])("rejects a substituted stored %s", async (kind) => {
+    const state = fixture();
+    const original = state.ports.repository.attach;
+    vi.spyOn(state.ports.repository, "attach").mockImplementation(async (value) => {
+      const saved = await original(value);
+      if (kind === "scope") return { ...saved, storeReference: id(90) as never };
+      if (kind === "guest") return { ...saved, guestSessionReference: id(90) as never };
+      return {
+        ...saved,
+        lines: saved.lines.map((line) => ({ ...line, quantity: line.quantity + 1 })),
+      };
+    });
+    await expect(state.service.attach(input())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
   });
 });

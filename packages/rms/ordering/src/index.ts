@@ -80,3 +80,8 @@ export {
   createPostgresCartLifecycleStore,
   type CartLifecycleStore,
 } from "./infrastructure/persistence/cart-lifecycle-store.js";
+
+export {
+  createPostgresCartQuoteStore,
+  type CartQuoteStore,
+} from "./infrastructure/persistence/cart-quote-store.js";

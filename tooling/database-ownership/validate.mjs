@@ -199,6 +199,13 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/cart-item-command-store.ts";
+        const acceptedCartQuoteAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "cart_line", "cart_quote_attachment", "cart_quote_attachment_line"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/cart-quote-store.ts";
         const acceptedCartLifecycleAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -225,7 +232,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&
           !acceptedPickupBindingAsset &&
-          !acceptedCartLifecycleAsset
+          !acceptedCartLifecycleAsset &&
+          !acceptedCartQuoteAsset
         )
           diagnostics.push(
             diag(
