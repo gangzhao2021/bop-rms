@@ -8,6 +8,7 @@ import type {
 } from "@bop/public-capability";
 import type { PermissionDecision } from "@bop/permission";
 import type { TenantContext } from "@bop/tenant";
+import type { DiningSessionMoveRecord, DiningTablePorts } from "./dining-table-ports.js";
 
 import type {
   DiningGuestContextEvidence,
@@ -125,10 +126,34 @@ export interface DiningSessionStorePort {
 }
 
 export interface DiningSessionPorts {
+  readonly movedJoin?: DiningMovedJoinPort;
   readonly staff: DiningStaffAuthorizationPort;
   readonly guests: DiningGuestContextPort;
   readonly abuse: DiningJoinAbusePort;
   readonly credentials: DiningCredentialPort;
   readonly store: DiningSessionStorePort;
   readonly pepperVersion: number;
+}
+
+export interface DiningMovedJoinState extends DiningJoinState {
+  readonly move: DiningSessionMoveRecord;
+}
+
+/** Optional owner adapter; scope and current committed Move facts are checked inside its transaction. */
+export interface DiningMovedJoinPort {
+  readonly references: DiningTablePorts["references"];
+  resolveMovedJoinState(
+    diningSessionReference: DiningReference,
+  ): Promise<DiningMovedJoinState | null>;
+  reissueAfterMove(input: {
+    readonly session: DiningSession;
+    readonly move: DiningSessionMoveRecord;
+    readonly previous: DiningJoinCapability;
+    readonly replacement: DiningJoinCapability;
+    readonly expectedCapabilityVersion: number;
+    readonly operationReference: DiningReference;
+    readonly operationIntentHash: DiningHash;
+    readonly currentPepperVersion: number;
+    readonly audit: AppendAuditRecordInput;
+  }): Promise<DiningRegenerationRecord>;
 }

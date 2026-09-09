@@ -242,6 +242,18 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_session_join_operation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-session-join-store.ts";
+        // WP-2286 admits only fresh Join generation backed by a committed Dining Move.
+        const acceptedDiningMovedJoinAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          [
+            "dining_table",
+            "dining_session",
+            "dining_join_capability",
+            "dining_join_regeneration_operation",
+            "dining_session_move_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/dining-moved-join-store.ts";
         // WP-2284 admits only the scoped Move owner transaction.
         const acceptedDiningMoveAsset =
           module.packageName === "@rms/dining" &&
@@ -334,6 +346,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningParticipationAsset &&
           !acceptedDiningClosingAsset &&
           !acceptedDiningMoveAsset &&
+          !acceptedDiningMovedJoinAsset &&
           !acceptedCartQueryAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&

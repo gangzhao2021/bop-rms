@@ -1,6 +1,7 @@
 import { captureSessionData, sessionDependency } from "./dining-session-snapshot.js";
 import { parseDiningJoinRecord } from "./dining-join-record.js";
 import { parseStaffStartRecord, parseStaffRegenerationRecord } from "./dining-staff-record.js";
+import { movedJoinAssignment, parseMovedJoinState } from "./dining-moved-join-record.js";
 import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import {
   diningJoinMaximumLifetimeMs,
@@ -11,6 +12,7 @@ import {
   parsePublicCapabilityReference,
   parsePublicCapabilityScopeReference,
   regenerateDiningJoinCapability,
+  reissueDiningJoinCapabilityAfterMove,
   type DiningJoinCapability,
   type DiningJoinCapabilityKind,
   type DiningJoinHumanCode,
@@ -33,6 +35,7 @@ import {
 } from "../contracts/dining-session.js";
 import type {
   DiningSessionPorts,
+  DiningMovedJoinState,
   DiningStaffAuthorizationEvidence,
 } from "./ports/dining-session-ports.js";
 
@@ -650,13 +653,27 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
         return Object.freeze({ status: "AlreadyApplied", capability: prior.capability });
       }
       const state = await sessionAsync(() => ports.store.resolveActiveJoin(diningSessionReference));
-      if (state === null) throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
+      const movedPort = state === null ? sessionPort(() => ports.movedJoin) : undefined;
+      let moved: DiningMovedJoinState | null = null;
+      if (state === null) {
+        if (movedPort === undefined) throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
+        const movedValue = await sessionAsync(() =>
+          movedPort.resolveMovedJoinState(diningSessionReference),
+        );
+        if (movedValue === null) throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
+        moved = sessionPort(() => parseMovedJoinState(movedValue, movedPort.references, scope));
+      }
       let session;
       let previous;
       try {
-        const captured = closed(captureSessionData(state), ["session", "capability"]);
-        session = parseDiningSession(captured.session);
-        previous = parseDiningJoinCapability(captured.capability);
+        if (moved !== null) {
+          session = moved.session;
+          previous = moved.capability;
+        } else {
+          const captured = closed(captureSessionData(state), ["session", "capability"]);
+          session = parseDiningSession(captured.session);
+          previous = parseDiningJoinCapability(captured.capability);
+        }
       } catch {
         return sessionDependency();
       }
@@ -665,9 +682,9 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
         session.brandReference !== staff.table.brandReference ||
         session.startedAt > requestedAt ||
         String(previous.storeReference) !== session.storeReference ||
-        String(previous.tableReference) !== session.tableReference ||
+        (moved === null && String(previous.tableReference) !== session.tableReference) ||
         String(previous.diningSessionReference) !== session.diningSessionReference ||
-        previous.assignmentVersion !== session.tableAssignmentVersion ||
+        (moved === null && previous.assignmentVersion !== session.tableAssignmentVersion) ||
         session.phase !== "Active" ||
         staff.table.tableState !== "Eligible" ||
         staff.table.activeDiningSessionReference !== diningSessionReference ||
@@ -685,6 +702,8 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       const replacement = sessionPort(() =>
         parseDiningJoinCapability({
           ...previous,
+          tableReference: session.tableReference,
+          assignmentVersion: session.tableAssignmentVersion,
           pepperVersion: ports.pepperVersion,
           capabilityReference: ports.credentials.generateReference("JoinCapability"),
           selectorHash: ports.credentials.hashJoinCredential(previous.kind, joinCredential),
@@ -698,22 +717,38 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
         }),
       );
       const transition = sessionPort(() =>
-        regenerateDiningJoinCapability({
-          previous,
-          replacement,
-          observedAt: requestedAt,
-        }),
+        moved === null
+          ? regenerateDiningJoinCapability({ previous, replacement, observedAt: requestedAt })
+          : reissueDiningJoinCapabilityAfterMove({
+              previous,
+              replacement,
+              assignment: movedJoinAssignment(moved.move),
+              currentPepperVersion: ports.pepperVersion,
+              observedAt: requestedAt,
+            }),
       );
       const persistedValue = await sessionAsync(() =>
-        ports.store.regenerate({
-          session,
-          previous: transition.previous,
-          replacement: transition.current,
-          expectedCapabilityVersion,
-          operationReference,
-          operationIntentHash: intent,
-          audit: staff.audit,
-        }),
+        moved !== null && movedPort !== undefined
+          ? movedPort.reissueAfterMove({
+              session,
+              move: moved.move,
+              previous: transition.previous,
+              replacement: transition.current,
+              expectedCapabilityVersion,
+              operationReference,
+              operationIntentHash: intent,
+              currentPepperVersion: ports.pepperVersion,
+              audit: staff.audit,
+            })
+          : ports.store.regenerate({
+              session,
+              previous: transition.previous,
+              replacement: transition.current,
+              expectedCapabilityVersion,
+              operationReference,
+              operationIntentHash: intent,
+              audit: staff.audit,
+            }),
       );
       const persisted = parseStaffRegenerationRecord(persistedValue, scope);
       if (

@@ -302,3 +302,6 @@ reissuance, shared Cart write coordination and UI activation remain separate.
 WP-2285 adds a dedicated pure Join reissue policy for changed assignment facts without weakening
 legacy same-assignment regeneration. Public Capability145/145, full verification and forced integration pass; committed Move/current Staff checks
 and atomic Dining service/storage composition remain separate.
+
+WP-2286 connects current Staff authority and committed Move facts to atomic fresh Join generation.
+Dining610/610, Dining PostgreSQL8/8, full verification and forced integration pass; Identity consumption and shared Cart remain separate.
