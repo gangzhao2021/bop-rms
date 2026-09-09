@@ -298,3 +298,7 @@ WP-2284 persists source/target Tables, Session, immutable Move history and Audit
 Concurrent retries return the actual original receipt; Closing and target competition are fenced.
 Dining573/573, Dining PostgreSQL7/7, full verification and forced uncached integration pass. Post-move Join credential
 reissuance, shared Cart write coordination and UI activation remain separate.
+
+WP-2285 adds a dedicated pure Join reissue policy for changed assignment facts without weakening
+legacy same-assignment regeneration. Public Capability145/145, full verification and forced integration pass; committed Move/current Staff checks
+and atomic Dining service/storage composition remain separate.
