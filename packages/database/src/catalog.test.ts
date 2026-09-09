@@ -24,6 +24,18 @@ afterEach(async () => {
 });
 
 describe("migration catalog", () => {
+  it("registers WP-2277 immutable regeneration and unique scoped generation", async () => {
+    const catalog = await readMigrationCatalog(repositoryRoot);
+    const migration = catalog.migrations.find(
+      (value) => value.id === "1001_003_create_dining_join_regeneration",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/dining", schema: "rms_dining" });
+    expect(migration?.sql).toContain("CREATE UNIQUE INDEX dining_join_capability_generation_idx");
+    expect(migration?.sql).toContain("dining_join_regeneration_operation_no_update");
+    expect(migration?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(migration?.sql).toContain("IS TRUE");
+  });
+
   it("registers WP-2275 scoped Session, capability and append-only start history", async () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
     const migration = catalog.migrations.find(
@@ -101,6 +113,7 @@ describe("migration catalog", () => {
       "1000_001_create_store_configuration",
       "1001_001_create_dining_table",
       "1001_002_create_dining_session_start",
+      "1001_003_create_dining_join_regeneration",
       "1100_001_create_product_aggregate",
       "1101_001_create_category_menu_structure",
       "1102_001_create_option_set_binding",

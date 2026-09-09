@@ -773,6 +773,49 @@ describe("Database Schema Ownership Architecture Test", () => {
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
 
+  it("accepts only the WP-2277 Join regeneration adapter without broadening driver admission", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "dining", "rms_dining", [
+      "dining_table",
+      "dining_session",
+      "dining_join_capability",
+      "dining_join_regeneration_operation",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/dining-join-regeneration-store.ts",
+    );
+    await writeFile(asset, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "dining_table",
+    "dining_session",
+    "dining_join_capability",
+    "dining_join_regeneration_operation",
+  ])("rejects WP-2277 admission without %s ownership", async (missing) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      "dining",
+      "rms_dining",
+      [
+        "dining_table",
+        "dining_session",
+        "dining_join_capability",
+        "dining_join_regeneration_operation",
+      ].filter((table) => table !== missing),
+    );
+    await writeFile(
+      join(context.moduleRoot, "src/infrastructure/persistence/dining-join-regeneration-store.ts"),
+      "export const synthetic = true;\n",
+    );
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
   it("accepts only the WP-2275 initial Session adapter without broadening driver admission", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "dining", "rms_dining", [

@@ -264,3 +264,7 @@ Join/Closing persistence and live activation remain separate.
 WP-2276 repairs fresh Join generation after consumption/expiry and current pepper metadata.
 Public Capability101/101, Dining352/352, full verification and security/Session acceptance pass.
 Join/regeneration persistence remains separate.
+
+WP-2277 implements atomic Join regeneration, original-operation recovery and Audit storage.
+Dining380/380, Dining PostgreSQL3/3, full verification and forced uncached integration pass.
+Guest Join/Closing persistence and live activation remain separate.

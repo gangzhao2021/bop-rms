@@ -42,6 +42,14 @@ const databaseAccessManifestInput = {
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier", "credential"],
     },
+    {
+      table: "dining_join_regeneration_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/dining" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "credential"],
+    },
   ],
   accesses: [],
 } as const;
