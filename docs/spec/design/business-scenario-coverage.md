@@ -171,3 +171,8 @@ and isolates Session context changes. Controller orchestration and live pricing 
 
 [WP-2254](../work-packages/WP-2254.md) retains the original foreground Quote request across
 uncertainty, refresh and reconnect. Synthetic browser evidence does not enable live payment.
+
+### BC-03 complete Quote evidence encoding
+
+[WP-2255](../work-packages/WP-2255.md) preserves and validates complete historical Quote snapshots
+without floating-point money or current-configuration reconstruction. Atomic persistence remains separate.
