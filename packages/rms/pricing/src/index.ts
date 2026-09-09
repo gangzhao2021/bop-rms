@@ -18,3 +18,4 @@ export * from "./domain/price-quote.js";
 export * from "./contracts/price-quote-lifecycle.js";
 export * from "./domain/price-quote-lifecycle.js";
 export * from "./domain/price-quote-snapshot-codec.js";
+export * from "./infrastructure/persistence/price-quote-query-store.js";

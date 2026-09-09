@@ -176,3 +176,8 @@ uncertainty, refresh and reconnect. Synthetic browser evidence does not enable l
 
 [WP-2255](../work-packages/WP-2255.md) preserves and validates complete historical Quote snapshots
 without floating-point money or current-configuration reconstruction. Atomic persistence remains separate.
+
+### BC-03 complete Quote history reads
+
+[WP-2256](../work-packages/WP-2256.md) reads complete historical snapshots with exact Brand/Store
+isolation and rejects partial legacy or inconsistent data. Atomic application writes remain separate.

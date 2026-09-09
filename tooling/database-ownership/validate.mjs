@@ -177,6 +177,12 @@ async function scanUnsupported(root, module, diagnostics) {
             "published_menu_projection_checkpoint",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/published-menu-query-store.ts";
+        // WP-2256 admits only the Pricing owner reader of complete Quote history.
+        const acceptedPriceQuoteQueryAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          module.manifest.ownedDatabase?.tables?.includes("price_quote") &&
+          moduleRelative === "src/infrastructure/persistence/price-quote-query-store.ts";
         // WP-2223 accepts only the Ordering reader over its existing Cart and line tables.
         const acceptedCartQueryAsset =
           module.packageName === "@rms/ordering" &&
@@ -228,6 +234,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedGuestEntryAsset &&
           !acceptedGuestBindingAsset &&
           !acceptedPublishedMenuAsset &&
+          !acceptedPriceQuoteQueryAsset &&
           !acceptedCartQueryAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&
