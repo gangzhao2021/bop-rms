@@ -1,3 +1,4 @@
+import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
 import { AppFrame } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
@@ -227,6 +228,8 @@ export function MenuScreen({
       ) : null}
       <div className="menu-content" aria-live="polite" aria-busy={state.kind === "Loading"}>
         <MenuState
+          key={context ? `${context.publicStoreReference}:${context.channel}` : "missing-context"}
+          channel={context?.channel}
           detail={detail}
           headingRef={headingRef}
           mode={mode}
@@ -263,13 +266,16 @@ function Retry({ onRetry }: { readonly onRetry?: (() => void) | undefined }) {
 }
 
 function MenuState({
+  channel,
   detail,
   headingRef,
   mode,
   onRetry,
   readOnlyNotice,
   state,
-}: Omit<MenuScreenProps, "context" | "search" | "searchTerm">) {
+}: Omit<MenuScreenProps, "context" | "search" | "searchTerm"> & {
+  readonly channel?: MenuJourneyContext["channel"] | undefined;
+}) {
   if (state.kind === "MissingContext")
     return (
       <section className="menu-state" role="alert">
@@ -336,7 +342,12 @@ function MenuState({
     );
   if (detail)
     return (
-      <SellableDetail sellable={detail} headingRef={headingRef} readOnlyNotice={readOnlyNotice} />
+      <SellableDetail
+        channel={channel}
+        sellable={detail}
+        headingRef={headingRef}
+        readOnlyNotice={readOnlyNotice}
+      />
     );
   return <MenuContents menu={state.menu} headingRef={headingRef} />;
 }
@@ -415,10 +426,12 @@ function SellableCard({ sellable }: { readonly sellable: MenuSellable }) {
 }
 
 function SellableDetail({
+  channel,
   sellable,
   headingRef,
   readOnlyNotice,
 }: {
+  readonly channel?: MenuJourneyContext["channel"] | undefined;
   readonly sellable: MenuSellable;
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
@@ -473,7 +486,11 @@ function SellableDetail({
           {readOnlyNotice}
         </div>
       ) : configuring ? (
-        <SellableConfigurator key={sellable.sellableReference} sellable={sellable} />
+        <SellableConfigurator
+          channel={channel}
+          key={sellable.sellableReference}
+          sellable={sellable}
+        />
       ) : (
         <button className="menu-action" type="button" onClick={() => setConfiguring(true)}>
           {sellable.optionRules.length === 0 ? "Add to cart" : "Configure and add"}
@@ -564,7 +581,11 @@ function ConfigureStatus({
         ? state.issueCodes.map((issue) => <p key={issue}>Issue: {issue}</p>)
         : null}
       {state.canRetry ? (
-        <button type="button" onClick={() => void controller.retry()}>
+        <button
+          type="button"
+          disabled={state.status === "offline"}
+          onClick={() => void controller.retry()}
+        >
           Retry the same operation
         </button>
       ) : null}
@@ -575,14 +596,23 @@ function ConfigureStatus({
 }
 
 export function SellableConfigurator({
+  channel,
   sellable,
   controller: provided,
 }: {
+  readonly channel?: MenuJourneyContext["channel"] | undefined;
   readonly sellable: MenuSellable;
   readonly controller?: ConfigureController | undefined;
 }) {
   const [controller] = useState(
-    () => provided ?? createConfigureController({ client: createBrowserCustomerCartClient() }),
+    () =>
+      provided ??
+      createConfigureController({
+        client:
+          channel === "Pickup"
+            ? createBrowserPickupCartClient()
+            : createBrowserCustomerCartClient(),
+      }),
   );
   const state = useSyncExternalStore(
     controller.subscribe,

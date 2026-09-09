@@ -1,3 +1,4 @@
+import * as pickupClient from "../cart/pickup-cart-client.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
@@ -163,4 +164,48 @@ it("disables Configurator edits and add while keeping unknown-outcome retry", ()
   expect(html).toContain("Retry");
   expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/u);
   expect(html).toMatch(/<textarea[^>]*disabled=""/u);
+});
+
+describe("Pickup configuration client selection", () => {
+  it.each(["idle", "offline"] as const)(
+    "preserves an injected Pickup controller in %s state",
+    (status) => {
+      const controller: ConfigureController = {
+        getState: () => (status === "idle" ? { status } : { status, canRetry: true }),
+        retry: vi.fn(),
+        setOnline: vi.fn(),
+        submit: vi.fn(),
+        subscribe: () => () => undefined,
+      };
+      const spy = vi.spyOn(pickupClient, "createBrowserPickupCartClient");
+      try {
+        const html = renderToStaticMarkup(
+          <MemoryRouter>
+            <SellableConfigurator sellable={sellable} channel="Pickup" controller={controller} />
+          </MemoryRouter>,
+        );
+        expect(spy).not.toHaveBeenCalled();
+        if (status === "offline")
+          expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Retry the same operation<\/button>/u);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
+  it.each(["Pickup", "DineIn", undefined] as const)(
+    "uses Pickup composition only for %s",
+    (channel) => {
+      const spy = vi.spyOn(pickupClient, "createBrowserPickupCartClient");
+      try {
+        renderToStaticMarkup(
+          <MemoryRouter>
+            <SellableConfigurator sellable={sellable} channel={channel} />
+          </MemoryRouter>,
+        );
+        expect(spy).toHaveBeenCalledTimes(channel === "Pickup" ? 1 : 0);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
 });

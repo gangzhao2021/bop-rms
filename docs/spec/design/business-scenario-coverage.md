@@ -225,3 +225,7 @@ current Catalog eligibility, conditional activation or option prices; those auth
 WP-2266 adds explicit Session generation ownership to opt-in Pickup creation plans. PWA417/417,
 Cart PostgreSQL6/6, PWA security111/111, full verification and forced uncached integration pass.
 Original-candidate recovery remains possible only within the owning context.
+
+WP-2267 connects Pickup product configuration to foreground Cart binding and creation. PWA430/430,
+browser48/48, PWA security111/111, full verification and forced uncached integration pass. All
+public menu and browser interception evidence remains explicitly synthetic.
