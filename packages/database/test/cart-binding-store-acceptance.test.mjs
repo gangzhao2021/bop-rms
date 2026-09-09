@@ -1,3 +1,5 @@
+import { createPickupCartCreationCoordinator } from "../../../apps/customer-pwa/src/cart/pickup-cart-creation.ts";
+import { createBrowserCustomerCartClient } from "../../../apps/customer-pwa/src/cart/cart-client.ts";
 import { createCustomerCartBindingComposition } from "../../../apps/api/src/customer-cart-binding-composition.ts";
 import { createBrowserCartBindingClient } from "../../../apps/customer-pwa/src/cart/cart-binding-client.ts";
 import { createCustomerCartReadPort } from "../../../apps/api/src/customer-cart-read-composition.ts";
@@ -694,6 +696,126 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
           ).rows[0].n,
           6,
         );
+        // Additional coordinator scenario keeps all earlier owner/transport assertions intact.
+        const creationCredential = credentials.generateCredential("Session");
+        const creationCsrf = credentials.generateCredential("Csrf");
+        await sessions.create({
+          record: createGuestSessionRecord({
+            session: guest(900),
+            sessionSelectorHash: credentials.hashCredential("Session", creationCredential),
+            csrfSelectorHash: credentials.hashCredential("Csrf", creationCsrf),
+            operationReference: id(901),
+            operationIntentHash: "d".repeat(64),
+          }),
+        });
+        const beforeCoordinator = await counts();
+        const networkFetch = globalThis.fetch;
+        const cookieJar = new Map([["__Host-bop-guest", creationCredential]]);
+        const paths = [];
+        let currentCsrf = creationCsrf;
+        const browserFetch = async (path, init = {}) => {
+          assert.equal(typeof path, "string");
+          assert.match(
+            path,
+            /^\/bff\/customer\/(?:cart|cart-binding\/(?:prepare|activate|complete))$/u,
+          );
+          paths.push(path);
+          const headers = new globalThis.Headers(init.headers);
+          headers.set("origin", "https://customer.example.test");
+          headers.set("sec-fetch-site", "same-origin");
+          headers.set("sec-fetch-mode", "cors");
+          headers.set(
+            "cookie",
+            [...cookieJar].map(([name, value]) => name + "=" + value).join("; "),
+          );
+          const response = await networkFetch("http://127.0.0.1:" + address.port + path, {
+            ...init,
+            headers,
+          });
+          for (const line of response.headers.getSetCookie()) {
+            const cookie = line.split(";")[0];
+            const split = cookie.indexOf("=");
+            const name = cookie.slice(0, split);
+            const value = cookie.slice(split + 1);
+            if (line.toLowerCase().includes("max-age=0")) cookieJar.delete(name);
+            else cookieJar.set(name, value);
+          }
+          return response;
+        };
+        try {
+          // Only the test cookie/header adapter sees raw Session cookies; both clients are production code.
+          globalThis.fetch = browserFetch;
+          const coordinator = createPickupCartCreationCoordinator({
+            binding: createBrowserCartBindingClient({ fetch: browserFetch, online: () => true }),
+            cart: createBrowserCustomerCartClient(),
+            csrf: {
+              get: () => currentCsrf,
+              set: (value) => {
+                currentCsrf = value;
+              },
+            },
+            generatePreparationReference: () => id(903),
+            online: () => true,
+          });
+          clock = 800;
+          failPublication = true;
+          const creationInput = { operationReference: id(902) };
+          await assert.rejects(coordinator.createCart(creationInput), { code: "network_unknown" });
+          assert.deepEqual(paths, [
+            "/bff/customer/cart",
+            "/bff/customer/cart-binding/prepare",
+            "/bff/customer/cart-binding/activate",
+          ]);
+          assert.equal(currentCsrf, creationCsrf);
+          assert.equal(
+            (await sessions.resolve(credentials.hashCredential("Session", creationCredential)))
+              .session.status,
+            "Revoked",
+          );
+          const beforeCompeting = paths.length;
+          await assert.rejects(coordinator.createCart({ operationReference: id(904) }), {
+            code: "network_unknown",
+          });
+          assert.equal(paths.length, beforeCompeting);
+          clock = 1101;
+          failPublication = false;
+          const createdView = await coordinator.createCart(creationInput);
+          assert.equal(createdView.cart.lifecycle.status, "Expired");
+          assert.deepEqual(createdView.cart.items, []);
+          assert.notEqual(currentCsrf, creationCsrf);
+          assert.deepEqual(paths.slice(beforeCompeting), [
+            "/bff/customer/cart-binding/complete",
+            "/bff/customer/cart",
+          ]);
+          const confirmedCounts = await counts();
+          assert.deepEqual(confirmedCounts, {
+            carts: beforeCoordinator.carts + 1,
+            bindings: beforeCoordinator.bindings + 2,
+            audits: beforeCoordinator.audits + 5,
+          });
+          const beforeReplay = paths.length;
+          assert.deepEqual(await coordinator.createCart(creationInput), createdView);
+          assert.deepEqual(paths.slice(beforeReplay), ["/bff/customer/cart"]);
+          assert.deepEqual(await counts(), confirmedCounts);
+          assert.equal(cookieJar.size, 1);
+          for (const value of [
+            creationCredential,
+            creationCsrf,
+            currentCsrf,
+            cookieJar.get("__Host-bop-guest"),
+          ])
+            assert.equal(JSON.stringify(createdView).includes(value), false);
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT count(*)::integer AS n FROM bop_identity.guest_binding_preparation",
+              )
+            ).rows[0].n,
+            9,
+          );
+        } finally {
+          globalThis.fetch = networkFetch;
+        }
       } finally {
         httpServer.closeAllConnections();
         await new Promise((resolve) => httpServer.close(() => resolve()));

@@ -145,3 +145,9 @@ retry and disables superseding mutations. This does not supply reload recovery o
 
 [WP-2249](../work-packages/WP-2249.md) extends the Cart deadline through complete response-body
 consumption and cleanup. It preserves foreground-only retries and does not provide live write wiring.
+
+### BC-02 foreground creation coordination
+
+[WP-2250](../work-packages/WP-2250.md) connects private browser binding transport and current-Cart
+reads in an opt-in foreground coordinator. Its evidence remains bounded; default App integration,
+item writes, shared DineIn and general reload recovery are separate.
