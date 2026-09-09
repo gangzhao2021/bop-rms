@@ -513,3 +513,27 @@ describe("WP-1000 Store Public Profile Query", () => {
     );
   });
 });
+
+it("supports explicit CustomerCart consumption of the existing published public branding", async () => {
+  const resolve = vi.fn(async () => resolutionEvidence());
+  const service = createPublicStoreProfileService({
+    resolution: { resolve },
+    profiles: { loadCandidates: async () => [candidate()] },
+    telemetry: { record: () => undefined },
+  });
+  expect((await service.getPublicStore({ ...request, purpose: "CustomerCart" })).status).toBe(
+    "Available",
+  );
+  expect(resolve).toHaveBeenCalledWith({
+    publicStoreReference: ids.publicStore,
+    evaluatedAt: request.evaluatedAt,
+    purpose: "CustomerCart",
+  });
+  const invalid = candidate();
+  invalid.publishingLifecycle.purposeCode = "CUSTOMER_CART";
+  invalid.publishingRelease.purposeCode = "CUSTOMER_CART";
+  invalid.effectiveVersion.purposeCode = "CUSTOMER_CART";
+  expect(
+    await harness({ candidates: [invalid] }).get({ ...request, purpose: "CustomerCart" }),
+  ).toEqual({ status: "StoreUnavailable" });
+});

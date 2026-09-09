@@ -87,3 +87,4 @@ export {
 } from "./infrastructure/persistence/cart-quote-store.js";
 
 export * from "./application/pickup-cart-read-service.js";
+export * from "./application/customer-cart-view-query.js";

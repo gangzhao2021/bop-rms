@@ -1,7 +1,12 @@
 import { appendAuditRecordInTransaction, validateAuditRecord } from "@bop/audit";
 import { readClosedRecord } from "@bop/identity";
 import type { CartQuoteAttachmentPorts } from "../../application/ports/cart-quote-attachment-ports.js";
-import { CartError, parseOrderingHash, parseOrderingReference } from "../../domain/cart.js";
+import {
+  CartError,
+  parseOrderingHash,
+  parseOrderingInstant,
+  parseOrderingReference,
+} from "../../domain/cart.js";
 import {
   parseCartQuoteAttachment,
   type CartQuoteAttachment,
@@ -14,6 +19,11 @@ import {
 } from "./cart-query-store.js";
 type Attach = Parameters<CartQuoteAttachmentPorts["repository"]["attach"]>[0];
 export interface CartQuoteStore {
+  loadLatest(input: {
+    readonly cartReference: string;
+    readonly cartVersion: number;
+    readonly observedAt: string;
+  }): Promise<CartQuoteAttachment | null>;
   resolveOperation(reference: string): Promise<CartQuoteAttachment | null>;
   attach(input: Attach): Promise<CartQuoteAttachment>;
 }
@@ -137,6 +147,39 @@ export function createPostgresCartQuoteStore(
     return attachment;
   }
   return Object.freeze({
+    async loadLatest(input: Parameters<CartQuoteStore["loadLatest"]>[0]) {
+      try {
+        const raw = closed(input, ["cartReference", "cartVersion", "observedAt"]);
+        const cartReference = parseOrderingReference(raw.cartReference);
+        const observedAt = parseOrderingInstant(raw.observedAt);
+        const cartVersion = raw.cartVersion;
+        if (!Number.isSafeInteger(cartVersion) || Number(cartVersion) < 1) fail();
+        return await run(async (tx) => {
+          const result = rows(
+            await tx.query(
+              "SELECT operation_id FROM rms_ordering.cart_quote_attachment WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3 AND cart_version=$4 AND attached_at<=$5 ORDER BY attached_at DESC, operation_id DESC LIMIT 1",
+              [brand, store, cartReference, cartVersion, observedAt],
+            ),
+          );
+          if (result.length === 0) return null;
+          if (result.length !== 1) fail();
+          const operation = parseOrderingReference(
+            closed(result[0], ["operation_id"]).operation_id,
+          );
+          const attachment = await resolve(tx, operation);
+          if (
+            attachment === null ||
+            attachment.cartReference !== cartReference ||
+            attachment.cartVersion !== cartVersion ||
+            attachment.attachedAt > observedAt
+          )
+            fail();
+          return attachment;
+        });
+      } catch {
+        return fail();
+      }
+    },
     async resolveOperation(value: string) {
       try {
         const reference = parseOrderingReference(value);

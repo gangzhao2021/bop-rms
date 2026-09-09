@@ -291,3 +291,24 @@ it("denies duplicate active binding evidence even when no option is selected", a
     status: "Unavailable",
   });
 });
+
+it("batches names with request-local version reuse and no cross-request cache", async () => {
+  const f = fixture();
+  const requests = [input(), input({ locale: "en-CA" })];
+  const found = await f.query.describeMany(requests);
+  expect(found).toHaveLength(2);
+  expect(found[0]).toMatchObject({ displayName: "Café au lait" });
+  expect(found[1]).toMatchObject({ displayName: "Latte" });
+  expect(f.loadVersionCandidates).toHaveBeenCalledTimes(1);
+  await f.query.describeMany(requests);
+  expect(f.loadVersionCandidates).toHaveBeenCalledTimes(2);
+  expect(await f.query.describeMany([])).toEqual([]);
+});
+it("validates the whole bounded batch before any dependency read", async () => {
+  const f = fixture();
+  for (const requests of [Array(101).fill(input()), [input(), {}], Array(1)])
+    await expect(f.query.describeMany(requests)).rejects.toMatchObject({
+      code: "CATALOG_INPUT_INVALID",
+    });
+  expect(f.loadVersionCandidates).not.toHaveBeenCalled();
+});

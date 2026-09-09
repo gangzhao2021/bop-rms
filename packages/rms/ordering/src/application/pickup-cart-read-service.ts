@@ -30,6 +30,7 @@ export interface PickupCartReadPorts {
 
 // Restricted owner-internal read result. A separate safe display DTO is required for HTTP.
 export interface PickupCartReadResult {
+  readonly context: { readonly publicStoreReference: string; readonly locale: string };
   readonly cart: CartAggregate;
   readonly effectiveStatus: "Active" | "Abandoned" | "Expired";
   readonly observedAt: OrderingInstant;
@@ -156,7 +157,15 @@ export function createPickupCartReadService(ports: PickupCartReadPorts) {
         (observedAt >= lifecycle.idleExpiresAt || observedAt >= lifecycle.absoluteExpiresAt)
           ? "Expired"
           : lifecycle.status;
-      return Object.freeze({ cart, effectiveStatus, observedAt });
+      return Object.freeze({
+        context: Object.freeze({
+          publicStoreReference: String(currentSession.publicStoreReference),
+          locale: String(currentSession.locale),
+        }),
+        cart,
+        effectiveStatus,
+        observedAt,
+      });
     },
   });
 }

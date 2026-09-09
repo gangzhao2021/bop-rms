@@ -1,3 +1,4 @@
+import { CustomerCartHandler } from "../../../apps/api/src/customer-cart.ts";
 import { createServer } from "node:http";
 import { createApp } from "../../../apps/api/src/app.ts";
 import {
@@ -10,6 +11,8 @@ import { it } from "vitest";
 import {
   createPostgresPickupCartBindingStore,
   createPickupCartReadService,
+  createCustomerCartViewQuery,
+  createPostgresCartQuoteStore,
   createPostgresCartQueryStore,
 } from "../../rms/ordering/src/index.ts";
 import {
@@ -87,7 +90,9 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
       );
       await admin.query(`GRANT USAGE ON SCHEMA rms_ordering TO ${orderingRole}`);
       await admin.query(`GRANT SELECT,INSERT,UPDATE ON rms_ordering.cart TO ${orderingRole}`);
-      await admin.query(`GRANT SELECT ON rms_ordering.cart_line TO ${orderingRole}`);
+      await admin.query(
+        `GRANT SELECT ON rms_ordering.cart_line,rms_ordering.cart_quote_attachment,rms_ordering.cart_quote_attachment_line TO ${orderingRole}`,
+      );
       await admin.query(
         `GRANT SELECT,INSERT ON rms_ordering.cart_binding_record TO ${orderingRole}`,
       );
@@ -470,8 +475,88 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
           activate: (receipt) => owner({ failAudit: failPublication }).activate(receipt),
         },
       });
+      const displayQuery = createCustomerCartViewQuery({
+        reads: createPickupCartReadService({
+          sessions: authorization,
+          binding: httpOwner,
+          scope,
+          now: () => at(clock),
+        }),
+        // Public Store display is a synthetic owner-port result; no production branding is asserted.
+        stores: {
+          async getPublicStore(request) {
+            assert.equal(request.purpose, "CustomerCart");
+            assert.equal(request.publicStoreReference, id(4));
+            return {
+              status: "Available",
+              profile: {
+                profileReference: id(810),
+                profileVersion: 1,
+                releaseReference: id(811),
+                contentDigest: "sha256:" + "a".repeat(64),
+                defaultLocale: "en-CA",
+                selectedLocale: "en-CA",
+                currencyCode: "CAD",
+                timeZone: "America/Toronto",
+                brandDisplayName: "Synthetic Brand",
+                storeDisplayName: "Synthetic Store",
+                address: {
+                  countryCode: "CA",
+                  regionCode: "ON",
+                  locality: "Exampleville",
+                  postalCode: "A1A 1A1",
+                  addressLines: ["100 Example Avenue"],
+                },
+                businessPhone: null,
+                website: null,
+                logoAssetVersionReference: null,
+              },
+            };
+          },
+        },
+        catalog: {
+          async describeMany(requests) {
+            assert.deepEqual(requests, []);
+            return [];
+          },
+        },
+        quotes: createPostgresCartQuoteStore(runner(orderingRole), scope, {
+          hashIntent() {
+            throw new Error("read must not write");
+          },
+          equals() {
+            throw new Error("read must not write");
+          },
+        }),
+      });
+      const display = async (input) => {
+        try {
+          const view = await displayQuery.read({
+            sessionCredential: input.guestCredential,
+            ...(input.cartReference === undefined ? {} : { cartReference: input.cartReference }),
+          });
+          return view === null ? { status: "NotFound" } : { status: "Found", view };
+        } catch (error) {
+          return {
+            status: error?.code === "CART_PERMISSION_DENIED" ? "SessionExpired" : "Unavailable",
+          };
+        }
+      };
+      const unavailableMutation = async () => ({ status: "Unavailable" });
       const httpServer = createServer(
         createApp({
+          customerCart: new CustomerCartHandler({
+            allowedOrigin: "https://customer.example.test",
+            now: () => at(clock),
+            port: {
+              getCurrentCart: display,
+              getCart: display,
+              createCart: unavailableMutation,
+              addItem: unavailableMutation,
+              updateItem: unavailableMutation,
+              removeItem: unavailableMutation,
+            },
+          }),
           customerCartBinding: new CustomerCartBindingHandler({
             allowedOrigin: "https://customer.example.test",
             port: httpService,
@@ -550,6 +635,27 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
         assert.equal(currentRead.effectiveStatus, "Expired");
         assert.equal(currentRead.cart.lifecycle.status, "Active");
         assert.equal(currentRead.cart.createdAt, at(401));
+        const getCart = (path, cookie) =>
+          globalThis.fetch(`http://127.0.0.1:${address.port}${path}`, {
+            headers: { cookie, "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors" },
+          });
+        const viewResponse = await getCart("/bff/customer/cart", publishedCookie);
+        assert.equal(viewResponse.status, 200);
+        assert.equal(viewResponse.headers.get("cache-control"), "no-store");
+        const publicView = await viewResponse.json();
+        assert.equal(publicView.cart.cartReference, currentRead.cart.cartReference);
+        assert.equal(publicView.cart.lifecycle.status, "Expired");
+        assert.deepEqual(publicView.cart.items, []);
+        assert.equal(publicView.cart.quote, null);
+        for (const privateValue of [
+          readCredential,
+          scope.brandReference,
+          scope.storeReference,
+          currentRead.cart.createdByActorReference,
+        ])
+          assert.equal(JSON.stringify(publicView).includes(privateValue), false);
+        assert.equal((await getCart("/api/v1/carts/" + id(9999), publishedCookie)).status, 404);
+        assert.equal((await getCart("/bff/customer/cart", oldCookie)).status, 401);
         assert.deepEqual(
           await reader.read({
             sessionCredential: readCredential,

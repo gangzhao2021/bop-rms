@@ -22,7 +22,7 @@ export interface GetPublicStoreRequest {
   readonly publicStoreReference: PublicStoreReference;
   readonly requestedLocale: StoreLocale;
   readonly evaluatedAt: CanonicalInstant;
-  readonly purpose: "CustomerEntry";
+  readonly purpose: "CustomerEntry" | "CustomerCart";
 }
 
 export interface PublicStoreResolutionEvidence {
@@ -323,7 +323,8 @@ export function parseGetPublicStoreRequest(value: unknown): GetPublicStoreReques
     ["publicStoreReference", "requestedLocale", "evaluatedAt", "purpose"],
     "STORE_REQUEST_INVALID",
   );
-  if (input.purpose !== "CustomerEntry") return fail("STORE_REQUEST_INVALID");
+  if (input.purpose !== "CustomerEntry" && input.purpose !== "CustomerCart")
+    return fail("STORE_REQUEST_INVALID");
   return Object.freeze({
     publicStoreReference: parseUuid<PublicStoreReference>(
       input.publicStoreReference,
@@ -331,7 +332,7 @@ export function parseGetPublicStoreRequest(value: unknown): GetPublicStoreReques
     ),
     requestedLocale: parseLocale(input.requestedLocale, "STORE_REQUEST_INVALID"),
     evaluatedAt: parseInstant(input.evaluatedAt, "STORE_REQUEST_INVALID"),
-    purpose: "CustomerEntry",
+    purpose: input.purpose,
   });
 }
 

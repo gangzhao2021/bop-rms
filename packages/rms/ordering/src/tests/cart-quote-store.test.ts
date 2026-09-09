@@ -98,3 +98,77 @@ describe("Cart Quote persistence boundary", () => {
     expect(error).not.toHaveProperty("cause");
   });
 });
+
+describe("latest Cart Quote reader", () => {
+  const request = { cartReference: id(4), cartVersion: 1, observedAt: "2026-09-08T12:01:00.000Z" };
+  function fixture(
+    selection: unknown = { rows: [{ operation_id: id(1) }] },
+    value: unknown = attachment(),
+  ) {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce(selection)
+      .mockResolvedValue({ rows: [{ attachment: value, lineCount: 1 }] });
+    const run = vi.fn();
+    return {
+      query,
+      run,
+      store: createPostgresCartQuoteStore(
+        {
+          run: async (action) => {
+            run();
+            return action({ query });
+          },
+        },
+        scope,
+        references,
+      ),
+    };
+  }
+  it("selects an exact version and hydrates the immutable attachment with exact money", async () => {
+    const f = fixture();
+    expect((await f.store.loadLatest(request))?.total.amountMinor).toBe(9007199254740993n);
+    expect(f.query.mock.calls[1]?.[1]).toEqual([
+      scope.brandReference,
+      scope.storeReference,
+      id(4),
+      1,
+      request.observedAt,
+    ]);
+    expect(f.query.mock.calls[1]?.[0]).toContain(
+      "ORDER BY attached_at DESC, operation_id DESC LIMIT 1",
+    );
+    expect(f.run).toHaveBeenCalledOnce();
+  });
+  it("preserves absence without resolving an invented operation", async () => {
+    const f = fixture({ rows: [] });
+    expect(await f.store.loadLatest(request)).toBeNull();
+    expect(f.query).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    null,
+    {},
+    { ...request, cartVersion: 0 },
+    { ...request, observedAt: "invalid" },
+    { ...request, extra: true },
+  ])("denies invalid request %j before SQL", async (value) => {
+    const f = fixture();
+    await expect(f.store.loadLatest(value as typeof request)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it("denies ambiguous selection and substituted attachment", async () => {
+    for (const f of [
+      fixture({ rows: [{ operation_id: id(1) }, { operation_id: id(2) }] }),
+      fixture(undefined, { ...attachment(), cartReference: id(99) }),
+      fixture(undefined, { ...attachment(), cartVersion: 2 }),
+      fixture(undefined, { ...attachment(), attachedAt: "2026-09-08T12:02:00.000Z" }),
+      fixture({ rows: [{}] }),
+    ])
+      await expect(f.store.loadLatest(request)).rejects.toMatchObject({
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+  });
+});

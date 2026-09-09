@@ -116,3 +116,11 @@ version-pinned display query backed by Active/Retired projection generations. It
 item/option names only and preserves the existing current-menu query's failure behavior. Its owning
 WP records unit and actual PostgreSQL evidence. This does not establish Ordering display DTO or
 browser integration, current availability, prices, allergen decisions or complete Cart recovery.
+
+[WP-2243](../work-packages/WP-2243.md) composes the existing safe Cart view in Ordering, with a
+final authorized reread, public Store branding, batched historical Catalog display and an exact
+Cart-version Quote reader. Isolated HTTP acceptance exercises the resulting empty/expired view
+after real Identity/Ordering credential activation; Store branding and empty Catalog responses in
+that composition are explicitly synthetic. Nonempty display and exact monetary output have unit
+coverage, and Quote storage has actual PostgreSQL coverage. General production/browser composition,
+DineIn ownership and complete recovery remain unfinished; this is not a full customer-journey claim.

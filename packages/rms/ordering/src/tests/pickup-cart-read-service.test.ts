@@ -110,7 +110,12 @@ describe("authorized Pickup reads", () => {
   it("resolves live credentials twice without interactive renewal and returns an internal snapshot", async () => {
     const f = fixture();
     const result = await f.service.read({ sessionCredential: credential });
-    expect(result).toEqual({ cart: cart(), effectiveStatus: "Active", observedAt: requestedAt });
+    expect(result).toEqual({
+      context: { publicStoreReference: ids.publicStore, locale: "en-CA" },
+      cart: cart(),
+      effectiveStatus: "Active",
+      observedAt: requestedAt,
+    });
     expect(f.resolve).toHaveBeenCalledTimes(2);
     expect(f.resolve).toHaveBeenNthCalledWith(1, {
       sessionCredential: credential,

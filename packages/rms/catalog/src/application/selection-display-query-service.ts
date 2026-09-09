@@ -60,14 +60,14 @@ function closed(value: unknown, keys: readonly string[]): Readonly<Record<string
     return invalid();
   }
 }
-function values(value: unknown): readonly unknown[] {
+function values(value: unknown, maximum = 50): readonly unknown[] {
   if (!Array.isArray(value)) return invalid();
   const descriptors = Object.getOwnPropertyDescriptors(value);
   const length: unknown = Object.getOwnPropertyDescriptor(value, "length")?.value;
   if (
     !Number.isSafeInteger(length) ||
     Number(length) < 0 ||
-    Number(length) > 50 ||
+    Number(length) > maximum ||
     Reflect.ownKeys(value).length !== Number(length) + 1
   )
     return invalid();
@@ -125,9 +125,39 @@ function name(names: Readonly<Record<string, string>>, locale: string, fallback:
   return value;
 }
 
+export interface CatalogSelectionDisplayQuery {
+  describe(value: unknown): Promise<CatalogSelectionDisplayResult>;
+  describeMany(value: unknown): Promise<readonly CatalogSelectionDisplayResult[]>;
+}
+
 // Owner-internal historical presentation only; never a sale, price or allergen decision.
-export function createCatalogSelectionDisplayQuery(ports: CatalogSelectionDisplayPorts) {
+export function createCatalogSelectionDisplayQuery(
+  ports: CatalogSelectionDisplayPorts,
+): CatalogSelectionDisplayQuery {
   return Object.freeze({
+    async describeMany(value: unknown) {
+      let requests: readonly ReturnType<typeof input>[];
+      try {
+        requests = values(value, 100).map(input);
+      } catch {
+        return invalid();
+      }
+      const cache = new Map<string, Promise<readonly PublishedMenuProjection[]>>();
+      const local = createCatalogSelectionDisplayQuery({
+        loadVersionCandidates(request) {
+          const key = JSON.stringify(request);
+          let pending = cache.get(key);
+          if (pending === undefined) {
+            pending = Promise.resolve().then(() => ports.loadVersionCandidates(request));
+            cache.set(key, pending);
+          }
+          return pending;
+        },
+      });
+      const results: CatalogSelectionDisplayResult[] = [];
+      for (const request of requests) results.push(await local.describe(request));
+      return Object.freeze(results);
+    },
     async describe(value: unknown): Promise<CatalogSelectionDisplayResult> {
       let request: ReturnType<typeof input>;
       try {
