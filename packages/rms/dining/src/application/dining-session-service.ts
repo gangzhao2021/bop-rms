@@ -685,6 +685,7 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       const replacement = sessionPort(() =>
         parseDiningJoinCapability({
           ...previous,
+          pepperVersion: ports.pepperVersion,
           capabilityReference: ports.credentials.generateReference("JoinCapability"),
           selectorHash: ports.credentials.hashJoinCredential(previous.kind, joinCredential),
           generation: previous.generation + 1,

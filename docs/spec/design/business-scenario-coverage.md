@@ -260,3 +260,7 @@ Identity credential recovery and Session persistence remain separate.
 WP-2275 implements atomic Session start, Table occupancy, initial capability and Audit storage.
 Dining345/345, Table/Session-start PostgreSQL2/2, full verification and forced uncached integration pass.
 Join/Closing persistence and live activation remain separate.
+
+WP-2276 repairs fresh Join generation after consumption/expiry and current pepper metadata.
+Public Capability101/101, Dining352/352, full verification and security/Session acceptance pass.
+Join/regeneration persistence remains separate.

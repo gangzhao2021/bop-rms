@@ -266,3 +266,97 @@ describe("Dining Join capability lifecycle", () => {
     );
   });
 });
+
+describe("WP-2276 fresh generation after consumption and expiry", () => {
+  const replacement = (
+    instant = "2026-07-30T05:16:00.000Z",
+    overrides: Record<string, unknown> = {},
+  ) =>
+    capability({
+      capabilityReference: refs.replacement,
+      selectorHash: hash("b"),
+      generation: 2,
+      issuedAt: instant,
+      expiresAt: "2026-07-30T05:31:00.000Z",
+      ...overrides,
+    });
+  it.each(["Consumed", "Expired"] as const)(
+    "preserves %s terminal history while issuing a fresh capability",
+    (status) => {
+      const previous = capability({
+        status,
+        version: 2,
+        consumedAt: status === "Consumed" ? "2026-07-30T05:05:00.000Z" : null,
+      });
+      const result = regenerateDiningJoinCapability({
+        previous,
+        replacement: replacement(),
+        observedAt: "2026-07-30T05:16:00.000Z",
+      });
+      expect(result.previous).toEqual(previous);
+      expect(Object.isFrozen(result.previous)).toBe(true);
+      expect(result.current).toMatchObject({
+        status: "Active",
+        version: 1,
+        generation: 2,
+        capabilityReference: refs.replacement,
+      });
+    },
+  );
+  it("revokes a clock-expired Active record without extending the old expiry", () => {
+    const result = regenerateDiningJoinCapability({
+      previous: capability(),
+      replacement: replacement(),
+      observedAt: "2026-07-30T05:16:00.000Z",
+    });
+    expect(result.previous).toMatchObject({
+      status: "Revoked",
+      version: 2,
+      expiresAt: "2026-07-30T05:15:00.000Z",
+      revokedAt: "2026-07-30T05:16:00.000Z",
+    });
+    expect(result.current.expiresAt).toBe("2026-07-30T05:31:00.000Z");
+  });
+  it.each([
+    { status: "Revoked", version: 2, revokedAt: "2026-07-30T05:05:00.000Z" },
+    { status: "Consumed", version: 2, consumedAt: "2026-07-30T05:07:00.000Z" },
+    { status: "Expired", version: 2 },
+  ])("rejects revoked or future terminal evidence %#", (previous) => {
+    expectInvalid(
+      () =>
+        regenerateDiningJoinCapability({
+          previous: capability(previous),
+          replacement: replacement("2026-07-30T05:06:00.000Z", {
+            expiresAt: "2026-07-30T05:21:00.000Z",
+          }),
+          observedAt: "2026-07-30T05:06:00.000Z",
+        }),
+      "PUBLIC_CAPABILITY_STATE_INVALID",
+    );
+  });
+  it.each([
+    { generation: 1 },
+    { generation: 3 },
+    { version: 2 },
+    { capabilityReference: refs.capability },
+    { selectorHash: hash("a") },
+    { storeReference: refs.otherStore },
+    { tableReference: refs.otherTable },
+    { diningSessionReference: refs.otherSession },
+    { assignmentVersion: 5 },
+  ])("retains fresh-generation boundaries for terminal predecessors %#", (override) => {
+    expectInvalid(
+      () =>
+        regenerateDiningJoinCapability({
+          previous: capability({
+            status: "Consumed",
+            version: 2,
+            consumedAt: "2026-07-30T05:05:00.000Z",
+          }),
+          replacement: replacement(undefined, override),
+          observedAt: "2026-07-30T05:16:00.000Z",
+        }),
+      "PUBLIC_CAPABILITY_STATE_INVALID",
+    );
+  });
+});

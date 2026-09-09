@@ -28,6 +28,9 @@ const ids = {
   audit: "018f2000-0000-7000-8000-00000000000e",
   correlation: "018f2000-0000-7000-8000-00000000000f",
   policy: "018f2000-0000-7000-8000-000000000010",
+  nextParticipant: "018f2000-0000-7000-8000-000000000011",
+  nextAdmission: "018f2000-0000-7000-8000-000000000012",
+  secondGuest: "018f2000-0000-7000-8000-000000000013",
 } as const;
 const startAt = "2026-07-29T12:00:00.000Z";
 const joinAt = "2026-07-29T12:01:00.000Z";
@@ -144,6 +147,9 @@ function fixture(
   let regenerationRecord: DiningRegenerationRecord | null = null;
   let capabilityIndex = 0;
   let credentialIndex = 0;
+  let participantIndex = 0;
+  let admissionIndex = 0;
+  const capabilities = new Map<string, DiningStartRecord["capability"]>();
   const startOperations = new Map<string, DiningStartRecord>();
   const joinOperations = new Map<string, DiningJoinRecord>();
   const regenerationOperations = new Map<string, DiningRegenerationRecord>();
@@ -179,8 +185,10 @@ function fixture(
     credentials: {
       generateReference(purpose) {
         if (purpose === "DiningSession") return ids.session;
-        if (purpose === "Participant") return ids.participant;
-        if (purpose === "IdentityAdmission") return ids.admission;
+        if (purpose === "Participant")
+          return participantIndex++ === 0 ? ids.participant : ids.nextParticipant;
+        if (purpose === "IdentityAdmission")
+          return admissionIndex++ === 0 ? ids.admission : ids.nextAdmission;
         return [ids.firstCapability, ids.nextCapability][capabilityIndex++] ?? ids.nextCapability;
       },
       generateJoinCredential() {
@@ -210,26 +218,26 @@ function fixture(
       },
       async start(input) {
         startRecord = input.record;
+        capabilities.set(input.record.capability.selectorHash, input.record.capability);
         startOperations.set(input.record.operationReference, input.record);
         return input.record;
       },
       async resolveJoinState(selectorHash) {
-        if (startRecord === null || startRecord.capability.selectorHash !== selectorHash)
-          return null;
-        return { session: startRecord.session, capability: startRecord.capability };
+        const capability = capabilities.get(selectorHash);
+        if (startRecord === null || capability === undefined) return null;
+        return { session: startRecord.session, capability };
       },
       async resolveActiveJoin(reference) {
         if (startRecord === null || startRecord.session.diningSessionReference !== reference)
           return null;
-        return joinRecord === null
-          ? { session: startRecord.session, capability: startRecord.capability }
-          : { session: joinRecord.session, capability: joinRecord.capability };
+        return { session: startRecord.session, capability: startRecord.capability };
       },
       async resolveJoinOperation(reference) {
         return joinOperations.get(reference) ?? null;
       },
       async join(input) {
         joinRecord = input.record;
+        capabilities.set(input.record.capability.selectorHash, input.record.capability);
         if (startRecord !== null) {
           startRecord = {
             ...startRecord,
@@ -244,6 +252,10 @@ function fixture(
         return regenerationOperations.get(reference) ?? null;
       },
       async regenerate(input) {
+        capabilities.set(input.previous.selectorHash, input.previous);
+        capabilities.set(input.replacement.selectorHash, input.replacement);
+        if (startRecord !== null)
+          startRecord = { ...startRecord, session: input.session, capability: input.replacement };
         regenerationRecord = {
           capability: input.replacement,
           operationReference: input.operationReference,
@@ -1120,4 +1132,129 @@ describe("WP-2274 first Join invariants", () => {
       code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
     });
   });
+});
+
+describe("WP-2276 sequential Guest admission", () => {
+  it("admits a second Guest through a fresh Staff generation and keeps the original Host", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const first = await service.join(joinInput);
+    expect(first.status).toBe("Joined");
+    const old = await ports.store.resolveJoinState(hash("a") as never);
+    const renewed = await service.regenerate({
+      ...regenerationInput,
+      expectedSessionVersion: 2,
+      expectedCapabilityVersion: 2,
+    });
+    expect(renewed).toMatchObject({
+      status: "Issued",
+      joinCredential: nextCredential,
+      capability: { generation: 2, status: "Active", version: 1 },
+    });
+    expect((await ports.store.resolveJoinState(hash("a") as never))?.capability).toEqual(
+      old?.capability,
+    );
+    const second = await service.join({
+      ...joinInput,
+      guestSessionReference: ids.secondGuest,
+      joinCredential: nextCredential,
+      expectedSessionVersion: 2,
+      expectedCapabilityVersion: 1,
+      operationReference: ids.policy,
+      requestedAt: "2026-07-29T12:03:00.000Z",
+    });
+    expect(second).toMatchObject({
+      status: "Joined",
+      session: {
+        diningSessionReference: ids.session,
+        version: 3,
+        hostParticipantReference: ids.participant,
+      },
+      participant: { participantReference: ids.nextParticipant },
+      admission: { admissionReference: ids.nextAdmission },
+    });
+    expect(await service.join({ ...joinInput, requestedAt: "2026-07-29T12:04:00.000Z" })).toEqual({
+      ...first,
+      status: "AlreadyApplied",
+    });
+    expect(
+      await service.join({
+        ...joinInput,
+        guestSessionReference: ids.secondGuest,
+        operationReference: ids.audit,
+        requestedAt: "2026-07-29T12:04:00.000Z",
+      }),
+    ).toEqual(joinUnavailable);
+  });
+  it("issues fresh credentials after the initial invitation expires", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    expect(await service.join({ ...joinInput, requestedAt: "2026-07-29T12:16:00.000Z" })).toEqual(
+      joinUnavailable,
+    );
+    expect(
+      await service.regenerate({ ...regenerationInput, requestedAt: "2026-07-29T12:16:00.000Z" }),
+    ).toMatchObject({
+      status: "Issued",
+      capability: {
+        generation: 2,
+        issuedAt: "2026-07-29T12:16:00.000Z",
+        expiresAt: "2026-07-29T12:31:00.000Z",
+      },
+    });
+    expect((await ports.store.resolveJoinState(hash("a") as never))?.capability).toMatchObject({
+      status: "Revoked",
+      expiresAt: "2026-07-29T12:15:00.000Z",
+    });
+  });
+  it("uses the configured current pepper version for the fresh hash", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const currentProviderService = createDiningSessionService({ ...ports, pepperVersion: 3 });
+    expect(await currentProviderService.regenerate(regenerationInput)).toMatchObject({
+      status: "Issued",
+      capability: { pepperVersion: 3 },
+    });
+    expect((await ports.store.resolveJoinState(hash("a") as never))?.capability.pepperVersion).toBe(
+      2,
+    );
+  });
+  it("does not bypass revoked Staff after consumption", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    await service.join(joinInput);
+    vi.spyOn(ports.staff, "authorize").mockResolvedValue(null);
+    const write = vi.spyOn(ports.store, "regenerate");
+    await expect(
+      service.regenerate({
+        ...regenerationInput,
+        expectedSessionVersion: 2,
+        expectedCapabilityVersion: 2,
+      }),
+    ).rejects.toMatchObject({ code: "DINING_SESSION_PERMISSION_DENIED" });
+    expect(write).not.toHaveBeenCalled();
+  });
+  it.each(["Closing", "Closed", "Cancelled"])(
+    "does not generate a fresh capability for a %s Session",
+    async (phase) => {
+      const { service, ports } = fixture();
+      await start(service);
+      await service.join(joinInput);
+      const state = changedRecord(
+        await ports.store.resolveActiveJoin(ids.session as never),
+        "session.phase",
+        phase,
+      );
+      vi.spyOn(ports.store, "resolveActiveJoin").mockResolvedValue(state);
+      const generate = vi.spyOn(ports.credentials, "generateJoinCredential");
+      await expect(
+        service.regenerate({
+          ...regenerationInput,
+          expectedSessionVersion: 2,
+          expectedCapabilityVersion: 2,
+        }),
+      ).rejects.toMatchObject({ code: "DINING_SESSION_UNAVAILABLE" });
+      expect(generate).not.toHaveBeenCalled();
+    },
+  );
 });

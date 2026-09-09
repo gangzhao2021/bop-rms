@@ -101,6 +101,7 @@ export interface DiningSessionStorePort {
     readonly audit: AppendAuditRecordInput;
   }): Promise<DiningStartRecord>;
   resolveJoinState(selectorHash: PublicCapabilitySelectorHash): Promise<DiningJoinState | null>;
+  /** Current generation for an Active Session; it may already be Consumed or Expired. */
   resolveActiveJoin(diningSessionReference: DiningReference): Promise<DiningJoinState | null>;
   resolveJoinOperation(operationReference: DiningReference): Promise<DiningJoinRecord | null>;
   join(input: {
