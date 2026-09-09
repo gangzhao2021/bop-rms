@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createGuestSession } from "@bop/identity";
-import { createPostgresPickupCartBindingStore } from "../infrastructure/persistence/pickup-cart-binding-store.js";
+import {
+  createPostgresPickupCartBindingStore,
+  createPostgresPickupCartBindingReader,
+} from "../infrastructure/persistence/pickup-cart-binding-store.js";
 const id = (n: number) => `018f5500-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-09-08T12:00:00.000Z";
 const later = "2026-09-08T12:05:00.000Z";
@@ -161,6 +164,54 @@ describe("initial Pickup binding owner boundary", () => {
     const f = setup();
     f.query.mockRejectedValue(new Error("synthetic restricted driver payload"));
     const error = await f.store.current(session, at).catch((value: unknown) => value);
+    expect(error).toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+      message: "cart is unavailable",
+    });
+    expect(error).not.toHaveProperty("cause");
+  });
+});
+
+describe("independent Pickup binding reader", () => {
+  it("needs no creation policy, audit or reference provider and exposes no writes", async () => {
+    const f = setup();
+    const reader = createPostgresPickupCartBindingReader(f.runner, scope);
+    expect(f.run).not.toHaveBeenCalled();
+    expect(Object.keys(reader)).toEqual(["current"]);
+    expect(Object.isFrozen(reader)).toBe(true);
+    expect(await reader.current(session, at)).toBeNull();
+    expect(f.run).toHaveBeenCalledOnce();
+    expect(f.query.mock.calls[0]?.[1]).toEqual([scope.brandReference, scope.storeReference]);
+    expect(f.query.mock.calls[1]?.[1]).toEqual([
+      scope.brandReference,
+      scope.storeReference,
+      session.sessionReference,
+      at,
+    ]);
+    expect(f.query.mock.calls.every(([sql]) => String(sql).startsWith("SELECT"))).toBe(true);
+    expect(f.audit).not.toHaveBeenCalled();
+  });
+  it.each([
+    { ...session, brandReference: id(99) },
+    { ...session, storeReference: id(99) },
+    { ...session, status: "Revoked" },
+    { ...session, channel: "DineIn" },
+  ])("denies invalid or foreign Guest evidence before SQL", async (value) => {
+    const f = setup();
+    await expect(
+      createPostgresPickupCartBindingReader(f.runner, scope).current(value as never, at),
+    ).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it("bounds duplicate bindings and driver failures", async () => {
+    const f = setup();
+    const reader = createPostgresPickupCartBindingReader(f.runner, scope);
+    f.query.mockResolvedValue({ rows: [{ cart_id: id(20) }, { cart_id: id(21) }] });
+    await expect(reader.current(session, at)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    f.query.mockRejectedValue(new Error("synthetic restricted driver payload"));
+    const error = await reader.current(session, at).catch((e: unknown) => e);
     expect(error).toMatchObject({
       code: "CART_DEPENDENCY_UNAVAILABLE",
       message: "cart is unavailable",

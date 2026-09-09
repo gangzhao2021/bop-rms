@@ -46,10 +46,11 @@ export interface PickupCartBindingOptions {
     readonly occurredAt: string;
   }) => unknown;
 }
-export interface PickupCartBindingStore extends GuestBindingOwnerPort {
+export interface PickupCartBindingReader {
   /** Current Identity authorization is required; this internal aggregate is never an HTTP DTO. */
   current(session: GuestSession, observedAt: unknown): Promise<CartAggregate | null>;
 }
+export interface PickupCartBindingStore extends GuestBindingOwnerPort, PickupCartBindingReader {}
 interface Binding {
   readonly intent: Omit<Prepare, "observedAt">;
   readonly preparedAt: string;
@@ -409,6 +410,39 @@ export function createPostgresPickupCartBindingStore(
         return fail();
       }
     },
+    current: createPostgresPickupCartBindingReader(runner, options).current,
+  });
+}
+
+// Trusted infrastructure query only. Call through the current Identity authorization service.
+export function createPostgresPickupCartBindingReader(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+): PickupCartBindingReader {
+  const brand = parseOrderingReference(scope.brandReference);
+  const store = parseOrderingReference(scope.storeReference);
+  function guest(value: unknown, at: string) {
+    const session = assertGuestSessionUsable(createGuestSession(value), at);
+    if (
+      String(session.brandReference) !== brand ||
+      String(session.storeReference) !== store ||
+      session.channel !== "Pickup" ||
+      session.diningState !== "ContextOnly" ||
+      Date.parse(at) < Date.parse(session.lastSeenAt)
+    )
+      fail();
+    return session;
+  }
+  async function run<T>(action: (tx: CartQueryTransaction) => Promise<T>): Promise<T> {
+    return runner.run(async (tx) => {
+      await tx.query(
+        "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+        [brand, store],
+      );
+      return action(tx);
+    });
+  }
+  return Object.freeze({
     async current(sessionValue: GuestSession, observedAt: unknown) {
       try {
         const at = parseOrderingInstant(observedAt);

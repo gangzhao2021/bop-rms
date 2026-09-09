@@ -10,9 +10,10 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresPickupCartBindingStore,
+  createPostgresPickupCartBindingReader,
   createPickupCartReadService,
   createCustomerCartViewQuery,
-  createPostgresCartQuoteStore,
+  createPostgresCartQuoteReader,
   createPostgresCartQueryStore,
 } from "../../rms/ordering/src/index.ts";
 import {
@@ -478,7 +479,7 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
       const displayQuery = createCustomerCartViewQuery({
         reads: createPickupCartReadService({
           sessions: authorization,
-          binding: httpOwner,
+          binding: createPostgresPickupCartBindingReader(runner(orderingRole), scope),
           scope,
           now: () => at(clock),
         }),
@@ -520,14 +521,7 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
             return [];
           },
         },
-        quotes: createPostgresCartQuoteStore(runner(orderingRole), scope, {
-          hashIntent() {
-            throw new Error("read must not write");
-          },
-          equals() {
-            throw new Error("read must not write");
-          },
-        }),
+        quotes: createPostgresCartQuoteReader(runner(orderingRole), scope),
       });
       const display = async (input) => {
         try {

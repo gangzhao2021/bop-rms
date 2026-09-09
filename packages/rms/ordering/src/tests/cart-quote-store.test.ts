@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPostgresCartQuoteStore } from "../infrastructure/persistence/cart-quote-store.js";
+import {
+  createPostgresCartQuoteStore,
+  createPostgresCartQuoteReader,
+} from "../infrastructure/persistence/cart-quote-store.js";
 const id = (n: number) => `018f5700-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const scope = { brandReference: id(2), storeReference: id(3) };
 const references = { hashIntent: () => "invalid", equals: (a: string, b: string) => a === b };
@@ -99,7 +102,7 @@ describe("Cart Quote persistence boundary", () => {
   });
 });
 
-describe("latest Cart Quote reader", () => {
+describe.each(["full", "read-only"])("latest Cart Quote reader %s", (mode) => {
   const request = { cartReference: id(4), cartVersion: 1, observedAt: "2026-09-08T12:01:00.000Z" };
   function fixture(
     selection: unknown = { rows: [{ operation_id: id(1) }] },
@@ -114,7 +117,7 @@ describe("latest Cart Quote reader", () => {
     return {
       query,
       run,
-      store: createPostgresCartQuoteStore(
+      store: (mode === "full" ? createPostgresCartQuoteStore : createPostgresCartQuoteReader)(
         {
           run: async (action) => {
             run();
@@ -126,6 +129,12 @@ describe("latest Cart Quote reader", () => {
       ),
     };
   }
+  it("constructs without acquiring resources and exposes only read capability", () => {
+    const f = fixture();
+    expect(f.run).not.toHaveBeenCalled();
+    if (mode === "read-only") expect(Object.keys(f.store)).toEqual(["loadLatest"]);
+    expect(Object.isFrozen(f.store)).toBe(true);
+  });
   it("selects an exact version and hydrates the immutable attachment with exact money", async () => {
     const f = fixture();
     expect((await f.store.loadLatest(request))?.total.amountMinor).toBe(9007199254740993n);

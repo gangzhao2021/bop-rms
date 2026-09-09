@@ -18,12 +18,14 @@ import {
   type CartQueryTransactionRunner,
 } from "./cart-query-store.js";
 type Attach = Parameters<CartQuoteAttachmentPorts["repository"]["attach"]>[0];
-export interface CartQuoteStore {
+export interface CartQuoteReader {
   loadLatest(input: {
     readonly cartReference: string;
     readonly cartVersion: number;
     readonly observedAt: string;
   }): Promise<CartQuoteAttachment | null>;
+}
+export interface CartQuoteStore extends CartQuoteReader {
   resolveOperation(reference: string): Promise<CartQuoteAttachment | null>;
   attach(input: Attach): Promise<CartQuoteAttachment>;
 }
@@ -111,11 +113,10 @@ const select = `SELECT jsonb_build_object(
 
 // Infrastructure only. Current Session/Participant authorization and authoritative Pricing evidence
 // are service duties. This scoped adapter owns one transaction and no Pricing-private access.
-export function createPostgresCartQuoteStore(
+function createQuoteAccess(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
-  references: CartQuoteAttachmentPorts["references"],
-): CartQuoteStore {
+) {
   const brand = parseOrderingReference(scope.brandReference);
   const store = parseOrderingReference(scope.storeReference);
   function inScope(value: CartQuoteAttachment) {
@@ -146,40 +147,56 @@ export function createPostgresCartQuoteStore(
       fail();
     return attachment;
   }
+  async function loadLatest(input: Parameters<CartQuoteStore["loadLatest"]>[0]) {
+    try {
+      const raw = closed(input, ["cartReference", "cartVersion", "observedAt"]);
+      const cartReference = parseOrderingReference(raw.cartReference);
+      const observedAt = parseOrderingInstant(raw.observedAt);
+      const cartVersion = raw.cartVersion;
+      if (!Number.isSafeInteger(cartVersion) || Number(cartVersion) < 1) fail();
+      return await run(async (tx) => {
+        const result = rows(
+          await tx.query(
+            "SELECT operation_id FROM rms_ordering.cart_quote_attachment WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3 AND cart_version=$4 AND attached_at<=$5 ORDER BY attached_at DESC, operation_id DESC LIMIT 1",
+            [brand, store, cartReference, cartVersion, observedAt],
+          ),
+        );
+        if (result.length === 0) return null;
+        if (result.length !== 1) fail();
+        const operation = parseOrderingReference(closed(result[0], ["operation_id"]).operation_id);
+        const attachment = await resolve(tx, operation);
+        if (
+          attachment === null ||
+          attachment.cartReference !== cartReference ||
+          attachment.cartVersion !== cartVersion ||
+          attachment.attachedAt > observedAt
+        )
+          fail();
+        return attachment;
+      });
+    } catch {
+      return fail();
+    }
+  }
+  return { brand, store, inScope, run, resolve, loadLatest };
+}
+
+export function createPostgresCartQuoteReader(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+): CartQuoteReader {
+  const { loadLatest } = createQuoteAccess(runner, scope);
+  return Object.freeze({ loadLatest });
+}
+
+export function createPostgresCartQuoteStore(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  references: CartQuoteAttachmentPorts["references"],
+): CartQuoteStore {
+  const { brand, store, inScope, run, resolve, loadLatest } = createQuoteAccess(runner, scope);
   return Object.freeze({
-    async loadLatest(input: Parameters<CartQuoteStore["loadLatest"]>[0]) {
-      try {
-        const raw = closed(input, ["cartReference", "cartVersion", "observedAt"]);
-        const cartReference = parseOrderingReference(raw.cartReference);
-        const observedAt = parseOrderingInstant(raw.observedAt);
-        const cartVersion = raw.cartVersion;
-        if (!Number.isSafeInteger(cartVersion) || Number(cartVersion) < 1) fail();
-        return await run(async (tx) => {
-          const result = rows(
-            await tx.query(
-              "SELECT operation_id FROM rms_ordering.cart_quote_attachment WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3 AND cart_version=$4 AND attached_at<=$5 ORDER BY attached_at DESC, operation_id DESC LIMIT 1",
-              [brand, store, cartReference, cartVersion, observedAt],
-            ),
-          );
-          if (result.length === 0) return null;
-          if (result.length !== 1) fail();
-          const operation = parseOrderingReference(
-            closed(result[0], ["operation_id"]).operation_id,
-          );
-          const attachment = await resolve(tx, operation);
-          if (
-            attachment === null ||
-            attachment.cartReference !== cartReference ||
-            attachment.cartVersion !== cartVersion ||
-            attachment.attachedAt > observedAt
-          )
-            fail();
-          return attachment;
-        });
-      } catch {
-        return fail();
-      }
-    },
+    loadLatest,
     async resolveOperation(value: string) {
       try {
         const reference = parseOrderingReference(value);

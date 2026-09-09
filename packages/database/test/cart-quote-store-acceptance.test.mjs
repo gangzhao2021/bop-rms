@@ -5,6 +5,7 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresCartQuoteStore,
+  createPostgresCartQuoteReader,
   createPostgresCartQueryStore,
   createCartQuoteAttachmentService,
 } from "../../rms/ordering/src/index.ts";
@@ -256,17 +257,22 @@ it("atomically attaches Quotes with exact bigint roundtrip, concurrent replay an
         cartVersion: first.attachment.cartVersion,
         observedAt: first.attachment.attachedAt,
       };
+      const quoteReader = createPostgresCartQuoteReader(runner(), scope);
+      assert.deepEqual(Object.keys(quoteReader), ["loadLatest"]);
       const beforeReads = await counts();
-      assert.deepEqual(await store.loadLatest(readRequest), first.attachment);
+      assert.deepEqual(await quoteReader.loadLatest(readRequest), first.attachment);
       assert.deepEqual(
-        await store.loadLatest({ ...readRequest, observedAt: first.attachment.quoteExpiresAt }),
+        await quoteReader.loadLatest({
+          ...readRequest,
+          observedAt: first.attachment.quoteExpiresAt,
+        }),
         first.attachment,
       );
       assert.equal(
-        await store.loadLatest({ ...readRequest, cartVersion: readRequest.cartVersion + 1 }),
+        await quoteReader.loadLatest({ ...readRequest, cartVersion: readRequest.cartVersion + 1 }),
         null,
       );
-      assert.equal(await store.loadLatest({ ...readRequest, cartReference: id(9999) }), null);
+      assert.equal(await quoteReader.loadLatest({ ...readRequest, cartReference: id(9999) }), null);
       assert.deepEqual(await counts(), beforeReads);
       assert.equal(
         (

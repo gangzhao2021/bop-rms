@@ -72,6 +72,8 @@ export {
 
 export {
   createPostgresPickupCartBindingStore,
+  createPostgresPickupCartBindingReader,
+  type PickupCartBindingReader,
   type PickupCartBindingStore,
   type PickupCartBindingOptions,
 } from "./infrastructure/persistence/pickup-cart-binding-store.js";
@@ -83,6 +85,8 @@ export {
 
 export {
   createPostgresCartQuoteStore,
+  createPostgresCartQuoteReader,
+  type CartQuoteReader,
   type CartQuoteStore,
 } from "./infrastructure/persistence/cart-quote-store.js";
 
