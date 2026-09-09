@@ -140,3 +140,44 @@ describe("scoped local Customer runtime", () => {
     expect(other.runtime.server.listening).toBe(true);
   });
 });
+
+describe("optional local Cart runtime", () => {
+  it("retains unavailable default without acquiring resources", async () => {
+    const { options, run } = setup();
+    const { root } = await start(options);
+    const response = await fetch(root + "/bff/customer/cart");
+    expect(response.status).toBe(503);
+    await response.text();
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("configures authentication without invoking admission, Cart or menu on denied reads", async () => {
+    const { options, run, f } = setup();
+    const cartRun = vi.fn(async (): Promise<never> => {
+      throw new Error("unexpected Cart lookup");
+    });
+    const { root } = await start({ ...options, cartTransactions: { run: cartRun } });
+    expect(run).not.toHaveBeenCalled();
+    expect(cartRun).not.toHaveBeenCalled();
+    const missing = await fetch(root + "/bff/customer/cart", {
+      headers: { "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors" },
+    });
+    expect(missing.status).toBe(401);
+    await missing.text();
+    expect(run).not.toHaveBeenCalled();
+    const denied = await fetch(root + "/bff/customer/cart", {
+      headers: {
+        cookie: "__Host-bop-guest=" + "a".repeat(43),
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+      },
+    });
+    expect(denied.status).toBe(401);
+    expect(denied.headers.get("cache-control")).toContain("no-store");
+    expect(await denied.text()).not.toContain("synthetic database unavailable");
+    expect(run).toHaveBeenCalledOnce();
+    expect(cartRun).not.toHaveBeenCalled();
+    expect(f.options.admission.consume).not.toHaveBeenCalled();
+    expect(f.options.profile.resolution.resolve).not.toHaveBeenCalled();
+    expect(f.options.session.credentials.generateCredential).not.toHaveBeenCalled();
+  });
+});

@@ -124,3 +124,7 @@ after real Identity/Ordering credential activation; Store branding and empty Cat
 that composition are explicitly synthetic. Nonempty display and exact monetary output have unit
 coverage, and Quote storage has actual PostgreSQL coverage. General production/browser composition,
 DineIn ownership and complete recovery remain unfinished; this is not a full customer-journey claim.
+
+[WP-2245](../work-packages/WP-2245.md) adds an optional local-runtime Cart read composition and
+the production API bridge. Its owning WP records bounded local HTTP/Identity/Ordering persistence
+evidence. No Cart/item write, recovery, DineIn, browser or production completion is inferred.

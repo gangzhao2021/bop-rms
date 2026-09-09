@@ -1,3 +1,4 @@
+import { createCustomerCartReadPort } from "../../../apps/api/src/customer-cart-read-composition.ts";
 import { CustomerCartHandler } from "../../../apps/api/src/customer-cart.ts";
 import { createServer } from "node:http";
 import { createApp } from "../../../apps/api/src/app.ts";
@@ -523,33 +524,12 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
         },
         quotes: createPostgresCartQuoteReader(runner(orderingRole), scope),
       });
-      const display = async (input) => {
-        try {
-          const view = await displayQuery.read({
-            sessionCredential: input.guestCredential,
-            ...(input.cartReference === undefined ? {} : { cartReference: input.cartReference }),
-          });
-          return view === null ? { status: "NotFound" } : { status: "Found", view };
-        } catch (error) {
-          return {
-            status: error?.code === "CART_PERMISSION_DENIED" ? "SessionExpired" : "Unavailable",
-          };
-        }
-      };
-      const unavailableMutation = async () => ({ status: "Unavailable" });
       const httpServer = createServer(
         createApp({
           customerCart: new CustomerCartHandler({
             allowedOrigin: "https://customer.example.test",
             now: () => at(clock),
-            port: {
-              getCurrentCart: display,
-              getCart: display,
-              createCart: unavailableMutation,
-              addItem: unavailableMutation,
-              updateItem: unavailableMutation,
-              removeItem: unavailableMutation,
-            },
+            port: createCustomerCartReadPort(displayQuery),
           }),
           customerCartBinding: new CustomerCartBindingHandler({
             allowedOrigin: "https://customer.example.test",

@@ -1,9 +1,21 @@
+import { createPublicStoreProfileService } from "@rms/store";
+import {
+  createCustomerCartViewQuery,
+  createPickupCartReadService,
+  createPostgresPickupCartBindingReader,
+  createPostgresCartQuoteReader,
+  type CartQueryTransactionRunner,
+} from "@rms/ordering";
+import { createCustomerCartReadPort } from "./customer-cart-read-composition.js";
+import { CustomerCartHandler } from "./customer-cart.js";
 import {
   createPostgresGuestSessionEntryStore,
+  GuestSessionService,
   type GuestSessionEntryTransactionRunner,
 } from "@bop/identity";
 import {
   createCustomerMenuQueryService,
+  createCatalogSelectionDisplayQuery,
   createPostgresPublishedMenuQueryStore,
   parseCatalogReference,
   type CustomerMenuQueryPorts,
@@ -30,6 +42,8 @@ export interface LocalCustomerRuntimeOptions {
   readonly sessionTransactions: GuestSessionEntryTransactionRunner;
   // Must own a separate, bounded, read-only transaction and release its connection.
   readonly menuTransactions: PublishedMenuQueryTransactionRunner;
+  // Optional scoped, bounded read-only transactions; the caller retains resource ownership.
+  readonly cartTransactions?: CartQueryTransactionRunner;
   readonly allowedOrigin: string;
   readonly now: () => string;
   readonly uuidV7Factory: () => string;
@@ -61,6 +75,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     },
     session: { ...entry.session, store },
   });
+  const projections = createPostgresPublishedMenuQueryStore(options.menuTransactions, scope);
   const customerMenu = createCustomerMenuQueryService({
     stores: {
       async resolvePublic(reference) {
@@ -68,9 +83,44 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
         return resolved !== null && sameScope(resolved) ? resolved : null;
       },
     },
-    projections: createPostgresPublishedMenuQueryStore(options.menuTransactions, scope),
+    projections,
   });
+  const customerCart =
+    options.cartTransactions === undefined
+      ? undefined
+      : new CustomerCartHandler({
+          allowedOrigin: options.allowedOrigin,
+          now,
+          port: createCustomerCartReadPort(
+            createCustomerCartViewQuery({
+              reads: createPickupCartReadService({
+                sessions: new GuestSessionService({
+                  ...entry.session,
+                  store,
+                  // This private instance only resolves existing sessions; creation always denies.
+                  admission: { consume: async () => null },
+                  now,
+                }),
+                binding: createPostgresPickupCartBindingReader(options.cartTransactions, scope),
+                scope,
+                now,
+              }),
+              catalog: createCatalogSelectionDisplayQuery(projections),
+              stores: createPublicStoreProfileService({
+                ...entry.profile,
+                resolution: {
+                  async resolve(request) {
+                    const resolved = await entry.profile.resolution.resolve(request);
+                    return resolved !== null && sameScope(resolved) ? resolved : null;
+                  },
+                },
+              }),
+              quotes: createPostgresCartQuoteReader(options.cartTransactions, scope),
+            }),
+          ),
+        });
   return createApiServerRuntime({
+    ...(customerCart === undefined ? {} : { customerCart }),
     port: options.runtime?.port ?? 0,
     ...(options.runtime?.logger === undefined ? {} : { logger: options.runtime.logger }),
     host: "127.0.0.1",
