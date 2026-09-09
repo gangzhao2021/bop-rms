@@ -1,3 +1,4 @@
+import type { CustomerCartBindingHandler } from "./customer-cart-binding.js";
 import { createServer, type Server } from "node:http";
 import { pathToFileURL } from "node:url";
 import {
@@ -59,6 +60,7 @@ export interface ApiServerRuntime {
 export interface ApiServerRuntimeOptions {
   coreTelemetry?: CoreTelemetry;
   customerCart?: CustomerCartHandler;
+  customerCartBinding?: CustomerCartBindingHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
   customerQuote?: CustomerQuoteHandler;
@@ -104,6 +106,7 @@ function runtimeDuration(startedAt: number, completedAt: number): number {
 export function createApiServerRuntime({
   coreTelemetry = createApiCoreTelemetry(),
   customerCart,
+  customerCartBinding,
   customerEntry,
   customerMenu,
   customerQuote,
@@ -125,6 +128,7 @@ export function createApiServerRuntime({
   const server = createServer(
     createApp({
       ...(customerCart === undefined ? {} : { customerCart }),
+      ...(customerCartBinding === undefined ? {} : { customerCartBinding }),
       ...(customerEntry === undefined ? {} : { customerEntry }),
       healthReadiness,
       ...(customerMenu === undefined ? {} : { customerMenu }),

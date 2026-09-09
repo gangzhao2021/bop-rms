@@ -1,3 +1,9 @@
+import { createServer } from "node:http";
+import { createApp } from "../../../apps/api/src/app.ts";
+import {
+  CustomerCartBindingHandler,
+  customerCartBindingRoutes,
+} from "../../../apps/api/src/customer-cart-binding.ts";
 import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
@@ -441,6 +447,111 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
         issued.recoveryProof,
       ])
         assert.equal(stored.includes(raw), false);
+      // Real HTTP transport over the same real owner stores; browser cookies are supplied explicitly.
+      const httpCredential = credentials.generateCredential("Session");
+      const httpCsrf = credentials.generateCredential("Csrf");
+      await sessions.create({
+        record: createGuestSessionRecord({
+          session: guest(700),
+          sessionSelectorHash: credentials.hashCredential("Session", httpCredential),
+          csrfSelectorHash: credentials.hashCredential("Csrf", httpCsrf),
+          operationReference: id(701),
+          operationIntentHash: "c".repeat(64),
+        }),
+      });
+      const beforeHttp = await counts();
+      let failPublication = true;
+      const httpOwner = owner();
+      const httpService = createGuestBindingService({
+        ...serviceOptions,
+        owner: {
+          ...httpOwner,
+          activate: (receipt) => owner({ failAudit: failPublication }).activate(receipt),
+        },
+      });
+      const httpServer = createServer(
+        createApp({
+          customerCartBinding: new CustomerCartBindingHandler({
+            allowedOrigin: "https://customer.example.test",
+            port: httpService,
+            now: () => at(clock),
+          }),
+        }),
+      );
+      try {
+        await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+        const address = httpServer.address();
+        assert.ok(address && typeof address === "object");
+        const send = (action, cookie, csrfToken, body = {}) =>
+          globalThis.fetch(`http://127.0.0.1:${address.port}${customerCartBindingRoutes[action]}`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              origin: "https://customer.example.test",
+              "sec-fetch-site": "same-origin",
+              "sec-fetch-mode": "cors",
+              "idempotency-key": id(702),
+              "x-csrf-token": csrfToken,
+              cookie,
+            },
+            body: JSON.stringify(body),
+          });
+        clock = 400;
+        const oldCookie = `__Host-bop-guest=${httpCredential}`;
+        const preparedResponse = await send("prepare", oldCookie, httpCsrf);
+        assert.equal(preparedResponse.status, 200);
+        assert.equal(preparedResponse.headers.get("cache-control"), "no-store");
+        const pendingCookie = preparedResponse.headers.getSetCookie()[0].split(";")[0];
+        assert.ok(pendingCookie.startsWith(`__Host-bop-guest-candidate-${id(702)}=`));
+        const preparedBody = await preparedResponse.json();
+        assert.equal(JSON.stringify(preparedBody).includes(pendingCookie.split("=")[1]), false);
+        assert.equal((await counts()).carts, beforeHttp.carts);
+        clock = 401;
+        const failedResponse = await send("activate", `${oldCookie}; ${pendingCookie}`, httpCsrf, {
+          candidateCsrfToken: preparedBody.candidateCsrfToken,
+          recoveryProof: preparedBody.recoveryProof,
+        });
+        assert.equal(failedResponse.status, 503);
+        assert.deepEqual(failedResponse.headers.getSetCookie(), []);
+        assert.equal(
+          (await sessions.resolve(credentials.hashCredential("Session", httpCredential))).session
+            .status,
+          "Revoked",
+        );
+        failPublication = false;
+        clock = 701;
+        const completedResponse = await send(
+          "complete",
+          `${oldCookie}; ${pendingCookie}`,
+          preparedBody.candidateCsrfToken,
+        );
+        assert.equal(completedResponse.status, 200);
+        const publishedCookie = completedResponse.headers.getSetCookie()[0].split(";")[0];
+        assert.equal(publishedCookie, `__Host-bop-guest=${pendingCookie.split("=")[1]}`);
+        const completedBody = await completedResponse.json();
+        assert.equal(completedBody.csrfToken, preparedBody.candidateCsrfToken);
+        assert.equal(JSON.stringify(completedBody).includes(pendingCookie.split("=")[1]), false);
+        clock = 702;
+        const repeated = await send("complete", publishedCookie, preparedBody.candidateCsrfToken);
+        assert.equal(repeated.status, 200);
+        assert.deepEqual(await repeated.json(), completedBody);
+        assert.deepEqual(await counts(), {
+          carts: beforeHttp.carts + 1,
+          bindings: beforeHttp.bindings + 2,
+          audits: beforeHttp.audits + 5,
+        });
+        assert.equal(
+          (
+            await admin.query(
+              "SELECT count(*)::integer AS n FROM bop_identity.guest_binding_preparation",
+            )
+          ).rows[0].n,
+          6,
+        );
+      } finally {
+        httpServer.closeAllConnections();
+        await new Promise((resolve) => httpServer.close(() => resolve()));
+      }
       assert.equal(active, 0);
     } finally {
       for (const role of [identityRole, orderingRole]) {

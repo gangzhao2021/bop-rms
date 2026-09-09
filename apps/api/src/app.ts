@@ -1,3 +1,8 @@
+import {
+  CustomerCartBindingHandler,
+  customerCartBindingRoutes,
+  unavailableCustomerCartBindingHandler,
+} from "./customer-cart-binding.js";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import type { CoreTelemetry } from "@bop-rms/observability";
 import {
@@ -45,6 +50,7 @@ export interface RequestErrorLogger {
 export interface AppOptions {
   correlationAcceptanceHandler?: RequestHandler;
   customerCart?: CustomerCartHandler;
+  customerCartBinding?: CustomerCartBindingHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
   customerQuote?: CustomerQuoteHandler;
@@ -101,6 +107,7 @@ function createErrorHandler(errorLogger: RequestErrorLogger | undefined): ErrorR
 export function createApp({
   correlationAcceptanceHandler,
   customerCart,
+  customerCartBinding,
   customerEntry,
   customerMenu,
   customerQuote,
@@ -143,6 +150,18 @@ export function createApp({
   });
   app.get("/bff/realtime", realtime?.handler() ?? unavailableRealtimeHandler);
   app.post("/bff/customer/entry", customerEntry?.handler() ?? unavailableCustomerEntryHandler);
+  app.post(
+    customerCartBindingRoutes.prepare,
+    customerCartBinding?.prepare() ?? unavailableCustomerCartBindingHandler,
+  );
+  app.post(
+    customerCartBindingRoutes.activate,
+    customerCartBinding?.activate() ?? unavailableCustomerCartBindingHandler,
+  );
+  app.post(
+    customerCartBindingRoutes.complete,
+    customerCartBinding?.complete() ?? unavailableCustomerCartBindingHandler,
+  );
   app.get(customerCartRoutes.current, customerCart?.current() ?? unavailableCustomerCartHandler);
   app.get(
     "/api/v1/public/stores/:store_public_id/menu",
