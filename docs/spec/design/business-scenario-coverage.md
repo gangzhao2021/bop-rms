@@ -142,3 +142,6 @@ no default configuration, full browser orchestration or real Store readiness is 
 
 [WP-2248](../work-packages/WP-2248.md) hardens in-memory Cart/Configurator uncertain-outcome
 retry and disables superseding mutations. This does not supply reload recovery or live item writes.
+
+[WP-2249](../work-packages/WP-2249.md) extends the Cart deadline through complete response-body
+consumption and cleanup. It preserves foreground-only retries and does not provide live write wiring.

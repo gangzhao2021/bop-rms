@@ -3,7 +3,7 @@ import {
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
-import { boundedFetch } from "../network/bounded-fetch.js";
+import { browserRequestTimeoutMs } from "../network/bounded-fetch.js";
 
 const errorStatuses: Partial<Record<CartErrorCode, number>> = {
   cart_request_invalid: 400,
@@ -186,13 +186,7 @@ function createHeaders(operationReference: string) {
   };
 }
 
-async function parse(response: Response): Promise<CartView | null> {
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new CartClientError("cart_service_unavailable");
-  }
+function parse(response: Response, payload: unknown): CartView | null {
   if (response.ok) return view(payload);
   const error =
     typeof payload === "object" && payload !== null
@@ -225,14 +219,67 @@ async function parse(response: Response): Promise<CartView | null> {
 }
 
 async function request(url: string, init: RequestInit): Promise<CartView | null> {
+  const controller = new AbortController();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let rejectCancellation: (error: CartClientError) => void = () => undefined;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const cancel = () => {
+    controller.abort();
+    rejectCancellation(new CartClientError("network_unknown"));
+  };
+  const timer = setTimeout(cancel, browserRequestTimeoutMs);
+  if (init.signal?.aborted) cancel();
+  else init.signal?.addEventListener("abort", cancel, { once: true });
+  const operation = async () => {
+    if (controller.signal.aborted) throw new CartClientError("network_unknown");
+    const response = await globalThis.fetch(url, {
+      ...init,
+      signal: controller.signal,
+      mode: "cors",
+      cache: "no-store",
+      credentials: "same-origin",
+      redirect: "error",
+      referrerPolicy: "no-referrer",
+    });
+    // A late, abort-insensitive response must not parse a Session error or acquire a reader.
+    if (controller.signal.aborted) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new CartClientError("network_unknown");
+    }
+    if (response.redirected || response.body === null) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new CartClientError("cart_service_unavailable");
+    }
+    reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      if (controller.signal.aborted) throw new CartClientError("network_unknown");
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > 16 * 1024 * 1024) throw new CartClientError("cart_service_unavailable");
+      chunks.push(part.value);
+    }
+    if (controller.signal.aborted) throw new CartClientError("network_unknown");
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    } catch {
+      throw new CartClientError("cart_service_unavailable");
+    }
+    return parse(response, payload);
+  };
   try {
-    return await parse(
-      await boundedFetch(globalThis.fetch, url, {
-        ...init,
-        cache: "no-store",
-        credentials: "same-origin",
-      }),
-    );
+    return await Promise.race([operation(), cancellation]);
   } catch (error) {
     if (error instanceof CartClientError) {
       // An unavailable or malformed write response may follow a committed command.
@@ -241,6 +288,14 @@ async function request(url: string, init: RequestInit): Promise<CartView | null>
       throw error;
     }
     throw new CartClientError("network_unknown");
+  } finally {
+    clearTimeout(timer);
+    init.signal?.removeEventListener("abort", cancel);
+    controller.abort();
+    if (reader !== undefined) {
+      void reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
   }
 }
 
