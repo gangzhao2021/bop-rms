@@ -133,3 +133,7 @@ evidence. No Cart/item write, recovery, DineIn, browser or production completion
 Pickup binding, with explicit calls and bounded unknown outcomes. Its owning WP records actual
 HTTP/Identity/Ordering evidence under a synthetic cookie boundary. Page orchestration, reload
 recovery, shared DineIn and overall browser journey acceptance remain unfinished.
+
+[WP-2247](../work-packages/WP-2247.md) connects explicit binding write/policy/audit providers
+to the optional local runtime. Its owning WP records bounded production-composition evidence;
+no default configuration, full browser orchestration or real Store readiness is inferred.

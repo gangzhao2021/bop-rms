@@ -1,3 +1,4 @@
+import { createCustomerCartBindingComposition } from "../../../apps/api/src/customer-cart-binding-composition.ts";
 import { createBrowserCartBindingClient } from "../../../apps/customer-pwa/src/cart/cart-binding-client.ts";
 import { createCustomerCartReadPort } from "../../../apps/api/src/customer-cart-read-composition.ts";
 import { CustomerCartHandler } from "../../../apps/api/src/customer-cart.ts";
@@ -468,12 +469,28 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
       const beforeHttp = await counts();
       let failPublication = true;
       const httpOwner = owner();
-      const httpService = createGuestBindingService({
-        ...serviceOptions,
-        owner: {
-          ...httpOwner,
-          activate: (receipt) => owner({ failAudit: failPublication }).activate(receipt),
+      const httpService = createCustomerCartBindingComposition({
+        scope,
+        session: { credentials, binding: { validate: async () => "Current" } },
+        sessionTransactions: runner(identityRole),
+        orderingTransactions: runner(orderingRole),
+        identityAudit: {
+          append: (tx, descriptor) =>
+            appendAuditRecordInTransaction(tx, auditRecord(descriptor, true)),
         },
+        ordering: {
+          policy: options.policy,
+          sourceChannel: options.sourceChannel,
+          generateReference: options.generateReference,
+          audit: (descriptor) => {
+            if (descriptor.action === "Activated" && failPublication)
+              throw new Error("synthetic owner audit unavailable");
+            return auditRecord(descriptor);
+          },
+        },
+        recovery,
+        preparationLifetimeSeconds: 300,
+        now: () => at(clock),
       });
       const displayQuery = createCustomerCartViewQuery({
         reads: createPickupCartReadService({

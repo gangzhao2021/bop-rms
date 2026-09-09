@@ -1,3 +1,4 @@
+import { createGuestBindingCredentialProvider } from "@bop/identity";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixture, id, now } from "../test-support/customer-entry-composition-fixture.js";
 import {
@@ -178,6 +179,92 @@ describe("optional local Cart runtime", () => {
     expect(cartRun).not.toHaveBeenCalled();
     expect(f.options.admission.consume).not.toHaveBeenCalled();
     expect(f.options.profile.resolution.resolve).not.toHaveBeenCalled();
+    expect(f.options.session.credentials.generateCredential).not.toHaveBeenCalled();
+  });
+});
+
+describe("optional local Cart binding runtime", () => {
+  function bindingOptions(): NonNullable<LocalCustomerRuntimeOptions["cartBinding"]> {
+    return {
+      orderingTransactions: {
+        run: vi.fn(async (): Promise<never> => {
+          throw new Error("unexpected Ordering write");
+        }),
+      },
+      identityAudit: {
+        append: vi.fn(async () => {
+          throw new Error("unexpected Identity audit");
+        }),
+      },
+      ordering: {
+        policy: {
+          policyVersionReference: id(901),
+          policyDigest: "sha256:" + "a".repeat(64),
+          idleTimeoutSeconds: 3600,
+          absoluteTimeoutSeconds: 86400,
+          validFrom: now,
+          validUntil: "2026-01-16T12:00:00.000Z",
+        },
+        sourceChannel: "Qr",
+        generateReference: vi.fn(() => id(900)),
+        audit: vi.fn(() => {
+          throw new Error("unexpected Ordering audit");
+        }),
+      },
+      recovery: createGuestBindingCredentialProvider(new Uint8Array(32).fill(7)),
+      preparationLifetimeSeconds: 300,
+    };
+  }
+  it("requires Cart reads before enabling binding", () => {
+    const { options, run } = setup();
+    expect(() => createLocalCustomerRuntime({ ...options, cartBinding: bindingOptions() })).toThrow(
+      "LOCAL_CART_BINDING_READS_REQUIRED",
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("keeps binding unavailable in the default runtime", async () => {
+    const { options, run } = setup();
+    const { root } = await start(options);
+    const response = await fetch(root + "/bff/customer/cart-binding/prepare", { method: "POST" });
+    expect(response.status).toBe(503);
+    await response.text();
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("wires configured binding with existing request guards and bounded authorization failure", async () => {
+    const { options, run, f } = setup();
+    const binding = bindingOptions();
+    const { root } = await start({ ...options, cartTransactions: { run }, cartBinding: binding });
+    expect(run).not.toHaveBeenCalled();
+    const send = (origin: string) =>
+      fetch(root + "/bff/customer/cart-binding/prepare", {
+        method: "POST",
+        headers: {
+          origin,
+          "sec-fetch-site": "same-origin",
+          "sec-fetch-mode": "cors",
+          "content-type": "application/json",
+          "idempotency-key": id(902),
+          "x-csrf-token": "b".repeat(43),
+          cookie: "__Host-bop-guest=" + "a".repeat(43),
+        },
+        body: "{}",
+      });
+    const wrongOrigin = await send("https://wrong.invalid");
+    expect(wrongOrigin.status).toBe(400);
+    await wrongOrigin.text();
+    expect(run).not.toHaveBeenCalled();
+    const denied = await send(options.allowedOrigin);
+    expect(denied.status).toBe(503);
+    expect(denied.headers.get("cache-control")).toBe("no-store");
+    expect(denied.headers.get("set-cookie")).toBeNull();
+    expect(await denied.json()).toEqual({
+      error: { code: "cart_binding_unavailable", messageKey: "customer.cart.binding_unavailable" },
+    });
+    expect(run).toHaveBeenCalledOnce();
+    expect(binding.orderingTransactions.run).not.toHaveBeenCalled();
+    expect(binding.identityAudit.append).not.toHaveBeenCalled();
+    expect(binding.ordering.audit).not.toHaveBeenCalled();
+    expect(f.options.admission.consume).not.toHaveBeenCalled();
     expect(f.options.session.credentials.generateCredential).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,8 @@
+import {
+  createCustomerCartBindingComposition,
+  type CustomerCartBindingCompositionOptions,
+} from "./customer-cart-binding-composition.js";
+import { CustomerCartBindingHandler } from "./customer-cart-binding.js";
 import { createPublicStoreProfileService } from "@rms/store";
 import {
   createCustomerCartViewQuery,
@@ -44,6 +49,10 @@ export interface LocalCustomerRuntimeOptions {
   readonly menuTransactions: PublishedMenuQueryTransactionRunner;
   // Optional scoped, bounded read-only transactions; the caller retains resource ownership.
   readonly cartTransactions?: CartQueryTransactionRunner;
+  readonly cartBinding?: Omit<
+    CustomerCartBindingCompositionOptions,
+    "scope" | "session" | "sessionTransactions" | "now"
+  >;
   readonly allowedOrigin: string;
   readonly now: () => string;
   readonly uuidV7Factory: () => string;
@@ -54,6 +63,8 @@ export interface LocalCustomerRuntimeOptions {
 export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions): ApiServerRuntime {
   if (!["development", "test"].includes(process.env.NODE_ENV ?? "development"))
     throw new Error("LOCAL_CUSTOMER_RUNTIME_UNAVAILABLE");
+  if (options.cartBinding !== undefined && options.cartTransactions === undefined)
+    throw new Error("LOCAL_CART_BINDING_READS_REQUIRED");
   const scope = Object.freeze({
     brandReference: parseCatalogReference(options.scope.brandReference),
     storeReference: parseCatalogReference(options.scope.storeReference),
@@ -119,7 +130,22 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             }),
           ),
         });
+  const customerCartBinding =
+    options.cartBinding === undefined
+      ? undefined
+      : new CustomerCartBindingHandler({
+          allowedOrigin: options.allowedOrigin,
+          now,
+          port: createCustomerCartBindingComposition({
+            ...options.cartBinding,
+            scope,
+            session: entry.session,
+            sessionTransactions: options.sessionTransactions,
+            now,
+          }),
+        });
   return createApiServerRuntime({
+    ...(customerCartBinding === undefined ? {} : { customerCartBinding }),
     ...(customerCart === undefined ? {} : { customerCart }),
     port: options.runtime?.port ?? 0,
     ...(options.runtime?.logger === undefined ? {} : { logger: options.runtime.logger }),
