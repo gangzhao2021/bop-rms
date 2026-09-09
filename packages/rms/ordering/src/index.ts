@@ -75,3 +75,8 @@ export {
   type PickupCartBindingStore,
   type PickupCartBindingOptions,
 } from "./infrastructure/persistence/pickup-cart-binding-store.js";
+
+export {
+  createPostgresCartLifecycleStore,
+  type CartLifecycleStore,
+} from "./infrastructure/persistence/cart-lifecycle-store.js";

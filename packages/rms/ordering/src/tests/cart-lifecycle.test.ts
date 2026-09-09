@@ -479,3 +479,41 @@ describe("WP-2233 lifecycle authority and delayed retry", () => {
     });
   });
 });
+
+describe("WP-2238 concurrent lifecycle acknowledgement", () => {
+  it.each(["Abandon", "Expire"] as const)(
+    "accepts the exact concurrent %s winner at its original time",
+    async (action) => {
+      const state = fixture();
+      const original = state.current();
+      const firstInput = {
+        cartReference: ids.cart,
+        expectedAggregateVersion: 1,
+        operationReference: ids.operation,
+        [action === "Abandon" ? "requestedAt" : "evaluatedAt"]:
+          action === "Abandon" ? abandonAt : idleDueAt,
+      };
+      const first =
+        action === "Abandon"
+          ? await state.service.abandon(firstInput)
+          : await state.service.expire(firstInput);
+      const saved = await state.ports.repository.resolveOperation(ids.operation as never);
+      if (saved === null) throw new Error("missing synthetic winner");
+      vi.spyOn(state.ports.repository, "resolveOperation").mockResolvedValue(null);
+      vi.spyOn(state.ports.repository, "load").mockResolvedValue(original);
+      vi.spyOn(state.ports.repository, "commit").mockResolvedValue(saved);
+      const secondInput = {
+        ...firstInput,
+        [action === "Abandon" ? "requestedAt" : "evaluatedAt"]: new Date(
+          Date.parse(action === "Abandon" ? abandonAt : idleDueAt) + 1000,
+        ).toISOString(),
+      };
+      const second =
+        action === "Abandon"
+          ? await state.service.abandon(secondInput)
+          : await state.service.expire(secondInput);
+      expect(second.aggregate).toEqual(first.aggregate);
+      expect(state.commits()).toBe(1);
+    },
+  );
+});

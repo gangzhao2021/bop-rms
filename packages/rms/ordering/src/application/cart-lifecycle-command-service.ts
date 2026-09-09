@@ -293,15 +293,36 @@ async function execute(
     .commit({ record, expectedAggregateVersion, audit: auditRecord })
     .catch(failure);
   const verified = parseRecord(saved);
+  // A concurrent same-key request may have committed at a different observation time.
+  // Reconstruct the one permitted transition from the source Cart at the winner's time.
+  let canonicalResult: CartAggregate;
+  try {
+    if (Date.parse(verified.occurredAt) < Date.parse(cart.updatedAt))
+      throw new Error("invalid transition time");
+    canonicalResult = parseCartAggregate({
+      ...cart,
+      aggregateVersion: expectedAggregateVersion + 1,
+      updatedAt: verified.occurredAt,
+      lifecycle:
+        action === "Abandon"
+          ? terminateCartLifecycle(cart.lifecycle, {
+              status: "Abandoned",
+              terminalAt: verified.occurredAt,
+            })
+          : expireCartLifecycle(cart.lifecycle, verified.occurredAt),
+    });
+  } catch {
+    throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  }
   if (
     verified.action !== action ||
     verified.guestSessionReference !== guestSessionReference ||
-    verified.occurredAt !== observedAt ||
-    JSON.stringify(verified.result) !== JSON.stringify(result) ||
+    Date.parse(observedAt) >= Date.parse(verified.expiresAt) ||
+    JSON.stringify(verified.result) !== JSON.stringify(canonicalResult) ||
     verified.operationReference !== operationReference ||
     verified.cartReference !== cartReference ||
     verified.result.aggregateVersion !== result.aggregateVersion ||
-    !ports.references.equals(verified.operationIntentHash, intent)
+    !ports.references.equals(verified.operationIntentHash, intentAt(verified.occurredAt))
   )
     throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
   return Object.freeze({ status: "Applied" as const, aggregate: verified.result });
