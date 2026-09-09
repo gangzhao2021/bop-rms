@@ -7,6 +7,7 @@ export * from "./domain/cart-quote-attachment.js";
 export * from "./domain/cart-lifecycle.js";
 export * from "./application/cart-item-command-service.js";
 export * from "./application/pickup-cart-removal-service.js";
+export * from "./application/pickup-cart-quote-service.js";
 export * from "./application/ports/cart-item-command-ports.js";
 export * from "./application/cart-quote-attachment-service.js";
 export * from "./application/ports/cart-quote-attachment-ports.js";

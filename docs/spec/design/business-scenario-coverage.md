@@ -195,3 +195,7 @@ result in one transaction. Current Session authorization and runtime composition
 [WP-2259](../work-packages/WP-2259.md) denies new attachment for selected options that the v1
 Quote cannot price explicitly. Empty selections remain supported; exact authorized history replay
 is unchanged. Versioned option-price facts and their authoritative producer remain required.
+
+[WP-2260](../work-packages/WP-2260.md) supplies Ordering's current Session/CSRF-authorized Pickup
+Quote entry, including authorization before original-history lookup and request-local Pricing identity.
+Authoritative pricing facts, HTTP composition and end-to-end customer journey remain separate.
