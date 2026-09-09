@@ -203,3 +203,6 @@ Authoritative pricing facts, HTTP composition and end-to-end customer journey re
 [WP-2261](../work-packages/WP-2261.md) supplies explicit local Quote HTTP composition with current
 authorization before and after original-result lookup. It requires an authoritative candidate
 producer; default Quote creation remains unavailable. Real Store facts and full journey are unclaimed.
+
+[WP-2262](../work-packages/WP-2262.md) exercises the actual multi-owner Quote HTTP composition in
+isolated PostgreSQL, including lost commit acknowledgements. Commercial and policy inputs remain synthetic.
