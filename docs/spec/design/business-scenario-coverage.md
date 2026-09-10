@@ -384,3 +384,9 @@ WP-2301 adds independent PWA Dining binding transport with exact admission input
 and deadline handling, and no credential storage or automatic retries. PWA476/476, security111/111,
 actual client/HTTP/PG recovery, full verification and forced uncached integration pass. Late and
 rejected response bodies are cancelled. This does not enable UI, reload recovery or operational configuration.
+
+WP-2302 adds private foreground Dining binding coordination: exact single-flight intent, original
+candidate recovery, current-context generation fences and confirmed-only CSRF publication.
+PWA508/508, security111/111, actual coordinator/client/HTTP/PG recovery, full verification and
+forced uncached integration pass. Exactly one CSRF publication and original preparation survive
+unknown activation; repeated success reauthorizes. UI/runtime activation remains separate.

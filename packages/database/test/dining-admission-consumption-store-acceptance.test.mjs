@@ -1,3 +1,9 @@
+import { createDiningBindingCoordinator } from "../../../apps/customer-pwa/src/dining/dining-binding-coordinator.ts";
+import {
+  captureCustomerCsrfContext,
+  getCustomerCsrfCredential,
+  setCustomerCsrfCredential,
+} from "../../../apps/customer-pwa/src/session/customer-transaction-context.ts";
 import { createBrowserDiningBindingClient } from "../../../apps/customer-pwa/src/dining/dining-binding-client.ts";
 import { createServer } from "node:http";
 import { createApp } from "../../../apps/api/src/app.ts";
@@ -1464,6 +1470,148 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
       } finally {
         server.closeAllConnections();
         await new Promise((resolve) => server.close(resolve));
+      }
+      // WP-2302: production foreground coordinator with real shared context and synthetic cookie jar.
+      const o = await makeIdentity(37, 116);
+      const oJoin = await firstJoin(37, 116);
+      minute = 3;
+      const coordinatorServer = createServer(
+        createApp({
+          customerDiningBinding: new CustomerDiningBindingHandler({
+            allowedOrigin: origin,
+            now: () => at(minute),
+            port: createCustomerDiningBindingComposition({
+              ...compositionOptions,
+              bindings: {
+                ...compositionOptions.bindings,
+                activate: bindingStore(runner({ loseAck: true })).activate,
+              },
+            }),
+          }),
+        }),
+      );
+      const cookieJar = new Map([["__Host-bop-guest", o.sessionCredential]]);
+      const observations = [];
+      let publications = 0,
+        generated = 0;
+      setCustomerCsrfCredential(o.csrfCredential);
+      try {
+        await new Promise((resolve) => coordinatorServer.listen(0, "127.0.0.1", resolve));
+        const client = createBrowserDiningBindingClient({
+          online: () => true,
+          async fetch(path, init) {
+            assert.ok(Object.values(customerDiningBindingRoutes).includes(path));
+            const response = await globalThis.fetch(
+              `http://127.0.0.1:${coordinatorServer.address().port}${path}`,
+              {
+                ...init,
+                headers: {
+                  ...init.headers,
+                  origin,
+                  "sec-fetch-site": "same-origin",
+                  "sec-fetch-mode": "cors",
+                  cookie: [...cookieJar].map(([name, value]) => `${name}=${value}`).join("; "),
+                },
+              },
+            );
+            observations.push({
+              path,
+              status: response.status,
+              cookies: response.headers.getSetCookie().length,
+            });
+            for (const line of response.headers.getSetCookie()) {
+              const pair = line.split(";")[0],
+                separator = pair.indexOf("=");
+              const name = pair.slice(0, separator),
+                value = pair.slice(separator + 1);
+              if (line.includes("Max-Age=0")) cookieJar.delete(name);
+              else cookieJar.set(name, value);
+            }
+            return response;
+          },
+        });
+        const coordinator = createDiningBindingCoordinator({
+          binding: client,
+          online: () => true,
+          generatePreparationReference: () => {
+            generated++;
+            return id(129);
+          },
+          csrf: {
+            get: getCustomerCsrfCredential,
+            capture: captureCustomerCsrfContext,
+            set(value) {
+              publications++;
+              setCustomerCsrfCredential(value);
+            },
+          },
+        });
+        const intent = {
+          operationReference: id(128),
+          admissionReference: oJoin.joined.admission.admissionReference,
+        };
+        assert.equal(observations.length, 0);
+        await assert.rejects(coordinator.bind(intent), {
+          code: "outcome-unknown",
+          message: "dining binding is unavailable",
+        });
+        assert.equal(publications, 0);
+        assert.equal(getCustomerCsrfCredential(), o.csrfCredential);
+        assert.equal(cookieJar.size, 2);
+        assert.deepEqual(await counts(), { operations: 11, audits: 11 });
+        assert.equal((await identityStore.resolve(o.selector)).session.status, "Revoked");
+        await assert.rejects(coordinator.bind({ ...intent, operationReference: id(130) }), {
+          code: "outcome-unknown",
+        });
+        assert.equal(observations.length, 2);
+        minute = 9;
+        const result = await coordinator.bind(intent);
+        assert.deepEqual(result, { status: "Bound", operationReference: id(128) });
+        assert.equal(publications, 1);
+        assert.equal(cookieJar.size, 1);
+        assert.notEqual(cookieJar.get("__Host-bop-guest"), o.sessionCredential);
+        assert.notEqual(getCustomerCsrfCredential(), o.csrfCredential);
+        assert.deepEqual(await coordinator.bind(intent), result);
+        assert.equal(publications, 1);
+        assert.equal(generated, 1);
+        assert.deepEqual(observations, [
+          { path: customerDiningBindingRoutes.prepare, status: 200, cookies: 1 },
+          { path: customerDiningBindingRoutes.activate, status: 503, cookies: 0 },
+          { path: customerDiningBindingRoutes.complete, status: 200, cookies: 2 },
+          { path: customerDiningBindingRoutes.complete, status: 200, cookies: 2 },
+        ]);
+        assert.deepEqual(await counts(), { operations: 11, audits: 11 });
+        const coordinatorHistory = (
+          await admin.query(
+            "SELECT record FROM bop_identity.guest_dining_binding_preparation WHERE operation_id=$1 ORDER BY revision",
+            [id(129)],
+          )
+        ).rows;
+        assert.equal(coordinatorHistory.length, 3);
+        assert.ok(at(minute) > coordinatorHistory[0].record.expiresAt);
+        assert.equal(
+          (
+            await admin.query(
+              "SELECT count(*)::integer AS n FROM platform_audit.audit_record WHERE target_type='GuestDiningBindingPreparation' AND target_id=$1",
+              [id(129)],
+            )
+          ).rows[0].n,
+          3,
+        );
+        for (const secret of [
+          o.sessionCredential,
+          o.csrfCredential,
+          cookieJar.get("__Host-bop-guest"),
+          getCustomerCsrfCredential(),
+        ]) {
+          assert.equal(JSON.stringify(result).includes(secret), false);
+          assert.equal(JSON.stringify(coordinatorHistory).includes(secret), false);
+          assert.equal(JSON.stringify(contextRequests).includes(secret), false);
+        }
+      } finally {
+        setCustomerCsrfCredential(null);
+        coordinatorServer.closeAllConnections();
+        await new Promise((resolve) => coordinatorServer.close(resolve));
       }
       assert.equal(active, 0);
     } finally {
