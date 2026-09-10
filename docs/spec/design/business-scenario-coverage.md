@@ -314,3 +314,8 @@ WP-2288 adds the pure Active-to-Consumed admission transition with exact current
 Participant and Table assignment facts. Dining678/678, full verification and forced uncached
 integration pass; Guest authority, durable consumption recovery and Identity/public-context
 composition remain separate.
+
+WP-2289 connects current Guest authority, original Join identity and current Dining facts to
+the admission-consumption service and complete original receipts. Dining760/760, full verification
+and forced uncached integration pass; atomic persistence and Identity/public-context composition
+remain separate.

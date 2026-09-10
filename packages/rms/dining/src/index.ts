@@ -29,3 +29,6 @@ export * from "./infrastructure/persistence/dining-move-store.js";
 export * from "./infrastructure/persistence/dining-moved-join-store.js";
 
 export * from "./domain/dining-admission.js";
+
+export * from "./application/ports/dining-admission-ports.js";
+export * from "./application/dining-admission-service.js";
