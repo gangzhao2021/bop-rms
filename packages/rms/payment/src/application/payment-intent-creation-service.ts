@@ -135,6 +135,36 @@ function verifyPreparation(
   return evidence;
 }
 
+function requireCurrentPreparation(
+  ports: PaymentIntentCreationPorts,
+  preparation: OrderPaymentPreparationEvidence,
+  previous: PaymentInstant,
+): PaymentInstant {
+  let current: PaymentInstant;
+  try {
+    current = parsePaymentInstant(ports.clock.now());
+  } catch {
+    return fail("PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE");
+  }
+  if (Date.parse(current) < Date.parse(previous))
+    return fail("PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE");
+  if (Date.parse(current) >= Date.parse(preparation.capacityExpiresAt))
+    return fail("PAYMENT_INTENT_PREPARATION_EXPIRED");
+  return current;
+}
+
+/** Both records have already been closed-parsed into immutable data, including bigint Money. */
+function sameClaimedRecord(
+  left: PaymentIntentCreationRecord,
+  right: PaymentIntentCreationRecord,
+): boolean {
+  const serialize = (record: PaymentIntentCreationRecord) =>
+    JSON.stringify(record, (_key, value: unknown) =>
+      typeof value === "bigint" ? value.toString() : value,
+    );
+  return serialize(left) === serialize(right);
+}
+
 function verifyReplay(
   value: unknown,
   expected: {
@@ -292,6 +322,8 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
       } catch {
         return fail("PAYMENT_INTENT_PROVIDER_DISABLED");
       }
+      if (Date.parse(requestedAt) > Date.parse(evaluatedAt))
+        return fail("PAYMENT_INTENT_ORDER_NOT_READY");
       let killSwitchEvaluation: unknown;
       try {
         killSwitchEvaluation = await ports.killSwitch.evaluate({
@@ -331,6 +363,7 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
         quoteReference,
         requestedAt,
       });
+      evaluatedAt = requireCurrentPreparation(ports, preparation, evaluatedAt);
       const paymentIntentReference = reference(ports, "PaymentIntent");
       const paymentAttemptReference = reference(ports, "PaymentAttempt");
       let providerIdempotencyKey;
@@ -385,6 +418,7 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
           }),
         )
         .catch(dependency);
+      evaluatedAt = requireCurrentPreparation(ports, preparation, evaluatedAt);
       const claimed = await ports.repository.claim({ record: pending, audit }).catch(dependency);
       const claimedRaw = exactPaymentObject(claimed, ["status", "record"]);
       if (claimedRaw.status !== "Claimed" && claimedRaw.status !== "Existing")
@@ -395,6 +429,14 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
           status: claimedRecord.providerOutcome === null ? "Processing" : "AlreadyCreated",
           record: claimedRecord,
         });
+      if (!sameClaimedRecord(claimedRecord, pending))
+        return fail("PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE");
+      try {
+        requireCurrentPreparation(ports, preparation, evaluatedAt);
+      } catch {
+        // The local claim remains durable. Recovery decides its disposition; no Provider result exists.
+        return Object.freeze({ status: "Processing", record: claimedRecord });
+      }
       let outcome: PaymentProviderOutcome;
       try {
         outcome = verifyProviderOutcome(

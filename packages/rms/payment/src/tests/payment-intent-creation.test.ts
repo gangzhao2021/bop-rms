@@ -138,10 +138,15 @@ function harness(
     killSwitchEvaluation?: unknown;
     killSwitchThrows?: boolean;
     clockNow?: string;
+    advanceAfter?: Partial<Record<"prepare" | "audit" | "claim" | "provider", string | Error>>;
     authorizationResult?: unknown;
   } = {},
 ) {
   let stored = options.prior ?? null;
+  let currentClock: string | Error = options.clockNow ?? at;
+  const advance = (phase: "prepare" | "audit" | "claim" | "provider") => {
+    currentClock = options.advanceAfter?.[phase] ?? currentClock;
+  };
   const calls: string[] = [];
   let providerCalls = 0;
   let referenceIndex = 0;
@@ -152,7 +157,8 @@ function harness(
     clock: {
       now() {
         calls.push("read-clock");
-        return options.clockNow ?? at;
+        if (currentClock instanceof Error) throw currentClock;
+        return currentClock;
       },
     },
     killSwitch: {
@@ -185,12 +191,14 @@ function harness(
     ordering: {
       async preparePayment() {
         calls.push("prepare-order");
+        advance("prepare");
         return (options.prepared ?? preparation()) as never;
       },
     },
     audit: {
       async create(input) {
         calls.push("audit");
+        advance("audit");
         return audit(input.paymentIntentReference);
       },
     },
@@ -215,6 +223,7 @@ function harness(
       },
       async claim(input) {
         calls.push("claim");
+        advance("claim");
         if (options.claimStatus === "Existing" && options.claimExisting !== undefined)
           return { status: "Existing", record: options.claimExisting };
         stored = input.record;
@@ -230,6 +239,7 @@ function harness(
       async createIntent(request) {
         calls.push("provider-create");
         providerCalls += 1;
+        advance("provider");
         if (options.providerThrows) throw new Error("synthetic transport failure");
         return createPaymentProviderSnapshot({
           kind: "Snapshot",
@@ -292,8 +302,11 @@ describe("Payment Intent creation service", () => {
       "read-clock",
       "evaluate-kill-switch",
       "prepare-order",
+      "read-clock",
       "audit",
+      "read-clock",
       "claim",
+      "read-clock",
       "provider-create",
       "record-observation",
     ]);
@@ -515,4 +528,168 @@ describe("Payment Intent creation service", () => {
     );
     expect(evaluated).toBe(false);
   });
+});
+
+describe("WP-2341 current capacity expiry around Payment creation waits", () => {
+  const expiry = "2026-08-03T15:30:00.000Z";
+  const lastLive = "2026-08-03T15:29:59.999Z";
+  it.each(["prepare", "audit"] as const)(
+    "stops capacity expiry during %s before claim",
+    async (stage) => {
+      const test = harness({ advanceAfter: { [stage]: expiry } });
+      await expect(
+        createPaymentIntentCreationService(test.ports).create(command()),
+      ).rejects.toMatchObject({ code: "PAYMENT_INTENT_PREPARATION_EXPIRED" });
+      expect(test.calls).not.toContain("claim");
+      expect(test.providerCalls()).toBe(0);
+    },
+  );
+  it("rejects a preparation already expired by current server time", async () => {
+    const test = harness({ clockNow: expiry });
+    await expect(
+      createPaymentIntentCreationService(test.ports).create(command()),
+    ).rejects.toMatchObject({ code: "PAYMENT_INTENT_PREPARATION_EXPIRED" });
+    expect(test.calls).not.toContain("claim");
+    expect(test.providerCalls()).toBe(0);
+  });
+  it("rejects a future requestedAt instead of shifting the allocation window", async () => {
+    const test = harness({ clockNow: "2026-08-03T14:59:59.999Z" });
+    await expect(
+      createPaymentIntentCreationService(test.ports).create(command()),
+    ).rejects.toMatchObject({ code: "PAYMENT_INTENT_ORDER_NOT_READY" });
+    expect(test.calls).not.toContain("prepare-order");
+    expect(test.providerCalls()).toBe(0);
+  });
+  it.each(["prepare", "audit"] as const)("rejects reversed clocks after %s", async (stage) => {
+    const test = harness({ advanceAfter: { [stage]: "2026-08-03T14:59:59.999Z" } });
+    await expect(
+      createPaymentIntentCreationService(test.ports).create(command()),
+    ).rejects.toMatchObject({ code: "PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE" });
+    expect(test.calls).not.toContain("claim");
+    expect(test.providerCalls()).toBe(0);
+  });
+  it.each(["prepare", "audit"] as const)("rejects a lost clock after %s", async (stage) => {
+    const test = harness({ advanceAfter: { [stage]: new Error("private clock failure") } });
+    await expect(
+      createPaymentIntentCreationService(test.ports).create(command()),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE",
+      message: "payment intent creation is unavailable",
+    });
+    expect(test.calls).not.toContain("claim");
+    expect(test.providerCalls()).toBe(0);
+  });
+  it.each([
+    expiry,
+    "2026-08-03T15:30:00.001Z",
+    "invalid",
+    "2026-08-03T14:59:59.999Z",
+    new Error("private clock failure"),
+  ])(
+    "retains a committed claim without new Provider work when its clock is no longer usable",
+    async (time) => {
+      const test = harness({ advanceAfter: { claim: time } });
+      const result = await createPaymentIntentCreationService(test.ports).create(command());
+      expect(result.status).toBe("Processing");
+      expect(result.record.providerOutcome).toBeNull();
+      expect(result.record.intent.createdAt).toBe(at);
+      expect(result.record.intent.preparation.capacityExpiresAt).toBe(expiry);
+      expect(test.calls).toContain("claim");
+      expect(test.calls).not.toContain("record-observation");
+      expect(test.providerCalls()).toBe(0);
+      const replay = harness({ prior: result.record, clockNow: expiry });
+      expect(
+        (await createPaymentIntentCreationService(replay.ports).create(command())).status,
+      ).toBe("Processing");
+      expect(replay.calls).toEqual(["authorize", "resolve-operation"]);
+      expect(replay.providerCalls()).toBe(0);
+    },
+  );
+  it("admits at the last live millisecond without rewriting the original creation/expiry", async () => {
+    const test = harness({ advanceAfter: { prepare: lastLive, audit: lastLive, claim: lastLive } });
+    const result = await createPaymentIntentCreationService(test.ports).create(command());
+    expect(result.status).toBe("Created");
+    expect(test.providerCalls()).toBe(1);
+    expect(result.record.intent.createdAt).toBe(at);
+    expect(result.record.attempt.createdAt).toBe(at);
+    expect(result.record.intent.preparation.capacityExpiresAt).toBe(expiry);
+  });
+  it("returns a concurrently Existing claim after expiry without re-invoking Provider", async () => {
+    const original = await createPaymentIntentCreationService(harness().ports).create(command());
+    const pending = { ...original.record, providerOutcome: null };
+    const test = harness({
+      claimStatus: "Existing",
+      claimExisting: pending,
+      advanceAfter: { claim: expiry },
+    });
+    const result = await createPaymentIntentCreationService(test.ports).create(command());
+    expect(result.status).toBe("Processing");
+    expect(result.record).toEqual(pending);
+    expect(test.providerCalls()).toBe(0);
+  });
+  it("retains the normalized result of a Provider call that was admitted before expiry", async () => {
+    const test = harness({ advanceAfter: { claim: lastLive, provider: expiry } });
+    const result = await createPaymentIntentCreationService(test.ports).create(command());
+    expect(result.status).toBe("Created");
+    expect(result.record.providerOutcome?.kind).toBe("Snapshot");
+    expect(test.providerCalls()).toBe(1);
+    expect(test.calls).toContain("record-observation");
+  });
+  it.each(["creation", "attempt", "preparation", "identity", "digest"] as const)(
+    "rejects substitution of %s in a newly Claimed record",
+    async (changed) => {
+      const test = harness();
+      const original = test.ports.repository.claim;
+      const ports: PaymentIntentCreationPorts = {
+        ...test.ports,
+        repository: {
+          ...test.ports.repository,
+          async claim(input) {
+            const result = await original(input);
+            const record = structuredClone(result.record);
+            const forged =
+              changed === "creation"
+                ? { ...record, intent: { ...record.intent, createdAt: "2026-08-03T15:01:00.000Z" } }
+                : changed === "attempt"
+                  ? {
+                      ...record,
+                      attempt: { ...record.attempt, createdAt: "2026-08-03T15:01:00.000Z" },
+                    }
+                  : changed === "preparation"
+                    ? {
+                        ...record,
+                        intent: {
+                          ...record.intent,
+                          preparation: {
+                            ...record.intent.preparation,
+                            capacityExpiresAt: "2026-08-03T15:31:00.000Z",
+                          },
+                        },
+                      }
+                    : changed === "identity"
+                      ? {
+                          ...record,
+                          intent: { ...record.intent, paymentIntentReference: id(90) },
+                          attempt: { ...record.attempt, paymentIntentReference: id(90) },
+                        }
+                      : {
+                          ...record,
+                          intent: {
+                            ...record.intent,
+                            preparation: {
+                              ...record.intent.preparation,
+                              sourceDigest: digest("f"),
+                            },
+                          },
+                        };
+            return { status: "Claimed", record: forged as PaymentIntentCreationRecord };
+          },
+        },
+      };
+      await expect(
+        createPaymentIntentCreationService(ports).create(command()),
+      ).rejects.toMatchObject({ code: "PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE" });
+      expect(test.providerCalls()).toBe(0);
+    },
+  );
 });
