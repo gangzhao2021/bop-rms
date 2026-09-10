@@ -9,6 +9,7 @@ import {
   createDiningSessionService,
   createPostgresDiningTableStore,
   createPostgresDiningSessionStartStore,
+  createPostgresDiningJoinRegenerationStore,
   createPostgresDiningSessionJoinStore,
   createPostgresDiningAdmissionConsumptionStore,
   createPostgresDiningGuestBindingStore,
@@ -73,7 +74,7 @@ export async function seedDining({ admin, context, sessionRole, sessionTransacti
     `GRANT SELECT,INSERT,UPDATE ON rms_dining.dining_table,rms_dining.dining_session,rms_dining.dining_join_capability,rms_dining.dining_participant,rms_dining.dining_identity_admission TO ${role}`,
   );
   await admin.query(
-    `GRANT SELECT,INSERT ON rms_dining.dining_table_operation,rms_dining.dining_session_start_operation,rms_dining.dining_session_join_operation,rms_dining.dining_admission_consumption_operation TO ${role}`,
+    `GRANT SELECT,INSERT ON rms_dining.dining_table_operation,rms_dining.dining_session_start_operation,rms_dining.dining_join_regeneration_operation,rms_dining.dining_session_join_operation,rms_dining.dining_admission_consumption_operation TO ${role}`,
   );
   await admin.query(
     `GRANT SELECT,INSERT ON bop_identity.guest_dining_binding_preparation TO ${sessionRole}`,
@@ -200,6 +201,8 @@ export async function seedDining({ admin, context, sessionRole, sessionTransacti
     updatedAt: at,
   });
 
+  const regeneration = createPostgresDiningJoinRegenerationStore(runner(), scope, credentials);
+  let currentSession = null;
   const staffService = createDiningSessionService({
     pepperVersion: 1,
     credentials,
@@ -257,7 +260,7 @@ export async function seedDining({ admin, context, sessionRole, sessionTransacti
 
     guests: { resolve: async () => null },
     abuse: { admit: async () => "Cooldown" },
-    store: { ...reader, start: writer.start },
+    store: { ...reader, ...regeneration, start: writer.start },
   });
   const contextsByTable = new Map();
   const contexts = {
@@ -335,7 +338,24 @@ export async function seedDining({ admin, context, sessionRole, sessionTransacti
       },
       resolveRequestContext: () => ({ abuse: { admit: async () => "Admitted" } }),
     },
-    async prepare() {
+    async prepare(reuseTable = false) {
+      if (reuseTable) {
+        assert(currentSession !== null);
+        const state = await regeneration.resolveActiveJoin(currentSession);
+        assert(state !== null);
+        const issued = await staffService.regenerate({
+          diningSessionReference: state.session.diningSessionReference,
+          tableReference: state.session.tableReference,
+          expectedAssignmentVersion: state.session.tableAssignmentVersion,
+          expectedSessionVersion: state.session.version,
+          expectedCapabilityVersion: state.capability.version,
+          expectedGeneration: state.capability.generation,
+          operationReference: id(++sequence),
+          requestedAt: at,
+        });
+        browsers++;
+        return issued.joinCredential;
+      }
       const table = 6 + browsers * 10;
       const publicTable = 5 + browsers * 10;
       const qr = 3 + browsers * 10;
@@ -347,6 +367,7 @@ export async function seedDining({ admin, context, sessionRole, sessionTransacti
         joinKind: "Invitation",
         requestedAt: at,
       });
+      currentSession = started.session.diningSessionReference;
       fixture.payload.publicTableReference = id(publicTable);
       fixture.payload.qrReference = id(qr);
       fixture.context.publicTableReference = id(publicTable);

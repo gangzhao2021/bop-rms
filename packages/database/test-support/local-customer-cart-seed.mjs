@@ -132,6 +132,40 @@ export async function seedCart({ admin, context, dining }) {
           ),
       },
     },
+    async verifyShared() {
+      const rows = (
+        await admin.query(
+          "SELECT aggregate_version,lifecycle_status FROM rms_ordering.cart ORDER BY aggregate_version",
+        )
+      ).rows;
+      assert.deepEqual(rows, [
+        { aggregate_version: 4, lifecycle_status: "Active" },
+        { aggregate_version: 4, lifecycle_status: "Active" },
+        { aggregate_version: 6, lifecycle_status: "Active" },
+      ]);
+      assert.equal(
+        (await admin.query("SELECT count(*)::int AS n FROM rms_ordering.cart_line")).rows[0].n,
+        0,
+      );
+      assert.equal(
+        (await admin.query("SELECT count(*)::int AS n FROM rms_ordering.cart_operation_record"))
+          .rows[0].n,
+        11,
+      );
+      assert.equal(
+        (await admin.query("SELECT count(*)::int AS n FROM rms_ordering.dining_cart_operation"))
+          .rows[0].n,
+        3,
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE target_type='OrderingCart'",
+          )
+        ).rows[0].n,
+        14,
+      );
+    },
     async verify(journeys) {
       const rows = (
         await admin.query(

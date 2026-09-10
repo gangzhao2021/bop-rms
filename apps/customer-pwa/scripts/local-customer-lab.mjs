@@ -242,6 +242,8 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
           ),
           0,
         );
+        if (dining && cart && viewport.width === 390)
+          await verifySharedTable(browser, origin, dining, cart);
         if (stopAfter && viewport.width === 390) {
           await page.getByRole("button", { name: "Stop local lab", exact: true }).click();
           await page.getByRole("button", { name: "Lab stopped", exact: true }).waitFor();
@@ -252,5 +254,88 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
     }
   } finally {
     await browser.close();
+  }
+}
+
+async function verifySharedTable(browser, origin, dining, cart) {
+  const contexts = [];
+  const pages = [];
+  const errors = [];
+  const notes = ["Synthetic first guest note", "Synthetic second guest note"];
+  const owner = (page) =>
+    page.locator("article.cart-item").filter({ hasNotText: "Added by another guest." });
+  async function refresh(page) {
+    await page.getByRole("link", { name: "Continue shopping", exact: true }).click();
+    await page.getByRole("link", { name: "Cart", exact: true }).click();
+  }
+  try {
+    for (let index = 0; index < 2; index++) {
+      let proof = await dining.prepare(index === 1);
+      const context = await browser.newContext({
+        viewport: { width: index === 0 ? 1440 : 390, height: 900 },
+        ignoreHTTPSErrors: true,
+      });
+      contexts.push(context);
+      const page = await context.newPage();
+      pages.push(page);
+      page.on("pageerror", () => errors.push("page_error"));
+      await page.goto(origin);
+      await page.getByRole("heading", { name: "Synthetic Store", exact: true }).waitFor();
+      try {
+        await page.getByLabel("Join code or invitation", { exact: true }).fill(proof);
+      } catch {
+        throw new Error("protected shared Dining input unavailable");
+      } finally {
+        proof = null;
+      }
+      await page.getByRole("button", { name: "Join table", exact: true }).click();
+      await page.getByRole("heading", { name: "You’ve joined this table", exact: true }).waitFor();
+      await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
+      await page.getByRole("link", { name: "View Latte", exact: true }).click();
+      await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+      await page.getByLabel("Preparation note (optional)", { exact: true }).fill(notes[index]);
+      await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+      await page.getByRole("link", { name: "Review cart", exact: true }).click();
+      await owner(page).getByRole("button", { name: "Remove", exact: true }).waitFor();
+    }
+    await refresh(pages[0]);
+    for (const [index, page] of pages.entries()) {
+      await page.getByText("2 item lines", { exact: true }).waitFor();
+      const foreign = page
+        .locator("article.cart-item")
+        .filter({ hasText: "Added by another guest." });
+      assert.equal(await foreign.count(), 1);
+      for (const button of ["Increase Latte quantity", "Decrease Latte quantity", "Remove"])
+        assert.equal(
+          await foreign.getByRole("button", { name: button, exact: true }).isDisabled(),
+          true,
+        );
+      assert.equal(await page.getByText(`Note: ${notes[index]}`, { exact: true }).count(), 1);
+      assert.equal(await page.getByText(`Note: ${notes[1 - index]}`, { exact: true }).count(), 0);
+      assert.equal(
+        await page.evaluate(
+          () => globalThis.localStorage.length + globalThis.sessionStorage.length,
+        ),
+        0,
+      );
+      assert.equal(new URL(page.url()).hash, "");
+    }
+    await owner(pages[0])
+      .getByRole("button", { name: "Increase Latte quantity", exact: true })
+      .click();
+    await pages[0].getByText("Cart version 4 · DineIn", { exact: true }).waitFor();
+    await refresh(pages[1]);
+    await pages[1].getByText("Cart version 4 · DineIn", { exact: true }).waitFor();
+    await owner(pages[1]).getByRole("button", { name: "Remove", exact: true }).click();
+    await pages[1].getByText("1 item lines", { exact: true }).waitFor();
+    await refresh(pages[0]);
+    await pages[0].getByText("Cart version 5 · DineIn", { exact: true }).waitFor();
+    await owner(pages[0]).getByRole("button", { name: "Remove", exact: true }).click();
+    await pages[0].getByRole("heading", { name: "Your cart is empty", exact: true }).waitFor();
+    await dining.verify();
+    await cart.verifyShared();
+    assert.deepEqual(errors, []);
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
   }
 }
