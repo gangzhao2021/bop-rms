@@ -3,6 +3,7 @@ import type { GuestSession } from "@bop/identity";
 import { resolveStoreBusinessDate } from "@rms/store";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { validateOrderSubmissionWriteFence } from "../application/order-submission-write-fence.js";
 import { createOrderCreationService } from "../application/order-creation-service.js";
 import type { OrderCreationPorts } from "../application/ports/order-creation-ports.js";
 import { parseCartAggregate } from "../domain/cart.js";
@@ -976,5 +977,123 @@ describe("WP-2349 stored Order consistency", () => {
       parseOrderCreationRecord({ ...original, order: { ...original.order, [field]: value } }),
     ).toThrow(OrderCreationError);
     expect(executed).toBe(0);
+  });
+});
+
+describe("WP-2351 transaction write evidence handoff", () => {
+  it("blocks expiry reached during Event preparation before entering the repository", async () => {
+    const f = ports();
+    let now = at;
+    f.implementation.clock.now = () => now;
+    const generate = f.implementation.references.generate;
+    f.implementation.references.generate = (purpose) => {
+      if (purpose === "Event") now = evidence().validUntil;
+      return generate(purpose);
+    };
+    await expectCode(
+      createOrderCreationService(f.implementation).create(command()),
+      "ORDER_CREATE_VALIDATION_EXPIRED",
+    );
+    expect(f.calls).not.toContain("commit");
+  });
+
+  async function pending() {
+    const f = ports();
+    const commit = f.implementation.repository.commit;
+    let captured: Parameters<OrderCreationPorts["repository"]["commit"]>[0] | undefined;
+    f.implementation.repository.commit = async (input) => {
+      captured = input;
+      return commit(input);
+    };
+    await createOrderCreationService(f.implementation).create(command());
+    if (captured === undefined) throw new Error("fixture");
+    return captured;
+  }
+  it("passes original parsed Checkout evidence to the owner commit port", async () => {
+    const input = await pending();
+    expect(input.checkoutValidationEvidence).toEqual(evidence());
+    expect(Object.isFrozen(input.checkoutValidationEvidence)).toBe(true);
+    const fence = validateOrderSubmissionWriteFence({ ...input, observedAt: at });
+    expect(fence.checkoutValidationEvidence).toEqual(evidence());
+    expect(fence.validUntil).toBe(evidence().validUntil);
+    expect(Object.isFrozen(fence)).toBe(true);
+  });
+  it("allows only observations strictly before the original expiry", async () => {
+    const input = await pending();
+    const expiry = input.checkoutValidationEvidence.validUntil;
+    expect(
+      validateOrderSubmissionWriteFence({
+        ...input,
+        observedAt: new Date(Date.parse(expiry) - 1).toISOString(),
+      }).validUntil,
+    ).toBe(expiry);
+    for (const observedAt of [expiry, new Date(Date.parse(expiry) + 1).toISOString()])
+      expect(() => validateOrderSubmissionWriteFence({ ...input, observedAt })).toThrow(
+        expect.objectContaining({ code: "ORDER_CREATE_VALIDATION_EXPIRED" }),
+      );
+  });
+  it.each(["invalid", "2026-08-02T18:00:59.999Z"])(
+    "rejects malformed/backward observation %s",
+    async (observedAt) => {
+      const input = await pending();
+      expect(() => validateOrderSubmissionWriteFence({ ...input, observedAt })).toThrow(
+        expect.objectContaining({ code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" }),
+      );
+    },
+  );
+  it.each([
+    "validationReference",
+    "guestSessionReference",
+    "cartReference",
+    "cartVersion",
+    "quoteReference",
+    "quoteInputDigest",
+    "brandReference",
+    "storeReference",
+    "orderType",
+    "sourceChannel",
+  ])("rejects incompatible Checkout %s", async (field) => {
+    const input = await pending();
+    const patch =
+      field === "cartVersion"
+        ? 6
+        : field === "quoteInputDigest"
+          ? digest("f")
+          : field === "orderType"
+            ? "DineIn"
+            : field === "sourceChannel"
+              ? "Pos"
+              : id(90);
+    expect(() =>
+      validateOrderSubmissionWriteFence({
+        ...input,
+        observedAt: at,
+        checkoutValidationEvidence: {
+          ...input.checkoutValidationEvidence,
+          [field]: patch,
+        } as never,
+      }),
+    ).toThrow(expect.objectContaining({ code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" }));
+  });
+  it.each([
+    "cartItemReference",
+    "sellableReference",
+    "productVersionReference",
+    "menuVersionReference",
+  ])("rejects mismatched line %s", async (field) => {
+    const input = await pending();
+    expect(() =>
+      validateOrderSubmissionWriteFence({
+        ...input,
+        observedAt: at,
+        checkoutValidationEvidence: {
+          ...input.checkoutValidationEvidence,
+          catalogLines: input.checkoutValidationEvidence.catalogLines.map((line) => ({
+            ...line,
+            [field]: id(90),
+          })),
+        } as never,
+      }),
+    ).toThrow(expect.objectContaining({ code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" }));
   });
 });

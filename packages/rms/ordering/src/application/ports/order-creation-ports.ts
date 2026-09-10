@@ -60,6 +60,7 @@ export interface OrderCreationPorts {
   readonly repository: {
     resolveSubmission(submissionReference: OrderingReference): Promise<OrderCreationRecord | null>;
     commit(input: {
+      readonly checkoutValidationEvidence: CheckoutValidationEvidence;
       readonly record: Omit<OrderCreationRecord, "orderNumberAllocation">;
       readonly businessDateResolution: StoreBusinessDateResolution;
       readonly audit: AppendAuditRecordInput;

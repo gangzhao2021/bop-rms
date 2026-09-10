@@ -1,3 +1,4 @@
+import { validateOrderSubmissionWriteFence } from "./order-submission-write-fence.js";
 import { canonicalizeRfc8785, validateAuditRecord } from "@bop/audit";
 import { assertGuestSessionUsable, createGuestSession, type GuestSession } from "@bop/identity";
 import type { StoreBusinessDateResolution } from "@rms/store";
@@ -538,8 +539,16 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
       } catch {
         return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
       }
+      fresh(sourceCart);
+      validateOrderSubmissionWriteFence({
+        record: provisional,
+        businessDateResolution: resolution,
+        checkoutValidationEvidence: evidence,
+        observedAt,
+      });
       const saved = await ports.repository
         .commit({
+          checkoutValidationEvidence: evidence,
           record: provisional,
           businessDateResolution: resolution,
           audit: auditEvidence,

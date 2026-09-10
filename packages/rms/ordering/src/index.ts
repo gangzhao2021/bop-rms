@@ -132,3 +132,5 @@ export * from "./application/dining-cart-selection-service.js";
 export * from "./domain/order-item-snapshot-codec.js";
 
 export * from "./infrastructure/persistence/order-creation-query-store.js";
+
+export * from "./application/order-submission-write-fence.js";
