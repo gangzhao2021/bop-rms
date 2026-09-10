@@ -467,3 +467,9 @@ ID/version; real between-statement version drift denies. Ordering618/618 and Car
 focused final query/race file2/2 passes. Identity/Dining authority inputs in this repository test are
 explicitly synthetic. No creation, uniqueness writer, HTTP/browser or atomic Closing lease is claimed;
 full verification and forced uncached integration pass.
+
+WP-2315 defines the pure initial shared Cart decision: select a unique active historical Cart unchanged,
+or construct an empty version1 Cart from explicit current policy only when owner history is absent.
+Expired, abandoned, legacy or ambiguous history cannot be silently replaced. Authorization, serialized
+creation and operation/Audit persistence remain separate. Ordering660/660, full verification and
+forced uncached integration pass.
