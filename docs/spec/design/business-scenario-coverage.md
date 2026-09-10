@@ -411,3 +411,9 @@ WP-2306 supplies stateless browser Join transport with strict closed input/resul
 bounds and explicit retry only. PWA561/561, security111/111/build and actual PostgreSQL/HTTP
 Join-client-to-binding recovery pass; one Join and one consumption remain. Full verification and
 forced uncached integration pass. UI coordination and production runtime activation remain separate.
+
+WP-2307 composes foreground Join and binding recovery with explicit start/resume, original-operation
+single-flight and opaque CSRF generation guards. Raw Join credential is released after validated
+admission; binding recovery never rejoins. PWA596/596, security111/111/build and actual PostgreSQL/
+HTTP double-lost-ack recovery pass with original one-Join/one-consumption history. Full verification
+and forced uncached integration pass. UI, cross-document/replacement recovery and runtime remain separate.

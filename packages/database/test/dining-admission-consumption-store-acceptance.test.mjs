@@ -1,3 +1,4 @@
+import { createDiningAdmissionJourney } from "../../../apps/customer-pwa/src/dining/dining-admission-journey.ts";
 import { createBrowserDiningJoinClient } from "../../../apps/customer-pwa/src/dining/dining-join-client.ts";
 import {
   CustomerDiningJoinHandler,
@@ -1818,7 +1819,13 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
           customerDiningBinding: new CustomerDiningBindingHandler({
             allowedOrigin: origin,
             now: () => at(minute),
-            port: createCustomerDiningBindingComposition(compositionOptions),
+            port: createCustomerDiningBindingComposition({
+              ...compositionOptions,
+              bindings: {
+                ...compositionOptions.bindings,
+                activate: bindingStore(runner({ loseAck: true })).activate,
+              },
+            }),
           }),
         }),
       );
@@ -1846,38 +1853,7 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
             return response;
           },
         });
-        const joinIntent = {
-          operationReference: id(140),
-          csrfToken: joinedGuest.csrfCredential,
-          joinCredential: httpStart.joinCredential,
-        };
-        await assert.rejects(browserJoin.join(joinIntent), {
-          code: "unavailable",
-          message: "dining join is unavailable",
-        });
-        const lost = joinResponse;
-        assert.equal(lost.status, 503);
-        assert.deepEqual(lost.headers.getSetCookie(), []);
-        assert.deepEqual(await lost.json(), {
-          error: {
-            code: "dining_join_unavailable",
-            messageKey: "customer.dining.join_unavailable",
-          },
-        });
-        const originalJoin = await joinReader.resolveJoinOperation(id(140));
-        assert.notEqual(originalJoin, null);
-        const receipt = await browserJoin.join(joinIntent);
-        const recovered = joinResponse;
-        assert.equal(recovered.status, 200);
-        assert.deepEqual(recovered.headers.getSetCookie(), []);
-        assert.deepEqual(await recovered.json(), receipt);
-        assert.deepEqual(receipt, {
-          status: "Joined",
-          operationReference: id(140),
-          admissionReference: originalJoin.admission.admissionReference,
-        });
-        assert.equal(admittedRequests, 2);
-        assert.equal((await identityStore.resolve(joinedGuest.selector)).session.status, "Active");
+        const bindingResponses = [];
         const bindingClient = createBrowserDiningBindingClient({
           online: () => true,
           async fetch(path, init) {
@@ -1892,6 +1868,11 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
                 cookie: [...journeyCookies].map(([name, value]) => `${name}=${value}`).join("; "),
               },
             });
+            bindingResponses.push({
+              path,
+              status: response.status,
+              cookies: response.headers.getSetCookie().length,
+            });
             for (const line of response.headers.getSetCookie()) {
               const pair = line.split(";")[0],
                 separator = pair.indexOf("=");
@@ -1903,7 +1884,9 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
             return response;
           },
         });
-        const coordinator = createDiningBindingCoordinator({
+        const journey = createDiningAdmissionJourney({
+          join: browserJoin,
+          generateBindingOperationReference: () => id(141),
           binding: bindingClient,
           online: () => true,
           generatePreparationReference: () => id(142),
@@ -1913,13 +1896,55 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
             capture: captureCustomerCsrfContext,
           },
         });
-        const intent = {
-          operationReference: id(141),
-          admissionReference: receipt.admissionReference,
+        const joinIntent = {
+          operationReference: id(140),
+          joinCredential: httpStart.joinCredential,
         };
-        const bound = await coordinator.bind(intent);
-        assert.deepEqual(bound, { status: "Bound", operationReference: id(141) });
-        assert.deepEqual(await coordinator.bind(intent), bound);
+        await assert.rejects(journey.start(joinIntent), {
+          code: "outcome-unknown",
+          message: "dining admission is unavailable",
+        });
+        const lost = joinResponse;
+        assert.equal(lost.status, 503);
+        assert.deepEqual(lost.headers.getSetCookie(), []);
+        assert.deepEqual(await lost.json(), {
+          error: {
+            code: "dining_join_unavailable",
+            messageKey: "customer.dining.join_unavailable",
+          },
+        });
+        const originalJoin = await joinReader.resolveJoinOperation(id(140));
+        assert.notEqual(originalJoin, null);
+        assert.equal((await identityStore.resolve(joinedGuest.selector)).session.status, "Active");
+        await assert.rejects(journey.resume({ operationReference: id(140) }), {
+          code: "outcome-unknown",
+        });
+        const recovered = joinResponse;
+        assert.equal(recovered.status, 200);
+        assert.deepEqual(recovered.headers.getSetCookie(), []);
+        const receipt = await recovered.json();
+        assert.deepEqual(receipt, {
+          status: "Joined",
+          operationReference: id(140),
+          admissionReference: originalJoin.admission.admissionReference,
+        });
+        assert.equal(admittedRequests, 2);
+        assert.equal((await identityStore.resolve(joinedGuest.selector)).session.status, "Revoked");
+        assert.equal(getCustomerCsrfCredential(), joinedGuest.csrfCredential);
+        assert.equal(journeyCookies.size, 2);
+        assert.deepEqual(bindingResponses, [
+          { path: customerDiningBindingRoutes.prepare, status: 200, cookies: 1 },
+          { path: customerDiningBindingRoutes.activate, status: 503, cookies: 0 },
+        ]);
+        minute = 9;
+        const bound = await journey.resume({ operationReference: id(140) });
+        assert.deepEqual(bound, { status: "Bound", operationReference: id(140) });
+        assert.deepEqual(await journey.resume({ operationReference: id(140) }), bound);
+        assert.equal(admittedRequests, 2);
+        assert.deepEqual(bindingResponses.slice(2), [
+          { path: customerDiningBindingRoutes.complete, status: 200, cookies: 2 },
+          { path: customerDiningBindingRoutes.complete, status: 200, cookies: 2 },
+        ]);
         assert.equal(journeyCookies.size, 1);
         assert.notEqual(journeyCookies.get("__Host-bop-guest"), joinedGuest.sessionCredential);
         assert.notEqual(getCustomerCsrfCredential(), joinedGuest.csrfCredential);
@@ -1932,6 +1957,7 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
           )
         ).rows;
         assert.equal(history.length, 3);
+        assert.ok(at(minute) > history[0].record.expiresAt);
         assert.equal(
           (
             await admin.query(
