@@ -18,6 +18,8 @@ export async function startCustomerLab({
   stop,
   diningAdmissionEnabled = false,
   cartEnabled = false,
+  quoteEnabled = false,
+  observedAt,
 }) {
   assert.equal(process.env.BOP_LOCAL_CUSTOMER_LAB, "1");
   assert(["development", "test"].includes(process.env.NODE_ENV));
@@ -91,6 +93,8 @@ export async function startCustomerLab({
                         qrToken: token(),
                         diningAdmissionEnabled: diningAdmissionEnabled === true,
                         cartEnabled: cartEnabled === true,
+                        quoteEnabled: quoteEnabled === true,
+                        ...(quoteEnabled === true ? { observedAt } : {}),
                       }
                   : { error: "unavailable" },
               ),
