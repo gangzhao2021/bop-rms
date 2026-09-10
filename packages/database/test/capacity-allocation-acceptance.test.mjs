@@ -6,6 +6,7 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresCapacityHoldTransitionStore,
+  createPostgresCapacityAllocationTerminalStore,
   createPostgresCapacityQueryStore,
 } from "../../rms/fulfillment/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -704,6 +705,201 @@ async function prove(context) {
         slot: { ...foreign.transition.hold.slot, storeReference: id(99) },
       };
       await assert.rejects(writer(first).convert(foreign), { code: "CAPACITY_INPUT_INVALID" });
+    }
+
+    {
+      // WP-2347: terminal receipts use explicit synthetic owner progress, never missing evidence.
+      const fixed = { brandReference: brand, storeReference: store };
+      const prepare = async (slot, h, a, startsAt) => {
+        await seed(slot, 1, startsAt);
+        await hold(admin, slot, h);
+        await admin.query("BEGIN");
+        try {
+          await convert(admin, h, a);
+          await admin.query("COMMIT");
+        } catch (error) {
+          await admin.query("ROLLBACK");
+          throw error;
+        }
+      };
+      const readOriginal = async (a) =>
+        createPostgresCapacityQueryStore(
+          {
+            async run(action) {
+              await admin.query("BEGIN");
+              try {
+                const result = await action(admin);
+                await admin.query("COMMIT");
+                return result;
+              } catch (error) {
+                await admin.query("ROLLBACK");
+                throw error;
+              }
+            },
+          },
+          fixed,
+        ).loadAllocation({
+          allocationReference: id(a),
+          orderReference: id(a + 40_000),
+          fulfillmentReference: id(a + 50_000),
+        });
+      const request = async (a, action = "Release", progress = null, operation = a + 80_000) => {
+        const original = await readOriginal(a);
+        assert(original);
+        const at = await stamp();
+        const inProgress = progress === "created" ? original.createdAt : progress;
+        const consumed = inProgress !== null || at >= original.slot.startsAt;
+        return {
+          transition: {
+            allocation: original,
+            scope: fixed,
+            expectedVersion: 1,
+            at,
+            action,
+            fulfillmentInProgressAt: inProgress,
+          },
+          operationReference: id(operation),
+          intentDigest: sha,
+          audit: {
+            auditId: id(operation + 10_000),
+            brandId: brand,
+            storeId: store,
+            actor: { type: "System" },
+            actionCode: consumed
+              ? "FULFILLMENT_CAPACITY_ALLOCATION_CONSUME"
+              : "FULFILLMENT_CAPACITY_ALLOCATION_RELEASE",
+            targetType: "FulfillmentCapacityAllocation",
+            targetId: id(a),
+            reasonCode: "AUTHORIZED_CAPACITY_TRANSITION",
+            correlationId: id(operation + 20_000),
+            occurredAt: at,
+            sourceChannel: "EVENT_CONSUMER",
+            dataClassification: "Restricted",
+            retentionPolicyCode: "SYNTHETIC_RETENTION",
+            retentionPolicyVersion: 1,
+          },
+        };
+      };
+      const writer = (client, options = {}) =>
+        createPostgresCapacityAllocationTerminalStore(
+          {
+            async run(action) {
+              await client.query("BEGIN");
+              try {
+                await client.query(`SET LOCAL ROLE ${role}`);
+                await client.query("SET LOCAL lock_timeout='3s'");
+                const result = await action({
+                  async query(sql, values) {
+                    if (
+                      options.failAudit &&
+                      sql.startsWith("INSERT INTO platform_audit.audit_record")
+                    )
+                      throw new Error("synthetic Audit failure");
+                    return client.query(sql, [...values]);
+                  },
+                });
+                if (options.beforeCommit) await options.beforeCommit();
+                await client.query("COMMIT");
+                if (options.loseAck) throw new Error("synthetic lost acknowledgement");
+                return result;
+              } catch (error) {
+                await client.query("ROLLBACK");
+                throw error;
+              }
+            },
+          },
+          fixed,
+        );
+      const counts = async (a) =>
+        (
+          await admin.query(
+            `SELECT
+        (SELECT count(*)::int FROM rms_fulfillment.capacity_allocation_terminal WHERE allocation_id=$1) AS terminal,
+        (SELECT count(*)::int FROM platform_audit.audit_record WHERE target_id=$1) AS audit`,
+            [id(a)],
+          )
+        ).rows[0];
+      const unavailable = { code: "CAPACITY_DEPENDENCY_UNAVAILABLE" };
+      await prepare(40, 400, 40_400);
+      const release = await request(40_400);
+      await assert.rejects(writer(first, { failAudit: true }).append(release), unavailable);
+      assert.deepEqual(await counts(40_400), { terminal: 0, audit: 0 });
+      await assert.rejects(writer(first, { loseAck: true }).append(release), unavailable);
+      assert.equal((await writer(first).append(release)).status, "Existing");
+      assert.deepEqual(await counts(40_400), { terminal: 1, audit: 1 });
+      await assert.rejects(
+        writer(first).append({ ...release, intentDigest: `sha256:${"c".repeat(64)}` }),
+        { code: "CAPACITY_IDEMPOTENCY_CONFLICT" },
+      );
+      await hold(admin, 40, 401); // Released units really return once.
+
+      await prepare(41, 410, 40_410);
+      const early = await request(40_410, "Release", "created");
+      const consumed = await writer(first).append(early);
+      assert.equal(consumed.allocation.state, "Consumed");
+      assert.equal(consumed.allocation.consumedAt, early.transition.allocation.createdAt);
+      assert.equal((await writer(first).append(early)).status, "Existing");
+      assert.deepEqual(await counts(40_410), { terminal: 1, audit: 1 });
+      await assert.rejects(hold(admin, 41, 411), /insufficient capacity/u);
+      const reopen = {
+        ...early,
+        operationReference: id(120_999),
+        intentDigest: `sha256:${"c".repeat(64)}`,
+      };
+      await assert.rejects(writer(first).append(reopen), { code: "CAPACITY_TRANSITION_CONFLICT" });
+
+      await prepare(42, 420, 40_420);
+      const firstRelease = await request(40_420);
+      const duplicate = await request(40_420, "Release", null, 121_420);
+      let releaseCommit;
+      const gate = new Promise((resolve) => {
+        releaseCommit = resolve;
+      });
+      let reachedCommit;
+      const entered = new Promise((resolve) => {
+        reachedCommit = resolve;
+      });
+      const initial = writer(first, {
+        beforeCommit: async () => {
+          reachedCommit();
+          await gate;
+        },
+      }).append(firstRelease);
+      await entered;
+      const competing = writer(second)
+        .append(duplicate)
+        .then(
+          () => null,
+          (error) => error.code,
+        );
+      try {
+        await waitForLock();
+      } finally {
+        releaseCommit();
+      }
+      assert.equal((await initial).status, "Created");
+      assert.equal(await competing, "CAPACITY_TRANSITION_CONFLICT");
+      assert.deepEqual(await counts(40_420), { terminal: 1, audit: 1 });
+
+      const slotStart = new Date(Date.parse(await stamp()) + 700).toISOString();
+      await prepare(43, 430, 40_430, slotStart);
+      await admin.query("SELECT pg_sleep(0.8)");
+      const started = await request(40_430, "Consume");
+      const atStart = await writer(first).append(started);
+      assert.equal(atStart.allocation.state, "Consumed");
+      assert.equal(atStart.allocation.consumedAt, slotStart);
+
+      await prepare(44, 440, 40_440);
+      const wrong = await request(40_440);
+      wrong.transition.allocation = { ...wrong.transition.allocation, units: 2 };
+      await assert.rejects(writer(first).append(wrong), { code: "CAPACITY_TRANSITION_CONFLICT" });
+      assert.deepEqual(await counts(40_440), { terminal: 0, audit: 0 });
+      const foreign = await request(40_440);
+      foreign.transition.allocation = {
+        ...foreign.transition.allocation,
+        slot: { ...foreign.transition.allocation.slot, storeReference: id(99) },
+      };
+      await assert.rejects(writer(first).append(foreign), { code: "CAPACITY_INPUT_INVALID" });
     }
   } finally {
     await Promise.all([

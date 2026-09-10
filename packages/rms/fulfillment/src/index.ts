@@ -32,3 +32,4 @@ export * from "./domain/scheduled-capacity.js";
 export * from "./infrastructure/persistence/capacity-query-store.js";
 export * from "./infrastructure/persistence/capacity-hold-store.js";
 export * from "./infrastructure/persistence/capacity-hold-transition-store.js";
+export * from "./infrastructure/persistence/capacity-allocation-terminal-store.js";
