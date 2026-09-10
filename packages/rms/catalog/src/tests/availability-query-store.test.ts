@@ -132,6 +132,66 @@ describe("Catalog availability query store", () => {
       });
     },
   );
+  it("rejects a result collection that can hide foreign rules", async () => {
+    const rows = [{ rule: rule({ brandReference: id(9) }) }];
+    const map = vi.fn(() => []);
+    Object.defineProperty(rows, "map", { value: map });
+    await expect(fixture(rows).store.loadCurrentRules(input)).rejects.toMatchObject({
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(map).not.toHaveBeenCalled();
+  });
+  it.each(["channelCodes", "orderTypeCodes"])(
+    "rejects executable selectors without invoking them: %s",
+    async (field) => {
+      const selectors = ["OTHER"];
+      const map = vi.fn(() => []);
+      Object.defineProperty(selectors, "map", { value: map });
+      await expect(
+        fixture([{ rule: rule({ [field]: selectors }) }]).store.loadCurrentRules(input),
+      ).rejects.toMatchObject({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" });
+      expect(map).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["rows", "row", "rule"])("does not invoke a %s accessor", async (level) => {
+    const getter = vi.fn(() => (level === "rule" ? rule() : [{ rule: rule() }]));
+    const f = fixture();
+    if (level === "rows") {
+      f.query.mockResolvedValue(Object.defineProperty({}, "rows", { get: getter }));
+    } else if (level === "row") {
+      const rows: unknown[] = [null];
+      Object.defineProperty(rows, "0", { get: getter });
+      f.query.mockResolvedValue({ rows });
+    } else {
+      f.query.mockResolvedValue({ rows: [Object.defineProperty({}, "rule", { get: getter })] });
+    }
+    await expect(f.store.loadCurrentRules(input)).rejects.toMatchObject({
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(getter).not.toHaveBeenCalled();
+  });
+  it.each(["rows", "channelCodes", "orderTypeCodes"])(
+    "rejects sparse collections: %s",
+    async (field) => {
+      const sparse = new Array<unknown>(1);
+      const rows = field === "rows" ? sparse : [{ rule: rule({ [field]: sparse }) }];
+      await expect(fixture(rows).store.loadCurrentRules(input)).rejects.toMatchObject({
+        code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+      });
+    },
+  );
+  it("accepts a driver result prototype and freezes wildcard selectors", async () => {
+    class DriverResult {
+      rows = [{ rule: rule({ channelCodes: [], orderTypeCodes: [] }) }];
+      rowCount = 1;
+    }
+    const f = fixture();
+    f.query.mockResolvedValue(new DriverResult());
+    const rules = await f.store.loadCurrentRules(input);
+    expect(rules).toEqual([rule({ channelCodes: [], orderTypeCodes: [] })]);
+    expect(Object.isFrozen(rules[0]?.channelCodes)).toBe(true);
+    expect(Object.isFrozen(rules[0]?.orderTypeCodes)).toBe(true);
+  });
   it("bounds transaction errors", async () => {
     const f = fixture();
     f.run.mockRejectedValue(new Error("synthetic private detail"));

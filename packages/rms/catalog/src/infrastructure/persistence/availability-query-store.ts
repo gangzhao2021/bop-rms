@@ -45,6 +45,39 @@ WHERE brand_id = $1 AND (store_id IS NULL OR store_id = $2) AND sku_id = $3
   AND (order_type_codes_json = '[]'::jsonb OR order_type_codes_json @> jsonb_build_array($5::text))
 ORDER BY availability_rule_id`;
 
+function dataProperty(value: unknown, key: string): unknown {
+  if (value === null || typeof value !== "object") throw new Error();
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (!descriptor?.enumerable || !("value" in descriptor)) throw new Error();
+  return descriptor.value;
+}
+
+/** Driver rows and JSON selectors must be dense data arrays, never executable collections. */
+function collection(value: unknown): readonly unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new Error();
+  const length = Object.getOwnPropertyDescriptor(value, "length")?.value as number;
+  if (!Number.isSafeInteger(length) || length < 0) throw new Error();
+  if (Reflect.ownKeys(value).length !== length + 1) throw new Error();
+  const captured: unknown[] = [];
+  for (let index = 0; index < length; index++) captured.push(dataProperty(value, String(index)));
+  return Object.freeze(captured);
+}
+
+function dataRecord(value: unknown): Record<string, unknown> {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    throw new Error();
+  const captured = Object.create(null) as Record<string, unknown>;
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") throw new Error();
+    captured[key] = dataProperty(value, key);
+  }
+  return captured;
+}
+
 function closed(value: unknown, fields: readonly string[]) {
   if (
     value === null ||
@@ -105,15 +138,15 @@ export function createPostgresAvailabilityQueryStore(
             [brand, ""],
           );
           const result = await transaction.query(select, values);
-          if (
-            result === null ||
-            typeof result !== "object" ||
-            !("rows" in result) ||
-            !Array.isArray(result.rows)
-          )
-            throw new Error();
-          const rules = result.rows.map((row: { rule?: unknown } | null) => {
-            const rule = parseAvailabilityRule(row?.rule);
+          // pg Result has its own prototype; only its own data-valued rows field is required.
+          const rows = collection(dataProperty(result, "rows"));
+          const rules = rows.map((row) => {
+            const rawRule = dataRecord(closed(row, ["rule"]).rule);
+            const rule = parseAvailabilityRule({
+              ...rawRule,
+              channelCodes: collection(rawRule.channelCodes),
+              orderTypeCodes: collection(rawRule.orderTypeCodes),
+            });
             if (
               rule.brandReference !== brand ||
               rule.sellableReference !== sku ||

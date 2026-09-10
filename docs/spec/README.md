@@ -15,7 +15,9 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 ## Latest Work Package Status
 
 - [WP-2334](./work-packages/WP-2334.md) reads scoped current SKU availability rules through a Catalog-owned PostgreSQL adapter.
-  Catalog141/141, actual read-only PostgreSQL1/1 and ownership184/184 pass; safety evidence remains separate.
+  Original evidence: Catalog141/141, actual read-only PostgreSQL1/1 and ownership184/184 pass.
+  WSL continuation rejects executable/sparse query results; Catalog151/151 and Ordering879/879 pass.
+  Fresh read-only PostgreSQL1/1 passes after Docker recovery; owned test resources are empty. Safety evidence remains separate.
 
 - [WP-2333](./work-packages/WP-2333.md) rejects executable behavior in Catalog selection and rule collections.
   Catalog117/117 and Ordering879/879 pass, including actual validator/command composition and original replay.
