@@ -113,3 +113,5 @@ export {
   type PickupCartItemOptions,
   type PickupCartItemResult,
 } from "./application/pickup-cart-item-service.js";
+
+export * from "./application/dining-cart-read-service.js";

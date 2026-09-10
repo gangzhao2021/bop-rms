@@ -451,3 +451,11 @@ publish Established credentials. PWA634/634 and browser76/76 pass. Two existing 
 include the canonical Entry no-store response header. Browser-managed Cookie arrival and general
 cross-document recovery remain separate. Real Dining lab, security/build, full verification and forced
 uncached integration pass.
+
+WP-2313 adds Ordering's owner-internal shared Dining Cart read service. Live Identity and exact public
+purpose-Cart participation precede lookup and are rechecked afterward, including absent Cart results.
+Two current Participants can read one Cart without rewriting creator/item attribution; scope, Guest,
+assignment and membership-version drift deny. Ordering591/591 tests pass. Persistence/current-slot
+production, creation, safe DTO/browser integration and atomic shared writes remain distinct unfinished
+work; this read observation is not a Closing write lease. Full verification and forced uncached
+integration pass.
