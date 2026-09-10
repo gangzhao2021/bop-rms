@@ -254,3 +254,5 @@ export type {
   GuestBindingTargetReceipt,
   GuestBindingCompletion,
 } from "./application/ports/guest-binding-ports.js";
+
+export * from "./contracts/guest-dining-binding-preparation.js";
