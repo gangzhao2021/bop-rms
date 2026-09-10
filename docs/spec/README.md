@@ -6,13 +6,17 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2342 - Checkout Capacity Handoff`
+- Current discussion node: `WP-2343 - Capacity Hold Append Adapter`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
 Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 
 ## Latest Work Package Status
+
+- [WP-2343](./work-packages/WP-2343.md) appends Scheduled Holds and public Audit atomically with exact operation recovery.
+  Fulfillment 217/217, ownership 197/197 and actual PostgreSQL acceptance pass.
+  Expired replay returns original history without renewal; application and Payment composition remain.
 
 - [WP-2342](./work-packages/WP-2342.md) documents remaining checkout capacity and Payment clock handoffs.
   The proposed Dine-in capacity meaning remains pending Owner disposition.

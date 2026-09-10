@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { setTimeout as delay } from "node:timers/promises";
 import { it } from "vitest";
+import { createPostgresCapacityHoldStore } from "../../rms/fulfillment/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
@@ -339,7 +340,170 @@ async function prove(context) {
       (client) => insert(client, 16, 170, { created: instant(-20_000) }),
       /invalid capacity hold/u,
     );
-    // A future trigger will add Allocation occupancy before this schema can serve checkout.
+
+    // WP-2343: actual owner append adapter and public Audit in one transaction.
+    await admin.query(`GRANT USAGE ON SCHEMA platform_audit TO ${role}`);
+    await admin.query(`GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`);
+    await admin.query(`GRANT SELECT,INSERT ON platform_audit.audit_record TO ${role}`);
+    const writerScope = { brandReference: scope.brand, storeReference: scope.store };
+    const stamp = async () =>
+      (
+        await admin.query("SELECT date_trunc('milliseconds',clock_timestamp()) AS now")
+      ).rows[0].now.toISOString();
+    const makeRequest = async (slot, hold, ttl = 600_000) => {
+      const createdAt = await stamp();
+      return {
+        hold: {
+          slot: {
+            ...writerScope,
+            fulfillmentType: "Pickup",
+            slotReference: id(slot),
+            configVersion: 1,
+            startsAt: instant(3_600_000 + slot * 1_800_000),
+            endsAt: instant(5_400_000 + slot * 1_800_000),
+          },
+          holdReference: id(hold),
+          cartReference: id(hold + 2000),
+          operationReference: id(hold + 1000),
+          units: 1,
+          unitsRuleVersion: 1,
+          unitsInputDigest: sha,
+          state: "Active",
+          version: 1,
+          createdAt,
+          updatedAt: createdAt,
+          expiresAt: new Date(Date.parse(createdAt) + ttl).toISOString(),
+          allocationReference: null,
+        },
+        intentDigest: sha,
+        audit: {
+          auditId: id(hold + 4000),
+          brandId: scope.brand,
+          storeId: scope.store,
+          actor: { type: "System" },
+          actionCode: "FULFILLMENT_CAPACITY_HOLD_CREATE",
+          targetType: "FulfillmentCapacityHold",
+          targetId: id(hold),
+          reasonCode: "AUTHORIZED_CHECKOUT_CAPACITY",
+          correlationId: id(hold + 5000),
+          occurredAt: createdAt,
+          sourceChannel: "CUSTOMER_PWA",
+          dataClassification: "Restricted",
+          retentionPolicyCode: "SYNTHETIC_RETENTION",
+          retentionPolicyVersion: 1,
+        },
+      };
+    };
+    const writer = (client, options = {}) =>
+      createPostgresCapacityHoldStore(
+        {
+          async run(action) {
+            await client.query("BEGIN");
+            try {
+              await client.query(`SET LOCAL ROLE ${role}`);
+              await client.query("SET LOCAL lock_timeout='3s'");
+              const value = await action({
+                async query(sql, values) {
+                  if (
+                    options.failAudit &&
+                    sql.startsWith("INSERT INTO platform_audit.audit_record")
+                  )
+                    throw new Error("synthetic Audit failure");
+                  return client.query(sql, [...values]);
+                },
+              });
+              if (options.beforeCommit) await options.beforeCommit();
+              await client.query("COMMIT");
+              if (options.loseAck) throw new Error("synthetic lost commit acknowledgement");
+              return value;
+            } catch (error) {
+              await client.query("ROLLBACK");
+              throw error;
+            }
+          },
+        },
+        writerScope,
+      );
+    const auditCount = async (target) =>
+      Number(
+        (
+          await admin.query(
+            "SELECT count(*) AS count FROM platform_audit.audit_record WHERE target_id=$1",
+            [id(target)],
+          )
+        ).rows[0].count,
+      );
+    const unavailable = { code: "CAPACITY_DEPENDENCY_UNAVAILABLE" };
+    await seedSlot(30);
+    const acquisition = await makeRequest(30, 300);
+    let releaseCommit;
+    const commitGate = new Promise((resolve) => {
+      releaseCommit = resolve;
+    });
+    let reachedCommit;
+    const enteredCommit = new Promise((resolve) => {
+      reachedCommit = resolve;
+    });
+    const initialWrite = writer(first, {
+      beforeCommit: async () => {
+        reachedCommit();
+        await commitGate;
+      },
+    }).append(acquisition);
+    await enteredCommit;
+    const duplicateWrite = writer(second).append(acquisition);
+    try {
+      await waitForLock(second);
+    } finally {
+      releaseCommit();
+    }
+    assert.equal((await initialWrite).status, "Created");
+    assert.equal((await duplicateWrite).status, "Existing");
+    assert.equal(await count(30), 1);
+    assert.equal(await auditCount(300), 1);
+    await assert.rejects(
+      writer(first).append({ ...acquisition, intentDigest: `sha256:${"c".repeat(64)}` }),
+      { code: "CAPACITY_IDEMPOTENCY_CONFLICT" },
+    );
+    await assert.rejects(writer(first).append(await makeRequest(30, 301)), unavailable);
+    assert.equal(await count(30), 1);
+    assert.equal(await auditCount(301), 0);
+
+    await seedSlot(31);
+    const rolledBack = await makeRequest(31, 310);
+    await assert.rejects(writer(first, { failAudit: true }).append(rolledBack), unavailable);
+    assert.equal(await count(31), 0);
+    assert.equal(await auditCount(310), 0);
+    assert.equal((await writer(first).append(rolledBack)).status, "Created");
+
+    await seedSlot(32);
+    const lost = await makeRequest(32, 320);
+    await assert.rejects(writer(first, { loseAck: true }).append(lost), unavailable);
+    assert.equal((await writer(first).append(lost)).status, "Existing");
+    assert.equal(await count(32), 1);
+    assert.equal(await auditCount(320), 1);
+
+    await seedSlot(33);
+    const short = await makeRequest(33, 330, 700);
+    assert.equal((await writer(first).append(short)).status, "Created");
+    await admin.query("SELECT pg_sleep(0.8)");
+    await admin.query(
+      `INSERT INTO rms_fulfillment.capacity_hold_terminal
+      (brand_id,store_id,hold_id,terminal_state,allocation_id,operation_id,intent_digest,occurred_at)
+      VALUES ($1,$2,$3,'Expired',NULL,$4,$5,$6)`,
+      [scope.brand, scope.store, id(330), id(6330), sha, await stamp()],
+    );
+    const historical = await writer(first).append(short);
+    assert.deepEqual(historical, { status: "Existing", hold: short.hold });
+    assert.equal(await auditCount(330), 1);
+
+    await seedSlot(34, 1, id(99));
+    await assert.rejects(writer(first).append(await makeRequest(34, 340)), unavailable);
+    assert.equal(await count(34), 0);
+    const cleared = await first.query(
+      "SELECT nullif(current_setting('bop.brand_id',true),'') AS brand, nullif(current_setting('bop.store_id',true),'') AS store",
+    );
+    assert.deepEqual(cleared.rows[0], { brand: null, store: null });
   } finally {
     await Promise.all([
       first.query("ROLLBACK").catch(() => undefined),

@@ -125,6 +125,33 @@ const databaseAccessManifestInput = {
   ],
   accesses: [
     {
+      id: "capacity-hold.read.capacity_slot",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_slot" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source: "packages/rms/fulfillment/src/infrastructure/persistence/capacity-hold-store.ts",
+    },
+    {
+      id: "capacity-hold.read.capacity_hold",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_hold" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source: "packages/rms/fulfillment/src/infrastructure/persistence/capacity-hold-store.ts",
+    },
+    {
+      id: "capacity-hold.write.capacity_hold",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_hold" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      source: "packages/rms/fulfillment/src/infrastructure/persistence/capacity-hold-store.ts",
+    },
+    {
       id: "capacity-query.read.capacity_slot",
       operation: "read",
       mechanism: "repository",

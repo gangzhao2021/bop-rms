@@ -190,6 +190,14 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
           module.manifest.ownedDatabase?.tables?.includes("availability_rule") &&
           moduleRelative === "src/infrastructure/persistence/availability-query-store.ts";
+        // WP-2343 admits only the scoped Fulfillment Hold append adapter.
+        const acceptedCapacityHoldWriterAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          ["capacity_slot", "capacity_hold"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/capacity-hold-store.ts";
         // WP-2340 admits only the Fulfillment owner capacity history reader.
         const acceptedCapacityQueryAsset =
           module.packageName === "@rms/fulfillment" &&
@@ -404,6 +412,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPublishedMenuAsset &&
           !acceptedAvailabilityQueryAsset &&
           !acceptedCapacityQueryAsset &&
+          !acceptedCapacityHoldWriterAsset &&
           !acceptedPriceQuoteQueryAsset &&
           !acceptedPriceQuoteWriterAsset &&
           !acceptedPriceQuoteRequestAsset &&
