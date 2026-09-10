@@ -9,21 +9,13 @@ import {
   decideInitialDiningCartSelection,
   parseDiningCartSelectionReceipt,
   type DiningCartSelectionReceipt,
+  type DiningCartSelectionCommand,
 } from "../../domain/dining-cart-selection.js";
 import {
   createPostgresCartQueryStore,
   type CartQueryTransactionRunner,
 } from "./cart-query-store.js";
 
-export interface DiningCartSelectionCommand {
-  readonly operationReference: string;
-  readonly brandReference: string;
-  readonly storeReference: string;
-  readonly diningSessionReference: string;
-  readonly guestSessionReference: string;
-  readonly participantReference: string;
-  readonly observedAt: string;
-}
 export interface DiningCartSelectionStoreOptions {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
   readonly sourceChannel: "Qr" | "Web";
@@ -398,3 +390,5 @@ export function createPostgresDiningCartSelectionStore(
     },
   });
 }
+
+export type { DiningCartSelectionCommand } from "../../domain/dining-cart-selection.js";

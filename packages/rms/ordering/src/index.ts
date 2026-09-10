@@ -121,3 +121,5 @@ export { createPostgresDiningCartReadStore } from "./infrastructure/persistence/
 export * from "./domain/dining-cart-selection.js";
 
 export * from "./infrastructure/persistence/dining-cart-selection-store.js";
+
+export * from "./application/dining-cart-selection-service.js";

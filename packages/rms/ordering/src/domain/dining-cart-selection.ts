@@ -9,6 +9,15 @@ import {
 } from "./cart.js";
 import { assertCartLifecycleActive, createActiveCartLifecycle } from "./cart-lifecycle.js";
 
+export interface DiningCartSelectionCommand {
+  readonly operationReference: string;
+  readonly brandReference: string;
+  readonly storeReference: string;
+  readonly diningSessionReference: string;
+  readonly guestSessionReference: string;
+  readonly participantReference: string;
+  readonly observedAt: string;
+}
 export interface DiningCartSelectionDecision {
   readonly action: "Create" | "Select";
   readonly cart: CartAggregate;

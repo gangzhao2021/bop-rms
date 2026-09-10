@@ -4,6 +4,7 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresDiningCartSelectionStore,
+  createDiningCartSelectionService,
   createPostgresDiningCartReadStore,
 } from "../../rms/ordering/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -29,6 +30,9 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
     const role = `wp2316_${context.runId}`;
     assert.match(role, /^wp2316_[a-f0-9]+$/u);
     let active = 0;
+    let transactions = 0;
+    let authorityReads = 0;
+    let participationAllowed = true;
     let generated = 1000;
     let creations = 0;
     let clock = 0;
@@ -60,6 +64,7 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
             });
             await client.connect();
             active++;
+            transactions++;
             let committed = false;
             try {
               await client.query("BEGIN");
@@ -130,8 +135,78 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
         }),
       };
       const store = createPostgresDiningCartSelectionStore(runner(), options);
+      // WP-2317 composes the actual application guard and writer with explicit synthetic current providers.
+      function authorized(intent, selection = store) {
+        const table = Number.parseInt(intent.diningSessionReference.slice(-12), 16);
+        return createDiningCartSelectionService({
+          scope,
+          selection,
+          now: () => at(clock),
+          sessions: {
+            resolve: async () => {
+              authorityReads++;
+              return {
+                sessionReference: intent.guestSessionReference,
+                status: "Active",
+                version: 1,
+                brandReference: id(2),
+                storeReference: id(3),
+                publicStoreReference: id(7),
+                publicTableReference: id(10000 + table),
+                channel: "DineIn",
+                locale: "en-CA",
+                qrReference: id(30000 + table),
+                qrRevocationVersion: 1,
+                diningState: "DiningBound",
+                diningSessionReference: intent.diningSessionReference,
+                diningParticipantReference: intent.participantReference,
+                createdAt: at(-120),
+                lastSeenAt: at(-60),
+                idleExpiresAt: at(14340),
+                absoluteExpiresAt: at(86280),
+                orderClosedAt: null,
+                closureExpiresAt: null,
+                rotatedFromGuestSessionReference: null,
+                revocationReason: null,
+                revokedAt: null,
+              };
+            },
+          },
+          participation: {
+            resolve: async (query) => {
+              assert.deepEqual(query, {
+                purpose: "Cart",
+                diningSessionReference: intent.diningSessionReference,
+                participantReference: intent.participantReference,
+              });
+              return participationAllowed
+                ? {
+                    schemaVersion: 1,
+                    brandReference: id(2),
+                    storeReference: id(3),
+                    diningSessionReference: intent.diningSessionReference,
+                    participantReference: intent.participantReference,
+                    tableReference: id(20000 + table),
+                    tableAssignmentVersion: 1,
+                    diningSessionVersion: 1,
+                    participantVersion: 1,
+                    observedAt: at(clock),
+                  }
+                : null;
+            },
+          },
+        });
+      }
       const commands = [command(10), command(11, 30, 41, 51)];
-      const results = await Promise.all(commands.map((value) => store.select(value)));
+      const results = await Promise.all(
+        commands.map((value, index) =>
+          authorized(value).select({
+            sessionCredential: (index === 0 ? "a" : "b").repeat(43),
+            operationReference: value.operationReference,
+          }),
+        ),
+      );
+      assert.equal(authorityReads, 8);
       assert.deepEqual(results.map((value) => value.action).sort(), ["Create", "Select"]);
       assert.equal(results[0].cartReference, results[1].cartReference);
       assert.equal(creations, 1);
@@ -147,6 +222,19 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
       ).rows[0];
       assert.equal(root.created_by_actor_id, created.guestSessionReference);
       assert.equal(root.aggregate_version, 1);
+      const originalRequest = {
+        sessionCredential: "a".repeat(43),
+        operationReference: created.operationReference,
+      };
+      participationAllowed = false;
+      const beforeDenied = transactions;
+      await assert.rejects(authorized(createdCommand).select(originalRequest), {
+        code: "CART_PERMISSION_DENIED",
+      });
+      assert.equal(transactions, beforeDenied);
+      participationAllowed = true;
+      assert.deepEqual(await authorized(createdCommand).select(originalRequest), created);
+
       const count = async (table) =>
         Number((await admin.query(`SELECT count(*) AS count FROM ${table}`)).rows[0].count);
       assert.equal(await count("rms_ordering.dining_cart_operation"), 2);
@@ -204,6 +292,47 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
         },
         beforeFailure,
       );
+
+      const changedAuthorityCommand = command(185, 85, 45, 55);
+      const changedAuthorityRequest = {
+        sessionCredential: "c".repeat(43),
+        operationReference: id(185),
+      };
+      const beforePostEffect = {
+        carts: await count("rms_ordering.cart"),
+        operations: await count("rms_ordering.dining_cart_operation"),
+        audit: await count("platform_audit.audit_record"),
+      };
+      let committedReceipt;
+      const changingAuthority = authorized(changedAuthorityCommand, {
+        select: async (value) => {
+          committedReceipt = await store.select(value);
+          participationAllowed = false;
+          return committedReceipt;
+        },
+      });
+      await assert.rejects(changingAuthority.select(changedAuthorityRequest), {
+        code: "CART_PERMISSION_DENIED",
+      });
+      assert.ok(committedReceipt);
+      assert.deepEqual(
+        {
+          carts: await count("rms_ordering.cart"),
+          operations: await count("rms_ordering.dining_cart_operation"),
+          audit: await count("platform_audit.audit_record"),
+        },
+        {
+          carts: beforePostEffect.carts + 1,
+          operations: beforePostEffect.operations + 1,
+          audit: beforePostEffect.audit + 1,
+        },
+      );
+      participationAllowed = true;
+      assert.deepEqual(
+        await authorized(changedAuthorityCommand).select(changedAuthorityRequest),
+        committedReceipt,
+      );
+      assert.equal(await count("platform_audit.audit_record"), beforePostEffect.audit + 1);
 
       async function seed(cart, session, kind = "Active") {
         if (kind === "Legacy") {
@@ -386,7 +515,17 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
         policy: { ...options.policy, validUntil: at(1) },
       });
       assert.deepEqual(await oldPolicyStore.select(createdCommand), created);
+      assert.deepEqual(
+        await authorized(createdCommand, oldPolicyStore).select(originalRequest),
+        created,
+      );
       clock = 86400;
+      const beforeExpiredGuest = transactions;
+      await assert.rejects(authorized(createdCommand).select(originalRequest), {
+        code: "CART_PERMISSION_DENIED",
+      });
+      assert.equal(transactions, beforeExpiredGuest);
+
       await assert.rejects(store.select(createdCommand), { code: "CART_IDEMPOTENCY_CONFLICT" });
       await assert.rejects(store.select(command(903, 903)), { code: "CART_LIFECYCLE_UNAVAILABLE" });
       assert.equal(active, 0);

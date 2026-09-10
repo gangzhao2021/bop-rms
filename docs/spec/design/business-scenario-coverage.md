@@ -478,3 +478,8 @@ WP-2316 implements the owner-local initial Dining Cart selection writer with exa
 minimal immutable operation receipts and atomic public Audit append. Current Identity/Dining authorization
 and customer runtime remain separate prerequisites. Ordering704/704, Cart PostgreSQL9/9, 101 migrations,
 full verification and forced uncached integration pass.
+
+WP-2317 shares current Identity/Dining authorization between Cart reads and selection. Historical
+operation lookup follows current authority, and post-effect authority drift prevents receipt publication.
+Safe customer views and runtime activation remain separate. Ordering753/753, Cart PostgreSQL9/9,
+full verification and forced uncached integration pass.
