@@ -3,9 +3,9 @@
 This is the documentation deliverable for [WP-2224](../work-packages/WP-2224.md), prepared from
 `main@cedc44c9b6a6a1b389f77342078cc6f2d540dabe`. It turns the Owner-requested design review into
 traceable scenarios, concrete proposals and a decision queue. It is not a new Handoff version,
-implementation authorization or production-readiness assertion. Current implementation status was
-reconciled in [WP-2330](../work-packages/WP-2330.md) against local fab611e; historical inventory
-and proposals below retain their original scope.
+implementation authorization or production-readiness assertion. Implementation status was reconciled in [WP-2330](../work-packages/WP-2330.md) against local
+fab611e and refreshed in [WP-2400](../work-packages/WP-2400.md) through the original repair baseline
+f7a4c90 (WP-2350), then reconciled at local integration with 4c3f9be52db676641a2cddc7d1f894424875f879 (WP-2352). Historical inventory and proposals retain their original scope.
 
 ## Read in this order
 
@@ -15,16 +15,20 @@ and proposals below retain their original scope.
    submission/capacity, Order transitions and ordinary refunds.
 3. [Approval and operating-day flow](./approval-and-operating-day.md): canonical work surfaces,
    source-domain actions and opening/closing/handover responsibilities.
-4. [System completeness contracts](./system-completeness-contracts.md): component compatibility,
+4. [Refund approval boundaries](./refund-approval-boundaries.md): source-preserved controls, precise
+   unresolved day/window/cumulative decisions and their boundary scenarios.
+5. [System completeness contracts](./system-completeness-contracts.md): component compatibility,
    privacy-owner coverage and performance acceptance inputs.
 
 ## What is and is not established
 
-The original WP-2224 baseline inventory contained 210 canonical Screens and 273 `WP-*.md` briefs, excluding the
-separately named SPIKE. Of the Screens, 201 have `work_package_mode: resolved` and nine inherit
-their mapping. These are inventory and mapping states, not proof of implemented actions, connected
-runtime, exhaustive requirements or successful acceptance. The current local inventory contains 380 WP briefs including WP-2330; this count is not completion
-evidence and no Screen mapping is changed by the status reconciliation.
+The original WP-2224 inventory contained 210 canonical Screens and 273 WP briefs.
+The importer then reported 201 resolved and nine inherited mappings; that count included five
+misclassified standalone Customer pages. WP-2400 recovers their existing Section 88 contracts and
+abbreviated WP references, preserving future gates. Current records are in the
+[Screen Registry](../../product/screen-registry.yaml). The WP-2330 count of 380 briefs is also
+historical. Inventory and mapping counts never prove implemented actions, connected runtime or
+successful acceptance.
 
 The repository already defines substantial QR/Session, Menu/Quote, Order, Payment reconciliation
 and compensation, Kitchen/Pickup, Receipt, Store, Reservation, Procurement/Inventory, Food Safety,
@@ -32,10 +36,11 @@ Privacy, Platform and recovery contracts. Their detailed evidence remains in the
 Most local evidence does not prove a connected operational Store journey. The coverage matrix
 keeps those two conclusions separate.
 
-The complete external Handoff was unavailable during this review. A repository search and the
-available connected-file searches did not obtain it. A missing local rule is therefore described as
-a local source/ownership gap, not a claim that the external Handoff never specified it. The
-[Specification Index](../README.md) retains authority and later accepted decisions retain precedence.
+The complete external Handoff was unavailable during WP-2224. An untracked local source identifying
+itself as 0.5.9 later became readable and supported the scoped WP-2336/WP-2400 reconciliations.
+The [Specification Index](../README.md#authority) distinguishes that availability from the accepted
+composite baseline. A local source rule, a proposed interpretation and an accepted addendum must
+retain separate labels; no new complete Handoff version is approved by this repair.
 
 ## Status vocabulary
 
@@ -59,20 +64,36 @@ The IDs below identify workstreams inside WP-2224. They are not new Domains, run
 approval records, database objects or assigned future WP numbers. The responsible roles are design
 review roles, not claims that real people have been assigned.
 
-| ID                            | Review roles                                                  | Reviewable proposal / preserved rule                                                                                                                                       | Required closure evidence                                                                                                                                               |
-| ----------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DC-01 Cart/Session            | Ordering + Identity + API                                     | H-CART-01; preserve exact binding, required rotation, immutable Cart attribution and server-authorized current lookup.                                                     | Reconciled create/bind/current sequence, concurrent and partial-failure recovery, credential-delivery boundary; accepted DEC-H01/02 and owning WP.                      |
-| DC-02 Ordinary refund         | Payment + Pricing + Operations + Permission                   | H-REFUND-01; Payment owns financial truth, original-method boundary and cumulative balance; ordinary refund is distinct from the existing paid-unfulfillable compensation. | Corrected WP-1301 attribution; source-backed DEC-H06/07 eligibility, allocation and approval rules; producer/consumer work scope and Unknown/reconciliation acceptance. |
-| DC-03 Work surfaces           | Source Domains + Task/Workflow + Merchant Web                 | AOD-D01/AOD-D02; Task metadata, approval facts and technical alerts retain their distinct owners.                                                                          | Exact source types and canonical Screen/action routing, permissions, freshness/unknown-outcome behavior and escalation policy; actual follow-up WP mapping.             |
-| DC-04 Order and capacity      | Ordering + capacity authority + Payment + Kitchen/Fulfillment | H-PREP-01/H-ORDER-01; preserve durable preparation evidence, 30-minute capacity rule and exclusive owner-issued finality.                                                  | DEC-H03/04/05: named producer and owner-local atomic boundary; accepted transition/race/recovery matrix; no invented shared transaction over foreign tables.            |
-| DC-05 Component compatibility | Architecture + Release + API/PWA/Worker owners                | System compatibility proposal; preserve immutable release digest, migration sequence and safe PWA update rules.                                                            | SC-D01/02: supported-version matrix, observation/withdrawal evidence, contract eligibility and rollback/fail-forward plan for one candidate.                            |
-| DC-06 Operating day           | Store Operations + Ordering + Dining + Payment + Kitchen      | AOD-D03; operating checklist and unresolved-item handover never rewrite transaction Business Date or impersonate source completion.                                        | System/manual responsibility decision, handover acceptance/escalation rules and synthetic opening-to-next-day scenario.                                                 |
-| DC-07 Privacy coverage        | Privacy + Security + every affected Data Owner                | System privacy proposal; required-owner coverage must be resolved before declaring all registered work complete.                                                           | SC-D03/04: versioned field/category-owner coverage, scoped applicability/hold evidence and completion/partial-result rules reconciled with policy.                      |
-| DC-08 Performance             | Product + Operations + SRE + Data                             | System performance proposal; preserve existing rate limits, recovery objectives and database budget.                                                                       | SC-D05/06: accepted journey SLOs, workload model, observation windows and overload priorities; no invented production numbers.                                          |
+| ID                            | Review roles                                                  | Reviewable proposal / preserved rule                                                                                                                                       | Required closure evidence                                                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DC-01 Cart/Session            | Ordering + Identity + API                                     | H-CART-01; preserve exact binding, required rotation, immutable Cart attribution and server-authorized current lookup.                                                     | Reconciled create/bind/current sequence, concurrent and partial-failure recovery, credential-delivery boundary; accepted DEC-H01/02 and owning WP.                         |
+| DC-02 Ordinary refund         | Payment + Pricing + Operations + Permission                   | H-REFUND-01; Payment owns financial truth, original-method boundary and cumulative balance; ordinary refund is distinct from the existing paid-unfulfillable compensation. | Corrected WP-1301 attribution; source-backed DEC-H06/07 eligibility, allocation and approval rules; producer/consumer work scope and Unknown/reconciliation acceptance.    |
+| DC-03 Work surfaces           | Source Domains + Task/Workflow + Merchant Web                 | AOD-D01/AOD-D02; Task metadata, approval facts and technical alerts retain their distinct owners.                                                                          | Exact source types and canonical Screen/action routing, permissions, freshness/unknown-outcome behavior and escalation policy; actual follow-up WP mapping.                |
+| DC-04 Order and capacity      | Ordering + capacity authority + Payment + Kitchen/Fulfillment | H-PREP-01/H-ORDER-01; preserve durable preparation evidence, 30-minute capacity rule and exclusive owner-issued finality.                                                  | [Accepted DEC-H03 topology](./capacity-source-decision.md); remaining producer/race evidence, DEC-H03-DINING and DEC-H04/05 decisions; no cross-owner private transaction. |
+| DC-05 Component compatibility | Architecture + Release + API/PWA/Worker owners                | System compatibility proposal; preserve immutable release digest, migration sequence and safe PWA update rules.                                                            | SC-D01/02: supported-version matrix, observation/withdrawal evidence, contract eligibility and rollback/fail-forward plan for one candidate.                               |
+| DC-06 Operating day           | Store Operations + Ordering + Dining + Payment + Kitchen      | AOD-D03; operating checklist and unresolved-item handover never rewrite transaction Business Date or impersonate source completion.                                        | System/manual responsibility decision, handover acceptance/escalation rules and synthetic opening-to-next-day scenario.                                                    |
+| DC-07 Privacy coverage        | Privacy + Security + every affected Data Owner                | System privacy proposal; required-owner coverage must be resolved before declaring all registered work complete.                                                           | SC-D03/04: versioned field/category-owner coverage, scoped applicability/hold evidence and completion/partial-result rules reconciled with policy.                         |
+| DC-08 Performance             | Product + Operations + SRE + Data                             | System performance proposal; preserve existing rate limits, recovery objectives and database budget.                                                                       | SC-D05/06: accepted journey SLOs, workload model, observation windows and overload priorities; no invented production numbers.                                             |
 
-The narrow WP-1301 correction is within this package. Canonical Screen mapping corrections remain
-explicit follow-up work because a replacement execution WP must actually own the required behavior;
-pointing every Screen to this documentation package would not close that gap.
+The narrow WP-1301 correction belongs to the original package. WP-2400 repairs transcription of
+existing Section 88 mappings; it does not assign this documentation WP as the runtime owner.
+Other mapping gaps still need a real owning execution WP, as recorded by the scenario view.
+
+## Current decision, implementation and evidence state
+
+The linked disposition record owns each decision; this view distinguishes implementation from approval.
+A missing adapter or test does not reopen an accepted decision. The
+[current scenario evidence view](./business-scenario-coverage.md#current-scenario-evidence-view)
+owns per-layer progress through WP-2352.
+
+| Decision / source                                                                                        | Decision acceptance                                       | Implemented scope                                                                               | Remaining implementation / acceptance                                                                                           |
+| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| [DEC-H01/H02, WP-2228](../work-packages/WP-2228.md)                                                      | Accepted product choices                                  | Shared Dining Cart and acknowledged foreground credential recovery; browser evidence in WP-2327 | Cross-document continuity, authoritative commercial inputs and Dining Quote/Checkout; no new sharing/recovery approval required |
+| [DEC-H03](./capacity-source-decision.md#decision-state)                                                  | Accepted scoped topology addendum                         | Scheduled capacity lifecycle and PostgreSQL owner reads/writes through WP-2347                  | Current application authority, exact clock seal, atomic Ordering linkage and composed rollback/Unknown/late-payment acceptance  |
+| [DEC-H03-DINING](./capacity-checkout-handoff.md#proposed-dine-in-interpretation-dec-h03-dining)          | Proposal; Owner disposition pending                       | No Dining capacity commitment is claimed                                                        | Resolve this mode-specific interpretation, then owner lifecycle/closure-race evidence                                           |
+| [DEC-H04/H05](./customer-order-payment-handoffs.md#h-order-01-acceptance-cancellation-and-final-closure) | Source decisions/proposals pending                        | Existing owner-local Order/Payment/fulfillment boundaries remain                                | Exact acceptance/cancellation/close rules, producer fences and cross-owner race evidence                                        |
+| [DEC-H06/H07](./refund-approval-boundaries.md)                                                           | Ordinary workflow and precise approval boundaries pending | Original-method adapter and separate paid-unfulfillable compensation baseline                   | Accept the RF-D01–06 boundary choices, then common claim exclusion and ordinary refund implementation/acceptance                |
+| [AOD-D01–03](./approval-and-operating-day.md), [SC-D01–06](./system-completeness-contracts.md)           | Proposals/source decisions retain their recorded status   | Existing source contracts and policy gates only                                                 | Scoped work routing, operating-day, compatibility, privacy coverage and performance decisions/evidence                          |
 
 ## Owner decisions recorded after the review
 
@@ -92,9 +113,10 @@ proofs with labeled synthetic commercial/Staff/QR inputs, not real Store or Prov
 
 Remaining DC-01 obligations include cross-document credential continuity (foreground response-loss
 recovery is not browser-reload recovery), authoritative Catalog selection/commercial producers and
-Dining Quote/Checkout composition. DC-04's capacity ownership/atomicity decision still gates full
-submission-to-Payment even for a proposed local operational scenario. Other DC entries remain
-unchanged. Do not reopen the accepted sharing/recovery product choices to resolve these mechanics.
+Dining Quote/Checkout composition. DC-04's topology is accepted in DEC-H03; full submission-to-Payment
+still needs its producer, exact clock/linkage and composed race/recovery evidence.
+The separate Dining interpretation and Order finality decisions remain pending as shown above.
+Do not reopen accepted topology or sharing/recovery choices to resolve these implementation duties.
 
 ## Recommended execution order
 
@@ -102,9 +124,10 @@ unchanged. Do not reopen the accepted sharing/recovery product choices to resolv
    and Dining Quote/Checkout; keep unavailable results where their owner inputs are absent. Establish
    each bounded execution brief before implementation. Do not substitute a display projection as
    current Catalog eligibility or synthetic prices as live authority.
-2. Resolve DEC-H03's precise capacity owner and local atomic boundary before enabling submission
-   and Payment. Existing policy configuration or a receipt cannot silently replace the accepted hold
-   requirement. Reconcile remaining Order finality and ordinary refund source decisions separately.
+2. Implement the remaining producer/clock/linkage composition under accepted DEC-H03 and prove
+   submission/Payment recovery. Existing policy configuration or an observation cannot replace a
+   durable owner commitment. Resolve DEC-H03-DINING, Order finality and the narrowed ordinary-refund
+   decisions separately; do not request topology acceptance again.
 3. Finish cross-document credential continuity only through an accepted Identity-owned mechanism;
    preserve random independent CSRF, page-memory handling and immutable Cart/Participant attribution.
    Existing acknowledged foreground recovery is retained and need not be redesigned or reapproved.

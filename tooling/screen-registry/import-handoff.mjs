@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { stringify } from "yaml";
+import { parseHandoffCells, phaseFor, workPackages } from "./handoff-row.mjs";
 const { values } = parseArgs({
   options: { source: { type: "string" }, output: { type: "string" } },
 });
@@ -238,30 +239,6 @@ function familyFor(id, source) {
     return "utility";
   return "transaction_explorer";
 }
-function phaseFor(text) {
-  if (/Future Trigger/i.test(text)) return ["future_trigger", "future_trigger_disabled"];
-  if (/Phase 1A/i.test(text)) return ["phase_1a", "phase_capability"];
-  if (/Later Phase 1/i.test(text)) return ["later_phase_1", "phase_capability"];
-  if (/Phase 0\+/i.test(text)) return ["phase_0_plus", "phase_capability"];
-  if (/Phase 1–3|Phase 1-3|Phase 2–3|Phase 2-3/i.test(text))
-    return ["cross_phase", "phase_capability"];
-  const match = text.match(/Phase\s+([0-9])/i);
-  return match
-    ? [`phase_${match[1]}`, "phase_capability"]
-    : ["inherited", "inherited_feature_gate"];
-}
-function workPackages(text) {
-  const result = [];
-  for (const match of text.matchAll(/WP-(\d{4})(?:[–-](\d{4}))?/g)) {
-    const first = Number(match[1]);
-    const last = Number(match[2] ?? match[1]);
-    if (last >= first && last - first <= 50)
-      for (let number = first; number <= last; number += 1)
-        result.push(`WP-${String(number).padStart(4, "0")}`);
-    else result.push(`WP-${match[1]}`);
-  }
-  return [...new Set(result)].sort();
-}
 function routeFrom(source) {
   return source.match(/`(\/(?:[^`\s]+))`/)?.[1];
 }
@@ -321,17 +298,7 @@ for (const line of section.split(/\r?\n/)) {
 }
 const screens = [];
 for (const row of rows) {
-  const regular = row.cells.length >= 6;
-  const [first, views, search, actions, access, phaseCell] = regular
-    ? row.cells
-    : [
-        row.cells[0],
-        row.cells[1],
-        "inherits parent Screen",
-        "inherits parent Screen",
-        row.cells[2],
-        row.cells[2],
-      ];
+  const [first, views, search, actions, access, phaseCell] = parseHandoffCells(row.cells);
   for (const id of row.rowIds) {
     const prefix = id.split("-")[0];
     const domain = domainFor(id, prefix);

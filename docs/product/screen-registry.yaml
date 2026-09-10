@@ -105,6 +105,7 @@ catalogs:
     - WP-0043
     - WP-0044
     - WP-0045
+    - WP-0046
     - WP-0100
     - WP-0101
     - WP-0102
@@ -117,6 +118,8 @@ catalogs:
     - WP-0109
     - WP-0120
     - WP-0121
+    - WP-0122
+    - WP-0123
     - WP-0125
     - WP-1000
     - WP-1001
@@ -147,6 +150,7 @@ catalogs:
     - WP-1203
     - WP-1204
     - WP-1205
+    - WP-1220
     - WP-1221
     - WP-1222
     - WP-1223
@@ -184,6 +188,15 @@ catalogs:
     - WP-1603
     - WP-1604
     - WP-1605
+    - WP-1700
+    - WP-1701
+    - WP-1702
+    - WP-1703
+    - WP-1704
+    - WP-1705
+    - WP-1706
+    - WP-1707
+    - WP-1708
     - WP-1709
     - WP-1720
     - WP-1721
@@ -205,10 +218,20 @@ catalogs:
     - WP-1903
     - WP-1904
     - WP-1905
+    - WP-2000
     - WP-2003
     - WP-2027
+    - WP-2028
+    - WP-2042
     - WP-2043
+    - WP-2045
+    - WP-2047
+    - WP-2048
+    - WP-2049
+    - WP-2051
     - WP-2052
+    - WP-2054
+    - WP-2055
     - WP-2060
     - WP-2061
     - WP-2062
@@ -257,6 +280,7 @@ catalogs:
     - WP-2153
     - WP-2154
     - WP-2155
+    - WP-2160
     - WP-2161
     - WP-2162
     - WP-2163
@@ -267,15 +291,20 @@ catalogs:
     - WP-2172
     - WP-2173
     - WP-2174
+    - WP-2175
     - WP-2176
     - WP-2177
     - WP-2178
+    - WP-2180
+    - WP-2181
+    - WP-2182
     - WP-2183
     - WP-2190
     - WP-2191
     - WP-2192
     - WP-2193
     - WP-2194
+    - WP-2195
     - WP-2196
     - WP-2197
     - WP-2198
@@ -321,6 +350,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-0045
+      - WP-1800
     handoff_section: "88.19"
     route_intent: ALERT-CENTER /app/alerts
     navigation_targets: []
@@ -368,6 +398,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-0125
+      - WP-1807
     handoff_section: "88.19"
     route_intent: APPROVAL-INBOX /app/approvals
     navigation_targets: []
@@ -414,6 +445,8 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-0042
+      - WP-0046
+      - WP-2052
     handoff_section: "88.19"
     route_intent: AUDIT-EXPLORER /app/audit
     navigation_targets: []
@@ -829,6 +862,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1021
+      - WP-1027
     handoff_section: "88.8"
     route_intent: CAT-CATEGORY-TREE /app/commerce/categories
     navigation_targets: []
@@ -1020,6 +1054,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1024
+      - WP-1027
       - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-MENU-PUBLISH contextual
@@ -1067,6 +1102,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1022
+      - WP-1027
     handoff_section: "88.8"
     route_intent: CAT-OPTIONSET-LIST、CAT-OPTIONSET-DETAIL、CAT-OPTIONSET-CREATE、CAT-OPTIONSET-EDIT /app/commerce/option-sets/...
     navigation_targets: []
@@ -1113,6 +1149,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1022
+      - WP-1027
     handoff_section: "88.8"
     route_intent: CAT-OPTIONSET-LIST、CAT-OPTIONSET-DETAIL、CAT-OPTIONSET-CREATE、CAT-OPTIONSET-EDIT /app/commerce/option-sets/...
     navigation_targets: []
@@ -1159,6 +1196,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1022
+      - WP-1027
     handoff_section: "88.8"
     route_intent: CAT-OPTIONSET-LIST、CAT-OPTIONSET-DETAIL、CAT-OPTIONSET-CREATE、CAT-OPTIONSET-EDIT /app/commerce/option-sets/...
     navigation_targets: []
@@ -1205,6 +1243,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1022
+      - WP-1027
     handoff_section: "88.8"
     route_intent: CAT-OPTIONSET-LIST、CAT-OPTIONSET-DETAIL、CAT-OPTIONSET-CREATE、CAT-OPTIONSET-EDIT /app/commerce/option-sets/...
     navigation_targets: []
@@ -1255,6 +1294,7 @@ screens:
       - WP-1022
       - WP-1023
       - WP-1024
+      - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-PRODUCT-DETAIL、CAT-PRODUCT-CREATE、CAT-PRODUCT-EDIT /app/commerce/products/...
     navigation_targets: []
@@ -1305,6 +1345,7 @@ screens:
       - WP-1022
       - WP-1023
       - WP-1024
+      - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-PRODUCT-DETAIL、CAT-PRODUCT-CREATE、CAT-PRODUCT-EDIT /app/commerce/products/...
     navigation_targets: []
@@ -1355,6 +1396,7 @@ screens:
       - WP-1022
       - WP-1023
       - WP-1024
+      - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-PRODUCT-DETAIL、CAT-PRODUCT-CREATE、CAT-PRODUCT-EDIT /app/commerce/products/...
     navigation_targets: []
@@ -1401,6 +1443,8 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1020
+      - WP-1027
+      - WP-1802
     handoff_section: "88.8"
     route_intent: CAT-PRODUCT-LIST /app/commerce/products
     navigation_targets: []
@@ -1447,6 +1491,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1020
+      - WP-1027
     handoff_section: "88.8"
     route_intent: CAT-SKU-LIST、CAT-SKU-DETAIL、CAT-SKU-CREATE、CAT-SKU-EDIT /app/commerce/skus/...
     navigation_targets: []
@@ -1493,6 +1538,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1020
+      - WP-1027
     handoff_section: "88.8"
     route_intent: CAT-SKU-LIST、CAT-SKU-DETAIL、CAT-SKU-CREATE、CAT-SKU-EDIT /app/commerce/skus/...
     navigation_targets: []
@@ -1539,6 +1585,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1020
+      - WP-1027
     handoff_section: "88.8"
     route_intent: CAT-SKU-LIST、CAT-SKU-DETAIL、CAT-SKU-CREATE、CAT-SKU-EDIT /app/commerce/skus/...
     navigation_targets: []
@@ -1585,6 +1632,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1020
+      - WP-1027
     handoff_section: "88.8"
     route_intent: CAT-SKU-LIST、CAT-SKU-DETAIL、CAT-SKU-CREATE、CAT-SKU-EDIT /app/commerce/skus/...
     navigation_targets: []
@@ -1631,6 +1679,8 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1028
+      - WP-2027
+      - WP-2175
     handoff_section: "88.16"
     route_intent: CMP-ALLERGEN-REVIEW /app/compliance/allergens
     navigation_targets: []
@@ -1906,6 +1956,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-2027
+      - WP-2175
     handoff_section: "88.16"
     route_intent: CMP-INCIDENT /app/compliance/incidents/:id
     navigation_targets: []
@@ -2186,6 +2237,7 @@ screens:
       - WP-1722
       - WP-1723
       - WP-1724
+      - WP-2145
     handoff_section: "88.14"
     route_intent: COMMS-HISTORY /app/customers/communications
     navigation_targets: []
@@ -2232,6 +2284,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1721
+      - WP-2145
     handoff_section: "88.14"
     route_intent: COMMS-TEMPLATE-LIST、COMMS-TEMPLATE-EDITOR /app/customers/templates/...
     navigation_targets: []
@@ -2278,6 +2331,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1721
+      - WP-2145
     handoff_section: "88.14"
     route_intent: COMMS-TEMPLATE-LIST、COMMS-TEMPLATE-EDITOR /app/customers/templates/...
     navigation_targets: []
@@ -2478,19 +2532,19 @@ screens:
     capability: customer.cust_account_auth
     owning_domain: customer
     object_or_workflow: cust_account_auth
-    phase: inherited
-    feature_gate: inherited_feature_gate
+    phase: phase_3
+    feature_gate: phase_capability
     roles:
       - Guest / Customer according to Section 88
     permission_ref: customer.authenticated
     scope: Guest Session and exact Store / journey scope
     mandatory_field_groups:
       - verified email / phone method selected by future IDR、challenge / recovery、privacy notice
-    search_filter_sort_export: inherits parent Screen
+    search_filter_sort_export: —
     query_ref: query.cust_account_auth
     projection_ref: customer_loyalty_*_v1
     freshness: Section 88.22 projection target or inherited parent freshness
-    action_summary: inherits parent Screen
+    action_summary: start / complete / recover authenticated Customer Session；no social / password choice is implied before Provider evidence
     command_refs:
       - handoff_intent.cust_account_auth
     idempotency: required for every mutation intent; query intents are side-effect free
@@ -2506,8 +2560,9 @@ screens:
       - Offline Read-only
     responsive_accessibility: Sections 88.4 and 88.27-88.30 universal profile
     analytics_privacy: Section 88.28 allowlist and exclusions
-    work_package_mode: inherited
-    work_packages: []
+    work_package_mode: resolved
+    work_packages:
+      - WP-2140
     handoff_section: "88.6"
     route_intent: CUST-ACCOUNT-AUTH /account/sign-in
     navigation_targets: []
@@ -2553,7 +2608,10 @@ screens:
     analytics_privacy: Section 88.28 allowlist and exclusions
     work_package_mode: resolved
     work_packages:
+      - WP-1006
       - WP-1028
+      - WP-1407
+      - WP-2027
     handoff_section: "88.6"
     route_intent: CUST-ALLERGEN-ASSIST contextual
     navigation_targets:
@@ -2605,6 +2663,8 @@ screens:
       - WP-1203
       - WP-1204
       - WP-1205
+      - WP-1702
+      - WP-2049
     handoff_section: "88.6"
     route_intent: CUST-CART /cart
     navigation_targets: []
@@ -2656,6 +2716,14 @@ screens:
       - WP-1103
       - WP-1104
       - WP-1105
+      - WP-1220
+      - WP-1221
+      - WP-1222
+      - WP-1223
+      - WP-1224
+      - WP-1225
+      - WP-1226
+      - WP-1703
     handoff_section: "88.6"
     route_intent: CUST-CHECKOUT /checkout
     navigation_targets: []
@@ -2709,6 +2777,7 @@ screens:
       - WP-1308
       - WP-1309
       - WP-1310
+      - WP-1704
     handoff_section: "88.6"
     route_intent: CUST-CHECKOUT-RESULT /checkout/result
     navigation_targets: []
@@ -2807,6 +2876,14 @@ screens:
     work_packages:
       - WP-1006
       - WP-1007
+      - WP-1220
+      - WP-1221
+      - WP-1222
+      - WP-1223
+      - WP-1224
+      - WP-1225
+      - WP-1226
+      - WP-1703
     handoff_section: "88.6"
     route_intent: CUST-DINE-IN-SESSION /dine-in/session
     navigation_targets: []
@@ -2860,6 +2937,9 @@ screens:
       - WP-1005
       - WP-1006
       - WP-1007
+      - WP-1700
+      - WP-2042
+      - WP-2048
     handoff_section: "88.6"
     route_intent: CUST-ENTRY-CONTEXT / verified QR or Store link
     navigation_targets: []
@@ -2957,6 +3037,9 @@ screens:
     work_packages:
       - WP-1025
       - WP-1026
+      - WP-1701
+      - WP-1707
+      - WP-1708
     handoff_section: "88.6"
     route_intent: CUST-MENU /menu
     navigation_targets: []
@@ -3003,6 +3086,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1026
+      - WP-1701
     handoff_section: "88.6"
     route_intent: CUST-MENU-SEARCH /menu/search
     navigation_targets: []
@@ -3049,6 +3133,11 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1225
+      - WP-1403
+      - WP-1404
+      - WP-1405
+      - WP-1605
+      - WP-1705
     handoff_section: "88.6"
     route_intent: CUST-ORDER-STATUS /orders/:orderReference
     navigation_targets: []
@@ -3104,6 +3193,8 @@ screens:
       - WP-1308
       - WP-1309
       - WP-1310
+      - WP-1704
+      - WP-2045
     handoff_section: "88.6"
     route_intent: CUST-PAYMENT /checkout/payment
     navigation_targets: []
@@ -3153,6 +3244,7 @@ screens:
       - WP-1603
       - WP-1604
       - WP-1605
+      - WP-1706
     handoff_section: "88.6"
     route_intent: CUST-PICKUP-CODE contextual
     navigation_targets:
@@ -3168,19 +3260,19 @@ screens:
     capability: customer.cust_profile
     owning_domain: customer
     object_or_workflow: cust_profile
-    phase: inherited
-    feature_gate: inherited_feature_gate
+    phase: phase_3
+    feature_gate: phase_capability
     roles:
       - Guest / Customer according to Section 88
     permission_ref: customer.authenticated
     scope: Guest Session and exact Store / journey scope
     mandatory_field_groups:
       - minimum profile、verified contacts、locale / accessibility preference、linked loyalty、privacy / consent entry
-    search_filter_sort_export: inherits parent Screen
+    search_filter_sort_export: —
     query_ref: query.cust_profile
     projection_ref: customer_loyalty_*_v1
     freshness: Section 88.22 projection target or inherited parent freshness
-    action_summary: inherits parent Screen
+    action_summary: update / verify、request export / correction / deletion、sign out / revoke Session
     command_refs:
       - handoff_intent.cust_profile
     idempotency: required for every mutation intent; query intents are side-effect free
@@ -3196,8 +3288,11 @@ screens:
       - Offline Read-only
     responsive_accessibility: Sections 88.4 and 88.27-88.30 universal profile
     analytics_privacy: Section 88.28 allowlist and exclusions
-    work_package_mode: inherited
-    work_packages: []
+    work_package_mode: resolved
+    work_packages:
+      - WP-2140
+      - WP-2144
+      - WP-2146
     handoff_section: "88.6"
     route_intent: CUST-PROFILE /account/profile
     navigation_targets: []
@@ -3244,6 +3339,12 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1709
+      - WP-1720
+      - WP-1721
+      - WP-1722
+      - WP-1723
+      - WP-1724
+      - WP-2028
     handoff_section: "88.6"
     route_intent: CUST-RECEIPT-SUPPORT /orders/:orderReference/receipt
     navigation_targets: []
@@ -3259,19 +3360,19 @@ screens:
     capability: reservation.cust_reservation_detail
     owning_domain: reservation
     object_or_workflow: cust_reservation_detail
-    phase: inherited
-    feature_gate: inherited_feature_gate
+    phase: phase_3
+    feature_gate: phase_capability
     roles:
       - Guest / Customer according to Section 88
     permission_ref: customer.authenticated
     scope: Guest Session and exact Store / journey scope
     mandatory_field_groups:
       - confirmed snapshot、revision history、deposit status separate、Store policy、check-in / cancel eligibility
-    search_filter_sort_export: inherits parent Screen
+    search_filter_sort_export: —
     query_ref: query.cust_reservation_detail
     projection_ref: reservation_*_v1
     freshness: Section 88.22 projection target or inherited parent freshness
-    action_summary: inherits parent Screen
+    action_summary: create / revise atomically、cancel、check-in intent、view refund / notification status；reference requires authorized Customer Session / resume
     command_refs:
       - handoff_intent.cust_reservation_detail
     idempotency: required for every mutation intent; query intents are side-effect free
@@ -3287,8 +3388,9 @@ screens:
       - Offline Read-only
     responsive_accessibility: Sections 88.4 and 88.27-88.30 universal profile
     analytics_privacy: Section 88.28 allowlist and exclusions
-    work_package_mode: inherited
-    work_packages: []
+    work_package_mode: resolved
+    work_packages:
+      - WP-2113
     handoff_section: "88.6"
     route_intent: CUST-RESERVATION-DETAIL /reservations/:reference
     navigation_targets: []
@@ -3304,19 +3406,19 @@ screens:
     capability: reservation.cust_reservation_search
     owning_domain: reservation
     object_or_workflow: cust_reservation_search
-    phase: inherited
-    feature_gate: inherited_feature_gate
+    phase: phase_3
+    feature_gate: phase_capability
     roles:
       - Guest / Customer according to Section 88
     permission_ref: customer.authenticated
     scope: Guest Session and exact Store / journey scope
     mandatory_field_groups:
       - Store、date / time range、party size、available slots、capacity / deposit policy、accessibility contact
-    search_filter_sort_export: inherits parent Screen
+    search_filter_sort_export: —
     query_ref: query.cust_reservation_search
     projection_ref: reservation_*_v1
     freshness: Section 88.22 projection target or inherited parent freshness
-    action_summary: inherits parent Screen
+    action_summary: search exact scenario、select slot / capacity hold、continue to details；Unavailable / Hold Expired
     command_refs:
       - handoff_intent.cust_reservation_search
     idempotency: required for every mutation intent; query intents are side-effect free
@@ -3332,8 +3434,9 @@ screens:
       - Offline Read-only
     responsive_accessibility: Sections 88.4 and 88.27-88.30 universal profile
     analytics_privacy: Section 88.28 allowlist and exclusions
-    work_package_mode: inherited
-    work_packages: []
+    work_package_mode: resolved
+    work_packages:
+      - WP-2113
     handoff_section: "88.6"
     route_intent: CUST-RESERVATION-SEARCH /reservations
     navigation_targets: []
@@ -3385,6 +3488,8 @@ screens:
       - WP-1203
       - WP-1204
       - WP-1205
+      - WP-1702
+      - WP-2027
     handoff_section: "88.6"
     route_intent: CUST-SELLABLE-CONFIGURE contextual
     navigation_targets:
@@ -3439,6 +3544,8 @@ screens:
       - WP-1026
       - WP-1027
       - WP-1028
+      - WP-1701
+      - WP-2027
     handoff_section: "88.6"
     route_intent: CUST-SELLABLE-DETAIL /menu/items/:sellableId
     navigation_targets: []
@@ -3454,19 +3561,19 @@ screens:
     capability: reservation.cust_waitlist
     owning_domain: reservation
     object_or_workflow: cust_waitlist
-    phase: inherited
-    feature_gate: inherited_feature_gate
+    phase: phase_3
+    feature_gate: phase_capability
     roles:
       - Guest / Customer according to Section 88
     permission_ref: customer.authenticated
     scope: Guest Session and exact Store / journey scope
     mandatory_field_groups:
       - party、quoted / current ETA range、ready / expiry、Store instruction、notification status
-    search_filter_sort_export: inherits parent Screen
+    search_filter_sort_export: —
     query_ref: query.cust_waitlist
     projection_ref: reservation_*_v1
     freshness: Section 88.22 projection target or inherited parent freshness
-    action_summary: inherits parent Screen
+    action_summary: join if Store policy allows、confirm ready / cancel、refresh；ETA is estimate, not guarantee
     command_refs:
       - handoff_intent.cust_waitlist
     idempotency: required for every mutation intent; query intents are side-effect free
@@ -3482,8 +3589,9 @@ screens:
       - Offline Read-only
     responsive_accessibility: Sections 88.4 and 88.27-88.30 universal profile
     analytics_privacy: Section 88.28 allowlist and exclusions
-    work_package_mode: inherited
-    work_packages: []
+    work_package_mode: resolved
+    work_packages:
+      - WP-2114
     handoff_section: "88.6"
     route_intent: CUST-WAITLIST /waitlist/:reference
     navigation_targets: []
@@ -3532,6 +3640,7 @@ screens:
     work_packages:
       - WP-1408
       - WP-1808
+      - WP-2180
     handoff_section: "88.17"
     route_intent: DEV-DEVICE-DETAIL /app/integrations/devices/:id
     navigation_targets: []
@@ -3579,6 +3688,7 @@ screens:
     work_packages:
       - WP-1408
       - WP-1808
+      - WP-2180
     handoff_section: "88.17"
     route_intent: DEV-DEVICE-LIST /app/integrations/devices
     navigation_targets: []
@@ -3625,6 +3735,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1808
+      - WP-2181
     handoff_section: "88.17"
     route_intent: DEV-KDS-PROFILE /app/integrations/kds-profiles
     navigation_targets: []
@@ -3719,6 +3830,7 @@ screens:
     work_packages:
       - WP-1006
       - WP-1007
+      - WP-2112
     handoff_section: "88.11"
     route_intent: DIN-SESSION-DETAIL /operations/dining/sessions/:id
     navigation_targets: []
@@ -3765,6 +3877,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1006
+      - WP-2048
     handoff_section: "88.11"
     route_intent: DIN-SESSION-START contextual wizard
     navigation_targets:
@@ -3904,6 +4017,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-0120
+      - WP-2193
     handoff_section: "88.7"
     route_intent: FEATURE-FLAG-LIST /app/organization/features
     navigation_targets: []
@@ -4295,6 +4409,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1800
+      - WP-1905
     handoff_section: "88.7"
     route_intent: HOME-OVERVIEW /app
     navigation_targets: []
@@ -4341,6 +4456,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1807
+      - WP-2195
     handoff_section: "88.7"
     route_intent: IAM-ROLE-EDITOR /app/organization/roles/:id
     navigation_targets: []
@@ -4387,6 +4503,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1807
+      - WP-2195
     handoff_section: "88.7"
     route_intent: IAM-ROLE-LIST /app/organization/roles
     navigation_targets: []
@@ -4548,6 +4665,7 @@ screens:
       - WP-0107
       - WP-0108
       - WP-0109
+      - WP-1807
     handoff_section: "88.7"
     route_intent: IAM-USER-LIST /app/organization/users
     navigation_targets: []
@@ -4637,6 +4755,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1027
+      - WP-2000
     handoff_section: "88.8"
     route_intent: IMPORT-JOB-LIST /app/commerce/imports
     navigation_targets: []
@@ -4684,6 +4803,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1027
+      - WP-2000
     handoff_section: "88.8"
     route_intent: IMPORT-JOB-WIZARD /app/commerce/imports/new
     navigation_targets: []
@@ -4776,6 +4896,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-0033
+      - WP-0045
     handoff_section: "88.17"
     route_intent: INT-DEAD-LETTER /platform/jobs/dead-letter
     navigation_targets: []
@@ -4791,8 +4912,8 @@ screens:
     capability: integration.int_provider_detail
     owning_domain: integration
     object_or_workflow: int_provider_detail
-    phase: inherited
-    feature_gate: inherited_feature_gate
+    phase: phase_specific
+    feature_gate: phase_capability
     roles:
       - Integration Admin
       - no raw secret
@@ -4823,6 +4944,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-2003
+      - WP-2182
     handoff_section: "88.17"
     route_intent: INT-PROVIDER-DETAIL /app/integrations/providers/:id
     navigation_targets: []
@@ -4838,8 +4960,8 @@ screens:
     capability: integration.int_provider_list
     owning_domain: integration
     object_or_workflow: int_provider_list
-    phase: inherited
-    feature_gate: inherited_feature_gate
+    phase: phase_specific
+    feature_gate: phase_capability
     roles:
       - Integration Admin / Security
     permission_ref: integration.manage
@@ -4869,6 +4991,8 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-2003
+      - WP-2045
+      - WP-2182
     handoff_section: "88.17"
     route_intent: INT-PROVIDER-LIST /app/integrations/providers
     navigation_targets: []
@@ -4916,6 +5040,8 @@ screens:
     work_packages:
       - WP-0032
       - WP-0033
+      - WP-1303
+      - WP-1304
     handoff_section: "88.17"
     route_intent: INT-WEBHOOK-INBOX /platform/integrations/webhooks
     navigation_targets: []
@@ -6936,6 +7062,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-0121
+      - WP-2047
     handoff_section: "88.7"
     route_intent: MEDIA-LIBRARY /app/media
     navigation_targets: []
@@ -7270,6 +7397,11 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-0101
+      - WP-0120
+      - WP-0121
+      - WP-0122
+      - WP-0123
+      - WP-2191
     handoff_section: "88.7"
     route_intent: ORG-BRAND-LIST /app/organization/brands
     navigation_targets: []
@@ -7672,6 +7804,7 @@ screens:
       - WP-1306
       - WP-1307
       - WP-1308
+      - WP-2045
     handoff_section: "88.10"
     route_intent: PAY-REFUND-WIZARD /app/operations/payments/:id/refund
     navigation_targets:
@@ -7728,6 +7861,7 @@ screens:
       - WP-1307
       - WP-1308
       - WP-1309
+      - WP-1408
     handoff_section: "88.10"
     route_intent: PAY-TERMINAL /operations/terminal
     navigation_targets: []
@@ -7774,6 +7908,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-0042
+      - WP-2052
     handoff_section: "88.18"
     route_intent: PLT-AUDIT-VERIFY /platform/audit-verification
     navigation_targets: []
@@ -7872,6 +8007,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-0045
+      - WP-2051
     handoff_section: "88.18"
     route_intent: PLT-INCIDENT-LIST、PLT-INCIDENT-DETAIL /platform/incidents/...
     navigation_targets: []
@@ -7918,6 +8054,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-0045
+      - WP-2051
     handoff_section: "88.18"
     route_intent: PLT-INCIDENT-LIST、PLT-INCIDENT-DETAIL /platform/incidents/...
     navigation_targets: []
@@ -8058,6 +8195,7 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-2052
+      - WP-2055
     handoff_section: "88.18"
     route_intent: PLT-RECORDS-ARCHIVE /platform/records
     navigation_targets: []
@@ -8104,6 +8242,9 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-2043
+      - WP-2047
+      - WP-2054
+      - WP-2061
     handoff_section: "88.18"
     route_intent: PLT-SECURITY-FINDINGS /platform/security/findings
     navigation_targets: []
@@ -8155,6 +8296,7 @@ screens:
       - WP-0043
       - WP-0044
       - WP-0045
+      - WP-2065
     handoff_section: "88.18"
     route_intent: PLT-SERVICE-HEALTH /platform/health
     navigation_targets: []
@@ -8443,6 +8585,7 @@ screens:
     analytics_privacy: Section 88.28 allowlist and exclusions
     work_package_mode: resolved
     work_packages:
+      - WP-2051
       - WP-2146
     handoff_section: "88.14"
     route_intent: PRIVACY-REQUEST /app/compliance/privacy-requests
@@ -8905,6 +9048,7 @@ screens:
     analytics_privacy: Section 88.28 allowlist and exclusions
     work_package_mode: resolved
     work_packages:
+      - WP-2027
       - WP-2105
     handoff_section: "88.8"
     route_intent: RECIPE-EDITOR /app/commerce/recipes/:id/edit
@@ -9233,6 +9377,7 @@ screens:
       - WP-1903
       - WP-1904
       - WP-1905
+      - WP-2160
     handoff_section: "88.15"
     route_intent: RPT-OPS-DASHBOARD /app/reports/operations
     navigation_targets: []
@@ -9511,6 +9656,9 @@ screens:
     work_package_mode: resolved
     work_packages:
       - WP-1001
+      - WP-1101
+      - WP-1223
+      - WP-2192
     handoff_section: "88.7"
     route_intent: STORE-HOURS-SERVICE /app/organization/stores/:id/service
     navigation_targets: []
@@ -9976,6 +10124,7 @@ screens:
     analytics_privacy: Section 88.28 allowlist and exclusions
     work_package_mode: resolved
     work_packages:
+      - WP-0045
       - WP-0125
     handoff_section: "88.7"
     route_intent: TASK-INBOX /app/tasks
