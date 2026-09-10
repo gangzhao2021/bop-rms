@@ -36,6 +36,11 @@ const ids = {
 const createdAt = "2026-08-02T14:00:00.000Z";
 const requestedAt = "2026-08-02T14:01:00.000Z";
 
+function required<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("missing synthetic fixture");
+  return value;
+}
+
 function guest(overrides: Partial<GuestSession> = {}): GuestSession {
   return {
     sessionReference: ids.session,
@@ -232,7 +237,9 @@ describe("authorized Pickup item writes", () => {
     expect(f.catalog).toHaveBeenCalledTimes(2);
     expect(f.commit).toHaveBeenCalledTimes(2);
     expect(f.history.size).toBe(2);
-    expect(f.authorize).toHaveBeenCalledTimes(8);
+    expect(
+      f.authorize.mock.calls.every(([value]) => value.csrfCredential === input.csrfCredential),
+    ).toBe(true);
     expect(f.metadata.mock.calls.map(([v]) => v.action)).toEqual([
       "Add",
       "Update",
@@ -382,5 +389,120 @@ describe("authorized Pickup item writes", () => {
     expect(results.map((x) => x.status)).toEqual(["fulfilled", "rejected"]);
     expect(f.commit).toHaveBeenCalledOnce();
     expect(f.history.has(ids.thirdOperation)).toBe(false);
+  });
+  it("rechecks authority immediately before persistence after item allocation", async () => {
+    const f = setup();
+    f.generate.mockImplementationOnce(() => {
+      f.authorize.mockRejectedValue(new Error("synthetic denial"));
+      return ids.item;
+    });
+    await expect(f.service.add(input)).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    expect(f.catalog).toHaveBeenCalledOnce();
+    expect(f.commit).not.toHaveBeenCalled();
+    expect(f.history.size).toBe(0);
+  });
+
+  describe.each(["Add", "Update"] as const)("%s await boundaries", (action) => {
+    async function fixture() {
+      const f = setup();
+      if (action === "Update") await f.service.add(input);
+      f.commit.mockClear();
+      f.catalog.mockClear();
+      return {
+        ...f,
+        run: () => (action === "Add" ? f.service.add(input) : f.service.update(update)),
+      };
+    }
+    it.each(["revoke", "version", "expiry", "backwards", "invalid"])(
+      "denies %s after Catalog waits without writing",
+      async (change) => {
+        const f = await fixture();
+        const validate = required(f.catalog.getMockImplementation());
+        f.catalog.mockImplementationOnce(async (selection) => {
+          const result = await validate(selection);
+          if (change === "revoke") f.authorize.mockRejectedValue(new Error("synthetic denial"));
+          if (change === "version") f.authorize.mockResolvedValue(guest({ version: 2 }));
+          if (change === "expiry") f.now.mockReturnValue("2026-08-02T18:00:00.000Z");
+          if (change === "backwards") f.now.mockReturnValue(createdAt);
+          if (change === "invalid") f.now.mockReturnValue("invalid");
+          return result;
+        });
+        await expect(f.run()).rejects.toMatchObject({
+          code: ["backwards", "invalid"].includes(change)
+            ? "CART_DEPENDENCY_UNAVAILABLE"
+            : "CART_PERMISSION_DENIED",
+        });
+        expect(f.commit).not.toHaveBeenCalled();
+      },
+    );
+    it.each([-1, 0, 1])("checks original Cart expiry at offset %i", async (offset) => {
+      const f = await fixture();
+      const expiry = Date.parse(required(f.current().lifecycle).idleExpiresAt);
+      const validate = required(f.catalog.getMockImplementation());
+      f.catalog.mockImplementationOnce(async (selection) => {
+        const result = await validate(selection);
+        f.now.mockReturnValue(new Date(expiry + offset).toISOString());
+        return result;
+      });
+      if (offset < 0) {
+        await expect(f.run()).resolves.toMatchObject({ status: "Applied" });
+        expect(f.commit).toHaveBeenCalledOnce();
+      } else {
+        await expect(f.run()).rejects.toMatchObject({ code: "CART_EXPIRED" });
+        expect(f.commit).not.toHaveBeenCalled();
+      }
+    });
+    it("denies expiry during the authorization await", async () => {
+      const f = await fixture();
+      const validate = required(f.catalog.getMockImplementation());
+      f.catalog.mockImplementationOnce(async (selection) => {
+        const result = await validate(selection);
+        f.authorize.mockImplementation(async () => {
+          f.now.mockReturnValue("2026-08-02T18:00:00.000Z");
+          return guest();
+        });
+        return result;
+      });
+      await expect(f.run()).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+      expect(f.commit).not.toHaveBeenCalled();
+    });
+    it("denies after commit and recovers the original result without another write", async () => {
+      const f = await fixture();
+      const persist = required(f.commit.getMockImplementation());
+      f.commit.mockImplementationOnce(async (command) => {
+        const saved = await persist(command);
+        f.authorize.mockRejectedValue(new Error("synthetic denial"));
+        return saved;
+      });
+      await expect(f.run()).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+      f.authorize.mockResolvedValue(guest());
+      f.now.mockReturnValue("2026-08-02T16:00:00.000Z");
+      await expect(f.run()).resolves.toMatchObject({ status: "AlreadyApplied" });
+      expect(f.commit).toHaveBeenCalledOnce();
+      expect(f.catalog).toHaveBeenCalledOnce();
+    });
+    it("denies result disclosure when history lookup revokes current authority", async () => {
+      const f = await fixture();
+      await f.run();
+      const lookup = f.history.get.bind(f.history);
+      vi.spyOn(f.history, "get").mockImplementation((key) => {
+        f.authorize.mockRejectedValue(new Error("synthetic denial"));
+        return lookup(key);
+      });
+      await expect(f.run()).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+      expect(f.commit).toHaveBeenCalledOnce();
+      expect(f.catalog).toHaveBeenCalledOnce();
+    });
+    it("checks lifecycle after the owner load before Catalog", async () => {
+      const f = await fixture();
+      f.load.mockImplementationOnce(async () => {
+        const loaded = f.current();
+        f.now.mockReturnValue(required(loaded.lifecycle).idleExpiresAt);
+        return loaded;
+      });
+      await expect(f.run()).rejects.toMatchObject({ code: "CART_EXPIRED" });
+      expect(f.catalog).not.toHaveBeenCalled();
+      expect(f.commit).not.toHaveBeenCalled();
+    });
   });
 });

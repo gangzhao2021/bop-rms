@@ -17,6 +17,7 @@ import {
   type OrderingInstant,
   type OrderingReference,
 } from "../domain/cart.js";
+import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import { createCartItemCommandService } from "./cart-item-command-service.js";
 import type { CartItemCommandPorts } from "./ports/cart-item-command-ports.js";
 import type { PickupCartRemovalOptions } from "./pickup-cart-removal-service.js";
@@ -117,6 +118,13 @@ export function createPickupCartItemService(options: PickupCartItemOptions) {
   );
   const brandReference = parseOrderingReference(rawScope.brandReference);
   const storeReference = parseOrderingReference(rawScope.storeReference);
+  function now() {
+    try {
+      return parseOrderingInstant(options.now());
+    } catch {
+      return unavailable();
+    }
+  }
   async function authorize(raw: ReturnType<typeof input>, observedAt: OrderingInstant) {
     try {
       const session = assertGuestSessionUsable(
@@ -168,8 +176,9 @@ export function createPickupCartItemService(options: PickupCartItemOptions) {
   }
   async function execute(action: "Add" | "Update", value: unknown): Promise<PickupCartItemResult> {
     const raw = input(value, action);
+    let boundaryFailure: CartError | undefined;
     try {
-      const requestedAt = parseOrderingInstant(options.now());
+      const requestedAt = now();
       const session = await authorize(raw, requestedAt);
       const bound = await options.binding.current(session, requestedAt);
       let snapshot: CartAggregate | null;
@@ -178,16 +187,39 @@ export function createPickupCartItemService(options: PickupCartItemOptions) {
       } catch {
         return unavailable();
       }
-      const checkedAt = parseOrderingInstant(options.now());
+      const checkedAt = now();
       if (checkedAt < requestedAt) return unavailable();
       const current = await authorize(raw, checkedAt);
-      if (
-        current.sessionReference !== session.sessionReference ||
-        current.publicStoreReference !== session.publicStoreReference ||
-        current.qrReference !== session.qrReference ||
-        current.qrRevocationVersion !== session.qrRevocationVersion
-      )
+      if (JSON.stringify(current) !== JSON.stringify(session))
         throw new CartError("CART_PERMISSION_DENIED");
+      let lastObservedAt = checkedAt;
+      let loadedForMutation: CartAggregate | null = null;
+      async function assertCurrentAuthority(newWork: boolean) {
+        try {
+          const observedAt = now();
+          if (observedAt < lastObservedAt) return unavailable();
+          lastObservedAt = observedAt;
+          const latest = await authorize(raw, observedAt);
+          const completedAt = now();
+          if (completedAt < lastObservedAt) return unavailable();
+          lastObservedAt = completedAt;
+          try {
+            assertGuestSessionUsable(latest, completedAt);
+          } catch {
+            throw new CartError("CART_PERMISSION_DENIED");
+          }
+          if (JSON.stringify(latest) !== JSON.stringify(current))
+            throw new CartError("CART_PERMISSION_DENIED");
+          if (newWork) {
+            if (loadedForMutation === null) return unavailable();
+            assertCartLifecycleActive(loadedForMutation.lifecycle, completedAt);
+          }
+        } catch (error) {
+          boundaryFailure =
+            error instanceof CartError ? error : new CartError("CART_DEPENDENCY_UNAVAILABLE");
+          throw boundaryFailure;
+        }
+      }
       if (snapshot === null || snapshot.cartReference !== raw.cartReference)
         throw new CartError("CART_UNAVAILABLE");
       const cart = owned(snapshot, current, checkedAt);
@@ -203,10 +235,20 @@ export function createPickupCartItemService(options: PickupCartItemOptions) {
       const service = createCartItemCommandService({
         authorization: { authorize: async () => ({ guestSession: current, audit }) },
         references: options.references,
-        catalog: options.catalog,
+        catalog: {
+          async validateSelection(selection) {
+            await assertCurrentAuthority(true);
+            const result = await options.catalog.validateSelection(selection);
+            await assertCurrentAuthority(true);
+            return result;
+          },
+        },
         repository: {
           resolveOperation: (reference) => options.repository.resolveOperation(reference),
-          commit: (command) => options.repository.commit(command),
+          async commit(command) {
+            await assertCurrentAuthority(true);
+            return options.repository.commit(command);
+          },
           load: async (reference) => {
             const loaded = await options.repository.load(reference);
             if (loaded === null) return null;
@@ -220,6 +262,7 @@ export function createPickupCartItemService(options: PickupCartItemOptions) {
                 JSON.stringify(latest) !== JSON.stringify(cart))
             )
               return unavailable();
+            loadedForMutation = latest;
             return latest;
           },
         },
@@ -237,6 +280,7 @@ export function createPickupCartItemService(options: PickupCartItemOptions) {
         action === "Add"
           ? await service.add({ ...command, sellableReference: raw.targetReference })
           : await service.update({ ...command, cartItemReference: raw.targetReference });
+      await assertCurrentAuthority(false);
       return Object.freeze({
         status: result.status,
         cartReference: result.aggregate.cartReference,
@@ -244,6 +288,7 @@ export function createPickupCartItemService(options: PickupCartItemOptions) {
         aggregateVersion: result.aggregate.aggregateVersion,
       });
     } catch (error) {
+      if (boundaryFailure !== undefined) throw boundaryFailure;
       if (error instanceof CartError) throw error;
       return unavailable();
     }
