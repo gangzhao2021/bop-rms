@@ -225,6 +225,14 @@ function fixture(offset = 0) {
       },
     },
     dining: {
+      binding: {
+        readCurrent: vi.fn(async () => ({
+          session: state.session,
+          participant: state.participant,
+          table: state.table,
+          admission: state.admission,
+        })),
+      },
       credentials: {
         hashOperationIntent: (value) => digest(value) as never,
         equals: (a, b) => a === b,
@@ -493,5 +501,45 @@ describe("WP-2298 explicit Dining binding composition", () => {
       expect(record.predecessor.session.publicTableReference).toBe(
         record.candidate.session.publicTableReference,
       );
+  });
+  it("keeps bound identity current during Closing without re-consuming admission", async () => {
+    const f = fixture();
+    const prepared = await f.service.prepare(f.input);
+    f.setTime(1);
+    await f.service.activate(f.activation(prepared));
+    Object.assign(f.state.session, { phase: "Closing", version: 3 });
+    expect((await f.service.complete(f.completion(prepared))).status).toBe("Activated");
+    expect(f.options.dining.store.consume).toHaveBeenCalledTimes(1);
+    expect(f.options.dining.binding.readCurrent).toHaveBeenCalled();
+  });
+  it.each(["Closed", "Cancelled"])("denies bound identity for %s Dining Session", async (phase) => {
+    const f = fixture();
+    const prepared = await f.service.prepare(f.input);
+    f.setTime(1);
+    await f.service.activate(f.activation(prepared));
+    Object.assign(f.state.session, { phase, version: 3 });
+    vi.mocked(f.options.bindings.complete).mockClear();
+    await expect(f.service.complete(f.completion(prepared))).rejects.toMatchObject(unavailable);
+    expect(f.options.bindings.complete).not.toHaveBeenCalled();
+  });
+  it("does not revive original credentials after the Dining Table assignment changes back", async () => {
+    const f = fixture();
+    const prepared = await f.service.prepare(f.input);
+    f.setTime(1);
+    await f.service.activate(f.activation(prepared));
+    Object.assign(f.state.session, { tableAssignmentVersion: 9, version: 4 });
+    Object.assign(f.state.table, { assignmentVersion: 9 });
+    await expect(f.service.complete(f.completion(prepared))).rejects.toMatchObject(unavailable);
+    expect(f.records.get(f.prior.sessionSelectorHash)?.session.status).toBe("Revoked");
+    expect(f.histories.size).toBe(1);
+  });
+  it("requires current bound facts even when the base Session policy returns Current", async () => {
+    const f = fixture();
+    const prepared = await f.service.prepare(f.input);
+    f.setTime(1);
+    await f.service.activate(f.activation(prepared));
+    vi.mocked(f.options.dining.binding.readCurrent).mockResolvedValue(null);
+    await expect(f.service.complete(f.completion(prepared))).rejects.toMatchObject(unavailable);
+    expect(f.options.session.binding.validate).toHaveBeenCalled();
   });
 });

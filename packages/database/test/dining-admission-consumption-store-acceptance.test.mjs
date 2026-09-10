@@ -18,6 +18,10 @@ import {
   createPostgresDiningSessionMoveStore,
   createPostgresDiningAdmissionConsumptionStore,
   createDiningAdmissionConsumptionService,
+  createPostgresDiningGuestBindingStore,
+  createDiningGuestBindingQuery,
+  createPostgresDiningParticipationStore,
+  createDiningCartParticipationQuery,
 } from "../../rms/dining/src/index.ts";
 import {
   createGuestSessionRecord,
@@ -1078,7 +1082,11 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
           binding: { validate: async () => "Current" },
         },
         bindings: bindingStore(),
-        dining: { credentials, store: consumptionWriter },
+        dining: {
+          credentials,
+          store: consumptionWriter,
+          binding: createPostgresDiningGuestBindingStore(runner({ readOnly: true }), scope),
+        },
         contexts: {
           async resolve(input) {
             contextRequests.push(input);
@@ -1133,7 +1141,7 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
       const ownerRollback = createCustomerDiningBindingComposition({
         ...compositionOptions,
         dining: {
-          credentials,
+          ...compositionOptions.dining,
           store: {
             ...consumptionWriter,
             consume: createPostgresDiningAdmissionConsumptionStore(
@@ -1221,6 +1229,74 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         assert.equal(JSON.stringify(bindingHistory).includes(secret), false);
         assert.equal(JSON.stringify(contextRequests).includes(secret), false);
       }
+      // WP-2299: Closing preserves identity facts, but Cart's independent Active gate stays closed.
+      const currentBinding = createPostgresDiningGuestBindingStore(
+        runner({ readOnly: true }),
+        scope,
+      );
+      const closingFacts = await createDiningGuestBindingQuery({
+        scope: identityScope,
+        repository: currentBinding,
+        now: () => at(15),
+      }).resolve({
+        purpose: "GuestSessionBinding",
+        diningSessionReference: a.sessionId,
+        participantReference: a.joined.participant.participantReference,
+        tableReference: id(20),
+      });
+      assert.equal(closingFacts.phase, "Closing");
+      const cartFacts = await createDiningCartParticipationQuery({
+        scope: identityScope,
+        repository: createPostgresDiningParticipationStore(runner({ readOnly: true }), scope),
+        now: () => at(15),
+      }).resolve({
+        purpose: "Cart",
+        diningSessionReference: a.sessionId,
+        participantReference: a.joined.participant.participantReference,
+      });
+      assert.equal(cartFacts, null);
+      // Original admission assignment is essential even when a Move returns to the original Table.
+      await configure(35);
+      await move(mJoin, 35, 125, 9);
+      const completionInput = {
+        operationReference: id(124),
+        sessionCredential: prepared.sessionCredential,
+        csrfCredential: prepared.csrfCredential,
+      };
+      await assert.rejects(
+        createCustomerDiningBindingComposition(compositionOptions).complete(completionInput),
+        { code: "GUEST_SESSION_UNAVAILABLE" },
+      );
+      await move(mJoin, 34, 126, 9);
+      const movedBack = await reader.loadSession(mJoin.sessionId);
+      assert.equal(movedBack.tableReference, id(34));
+      assert.notEqual(
+        movedBack.tableAssignmentVersion,
+        mJoin.joined.admission.tableAssignmentVersion,
+      );
+      await assert.rejects(
+        createCustomerDiningBindingComposition(compositionOptions).complete(completionInput),
+        { code: "GUEST_SESSION_UNAVAILABLE" },
+      );
+      assert.deepEqual(await counts(), { operations: 9, audits: 9 });
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::integer AS n FROM bop_identity.guest_dining_binding_preparation WHERE operation_id=$1",
+            [id(124)],
+          )
+        ).rows[0].n,
+        3,
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::integer AS n FROM platform_audit.audit_record WHERE target_type='GuestDiningBindingPreparation' AND target_id=$1",
+            [id(124)],
+          )
+        ).rows[0].n,
+        3,
+      );
       assert.equal(active, 0);
     } finally {
       await admin.end();

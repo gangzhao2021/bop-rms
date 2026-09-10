@@ -980,6 +980,48 @@ describe("Database Schema Ownership Architecture Test", () => {
     },
   );
 
+  it("admits only the WP-2299 owner binding reader without driver access", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "dining", "rms_dining", [
+      "dining_table",
+      "dining_session",
+      "dining_participant",
+      "dining_identity_admission",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/dining-guest-binding-store.ts",
+    );
+    await writeFile(asset, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "owner",
+    "schema",
+    "dining_table",
+    "dining_session",
+    "dining_participant",
+    "dining_identity_admission",
+  ])("rejects WP-2299 changed %s admission", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other" : "dining",
+      changed === "schema" ? "rms_other" : "rms_dining",
+      ["dining_table", "dining_session", "dining_participant", "dining_identity_admission"].filter(
+        (table) => table !== changed,
+      ),
+    );
+    await writeFile(
+      join(context.moduleRoot, "src/infrastructure/persistence/dining-guest-binding-store.ts"),
+      "export const synthetic = true;\n",
+    );
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
   it("accepts only the WP-2278 Guest Join adapter without broadening driver admission", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "dining", "rms_dining", [

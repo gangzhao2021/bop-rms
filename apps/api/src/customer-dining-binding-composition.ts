@@ -17,6 +17,8 @@ import {
 import {
   assertCurrentDiningGuestTableContext,
   createDiningAdmissionConsumptionService,
+  createDiningGuestBindingQuery,
+  type DiningGuestBindingOptions,
   parseDiningReference,
   type QrTableContextEvidence,
   type DiningAdmissionConsumptionPorts,
@@ -26,7 +28,9 @@ export interface CustomerDiningBindingCompositionOptions {
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
   readonly session: Pick<GuestSessionServiceOptions, "store" | "binding" | "credentials">;
   readonly bindings: GuestDiningBindingStorePort;
-  readonly dining: Pick<DiningAdmissionConsumptionPorts, "store" | "credentials">;
+  readonly dining: Pick<DiningAdmissionConsumptionPorts, "store" | "credentials"> & {
+    readonly binding: DiningGuestBindingOptions["repository"];
+  };
   readonly contexts: {
     /** Current owner evidence for this authenticated Session; no signed payload is fabricated. */
     resolve(input: {
@@ -53,12 +57,58 @@ export function createCustomerDiningBindingComposition(
     brandReference: String(parseDiningReference(rawScope.brandReference)),
     storeReference: String(parseDiningReference(rawScope.storeReference)),
   });
+  const now = () => parseCanonicalInstant(options.now());
+  const contextInput = (session: GuestSession, observedAt: CanonicalInstant) => ({
+    brandReference: session.brandReference,
+    storeReference: session.storeReference,
+    publicStoreReference: session.publicStoreReference,
+    publicTableReference: session.publicTableReference,
+    channel: session.channel,
+    qrRevocationVersion: session.qrRevocationVersion,
+    observedAt,
+  });
+  async function contextFor(session: GuestSession, observedAt: CanonicalInstant) {
+    if (
+      session.brandReference !== scope.brandReference ||
+      session.storeReference !== scope.storeReference
+    )
+      return unavailable();
+    return assertCurrentDiningGuestTableContext(
+      contextInput(session, observedAt),
+      await options.contexts.resolve(
+        Object.freeze({ session, observedAt, purpose: "DiningAdmission" }),
+      ),
+    );
+  }
   const authorization = new GuestSessionService({
     ...options.session,
     admission: { consume: async () => null },
-    now: options.now,
+    now,
+    binding: {
+      async validate(session, observedAt) {
+        try {
+          if ((await options.session.binding.validate(session, observedAt)) !== "Current")
+            return "Unavailable";
+          if (session.diningState === "ContextOnly") return "Current";
+          const context = await contextFor(session, observedAt);
+          const current = await createDiningGuestBindingQuery({
+            scope,
+            repository: options.dining.binding,
+            now,
+          }).resolve({
+            purpose: "GuestSessionBinding",
+            diningSessionReference: session.diningSessionReference,
+            participantReference: session.diningParticipantReference,
+            tableReference: context.tableReference,
+          });
+          assertCurrentDiningGuestTableContext(contextInput(session, now()), context);
+          return current === null ? "Unavailable" : "Current";
+        } catch {
+          return "Unavailable";
+        }
+      },
+    },
   });
-  const now = () => parseCanonicalInstant(options.now());
   function invocation() {
     // Never share the authenticated request's credentials or context with another invocation.
     let authenticated: {
@@ -84,20 +134,7 @@ export function createCustomerDiningBindingComposition(
         session.storeReference !== scope.storeReference
       )
         return unavailable();
-      const context = assertCurrentDiningGuestTableContext(
-        {
-          brandReference: session.brandReference,
-          storeReference: session.storeReference,
-          publicStoreReference: session.publicStoreReference,
-          publicTableReference: session.publicTableReference,
-          channel: session.channel,
-          qrRevocationVersion: session.qrRevocationVersion,
-          observedAt,
-        },
-        await options.contexts.resolve(
-          Object.freeze({ session, observedAt, purpose: "DiningAdmission" }),
-        ),
-      );
+      const context = await contextFor(session, observedAt);
       return Object.freeze({ session, context });
     }
     function owner() {

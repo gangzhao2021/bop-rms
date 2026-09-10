@@ -298,6 +298,17 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/dining-participation-store.ts";
+        // WP-2299 admits only the coherent owner binding reader with original admission.
+        const acceptedDiningGuestBindingAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          [
+            "dining_table",
+            "dining_session",
+            "dining_participant",
+            "dining_identity_admission",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/dining-guest-binding-store.ts";
         // WP-2223 accepts only the Ordering reader over its existing Cart and line tables.
         const acceptedCartQueryAsset =
           module.packageName === "@rms/ordering" &&
@@ -365,6 +376,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningJoinRegenerationAsset &&
           !acceptedDiningSessionJoinAsset &&
           !acceptedDiningParticipationAsset &&
+          !acceptedDiningGuestBindingAsset &&
           !acceptedDiningClosingAsset &&
           !acceptedDiningMoveAsset &&
           !acceptedDiningMovedJoinAsset &&

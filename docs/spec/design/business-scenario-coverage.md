@@ -366,3 +366,9 @@ public ports. Dining owns current context lifecycle/revocation/expiry validation
 reauthorizes its own Guest and preserves distinct public/internal Table IDs. API388/388, Dining843/843
 and real combined PostgreSQL acceptance, full verification and forced uncached integration pass. Synthetic current QR
 mapping and bound-session validation remain explicit test inputs, not operational producers.
+
+WP-2299 requires a distinct current Dining-bound identity query backed by coherent Session,
+Participant, Table and original consumed admission. Closing preserves identity facts while the
+separate Cart gate stays Active-only. Actual Move away/back cannot revive the old binding merely
+by restoring the same Table ID. Dining928/928, API393/393, real PostgreSQL acceptance,
+full verification and forced uncached integration pass. Read denial does not claim a persisted revocation or grant write authority.

@@ -34,3 +34,6 @@ export * from "./application/ports/dining-admission-ports.js";
 export * from "./application/dining-admission-service.js";
 
 export * from "./infrastructure/persistence/dining-admission-consumption-store.js";
+
+export * from "./application/dining-guest-binding-query.js";
+export * from "./infrastructure/persistence/dining-guest-binding-store.js";
