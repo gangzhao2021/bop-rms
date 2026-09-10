@@ -131,6 +131,10 @@ and capacity expires exactly 30 minutes after Payment Intent creation. Payment t
 claims one Intent/Attempt/operation before Provider invocation. Unknown is not success or failure.
 The new-work Kill Switch precedes new preparation; accepted replay and recovery remain available.
 
+WP-2336 now reconciles the available local Handoff34.34-34.40 and higher87.9 with the current code in
+[the capacity source decision](./capacity-source-decision.md). The independent Hold lifecycle is
+source-backed; equivalence of an owner receipt plus Ordering-local linkage remains unaccepted.
+
 **Source question DEC-H03.** Identify the owner and precise fact meant by that capacity allocation.
 Reservation policy configuration in [WP-2115](../work-packages/WP-2115.md) creates no hold and cannot
 be substituted as proof. There is no permission here to move capacity facts into Ordering, query
