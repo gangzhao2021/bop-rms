@@ -274,6 +274,7 @@ function pickupFixture() {
   );
   const now = vi.fn(() => requestedAt);
   const history = vi.spyOn(state.ports.repository, "resolveOperation");
+  const persist = state.ports.repository.attach;
   const write = vi.spyOn(state.ports.repository, "attach");
   const service = createPickupCartQuoteService({
     scope,
@@ -294,6 +295,7 @@ function pickupFixture() {
     auditFactory,
     now,
     history,
+    persist,
     write,
     service,
   };
@@ -309,6 +311,88 @@ function pickupInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe("WP-2328 current Pickup Quote authority", () => {
+  it.each(["history", "Cart", "Pricing"])(
+    "denies revocation during %s before attachment",
+    async (stage) => {
+      const state = pickupFixture();
+      const revoke = () =>
+        state.sessions.authorize.mockRejectedValue(new Error("synthetic revoked"));
+      if (stage === "history")
+        state.history.mockImplementationOnce(async () => {
+          revoke();
+          return null;
+        });
+      if (stage === "Cart")
+        vi.spyOn(state.ports.repository, "loadCart").mockImplementationOnce(async () => {
+          revoke();
+          return cart();
+        });
+      if (stage === "Pricing")
+        state.pricing.quoteCart.mockImplementationOnce(async () => {
+          revoke();
+          return quote();
+        });
+      await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+        code: "CART_PERMISSION_DENIED",
+      });
+      expect(state.write).not.toHaveBeenCalled();
+      if (stage !== "Pricing") expect(state.pricing.quoteCart).not.toHaveBeenCalled();
+    },
+  );
+  it("denies changed Session version after Pricing returns", async () => {
+    const state = pickupFixture();
+    state.pricing.quoteCart.mockImplementationOnce(async () => {
+      state.sessions.authorize.mockResolvedValue(guest({ version: 2 }));
+      return quote();
+    });
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(state.write).not.toHaveBeenCalled();
+  });
+  it("denies backwards time after Pricing returns", async () => {
+    const state = pickupFixture();
+    state.pricing.quoteCart.mockImplementationOnce(async () => {
+      state.now.mockReturnValue("2026-08-02T14:59:59.000Z");
+      return quote();
+    });
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(state.write).not.toHaveBeenCalled();
+  });
+  it("denies revoked original-history disclosure", async () => {
+    const state = pickupFixture();
+    const first = await state.service.attach(pickupInput());
+    state.history.mockImplementationOnce(async () => {
+      state.sessions.authorize.mockRejectedValue(new Error("synthetic revoked"));
+      return first.attachment;
+    });
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(state.pricing.quoteCart).toHaveBeenCalledTimes(1);
+    expect(state.write).toHaveBeenCalledTimes(1);
+  });
+  it("retains a committed attachment after post-write denial and recovers without duplicate effects", async () => {
+    const state = pickupFixture();
+    const persist = state.persist;
+    state.write.mockImplementationOnce(async (command) => {
+      const result = await persist(command);
+      state.sessions.authorize.mockRejectedValue(new Error("synthetic revoked"));
+      return result;
+    });
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    state.sessions.authorize.mockResolvedValue(guest());
+    expect((await state.service.attach(pickupInput())).status).toBe("AlreadyAttached");
+    expect(state.pricing.quoteCart).toHaveBeenCalledTimes(1);
+    expect(state.write).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("WP-2260 authorized Pickup Quote entry", () => {
   it("copies scope without I/O and sends fresh server identity only after authorization", async () => {
     const state = pickupFixture();
@@ -317,7 +401,7 @@ describe("WP-2260 authorized Pickup Quote entry", () => {
     expect(state.now).not.toHaveBeenCalled();
     state.scope.storeReference = id(999);
     const checkedAt = "2026-08-02T15:00:01.000Z";
-    state.now.mockReturnValueOnce(requestedAt).mockReturnValueOnce(checkedAt);
+    state.now.mockReturnValue(checkedAt).mockReturnValueOnce(requestedAt);
     const result = await state.service.attach(pickupInput());
     expect(result.status).toBe("Attached");
     expect(result.attachment.attachedAt).toBe(checkedAt);
@@ -477,7 +561,7 @@ describe("WP-2260 authorized Pickup Quote entry", () => {
     state.now.mockReturnValue("2026-08-02T15:05:00.000Z");
     const replay = await state.service.attach(pickupInput());
     expect(replay).toEqual({ status: "AlreadyAttached", attachment: first.attachment });
-    expect(state.sessions.authorize).toHaveBeenCalledTimes(4);
+    expect(state.sessions.authorize).toHaveBeenCalledTimes(9);
     expect(state.pricing.quoteCart).toHaveBeenCalledTimes(1);
     state.sessions.authorize.mockRejectedValue(new Error("revoked"));
     await expect(state.service.attach(pickupInput())).rejects.toMatchObject({

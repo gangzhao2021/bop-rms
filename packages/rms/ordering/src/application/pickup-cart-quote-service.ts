@@ -160,6 +160,7 @@ export function createPickupCartQuoteService(options: PickupCartQuoteOptions) {
   return Object.freeze({
     async attach(value: unknown) {
       const raw = input(value);
+      let authorityFailure: CartError | undefined;
       try {
         const requestedAt = at();
         const session = await authorize(raw, requestedAt);
@@ -167,13 +168,27 @@ export function createPickupCartQuoteService(options: PickupCartQuoteOptions) {
         const checkedAt = at();
         if (checkedAt < requestedAt) throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
         const current = await authorize(raw, checkedAt);
-        if (
-          current.sessionReference !== session.sessionReference ||
-          current.publicStoreReference !== session.publicStoreReference ||
-          current.qrReference !== session.qrReference ||
-          current.qrRevocationVersion !== session.qrRevocationVersion
-        )
+        if (JSON.stringify(current) !== JSON.stringify(session))
           throw new CartError("CART_PERMISSION_DENIED");
+        let lastObservedAt = checkedAt;
+        async function assertCurrentAuthority() {
+          try {
+            const observedAt = at();
+            if (observedAt < lastObservedAt) throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+            lastObservedAt = observedAt;
+            const latest = await authorize(raw, observedAt);
+            const completedAt = at();
+            if (completedAt < lastObservedAt) throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+            lastObservedAt = completedAt;
+            assertGuestSessionUsable(latest, completedAt);
+            if (JSON.stringify(latest) !== JSON.stringify(current))
+              throw new CartError("CART_PERMISSION_DENIED");
+          } catch (error) {
+            authorityFailure =
+              error instanceof CartError ? error : new CartError("CART_PERMISSION_DENIED");
+            throw authorityFailure;
+          }
+        }
         if (bound === null) throw new CartError("CART_UNAVAILABLE");
         const cart = ownedCart(bound, current, checkedAt);
         if (cart.cartReference !== raw.cartReference) throw new CartError("CART_UNAVAILABLE");
@@ -194,11 +209,19 @@ export function createPickupCartQuoteService(options: PickupCartQuoteOptions) {
           authorization: { authorize: async () => ({ guestSession: current, audit }) },
           references: options.references,
           pricing: {
-            quoteCart: (pricingInput) => options.pricing.quoteCart(pricingInput, identity),
+            async quoteCart(pricingInput) {
+              await assertCurrentAuthority();
+              const quote = await options.pricing.quoteCart(pricingInput, identity);
+              await assertCurrentAuthority();
+              return quote;
+            },
           },
           repository: {
             resolveOperation: (reference) => options.repository.resolveOperation(reference),
-            attach: (command) => options.repository.attach(command),
+            async attach(command) {
+              await assertCurrentAuthority();
+              return options.repository.attach(command);
+            },
             loadCart: async (reference) => {
               const loaded = await options.repository.loadCart(reference);
               if (loaded === null) return null;
@@ -216,13 +239,16 @@ export function createPickupCartQuoteService(options: PickupCartQuoteOptions) {
             },
           },
         });
-        return await service.attach({
+        const result = await service.attach({
           cartReference: raw.cartReference,
           expectedCartVersion: raw.expectedCartVersion,
           operationReference: raw.operationReference,
           requestedAt: checkedAt,
         });
+        await assertCurrentAuthority();
+        return result;
       } catch (error) {
+        if (authorityFailure !== undefined) throw authorityFailure;
         if (error instanceof CartError) throw error;
         throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
       }
