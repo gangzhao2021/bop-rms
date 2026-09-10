@@ -36,6 +36,11 @@ const ids = {
 const createdAt = "2026-08-02T14:00:00.000Z";
 const requestedAt = "2026-08-02T14:01:00.000Z";
 
+function required<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("missing synthetic fixture");
+  return value;
+}
+
 function guest(overrides: Partial<GuestSession> = {}): GuestSession {
   return {
     sessionReference: ids.session,
@@ -197,7 +202,9 @@ describe("authorized Pickup removal", () => {
     });
     f.now.mockReturnValue("2026-08-02T14:02:00.000Z");
     expect(await f.service.remove(input)).toEqual({ ...first, status: "AlreadyApplied" });
-    expect(f.authorize).toHaveBeenCalledTimes(4);
+    expect(
+      f.authorize.mock.calls.every(([value]) => value.csrfCredential === input.csrfCredential),
+    ).toBe(true);
     expect(f.commit).toHaveBeenCalledOnce();
     expect(f.history.size).toBe(1);
     expect(f.current().items).toEqual([]);
@@ -305,5 +312,91 @@ describe("authorized Pickup removal", () => {
       code: "CART_DEPENDENCY_UNAVAILABLE",
     });
     expect(f.commit).not.toHaveBeenCalled();
+  });
+  it.each(["revoke", "version", "qr", "expiry", "backwards", "invalid"])(
+    "denies %s while owner loading waits before persistence",
+    async (change) => {
+      const f = setup();
+      f.load.mockImplementationOnce(async () => {
+        if (change === "revoke") f.authorize.mockRejectedValue(new Error("synthetic denial"));
+        if (change === "version") f.authorize.mockResolvedValue(guest({ version: 2 }));
+        if (change === "qr") f.authorize.mockResolvedValue(guest({ qrRevocationVersion: 2 }));
+        if (change === "expiry") f.now.mockReturnValue("2026-08-02T18:00:00.000Z");
+        if (change === "backwards") f.now.mockReturnValue(createdAt);
+        if (change === "invalid") f.now.mockReturnValue("invalid");
+        return f.current();
+      });
+      await expect(f.service.remove(input)).rejects.toMatchObject({
+        code: ["backwards", "invalid"].includes(change)
+          ? "CART_DEPENDENCY_UNAVAILABLE"
+          : "CART_PERMISSION_DENIED",
+      });
+      expect(f.commit).not.toHaveBeenCalled();
+      expect(f.current().items).toHaveLength(1);
+    },
+  );
+  it.each([-1, 0, 1])(
+    "checks original Cart expiry at offset %i after history lookup",
+    async (offset) => {
+      const f = setup();
+      const lookup = f.history.get.bind(f.history);
+      vi.spyOn(f.history, "get").mockImplementation((key) => {
+        const expiry = Date.parse(required(f.current().lifecycle).idleExpiresAt);
+        f.now.mockReturnValue(new Date(expiry + offset).toISOString());
+        return lookup(key);
+      });
+      if (offset < 0) {
+        await expect(f.service.remove(input)).resolves.toMatchObject({ status: "Applied" });
+        expect(f.commit).toHaveBeenCalledOnce();
+      } else {
+        await expect(f.service.remove(input)).rejects.toMatchObject({ code: "CART_EXPIRED" });
+        expect(f.commit).not.toHaveBeenCalled();
+      }
+    },
+  );
+  it("denies Session expiry during final precommit authorization", async () => {
+    const f = setup();
+    f.load.mockImplementationOnce(async () => {
+      f.authorize.mockImplementation(async () => {
+        f.now.mockReturnValue("2026-08-02T18:00:00.000Z");
+        return guest();
+      });
+      return f.current();
+    });
+    await expect(f.service.remove(input)).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    expect(f.commit).not.toHaveBeenCalled();
+  });
+  it("denies after commit and recovers the exact original removal after Cart expiry", async () => {
+    const f = setup();
+    const persist = required(f.commit.getMockImplementation());
+    f.commit.mockImplementationOnce(async (command) => {
+      const result = await persist(command);
+      f.authorize.mockRejectedValue(new Error("synthetic denial"));
+      return result;
+    });
+    await expect(f.service.remove(input)).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    const original = f.history.get(ids.operation);
+    f.authorize.mockResolvedValue(guest());
+    f.now.mockReturnValue("2026-08-02T16:00:00.000Z");
+    await expect(f.service.remove(input)).resolves.toEqual({
+      status: "AlreadyApplied",
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      aggregateVersion: 2,
+    });
+    expect(f.commit).toHaveBeenCalledOnce();
+    expect(f.history.get(ids.operation)).toBe(original);
+    expect(f.current().items).toEqual([]);
+  });
+  it("denies historical result disclosure after authority changes during lookup", async () => {
+    const f = setup();
+    await f.service.remove(input);
+    const lookup = f.history.get.bind(f.history);
+    vi.spyOn(f.history, "get").mockImplementation((key) => {
+      f.authorize.mockRejectedValue(new Error("synthetic denial"));
+      return lookup(key);
+    });
+    await expect(f.service.remove(input)).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    expect(f.commit).toHaveBeenCalledOnce();
   });
 });
