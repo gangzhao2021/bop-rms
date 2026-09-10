@@ -175,6 +175,7 @@ export function createCartStateController({
   const begin = (
     createOperation: (cart: CartView) => PendingOperation,
     retry = false,
+    cartItemReference?: string,
   ): Promise<void> => {
     if (commandFlight !== null) return commandFlight;
     if (pending !== null && !retry) return Promise.resolve();
@@ -184,6 +185,17 @@ export function createCartStateController({
     }
     const cart = retry && pending !== null ? pending.cart : currentCart();
     if (cart === null) return Promise.resolve();
+    // Only new UI intents are blocked; an unknown original operation still needs server reconciliation.
+    if (
+      !retry &&
+      cartItemReference !== undefined &&
+      cart.cart.items.some(
+        (item) =>
+          item.cartItemReference === cartItemReference &&
+          item.warnings.includes("OTHER_PARTICIPANT_ITEM"),
+      )
+    )
+      return Promise.resolve();
     if (!retry) outcomeUnknown = false;
     const current = execute(
       createOperation(Object.freeze({ ...cart, cart: Object.freeze({ ...cart.cart }) })),
@@ -204,12 +216,16 @@ export function createCartStateController({
     getState: () => state,
     load,
     removeItem: (cartItemReference: string) =>
-      begin((cart) => ({
-        kind: "remove",
-        cart,
+      begin(
+        (cart) => ({
+          kind: "remove",
+          cart,
+          cartItemReference,
+          operationReference: keyFactory(),
+        }),
+        false,
         cartItemReference,
-        operationReference: keyFactory(),
-      })),
+      ),
     retry: () => {
       if (pending === null) return Promise.resolve();
       return begin(() => pending as PendingOperation, true);
@@ -225,18 +241,22 @@ export function createCartStateController({
       return () => listeners.delete(listener);
     },
     updateItem: (cartItemReference: string, draft: CartItemDraft) =>
-      begin((cart) => ({
-        kind: "update",
-        cart,
-        cartItemReference,
-        draft: Object.freeze({
-          quantity: draft.quantity,
-          customerNote: draft.customerNote,
-          optionSelections: Object.freeze(
-            draft.optionSelections.map((option) => Object.freeze({ ...option })),
-          ),
+      begin(
+        (cart) => ({
+          kind: "update",
+          cart,
+          cartItemReference,
+          draft: Object.freeze({
+            quantity: draft.quantity,
+            customerNote: draft.customerNote,
+            optionSelections: Object.freeze(
+              draft.optionSelections.map((option) => Object.freeze({ ...option })),
+            ),
+          }),
+          operationReference: keyFactory(),
         }),
-        operationReference: keyFactory(),
-      })),
+        false,
+        cartItemReference,
+      ),
   });
 }

@@ -75,6 +75,55 @@ function renderPage(state: CartState): string {
 }
 
 describe("CUST-CART page contract", () => {
+  it("explains foreign ownership, disables all row controls and suppresses a supplied foreign note", () => {
+    const base = cart();
+    const item = base.cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const shared: CartView = {
+      ...base,
+      cart: {
+        ...base.cart,
+        orderType: "DineIn",
+        serviceMode: "DineIn",
+        items: [
+          {
+            ...item,
+            warnings: ["OTHER_PARTICIPANT_ITEM"],
+            customerNote: "Synthetic restricted foreign note",
+          },
+        ],
+      },
+    };
+    const html = renderPage({ status: "ready", cart: shared });
+    expect(html).toContain("Added by another guest. Only they can change this item.");
+    expect(html).not.toContain("Synthetic restricted foreign note");
+    expect(html).not.toContain("OTHER_PARTICIPANT_ITEM");
+    expect(
+      html.match(new RegExp(`aria-describedby="cart-item-ownership-${id(2)}" disabled=""`, "gu")),
+    ).toHaveLength(3);
+  });
+  it("keeps current-participant notes and controls available", () => {
+    const base = cart();
+    const item = base.cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const html = renderPage({
+      status: "ready",
+      cart: {
+        ...base,
+        cart: {
+          ...base.cart,
+          orderType: "DineIn",
+          serviceMode: "DineIn",
+          items: [{ ...item, warnings: [], customerNote: "Synthetic own note" }],
+        },
+      },
+    });
+    expect(html).toContain("Synthetic own note");
+    expect(html).not.toContain("Added by another guest");
+    expect(html).toContain('type="button" aria-label="Increase Synthetic tea quantity"');
+    expect(html).not.toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+  });
+
   it("renders exact Cart fields, Quote, boundaries and accessible controls", () => {
     const html = renderPage({ status: "ready", cart: cart() });
     expect(html).toContain("Your cart");

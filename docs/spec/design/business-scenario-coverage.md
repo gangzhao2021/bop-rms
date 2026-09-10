@@ -491,3 +491,7 @@ full verification and forced uncached integration pass.
 WP-2319 composes current-authorized Dining Cart selection/read with the existing API routes.
 Local opt-in and synthetic-provider acceptance pass: API551/551, Cart PostgreSQL9/9, existing customer
 lab, full verification and forced integration. Dining item mutations and new browser activation remain open.
+
+WP-2320 interprets shared Cart ownership in the UI and blocks new foreign-item intents.
+PWA639/639, selected browser50/50 and build/offline security pass. Verification reuses unchanged backend
+evidence under the Owner-approved affected-check plan; no new full uncached regression is claimed.

@@ -69,10 +69,18 @@ function fixture() {
       return current;
     },
   };
-  const controller = createCartStateController({ client, keyFactory: () => id(20) });
+  let keys = 0;
+  const controller = createCartStateController({
+    client,
+    keyFactory: () => {
+      keys++;
+      return id(20);
+    },
+  });
   return {
     controller,
     calls,
+    getKeyCount: () => keys,
     failUpdate(error: Error | null) {
       updateFailure = error;
     },
@@ -86,6 +94,59 @@ function fixture() {
 }
 
 describe("WP-1205 in-memory Cart state", () => {
+  function foreignCart(): CartView {
+    const base = cart();
+    return {
+      ...base,
+      cart: {
+        ...base.cart,
+        orderType: "DineIn",
+        serviceMode: "DineIn",
+        items: base.cart.items.map((item) => ({ ...item, warnings: ["OTHER_PARTICIPANT_ITEM"] })),
+      },
+    };
+  }
+  it("declines new foreign-item update/remove intents without generating a key", async () => {
+    const f = fixture();
+    f.setCurrent(foreignCart());
+    await f.controller.load();
+    await f.controller.updateItem(id(2), { quantity: 2, optionSelections: [], customerNote: null });
+    await f.controller.removeItem(id(2));
+    expect(f.calls).toEqual([{ name: "load" }]);
+    expect(f.getKeyCount()).toBe(0);
+    expect(f.controller.getState()).toEqual({ status: "ready", cart: foreignCart() });
+  });
+  it("preserves explicit original recovery despite a later foreign-item display", async () => {
+    const f = fixture();
+    await f.controller.load();
+    f.failUpdate(new CartClientError("network_unknown"));
+    await f.controller.updateItem(id(2), { quantity: 2, optionSelections: [], customerNote: null });
+    f.setCurrent(foreignCart());
+    await f.controller.load();
+    expect(f.controller.getState()).toMatchObject({
+      status: "command-failed",
+      canRetrySameOperation: true,
+    });
+    f.failUpdate(null);
+    await f.controller.retry();
+    expect(f.calls.filter((call) => call.name === "update")).toEqual([
+      { name: "update", operationReference: id(20) },
+      { name: "update", operationReference: id(20) },
+    ]);
+    expect(f.getKeyCount()).toBe(1);
+  });
+  it("does not queue or replay foreign-item intents offline", async () => {
+    const f = fixture();
+    f.setCurrent(foreignCart());
+    await f.controller.load();
+    f.controller.setOnline(false);
+    await f.controller.removeItem(id(2));
+    f.controller.setOnline(true);
+    await f.controller.retry();
+    expect(f.calls).toEqual([{ name: "load" }]);
+    expect(f.getKeyCount()).toBe(0);
+  });
+
   it("loads server-authoritative ready and empty states", async () => {
     const state = fixture();
     await state.controller.load();

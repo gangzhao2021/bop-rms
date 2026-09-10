@@ -42,6 +42,8 @@ function CartItem({
   readonly controller: CartStateController;
 }) {
   const unavailable = item.lineEstimate.status === "Unavailable";
+  const foreign = item.warnings.includes("OTHER_PARTICIPANT_ITEM");
+  const ownershipDescription = `cart-item-ownership-${item.cartItemReference}`;
   const updateQuantity = (quantity: number) =>
     controller.updateItem(item.cartItemReference, {
       quantity,
@@ -74,18 +76,26 @@ function CartItem({
             : formatCartMoney(item.lineEstimate.total)}
         </p>
       </div>
-      {item.customerNote === null ? null : (
+      {item.customerNote === null || foreign ? null : (
         <p className="cart-item__note">Note: {item.customerNote}</p>
       )}
-      {item.warnings.map((warning) => (
-        <p className="cart-warning" key={warning}>
-          Warning: {warning}
+      {foreign ? (
+        <p className="cart-warning" id={ownershipDescription}>
+          Added by another guest. Only they can change this item.
         </p>
-      ))}
+      ) : null}
+      {item.warnings
+        .filter((warning) => warning !== "OTHER_PARTICIPANT_ITEM")
+        .map((warning) => (
+          <p className="cart-warning" key={warning}>
+            Warning: {warning}
+          </p>
+        ))}
       <div className="cart-item__actions" aria-label={`Quantity for ${item.displayName}`}>
         <button
           type="button"
-          disabled={readOnly || pending || item.quantity <= 1}
+          aria-describedby={foreign ? ownershipDescription : undefined}
+          disabled={readOnly || foreign || pending || item.quantity <= 1}
           aria-label={`Decrease ${item.displayName} quantity`}
           onClick={() => void updateQuantity(item.quantity - 1)}
         >
@@ -96,7 +106,8 @@ function CartItem({
         </output>
         <button
           type="button"
-          disabled={readOnly || pending || item.quantity >= 100}
+          aria-describedby={foreign ? ownershipDescription : undefined}
+          disabled={readOnly || foreign || pending || item.quantity >= 100}
           aria-label={`Increase ${item.displayName} quantity`}
           onClick={() => void updateQuantity(item.quantity + 1)}
         >
@@ -105,7 +116,8 @@ function CartItem({
         <button
           className="cart-link-button"
           type="button"
-          disabled={readOnly || pending}
+          aria-describedby={foreign ? ownershipDescription : undefined}
+          disabled={readOnly || foreign || pending}
           onClick={() => void controller.removeItem(item.cartItemReference)}
         >
           Remove
