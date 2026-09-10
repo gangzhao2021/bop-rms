@@ -129,3 +129,4 @@ export * from "./domain/dining-cart-selection.js";
 export * from "./infrastructure/persistence/dining-cart-selection-store.js";
 
 export * from "./application/dining-cart-selection-service.js";
+export * from "./domain/order-item-snapshot-codec.js";

@@ -3,6 +3,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
+import {
+  createOrderItemSnapshots,
+  encodeOrderItemSnapshot,
+  decodeOrderItemSnapshot,
+} from "../../rms/ordering/src/index.ts";
+import { orderSnapshotInput } from "../../rms/ordering/src/tests/order-item-snapshot.fixture.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
@@ -270,6 +276,98 @@ async function prove(context) {
       ).rows[0].count,
       0,
     );
+
+    // WP-2348: new complete JSONB data and explicit order coexist with unknown legacy order.
+    const legacy = (
+      await client.query("SELECT ordinal FROM rms_ordering.order_item WHERE order_item_id=$1", [
+        id(16),
+      ])
+    ).rows[0];
+    assert.equal(legacy.ordinal, null);
+    const sample = createOrderItemSnapshots(orderSnapshotInput())[0];
+    assert(sample);
+    const largeFee = 9007199254740993n;
+    const complete = (item, line) => ({
+      ...sample,
+      orderItemReference: id(item),
+      orderBatchReference: id(14),
+      cartItemReference: id(line),
+      catalog: { ...sample.catalog, brandReference: id(1), storeReference: id(2) },
+      pricing: {
+        ...sample.pricing,
+        quoteReference: id(13),
+        lineReference: id(line),
+        priceResolution: { ...sample.pricing.priceResolution, scopeReference: id(2) },
+        fee: { amountMinor: largeFee, currencyCode: "CAD" },
+        total: { amountMinor: largeFee + 2260n, currencyCode: "CAD" },
+      },
+    });
+    const insertOrdered = (item, line, ordinal) =>
+      client.query(
+        `INSERT INTO rms_ordering.order_item
+      (order_item_id,brand_id,store_id,order_id,order_batch_id,source_cart_line_id,quantity,
+       catalog_snapshot_digest,quote_input_digest,transaction_snapshot_json,snapshot_captured_at,ordinal)
+      VALUES ($1,$2,$3,$4,$5,$6,2,$7,$8,$9::jsonb,$10,$11)`,
+        [
+          id(item),
+          id(1),
+          id(2),
+          id(10),
+          id(14),
+          id(line),
+          sample.catalog.snapshotDigest,
+          sample.pricing.quoteInputDigest,
+          encodeOrderItemSnapshot(complete(item, line)),
+          at,
+          ordinal,
+        ],
+      );
+    await client.query("BEGIN");
+    try {
+      await insertOrdered(96, 97, 2);
+      await insertOrdered(98, 99, 1);
+      const ordered = (
+        await client.query(
+          `SELECT order_item_id,ordinal,transaction_snapshot_json
+        FROM rms_ordering.order_item WHERE order_batch_id=$1 AND ordinal IS NOT NULL ORDER BY ordinal`,
+          [id(14)],
+        )
+      ).rows;
+      assert.deepEqual(
+        ordered.map((row) => row.order_item_id),
+        [id(98), id(96)],
+      );
+      assert.equal(
+        ordered[0].transaction_snapshot_json.pricing.fee.amountMinor,
+        "9007199254740993",
+      );
+      assert.deepEqual(
+        decodeOrderItemSnapshot(ordered[0].transaction_snapshot_json),
+        complete(98, 99),
+      );
+      for (const ordinal of [0, 101, 1]) {
+        await client.query("SAVEPOINT ordinal_rejection");
+        await assert.rejects(
+          insertOrdered(100, 101, ordinal),
+          /order_item_ordinal_check|order_item_batch_ordinal_unique/u,
+        );
+        await client.query("ROLLBACK TO SAVEPOINT ordinal_rejection");
+        await client.query("RELEASE SAVEPOINT ordinal_rejection");
+      }
+      await client.query("UPDATE rms_ordering.order_item SET ordinal=3 WHERE order_item_id=$1", [
+        id(96),
+      ]);
+      assert.equal(
+        (
+          await client.query("SELECT ordinal FROM rms_ordering.order_item WHERE order_item_id=$1", [
+            id(96),
+          ])
+        ).rows[0].ordinal,
+        2,
+      );
+    } finally {
+      await client.query("ROLLBACK");
+    }
   } finally {
     await client.end();
   }

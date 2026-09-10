@@ -24,6 +24,16 @@ afterEach(async () => {
 });
 
 describe("migration catalog", () => {
+  it("registers WP-2348 immutable Order Item ordinal without invented backfill", async () => {
+    const catalog = await readMigrationCatalog(repositoryRoot);
+    const migration = catalog.migrations.find(
+      (value) => value.id === "1300_013_alter_order_item_ordinal",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/ordering", schema: "rms_ordering" });
+    expect(migration?.sql).toContain("order_item_batch_ordinal_unique");
+    expect(migration?.sql).toContain("ordinal IS NULL OR ordinal BETWEEN 1 AND 100");
+    expect(migration?.sql).not.toContain("UPDATE rms_ordering.order_item");
+  });
   it("registers WP-2316 scoped immutable initial Dining Cart operations", async () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
     const migration = catalog.migrations.find(
@@ -171,6 +181,7 @@ describe("migration catalog", () => {
       "1300_010_create_cart_binding_record",
       "1300_011_create_cart_quote_expiry",
       "1300_012_create_dining_cart_operation",
+      "1300_013_alter_order_item_ordinal",
       "1400_001_create_payment_intent",
       "1400_002_create_provider_webhook_inbox",
       "1400_003_create_payment_terminal_fact",
