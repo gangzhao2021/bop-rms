@@ -1,4 +1,4 @@
-import { validateAuditRecord } from "@bop/audit";
+import { canonicalizeRfc8785, validateAuditRecord } from "@bop/audit";
 import { assertGuestSessionUsable, createGuestSession, type GuestSession } from "@bop/identity";
 import type { StoreBusinessDateResolution } from "@rms/store";
 import { createOrderCreatedEnvelope } from "./order-created-event.js";
@@ -286,20 +286,29 @@ function audit(value: unknown, order: OrderCreationRecord["order"], at: Ordering
 function verifySaved(
   value: unknown,
   expected: Omit<OrderCreationRecord, "orderNumberAllocation">,
-  ports: OrderCreationPorts,
+  resolution: StoreBusinessDateResolution,
 ): OrderCreationRecord {
   try {
     const saved = parseOrderCreationRecord(value);
-    if (
-      saved.submissionReference !== expected.submissionReference ||
-      saved.guestSessionReference !== expected.guestSessionReference ||
-      saved.order.orderReference !== expected.order.orderReference ||
-      saved.order.batches[0].orderBatchReference !==
-        expected.order.batches[0].orderBatchReference ||
-      saved.items.length !== expected.items.length ||
-      !ports.references.equals(saved.submissionIntentHash, expected.submissionIntentHash)
-    )
-      throw new Error("mismatch");
+    const exact = parseOrderCreationRecord({
+      ...expected,
+      orderNumberAllocation: createOrderNumberAllocation({
+        orderReference: expected.order.orderReference,
+        allocatedAt: expected.createdAt,
+        sequence: saved.orderNumberAllocation.sequence,
+        businessDateResolution: resolution,
+      }),
+    });
+    // Both records have passed closed parsers. Encode bigint exactly, then compare canonical facts.
+    const canonical = (record: OrderCreationRecord) =>
+      canonicalizeRfc8785(
+        JSON.parse(
+          JSON.stringify(record, (_key, item: unknown) =>
+            typeof item === "bigint" ? item.toString() : item,
+          ),
+        ),
+      );
+    if (canonical(saved) !== canonical(exact)) throw new Error("mismatch");
     return saved;
   } catch {
     return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
@@ -373,6 +382,13 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
       } catch {
         return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
       }
+      if (
+        evidence.validationReference !== validationReference ||
+        evidence.cartReference !== cartReference ||
+        evidence.cartVersion !== expectedCartVersion ||
+        evidence.quoteReference !== quoteReference
+      )
+        return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
       authorizedForEvidence(guestSession, evidence);
       const loaded = await ports.source.load({ evidence }).catch(dependency);
       const sourceCart = sourceScope(loaded, evidence);
@@ -458,7 +474,7 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
         .catch(dependency);
       return Object.freeze({
         status: "Created" as const,
-        record: verifySaved(saved, provisional, ports),
+        record: verifySaved(saved, provisional, resolution),
       });
     },
   });

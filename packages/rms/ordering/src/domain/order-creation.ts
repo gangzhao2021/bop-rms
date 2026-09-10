@@ -97,13 +97,26 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
     "orderNumberAllocation",
     "createdAt",
   ]);
-  if (!Array.isArray(raw.items) || raw.items.length < 1 || raw.items.length > 100) return invalid();
+  if (
+    !Array.isArray(raw.items) ||
+    Object.getPrototypeOf(raw.items) !== Array.prototype ||
+    raw.items.length < 1 ||
+    raw.items.length > 100 ||
+    Reflect.ownKeys(raw.items).length !== raw.items.length + 1
+  )
+    return invalid();
+  const captured: unknown[] = [];
+  for (let index = 0; index < raw.items.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(raw.items, String(index));
+    if (!descriptor?.enumerable || !("value" in descriptor)) return invalid();
+    captured.push(descriptor.value);
+  }
   try {
     const submissionReference = parseOrderingReference(raw.submissionReference);
     const guestSessionReference = parseOrderingReference(raw.guestSessionReference);
     const createdAt = parseOrderingInstant(raw.createdAt);
     const order = parseOrderAggregate(raw.order);
-    const items = Object.freeze(raw.items.map(parseOrderItemTransactionSnapshot));
+    const items = Object.freeze(captured.map(parseOrderItemTransactionSnapshot));
     const allocationRaw = exact(raw.orderNumberAllocation, [
       "orderReference",
       "brandReference",
@@ -123,6 +136,10 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
     const batch = order.batches[0];
     const identities = new Map(batch.items.map((item) => [item.orderItemReference, item]));
     if (
+      allocationRaw.brandReference !== allocation.brandReference ||
+      allocationRaw.storeReference !== allocation.storeReference ||
+      allocationRaw.businessDate !== allocation.businessDate ||
+      allocationRaw.orderNumber !== allocation.orderNumber ||
       batch.submissionReference !== submissionReference ||
       order.submittedByActorReference !== guestSessionReference ||
       batch.submittedByActorReference !== guestSessionReference ||

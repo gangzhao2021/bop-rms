@@ -488,3 +488,113 @@ describe("WP-1224 Create Order application API", () => {
     );
   });
 });
+
+describe("WP-2345 exact submission evidence", () => {
+  it.each([{ cartReference: id(90) }, { expectedCartVersion: 6 }, { quoteReference: id(90) }])(
+    "rejects Checkout evidence for another requested tuple %j",
+    async (patch) => {
+      const fixture = ports();
+      await expectCode(
+        createOrderCreationService(fixture.implementation).create(command(patch)),
+        "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+      );
+      expect(fixture.calls).toEqual(["authorize", "resolve", "checkout"]);
+    },
+  );
+  it("rejects a different validation operation before loading source facts", async () => {
+    const fixture = ports({ checkoutOverride: evidence({ validationReference: id(90) }) });
+    await expectCode(
+      createOrderCreationService(fixture.implementation).create(command()),
+      "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+    );
+    expect(fixture.calls).toEqual(["authorize", "resolve", "checkout"]);
+  });
+  it.each(["item name", "creator", "business configuration"])(
+    "does not accept substituted saved %s",
+    async (kind) => {
+      const fixture = ports();
+      const commit = fixture.implementation.repository.commit;
+      fixture.implementation.repository.commit = async (input) => {
+        const original = await commit(input);
+        const item = original.items[0];
+        if (item === undefined) throw new Error("fixture");
+        if (kind === "item name")
+          return {
+            ...original,
+            items: [
+              {
+                ...item,
+                catalog: {
+                  ...item.catalog,
+                  localizedNames: { "en-CA": "Different synthetic item" },
+                },
+              },
+            ],
+          } as never;
+        if (kind === "creator")
+          return {
+            ...original,
+            order: { ...original.order, createdByActorReference: id(90) },
+          } as never;
+        return {
+          ...original,
+          orderNumberAllocation: createOrderNumberAllocation({
+            orderReference: original.order.orderReference,
+            allocatedAt: original.createdAt,
+            sequence: original.orderNumberAllocation.sequence,
+            businessDateResolution: {
+              ...original.orderNumberAllocation.businessDateResolution,
+              configurationVersion: 2,
+            },
+          }),
+        };
+      };
+      await expectCode(
+        createOrderCreationService(fixture.implementation).create(command()),
+        "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+      );
+      expect(fixture.calls.filter((value) => value === "commit")).toHaveLength(1);
+    },
+  );
+  it.each([
+    ["brandReference", id(90)],
+    ["storeReference", id(90)],
+    ["businessDate", "2026-08-01"],
+    ["orderNumber", "999"],
+  ])("rejects contradictory number allocation %s", async (field, value) => {
+    const fixture = ports();
+    const result = await createOrderCreationService(fixture.implementation).create(command());
+    expect(() =>
+      parseOrderCreationRecord({
+        ...result.record,
+        orderNumberAllocation: {
+          ...result.record.orderNumberAllocation,
+          [field]: value,
+        },
+      }),
+    ).toThrow(OrderCreationError);
+  });
+  it.each(["sparse", "accessor", "decorated"])(
+    "rejects %s snapshot arrays without executing code",
+    async (kind) => {
+      const fixture = ports();
+      const result = await createOrderCreationService(fixture.implementation).create(command());
+      const item = result.record.items[0];
+      let executed = 0;
+      const items: unknown[] = kind === "sparse" ? new Array(1) : [item];
+      if (kind === "accessor")
+        Object.defineProperty(items, "0", {
+          enumerable: true,
+          get() {
+            executed++;
+            return item;
+          },
+        });
+      if (kind === "decorated") Object.assign(items, { unexpected: true });
+      expect(() => parseOrderCreationRecord({ ...result.record, items })).toThrow(
+        OrderCreationError,
+      );
+      expect(executed).toBe(0);
+    },
+  );
+});
