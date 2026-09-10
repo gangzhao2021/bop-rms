@@ -400,3 +400,9 @@ WP-2304 composes real current Identity/QR authority with owner-selected Dining J
 an explicitly separate trusted request abuse port. API456/456, actual PostgreSQL cooldown/
 recovery/revocation acceptance, full verification and forced uncached integration pass. HTTP/UI
 and production abuse/context providers remain separate.
+
+WP-2305 adds fixed same-origin Join HTTP with request-bound server abuse context and no Cookie
+mutation. API500/500 and actual PostgreSQL/HTTP Join response-loss-to-binding acceptance pass:
+original admission is recovered with one Join Audit, then the existing client/coordinator rotates
+identity once. Full verification and forced uncached integration pass. Production context/abuse
+providers and customer UI activation remain separate.

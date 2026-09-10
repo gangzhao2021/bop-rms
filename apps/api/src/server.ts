@@ -1,3 +1,4 @@
+import type { CustomerDiningJoinHandler } from "./customer-dining-join.js";
 import type { CustomerDiningBindingHandler } from "./customer-dining-binding.js";
 import type { CustomerCartBindingHandler } from "./customer-cart-binding.js";
 import { createServer, type Server } from "node:http";
@@ -62,6 +63,7 @@ export interface ApiServerRuntimeOptions {
   coreTelemetry?: CoreTelemetry;
   customerCart?: CustomerCartHandler;
   customerCartBinding?: CustomerCartBindingHandler;
+  customerDiningJoin?: CustomerDiningJoinHandler;
   customerDiningBinding?: CustomerDiningBindingHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
@@ -109,6 +111,7 @@ export function createApiServerRuntime({
   coreTelemetry = createApiCoreTelemetry(),
   customerCart,
   customerCartBinding,
+  customerDiningJoin,
   customerDiningBinding,
   customerEntry,
   customerMenu,
@@ -132,6 +135,7 @@ export function createApiServerRuntime({
     createApp({
       ...(customerCart === undefined ? {} : { customerCart }),
       ...(customerCartBinding === undefined ? {} : { customerCartBinding }),
+      ...(customerDiningJoin === undefined ? {} : { customerDiningJoin }),
       ...(customerDiningBinding === undefined ? {} : { customerDiningBinding }),
       ...(customerEntry === undefined ? {} : { customerEntry }),
       healthReadiness,

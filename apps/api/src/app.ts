@@ -1,4 +1,9 @@
 import {
+  CustomerDiningJoinHandler,
+  customerDiningJoinRoute,
+  unavailableCustomerDiningJoinHandler,
+} from "./customer-dining-join.js";
+import {
   CustomerDiningBindingHandler,
   customerDiningBindingRoutes,
   unavailableCustomerDiningBindingHandler,
@@ -56,6 +61,7 @@ export interface AppOptions {
   correlationAcceptanceHandler?: RequestHandler;
   customerCart?: CustomerCartHandler;
   customerCartBinding?: CustomerCartBindingHandler;
+  customerDiningJoin?: CustomerDiningJoinHandler;
   customerDiningBinding?: CustomerDiningBindingHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
@@ -114,6 +120,7 @@ export function createApp({
   correlationAcceptanceHandler,
   customerCart,
   customerCartBinding,
+  customerDiningJoin,
   customerDiningBinding,
   customerEntry,
   customerMenu,
@@ -170,6 +177,10 @@ export function createApp({
     customerCartBinding?.complete() ?? unavailableCustomerCartBindingHandler,
   );
 
+  app.post(
+    customerDiningJoinRoute,
+    customerDiningJoin?.join() ?? unavailableCustomerDiningJoinHandler,
+  );
   app.post(
     customerDiningBindingRoutes.prepare,
     customerDiningBinding?.prepare() ?? unavailableCustomerDiningBindingHandler,

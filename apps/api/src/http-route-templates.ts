@@ -1,3 +1,4 @@
+import { customerDiningJoinRoute } from "./customer-dining-join.js";
 import { customerDiningBindingRoutes } from "./customer-dining-binding.js";
 import { customerCartBindingRoutes } from "./customer-cart-binding.js";
 import { customerCartRoutes } from "./customer-cart.js";
@@ -7,6 +8,7 @@ export const apiRouteTemplates = Object.freeze([
   "/__acceptance/request-command-event",
   "/bff/customer/entry",
   ...Object.values(customerCartBindingRoutes),
+  customerDiningJoinRoute,
   ...Object.values(customerDiningBindingRoutes),
   customerCartRoutes.current,
   "/bff/realtime",

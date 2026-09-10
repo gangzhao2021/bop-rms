@@ -1,3 +1,7 @@
+import {
+  CustomerDiningJoinHandler,
+  customerDiningJoinRoute,
+} from "../../../apps/api/src/customer-dining-join.ts";
 import { createCustomerDiningJoinComposition } from "../../../apps/api/src/customer-dining-join-composition.ts";
 import { createDiningBindingCoordinator } from "../../../apps/customer-pwa/src/dining/dining-binding-coordinator.ts";
 import {
@@ -1771,6 +1775,180 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         assert.equal(JSON.stringify(joinedRecord).includes(secret), false);
         assert.equal(JSON.stringify(requestAbuse).includes(secret), false);
         assert.equal(JSON.stringify(contextRequests).includes(secret), false);
+      }
+      // WP-2305: actual Join HTTP lost-ack recovery followed by production binding coordination.
+      const joinedGuest = await makeIdentity(41, 121);
+      await configure(41);
+      const httpStart = await service().start(command(41, 139));
+      minute = 3;
+      let admittedRequests = 0;
+      const journeyServer = createServer(
+        createApp({
+          customerDiningJoin: new CustomerDiningJoinHandler({
+            allowedOrigin: origin,
+            port: createCustomerDiningJoinComposition({
+              ...joinOptions,
+              dining: {
+                ...joinOptions.dining,
+                store: {
+                  ...joinReader,
+                  join: createPostgresDiningSessionJoinStore(
+                    runner({ loseAck: true }),
+                    scope,
+                    credentials,
+                    joinAudit,
+                  ).join,
+                },
+              },
+            }),
+            async resolveRequestContext() {
+              return {
+                abuse: {
+                  async admit(input) {
+                    admittedRequests++;
+                    assert.equal(input.guestSessionReference, id(121));
+                    assert.equal(input.kind, "Invitation");
+                    return "Admitted";
+                  },
+                },
+              };
+            },
+          }),
+          customerDiningBinding: new CustomerDiningBindingHandler({
+            allowedOrigin: origin,
+            now: () => at(minute),
+            port: createCustomerDiningBindingComposition(compositionOptions),
+          }),
+        }),
+      );
+      const journeyCookies = new Map([["__Host-bop-guest", joinedGuest.sessionCredential]]);
+      setCustomerCsrfCredential(joinedGuest.csrfCredential);
+      try {
+        await new Promise((resolve) => journeyServer.listen(0, "127.0.0.1", resolve));
+        const base = `http://127.0.0.1:${journeyServer.address().port}`;
+        const joinRequest = () =>
+          globalThis.fetch(base + customerDiningJoinRoute, {
+            method: "POST",
+            headers: {
+              origin,
+              "sec-fetch-site": "same-origin",
+              "sec-fetch-mode": "cors",
+              "content-type": "application/json",
+              "idempotency-key": id(140),
+              "x-csrf-token": joinedGuest.csrfCredential,
+              cookie: `__Host-bop-guest=${joinedGuest.sessionCredential}`,
+            },
+            body: JSON.stringify({ joinCredential: httpStart.joinCredential }),
+          });
+        const lost = await joinRequest();
+        assert.equal(lost.status, 503);
+        assert.deepEqual(lost.headers.getSetCookie(), []);
+        assert.deepEqual(await lost.json(), {
+          error: {
+            code: "dining_join_unavailable",
+            messageKey: "customer.dining.join_unavailable",
+          },
+        });
+        const originalJoin = await joinReader.resolveJoinOperation(id(140));
+        assert.notEqual(originalJoin, null);
+        const recovered = await joinRequest();
+        assert.equal(recovered.status, 200);
+        assert.deepEqual(recovered.headers.getSetCookie(), []);
+        const receipt = await recovered.json();
+        assert.deepEqual(receipt, {
+          status: "Joined",
+          operationReference: id(140),
+          admissionReference: originalJoin.admission.admissionReference,
+        });
+        assert.equal(admittedRequests, 2);
+        assert.equal((await identityStore.resolve(joinedGuest.selector)).session.status, "Active");
+        const bindingClient = createBrowserDiningBindingClient({
+          online: () => true,
+          async fetch(path, init) {
+            assert.ok(Object.values(customerDiningBindingRoutes).includes(path));
+            const response = await globalThis.fetch(base + path, {
+              ...init,
+              headers: {
+                ...init.headers,
+                origin,
+                "sec-fetch-site": "same-origin",
+                "sec-fetch-mode": "cors",
+                cookie: [...journeyCookies].map(([name, value]) => `${name}=${value}`).join("; "),
+              },
+            });
+            for (const line of response.headers.getSetCookie()) {
+              const pair = line.split(";")[0],
+                separator = pair.indexOf("=");
+              const name = pair.slice(0, separator),
+                value = pair.slice(separator + 1);
+              if (line.includes("Max-Age=0")) journeyCookies.delete(name);
+              else journeyCookies.set(name, value);
+            }
+            return response;
+          },
+        });
+        const coordinator = createDiningBindingCoordinator({
+          binding: bindingClient,
+          online: () => true,
+          generatePreparationReference: () => id(142),
+          csrf: {
+            get: getCustomerCsrfCredential,
+            set: setCustomerCsrfCredential,
+            capture: captureCustomerCsrfContext,
+          },
+        });
+        const intent = {
+          operationReference: id(141),
+          admissionReference: receipt.admissionReference,
+        };
+        const bound = await coordinator.bind(intent);
+        assert.deepEqual(bound, { status: "Bound", operationReference: id(141) });
+        assert.deepEqual(await coordinator.bind(intent), bound);
+        assert.equal(journeyCookies.size, 1);
+        assert.notEqual(journeyCookies.get("__Host-bop-guest"), joinedGuest.sessionCredential);
+        assert.notEqual(getCustomerCsrfCredential(), joinedGuest.csrfCredential);
+        assert.equal((await identityStore.resolve(joinedGuest.selector)).session.status, "Revoked");
+        assert.deepEqual(await counts(), { operations: 12, audits: 12 });
+        const history = (
+          await admin.query(
+            "SELECT record FROM bop_identity.guest_dining_binding_preparation WHERE operation_id=$1 ORDER BY revision",
+            [id(142)],
+          )
+        ).rows;
+        assert.equal(history.length, 3);
+        assert.equal(
+          (
+            await admin.query(
+              "SELECT count(*)::integer AS n FROM platform_audit.audit_record WHERE target_type='GuestDiningBindingPreparation' AND target_id=$1",
+              [id(142)],
+            )
+          ).rows[0].n,
+          3,
+        );
+        assert.equal(
+          (
+            await admin.query(
+              "SELECT count(*)::integer AS n FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_JOIN' AND target_id=$1",
+              [httpStart.session.diningSessionReference],
+            )
+          ).rows[0].n,
+          1,
+        );
+        for (const secret of [
+          joinedGuest.sessionCredential,
+          joinedGuest.csrfCredential,
+          httpStart.joinCredential,
+          journeyCookies.get("__Host-bop-guest"),
+          getCustomerCsrfCredential(),
+        ]) {
+          assert.equal(JSON.stringify(history).includes(secret), false);
+          assert.equal(JSON.stringify(receipt).includes(secret), false);
+          assert.equal(JSON.stringify(bound).includes(secret), false);
+        }
+      } finally {
+        setCustomerCsrfCredential(null);
+        journeyServer.closeAllConnections();
+        await new Promise((resolve) => journeyServer.close(resolve));
       }
       assert.equal(active, 0);
     } finally {
