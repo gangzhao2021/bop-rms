@@ -11,6 +11,7 @@ import {
   parseCartQuoteAttachment,
   type CartQuoteAttachment,
 } from "../domain/cart-quote-attachment.js";
+import type { DiningCartReadResult, DiningCartViewer } from "./dining-cart-read-service.js";
 import type { PickupCartReadResult } from "./pickup-cart-read-service.js";
 
 export interface CustomerCartDisplayMoney {
@@ -22,8 +23,8 @@ export interface CustomerCartDisplayView {
   readonly cart: {
     readonly cartReference: string;
     readonly version: number;
-    readonly orderType: "Pickup";
-    readonly serviceMode: "Pickup";
+    readonly orderType: "Pickup" | "DineIn";
+    readonly serviceMode: "Pickup" | "DineIn";
     readonly context: { readonly brandName: string; readonly storeName: string };
     readonly lifecycle: {
       readonly status: "Active" | "Abandoned" | "Expired";
@@ -75,6 +76,48 @@ export interface CustomerCartViewPorts {
     }): Promise<CartQuoteAttachment | null>;
   };
 }
+export interface CustomerDiningCartViewPorts {
+  readonly reads: { read(input: unknown): Promise<DiningCartReadResult | null> };
+  readonly catalog: CustomerCartViewPorts["catalog"];
+  readonly stores: CustomerCartViewPorts["stores"];
+}
+type ViewPorts = Omit<CustomerCartViewPorts, "reads"> & {
+  readonly reads: {
+    read(input: unknown): Promise<PickupCartReadResult | DiningCartReadResult | null>;
+  };
+};
+const viewerFields = [
+  "guestSessionReference",
+  "guestSessionVersion",
+  "participantReference",
+  "participantVersion",
+  "diningSessionVersion",
+  "tableReference",
+  "tableAssignmentVersion",
+  "publicTableReference",
+  "qrReference",
+  "qrRevocationVersion",
+] as const;
+function viewer(value: unknown): DiningCartViewer {
+  const raw = closed(value, viewerFields);
+  const version = (key: keyof DiningCartViewer) => {
+    const n = raw[key];
+    if (typeof n !== "number" || !Number.isSafeInteger(n) || n < 1) return unavailable();
+    return n;
+  };
+  return Object.freeze({
+    guestSessionReference: parseOrderingReference(raw.guestSessionReference),
+    guestSessionVersion: version("guestSessionVersion"),
+    participantReference: parseOrderingReference(raw.participantReference),
+    participantVersion: version("participantVersion"),
+    diningSessionVersion: version("diningSessionVersion"),
+    tableReference: parseOrderingReference(raw.tableReference),
+    tableAssignmentVersion: version("tableAssignmentVersion"),
+    publicTableReference: parseOrderingReference(raw.publicTableReference),
+    qrReference: parseOrderingReference(raw.qrReference),
+    qrRevocationVersion: version("qrRevocationVersion"),
+  });
+}
 function unavailable(): never {
   throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
 }
@@ -86,8 +129,14 @@ function text(value: unknown): string {
     return unavailable();
   return value.normalize("NFC").trim();
 }
-function snapshot(value: PickupCartReadResult) {
-  const raw = closed(value, ["context", "cart", "effectiveStatus", "observedAt"]);
+function snapshot(value: PickupCartReadResult | DiningCartReadResult, mode: "Pickup" | "DineIn") {
+  const raw = closed(
+    value,
+    mode === "DineIn"
+      ? ["context", "cart", "effectiveStatus", "observedAt", "viewer"]
+      : ["context", "cart", "effectiveStatus", "observedAt"],
+  );
+  const currentViewer = mode === "DineIn" ? viewer(raw.viewer) : null;
   const context = closed(raw.context, ["publicStoreReference", "locale"]);
   const observedAt = parseOrderingInstant(raw.observedAt);
   const storeRequest = parseGetPublicStoreRequest({
@@ -98,7 +147,7 @@ function snapshot(value: PickupCartReadResult) {
   });
   const cart = parseCartAggregate(raw.cart);
   if (
-    cart.orderType !== "Pickup" ||
+    cart.orderType !== mode ||
     !["Qr", "Web"].includes(cart.sourceChannel) ||
     cart.lifecycle === null ||
     cart.aggregateVersion > 999_999_999 ||
@@ -111,10 +160,18 @@ function snapshot(value: PickupCartReadResult) {
       ? "Expired"
       : cart.lifecycle.status;
   if (raw.effectiveStatus !== effectiveStatus) return unavailable();
-  return { cart, storeRequest, observedAt, effectiveStatus };
+  return { cart, storeRequest, observedAt, effectiveStatus, viewer: currentViewer };
 }
 
 export function createCustomerCartViewQuery(ports: CustomerCartViewPorts) {
+  return createViewQuery(ports, "Pickup");
+}
+
+/** Shared product display; another participant's restricted note is never published. */
+export function createCustomerDiningCartViewQuery(ports: CustomerDiningCartViewPorts) {
+  return createViewQuery({ ...ports, quotes: { loadLatest: async () => null } }, "DineIn");
+}
+function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
   return Object.freeze({
     async read(input: unknown): Promise<CustomerCartDisplayView | null> {
       let authorizationErrorCode: "CART_PERMISSION_DENIED" | "CART_INPUT_INVALID" | null = null;
@@ -133,7 +190,7 @@ export function createCustomerCartViewQuery(ports: CustomerCartViewPorts) {
       try {
         const loaded = await read();
         if (loaded === null) return null;
-        const first = snapshot(loaded);
+        const first = snapshot(loaded, mode);
         const cart = first.cart;
         const requests = cart.items.map((item) => {
           const evidence = item.catalogSelectionEvidence;
@@ -226,12 +283,21 @@ export function createCustomerCartViewQuery(ports: CustomerCartViewPorts) {
               displayName: text(description.displayName),
               quantity: item.quantity,
               configuration,
-              customerNote: item.customerNote,
+              customerNote:
+                first.viewer !== null &&
+                item.addedByParticipantReference !== first.viewer.participantReference
+                  ? null
+                  : item.customerNote,
               lineEstimate: Object.freeze({
                 status: "Unavailable" as const,
                 reasonCode: "LINE_ESTIMATE_UNAVAILABLE" as const,
               }),
-              warnings: Object.freeze([] as string[]),
+              warnings: Object.freeze(
+                first.viewer !== null &&
+                  item.addedByParticipantReference !== first.viewer.participantReference
+                  ? ["OTHER_PARTICIPANT_ITEM"]
+                  : ([] as string[]),
+              ),
             });
           }),
         );
@@ -262,9 +328,10 @@ export function createCustomerCartViewQuery(ports: CustomerCartViewPorts) {
           return unavailable();
         const reloaded = await read();
         if (reloaded === null) return unavailable();
-        const final = snapshot(reloaded);
+        const final = snapshot(reloaded, mode);
         if (
           JSON.stringify(cart) !== JSON.stringify(final.cart) ||
+          JSON.stringify(first.viewer) !== JSON.stringify(final.viewer) ||
           first.storeRequest.publicStoreReference !== final.storeRequest.publicStoreReference ||
           first.storeRequest.requestedLocale !== final.storeRequest.requestedLocale ||
           final.observedAt < first.observedAt
@@ -282,8 +349,8 @@ export function createCustomerCartViewQuery(ports: CustomerCartViewPorts) {
           cart: Object.freeze({
             cartReference: cart.cartReference,
             version: cart.aggregateVersion,
-            orderType: "Pickup",
-            serviceMode: "Pickup",
+            orderType: mode,
+            serviceMode: mode,
             context,
             lifecycle: Object.freeze({
               status: final.effectiveStatus,

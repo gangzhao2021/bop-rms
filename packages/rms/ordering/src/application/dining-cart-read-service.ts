@@ -21,7 +21,21 @@ export interface DiningCartReadPorts extends DiningCartAuthorityPorts {
     }): Promise<CartAggregate | null>;
   };
 }
+export interface DiningCartViewer {
+  readonly guestSessionReference: string;
+  readonly guestSessionVersion: number;
+  readonly participantReference: string;
+  readonly participantVersion: number;
+  readonly diningSessionVersion: number;
+  readonly tableReference: string;
+  readonly tableAssignmentVersion: number;
+  readonly publicTableReference: string;
+  readonly qrReference: string;
+  readonly qrRevocationVersion: number;
+}
 export interface DiningCartReadResult {
+  /** Restricted current authority; omitted entirely from public display. */
+  readonly viewer: DiningCartViewer;
   readonly context: { readonly publicStoreReference: string; readonly locale: string };
   readonly cart: CartAggregate;
   readonly effectiveStatus: "Active" | "Abandoned" | "Expired";
@@ -93,6 +107,18 @@ export function createDiningCartReadService(ports: DiningCartReadPorts) {
           ? "Expired"
           : lifecycle.status;
       return Object.freeze({
+        viewer: Object.freeze({
+          guestSessionReference: String(last.session.sessionReference),
+          guestSessionVersion: last.session.version,
+          participantReference: last.participation.participantReference,
+          participantVersion: last.participation.participantVersion,
+          diningSessionVersion: last.participation.diningSessionVersion,
+          tableReference: last.participation.tableReference,
+          tableAssignmentVersion: last.participation.tableAssignmentVersion,
+          publicTableReference: String(last.session.publicTableReference),
+          qrReference: String(last.session.qrReference),
+          qrRevocationVersion: last.session.qrRevocationVersion,
+        }),
         context: Object.freeze({
           publicStoreReference: String(last.session.publicStoreReference),
           locale: String(last.session.locale),

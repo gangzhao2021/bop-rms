@@ -483,3 +483,7 @@ WP-2317 shares current Identity/Dining authorization between Cart reads and sele
 operation lookup follows current authority, and post-effect authority drift prevents receipt publication.
 Safe customer views and runtime activation remain separate. Ordering753/753, Cart PostgreSQL9/9,
 full verification and forced uncached integration pass.
+
+WP-2318 adds a safe shared Dining Cart display with current viewer checks and participant note minimization.
+HTTP/runtime and item-edit UI remain separate. Ordering790/790, Cart PostgreSQL9/9,
+full verification and forced uncached integration pass.

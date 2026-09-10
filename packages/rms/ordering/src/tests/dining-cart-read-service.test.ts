@@ -170,6 +170,15 @@ describe("current-authorized shared Dining Cart read", () => {
     const a = await first.service.read({ sessionCredential: credential });
     const b = await second.service.read({ sessionCredential: "y".repeat(43) });
     expect(a?.cart).toEqual(b?.cart);
+    expect(a?.viewer).toMatchObject({
+      guestSessionReference: ids.session,
+      participantReference: ids.participant,
+    });
+    expect(b?.viewer).toMatchObject({
+      guestSessionReference: ids.otherSession,
+      participantReference: ids.otherParticipant,
+    });
+    expect(Object.isFrozen(a?.viewer)).toBe(true);
     expect(a?.cart.createdByActorReference).toBe(ids.otherSession);
     expect(a?.cart.items.map((item) => item.addedByParticipantReference)).toEqual([
       ids.participant,
