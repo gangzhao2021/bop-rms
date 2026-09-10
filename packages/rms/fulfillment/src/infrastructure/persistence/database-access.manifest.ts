@@ -3,6 +3,30 @@ const databaseAccessManifestInput = {
   module: { moduleName: "fulfillment", packageName: "@rms/fulfillment", layer: "RMS" },
   tables: [
     {
+      table: "capacity_hold_terminal",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "capacity_allocation",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "capacity_allocation_terminal",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "capacity_slot",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@rms/fulfillment" },

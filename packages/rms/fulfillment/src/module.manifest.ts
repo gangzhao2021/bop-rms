@@ -41,6 +41,9 @@ const moduleManifestInput =
     ownedDatabase: {
       schema: "rms_fulfillment",
       tables: [
+        "capacity_hold_terminal",
+        "capacity_allocation",
+        "capacity_allocation_terminal",
         "capacity_slot",
         "capacity_slot_configuration",
         "capacity_hold",
