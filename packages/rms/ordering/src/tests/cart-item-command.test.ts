@@ -1,5 +1,6 @@
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { GuestSession } from "@bop/identity";
+import { createCatalogSelectionValidationService } from "@rms/catalog";
 import { describe, expect, it, vi } from "vitest";
 import { createCartItemCommandService } from "../application/cart-item-command-service.js";
 import type {
@@ -712,5 +713,93 @@ describe("WP-2270 Cart commands across revision999", () => {
     expect(commit).not.toHaveBeenCalled();
     expect(state.current().aggregateVersion).toBe(2_147_483_647);
     expect(state.operations()).toBe(0);
+  });
+});
+
+describe("actual Catalog validator and Ordering composition", () => {
+  it("persists exact accepted evidence, denies new invalid selections and preserves original recovery", async () => {
+    const state = fixture();
+    const hook = vi.fn(() => []);
+    let hostile = false;
+    const resolveCurrent = vi.fn(
+      async (scope: {
+        brandReference: string;
+        storeReference: string;
+        sellableReference: string;
+        sourceChannel: string;
+        orderType: string;
+        observedAt: string;
+      }) => {
+        const conflicts: string[] = [];
+        if (hostile) Object.defineProperty(conflicts, "map", { value: hook });
+        return {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          sourceChannel: scope.sourceChannel,
+          orderType: scope.orderType,
+          sellableReference: scope.sellableReference,
+          availability: "Available",
+          freshnessStatus: "Fresh",
+          menuVersionReference: ids.menuVersion,
+          productVersionReference: ids.productVersion,
+          catalogChannelCode: "PILOT_CHANNEL",
+          catalogOrderTypeCode: "PILOT_ORDER_TYPE",
+          effectiveFrom: createdAt,
+          effectiveUntil: null,
+          resolvedAt: scope.observedAt,
+          rules: [
+            {
+              bindingReference: ids.binding,
+              optionSetVersionReference: ids.optionSetVersion,
+              minimumQuantity: 1,
+              maximumQuantity: 1,
+              activationOptionReferences: [],
+              options: [
+                {
+                  optionReference: ids.option,
+                  maximumQuantity: 1,
+                  conflictOptionReferences: conflicts,
+                },
+              ],
+            },
+          ],
+        } as never;
+      },
+    );
+    const validator = createCatalogSelectionValidationService({ snapshots: { resolveCurrent } });
+    const composed = createCartItemCommandService({ ...state.ports, catalog: validator });
+    const original = addInput({ customerNote: null });
+    const first = await composed.add(original);
+    expect(first.aggregate.items[0]?.catalogSelectionEvidence).toMatchObject({
+      menuVersionReference: ids.menuVersion,
+      productVersionReference: ids.productVersion,
+      ruleEvidence: [
+        { bindingReference: ids.binding, optionSetVersionReference: ids.optionSetVersion },
+      ],
+    });
+    const update = {
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 2,
+      quantity: 1,
+      optionSelections: [],
+      customerNote: null,
+      operationReference: ids.secondOperation,
+      requestedAt,
+    };
+    await expect(composed.update(update)).rejects.toMatchObject({ code: "CART_SELECTION_INVALID" });
+    expect(state.operations()).toBe(1);
+    hostile = true;
+    await expect(
+      composed.update({ ...update, optionSelections: original.optionSelections }),
+    ).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(hook).not.toHaveBeenCalled();
+    expect(state.operations()).toBe(1);
+    expect(await composed.add(original)).toEqual({ ...first, status: "AlreadyApplied" });
+    expect(resolveCurrent).toHaveBeenCalledTimes(3);
+    expect(state.generated()).toBe(1);
+    expect(state.current().aggregateVersion).toBe(2);
   });
 });

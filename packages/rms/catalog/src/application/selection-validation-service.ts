@@ -12,7 +12,6 @@ import {
   type CatalogReference,
 } from "../domain/product.js";
 import type {
-  CatalogResolvedSelectionRule,
   CatalogSelectionValidationPorts,
   CurrentCatalogSelectionSnapshot,
 } from "./ports/selection-validation-ports.js";
@@ -57,6 +56,22 @@ function exact(value: unknown, keys: readonly string[]): Readonly<Record<string,
   }
 }
 
+/** Copy only dense data elements; never dispatch methods supplied on a collection. */
+function collection(value: unknown): readonly unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return invalid();
+  const length = Object.getOwnPropertyDescriptor(value, "length")?.value;
+  if (!Number.isSafeInteger(length) || length < 0 || length > 100) return invalid();
+  if (Reflect.ownKeys(value).length !== length + 1) return invalid();
+  const result: unknown[] = [];
+  for (let index = 0; index < length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable)
+      return invalid();
+    result.push(descriptor.value);
+  }
+  return Object.freeze(result);
+}
+
 function positive(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 999)
     return invalid();
@@ -64,16 +79,14 @@ function positive(value: unknown): number {
 }
 
 function references(value: unknown): readonly CatalogReference[] {
-  if (!Array.isArray(value) || value.length > 100) return invalid();
-  const result = Object.freeze(value.map(parseCatalogReference));
+  const result = Object.freeze(collection(value).map(parseCatalogReference));
   if (new Set(result).size !== result.length) return invalid();
   return result;
 }
 
 function selections(value: unknown): readonly CatalogSelectionQuantity[] {
-  if (!Array.isArray(value) || value.length > 100) return invalid();
   const result = Object.freeze(
-    value.map((candidate) => {
+    collection(value).map((candidate) => {
       const raw = exact(candidate, ["optionReference", "quantity"]);
       return Object.freeze({
         optionReference: parseCatalogReference(raw.optionReference),
@@ -96,8 +109,10 @@ function input(value: unknown): ValidateCatalogSelectionInput {
     "observedAt",
   ]);
   if (
-    !["Api", "Pos", "Qr", "Web"].includes(String(raw.sourceChannel)) ||
-    !["DineIn", "Pickup"].includes(String(raw.orderType))
+    typeof raw.sourceChannel !== "string" ||
+    !["Api", "Pos", "Qr", "Web"].includes(raw.sourceChannel) ||
+    typeof raw.orderType !== "string" ||
+    !["DineIn", "Pickup"].includes(raw.orderType)
   )
     return invalid();
   return Object.freeze({
@@ -111,7 +126,7 @@ function input(value: unknown): ValidateCatalogSelectionInput {
   });
 }
 
-function rule(value: CatalogResolvedSelectionRule) {
+function rule(value: unknown) {
   const raw = exact(value, [
     "bindingReference",
     "optionSetVersionReference",
@@ -128,9 +143,8 @@ function rule(value: CatalogResolvedSelectionRule) {
     : invalid();
   if (minimumQuantity < 0 || maximumQuantity < minimumQuantity || maximumQuantity > 99_900)
     return invalid();
-  if (!Array.isArray(raw.options) || raw.options.length > 100) return invalid();
   const options = Object.freeze(
-    raw.options.map((option) => {
+    collection(raw.options).map((option) => {
       const candidate = exact(option, [
         "optionReference",
         "maximumQuantity",
@@ -209,17 +223,11 @@ function snapshot(value: CurrentCatalogSelectionSnapshot, expected: ValidateCata
     "resolvedAt",
     "rules",
   ]);
-  if (
-    raw.availability !== "Available" ||
-    raw.freshnessStatus !== "Fresh" ||
-    !Array.isArray(raw.rules) ||
-    raw.rules.length > 100
-  )
-    return invalid();
+  if (raw.availability !== "Available" || raw.freshnessStatus !== "Fresh") return invalid();
   const effectiveFrom = parseCatalogInstant(raw.effectiveFrom);
   const effectiveUntil =
     raw.effectiveUntil === null ? null : parseCatalogInstant(raw.effectiveUntil);
-  const rules = Object.freeze(raw.rules.map(rule));
+  const rules = Object.freeze(collection(raw.rules).map(rule));
   const options = rules.flatMap((candidate) => candidate.options);
   const optionReferences = new Set(options.map((option) => option.optionReference));
   if (

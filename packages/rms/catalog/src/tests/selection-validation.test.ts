@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CatalogError,
   createCatalogSelectionValidationService,
@@ -236,5 +236,81 @@ describe("Catalog current Sellable / Option selection validation", () => {
     await expect(service().validateSelection(hostile)).rejects.toMatchObject({
       code: "CATALOG_INPUT_INVALID",
     });
+  });
+});
+
+describe("closed Catalog selection collections", () => {
+  const paths = ["selections", "rules", "options", "activation", "conflicts"] as const;
+  const shapes = ["map", "getter", "sparse", "extra", "symbol", "prototype"] as const;
+  it.each(paths)("rejects hostile %s collections without executing hooks", async (path) => {
+    for (const shape of shapes) {
+      const hook = vi.fn(() => []);
+      const current = snapshot();
+      const request = command([{ optionReference: ids.base, quantity: 1 }]);
+      const base = current.rules[0];
+      const option = base?.options[0];
+      if (base === undefined || option === undefined) throw new Error("missing fixture");
+      const original =
+        path === "selections"
+          ? request.optionSelections
+          : path === "rules"
+            ? current.rules
+            : path === "options"
+              ? base.options
+              : path === "activation"
+                ? base.activationOptionReferences
+                : option.conflictOptionReferences;
+      const hostile: unknown[] = [...original];
+      if (shape === "map") Object.defineProperty(hostile, "map", { value: hook });
+      if (shape === "getter") Object.defineProperty(hostile, "0", { enumerable: true, get: hook });
+      if (shape === "sparse") hostile.length += 1;
+      if (shape === "extra") Object.defineProperty(hostile, "extra", { value: true });
+      if (shape === "symbol") Object.defineProperty(hostile, Symbol("extra"), { value: true });
+      if (shape === "prototype") Object.setPrototypeOf(hostile, Object.create(Array.prototype));
+      if (path === "selections") request.optionSelections = hostile as never;
+      else if (path === "rules") Object.assign(current, { rules: hostile });
+      else if (path === "options") Object.assign(base, { options: hostile });
+      else if (path === "activation") Object.assign(base, { activationOptionReferences: hostile });
+      else Object.assign(option, { conflictOptionReferences: hostile });
+      const resolveCurrent = vi.fn(async () => current);
+      const validator = createCatalogSelectionValidationService({ snapshots: { resolveCurrent } });
+      await expect(validator.validateSelection(request), `${path}:${shape}`).rejects.toMatchObject({
+        code: "CATALOG_INPUT_INVALID",
+      });
+      expect(hook, `${path}:${shape}`).not.toHaveBeenCalled();
+      if (path === "selections") expect(resolveCurrent).not.toHaveBeenCalled();
+    }
+  });
+  it.each(["sourceChannel", "orderType"])("does not coerce %s", async (field) => {
+    const hook = vi.fn(() => (field === "sourceChannel" ? "Qr" : "DineIn"));
+    const request = { ...command([]), [field]: { toString: hook } };
+    const resolveCurrent = vi.fn(async () => snapshot());
+    const validator = createCatalogSelectionValidationService({ snapshots: { resolveCurrent } });
+    await expect(validator.validateSelection(request)).rejects.toMatchObject({
+      code: "CATALOG_INPUT_INVALID",
+    });
+    expect(hook).not.toHaveBeenCalled();
+    expect(resolveCurrent).not.toHaveBeenCalled();
+  });
+  it("owns selected quantities before the source await", async () => {
+    const selected = { optionReference: ids.base, quantity: 1 };
+    const request = command([selected]);
+    const validator = createCatalogSelectionValidationService({
+      snapshots: {
+        async resolveCurrent() {
+          selected.quantity = 99;
+          request.optionSelections = [{ optionReference: ids.unknown, quantity: 1 }];
+          return snapshot();
+        },
+      },
+    });
+    const result = await validator.validateSelection(request);
+    expect(result).toMatchObject({
+      status: "Accepted",
+      optionSelections: [{ optionReference: ids.base, quantity: 1 }],
+    });
+    if (result.status !== "Accepted") throw new Error("expected synthetic acceptance");
+    expect(Object.isFrozen(result.optionSelections)).toBe(true);
+    expect(Object.isFrozen(result.optionSelections[0])).toBe(true);
   });
 });
