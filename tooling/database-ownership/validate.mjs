@@ -325,6 +325,14 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/dining-cart-read-store.ts";
+        // WP-2316 admits only the atomic owner writer with its operation and Cart tables.
+        const acceptedDiningCartSelectionAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "cart_line", "dining_cart_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/dining-cart-selection-store.ts";
         // WP-2230 accepts only the reader of existing Ordering operation history.
         const acceptedCartOperationAsset =
           module.packageName === "@rms/ordering" &&
@@ -391,6 +399,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningAdmissionConsumptionAsset &&
           !acceptedCartQueryAsset &&
           !acceptedDiningCartQueryAsset &&
+          !acceptedDiningCartSelectionAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&
           !acceptedPickupBindingAsset &&

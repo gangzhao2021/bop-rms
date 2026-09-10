@@ -6,13 +6,16 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2315 - Initial Shared Dining Cart Selection Transition`
+- Current discussion node: `WP-2316 - Atomic Initial Dining Cart Selection Store`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
 Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 
 ## Latest Work Package Status
+
+- [WP-2316](./work-packages/WP-2316.md) persists initial shared Dining Cart selection atomically with operation/Audit history.
+  Ordering704/704, Cart PostgreSQL9/9, 101 migrations, full verification and forced uncached integration pass.
 
 - [WP-2315](./work-packages/WP-2315.md) defines initial shared Dining Cart creation/selection without replacing history.
   Ordering660/660, full verification and forced uncached integration pass; atomic persistence remains separate.

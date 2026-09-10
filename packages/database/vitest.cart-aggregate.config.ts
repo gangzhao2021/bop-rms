@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: [
+      "packages/database/test/dining-cart-selection-store-acceptance.test.mjs",
       "packages/database/test/cart-aggregate-acceptance.test.mjs",
       "packages/database/test/cart-query-store-acceptance.test.mjs",
       "packages/database/test/cart-item-command-store-acceptance.test.mjs",

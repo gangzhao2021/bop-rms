@@ -19,6 +19,66 @@ export interface DiningCartSelectionDecision {
   readonly observedAt: OrderingInstant;
 }
 
+/** Historical owner receipt; it neither returns Cart content nor grants current authority. */
+export interface DiningCartSelectionReceipt {
+  readonly operationReference: OrderingReference;
+  readonly brandReference: OrderingReference;
+  readonly storeReference: OrderingReference;
+  readonly diningSessionReference: OrderingReference;
+  readonly guestSessionReference: OrderingReference;
+  readonly participantReference: OrderingReference;
+  readonly action: "Create" | "Select";
+  readonly cartReference: OrderingReference;
+  readonly cartVersion: number;
+  readonly occurredAt: OrderingInstant;
+  readonly expiresAt: OrderingInstant;
+}
+
+export function parseDiningCartSelectionReceipt(value: unknown): DiningCartSelectionReceipt {
+  try {
+    const raw = exact(value, [
+      "operationReference",
+      "brandReference",
+      "storeReference",
+      "diningSessionReference",
+      "guestSessionReference",
+      "participantReference",
+      "action",
+      "cartReference",
+      "cartVersion",
+      "occurredAt",
+      "expiresAt",
+    ]);
+    const occurredAt = parseOrderingInstant(raw.occurredAt);
+    const expiresAt = parseOrderingInstant(raw.expiresAt);
+    if (
+      (raw.action !== "Create" && raw.action !== "Select") ||
+      typeof raw.cartVersion !== "number" ||
+      !Number.isSafeInteger(raw.cartVersion) ||
+      raw.cartVersion < 1 ||
+      raw.cartVersion > 2_147_483_647 ||
+      (raw.action === "Create" && raw.cartVersion !== 1) ||
+      Date.parse(expiresAt) - Date.parse(occurredAt) !== 86_400_000
+    )
+      return invalid();
+    return Object.freeze({
+      operationReference: parseOrderingReference(raw.operationReference),
+      brandReference: parseOrderingReference(raw.brandReference),
+      storeReference: parseOrderingReference(raw.storeReference),
+      diningSessionReference: parseOrderingReference(raw.diningSessionReference),
+      guestSessionReference: parseOrderingReference(raw.guestSessionReference),
+      participantReference: parseOrderingReference(raw.participantReference),
+      action: raw.action,
+      cartReference: parseOrderingReference(raw.cartReference),
+      cartVersion: raw.cartVersion,
+      occurredAt,
+      expiresAt,
+    });
+  } catch {
+    return invalid();
+  }
+}
+
 function invalid(): never {
   throw new CartError("CART_INPUT_INVALID");
 }

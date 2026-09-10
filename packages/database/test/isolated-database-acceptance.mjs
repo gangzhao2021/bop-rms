@@ -39,7 +39,7 @@ async function proveDatabase(context) {
       FROM platform_core.migration_history
       GROUP BY current_database()`);
     assert.deepEqual(evidence.rows, [
-      { database_name: context.databaseName, migration_count: 100 },
+      { database_name: context.databaseName, migration_count: 101 },
     ]);
   } finally {
     await client.end();

@@ -1,0 +1,397 @@
+import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
+import pg from "pg";
+import { it } from "vitest";
+import {
+  createPostgresDiningCartSelectionStore,
+  createPostgresDiningCartReadStore,
+} from "../../rms/ordering/src/index.ts";
+import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+
+const { Client } = pg;
+const id = (n) => `018f2316-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+const at = (seconds = 0) =>
+  new Date(Date.parse("2026-09-09T12:00:00.000Z") + seconds * 1000).toISOString();
+const scope = { brandReference: id(2), storeReference: id(3) };
+const command = (operation, session = 30, guest = 40, participant = 50) => ({
+  ...scope,
+  operationReference: id(operation),
+  diningSessionReference: id(session),
+  guestSessionReference: id(guest),
+  participantReference: id(participant),
+  observedAt: at(),
+});
+
+it("atomically selects one initial shared Dining Cart with immutable replay and Audit", async () => {
+  await withIsolatedDatabase({ caseId: "wp2316_cart_write" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const role = `wp2316_${context.runId}`;
+    assert.match(role, /^wp2316_[a-f0-9]+$/u);
+    let active = 0;
+    let generated = 1000;
+    let creations = 0;
+    let clock = 0;
+    try {
+      await admin.query(
+        `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`,
+      );
+      await admin.query(
+        `GRANT USAGE ON SCHEMA platform_helpers,platform_audit,rms_ordering TO ${role}`,
+      );
+      await admin.query(`GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ${role}`);
+      await admin.query(
+        `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
+      );
+      await admin.query(
+        `GRANT SELECT,INSERT ON rms_ordering.cart,rms_ordering.dining_cart_operation,platform_audit.audit_record TO ${role}`,
+      );
+      // PostgreSQL requires an UPDATE column grant for FOR SHARE; the adapter issues no Cart UPDATE.
+      await admin.query(`GRANT UPDATE (aggregate_version) ON rms_ordering.cart TO ${role}`);
+      await admin.query(`GRANT SELECT ON rms_ordering.cart_line TO ${role}`);
+      await admin.query(`GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`);
+      function runner({ failAudit = false, loseAck = false, afterHistory } = {}) {
+        return {
+          async run(action) {
+            const client = new Client({
+              ...context.clientConfig,
+              connectionTimeoutMillis: 2000,
+              query_timeout: 5000,
+            });
+            await client.connect();
+            active++;
+            let committed = false;
+            try {
+              await client.query("BEGIN");
+              await client.query(`SET LOCAL ROLE ${role}`);
+              await client.query("SET LOCAL lock_timeout='5s'");
+              await client.query("SET LOCAL statement_timeout='5s'");
+              const result = await action({
+                query: async (sql, values) => {
+                  if (failAudit && sql.startsWith("UPDATE platform_audit.audit_chain_head"))
+                    throw new Error("synthetic Audit failure");
+                  const result = await client.query(sql, [...values]);
+                  if (afterHistory && sql.includes("LIMIT 2 FOR SHARE")) await afterHistory();
+                  return result;
+                },
+              });
+              await client.query("COMMIT");
+              committed = true;
+              const cleared = (
+                await client.query(
+                  "SELECT current_setting('bop.brand_id',true) AS brand,current_setting('bop.store_id',true) AS store",
+                )
+              ).rows[0];
+              assert(!cleared.brand && !cleared.store);
+              if (loseAck) throw new Error("synthetic lost commit acknowledgement");
+              return result;
+            } catch (error) {
+              if (!committed) await client.query("ROLLBACK");
+              throw error;
+            } finally {
+              await client.end();
+              active--;
+            }
+          },
+        };
+      }
+      // These are explicit synthetic already-authorized owner commands and policy, not Identity or Dining evidence.
+      const options = {
+        scope,
+        sourceChannel: "Qr",
+        policy: {
+          policyVersionReference: id(8),
+          policyDigest: `sha256:${"a".repeat(64)}`,
+          idleTimeoutSeconds: 3600,
+          absoluteTimeoutSeconds: 7200,
+          validFrom: at(-3600),
+          validUntil: at(86400),
+        },
+        now: () => at(clock),
+        generateReference: () => {
+          creations++;
+          return id(generated++);
+        },
+        audit: (d) => ({
+          auditId: id(generated++),
+          brandId: d.brandReference,
+          storeId: d.storeReference,
+          actor: { type: "System" },
+          actionCode: `ORDERING_DINING_CART_${d.action.toUpperCase()}`,
+          targetType: "OrderingCart",
+          targetId: d.cartReference,
+          reasonCode: "AUTHORIZED_CART_SELECTION",
+          correlationId: d.operationReference,
+          occurredAt: d.occurredAt,
+          sourceChannel: "CUSTOMER_PWA",
+          dataClassification: "Restricted",
+          retentionPolicyCode: "AUDIT_DEFAULT",
+          retentionPolicyVersion: 1,
+        }),
+      };
+      const store = createPostgresDiningCartSelectionStore(runner(), options);
+      const commands = [command(10), command(11, 30, 41, 51)];
+      const results = await Promise.all(commands.map((value) => store.select(value)));
+      assert.deepEqual(results.map((value) => value.action).sort(), ["Create", "Select"]);
+      assert.equal(results[0].cartReference, results[1].cartReference);
+      assert.equal(creations, 1);
+      const created = results.find((value) => value.action === "Create");
+      const createdCommand = commands.find(
+        (value) => value.operationReference === created.operationReference,
+      );
+      const root = (
+        await admin.query(
+          "SELECT created_by_actor_id,aggregate_version FROM rms_ordering.cart WHERE cart_id=$1",
+          [created.cartReference],
+        )
+      ).rows[0];
+      assert.equal(root.created_by_actor_id, created.guestSessionReference);
+      assert.equal(root.aggregate_version, 1);
+      const count = async (table) =>
+        Number((await admin.query(`SELECT count(*) AS count FROM ${table}`)).rows[0].count);
+      assert.equal(await count("rms_ordering.dining_cart_operation"), 2);
+      assert.equal(await count("platform_audit.audit_record"), 2);
+      const repeated = await Promise.all([store.select(command(12)), store.select(command(12))]);
+      assert.deepEqual(repeated[0], repeated[1]);
+      assert.equal(await count("rms_ordering.dining_cart_operation"), 3);
+      assert.equal(await count("platform_audit.audit_record"), 3);
+      assert.equal(creations, 1);
+      const current = await createPostgresDiningCartReadStore(runner(), scope).current({
+        ...scope,
+        diningSessionReference: id(30),
+        observedAt: at(),
+      });
+      assert.equal(current.cartReference, created.cartReference);
+      assert.equal(current.createdByActorReference, created.guestSessionReference);
+      for (const change of [
+        { guestSessionReference: id(99) },
+        { participantReference: id(99) },
+        { diningSessionReference: id(99) },
+      ])
+        await assert.rejects(store.select({ ...createdCommand, ...change }), {
+          code: "CART_IDEMPOTENCY_CONFLICT",
+        });
+      await assert.rejects(store.select({ ...command(13), storeReference: id(99) }), {
+        code: "CART_INPUT_INVALID",
+      });
+
+      const lost = command(21, 31);
+      await assert.rejects(
+        createPostgresDiningCartSelectionStore(runner({ loseAck: true }), options).select(lost),
+        { code: "CART_DEPENDENCY_UNAVAILABLE" },
+      );
+      const afterLoss = await count("platform_audit.audit_record");
+      const recovered = await store.select(lost);
+      assert.equal(recovered.action, "Create");
+      assert.equal(await count("platform_audit.audit_record"), afterLoss);
+      assert.deepEqual(await store.select(lost), recovered);
+      const beforeFailure = {
+        carts: await count("rms_ordering.cart"),
+        operations: await count("rms_ordering.dining_cart_operation"),
+        audit: await count("platform_audit.audit_record"),
+      };
+      await assert.rejects(
+        createPostgresDiningCartSelectionStore(runner({ failAudit: true }), options).select(
+          command(22, 32),
+        ),
+        { code: "CART_DEPENDENCY_UNAVAILABLE" },
+      );
+      assert.deepEqual(
+        {
+          carts: await count("rms_ordering.cart"),
+          operations: await count("rms_ordering.dining_cart_operation"),
+          audit: await count("platform_audit.audit_record"),
+        },
+        beforeFailure,
+      );
+
+      async function seed(cart, session, kind = "Active") {
+        if (kind === "Legacy") {
+          await admin.query(
+            "INSERT INTO rms_ordering.cart(cart_id,brand_id,store_id,order_type,source_channel,dining_session_id,created_by_actor_id,aggregate_version,created_at,updated_at) VALUES($1,$2,$3,'DineIn','Qr',$4,$5,1,$6,$6)",
+            [id(cart), id(2), id(3), id(session), id(90), at(-3600)],
+          );
+          return;
+        }
+        await admin.query(
+          `INSERT INTO rms_ordering.cart(cart_id,brand_id,store_id,order_type,source_channel,dining_session_id,created_by_actor_id,aggregate_version,created_at,updated_at,lifecycle_status,lifecycle_policy_version_id,lifecycle_policy_digest,idle_timeout_seconds,absolute_timeout_seconds,idle_expires_at,absolute_expires_at)
+          VALUES($1,$2,$3,'DineIn','Qr',$4,$5,1,$6,$6,'Active',$7,$8,3600,7200,$9,$10)`,
+          [
+            id(cart),
+            id(2),
+            id(3),
+            id(session),
+            id(90),
+            at(-3600),
+            id(8),
+            `sha256:${"a".repeat(64)}`,
+            kind === "Expired" ? at(-1) : at(3600),
+            at(7200),
+          ],
+        );
+        if (kind === "Abandoned")
+          await admin.query(
+            "UPDATE rms_ordering.cart SET lifecycle_status='Abandoned',terminal_at=$2,terminal_reason='CUSTOMER_ABANDONED',updated_at=$2,aggregate_version=2 WHERE cart_id=$1",
+            [id(cart), at(-1)],
+          );
+      }
+      for (const [index, kind, code] of [
+        [60, "Expired", "CART_EXPIRED"],
+        [61, "Abandoned", "CART_ABANDONED"],
+        [62, "Legacy", "CART_LIFECYCLE_UNAVAILABLE"],
+      ]) {
+        await seed(6000 + index, index, kind);
+        const before = await count("rms_ordering.cart");
+        await assert.rejects(store.select(command(100 + index, index)), { code });
+        assert.equal(await count("rms_ordering.cart"), before);
+      }
+      await seed(6070, 70);
+      await seed(6071, 70);
+      await assert.rejects(store.select(command(170, 70)), { code: "CART_DEPENDENCY_UNAVAILABLE" });
+      await seed(6080, 80);
+      for (const [line, guest, participant] of [
+        [7001, 40, 50],
+        [7002, 41, 51],
+      ])
+        await admin.query(
+          "INSERT INTO rms_ordering.cart_line(cart_line_id,cart_id,brand_id,store_id,sellable_id,quantity,option_selections_json,added_by_actor_id,added_by_participant_id,added_at) VALUES($1,$2,$3,$4,$5,1,'[]'::jsonb,$6,$7,$8)",
+          [id(line), id(6080), id(2), id(3), id(8), id(guest), id(participant), at(-1)],
+        );
+      await admin.query(
+        "UPDATE rms_ordering.cart SET aggregate_version=4,updated_at=$2 WHERE cart_id=$1",
+        [id(6080), at()],
+      );
+      const existingBefore = await createPostgresDiningCartReadStore(runner(), scope).current({
+        ...scope,
+        diningSessionReference: id(80),
+        observedAt: at(),
+      });
+      const selected = await store.select(command(180, 80));
+      assert.equal(selected.action, "Select");
+      assert.equal(selected.cartVersion, 4);
+      const existingAfter = await createPostgresDiningCartReadStore(runner(), scope).current({
+        ...scope,
+        diningSessionReference: id(80),
+        observedAt: at(),
+      });
+      assert.deepEqual(existingAfter, existingBefore);
+      assert.equal(existingAfter.createdByActorReference, id(90));
+      assert.deepEqual(
+        existingAfter.items.map((item) => item.addedByParticipantReference),
+        [id(50), id(51)],
+      );
+
+      let release;
+      let entered;
+      const gate = new Promise((resolve) => {
+        release = resolve;
+      });
+      const locked = new Promise((resolve) => {
+        entered = resolve;
+      });
+      const pending = createPostgresDiningCartSelectionStore(
+        runner({
+          afterHistory: async () => {
+            entered();
+            await gate;
+          },
+        }),
+        options,
+      ).select(command(181, 80));
+      await locked;
+      const update = admin.query(
+        "UPDATE rms_ordering.cart SET aggregate_version=5 WHERE cart_id=$1",
+        [id(6080)],
+      );
+      try {
+        assert.equal(
+          await Promise.race([update.then(() => "updated"), delay(40, "locked")]),
+          "locked",
+        );
+      } finally {
+        release();
+      }
+      assert.equal((await pending).cartVersion, 4);
+      await update;
+      assert.deepEqual(await store.select(command(180, 80)), selected);
+
+      for (const sql of [
+        "UPDATE rms_ordering.dining_cart_operation SET cart_version=cart_version",
+        "DELETE FROM rms_ordering.dining_cart_operation",
+        "TRUNCATE rms_ordering.dining_cart_operation",
+      ])
+        await assert.rejects(admin.query(sql), (error) => error.code === "55000");
+      await assert.rejects(
+        admin.query(
+          `INSERT INTO rms_ordering.dining_cart_operation
+        SELECT brand_id,store_id,$1,dining_session_id,guest_session_id,participant_id,action_code,cart_id,cart_version,occurred_at,expires_at
+        FROM rms_ordering.dining_cart_operation WHERE operation_id=$2`,
+          [id(900), created.operationReference],
+        ),
+        (error) => error.code === "23505",
+      );
+      for (const [session, version] of [
+        [id(999), 1],
+        [id(30), 99],
+      ])
+        await assert.rejects(
+          admin.query(
+            `INSERT INTO rms_ordering.dining_cart_operation
+          SELECT brand_id,store_id,$1,$2,guest_session_id,participant_id,'Select',cart_id,$3,occurred_at,expires_at
+          FROM rms_ordering.dining_cart_operation WHERE operation_id=$4`,
+            [id(901), session, version, created.operationReference],
+          ),
+          (error) => error.code === "23514",
+        );
+      await runner().run(async (tx) => {
+        assert.equal(
+          Number(
+            (await tx.query("SELECT count(*) AS count FROM rms_ordering.dining_cart_operation", []))
+              .rows[0].count,
+          ),
+          0,
+        );
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [id(2), id(99)],
+        );
+        assert.equal(
+          Number(
+            (await tx.query("SELECT count(*) AS count FROM rms_ordering.dining_cart_operation", []))
+              .rows[0].count,
+          ),
+          0,
+        );
+      });
+      await assert.rejects(
+        runner().run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [id(2), id(99)],
+          );
+          await tx.query(
+            "INSERT INTO rms_ordering.cart(cart_id,brand_id,store_id,order_type,source_channel,dining_session_id,created_by_actor_id,aggregate_version,created_at,updated_at) VALUES($1,$2,$3,'DineIn','Qr',$4,$5,1,$6,$6)",
+            [id(902), id(2), id(3), id(30), id(40), at()],
+          );
+        }),
+        (error) => error.code === "42501",
+      );
+      const constraints = await admin.query(
+        "SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid='rms_ordering.dining_cart_operation'::regclass",
+      );
+      assert.deepEqual(constraints.rows, [{ relrowsecurity: true, relforcerowsecurity: true }]);
+      clock = 8000;
+      const oldPolicyStore = createPostgresDiningCartSelectionStore(runner(), {
+        ...options,
+        policy: { ...options.policy, validUntil: at(1) },
+      });
+      assert.deepEqual(await oldPolicyStore.select(createdCommand), created);
+      clock = 86400;
+      await assert.rejects(store.select(createdCommand), { code: "CART_IDEMPOTENCY_CONFLICT" });
+      await assert.rejects(store.select(command(903, 903)), { code: "CART_LIFECYCLE_UNAVAILABLE" });
+      assert.equal(active, 0);
+    } finally {
+      await admin.end();
+    }
+  });
+}, 120_000);

@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "ordering", packageName: "@rms/ordering", layer: "RMS" },
   tables: [
     {
+      table: "dining_cart_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "cart_quote_expiry_record",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },

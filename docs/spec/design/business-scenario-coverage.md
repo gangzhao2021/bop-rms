@@ -473,3 +473,8 @@ or construct an empty version1 Cart from explicit current policy only when owner
 Expired, abandoned, legacy or ambiguous history cannot be silently replaced. Authorization, serialized
 creation and operation/Audit persistence remain separate. Ordering660/660, full verification and
 forced uncached integration pass.
+
+WP-2316 implements the owner-local initial Dining Cart selection writer with exact Session serialization,
+minimal immutable operation receipts and atomic public Audit append. Current Identity/Dining authorization
+and customer runtime remain separate prerequisites. Ordering704/704, Cart PostgreSQL9/9, 101 migrations,
+full verification and forced uncached integration pass.

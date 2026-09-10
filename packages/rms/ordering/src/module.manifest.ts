@@ -57,6 +57,7 @@ const moduleManifestInput =
       tables: [
         "cart",
         "cart_binding_record",
+        "dining_cart_operation",
         "cart_line",
         "cart_operation_record",
         "cart_quote_attachment",
