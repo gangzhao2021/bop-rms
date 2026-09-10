@@ -354,3 +354,9 @@ atomic Identity activation preserve the delivered candidate through owner failur
 lost commit acknowledgement. Identity476/476, actual PostgreSQL acceptance, full verification
 and forced uncached integration pass. Owner reservation/current Dining evidence remains synthetic in these composition tests;
 actual public Table mapping, production policy, transport and browser recovery remain separate.
+
+WP-2297 adds current-authorized read-only Dining admission reservation. Repeated observations
+preserve admission, consumption history and Audit; consumed, Closing, moved or inactive eligibility
+is denied. Consumption still revalidates atomically and original recovery remains unchanged.
+Dining821/821, actual PostgreSQL acceptance, full verification and forced uncached integration pass. The receipt
+is internal owner evidence, not public Table mapping, finite Identity evidence or a write lease.

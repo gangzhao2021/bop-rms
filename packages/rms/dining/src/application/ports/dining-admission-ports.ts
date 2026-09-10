@@ -56,3 +56,18 @@ export interface DiningAdmissionConsumptionResult {
   readonly status: "Consumed" | "AlreadyApplied";
   readonly record: DiningAdmissionConsumptionRecord;
 }
+
+/** Read-only current owner facts; neither a lease nor Identity credential authority. */
+export interface DiningAdmissionReservation {
+  readonly operationReference: DiningReference;
+  readonly admissionReference: DiningReference;
+  readonly guestSessionReference: DiningReference;
+  readonly brandReference: DiningReference;
+  readonly storeReference: DiningReference;
+  readonly tableReference: DiningReference;
+  readonly tableAssignmentVersion: number;
+  readonly diningSessionReference: DiningReference;
+  readonly participantReference: DiningReference;
+  readonly sessionVersion: number;
+  readonly evaluatedAt: DiningInstant;
+}

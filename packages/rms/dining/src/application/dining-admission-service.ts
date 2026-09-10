@@ -4,6 +4,7 @@ import {
   parseDiningHash,
   parseDiningInstant,
   parseDiningReference,
+  type DiningReference,
 } from "../domain/dining-session.js";
 import { consumeDiningIdentityAdmission } from "../domain/dining-admission.js";
 import {
@@ -16,6 +17,7 @@ import { captureSessionData, sessionDependency } from "./dining-session-snapshot
 import type {
   DiningAdmissionConsumptionPorts,
   DiningAdmissionConsumptionResult,
+  DiningAdmissionReservation,
 } from "./ports/dining-admission-ports.js";
 
 function unavailable(): never {
@@ -47,8 +49,8 @@ async function dependency<T>(work: () => Promise<T>, writer = false): Promise<T>
 }
 /** Internal current-Guest authority plus owner protocol. Identity evidence requires separate composition. */
 export function createDiningAdmissionConsumptionService(ports: DiningAdmissionConsumptionPorts) {
-  let brandReference;
-  let storeReference;
+  let brandReference: DiningReference;
+  let storeReference: DiningReference;
   try {
     const scope = closedAdmissionData(ports.scope, ["brandReference", "storeReference"]);
     brandReference = parseDiningReference(scope.brandReference);
@@ -56,83 +58,125 @@ export function createDiningAdmissionConsumptionService(ports: DiningAdmissionCo
   } catch {
     throw new DiningSessionError("DINING_SESSION_INPUT_INVALID");
   }
-  return Object.freeze({
-    async consume(input: unknown): Promise<DiningAdmissionConsumptionResult> {
-      let guestSessionReference;
-      let admissionReference;
-      let operationReference;
-      let requestedAt;
-      try {
-        const raw = closedAdmissionData(input, [
-          "guestSessionReference",
-          "admissionReference",
-          "operationReference",
-          "requestedAt",
-        ]);
-        guestSessionReference = parseDiningReference(raw.guestSessionReference);
-        admissionReference = parseDiningReference(raw.admissionReference);
-        operationReference = parseDiningReference(raw.operationReference);
-        requestedAt = parseDiningInstant(raw.requestedAt);
-      } catch {
-        throw new DiningSessionError("DINING_SESSION_INPUT_INVALID");
-      }
-      let guest;
-      try {
-        guest = parseDiningGuestContextEvidence(
-          captureSessionData(
-            await ports.guests.resolve({ guestSessionReference, observedAt: requestedAt }),
-          ),
-        );
-      } catch {
-        return unavailable();
-      }
-      if (
-        guest.guestSessionReference !== guestSessionReference ||
-        guest.channel !== "DineIn" ||
-        guest.diningState !== "ContextOnly" ||
-        guest.storeReference !== storeReference ||
-        guest.tableReference === null ||
-        guest.observedAt !== requestedAt
-      )
-        return unavailable();
-      const source = await dependency(() =>
-        ports.store.readCurrent({ admissionReference, observedAt: requestedAt }),
-      );
-      if (source === null) return unavailable();
-      const snapshot = parseDiningAdmissionSnapshot(source);
-      if (
-        snapshot.session.brandReference !== brandReference ||
-        snapshot.session.storeReference !== storeReference ||
-        snapshot.admission.admissionReference !== admissionReference
-      )
-        return sessionDependency();
-      if (
-        snapshot.joinedGuestSessionReference !== guestSessionReference ||
-        snapshot.session.tableReference !== guest.tableReference
-      )
-        return unavailable();
-      const joinHash = checked(() =>
-        parseDiningHash(
-          ports.credentials.hashOperationIntent(
-            `Join:${guestSessionReference}:${snapshot.join.capability.capabilityReference}`,
-          ),
+  async function current(input: unknown) {
+    let guestSessionReference;
+    let admissionReference;
+    let operationReference;
+    let requestedAt;
+    try {
+      const raw = closedAdmissionData(input, [
+        "guestSessionReference",
+        "admissionReference",
+        "operationReference",
+        "requestedAt",
+      ]);
+      guestSessionReference = parseDiningReference(raw.guestSessionReference);
+      admissionReference = parseDiningReference(raw.admissionReference);
+      operationReference = parseDiningReference(raw.operationReference);
+      requestedAt = parseDiningInstant(raw.requestedAt);
+    } catch {
+      throw new DiningSessionError("DINING_SESSION_INPUT_INVALID");
+    }
+    let guest;
+    try {
+      guest = parseDiningGuestContextEvidence(
+        captureSessionData(
+          await ports.guests.resolve({ guestSessionReference, observedAt: requestedAt }),
         ),
       );
-      if (
-        checked(() => ports.credentials.equals(joinHash, snapshot.join.operationIntentHash)) !==
-        true
-      )
-        return sessionDependency();
-      // Reevaluate the original Active admission against current facts even during recovery.
-      const consumed = consumeDiningIdentityAdmission({
-        admission: snapshot.join.admission,
-        session: snapshot.session,
-        participant: snapshot.participant,
-        table: snapshot.table,
-        expectedAdmissionVersion: 1,
-        expectedSessionVersion: snapshot.session.version,
-        observedAt: requestedAt,
+    } catch {
+      return unavailable();
+    }
+    if (
+      guest.guestSessionReference !== guestSessionReference ||
+      guest.channel !== "DineIn" ||
+      guest.diningState !== "ContextOnly" ||
+      guest.storeReference !== storeReference ||
+      guest.tableReference === null ||
+      guest.observedAt !== requestedAt
+    )
+      return unavailable();
+    const source = await dependency(() =>
+      ports.store.readCurrent({ admissionReference, observedAt: requestedAt }),
+    );
+    if (source === null) return unavailable();
+    const snapshot = parseDiningAdmissionSnapshot(source);
+    if (
+      snapshot.session.brandReference !== brandReference ||
+      snapshot.session.storeReference !== storeReference ||
+      snapshot.admission.admissionReference !== admissionReference
+    )
+      return sessionDependency();
+    if (
+      snapshot.joinedGuestSessionReference !== guestSessionReference ||
+      snapshot.session.tableReference !== guest.tableReference
+    )
+      return unavailable();
+    const joinHash = checked(() =>
+      parseDiningHash(
+        ports.credentials.hashOperationIntent(
+          `Join:${guestSessionReference}:${snapshot.join.capability.capabilityReference}`,
+        ),
+      ),
+    );
+    if (
+      checked(() => ports.credentials.equals(joinHash, snapshot.join.operationIntentHash)) !== true
+    )
+      return sessionDependency();
+    // Reevaluate the original Active admission against current facts even during recovery.
+    const consumed = consumeDiningIdentityAdmission({
+      admission: snapshot.join.admission,
+      session: snapshot.session,
+      participant: snapshot.participant,
+      table: snapshot.table,
+      expectedAdmissionVersion: 1,
+      expectedSessionVersion: snapshot.session.version,
+      observedAt: requestedAt,
+    });
+    return Object.freeze({
+      guestSessionReference,
+      admissionReference,
+      operationReference,
+      requestedAt,
+      snapshot,
+      consumed,
+    });
+  }
+  return Object.freeze({
+    /** Current observation only; consumption must revalidate under owner locks. */
+    async reserve(input: unknown): Promise<DiningAdmissionReservation> {
+      const {
+        guestSessionReference,
+        admissionReference,
+        operationReference,
+        requestedAt,
+        snapshot,
+      } = await current(input);
+      if (snapshot.admission.status !== "Active" || snapshot.admission.version !== 1)
+        return unavailable();
+      return Object.freeze({
+        operationReference,
+        admissionReference,
+        guestSessionReference,
+        brandReference,
+        storeReference,
+        tableReference: snapshot.session.tableReference,
+        tableAssignmentVersion: snapshot.session.tableAssignmentVersion,
+        diningSessionReference: snapshot.session.diningSessionReference,
+        participantReference: snapshot.participant.participantReference,
+        sessionVersion: snapshot.session.version,
+        evaluatedAt: requestedAt,
       });
+    },
+    async consume(input: unknown): Promise<DiningAdmissionConsumptionResult> {
+      const {
+        guestSessionReference,
+        admissionReference,
+        operationReference,
+        requestedAt,
+        snapshot,
+        consumed,
+      } = await current(input);
       const operationIntentHash = checked(() =>
         parseDiningHash(
           ports.credentials.hashOperationIntent(

@@ -566,3 +566,194 @@ describe("admission service fail-closed boundaries", () => {
     expect(x.original).not.toHaveBeenCalled();
   });
 });
+
+describe("WP-2297 current read-only Dining admission reservation", () => {
+  it("returns only immutable owner facts without history, writes or capability disclosure", async () => {
+    const x = fixture();
+    const before = structuredClone(x.state);
+    for (let n = 0; n < 2; n++) {
+      const receipt = await x.service.reserve(x.input);
+      expect(receipt).toEqual({
+        operationReference: id(11),
+        admissionReference: id(1),
+        guestSessionReference: id(9),
+        brandReference: id(7),
+        storeReference: id(4),
+        tableReference: id(5),
+        tableAssignmentVersion: 7,
+        diningSessionReference: id(2),
+        participantReference: id(3),
+        sessionVersion: 2,
+        evaluatedAt: now,
+      });
+      expect(Object.isFrozen(receipt)).toBe(true);
+    }
+    expect(x.state).toEqual(before);
+    expect(x.history.size).toBe(0);
+    expect(x.original).not.toHaveBeenCalled();
+    expect(x.write).not.toHaveBeenCalled();
+    expect(x.guest.mock.invocationCallOrder[0]).toBeLessThan(
+      x.read.mock.invocationCallOrder[0] ?? Infinity,
+    );
+  });
+  it("does not let a reservation bypass later consumption revalidation", async () => {
+    const x = fixture();
+    await x.service.reserve(x.input);
+    x.state.session = { ...x.state.session, version: 3, phase: "Closing" };
+    await expect(x.service.consume(x.input)).rejects.toMatchObject(unavailable);
+    expect(x.write).not.toHaveBeenCalled();
+  });
+  it("denies consumed eligibility while original consumption recovery still works", async () => {
+    const x = fixture();
+    await x.service.reserve(x.input);
+    const consumed = await x.service.consume(x.input);
+    x.original.mockClear();
+    await expect(x.service.reserve(x.input)).rejects.toMatchObject(unavailable);
+    expect(x.original).not.toHaveBeenCalled();
+    expect(await x.service.consume(x.input)).toEqual({
+      status: "AlreadyApplied",
+      record: consumed.record,
+    });
+    expect(x.write).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ["guestSessionReference", id(99)],
+    ["diningState", "DiningBound"],
+    ["channel", "Pickup"],
+    ["storeReference", id(99)],
+    ["tableReference", null],
+    ["observedAt", start],
+  ])("denies Guest %s before owner reads", async (field, value) => {
+    const x = fixture();
+    const resolve = x.guest.getMockImplementation();
+    if (!resolve) throw new Error("missing resolver");
+    x.guest.mockImplementation(async (input) =>
+      changed(await resolve(input), String(field), value),
+    );
+    await expect(x.service.reserve(x.input)).rejects.toMatchObject(unavailable);
+    expect(x.read).not.toHaveBeenCalled();
+    expect(x.original).not.toHaveBeenCalled();
+    expect(x.write).not.toHaveBeenCalled();
+  });
+  it.each(["Closing", "Closed", "Cancelled"] as const)("denies %s Session", async (phase) => {
+    const x = fixture();
+    x.state.session = { ...x.state.session, phase, version: 3 };
+    await expect(x.service.reserve(x.input)).rejects.toMatchObject(unavailable);
+    expect(x.original).not.toHaveBeenCalled();
+    expect(x.write).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["table.tableState", "Unavailable"],
+    ["table.assignmentVersion", 8],
+    ["table.activeDiningSessionReference", null],
+    ["table.storeReference", id(99)],
+    ["table.brandReference", id(99)],
+    ["table.observedAt", joined],
+  ])("denies current ineligible %s", async (path, value) => {
+    const x = fixture();
+    x.read.mockResolvedValue(changed(x.state, String(path), value));
+    await expect(x.service.reserve(x.input)).rejects.toMatchObject(unavailable);
+    expect(x.original).not.toHaveBeenCalled();
+    expect(x.write).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["admission.admissionReference", id(99)],
+    ["admission.operationIntentHash", "b".repeat(64)],
+    ["participant.joinedAt", start],
+    ["session.startedByActorReference", id(99)],
+    ["join.capability.diningSessionReference", id(99)],
+    ["join.participant.extra", "private"],
+  ])("rejects incoherent original owner %s", async (path, value) => {
+    const x = fixture();
+    x.read.mockResolvedValue(changed(x.state, String(path), value));
+    await expect(x.service.reserve(x.input)).rejects.toMatchObject(dependency);
+    expect(x.original).not.toHaveBeenCalled();
+    expect(x.write).not.toHaveBeenCalled();
+  });
+  it("recomputes original Guest intent with exact boolean comparison", async () => {
+    const x = fixture();
+    const service = createDiningAdmissionConsumptionService({
+      ...x.ports,
+      credentials: { ...x.ports.credentials, equals: () => "true" as never },
+    });
+    await expect(service.reserve(x.input)).rejects.toMatchObject(dependency);
+    expect(x.write).not.toHaveBeenCalled();
+  });
+  it("requires the immutable original Guest despite valid table context", async () => {
+    const x = fixture();
+    await expect(
+      x.service.reserve({ ...x.input, guestSessionReference: id(99) }),
+    ).rejects.toMatchObject(unavailable);
+    expect(x.write).not.toHaveBeenCalled();
+  });
+  it("denies an obsolete admission after a committed Move", async () => {
+    const x = fixture();
+    x.state.session = {
+      ...x.state.session,
+      tableReference: parseDiningReference(id(99)),
+      version: 3,
+    };
+    await expect(x.service.reserve(x.input)).rejects.toMatchObject(unavailable);
+    expect(x.write).not.toHaveBeenCalled();
+  });
+  it("denies a participant who has left", async () => {
+    const x = fixture();
+    x.state.participant = {
+      ...x.state.participant,
+      status: "Left",
+      version: 2,
+      leftAt: now as typeof x.state.participant.joinedAt,
+    };
+    await expect(x.service.reserve(x.input)).rejects.toMatchObject(unavailable);
+    expect(x.write).not.toHaveBeenCalled();
+  });
+  it.each(["guestSessionReference", "admissionReference", "operationReference", "requestedAt"])(
+    "rejects invalid %s before authority",
+    async (field) => {
+      const x = fixture();
+      await expect(x.service.reserve({ ...x.input, [field]: "invalid" })).rejects.toMatchObject({
+        code: "DINING_SESSION_INPUT_INVALID",
+      });
+      expect(x.guest).not.toHaveBeenCalled();
+      expect(x.read).not.toHaveBeenCalled();
+    },
+  );
+  it("rejects getters, extra fields and inherited input without executing them", async () => {
+    const x = fixture();
+    const getter = vi.fn(() => x.input.guestSessionReference);
+    for (const input of [
+      { ...x.input, scope: id(99) },
+      Object.create(x.input),
+      Object.defineProperty({ ...x.input }, "guestSessionReference", {
+        enumerable: true,
+        get: getter,
+      }),
+    ])
+      await expect(x.service.reserve(input)).rejects.toMatchObject({
+        code: "DINING_SESSION_INPUT_INVALID",
+      });
+    expect(getter).not.toHaveBeenCalled();
+    expect(x.guest).not.toHaveBeenCalled();
+  });
+  it("captures a wrong Guest before asynchronous mutation", async () => {
+    const x = fixture();
+    const input = { ...x.input, guestSessionReference: id(99) };
+    const resolve = x.guest.getMockImplementation();
+    if (!resolve) throw new Error("missing resolver");
+    x.guest.mockImplementation(async (request) => {
+      input.guestSessionReference = x.input.guestSessionReference;
+      return resolve(request);
+    });
+    await expect(x.service.reserve(input)).rejects.toMatchObject(unavailable);
+    expect(x.write).not.toHaveBeenCalled();
+  });
+  it.each(["guest", "read"] as const)("bounds private %s dependency failures", async (key) => {
+    const x = fixture();
+    x[key].mockRejectedValue(new Error("synthetic private detail"));
+    await expect(x.service.reserve(x.input)).rejects.toMatchObject({
+      ...(key === "guest" ? unavailable : dependency),
+      message: "dining session is unavailable",
+    });
+    expect(x.write).not.toHaveBeenCalled();
+  });
+});

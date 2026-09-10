@@ -533,6 +533,37 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
       const originalJoin = await joinReader.resolveJoinOperation(
         a.joined.admission.operationReference,
       );
+      // WP-2297: actual read-only owner reservation never consumes or appends history/Audit.
+      const beforeReservation = await counts();
+      const beforeAdmission = await consumptionReader.readCurrent({
+        admissionReference: a.joined.admission.admissionReference,
+        observedAt: at(3),
+      });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const reservation = await consumption().reserve(request(a, 90, 3));
+        assert.deepEqual(reservation, {
+          operationReference: id(90),
+          admissionReference: a.joined.admission.admissionReference,
+          guestSessionReference: id(80),
+          brandReference: id(2),
+          storeReference: id(3),
+          tableReference: id(20),
+          tableAssignmentVersion: beforeAdmission.session.tableAssignmentVersion,
+          diningSessionReference: a.sessionId,
+          participantReference: a.joined.participant.participantReference,
+          sessionVersion: 2,
+          evaluatedAt: at(3),
+        });
+      }
+      assert.deepEqual(await counts(), beforeReservation);
+      assert.deepEqual(
+        await consumptionReader.readCurrent({
+          admissionReference: a.joined.admission.admissionReference,
+          observedAt: at(3),
+        }),
+        beforeAdmission,
+      );
+      assert.equal(savedCommand, undefined);
       const first = await consumption().consume(request(a, 90, 3));
       assert.equal(first.status, "Consumed");
       assert.equal(first.record.admission.status, "Consumed");
@@ -547,12 +578,20 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         record: first.record,
       });
       assert.equal(first.record.admission.consumedAt, at(3));
+      await assert.rejects(consumption().reserve(request(a, 90, 4)), {
+        code: "DINING_SESSION_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { operations: 1, audits: 1 });
       await assert.rejects(consumption().consume(request(a, 91, 4)), {
         code: "DINING_SESSION_UNAVAILABLE",
       });
       guestTables.set(id(99), id(20));
       await assert.rejects(
         consumption().consume({ ...request(a, 90, 4), guestSessionReference: id(99) }),
+        { code: "DINING_SESSION_UNAVAILABLE" },
+      );
+      await assert.rejects(
+        consumption().reserve({ ...request(a, 90, 4), guestSessionReference: id(99) }),
         { code: "DINING_SESSION_UNAVAILABLE" },
       );
       guestAllowed = false;
@@ -629,6 +668,7 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
       );
       assert.deepEqual(await counts(), { operations: 4, audits: 4 });
       const e = await additional(a, 84, 13);
+      await consumption().reserve(request(e, 96, 15));
       await assert.rejects(
         consumption(consumptionWriter, () => beginClosing(a, 97, 15)).consume(request(e, 96, 15)),
         { code: "DINING_SESSION_VERSION_CONFLICT" },
@@ -650,7 +690,12 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         code: "DINING_SESSION_UNAVAILABLE",
       });
 
+      await assert.rejects(consumption().reserve(request(e, 96, 15)), {
+        code: "DINING_SESSION_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { operations: 4, audits: 4 });
       const f = await firstJoin(21, 85);
+      await consumption().reserve(request(f, 98, 3));
       await configure(22);
       await assert.rejects(
         consumption(consumptionWriter, () => move(f, 22, 99, 3)).consume(request(f, 98, 3)),
@@ -661,6 +706,10 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         code: "DINING_SESSION_UNAVAILABLE",
       });
       assert.equal(await consumptionReader.resolveOperation(id(98)), null);
+      await assert.rejects(consumption().reserve(request(f, 98, 4)), {
+        code: "DINING_SESSION_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { operations: 4, audits: 4 });
       const g = await firstJoin(23, 86);
       const fifth = await consumption().consume(request(g, 100, 3));
       const originalWrite = savedCommand;
