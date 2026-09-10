@@ -1,9 +1,9 @@
+import { createLocalCustomerRuntime } from "../../../apps/api/src/local-customer-runtime.ts";
+import { createApiRuntimeLogger } from "../../../apps/api/src/server.ts";
+import { fixture as entryFixture } from "../../../apps/api/test-support/customer-entry-composition-fixture.ts";
 import { createDiningAdmissionJourney } from "../../../apps/customer-pwa/src/dining/dining-admission-journey.ts";
 import { createBrowserDiningJoinClient } from "../../../apps/customer-pwa/src/dining/dining-join-client.ts";
-import {
-  CustomerDiningJoinHandler,
-  customerDiningJoinRoute,
-} from "../../../apps/api/src/customer-dining-join.ts";
+import { customerDiningJoinRoute } from "../../../apps/api/src/customer-dining-join.ts";
 import { createCustomerDiningJoinComposition } from "../../../apps/api/src/customer-dining-join-composition.ts";
 import { createDiningBindingCoordinator } from "../../../apps/customer-pwa/src/dining/dining-binding-coordinator.ts";
 import {
@@ -1784,55 +1784,76 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
       const httpStart = await service().start(command(41, 139));
       minute = 3;
       let admittedRequests = 0;
-      const journeyServer = createServer(
-        createApp({
-          customerDiningJoin: new CustomerDiningJoinHandler({
-            allowedOrigin: origin,
-            port: createCustomerDiningJoinComposition({
-              ...joinOptions,
-              dining: {
-                ...joinOptions.dining,
-                store: {
-                  ...joinReader,
-                  join: createPostgresDiningSessionJoinStore(
-                    runner({ loseAck: true }),
-                    scope,
-                    credentials,
-                    joinAudit,
-                  ).join,
-                },
-              },
-            }),
-            async resolveRequestContext() {
-              return {
-                abuse: {
-                  async admit(input) {
-                    admittedRequests++;
-                    assert.equal(input.guestSessionReference, id(121));
-                    assert.equal(input.kind, "Invitation");
-                    return "Admitted";
-                  },
-                },
-              };
+      // WP-2309: fixed runtime authority supersedes extraneous caller sub-configuration.
+      const runtimeLogs = [];
+      const ignoredAuthority = {
+        scope: { brandReference: id(990), storeReference: id(991) },
+        session: {
+          ...compositionOptions.session,
+          store: {
+            async resolve() {
+              throw new Error("sub-configuration store must never execute");
             },
-          }),
-          customerDiningBinding: new CustomerDiningBindingHandler({
-            allowedOrigin: origin,
-            now: () => at(minute),
-            port: createCustomerDiningBindingComposition({
-              ...compositionOptions,
-              bindings: {
-                ...compositionOptions.bindings,
-                activate: bindingStore(runner({ loseAck: true })).activate,
+          },
+        },
+        now: () => at(59),
+      };
+      const journeyRuntime = createLocalCustomerRuntime({
+        scope: identityScope,
+        entry: { ...entryFixture().options, session: compositionOptions.session },
+        sessionTransactions: runner(),
+        menuTransactions: runner({ readOnly: true }),
+        menuStores: { resolvePublic: async () => null },
+        allowedOrigin: origin,
+        now: () => at(minute),
+        uuidV7Factory: () => id(++sequence),
+        runtime: {
+          logger: createApiRuntimeLogger({ write: (line) => runtimeLogs.push(String(line)) }),
+        },
+        diningAdmission: {
+          join: {
+            ...joinOptions,
+            ...ignoredAuthority,
+            dining: {
+              ...joinOptions.dining,
+              store: {
+                ...joinReader,
+                join: createPostgresDiningSessionJoinStore(
+                  runner({ loseAck: true }),
+                  scope,
+                  credentials,
+                  joinAudit,
+                ).join,
               },
-            }),
-          }),
-        }),
-      );
+            },
+          },
+          binding: {
+            ...compositionOptions,
+            ...ignoredAuthority,
+            bindings: {
+              ...compositionOptions.bindings,
+              activate: bindingStore(runner({ loseAck: true })).activate,
+            },
+          },
+          async resolveRequestContext() {
+            return {
+              abuse: {
+                async admit(input) {
+                  admittedRequests++;
+                  assert.equal(input.guestSessionReference, id(121));
+                  assert.equal(input.kind, "Invitation");
+                  return "Admitted";
+                },
+              },
+            };
+          },
+        },
+      });
+      const journeyServer = journeyRuntime.server;
       const journeyCookies = new Map([["__Host-bop-guest", joinedGuest.sessionCredential]]);
       setCustomerCsrfCredential(joinedGuest.csrfCredential);
       try {
-        await new Promise((resolve) => journeyServer.listen(0, "127.0.0.1", resolve));
+        await journeyRuntime.listen();
         const base = `http://127.0.0.1:${journeyServer.address().port}`;
         let joinResponse;
         const browserJoin = createBrowserDiningJoinClient({
@@ -1986,11 +2007,11 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
           assert.equal(JSON.stringify(history).includes(secret), false);
           assert.equal(JSON.stringify(receipt).includes(secret), false);
           assert.equal(JSON.stringify(bound).includes(secret), false);
+          assert.equal(JSON.stringify(runtimeLogs).includes(secret), false);
         }
       } finally {
         setCustomerCsrfCredential(null);
-        journeyServer.closeAllConnections();
-        await new Promise((resolve) => journeyServer.close(resolve));
+        await journeyRuntime.shutdown("SIGTERM");
       }
       assert.equal(active, 0);
     } finally {

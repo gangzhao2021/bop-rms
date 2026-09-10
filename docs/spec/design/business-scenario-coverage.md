@@ -423,3 +423,8 @@ explicit original recovery, offline controls and honest unavailable state. PWA61
 browser cases (desktop/mobile/production exclusion) pass; security111/111/build pass. Reviewed
 empty-input recovery/confirmation screenshots, keyboard focus and320px reflow. Real entry/menu lab, full verification
 and forced uncached integration pass. Local synthetic preview is excluded from production; runtime remains gated.
+
+WP-2309 assembles optional Join/binding handlers in the scoped local runtime, fixing Session store,
+scope/clock/Origin over sub-configuration. API508/508, real PostgreSQL/runtime double-ack recovery
+and existing HTTPS browser entry/menu lab pass. Full verification and forced uncached integration pass.
+Dining UI browser-to-database lab activation remains the next distinct scope; no production providers.

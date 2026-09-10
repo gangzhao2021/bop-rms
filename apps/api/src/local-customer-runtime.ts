@@ -1,3 +1,13 @@
+import { CustomerDiningJoinHandler } from "./customer-dining-join.js";
+import { CustomerDiningBindingHandler } from "./customer-dining-binding.js";
+import {
+  createCustomerDiningJoinComposition,
+  type CustomerDiningJoinCompositionOptions,
+} from "./customer-dining-join-composition.js";
+import {
+  createCustomerDiningBindingComposition,
+  type CustomerDiningBindingCompositionOptions,
+} from "./customer-dining-binding-composition.js";
 import {
   createCustomerCartItemComposition,
   type CustomerCartItemCompositionOptions,
@@ -52,6 +62,13 @@ import {
 } from "./server.js";
 
 export interface LocalCustomerRuntimeOptions {
+  readonly diningAdmission?: {
+    readonly join: Omit<CustomerDiningJoinCompositionOptions, "scope" | "session" | "now">;
+    readonly binding: Omit<CustomerDiningBindingCompositionOptions, "scope" | "session" | "now">;
+    readonly resolveRequestContext: ConstructorParameters<
+      typeof CustomerDiningJoinHandler
+    >[0]["resolveRequestContext"];
+  };
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
   readonly entry: Omit<CustomerEntryCompositionOptions, "session"> & {
     readonly session: Omit<CustomerEntryCompositionOptions["session"], "store">;
@@ -194,7 +211,41 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             now,
           }),
         });
+  const diningAdmission = options.diningAdmission;
+  const diningSession = {
+    store,
+    credentials: entry.session.credentials,
+    binding: entry.session.binding,
+  };
+  const customerDiningJoin =
+    diningAdmission === undefined
+      ? undefined
+      : new CustomerDiningJoinHandler({
+          allowedOrigin: options.allowedOrigin,
+          resolveRequestContext: diningAdmission.resolveRequestContext,
+          port: createCustomerDiningJoinComposition({
+            ...diningAdmission.join,
+            scope,
+            session: diningSession,
+            now,
+          }),
+        });
+  const customerDiningBinding =
+    diningAdmission === undefined
+      ? undefined
+      : new CustomerDiningBindingHandler({
+          allowedOrigin: options.allowedOrigin,
+          now,
+          port: createCustomerDiningBindingComposition({
+            ...diningAdmission.binding,
+            scope,
+            session: diningSession,
+            now,
+          }),
+        });
   return createApiServerRuntime({
+    ...(customerDiningJoin === undefined ? {} : { customerDiningJoin }),
+    ...(customerDiningBinding === undefined ? {} : { customerDiningBinding }),
     ...(options.cartQuote === undefined || options.cartTransactions === undefined
       ? {}
       : {

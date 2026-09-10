@@ -47,6 +47,137 @@ async function start(options: LocalCustomerRuntimeOptions) {
 }
 
 describe("scoped local Customer runtime", () => {
+  function diningOptions() {
+    const owner = vi.fn(async (): Promise<never> => {
+      throw new Error("synthetic Dining unavailable");
+    });
+    const credential = vi.fn((): never => {
+      throw new Error("synthetic credential unavailable");
+    });
+    const configuration: NonNullable<LocalCustomerRuntimeOptions["diningAdmission"]> = {
+      join: {
+        dining: {
+          store: { resolveJoinState: owner, resolveJoinOperation: owner, join: owner },
+          credentials: {
+            generateReference: credential,
+            hashJoinCredential: credential,
+            hashOperationIntent: credential,
+            equals: credential,
+          },
+          pepperVersion: 1,
+        },
+        contexts: { resolve: owner },
+      },
+      binding: {
+        bindings: { prepare: owner, acknowledge: owner, activate: owner, complete: owner },
+        dining: {
+          store: { readCurrent: owner, resolveOperation: owner, consume: owner },
+          credentials: { hashOperationIntent: credential, equals: credential },
+          binding: { readCurrent: owner },
+        },
+        contexts: { resolve: owner },
+        recovery: { generate: credential, hash: credential },
+        preparationLifetimeSeconds: 300,
+      },
+      resolveRequestContext: vi.fn(async () => ({ abuse: { admit: owner } })),
+    };
+    return { configuration, owner, credential };
+  }
+  async function diningPost(root: string, route: string, body: object) {
+    return fetch(root + route, {
+      method: "POST",
+      headers: {
+        origin: "https://customer.invalid",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "content-type": "application/json",
+        "idempotency-key": id(900),
+        "x-csrf-token": "B".repeat(43),
+        cookie: `__Host-bop-guest=${"A".repeat(43)}`,
+      },
+      body: JSON.stringify(body),
+    });
+  }
+  it.each([
+    "/bff/customer/dining/join",
+    "/bff/customer/dining-binding/prepare",
+    "/bff/customer/dining-binding/activate",
+    "/bff/customer/dining-binding/complete",
+  ])("keeps unconfigured Dining route %s unavailable without database reads", async (route) => {
+    const { options, run } = setup();
+    const { root } = await start(options);
+    expect((await diningPost(root, route, {})).status).toBe(503);
+    expect(run).not.toHaveBeenCalled();
+  });
+  it.each(["join", "prepare"])(
+    "uses actual Session lookup before configured Dining %s providers",
+    async (action) => {
+      const { options, run } = setup(),
+        dining = diningOptions();
+      const override = vi.fn(async () => {
+        throw new Error("must not use sub-configuration authority");
+      });
+      const join = {
+        ...dining.configuration.join,
+        scope: { brandReference: id(998), storeReference: id(999) },
+        session: { store: { resolve: override } },
+        now: override,
+      };
+      const binding = {
+        ...dining.configuration.binding,
+        scope: { brandReference: id(998), storeReference: id(999) },
+        session: { store: { resolve: override } },
+        now: override,
+      };
+      const { root } = await start({
+        ...options,
+        diningAdmission: { ...dining.configuration, join, binding },
+      });
+      const response = await diningPost(
+        root,
+        action === "join" ? "/bff/customer/dining/join" : "/bff/customer/dining-binding/prepare",
+        action === "join" ? { joinCredential: "123456" } : { admissionReference: id(901) },
+      );
+      expect(response.status).toBe(503);
+      expect(run).toHaveBeenCalledOnce();
+      expect(override).not.toHaveBeenCalled();
+      expect(dining.owner).not.toHaveBeenCalled();
+      expect(dining.credential).not.toHaveBeenCalled();
+      expect(response.headers.getSetCookie()).toEqual([]);
+    },
+  );
+  it("requires this request's server context before any Session lookup", async () => {
+    const { options, run } = setup(),
+      dining = diningOptions();
+    const resolve = vi.fn(async () => null);
+    const { root } = await start({
+      ...options,
+      diningAdmission: { ...dining.configuration, resolveRequestContext: resolve },
+    });
+    const response = await diningPost(root, "/bff/customer/dining/join", {
+      joinCredential: "123456",
+    });
+    expect(response.status).toBe(503);
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(run).not.toHaveBeenCalled();
+    expect(dining.owner).not.toHaveBeenCalled();
+  });
+  it("denies malformed configured transport before request context resolution", async () => {
+    const { options, run } = setup(),
+      dining = diningOptions();
+    const { root } = await start({ ...options, diningAdmission: dining.configuration });
+    expect(
+      (
+        await diningPost(root, "/bff/customer/dining/join", {
+          joinCredential: "123456",
+          abuse: "Admitted",
+        })
+      ).status,
+    ).toBe(400);
+    expect(dining.configuration.resolveRequestContext).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("keeps an unconfigured Quote endpoint unavailable without database access", async () => {
     const { options, run } = setup();
     const { root } = await start(options);
