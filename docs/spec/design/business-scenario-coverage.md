@@ -379,3 +379,8 @@ only ephemeral CSRF/recovery material. API431/431, Identity476/476, privacy8/8, 
 HTTP recovery, full verification and forced uncached integration pass. After lost activation
 acknowledgement, both staged and published-main cookie recovery preserve consumption/Audit10/10
 and preparation/Audit3/3. Browser client/UI and production activation remain separate.
+
+WP-2301 adds independent PWA Dining binding transport with exact admission input, bounded response
+and deadline handling, and no credential storage or automatic retries. PWA476/476, security111/111,
+actual client/HTTP/PG recovery, full verification and forced uncached integration pass. Late and
+rejected response bodies are cancelled. This does not enable UI, reload recovery or operational configuration.

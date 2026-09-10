@@ -1,3 +1,4 @@
+import { createBrowserDiningBindingClient } from "../../../apps/customer-pwa/src/dining/dining-binding-client.ts";
 import { createServer } from "node:http";
 import { createApp } from "../../../apps/api/src/app.ts";
 import {
@@ -1326,34 +1327,46 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
       );
       try {
         await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-        const post = (action, body, cookie, csrfToken) =>
-          globalThis.fetch(
-            `http://127.0.0.1:${server.address().port}${customerDiningBindingRoutes[action]}`,
-            {
-              method: "POST",
-              headers: {
-                origin,
-                "sec-fetch-site": "same-origin",
-                "sec-fetch-mode": "cors",
-                "content-type": "application/json",
-                "idempotency-key": id(127),
-                "x-csrf-token": csrfToken,
-                cookie,
-              },
-              body: JSON.stringify(body),
-            },
-          );
         const oldCookie = `__Host-bop-guest=${n.sessionCredential}`;
+        let browserCookie = oldCookie;
+        let latestResponse;
+        let clientRequests = 0;
+        // WP-2301: synthetic cookie/Fetch Metadata boundary; production client owns request semantics.
+        const browser = createBrowserDiningBindingClient({
+          online: () => true,
+          async fetch(path, init) {
+            assert.ok(Object.values(customerDiningBindingRoutes).includes(path));
+            assert.equal(init.credentials, "same-origin");
+            assert.equal(init.cache, "no-store");
+            assert.equal(init.redirect, "error");
+            clientRequests++;
+            const response = await globalThis.fetch(
+              `http://127.0.0.1:${server.address().port}${path}`,
+              {
+                ...init,
+                headers: {
+                  ...init.headers,
+                  origin,
+                  "sec-fetch-site": "same-origin",
+                  "sec-fetch-mode": "cors",
+                  cookie: browserCookie,
+                },
+              },
+            );
+            latestResponse = response.clone();
+            return response;
+          },
+        });
         const stagedName = `__Host-bop-guest-dining-candidate-${id(127)}`;
-        const preparationResponse = await post(
-          "prepare",
-          { admissionReference: nJoin.joined.admission.admissionReference },
-          oldCookie,
-          n.csrfCredential,
-        );
+        const preparationBody = await browser.prepare({
+          operationReference: id(127),
+          csrfToken: n.csrfCredential,
+          admissionReference: nJoin.joined.admission.admissionReference,
+        });
+        const preparationResponse = latestResponse;
         assert.equal(preparationResponse.status, 200);
         assert.equal(preparationResponse.headers.get("cache-control"), "no-store");
-        const preparationBody = await preparationResponse.json();
+        assert.deepEqual(await preparationResponse.json(), preparationBody);
         const preparationCookies = preparationResponse.headers.getSetCookie();
         assert.equal(preparationCookies.length, 1);
         assert.ok(preparationCookies[0].startsWith(`${stagedName}=`));
@@ -1364,15 +1377,18 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         assert.equal(JSON.stringify(preparationBody).includes(rawCandidate), false);
         assert.deepEqual(await counts(), { operations: 9, audits: 9 });
         minute = 4;
-        const activationResponse = await post(
-          "activate",
-          {
+        browserCookie = `${oldCookie}; ${stageCookie}`;
+        await assert.rejects(
+          browser.activate({
+            operationReference: id(127),
+            csrfToken: n.csrfCredential,
             candidateCsrfToken: preparationBody.candidateCsrfToken,
             recoveryProof: preparationBody.recoveryProof,
-          },
-          `${oldCookie}; ${stageCookie}`,
-          n.csrfCredential,
+          }),
+          { code: "unavailable", message: "dining binding is unavailable" },
         );
+        const activationResponse = latestResponse;
+        assert.equal(clientRequests, 2);
         assert.equal(activationResponse.status, 503);
         assert.deepEqual(activationResponse.headers.getSetCookie(), []);
         assert.deepEqual(await activationResponse.json(), {
@@ -1385,19 +1401,18 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         assert.equal((await identityStore.resolve(n.selector)).session.status, "Revoked");
         minute = 9;
         assert.ok(at(minute) > preparationBody.expiresAt);
-        const completionResponse = await post(
-          "complete",
-          {},
-          `${oldCookie}; ${stageCookie}`,
-          preparationBody.candidateCsrfToken,
-        );
+        const completionBody = await browser.complete({
+          operationReference: id(127),
+          csrfToken: preparationBody.candidateCsrfToken,
+        });
+        const completionResponse = latestResponse;
         assert.equal(completionResponse.status, 200);
         assert.equal(completionResponse.headers.get("cache-control"), "no-store");
         assert.deepEqual(completionResponse.headers.getSetCookie(), [
           `__Host-bop-guest=${rawCandidate}; Path=/; Secure; HttpOnly; SameSite=Lax`,
           `${stagedName}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`,
         ]);
-        const completionBody = await completionResponse.json();
+        assert.deepEqual(await completionResponse.json(), completionBody);
         assert.deepEqual(completionBody, {
           status: "Activated",
           operationReference: id(127),
@@ -1405,12 +1420,14 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         });
         assert.equal(JSON.stringify(completionBody).includes(rawCandidate), false);
         const publishedCookie = completionResponse.headers.getSetCookie()[0].split(";")[0];
-        const alreadyPublished = await post(
-          "complete",
-          {},
-          publishedCookie,
-          preparationBody.candidateCsrfToken,
-        );
+        browserCookie = publishedCookie;
+        const repeated = await browser.complete({
+          operationReference: id(127),
+          csrfToken: preparationBody.candidateCsrfToken,
+        });
+        assert.deepEqual(repeated, completionBody);
+        const alreadyPublished = latestResponse;
+        assert.equal(clientRequests, 4);
         assert.equal(alreadyPublished.status, 200);
         assert.deepEqual(await alreadyPublished.json(), completionBody);
         assert.deepEqual(
