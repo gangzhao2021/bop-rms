@@ -417,3 +417,9 @@ single-flight and opaque CSRF generation guards. Raw Join credential is released
 admission; binding recovery never rejoins. PWA596/596, security111/111/build and actual PostgreSQL/
 HTTP double-lost-ack recovery pass with original one-Join/one-consumption history. Full verification
 and forced uncached integration pass. UI, cross-document/replacement recovery and runtime remain separate.
+
+WP-2308 embeds optional admission UI in eligible CUST-ENTRY-CONTEXT with protected transient input,
+explicit original recovery, offline controls and honest unavailable state. PWA612/612 and53/53
+browser cases (desktop/mobile/production exclusion) pass; security111/111/build pass. Reviewed
+empty-input recovery/confirmation screenshots, keyboard focus and320px reflow. Real entry/menu lab, full verification
+and forced uncached integration pass. Local synthetic preview is excluded from production; runtime remains gated.

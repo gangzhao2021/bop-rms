@@ -1,3 +1,4 @@
+import type { DiningAdmissionUi } from "./dining/DiningAdmissionPanel.js";
 import { Route, Routes, useParams } from "react-router";
 import { useCallback, useState } from "react";
 import { CartPage } from "./cart/CartPage.js";
@@ -48,10 +49,12 @@ function CustomerReceiptRoute({ demo }: { readonly demo: CustomerDemoDependencie
 }
 
 export function App({
+  diningAdmission,
   entryClient,
   initialMenuContext,
   demo,
 }: Readonly<{
+  diningAdmission?: DiningAdmissionUi | undefined;
   entryClient?: CustomerEntryClient | undefined;
   initialMenuContext?: MenuJourneyContext | undefined;
   demo?: CustomerDemoDependencies | undefined;
@@ -80,6 +83,7 @@ export function App({
           path="/"
           element={
             <EntryContextPage
+              diningAdmission={diningAdmission}
               client={entryClient ?? demo?.entryClient}
               onEstablished={establishMenuContext}
             />

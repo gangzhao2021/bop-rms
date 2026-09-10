@@ -35,6 +35,20 @@ describe("CUST-ENTRY-CONTEXT", () => {
     expect(html).not.toContain(context.csrfToken);
   });
 
+  it.each([
+    { ...context, channel: "Pickup" as const, publicTableReference: null },
+    { ...context, publicTableReference: null },
+    { ...context, operatingState: "Closed" as const },
+    { ...context, availableServiceModes: ["Pickup"] as const },
+  ])("does not offer table admission outside eligible entry context", (next) => {
+    expect(render({ kind: "Established", context: next })).not.toContain(
+      "dining-admission-heading",
+    );
+  });
+  it("shows unavailable admission honestly for eligible context without runtime", () => {
+    expect(render({ kind: "Established", context })).toContain("Table joining is unavailable");
+  });
+
   it("uses explicit non-colour status and blocks continuation when closed", () => {
     const html = render({
       kind: "Established",

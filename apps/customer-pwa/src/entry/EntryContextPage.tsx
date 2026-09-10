@@ -1,3 +1,4 @@
+import { DiningAdmissionPanel, type DiningAdmissionUi } from "../dining/DiningAdmissionPanel.js";
 import { AppFrame } from "@bop-rms/ui";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -24,6 +25,7 @@ const unavailableClient: CustomerEntryClient = Object.freeze({
 });
 
 export interface EntryContextPageProps {
+  readonly diningAdmission?: DiningAdmissionUi | undefined;
   readonly client?: CustomerEntryClient | undefined;
   readonly onEstablished?: ((context: CustomerEntryEstablishedContext) => void) | undefined;
 }
@@ -31,6 +33,7 @@ export interface EntryContextPageProps {
 export function EntryContextPage({
   client = unavailableClient,
   onEstablished,
+  diningAdmission,
 }: EntryContextPageProps) {
   const [state, setState] = useState<CustomerEntryScreenState>(
     client.hasEntry ? Object.freeze({ kind: "Loading" }) : Object.freeze({ kind: "Missing" }),
@@ -65,6 +68,7 @@ export function EntryContextPage({
 
   return (
     <EntryContextView
+      diningAdmission={diningAdmission}
       headingRef={heading}
       onContinue={() => navigate("/menu")}
       onRetry={retry}
@@ -74,6 +78,7 @@ export function EntryContextPage({
 }
 
 export interface EntryContextViewProps {
+  readonly diningAdmission?: DiningAdmissionUi | undefined;
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
   readonly onContinue?: (() => void) | undefined;
   readonly onRetry?: (() => void) | undefined;
@@ -81,6 +86,7 @@ export interface EntryContextViewProps {
 }
 
 export function EntryContextView({
+  diningAdmission,
   headingRef,
   onContinue,
   onRetry,
@@ -96,6 +102,7 @@ export function EntryContextView({
     <AppFrame title={title} description={description}>
       <section className="entry-card" aria-live="polite" aria-busy={state.kind === "Loading"}>
         <EntryState
+          diningAdmission={diningAdmission}
           headingRef={headingRef}
           onContinue={onContinue}
           onRetry={onRetry}
@@ -135,7 +142,13 @@ function RetryAction({ onRetry }: Readonly<{ onRetry?: (() => void) | undefined 
   ) : null;
 }
 
-function EntryState({ headingRef, onContinue, onRetry, state }: Readonly<EntryContextViewProps>) {
+function EntryState({
+  diningAdmission,
+  headingRef,
+  onContinue,
+  onRetry,
+  state,
+}: Readonly<EntryContextViewProps>) {
   if (state.kind === "Loading")
     return (
       <div role="status">
@@ -214,6 +227,12 @@ function EntryState({ headingRef, onContinue, onRetry, state }: Readonly<EntryCo
           </dd>
         </div>
       </dl>
+      {context.channel === "DineIn" &&
+      context.publicTableReference !== null &&
+      locationOpen &&
+      context.availableServiceModes.includes("DineIn") ? (
+        <DiningAdmissionPanel contextEpoch={context} service={diningAdmission} />
+      ) : null}
       {locationOpen ? (
         onContinue ? (
           <button className="entry-action" type="button" onClick={onContinue}>

@@ -1,3 +1,4 @@
+import { createLocalDiningAdmissionDemo } from "./customer-dining-demo.js";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -13,6 +14,18 @@ import { loadLocalCustomerDemo, shouldUseLocalCustomerDemoEntry } from "./custom
 import { MenuScreen } from "./menu/MenuPage.js";
 
 describe("WP-2204 local Customer preview", () => {
+  it("keeps Dining UI training separate and explicitly synthetic", async () => {
+    const sample = createLocalDiningAdmissionDemo();
+    const entry = await sample.entryClient.start();
+    expect(entry.kind).toBe("Established");
+    if (entry.kind !== "Established") throw new Error("missing synthetic entry");
+    expect(entry.context.channel).toBe("DineIn");
+    const original = await enabledCustomerDemo.entryClient.start();
+    expect(original.kind === "Established" && original.context.channel).toBe("Pickup");
+    const normal = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
+    expect(normal).not.toContain("customer-dining-demo");
+  });
+
   it("selects the separate entry only for the exact development flag", async () => {
     expect(shouldUseLocalCustomerDemoEntry("serve", "1")).toBe(true);
     expect(shouldUseLocalCustomerDemoEntry("build", "1")).toBe(false);

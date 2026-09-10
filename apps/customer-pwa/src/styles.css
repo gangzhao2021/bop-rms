@@ -910,3 +910,50 @@
     animation-iteration-count: 1 !important;
   }
 }
+
+.dining-admission {
+  max-width: 44rem;
+  margin: 1rem auto;
+  padding: 1.25rem;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.dining-admission form {
+  display: grid;
+  gap: 0.75rem;
+}
+.dining-admission input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.65rem;
+  border: 1px solid #64748b;
+  border-radius: 0.35rem;
+  font: inherit;
+}
+.dining-admission button {
+  min-height: 44px;
+}
+.dining-admission input:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 3px;
+}
+.dining-admission [aria-invalid="true"] {
+  border: 2px solid #b91c1c;
+}
+.dining-admission button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dining-admission h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.dining-admission p {
+  margin: 0.5rem 0 0.75rem;
+}
