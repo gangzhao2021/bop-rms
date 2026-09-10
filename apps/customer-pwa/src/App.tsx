@@ -49,11 +49,13 @@ function CustomerReceiptRoute({ demo }: { readonly demo: CustomerDemoDependencie
 }
 
 export function App({
+  checkoutNow,
   diningAdmission,
   entryClient,
   initialMenuContext,
   demo,
 }: Readonly<{
+  checkoutNow?: () => number;
   diningAdmission?: DiningAdmissionUi | undefined;
   entryClient?: CustomerEntryClient | undefined;
   initialMenuContext?: MenuJourneyContext | undefined;
@@ -127,6 +129,7 @@ export function App({
           path="/checkout"
           element={
             <CheckoutPage
+              {...(checkoutNow === undefined ? {} : { now: checkoutNow })}
               {...(demo ? { controller: demo.checkoutController, now: demo.now } : {})}
             />
           }

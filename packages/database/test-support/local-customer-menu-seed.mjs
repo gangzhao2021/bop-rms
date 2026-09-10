@@ -6,7 +6,8 @@ const scope = { brandReference: id(1), storeReference: id(2) };
 const digest = `sha256:${"a".repeat(64)}`;
 const optionRules = [];
 
-export async function seedMenu(admin) {
+export async function seedMenu(admin, mode = "DineIn") {
+  if (mode !== "DineIn" && mode !== "Pickup") throw new Error("LOCAL_MENU_MODE_INVALID");
   await admin.query(
     `INSERT INTO rms_catalog.menu (menu_id,brand_id,internal_code,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES ($1,$2,'ALL_DAY',1,$3,$4,$3)`,
     [id(1), scope.brandReference, at, id(3)],
@@ -28,7 +29,7 @@ export async function seedMenu(admin) {
     [id(9), scope.brandReference, id(1), id(10), at],
   );
   await admin.query(
-    `INSERT INTO rms_catalog.published_menu_projection (generation_id,brand_id,menu_id,menu_version_id,release_id,snapshot_digest,default_locale,localized_names_json,store_ids_json,channel_codes_json,order_type_codes_json,time_zone,effective_from) VALUES ($1,$2,$3,$4,$5,$6,'en-CA','{"en-CA":"All Day"}'::jsonb,$8::jsonb,'["DINE_IN"]'::jsonb,'["TABLE_SERVICE"]'::jsonb,'UTC',$7)`,
+    `INSERT INTO rms_catalog.published_menu_projection (generation_id,brand_id,menu_id,menu_version_id,release_id,snapshot_digest,default_locale,localized_names_json,store_ids_json,channel_codes_json,order_type_codes_json,time_zone,effective_from) VALUES ($1,$2,$3,$4,$5,$6,'en-CA','{"en-CA":"All Day"}'::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,'UTC',$7)`,
     [
       id(9),
       scope.brandReference,
@@ -38,6 +39,8 @@ export async function seedMenu(admin) {
       digest,
       at,
       JSON.stringify([scope.storeReference]),
+      JSON.stringify([mode === "Pickup" ? "PICKUP" : "DINE_IN"]),
+      JSON.stringify([mode === "Pickup" ? "PICKUP" : "TABLE_SERVICE"]),
     ],
   );
   await admin.query(
