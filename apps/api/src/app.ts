@@ -1,4 +1,9 @@
 import {
+  CustomerDiningBindingHandler,
+  customerDiningBindingRoutes,
+  unavailableCustomerDiningBindingHandler,
+} from "./customer-dining-binding.js";
+import {
   CustomerCartBindingHandler,
   customerCartBindingRoutes,
   unavailableCustomerCartBindingHandler,
@@ -51,6 +56,7 @@ export interface AppOptions {
   correlationAcceptanceHandler?: RequestHandler;
   customerCart?: CustomerCartHandler;
   customerCartBinding?: CustomerCartBindingHandler;
+  customerDiningBinding?: CustomerDiningBindingHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
   customerQuote?: CustomerQuoteHandler;
@@ -108,6 +114,7 @@ export function createApp({
   correlationAcceptanceHandler,
   customerCart,
   customerCartBinding,
+  customerDiningBinding,
   customerEntry,
   customerMenu,
   customerQuote,
@@ -161,6 +168,19 @@ export function createApp({
   app.post(
     customerCartBindingRoutes.complete,
     customerCartBinding?.complete() ?? unavailableCustomerCartBindingHandler,
+  );
+
+  app.post(
+    customerDiningBindingRoutes.prepare,
+    customerDiningBinding?.prepare() ?? unavailableCustomerDiningBindingHandler,
+  );
+  app.post(
+    customerDiningBindingRoutes.activate,
+    customerDiningBinding?.activate() ?? unavailableCustomerDiningBindingHandler,
+  );
+  app.post(
+    customerDiningBindingRoutes.complete,
+    customerDiningBinding?.complete() ?? unavailableCustomerDiningBindingHandler,
   );
   app.get(customerCartRoutes.current, customerCart?.current() ?? unavailableCustomerCartHandler);
   app.get(

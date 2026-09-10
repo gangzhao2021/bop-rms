@@ -86,7 +86,7 @@ describe("WP-2051 privacy execution policy", () => {
     }
   });
 
-  it("registers only the operation-scoped candidate family in its transport owner", async () => {
+  it("registers only the operation-scoped candidate families in their exact transport owners", async () => {
     const value = await policy();
     expect(value.necessaryCookieFamilies).toEqual([
       {
@@ -94,6 +94,21 @@ describe("WP-2051 privacy execution policy", () => {
         suffixFormat: "uuid-v7-operation-reference",
         purpose: "guest-binding-candidate-handoff",
         sourceFiles: ["apps/api/src/customer-cart-binding.ts"],
+        secure: true,
+        httpOnly: true,
+        sameSite: "Lax",
+        path: "/",
+        domain: null,
+        persistence: "browser-session",
+        serverAuthority: "Identity preparation and Session deadlines",
+        clearOn: "successful activation or completion of the same operation",
+        webStorage: false,
+      },
+      {
+        prefix: "__Host-bop-guest-dining-candidate-",
+        suffixFormat: "uuid-v7-operation-reference",
+        purpose: "guest-dining-binding-candidate-handoff",
+        sourceFiles: ["apps/api/src/customer-dining-binding.ts"],
         secure: true,
         httpOnly: true,
         sameSite: "Lax",
@@ -120,6 +135,33 @@ describe("WP-2051 privacy execution policy", () => {
     ).toBe(false);
     expect(
       allowedCookie(value, "__Host-bop-unregistered", "apps/api/src/customer-cart-binding.ts"),
+    ).toBe(false);
+  });
+
+  it("rejects Dining candidate use outside its owner and cross-purpose registration", async () => {
+    const value = await policy();
+    expect(
+      allowedCookie(
+        value,
+        "__Host-bop-guest-dining-candidate-",
+        "apps/api/src/customer-dining-binding.ts",
+      ),
+    ).toBe(true);
+    for (const file of ["apps/api/src/customer-cart-binding.ts", "apps/api/src/other.ts"])
+      expect(allowedCookie(value, "__Host-bop-guest-dining-candidate-", file)).toBe(false);
+    expect(
+      allowedCookie(
+        value,
+        "__Host-bop-guest-candidate-",
+        "apps/api/src/customer-dining-binding.ts",
+      ),
+    ).toBe(false);
+    expect(
+      allowedCookie(
+        value,
+        "__Host-bop-guest-dining-candidate-tracking",
+        "apps/api/src/customer-dining-binding.ts",
+      ),
     ).toBe(false);
   });
 

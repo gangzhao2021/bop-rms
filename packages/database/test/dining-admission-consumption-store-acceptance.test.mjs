@@ -1,3 +1,9 @@
+import { createServer } from "node:http";
+import { createApp } from "../../../apps/api/src/app.ts";
+import {
+  CustomerDiningBindingHandler,
+  customerDiningBindingRoutes,
+} from "../../../apps/api/src/customer-dining-binding.ts";
 import { Buffer } from "node:buffer";
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
@@ -1297,6 +1303,151 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         ).rows[0].n,
         3,
       );
+      // WP-2300: synthetic HTTP cookie boundary with actual owner and Identity persistence.
+      const n = await makeIdentity(36, 115);
+      const nJoin = await firstJoin(36, 115);
+      minute = 3;
+      const httpPort = createCustomerDiningBindingComposition({
+        ...compositionOptions,
+        bindings: {
+          ...compositionOptions.bindings,
+          activate: bindingStore(runner({ loseAck: true })).activate,
+        },
+      });
+      const origin = "https://customer.example.test";
+      const server = createServer(
+        createApp({
+          customerDiningBinding: new CustomerDiningBindingHandler({
+            allowedOrigin: origin,
+            port: httpPort,
+            now: () => at(minute),
+          }),
+        }),
+      );
+      try {
+        await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const post = (action, body, cookie, csrfToken) =>
+          globalThis.fetch(
+            `http://127.0.0.1:${server.address().port}${customerDiningBindingRoutes[action]}`,
+            {
+              method: "POST",
+              headers: {
+                origin,
+                "sec-fetch-site": "same-origin",
+                "sec-fetch-mode": "cors",
+                "content-type": "application/json",
+                "idempotency-key": id(127),
+                "x-csrf-token": csrfToken,
+                cookie,
+              },
+              body: JSON.stringify(body),
+            },
+          );
+        const oldCookie = `__Host-bop-guest=${n.sessionCredential}`;
+        const stagedName = `__Host-bop-guest-dining-candidate-${id(127)}`;
+        const preparationResponse = await post(
+          "prepare",
+          { admissionReference: nJoin.joined.admission.admissionReference },
+          oldCookie,
+          n.csrfCredential,
+        );
+        assert.equal(preparationResponse.status, 200);
+        assert.equal(preparationResponse.headers.get("cache-control"), "no-store");
+        const preparationBody = await preparationResponse.json();
+        const preparationCookies = preparationResponse.headers.getSetCookie();
+        assert.equal(preparationCookies.length, 1);
+        assert.ok(preparationCookies[0].startsWith(`${stagedName}=`));
+        assert.ok(preparationCookies[0].endsWith("; Path=/; Secure; HttpOnly; SameSite=Lax"));
+        // Raw candidate is retained only by this synthetic cookie jar, never JSON.
+        const stageCookie = preparationCookies[0].split(";")[0];
+        const rawCandidate = stageCookie.slice(stagedName.length + 1);
+        assert.equal(JSON.stringify(preparationBody).includes(rawCandidate), false);
+        assert.deepEqual(await counts(), { operations: 9, audits: 9 });
+        minute = 4;
+        const activationResponse = await post(
+          "activate",
+          {
+            candidateCsrfToken: preparationBody.candidateCsrfToken,
+            recoveryProof: preparationBody.recoveryProof,
+          },
+          `${oldCookie}; ${stageCookie}`,
+          n.csrfCredential,
+        );
+        assert.equal(activationResponse.status, 503);
+        assert.deepEqual(activationResponse.headers.getSetCookie(), []);
+        assert.deepEqual(await activationResponse.json(), {
+          error: {
+            code: "dining_binding_unavailable",
+            messageKey: "customer.dining.binding_unavailable",
+          },
+        });
+        assert.deepEqual(await counts(), { operations: 10, audits: 10 });
+        assert.equal((await identityStore.resolve(n.selector)).session.status, "Revoked");
+        minute = 9;
+        assert.ok(at(minute) > preparationBody.expiresAt);
+        const completionResponse = await post(
+          "complete",
+          {},
+          `${oldCookie}; ${stageCookie}`,
+          preparationBody.candidateCsrfToken,
+        );
+        assert.equal(completionResponse.status, 200);
+        assert.equal(completionResponse.headers.get("cache-control"), "no-store");
+        assert.deepEqual(completionResponse.headers.getSetCookie(), [
+          `__Host-bop-guest=${rawCandidate}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+          `${stagedName}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`,
+        ]);
+        const completionBody = await completionResponse.json();
+        assert.deepEqual(completionBody, {
+          status: "Activated",
+          operationReference: id(127),
+          csrfToken: preparationBody.candidateCsrfToken,
+        });
+        assert.equal(JSON.stringify(completionBody).includes(rawCandidate), false);
+        const publishedCookie = completionResponse.headers.getSetCookie()[0].split(";")[0];
+        const alreadyPublished = await post(
+          "complete",
+          {},
+          publishedCookie,
+          preparationBody.candidateCsrfToken,
+        );
+        assert.equal(alreadyPublished.status, 200);
+        assert.deepEqual(await alreadyPublished.json(), completionBody);
+        assert.deepEqual(
+          alreadyPublished.headers.getSetCookie(),
+          completionResponse.headers.getSetCookie(),
+        );
+        assert.deepEqual(await counts(), { operations: 10, audits: 10 });
+        const httpHistory = (
+          await admin.query(
+            "SELECT record FROM bop_identity.guest_dining_binding_preparation WHERE operation_id=$1 ORDER BY revision",
+            [id(127)],
+          )
+        ).rows;
+        assert.equal(httpHistory.length, 3);
+        assert.equal(
+          (
+            await admin.query(
+              "SELECT count(*)::integer AS n FROM platform_audit.audit_record WHERE target_type='GuestDiningBindingPreparation' AND target_id=$1",
+              [id(127)],
+            )
+          ).rows[0].n,
+          3,
+        );
+        for (const secret of [
+          n.sessionCredential,
+          n.csrfCredential,
+          rawCandidate,
+          preparationBody.candidateCsrfToken,
+          preparationBody.recoveryProof,
+        ]) {
+          assert.equal(JSON.stringify(httpHistory).includes(secret), false);
+          assert.equal(JSON.stringify(contextRequests).includes(secret), false);
+        }
+      } finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
       assert.equal(active, 0);
     } finally {
       await admin.end();

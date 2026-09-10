@@ -372,3 +372,10 @@ Participant, Table and original consumed admission. Closing preserves identity f
 separate Cart gate stays Active-only. Actual Move away/back cannot revive the old binding merely
 by restoring the same Table ID. Dining928/928, API393/393, real PostgreSQL acceptance,
 full verification and forced uncached integration pass. Read denial does not claim a persisted revocation or grant write authority.
+
+WP-2300 adds separate same-origin Dining preparation, acknowledgement and completion transport.
+Candidate Session uses an operation-specific HttpOnly cookie distinct from Pickup; JSON carries
+only ephemeral CSRF/recovery material. API431/431, Identity476/476, privacy8/8, actual owner/Identity
+HTTP recovery, full verification and forced uncached integration pass. After lost activation
+acknowledgement, both staged and published-main cookie recovery preserve consumption/Audit10/10
+and preparation/Audit3/3. Browser client/UI and production activation remain separate.

@@ -147,6 +147,21 @@
       "serverAuthority": "Identity preparation and Session deadlines",
       "clearOn": "successful activation or completion of the same operation",
       "webStorage": false
+    },
+    {
+      "prefix": "__Host-bop-guest-dining-candidate-",
+      "suffixFormat": "uuid-v7-operation-reference",
+      "purpose": "guest-dining-binding-candidate-handoff",
+      "sourceFiles": ["apps/api/src/customer-dining-binding.ts"],
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null,
+      "persistence": "browser-session",
+      "serverAuthority": "Identity preparation and Session deadlines",
+      "clearOn": "successful activation or completion of the same operation",
+      "webStorage": false
     }
   ]
 }
