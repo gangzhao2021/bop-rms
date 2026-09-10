@@ -3,7 +3,9 @@
 This is the documentation deliverable for [WP-2224](../work-packages/WP-2224.md), prepared from
 `main@cedc44c9b6a6a1b389f77342078cc6f2d540dabe`. It turns the Owner-requested design review into
 traceable scenarios, concrete proposals and a decision queue. It is not a new Handoff version,
-implementation authorization or production-readiness assertion.
+implementation authorization or production-readiness assertion. Current implementation status was
+reconciled in [WP-2330](../work-packages/WP-2330.md) against local fab611e; historical inventory
+and proposals below retain their original scope.
 
 ## Read in this order
 
@@ -18,11 +20,11 @@ implementation authorization or production-readiness assertion.
 
 ## What is and is not established
 
-The baseline inventory contains 210 canonical Screens and 273 `WP-*.md` briefs, excluding the
+The original WP-2224 baseline inventory contained 210 canonical Screens and 273 `WP-*.md` briefs, excluding the
 separately named SPIKE. Of the Screens, 201 have `work_package_mode: resolved` and nine inherit
 their mapping. These are inventory and mapping states, not proof of implemented actions, connected
-runtime, exhaustive requirements or successful acceptance. This package adds one WP brief and does
-not alter that Screen inventory.
+runtime, exhaustive requirements or successful acceptance. The current local inventory contains 380 WP briefs including WP-2330; this count is not completion
+evidence and no Screen mapping is changed by the status reconciliation.
 
 The repository already defines substantial QR/Session, Menu/Quote, Order, Payment reconciliation
 and compensation, Kitchen/Pickup, Receipt, Store, Reservation, Procurement/Inventory, Food Safety,
@@ -46,7 +48,8 @@ a local source/ownership gap, not a claim that the external Handoff never specif
 | Integration dependency | The existing contract needs an owning producer, adapter or composed acceptance.        | Only after its bounded implementation scope is ready.                        |
 | External gate          | Real Store, Provider, professional, operator or environment evidence is required.      | Local synthetic work may proceed where authorized; live activation may not.  |
 
-Every new scenario in these documents is **designed, not executed**. An existing test command
+The original AC-H/AOD/SC scenarios were **designed, not executed in WP-2224**. Later owning WPs
+provide the specific evidence identified below; this does not retroactively execute those whole suites. An existing test command
 listed beside it protects the cited baseline; its mere existence does not prove the new scenario.
 The actual documentation checks for this WP are recorded only in its verification section.
 
@@ -75,23 +78,39 @@ pointing every Screen to this documentation package would not close that gap.
 
 [WP-2228](../work-packages/WP-2228.md) records the Owner's 2026-09-08 acceptance of a shared
 Dining Session Cart with Participant-owned item edits and one-time safe credential recovery.
-These resolve the two product choices within DC-01. Detailed recovery mechanics, owner-local
-persistence and source reconciliation remain implementation obligations; other DC entries are
-unchanged. The original WP-2224 proposal-status statements are historical review snapshots.
+These resolve the two product choices within DC-01; they are not pending approval again.
+Owner-local acknowledged credential preparation/activation/recovery and foreground transport now
+have WP-2234–2250 and WP-2294–2309 evidence. Current bound Dining identity is owner-validated
+(WP-2299/2326). Shared Cart create/read/items, scoped history and safe UI are implemented in
+WP-2313–2325. [WP-2327](../work-packages/WP-2327.md) proves two simultaneous browser contexts
+on one table, with own-line edits, foreign-note/control isolation and actual invitation regeneration.
+
+Pickup Quote persistence/HTTP and continuous recalculation have WP-2255–2268 evidence;
+[WP-2328](../work-packages/WP-2328.md) and [WP-2329](../work-packages/WP-2329.md) add current
+authority and fresh expiry checks across asynchronous Pricing/persistence. These are local owner-store
+proofs with labeled synthetic commercial/Staff/QR inputs, not real Store or Provider readiness.
+
+Remaining DC-01 obligations include cross-document credential continuity (foreground response-loss
+recovery is not browser-reload recovery), authoritative Catalog selection/commercial producers and
+Dining Quote/Checkout composition. DC-04's capacity ownership/atomicity decision still gates full
+submission-to-Payment even for a proposed local operational scenario. Other DC entries remain
+unchanged. Do not reopen the accepted sharing/recovery product choices to resolve these mechanics.
 
 ## Recommended execution order
 
-1. Reconcile the applicable Handoff sections for DC-01 and the source ownership/atomicity question
-   in DC-04. Record concrete accepted decisions and create the smallest separate execution brief.
-   These decisions precede connecting the scoped Cart reader to HTTP or enabling Payment.
-2. Resolve DC-02 and DC-03 follow-up ownership while preserving their current fail-closed actions.
-   Ordinary refund execution needs eligibility/allocation/approval decisions; an Inbox needs real
-   source-domain action/result contracts. Each is an independent later WP, not one combined change.
-3. Turn the first accepted decision into producer/adapter work with continuous synthetic browser,
-   HTTP and isolated-database acceptance. Then advance sequentially through the other ready WPs.
-4. Resolve DC-05/DC-06/DC-07/DC-08 before the release or operating scope that depends on them.
-   The accepted [Pilot readiness inventory](../../runbooks/pilot-integration-readiness-inventory.md)
-   remains the owner of external evidence gates; this package cannot satisfy those gates.
+1. Continue source-ready producer/composition work for Catalog selection, commercial Quote inputs
+   and Dining Quote/Checkout; keep unavailable results where their owner inputs are absent. Establish
+   each bounded execution brief before implementation. Do not substitute a display projection as
+   current Catalog eligibility or synthetic prices as live authority.
+2. Resolve DEC-H03's precise capacity owner and local atomic boundary before enabling submission
+   and Payment. Existing policy configuration or a receipt cannot silently replace the accepted hold
+   requirement. Reconcile remaining Order finality and ordinary refund source decisions separately.
+3. Finish cross-document credential continuity only through an accepted Identity-owned mechanism;
+   preserve random independent CSRF, page-memory handling and immutable Cart/Participant attribution.
+   Existing acknowledged foreground recovery is retained and need not be redesigned or reapproved.
+4. Resolve source action ownership for work surfaces and DC-05/DC-06/DC-07/DC-08 before their
+   dependent release/operating scope. The accepted [Pilot readiness inventory](../../runbooks/pilot-integration-readiness-inventory.md)
+   owns external evidence gates. Keep local connected acceptance and actual deployment separate.
 
 A decision record must identify the source version/section, precise choice and rationale, owning
 Domain/public contract, rejected incompatible alternative, acceptance scenarios, remaining gates
@@ -100,11 +119,11 @@ Source decision. Future WP IDs are allocated only when the actual bounded brief 
 
 ## Prior implementation findings
 
-The earlier static review also found request-time/idempotency coupling, Cart-to-Menu full reload,
-internal-unit Money display, incomplete telemetry route registration and an unbounded realtime
-drain path. WP-2224 does not fix those source files or claim new runtime verification. They remain
-separate behavior fixes under their owning WPs; the Cart/Order acceptance proposal must include
-the stable-intent retry case when that implementation is authorized.
+The original request-time/idempotency, Cart-to-Menu navigation/Money display and telemetry/drain
+findings have owning repairs in WP-2225/2226/2227 and integrated local evidence in
+[WP-2232](../work-packages/WP-2232.md). They are no longer an unassigned open defect list.
+Current Quote authority/expiry repairs are recorded in WP-2328/2329. Evidence remains at each WP's
+stated scope; status reconciliation runs no new business regression.
 
 ## Completion rule
 

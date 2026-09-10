@@ -7,7 +7,8 @@ not the business decisions or runtime. **Baseline** means a rule evidenced by an
 WP. **Proposal** means a recommended design awaiting source reconciliation and explicit decision.
 Command, record, state and decision names introduced here are design labels, not registered APIs,
 permissions, Events or new Work Packages. The external Handoff was unavailable to this review;
-an unresolved local reference does not prove that the external source lacks a rule.
+an unresolved local reference does not prove that the external source lacks a rule. WP-2330
+reconciles current local progress without accepting remaining proposals.
 
 All four handoffs require authorization before source reads; explicit Tenant/Brand/Store, Actor,
 purpose and permission; exact expected versions; immutable operation intent and append-only Audit.
@@ -18,14 +19,14 @@ collaboration uses public contracts. This document authorizes no cross-Domain pr
 
 ## Baseline map
 
-| Handoff               | Repository-visible rule                                                                                                                                                                                                | Remaining boundary                                                                                                   |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Guest to Cart         | [WP-1003](../work-packages/WP-1003.md) requires exact binding and Session rotation; [WP-1201](../work-packages/WP-1201.md) binds Pickup edits to the creating Session and DineIn edits to the exact Participant.       | [WP-2223](../work-packages/WP-2223.md) explicitly leaves creation/binding open; its reader grants no HTTP authority. |
-| Cart to submission    | [WP-1220](../work-packages/WP-1220.md) validates current Cart/Quote/Catalog/fulfillment evidence; [WP-1224](../work-packages/WP-1224.md) durably creates immutable submission, snapshots, number allocation and Audit. | Validation is not a capacity hold; Checkout Session/contact/capacity composition remains outside those WPs.          |
-| Submission to Payment | [WP-1302](../work-packages/WP-1302.md) requires atomic durable submission/capacity evidence and a 30-minute capacity expiry; Payment claims its Intent/Attempt before calling the Provider.                            | The public preparation evidence has no accepted production source merely because its parser exists.                  |
-| Payment to work       | [WP-1310](../work-packages/WP-1310.md) makes Ordering the sole producer of OrderConfirmed and the mutually exclusive unfulfillable disposition.                                                                        | Acceptance/cancellation/capacity-finality producers remain explicit dependencies.                                    |
-| Work to closure       | [WP-1603](../work-packages/WP-1603.md) defines partial/full Pickup handoff; [WP-1605](../work-packages/WP-1605.md) preserves Fulfilled + Open.                                                                         | Order close/reopen remains a separate source action; Dining closure cannot close an Order.                           |
-| Refund                | [WP-1301](../work-packages/WP-1301.md) defines original-method Provider ports; WP-1310 covers paid-without-fulfillable compensation.                                                                                   | Ordinary refund workflow was attributed to WP-2045, which actually owns webhook security review.                     |
+| Handoff               | Repository-visible rule                                                                                                                                                                                                | Remaining boundary                                                                                                                     |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Guest to Cart         | [WP-1003](../work-packages/WP-1003.md) requires exact binding and Session rotation; [WP-1201](../work-packages/WP-1201.md) binds Pickup edits to the creating Session and DineIn edits to the exact Participant.       | Current owner-store/HTTP/browser composition is evidenced by WP-2325/2326/2327; cross-document credential continuity remains separate. |
+| Cart to submission    | [WP-1220](../work-packages/WP-1220.md) validates current Cart/Quote/Catalog/fulfillment evidence; [WP-1224](../work-packages/WP-1224.md) durably creates immutable submission, snapshots, number allocation and Audit. | Validation is not a capacity hold; Checkout Session/contact/capacity composition remains outside those WPs.                            |
+| Submission to Payment | [WP-1302](../work-packages/WP-1302.md) requires atomic durable submission/capacity evidence and a 30-minute capacity expiry; Payment claims its Intent/Attempt before calling the Provider.                            | The public preparation evidence has no accepted production source merely because its parser exists.                                    |
+| Payment to work       | [WP-1310](../work-packages/WP-1310.md) makes Ordering the sole producer of OrderConfirmed and the mutually exclusive unfulfillable disposition.                                                                        | Acceptance/cancellation/capacity-finality producers remain explicit dependencies.                                                      |
+| Work to closure       | [WP-1603](../work-packages/WP-1603.md) defines partial/full Pickup handoff; [WP-1605](../work-packages/WP-1605.md) preserves Fulfilled + Open.                                                                         | Order close/reopen remains a separate source action; Dining closure cannot close an Order.                                             |
+| Refund                | [WP-1301](../work-packages/WP-1301.md) defines original-method Provider ports; WP-1310 covers paid-without-fulfillable compensation.                                                                                   | Ordinary refund workflow was attributed to WP-2045, which actually owns webhook security review.                                       |
 
 ## H-CART-01: create, bind and recover the current Cart
 
@@ -84,7 +85,7 @@ access or access merely from a Table/Cart identifier. Dining remains the members
 Ordering rechecks active Participant scope and exact Cart version on every mutation. Concurrent
 participants must observe a version conflict and refresh rather than overwrite another change.
 
-**DEC-H02: accepted continuity goal; mechanism requires implementation.** The Owner adopted
+**DEC-H02: accepted continuity goal; acknowledged foreground mechanism implemented.** The Owner adopted
 one-time safe credential recovery to preserve the basket after a lost binding response. This
 supersedes the earlier recommendation to prefer fresh Entry and accept loss of the old basket.
 It does not authorize plaintext credential persistence, use of a revoked Cookie as proof, a Cart-ID
@@ -93,13 +94,15 @@ unpredictable recovery proof; server storage retains a keyed verifier, not its p
 Proof must bind the exact operation and scope and be securely available to the browser before the
 binding response can be lost. Its delivery acknowledgement is therefore part of the protocol.
 
-The future recovery contract must specify a finite lifetime, same-origin/CSRF and abuse controls,
+The accepted recovery implementation must retain its finite lifetime, same-origin/CSRF and abuse controls,
 atomic single consumption, exact activation reconciliation, and denial after expiry, revocation,
 scope drift or conflicting intent. A consumed proof must never restore an old Session. Repeating a
 recovery after its own response is lost must have an explicit safe continuation: neither unlimited
 replay nor silently abandoning the basket satisfies the accepted goal. Credential rotation must
 not silently rewrite Pickup creator attribution or transfer item ownership. Resolve this with
-Identity and Ordering public contracts before choosing a schema or activating an endpoint.
+Identity and Ordering public contracts for any further cross-document continuation mechanism.
+WP-2234–2250 and WP-2294–2309 now implement acknowledged preparation/activation, bounded
+foreground recovery and their owner persistence/transport. This is not durable browser-reload recovery.
 
 Credential material is restricted to approved credential transport and ephemeral handling. It must
 not enter Cart DTOs, URLs, localStorage, logs, telemetry, Audit summaries or Event payloads. Audit
@@ -109,7 +112,9 @@ Required future synthetic acceptance includes: two Participants sharing one Cart
 edits deny; cross-Dining/Store denial; concurrent version conflict; lost initial binding response;
 lost recovery response; concurrent recovery with one consumption; expired/wrong-scope proof;
 revoked predecessor denial; crashes between owner-local commits; exact-operation reconciliation;
-and no credential persistence or disclosure. These cases are designed, not executed in WP-2228.
+and no credential persistence or disclosure. These cases were designed, not executed in WP-2228. Later evidence is scoped: WP-2300/2302/2305
+cover foreground response-loss/owner recovery, WP-2323/2324 actual multi-participant persistence, and
+WP-2327 simultaneous same-table browser isolation. This does not claim the entire AC-H suite ran.
 
 Create/activate/abort each has a stable purpose-specific operation, expected local version and
 bounded Audit action/result. Reconciliation rechecks current authority and exact receipt digests;
@@ -294,8 +299,10 @@ future owning WP must add each missing scenario and its real adapter/transaction
 DEC-H01/H02 belong to Identity + Ordering + Customer composition; DEC-H03 to Ordering + the
 source-confirmed capacity owner + Payment + Architecture; DEC-H04/H05 to Ordering and the
 collaborating execution/finality owners; DEC-H06/H07 to Payment + Ordering/Pricing + Operations.
-All seven are **Proposal / source reconciliation pending**. No named person, policy approval,
-production evidence, new permission, follow-up WP readiness or implementation completion is claimed.
+DEC-H01/H02 product choices are **accepted in WP-2228**, with the implemented and remaining
+mechanics distinguished above. DEC-H03–H07 remain **Proposal / source reconciliation pending**.
+No named person, additional policy approval, production evidence, new permission or readiness for
+the unresolved handoffs is claimed.
 The next allowed increment is reconciliation and a separately scoped owning implementation brief
 with exact public contracts, source version fences, migrations if needed and the relevant AC-H
 scenarios. Passing existing regression commands alone cannot accept these proposals.
