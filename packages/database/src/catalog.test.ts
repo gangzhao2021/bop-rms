@@ -190,6 +190,7 @@ describe("migration catalog", () => {
       "1700_003_create_pickup_proof",
       "1700_004_create_pickup_handoff",
       "1700_005_create_fulfillment_completion_publication",
+      "1700_006_create_capacity_hold",
       "1800_001_create_report_definition",
       "1800_002_create_report_run",
       "1800_003_create_metric_definition",
