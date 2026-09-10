@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 import { it } from "vitest";
+import { createPostgresCapacityQueryStore } from "../../rms/fulfillment/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
@@ -374,6 +375,142 @@ async function prove(context) {
     assert.deepEqual(provenance.rows, [
       { config_version: "1", capacity_units: "1", cart_id: id(10100), units_input_digest: sha },
     ]);
+
+    // WP-2340 reads actual owner rows through a dedicated role with no write grant.
+    const reader = `bop_wp2340_${context.runId}`;
+    await admin.query(`CREATE ROLE ${reader} NOLOGIN`);
+    try {
+      await admin.query(`GRANT USAGE ON SCHEMA rms_fulfillment,platform_helpers TO ${reader}`);
+      await admin.query(`GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),
+        platform_helpers.current_store_id(),platform_helpers.is_uuid_v7(uuid) TO ${reader}`);
+      for (const table of ["capacity_slot", "capacity_hold", ...added])
+        await admin.query(`GRANT SELECT ON rms_fulfillment.${table} TO ${reader}`);
+      const runner = {
+        async run(action) {
+          await admin.query("BEGIN READ ONLY");
+          try {
+            await admin.query(`SET LOCAL ROLE ${reader}`);
+            assert.equal(
+              (await admin.query("SHOW transaction_read_only")).rows[0].transaction_read_only,
+              "on",
+            );
+            const result = await action({ query: (sql, values) => admin.query(sql, values) });
+            await admin.query("COMMIT");
+            return result;
+          } catch (error) {
+            await admin.query("ROLLBACK");
+            throw error;
+          }
+        },
+      };
+      const owner = createPostgresCapacityQueryStore(runner, {
+        brandReference: brand,
+        storeReference: store,
+      });
+      const found = await owner.loadHold({ holdReference: id(100), cartReference: id(10100) });
+      assert.equal(found.state, "Converted");
+      assert.equal(found.allocationReference, id(200));
+      const recovered = await owner.resolveHoldOperation({
+        operationReference: id(20100),
+        cartReference: id(10100),
+        intentDigest: sha,
+      });
+      assert.deepEqual(recovered, found);
+      assert.equal(
+        (await owner.loadHold({ holdReference: id(160), cartReference: id(10160) })).state,
+        "Expired",
+      );
+      assert.equal(
+        (await owner.loadHold({ holdReference: id(101), cartReference: id(10101) })).state,
+        "Active",
+      );
+      assert.equal(
+        (
+          await owner.loadAllocation({
+            allocationReference: id(200),
+            orderReference: id(40200),
+            fulfillmentReference: id(50200),
+          })
+        ).state,
+        "Released",
+      );
+      assert.equal(
+        (
+          await owner.loadAllocation({
+            allocationReference: id(230),
+            orderReference: id(40230),
+            fulfillmentReference: id(50230),
+          })
+        ).state,
+        "Consumed",
+      );
+      assert.equal(
+        (
+          await owner.loadAllocation({
+            allocationReference: id(210),
+            orderReference: id(40210),
+            fulfillmentReference: id(50210),
+          })
+        ).state,
+        "Active",
+      );
+      assert.equal(await owner.loadHold({ holdReference: id(100), cartReference: id(999) }), null);
+      assert.equal(
+        await owner.loadAllocation({
+          allocationReference: id(200),
+          orderReference: id(999),
+          fulfillmentReference: id(50200),
+        }),
+        null,
+      );
+      await assert.rejects(
+        owner.resolveHoldOperation({
+          operationReference: id(20100),
+          cartReference: id(10100),
+          intentDigest: `sha256:${"c".repeat(64)}`,
+        }),
+        { code: "CAPACITY_IDEMPOTENCY_CONFLICT" },
+      );
+      await assert.rejects(
+        owner.resolveHoldOperation({
+          operationReference: id(20100),
+          cartReference: id(999),
+          intentDigest: sha,
+        }),
+        { code: "CAPACITY_IDEMPOTENCY_CONFLICT" },
+      );
+      const foreign = createPostgresCapacityQueryStore(runner, {
+        brandReference: brand,
+        storeReference: id(99),
+      });
+      assert.equal(
+        await foreign.loadHold({ holdReference: id(100), cartReference: id(10100) }),
+        null,
+      );
+      assert.equal(
+        await foreign.resolveHoldOperation({
+          operationReference: id(20100),
+          cartReference: id(10100),
+          intentDigest: sha,
+        }),
+        null,
+      );
+      const permission = await admin.query(
+        "SELECT has_table_privilege($1,'rms_fulfillment.capacity_hold','INSERT') AS can_write,has_table_privilege($1,'rms_fulfillment.fulfillment','SELECT') AS can_read_other",
+        [reader],
+      );
+      assert.deepEqual(permission.rows, [{ can_write: false, can_read_other: false }]);
+      const contextAfter = await admin.query(
+        "SELECT current_setting('bop.brand_id',true) AS brand,current_setting('bop.store_id',true) AS store",
+      );
+      assert.equal(contextAfter.rows[0].brand, "");
+      assert.equal(contextAfter.rows[0].store, "");
+    } finally {
+      await admin.query("ROLLBACK");
+      await admin.query("RESET ROLE");
+      await admin.query(`DROP OWNED BY ${reader}`);
+      await admin.query(`DROP ROLE ${reader}`);
+    }
   } finally {
     await Promise.all([
       first.query("ROLLBACK").catch(() => undefined),

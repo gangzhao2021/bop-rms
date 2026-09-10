@@ -29,3 +29,4 @@ export * from "./domain/delivery-exception.js";
 export * from "./contracts/delivery-exception.js";
 export * from "./application/ports/delivery-exception-ports.js";
 export * from "./domain/scheduled-capacity.js";
+export * from "./infrastructure/persistence/capacity-query-store.js";

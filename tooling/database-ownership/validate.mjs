@@ -190,6 +190,18 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
           module.manifest.ownedDatabase?.tables?.includes("availability_rule") &&
           moduleRelative === "src/infrastructure/persistence/availability-query-store.ts";
+        // WP-2340 admits only the Fulfillment owner capacity history reader.
+        const acceptedCapacityQueryAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          [
+            "capacity_slot",
+            "capacity_hold",
+            "capacity_hold_terminal",
+            "capacity_allocation",
+            "capacity_allocation_terminal",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/capacity-query-store.ts";
         // WP-2256 admits only the Pricing owner reader of complete Quote history.
         const acceptedPriceQuoteQueryAsset =
           module.packageName === "@rms/pricing" &&
@@ -391,6 +403,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedGuestDiningBindingAsset &&
           !acceptedPublishedMenuAsset &&
           !acceptedAvailabilityQueryAsset &&
+          !acceptedCapacityQueryAsset &&
           !acceptedPriceQuoteQueryAsset &&
           !acceptedPriceQuoteWriterAsset &&
           !acceptedPriceQuoteRequestAsset &&
