@@ -6,13 +6,17 @@
 - Owner-confirmed available Library file: `BOP-RMS Complete Handoff Package.md`
 - Available source document version: `0.5.3`
 - Composite architecture baseline: Handoff Sections `0–91` plus repository-accepted Sections `92–97`
-- Current discussion node: `WP-2334 - Catalog Availability Rule Query Store`
+- Current discussion node: `WP-2335 - Current Availability Evidence Composition`
 
 The complete Handoff Package remains outside this repository and is not duplicated here. On `2026-07-23` the Owner confirmed that no newer Library file is available and explicitly accepted a composite authority baseline: the available `0.5.3` Handoff supplies Sections 0–91；the accepted ADR and Work Package records already integrated into this repository supply later Sections 92–97. This index no longer claims an unavailable `0.5.9` file. Never store Library credentials、signed URLs、account identities、private access metadata or the complete Handoff Package in Git.
 
 Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 
 ## Latest Work Package Status
+
+- [WP-2335](./work-packages/WP-2335.md) composes Catalog rules with both required owner safety evidence kinds.
+  Catalog204/204, Ordering879/879 and actual PostgreSQL1/1 pass; owner safety ports are synthetic in acceptance.
+  Observation results do not grant final selection or checkout authority.
 
 - [WP-2334](./work-packages/WP-2334.md) reads scoped current SKU availability rules through a Catalog-owned PostgreSQL adapter.
   Original evidence: Catalog141/141, actual read-only PostgreSQL1/1 and ownership184/184 pass.

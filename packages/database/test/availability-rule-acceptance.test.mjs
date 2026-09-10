@@ -5,6 +5,7 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresAvailabilityQueryStore,
+  createCurrentAvailabilityQueryService,
   resolveStoreAvailability,
 } from "../../rms/catalog/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -161,6 +162,56 @@ async function prove(context) {
         })
       ).map((rule) => rule.ruleReference),
       [id(20)],
+    );
+    // WP-2335: actual Catalog reader; injected safety records are synthetic owner-port fixtures.
+    const syntheticSafety = (kind, evidenceScope, status) => ({
+      kind,
+      ...evidenceScope,
+      sellableReference: id(5),
+      status,
+      observedAt: at,
+      expiresAt: "2026-08-01T16:01:00.000Z",
+      reasonCode: "SYNTHETIC_CLEAR",
+    });
+    const composed = (evidenceScope, inventoryStatus = "Available") =>
+      createCurrentAvailabilityQueryService(
+        {
+          rules: createPostgresAvailabilityQueryStore(runner, evidenceScope),
+          killSwitch: {
+            async loadEvidence() {
+              return syntheticSafety("KillSwitch", evidenceScope, "Clear");
+            },
+          },
+          inventory: {
+            async loadEvidence() {
+              return inventoryStatus === null
+                ? null
+                : syntheticSafety("Inventory", evidenceScope, inventoryStatus);
+            },
+          },
+          clock: {
+            now() {
+              return at;
+            },
+          },
+        },
+        evidenceScope,
+      );
+    assert.equal((await composed(scope).resolveCurrent(request)).reasonCode, "AMBIGUOUS_RULE");
+    const scopedRequest = { ...request, ...otherScope };
+    assert.deepEqual(await composed(otherScope).resolveCurrent(scopedRequest), {
+      status: "Available",
+      reasonCode: "CATALOG_ALLOWED",
+      ruleReference: id(20),
+      observedAt: at,
+    });
+    assert.equal(
+      (await composed(otherScope, null).resolveCurrent(scopedRequest)).reasonCode,
+      "EVIDENCE_MISSING",
+    );
+    assert.equal(
+      (await composed(otherScope, "Unavailable").resolveCurrent(scopedRequest)).status,
+      "Unavailable",
     );
     const foreignScope = { brandReference: id(80), storeReference: id(7) };
     assert.deepEqual(
