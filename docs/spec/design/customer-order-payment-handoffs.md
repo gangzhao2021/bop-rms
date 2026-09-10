@@ -306,3 +306,7 @@ the unresolved handoffs is claimed.
 The next allowed increment is reconciliation and a separately scoped owning implementation brief
 with exact public contracts, source version fences, migrations if needed and the relevant AC-H
 scenarios. Passing existing regression commands alone cannot accept these proposals.
+
+## Checkout capacity follow-up
+
+[WP-2342 capacity handoff](./capacity-checkout-handoff.md) separates Scheduled, ASAP and Dine-in requirements and the remaining Payment clock producer. The Dine-in interpretation is proposed only; no new approval is recorded here.
