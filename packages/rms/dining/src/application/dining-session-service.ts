@@ -601,6 +601,7 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
         "expectedAssignmentVersion",
         "expectedSessionVersion",
         "expectedCapabilityVersion",
+        "expectedGeneration",
         "operationReference",
         "requestedAt",
       ]);
@@ -609,6 +610,9 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       const expectedAssignmentVersion = positive(raw.expectedAssignmentVersion);
       const expectedSessionVersion = positive(raw.expectedSessionVersion);
       const expectedCapabilityVersion = positive(raw.expectedCapabilityVersion);
+      const expectedGeneration = positive(raw.expectedGeneration);
+      if (!Number.isSafeInteger(expectedGeneration + 1))
+        throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
       const operationReference = parseDiningReference(raw.operationReference);
       const requestedAt = parseDiningInstant(raw.requestedAt);
       const intent = sessionPort(() =>
@@ -648,7 +652,10 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       );
       if (priorValue !== null) {
         const prior = parseStaffRegenerationRecord(priorValue, scope);
-        if (sessionPort(() => ports.credentials.equals(prior.operationIntentHash, intent)) !== true)
+        if (
+          prior.capability.generation !== expectedGeneration + 1 ||
+          sessionPort(() => ports.credentials.equals(prior.operationIntentHash, intent)) !== true
+        )
           throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
         return Object.freeze({ status: "AlreadyApplied", capability: prior.capability });
       }
@@ -692,6 +699,7 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
         session.storeReference !== staff.table.storeReference ||
         session.tableAssignmentVersion !== expectedAssignmentVersion ||
         session.version !== expectedSessionVersion ||
+        previous.generation !== expectedGeneration ||
         previous.version !== expectedCapabilityVersion
       ) {
         throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
@@ -752,6 +760,7 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       );
       const persisted = parseStaffRegenerationRecord(persistedValue, scope);
       if (
+        persisted.capability.generation !== expectedGeneration + 1 ||
         sessionPort(() => ports.credentials.equals(persisted.operationIntentHash, intent)) !== true
       )
         throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");

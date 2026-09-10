@@ -315,12 +315,13 @@ it("regenerates scoped Join generations with atomic history and Audit", async ()
       const started = await service().start(command(20, 30));
       assert.equal(started.status, "Issued");
       const sessionId = started.session.diningSessionReference;
-      const regenCommand = (operation, version = 1, minute = 2) => ({
+      const regenCommand = (operation, version = 1, minute = 2, generation = 1) => ({
         diningSessionReference: sessionId,
         tableReference: id(20),
         expectedAssignmentVersion: 2,
         expectedSessionVersion: 1,
         expectedCapabilityVersion: version,
+        expectedGeneration: generation,
         operationReference: id(operation),
         requestedAt: at(minute),
       });
@@ -351,7 +352,7 @@ it("regenerates scoped Join generations with atomic history and Audit", async ()
         credentials,
       );
       await assert.rejects(
-        service(broken).regenerate(regenCommand(41)),
+        service(broken).regenerate(regenCommand(41, 1, 2, 2)),
         (e) => e.code === "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
       );
       assert.deepEqual(await regenerationReader.resolveActiveJoin(sessionId), before);
@@ -362,7 +363,7 @@ it("regenerates scoped Join generations with atomic history and Audit", async ()
         credentials,
       );
       await assert.rejects(
-        service(readonly).regenerate(regenCommand(42)),
+        service(readonly).regenerate(regenCommand(42, 1, 2, 2)),
         (e) => e.code === "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
       );
       const lost = createPostgresDiningJoinRegenerationStore(
@@ -371,10 +372,13 @@ it("regenerates scoped Join generations with atomic history and Audit", async ()
         credentials,
       );
       await assert.rejects(
-        service(lost).regenerate(regenCommand(43)),
+        service(lost).regenerate(regenCommand(43, 1, 2, 2)),
         (e) => e.code === "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
       );
-      assert.equal((await service().regenerate(regenCommand(43))).status, "AlreadyApplied");
+      assert.equal(
+        (await service().regenerate(regenCommand(43, 1, 2, 2))).status,
+        "AlreadyApplied",
+      );
       assert.deepEqual(await counts(), { capabilities: 3, operations: 2, audits: 2 });
       function barrier() {
         let arrived = 0;
@@ -389,14 +393,14 @@ it("regenerates scoped Join generations with atomic history and Audit", async ()
       }
       let wait = barrier();
       const same = await Promise.all([
-        service(regenerationWriter, wait).regenerate(regenCommand(44)),
-        service(regenerationWriter, wait).regenerate(regenCommand(44)),
+        service(regenerationWriter, wait).regenerate(regenCommand(44, 1, 2, 3)),
+        service(regenerationWriter, wait).regenerate(regenCommand(44, 1, 2, 3)),
       ]);
       assert.deepEqual(same.map((x) => x.status).sort(), ["AlreadyApplied", "Issued"]);
       wait = barrier();
       const competing = await Promise.allSettled([
-        service(regenerationWriter, wait).regenerate(regenCommand(45)),
-        service(regenerationWriter, wait).regenerate(regenCommand(46)),
+        service(regenerationWriter, wait).regenerate(regenCommand(45, 1, 2, 4)),
+        service(regenerationWriter, wait).regenerate(regenCommand(46, 1, 2, 4)),
       ]);
       assert.equal(competing.filter((x) => x.status === "fulfilled").length, 1);
       assert.equal(
@@ -425,7 +429,11 @@ it("regenerates scoped Join generations with atomic history and Audit", async ()
           ],
         );
         assert.equal(
-          (await service().regenerate(regenCommand(operation, 2, minute))).status,
+          (
+            await service().regenerate(
+              regenCommand(operation, 2, minute, state.capability.generation),
+            )
+          ).status,
           "Issued",
         );
         const persisted = (
@@ -437,9 +445,13 @@ it("regenerates scoped Join generations with atomic history and Audit", async ()
         assert.deepEqual(persisted, terminal);
       }
       // Active but elapsed capability also permits an explicitly fresh generation.
-      assert.equal((await service().regenerate(regenCommand(52, 1, 40))).status, "Issued");
+      assert.equal((await service().regenerate(regenCommand(52, 1, 40, 7))).status, "Issued");
       assert.deepEqual(await counts(), { capabilities: 8, operations: 7, audits: 7 });
       assert.deepEqual(await regenerationReader.resolveRegenerationOperation(id(40)), original);
+      assert.deepEqual(await service().regenerate(first), {
+        status: "AlreadyApplied",
+        capability: original.capability,
+      });
       const foreign = createPostgresDiningJoinRegenerationStore(
         runner({ readOnly: true }),
         { ...scope, storeReference: id(90) },
@@ -520,7 +532,7 @@ it("regenerates scoped Join generations with atomic history and Audit", async ()
             "UPDATE rms_dining.dining_table SET version=$2,table_snapshot=$3::jsonb,observed_at=$4 WHERE table_id=$1",
             [id(20), blocked.aggregateVersion, JSON.stringify(blocked), at(40)],
           );
-        }).regenerate(regenCommand(60, 1, 40)),
+        }).regenerate(regenCommand(60, 1, 40, 8)),
         (e) => e.code === "DINING_SESSION_VERSION_CONFLICT",
       );
       const blocked = await tableReader.loadTable(id(20));
@@ -541,7 +553,7 @@ it("regenerates scoped Join generations with atomic history and Audit", async ()
             "UPDATE rms_dining.dining_session SET version=2,phase='Closing',session_snapshot=$2::jsonb WHERE session_id=$1",
             [sessionId, JSON.stringify({ ...session, phase: "Closing", version: 2 })],
           );
-        }).regenerate(regenCommand(61, 1, 40)),
+        }).regenerate(regenCommand(61, 1, 40, 8)),
         (e) => e.code === "DINING_SESSION_VERSION_CONFLICT",
       );
       assert.equal(await regenerationReader.resolveActiveJoin(sessionId), null);

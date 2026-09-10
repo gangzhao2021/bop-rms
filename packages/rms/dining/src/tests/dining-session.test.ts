@@ -379,6 +379,7 @@ describe("staff-started Dining Session contract", () => {
       expectedAssignmentVersion: 7,
       expectedSessionVersion: 1,
       expectedCapabilityVersion: 1,
+      expectedGeneration: 1,
       operationReference: ids.regenerateOperation,
       requestedAt: regenerateAt,
     });
@@ -415,6 +416,7 @@ const regenerationInput = {
   expectedAssignmentVersion: 7,
   expectedSessionVersion: 1,
   expectedCapabilityVersion: 1,
+  expectedGeneration: 1,
   operationReference: ids.regenerateOperation,
   requestedAt: regenerateAt,
 };
@@ -1257,4 +1259,23 @@ describe("WP-2276 sequential Guest admission", () => {
       expect(generate).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("normal regeneration generation fence", () => {
+  it("rejects a delayed different operation before generating or writing", async () => {
+    const { service, ports } = fixture();
+    await start(service);
+    const issued = await service.regenerate(regenerationInput);
+    const generate = vi.spyOn(ports.credentials, "generateJoinCredential");
+    const write = vi.spyOn(ports.store, "regenerate");
+    await expect(
+      service.regenerate({ ...regenerationInput, operationReference: ids.policy }),
+    ).rejects.toMatchObject({ code: "DINING_SESSION_UNAVAILABLE" });
+    expect(generate).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(await service.regenerate(regenerationInput)).toEqual({
+      status: "AlreadyApplied",
+      capability: issued.capability,
+    });
+  });
 });

@@ -377,6 +377,7 @@ it("consumes Join credentials and creates Participant, Host and admission atomic
           expectedAssignmentVersion: 2,
           expectedSessionVersion: state.session.version,
           expectedCapabilityVersion: state.capability.version,
+          expectedGeneration: state.capability.generation,
           operationReference: id(operation),
           requestedAt: at(minute),
         });

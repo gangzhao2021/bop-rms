@@ -432,6 +432,7 @@ it("reissues a fresh Join generation after committed Move with current Staff and
           expectedAssignmentVersion: session.tableAssignmentVersion,
           expectedSessionVersion: session.version,
           expectedCapabilityVersion: state.capability.version,
+          expectedGeneration: state.capability.generation,
           operationReference: id(operation),
           requestedAt: at(minute),
         };
@@ -541,7 +542,14 @@ it("reissues a fresh Join generation after committed Move with current Staff and
       assert.deepEqual(await counts(), { operations: 2, linked: 1, audits: 2 });
       selectedReissueWriter = movedWriter;
       const returned = await service().regenerate(retryRequest);
+      const afterReturned = await counts();
+      const currentReturned = await regenerationReader.resolveActiveJoin(sessionId);
       assert.equal(returned.status, "Issued");
+      await assert.rejects(service().regenerate({ ...retryRequest, operationReference: id(195) }), {
+        code: "DINING_SESSION_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), afterReturned);
+      assert.deepEqual(await regenerationReader.resolveActiveJoin(sessionId), currentReturned);
       assert.equal(returned.capability.tableReference, normal.capability.tableReference);
       assert(returned.capability.assignmentVersion > normal.capability.assignmentVersion);
       assert.equal(

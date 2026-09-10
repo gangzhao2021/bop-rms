@@ -305,3 +305,7 @@ and atomic Dining service/storage composition remain separate.
 
 WP-2286 connects current Staff authority and committed Move facts to atomic fresh Join generation.
 Dining610/610, Dining PostgreSQL8/8, full verification and forced integration pass; Identity consumption and shared Cart remain separate.
+
+WP-2287 binds Staff regeneration to the exact predecessor generation, including original retry and
+returned receipt identity. Dining623/623, Dining PostgreSQL8/8, full verification and forced
+uncached integration pass. Identity consumption and shared Cart remain separate.

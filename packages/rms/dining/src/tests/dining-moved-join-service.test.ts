@@ -262,6 +262,7 @@ function fixture(includeMoved = true) {
     expectedAssignmentVersion: 3,
     expectedSessionVersion: 2,
     expectedCapabilityVersion: 1,
+    expectedGeneration: 1,
     operationReference: id(22),
     requestedAt: issuedAt,
   };
@@ -335,7 +336,7 @@ describe("currently authorized Join reissue after Move", () => {
     });
     expect(x.write).not.toHaveBeenCalled();
   });
-  it.each(["expectedSessionVersion", "expectedCapabilityVersion"] as const)(
+  it.each(["expectedSessionVersion", "expectedCapabilityVersion", "expectedGeneration"] as const)(
     "denies stale %s",
     async (field) => {
       const x = fixture();
@@ -414,5 +415,48 @@ describe("currently authorized Join reissue after Move", () => {
       parseMovedJoinState(value, hashes, { ...scope, diningSessionReference: id(5) }),
     ).toThrow();
     expect(get).not.toHaveBeenCalled();
+  });
+});
+
+describe("regeneration generation identity", () => {
+  it.each([undefined, null, 0, -1, 1.5, "1", Number.MAX_SAFE_INTEGER, Infinity])(
+    "rejects invalid predecessor generation %s before issuance",
+    async (expectedGeneration) => {
+      const x = fixture();
+      await expect(x.service.regenerate({ ...x.input, expectedGeneration })).rejects.toBeInstanceOf(
+        Error,
+      );
+      expect(x.generate).not.toHaveBeenCalled();
+      expect(x.write).not.toHaveBeenCalled();
+    },
+  );
+  it("rejects an omitted generation", async () => {
+    const x = fixture();
+    const input: Record<string, unknown> = { ...x.input };
+    delete input.expectedGeneration;
+    await expect(x.service.regenerate(input)).rejects.toMatchObject({
+      code: "DINING_SESSION_INPUT_INVALID",
+    });
+    expect(x.authorize).not.toHaveBeenCalled();
+  });
+  it("conflicts when the original operation is retried for another generation", async () => {
+    const x = fixture();
+    await x.service.regenerate(x.input);
+    await expect(x.service.regenerate({ ...x.input, expectedGeneration: 2 })).rejects.toMatchObject(
+      { code: "DINING_SESSION_IDEMPOTENCY_CONFLICT" },
+    );
+    expect(x.write).toHaveBeenCalledTimes(1);
+    expect(x.generate).toHaveBeenCalledTimes(1);
+  });
+  it("rejects a wrong-generation persistence receipt", async () => {
+    const x = fixture();
+    x.write.mockImplementationOnce(async (input) => ({
+      capability: { ...input.replacement, generation: 3 },
+      operationReference: input.operationReference,
+      operationIntentHash: input.operationIntentHash,
+    }));
+    await expect(x.service.regenerate(x.input)).rejects.toMatchObject({
+      code: "DINING_SESSION_IDEMPOTENCY_CONFLICT",
+    });
   });
 });

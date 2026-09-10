@@ -542,6 +542,7 @@ it("persists authorized Closing atomically with immutable scoped original result
         expectedAssignmentVersion: 2,
         expectedSessionVersion: 8,
         expectedCapabilityVersion: 2,
+        expectedGeneration: 1,
         operationReference: id(99),
         requestedAt: at(4),
       });

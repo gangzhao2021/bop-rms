@@ -436,6 +436,7 @@ it("moves Dining Session and both Tables atomically with original commit receipt
           expectedAssignmentVersion: 3,
           expectedSessionVersion: 3,
           expectedCapabilityVersion: 2,
+          expectedGeneration: 1,
           operationReference: id(89),
           requestedAt: at(4),
         }),

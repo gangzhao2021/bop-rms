@@ -396,6 +396,7 @@ it("reads coherent current Dining participation without writing authority or his
         expectedAssignmentVersion: 2,
         expectedSessionVersion: 2,
         expectedCapabilityVersion: 2,
+        expectedGeneration: 1,
         operationReference: id(41),
         requestedAt: at(3),
       });
