@@ -28,6 +28,34 @@ export function createPostgresCartItemOperationStore(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
 ): CartItemOperationStore {
+  return createScopedOperationStore(runner, scope);
+}
+
+/** Bound application recovery; rejects mismatched immutable headers before reading notes. */
+export function createPostgresBoundCartItemOperationStore(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{
+    brandReference: string;
+    storeReference: string;
+    cartReference: string;
+    guestSessionReference: string;
+  }>,
+): CartItemOperationStore {
+  return createScopedOperationStore(
+    runner,
+    scope,
+    Object.freeze({
+      cartReference: parseOrderingReference(scope.cartReference),
+      guestSessionReference: parseOrderingReference(scope.guestSessionReference),
+    }),
+  );
+}
+
+function createScopedOperationStore(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  binding?: Readonly<{ cartReference: string; guestSessionReference: string }>,
+): CartItemOperationStore {
   const brand = parseOrderingReference(scope.brandReference);
   const store = parseOrderingReference(scope.storeReference);
   return Object.freeze({
@@ -39,7 +67,43 @@ export function createPostgresCartItemOperationStore(
             "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
             [brand, store],
           );
-          const response = await transaction.query(select, [brand, store, reference]);
+          if (binding !== undefined) {
+            const header = await transaction.query(
+              'SELECT cart_id AS "cartReference", guest_session_id AS "guestSessionReference" FROM rms_ordering.cart_operation_record WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3',
+              [brand, store, reference],
+            );
+            if (
+              header === null ||
+              typeof header !== "object" ||
+              !("rows" in header) ||
+              !Array.isArray(header.rows) ||
+              header.rows.length > 1
+            )
+              throw new Error("invalid header");
+            if (header.rows.length === 0) return null;
+            const row = header.rows[0];
+            if (row === null || typeof row !== "object" || Array.isArray(row))
+              throw new Error("invalid header");
+            const fields = Object.getOwnPropertyDescriptors(row);
+            if (
+              Reflect.ownKeys(row).length !== 2 ||
+              !fields.cartReference?.enumerable ||
+              !("value" in fields.cartReference) ||
+              !fields.guestSessionReference?.enumerable ||
+              !("value" in fields.guestSessionReference)
+            )
+              throw new Error("invalid header");
+            const cart = parseOrderingReference(fields.cartReference.value);
+            const guest = parseOrderingReference(fields.guestSessionReference.value);
+            if (cart !== binding.cartReference || guest !== binding.guestSessionReference)
+              throw new CartError("CART_IDEMPOTENCY_CONFLICT");
+          }
+          const response = await transaction.query(
+            binding === undefined ? select : `${select} AND cart_id = $4 AND guest_session_id = $5`,
+            binding === undefined
+              ? [brand, store, reference]
+              : [brand, store, reference, binding.cartReference, binding.guestSessionReference],
+          );
           if (
             response === null ||
             typeof response !== "object" ||
@@ -48,7 +112,10 @@ export function createPostgresCartItemOperationStore(
             response.rows.length > 1
           )
             throw new Error("invalid result");
-          if (response.rows.length === 0) return null;
+          if (response.rows.length === 0) {
+            if (binding !== undefined) throw new Error("missing immutable operation");
+            return null;
+          }
           const row: unknown = response.rows[0];
           if (
             row === null ||
@@ -95,6 +162,9 @@ export function createPostgresCartItemOperationStore(
             raw.operationReference !== reference ||
             raw.brandReference !== brand ||
             raw.storeReference !== store ||
+            (binding !== undefined &&
+              (cartReference !== binding.cartReference ||
+                guestSessionReference !== binding.guestSessionReference)) ||
             result.brandReference !== brand ||
             result.storeReference !== store ||
             result.cartReference !== cartReference ||
@@ -123,7 +193,13 @@ export function createPostgresCartItemOperationStore(
             expiresAt,
           });
         });
-      } catch {
+      } catch (error) {
+        if (
+          binding !== undefined &&
+          error instanceof CartError &&
+          error.code === "CART_IDEMPOTENCY_CONFLICT"
+        )
+          throw new CartError("CART_IDEMPOTENCY_CONFLICT");
         throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
       }
     },

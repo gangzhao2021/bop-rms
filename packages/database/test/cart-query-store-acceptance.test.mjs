@@ -7,6 +7,7 @@ import {
   createPostgresDiningCartReadStore,
   createDiningCartReadService,
   createPostgresCartItemOperationStore,
+  createPostgresBoundCartItemOperationStore,
 } from "../../rms/ordering/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
@@ -176,6 +177,22 @@ it("reads scoped Cart facts through a least-privilege read-only PostgreSQL adapt
       const operations = createPostgresCartItemOperationStore(runner, scope);
       const historical = await operations.resolveOperation(id(30));
       assert.deepEqual(historical.result, snapshot);
+      const boundHistory = createPostgresBoundCartItemOperationStore(runner, {
+        ...scope,
+        cartReference: id(1),
+        guestSessionReference: id(4),
+      });
+      assert.deepEqual(await boundHistory.resolveOperation(id(30)), historical);
+      for (const mismatch of [{ cartReference: id(10) }, { guestSessionReference: id(99) }])
+        await assert.rejects(
+          createPostgresBoundCartItemOperationStore(runner, {
+            ...scope,
+            cartReference: id(1),
+            guestSessionReference: id(4),
+            ...mismatch,
+          }).resolveOperation(id(30)),
+          { code: "CART_IDEMPOTENCY_CONFLICT" },
+        );
       assert.equal(historical.expiresAt, "2026-08-03T14:00:00.000Z");
       assert.equal((await reader.load(id(1))).aggregateVersion, 3);
       assert.deepEqual(

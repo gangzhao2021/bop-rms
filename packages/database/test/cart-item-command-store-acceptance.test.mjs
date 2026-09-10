@@ -8,6 +8,9 @@ import {
   createPostgresCartQueryStore,
   createPostgresCartItemOperationStore,
   createPostgresCartItemCommandStore,
+  createDiningCartItemService,
+  createPostgresDiningCartCommandQueryStore,
+  createPostgresBoundCartItemOperationStore,
 } from "../../rms/ordering/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client } = pg;
@@ -398,6 +401,183 @@ it.each([1, 999])(
           ).rows[0].sequence,
           9,
         );
+        if (initialVersion === 1) {
+          // WP-2323: real owner repositories and transactions; Identity/Dining/Catalog are
+          // explicitly synthetic current-authority fixtures, not live admission evidence.
+          await admin.query(
+            `INSERT INTO rms_ordering.cart
+            (cart_id,brand_id,store_id,order_type,source_channel,dining_session_id,created_by_actor_id,
+             aggregate_version,created_at,updated_at,lifecycle_status,lifecycle_policy_version_id,
+             lifecycle_policy_digest,idle_timeout_seconds,absolute_timeout_seconds,idle_expires_at,absolute_expires_at)
+            VALUES($1,$2,$3,'DineIn','Qr',$4,$5,1,$6,$6,'Active',$7,$8,3600,86400,$9,$10)`,
+            [
+              id(200),
+              id(2),
+              id(3),
+              id(201),
+              id(204),
+              createdAt,
+              id(7),
+              `sha256:${"a".repeat(64)}`,
+              "2026-08-02T15:00:00.000Z",
+              "2026-08-03T14:00:00.000Z",
+            ],
+          );
+          let allowed = true;
+          let ownerReads = 0;
+          function dining(actor, participant, selectedWriter = writer) {
+            return createDiningCartItemService({
+              scope,
+              now: () => at,
+              sessions: {
+                authorize: async (request) => {
+                  assert.equal(request.sessionCredential, "a".repeat(43));
+                  assert.equal(request.csrfCredential, "b".repeat(43));
+                  return {
+                    ...guest,
+                    sessionReference: id(actor),
+                    channel: "DineIn",
+                    publicTableReference: id(202),
+                    diningState: "DiningBound",
+                    diningSessionReference: id(201),
+                    diningParticipantReference: id(participant),
+                  };
+                },
+              },
+              participation: {
+                resolve: async (request) => {
+                  assert.deepEqual(request, {
+                    purpose: "Cart",
+                    diningSessionReference: id(201),
+                    participantReference: id(participant),
+                  });
+                  return allowed
+                    ? {
+                        schemaVersion: 1,
+                        ...scope,
+                        diningSessionReference: id(201),
+                        participantReference: id(participant),
+                        tableReference: id(203),
+                        tableAssignmentVersion: 1,
+                        diningSessionVersion: 1,
+                        participantVersion: 1,
+                        observedAt: at,
+                      }
+                    : null;
+                },
+              },
+              catalog: {
+                validateSelection: async (request) => ({
+                  ...request,
+                  status: "Accepted",
+                  menuVersionReference: id(9),
+                  productVersionReference: id(10),
+                  catalogChannelCode: "PILOT_CHANNEL",
+                  catalogOrderTypeCode: "PILOT_ORDER_TYPE",
+                  ruleEvidence: [],
+                  validatedAt: request.observedAt,
+                }),
+              },
+              references: { ...references, generate: () => id(++generated) },
+              audit: (input) => ({
+                auditId: id(++generated),
+                brandId: id(2),
+                storeId: id(3),
+                actor: { type: "System" },
+                actionCode: `ORDERING_CART_ITEM_${input.action.toUpperCase()}`,
+                targetType: "OrderingCart",
+                targetId: input.cartReference,
+                reasonCode: "AUTHORIZED_CART_MUTATION",
+                correlationId: input.operationReference,
+                occurredAt: input.observedAt,
+                sourceChannel: "CUSTOMER_PWA",
+                dataClassification: "Restricted",
+                retentionPolicyCode: "AUDIT_DEFAULT",
+                retentionPolicyVersion: 1,
+              }),
+              repository: (bound) => {
+                ownerReads++;
+                return {
+                  load: createPostgresDiningCartCommandQueryStore(runner({ readOnly: true }), bound)
+                    .load,
+                  resolveOperation: createPostgresBoundCartItemOperationStore(
+                    runner({ readOnly: true }),
+                    bound,
+                  ).resolveOperation,
+                  commit: selectedWriter.commit,
+                };
+              },
+            });
+          }
+          const one = dining(204, 205);
+          const two = dining(206, 207);
+          const common = {
+            sessionCredential: "a".repeat(43),
+            csrfCredential: "b".repeat(43),
+            cartReference: id(200),
+          };
+          const addDining = (operation, version) => ({
+            ...common,
+            operationReference: id(operation),
+            expectedAggregateVersion: version,
+            sellableReference: id(11),
+            quantity: 2,
+            optionSelections: [],
+            customerNote: "Synthetic Dining note",
+          });
+          const own = await one.add(addDining(220, 1));
+          const other = await two.add(addDining(221, 2));
+          await assert.rejects(
+            one.update({
+              ...common,
+              operationReference: id(222),
+              expectedAggregateVersion: 3,
+              cartItemReference: other.cartItemReference,
+              quantity: 3,
+              optionSelections: [],
+              customerNote: null,
+            }),
+            { code: "CART_PERMISSION_DENIED" },
+          );
+          await one.update({
+            ...common,
+            operationReference: id(223),
+            expectedAggregateVersion: 3,
+            cartItemReference: own.cartItemReference,
+            quantity: 3,
+            optionSelections: [],
+            customerNote: null,
+          });
+          await one.remove({
+            ...common,
+            operationReference: id(224),
+            expectedAggregateVersion: 4,
+            cartItemReference: own.cartItemReference,
+          });
+          const lostWriter = createPostgresCartItemCommandStore(
+            runner({ loseAck: true }),
+            scope,
+            references,
+          );
+          await assert.rejects(dining(204, 205, lostWriter).add(addDining(225, 5)), {
+            code: "CART_DEPENDENCY_UNAVAILABLE",
+          });
+          const recovered = await one.add(addDining(225, 5));
+          assert.equal(recovered.status, "AlreadyApplied");
+          assert.equal(recovered.aggregateVersion, 6);
+          await assert.rejects(two.add(addDining(225, 5)), { code: "CART_IDEMPOTENCY_CONFLICT" });
+          allowed = false;
+          const beforeDenied = ownerReads;
+          await assert.rejects(one.add(addDining(225, 5)), { code: "CART_PERMISSION_DENIED" });
+          assert.equal(ownerReads, beforeDenied);
+          const final = await reader.load(id(200));
+          assert.equal(final.aggregateVersion, 6);
+          assert.deepEqual(
+            final.items.map((item) => item.addedByParticipantReference).sort(),
+            [id(205), id(207)].sort(),
+          );
+          assert.deepEqual(await counts(), { operations: 13, audits: 13 });
+        }
         assert.equal(active, 0);
       } finally {
         await admin.end();

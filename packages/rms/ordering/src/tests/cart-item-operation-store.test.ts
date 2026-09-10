@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPostgresCartItemOperationStore } from "../infrastructure/persistence/cart-item-operation-store.js";
+import {
+  createPostgresCartItemOperationStore,
+  createPostgresBoundCartItemOperationStore,
+} from "../infrastructure/persistence/cart-item-operation-store.js";
 
 const id = (n: number) => `018f5000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T14:00:00.000Z";
@@ -154,5 +157,106 @@ describe("scoped Cart Item operation reader", () => {
       message: "cart is unavailable",
     });
     expect(error).not.toHaveProperty("cause");
+  });
+});
+
+describe("bound Cart operation snapshot privacy", () => {
+  const binding = { ...scope, cartReference: id(1), guestSessionReference: id(4) };
+  function bound(
+    header: unknown = { rows: [{ cartReference: id(1), guestSessionReference: id(4) }] },
+    result: unknown = { rows: [row()] },
+  ) {
+    const query = vi.fn<(sql: string, values: readonly unknown[]) => Promise<unknown>>(
+      async (sql) =>
+        sql.startsWith("SELECT set_config")
+          ? { rows: [] }
+          : sql.startsWith("SELECT cart_id AS")
+            ? header
+            : result,
+    );
+    const store = createPostgresBoundCartItemOperationStore(
+      { run: async (action) => action({ query }) },
+      binding,
+    );
+    return { query, store };
+  }
+  it("reads snapshots only after matching immutable headers and constrains both statements", async () => {
+    const f = bound();
+    expect(await f.store.resolveOperation(id(9))).toMatchObject({
+      cartReference: id(1),
+      guestSessionReference: id(4),
+    });
+    expect(f.query).toHaveBeenCalledTimes(3);
+    expect(f.query.mock.calls[1]?.[0]).not.toContain("result_cart_snapshot_json");
+    expect(f.query.mock.calls[2]?.[1]).toEqual([id(2), id(3), id(9), id(1), id(4)]);
+  });
+  it.each([
+    { cartReference: id(90), guestSessionReference: id(4) },
+    { cartReference: id(1), guestSessionReference: id(90) },
+  ])("rejects mismatched bindings without a restricted snapshot query", async (header) => {
+    const f = bound({ rows: [header] });
+    await expect(f.store.resolveOperation(id(9))).rejects.toMatchObject({
+      code: "CART_IDEMPOTENCY_CONFLICT",
+      message: "cart idempotency conflict",
+    });
+    expect(f.query).toHaveBeenCalledTimes(2);
+    expect(f.query.mock.calls.some(([sql]) => sql.includes("result_cart_snapshot_json"))).toBe(
+      false,
+    );
+  });
+  it("returns null for absent headers without fetching snapshots", async () => {
+    const f = bound({ rows: [] });
+    expect(await f.store.resolveOperation(id(9))).toBeNull();
+    expect(f.query).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    null,
+    {},
+    { rows: null },
+    { rows: [null] },
+    { rows: [{}] },
+    { rows: [{ cartReference: "invalid", guestSessionReference: id(4) }] },
+  ])("bounds malformed headers", async (header) => {
+    const f = bound(header);
+    await expect(f.store.resolveOperation(id(9))).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.query).toHaveBeenCalledTimes(2);
+  });
+  it("rejects accessors without invoking them", async () => {
+    const get = vi.fn(() => id(1));
+    const header = Object.defineProperty({ guestSessionReference: id(4) }, "cartReference", {
+      get,
+      enumerable: true,
+    });
+    await expect(bound({ rows: [header] }).store.resolveOperation(id(9))).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(get).not.toHaveBeenCalled();
+  });
+  it("rejects missing immutable snapshots and substituted records", async () => {
+    const header = { rows: [{ cartReference: id(1), guestSessionReference: id(4) }] };
+    for (const result of [{ rows: [] }, { rows: [{ ...row(), guestSessionReference: id(90) }] }])
+      await expect(bound(header, result).store.resolveOperation(id(9))).rejects.toMatchObject({
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+  });
+  it("captures trusted binding before awaits and rejects invalid scope without SQL", async () => {
+    const f = bound();
+    const mutable = { ...binding };
+    const runner = {
+      run: async <T>(action: (tx: { query: typeof f.query }) => Promise<T>) =>
+        action({ query: f.query }),
+    };
+    const store = createPostgresBoundCartItemOperationStore(runner, mutable);
+    mutable.cartReference = id(90);
+    await store.resolveOperation(id(9));
+    expect(f.query.mock.calls[2]?.[1]).toContain(id(1));
+    expect(() =>
+      createPostgresBoundCartItemOperationStore(runner, {
+        ...binding,
+        guestSessionReference: "invalid",
+      }),
+    ).toThrow();
   });
 });

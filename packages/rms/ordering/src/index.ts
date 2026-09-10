@@ -65,6 +65,7 @@ export {
 } from "./infrastructure/persistence/cart-query-store.js";
 export {
   createPostgresCartItemOperationStore,
+  createPostgresBoundCartItemOperationStore,
   type CartItemOperationStore,
 } from "./infrastructure/persistence/cart-item-operation-store.js";
 export {

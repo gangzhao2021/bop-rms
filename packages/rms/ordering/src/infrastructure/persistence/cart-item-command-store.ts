@@ -13,7 +13,10 @@ import {
 } from "../../domain/cart.js";
 import { advanceCartLifecycle } from "../../domain/cart-lifecycle.js";
 import { createPostgresCartQueryStore, type CartQueryTransaction } from "./cart-query-store.js";
-import { createPostgresCartItemOperationStore } from "./cart-item-operation-store.js";
+import {
+  createPostgresCartItemOperationStore,
+  createPostgresBoundCartItemOperationStore,
+} from "./cart-item-operation-store.js";
 
 export interface CartItemWriteTransactionRunner {
   // Own a bounded transaction: commit on success, rollback on every failure, release connection/context.
@@ -217,10 +220,19 @@ export function createPostgresCartItemCommandStore(
           const borrowed = {
             run: async <T>(action: (tx: CartQueryTransaction) => Promise<T>) => action(transaction),
           };
-          const prior = await createPostgresCartItemOperationStore(borrowed, {
+          const operationScope = {
             brandReference: brand,
             storeReference: store,
-          }).resolveOperation(next.operationReference);
+          };
+          const operationReader =
+            next.result.orderType === "DineIn"
+              ? createPostgresBoundCartItemOperationStore(borrowed, {
+                  ...operationScope,
+                  cartReference: next.cartReference,
+                  guestSessionReference: next.guestSessionReference,
+                })
+              : createPostgresCartItemOperationStore(borrowed, operationScope);
+          const prior = await operationReader.resolveOperation(next.operationReference);
           if (prior !== null) {
             if (
               prior.action !== next.action ||

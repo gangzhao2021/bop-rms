@@ -505,3 +505,8 @@ WP-2322 adds current Identity/CSRF and Dining authority around item Add/Update/R
 pre-history, pre-commit and post-result checks. Real owner-store/API wiring remains separate.
 Ordering816/816, final affected20/20 and static/security gates pass. No real-service PostgreSQL
 composition or new full-repository regression is claimed for this application-only work.
+
+WP-2323 limits operation snapshot reads by Cart/Guest before restricted data retrieval, including
+Dining writer retries. Real owner-store composition with synthetic authority providers passes,
+including shared participant edits and lost-commit-ack recovery without duplicate history/Audit.
+Ordering829/829, final affected41/41, Cart PostgreSQL9/9 and static/security gates pass.
