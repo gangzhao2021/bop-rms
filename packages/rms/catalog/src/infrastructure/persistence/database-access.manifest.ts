@@ -405,6 +405,15 @@ const databaseAccessManifestInput = {
   ],
   accesses: [
     {
+      id: "availability.read.availability_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "availability_rule" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/availability-query-store.ts",
+    },
+    {
       id: "published-menu.read.published_menu_projection_generation",
       operation: "read",
       mechanism: "repository",

@@ -184,6 +184,12 @@ async function scanUnsupported(root, module, diagnostics) {
             "published_menu_projection_checkpoint",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/published-menu-query-store.ts";
+        // WP-2334 admits only the Catalog-owned SKU availability rule reader.
+        const acceptedAvailabilityQueryAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          module.manifest.ownedDatabase?.tables?.includes("availability_rule") &&
+          moduleRelative === "src/infrastructure/persistence/availability-query-store.ts";
         // WP-2256 admits only the Pricing owner reader of complete Quote history.
         const acceptedPriceQuoteQueryAsset =
           module.packageName === "@rms/pricing" &&
@@ -384,6 +390,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedGuestBindingAsset &&
           !acceptedGuestDiningBindingAsset &&
           !acceptedPublishedMenuAsset &&
+          !acceptedAvailabilityQueryAsset &&
           !acceptedPriceQuoteQueryAsset &&
           !acceptedPriceQuoteWriterAsset &&
           !acceptedPriceQuoteRequestAsset &&

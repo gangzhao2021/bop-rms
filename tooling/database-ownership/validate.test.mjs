@@ -657,6 +657,40 @@ describe("Database Schema Ownership Architecture Test", () => {
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
 
+  it("accepts only the WP-2334 Catalog availability reader without driver imports", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "catalog", "rms_catalog", ["availability_rule"]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/availability-query-store.ts",
+    );
+    await writeFile(asset, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, "export const synthetic = true;\n");
+    await writeFile(join(dirname(asset), "other-store.ts"), "export const synthetic = true;\n");
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each(["owner", "schema", "table"])(
+    "does not transfer WP-2334 admission with changed %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "catalog",
+        changed === "schema" ? "rms_other" : "rms_catalog",
+        changed === "table" ? ["other_table"] : ["availability_rule"],
+      );
+      await writeFile(
+        join(context.moduleRoot, "src/infrastructure/persistence/availability-query-store.ts"),
+        "export const synthetic = true;\n",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
   it("accepts only the WP-2256 Pricing history reader without driver imports", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "pricing", "rms_pricing", ["price_quote"]);

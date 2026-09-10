@@ -36,3 +36,4 @@ export * from "./application/ports/bundle-ports.js";
 export * from "./application/bundle-service.js";
 export * from "./infrastructure/persistence/published-menu-query-store.js";
 export * from "./application/selection-display-query-service.js";
+export * from "./infrastructure/persistence/availability-query-store.js";
