@@ -390,3 +390,8 @@ candidate recovery, current-context generation fences and confirmed-only CSRF pu
 PWA508/508, security111/111, actual coordinator/client/HTTP/PG recovery, full verification and
 forced uncached integration pass. Exactly one CSRF publication and original preparation survive
 unknown activation; repeated success reauthorizes. UI/runtime activation remains separate.
+
+WP-2303 adds Dining-owned current-version joining from a separate credential, retaining current
+Guest/abuse gates, original replay and exact atomic write versions. Dining951/951, actual
+PostgreSQL replay/race acceptance, full verification and forced uncached integration pass.
+This does not add Guest self-start, HTTP/UI or Identity binding authority.

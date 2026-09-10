@@ -1613,6 +1613,67 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         coordinatorServer.closeAllConnections();
         await new Promise((resolve) => coordinatorServer.close(resolve));
       }
+      // WP-2303: owner chooses versions; actual atomic writer still rejects a post-read race.
+      await configure(38);
+      guestTables.set(id(117), id(38));
+      const pStart = await service().start(command(38, 131));
+      const currentIntent = {
+        guestSessionReference: id(117),
+        joinCredential: pStart.joinCredential,
+        operationReference: id(132),
+        requestedAt: at(2),
+      };
+      const pJoin = await service().joinCurrent(currentIntent);
+      assert.equal(pJoin.status, "Joined");
+      assert.deepEqual(await service().joinCurrent({ ...currentIntent, requestedAt: at(3) }), {
+        ...pJoin,
+        status: "AlreadyApplied",
+      });
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::integer AS n FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_JOIN' AND target_id=$1",
+            [pStart.session.diningSessionReference],
+          )
+        ).rows[0].n,
+        1,
+      );
+      await configure(39);
+      guestTables.set(id(118), id(39));
+      guestTables.set(id(119), id(39));
+      const qStart = await service().start(command(39, 133));
+      let winner;
+      const racing = service(joinWriter, async () => {
+        winner = await service().joinCurrent({
+          guestSessionReference: id(119),
+          joinCredential: qStart.joinCredential,
+          operationReference: id(135),
+          requestedAt: at(2),
+        });
+      });
+      await assert.rejects(
+        racing.joinCurrent({
+          guestSessionReference: id(118),
+          joinCredential: qStart.joinCredential,
+          operationReference: id(134),
+          requestedAt: at(2),
+        }),
+        { code: "DINING_SESSION_VERSION_CONFLICT" },
+      );
+      assert.equal(winner.status, "Joined");
+      assert.equal(await joinReader.resolveJoinOperation(id(134)), null);
+      assert.notEqual(await joinReader.resolveJoinOperation(id(135)), null);
+      assert.equal((await reader.loadSession(qStart.session.diningSessionReference)).version, 2);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::integer AS n FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_JOIN' AND target_id=$1",
+            [qStart.session.diningSessionReference],
+          )
+        ).rows[0].n,
+        1,
+      );
+      assert.deepEqual(await counts(), { operations: 11, audits: 11 });
       assert.equal(active, 0);
     } finally {
       await admin.end();

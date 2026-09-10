@@ -1279,3 +1279,184 @@ describe("normal regeneration generation fence", () => {
     });
   });
 });
+
+const currentJoinInput = {
+  guestSessionReference: ids.guest,
+  joinCredential: firstCredential,
+  operationReference: ids.joinOperation,
+  requestedAt: joinAt,
+};
+describe("WP-2303 owner-selected current Join versions", () => {
+  it("uses one authorized read and one abuse admission, preserving original replay", async () => {
+    const f = fixture();
+    await start(f.service);
+    const abuse = vi.spyOn(f.ports.abuse, "admit"),
+      guest = vi.spyOn(f.ports.guests, "resolve");
+    const read = vi.spyOn(f.ports.store, "resolveJoinState"),
+      write = vi.spyOn(f.ports.store, "join");
+    const joined = await f.service.joinCurrent(currentJoinInput);
+    expect(joined.status).toBe("Joined");
+    expect(abuse).toHaveBeenCalledTimes(1);
+    expect(guest).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedSessionVersion: 1,
+        expectedCapabilityVersion: 1,
+        guestSessionReference: ids.guest,
+      }),
+    );
+    expect(await f.service.joinCurrent({ ...currentJoinInput, requestedAt: regenerateAt })).toEqual(
+      { ...joined, status: "AlreadyApplied" },
+    );
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(joined)).not.toContain(firstCredential);
+  });
+  it("selects the current higher Session version after another participant joins", async () => {
+    const f = fixture();
+    await start(f.service);
+    await f.service.join(joinInput);
+    await f.service.regenerate({
+      ...regenerationInput,
+      expectedSessionVersion: 2,
+      expectedCapabilityVersion: 2,
+    });
+    const write = vi.spyOn(f.ports.store, "join");
+    const result = await f.service.joinCurrent({
+      ...currentJoinInput,
+      guestSessionReference: ids.secondGuest,
+      joinCredential: nextCredential,
+      operationReference: ids.policy,
+      requestedAt: "2026-07-29T12:03:00.000Z",
+    });
+    expect(result).toMatchObject({
+      status: "Joined",
+      session: { version: 3, hostParticipantReference: ids.participant },
+    });
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedSessionVersion: 2, expectedCapabilityVersion: 1 }),
+    );
+  });
+  it.each([
+    null,
+    [],
+    {},
+    joinInput,
+    { ...currentJoinInput, expectedSessionVersion: 1 },
+    { ...currentJoinInput, extra: true },
+    { ...currentJoinInput, joinCredential: "bad" },
+    { ...currentJoinInput, requestedAt: "bad" },
+  ])("rejects malformed or caller-version input", async (value) => {
+    const f = fixture();
+    const abuse = vi.spyOn(f.ports.abuse, "admit");
+    await expect(f.service.joinCurrent(value)).rejects.toMatchObject({
+      code: "DINING_SESSION_INPUT_INVALID",
+    });
+    expect(abuse).not.toHaveBeenCalled();
+  });
+  it("rejects accessors without calling them and captures original input before awaits", async () => {
+    const f = fixture();
+    await start(f.service);
+    const getter = vi.fn(() => firstCredential);
+    await expect(
+      f.service.joinCurrent(
+        Object.defineProperty({ ...currentJoinInput }, "joinCredential", { get: getter }),
+      ),
+    ).rejects.toMatchObject({ code: "DINING_SESSION_INPUT_INVALID" });
+    expect(getter).not.toHaveBeenCalled();
+    const mutable = {
+      ...currentJoinInput,
+      guestSessionReference: String(currentJoinInput.guestSessionReference),
+    };
+    vi.spyOn(f.ports.abuse, "admit").mockImplementationOnce(async () => {
+      mutable.guestSessionReference = ids.secondGuest;
+      mutable.joinCredential = nextCredential;
+      return "Admitted";
+    });
+    const write = vi.spyOn(f.ports.store, "join");
+    expect(await f.service.joinCurrent(mutable)).toMatchObject({ status: "Joined" });
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({ guestSessionReference: ids.guest }),
+    );
+  });
+  it.each(["cooldown", "guest", "bound"] as const)(
+    "checks %s before capability/history reads",
+    async (mode) => {
+      const f = fixture({ cooldown: mode === "cooldown" });
+      await start(f.service);
+      if (mode === "guest") vi.spyOn(f.ports.guests, "resolve").mockResolvedValue(null);
+      if (mode === "bound") {
+        const value = await f.ports.guests.resolve({
+          guestSessionReference: ids.guest as never,
+          observedAt: joinAt as never,
+        });
+        vi.spyOn(f.ports.guests, "resolve").mockResolvedValue(
+          changedRecord(value, "diningState", "DiningBound"),
+        );
+      }
+      const read = vi.spyOn(f.ports.store, "resolveJoinState"),
+        history = vi.spyOn(f.ports.store, "resolveJoinOperation");
+      expect(await f.service.joinCurrent(currentJoinInput)).toEqual(joinUnavailable);
+      expect(read).not.toHaveBeenCalled();
+      expect(history).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["Closing", "Closed", "Cancelled", "moved", "expired", "wrongTable"] as const)(
+    "preserves current %s denial",
+    async (mode) => {
+      const f = fixture({ wrongTable: mode === "wrongTable" });
+      await start(f.service);
+      if (["Closing", "Closed", "Cancelled", "moved"].includes(mode)) {
+        const state = await f.ports.store.resolveJoinState(hash("a") as never);
+        vi.spyOn(f.ports.store, "resolveJoinState").mockResolvedValue(
+          changedRecord(
+            state,
+            mode === "moved" ? "session.tableAssignmentVersion" : "session.phase",
+            mode === "moved" ? 8 : mode,
+          ),
+        );
+      }
+      const write = vi.spyOn(f.ports.store, "join");
+      expect(
+        await f.service.joinCurrent({
+          ...currentJoinInput,
+          requestedAt: mode === "expired" ? "2026-07-29T12:16:00.000Z" : joinAt,
+        }),
+      ).toEqual(joinUnavailable);
+      expect(write).not.toHaveBeenCalled();
+    },
+  );
+  it("does not recover another Guest's consumed capability", async () => {
+    const f = fixture();
+    await start(f.service);
+    await f.service.joinCurrent(currentJoinInput);
+    expect(
+      await f.service.joinCurrent({
+        ...currentJoinInput,
+        guestSessionReference: ids.secondGuest,
+        operationReference: ids.policy,
+      }),
+    ).toEqual(joinUnavailable);
+  });
+  it("propagates the writer version fence without retrying a fresh state", async () => {
+    const f = fixture();
+    await start(f.service);
+    const read = vi.spyOn(f.ports.store, "resolveJoinState");
+    const write = vi
+      .spyOn(f.ports.store, "join")
+      .mockRejectedValue(new DiningSessionError("DINING_SESSION_VERSION_CONFLICT"));
+    await expect(f.service.joinCurrent(currentJoinInput)).rejects.toMatchObject({
+      code: "DINING_SESSION_VERSION_CONFLICT",
+    });
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+  it("keeps explicit stale-version rejection intact", async () => {
+    const f = fixture();
+    await start(f.service);
+    expect(await f.service.join({ ...joinInput, expectedSessionVersion: 2 })).toEqual(
+      joinUnavailable,
+    );
+    expect(await f.service.joinCurrent(currentJoinInput)).toMatchObject({ status: "Joined" });
+  });
+});
