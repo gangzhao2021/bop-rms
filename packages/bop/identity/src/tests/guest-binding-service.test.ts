@@ -110,7 +110,9 @@ function fixture() {
         {
           preparation: requirePreparation(),
           current: requireRecord(input.sessionSelectorHash),
-          ...input,
+          sessionSelectorHash: input.sessionSelectorHash,
+          csrfSelectorHash: input.csrfSelectorHash,
+          observedAt: input.observedAt,
         },
         credentials.equals,
       );

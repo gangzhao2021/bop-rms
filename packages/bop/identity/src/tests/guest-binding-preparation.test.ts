@@ -333,3 +333,156 @@ describe("WP-2234 Guest binding preparation", () => {
     ).toThrowError("guest session is unavailable");
   });
 });
+
+describe("WP-2292 closed transition commands", () => {
+  const names = ["prepare", "acknowledge", "activate", "complete"] as const;
+  const transition = (name: (typeof names)[number]) => {
+    const f = fixture();
+    const comparator = equals;
+    if (name === "prepare") {
+      return {
+        command: {
+          operationReference: f.preparation.operationReference,
+          targetReference: f.preparation.targetReference,
+          predecessor: f.predecessor,
+          candidate: f.candidate,
+          recoverySelectorHash: f.preparation.recoverySelectorHash,
+          preparedAt: f.preparation.preparedAt,
+          expiresAt: f.preparation.expiresAt,
+        },
+        run: (input: unknown) =>
+          prepareGuestBinding(input as Parameters<typeof prepareGuestBinding>[0]),
+      };
+    }
+    if (name === "acknowledge") {
+      return {
+        command: {
+          preparation: f.preparation,
+          current: f.predecessor,
+          proof: f.proof,
+          observedAt: at(1),
+        },
+        run: (input: unknown, compare = comparator) =>
+          acknowledgeGuestBinding(input as Parameters<typeof acknowledgeGuestBinding>[0], compare),
+      };
+    }
+    if (name === "activate") {
+      return {
+        command: {
+          preparation: f.acknowledge(),
+          current: f.predecessor,
+          proof: f.proof,
+          ownerEvidence: f.evidence,
+          observedAt: at(3),
+        },
+        run: (input: unknown, compare = comparator) =>
+          activateGuestBinding(input as Parameters<typeof activateGuestBinding>[0], compare),
+      };
+    }
+    return {
+      command: {
+        preparation: f.activate().preparation,
+        current: f.candidate,
+        sessionSelectorHash: f.candidate.sessionSelectorHash,
+        csrfSelectorHash: f.candidate.csrfSelectorHash,
+        observedAt: at(4),
+      },
+      run: (input: unknown, compare = comparator) =>
+        completeGuestBinding(input as Parameters<typeof completeGuestBinding>[0], compare),
+    };
+  };
+  for (const name of names) {
+    it(`${name} accepts its declared immutable command`, () => {
+      const t = transition(name);
+      const before = JSON.stringify(t.command);
+      expect(Object.isFrozen(t.run(Object.freeze(t.command)))).toBe(true);
+      expect(JSON.stringify(t.command)).toBe(before);
+    });
+    for (const shape of [
+      "extra",
+      "missing",
+      "symbol",
+      "hidden",
+      "accessor",
+      "prototype",
+      "array",
+      "null",
+    ] as const) {
+      it(`${name} rejects ${shape} outer input without executing accessors`, () => {
+        const t = transition(name);
+        let input: unknown = { ...t.command };
+        const key = Object.keys(t.command)[0];
+        if (key === undefined) throw new Error("empty synthetic command");
+        let reads = 0;
+        if (shape === "extra") Object.assign(input as object, { unauthorized: true });
+        if (shape === "missing") Reflect.deleteProperty(input as object, key);
+        if (shape === "symbol") Object.assign(input as object, { [Symbol("extra")]: true });
+        if (shape === "hidden") Object.defineProperty(input, "hidden", { value: true });
+        if (shape === "accessor")
+          Object.defineProperty(input, key, {
+            enumerable: true,
+            get: () => {
+              reads++;
+              return Reflect.get(t.command, key);
+            },
+          });
+        if (shape === "prototype") Object.setPrototypeOf(input, { marker: true });
+        if (shape === "array") input = [];
+        if (shape === "null") input = null;
+        let failure: unknown;
+        try {
+          t.run(input);
+        } catch (error) {
+          failure = error;
+        }
+        expect(reads).toBe(0);
+        expect(failure).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+      });
+    }
+  }
+  it.each(["revision", "status", "acknowledgedAt", "activatedAt"])(
+    "prepare rejects caller lifecycle field %s",
+    (field) => {
+      const t = transition("prepare");
+      expect(() => t.run({ ...t.command, [field]: null })).toThrowError(
+        "guest session is unavailable",
+      );
+    },
+  );
+  for (const name of ["acknowledge", "activate", "complete"] as const) {
+    for (const value of [false, "true", 1, {}, undefined, null]) {
+      it(`${name} requires exact true comparison for ${String(value)}`, () => {
+        const t = transition(name);
+        expect(() => t.run(t.command, () => value as boolean)).toThrowError(
+          "guest session is unavailable",
+        );
+      });
+    }
+    it(`${name} requires every individual possession comparison`, () => {
+      const count = name === "complete" ? 2 : 3;
+      for (let failed = 0; failed < count; failed++) {
+        const t = transition(name);
+        let calls = 0;
+        expect(() =>
+          t.run(t.command, () => (calls++ === failed ? ("true" as unknown as boolean) : true)),
+        ).toThrowError("guest session is unavailable");
+        expect(calls).toBe(count);
+      }
+    });
+    it(`${name} replaces thrown comparison failures with a bounded error`, () => {
+      const t = transition(name);
+      const injected = new Error("synthetic-private-provider-detail");
+      let failure: unknown;
+      try {
+        t.run(t.command, () => {
+          throw injected;
+        });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).not.toBe(injected);
+      expect(failure).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+      expect(String(failure)).not.toContain(injected.message);
+    });
+  }
+});

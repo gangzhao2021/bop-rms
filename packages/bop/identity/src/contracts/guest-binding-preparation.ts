@@ -170,13 +170,23 @@ export function prepareGuestBinding(input: {
   readonly preparedAt: CanonicalInstant;
   readonly expiresAt: CanonicalInstant;
 }): GuestBindingPreparation {
-  return parseGuestBindingPreparation({
-    ...input,
-    revision: 1,
-    status: "Prepared",
-    acknowledgedAt: null,
-    activatedAt: null,
-  });
+  return safe(() =>
+    parseGuestBindingPreparation({
+      ...readClosedRecord(input, [
+        "operationReference",
+        "targetReference",
+        "predecessor",
+        "candidate",
+        "recoverySelectorHash",
+        "preparedAt",
+        "expiresAt",
+      ]),
+      revision: 1,
+      status: "Prepared",
+      acknowledgedAt: null,
+      activatedAt: null,
+    }),
+  );
 }
 
 function currentAuthority(
@@ -212,7 +222,7 @@ function possession(
     equals(parseGuestSelectorHash(proof.csrfSelectorHash), preparation.candidate.csrfSelectorHash),
     equals(parseGuestSelectorHash(proof.recoverySelectorHash), preparation.recoverySelectorHash),
   ];
-  if (checks.some((matched) => !matched)) unavailable();
+  if (checks.some((matched) => matched !== true)) unavailable();
 }
 
 export function acknowledgeGuestBinding(
@@ -225,10 +235,16 @@ export function acknowledgeGuestBinding(
   equals: GuestBindingHashEquals,
 ): GuestBindingPreparation {
   return safe(() => {
-    const preparation = parseGuestBindingPreparation(input.preparation);
-    const at = parseCanonicalInstant(input.observedAt);
-    currentAuthority(preparation, input.current, at);
-    possession(preparation, input.proof, equals);
+    const command = readClosedRecord(input, [
+      "preparation",
+      "current",
+      "proof",
+      "observedAt",
+    ]) as unknown as typeof input;
+    const preparation = parseGuestBindingPreparation(command.preparation);
+    const at = parseCanonicalInstant(command.observedAt);
+    currentAuthority(preparation, command.current, at);
+    possession(preparation, command.proof, equals);
     if (preparation.status === "Activated") return unavailable();
     if (preparation.status === "Acknowledged") {
       if (preparation.acknowledgedAt === null || at < preparation.acknowledgedAt)
@@ -256,17 +272,24 @@ export function activateGuestBinding(
   equals: GuestBindingHashEquals,
 ) {
   return safe(() => {
-    const preparation = parseGuestBindingPreparation(input.preparation);
-    const at = parseCanonicalInstant(input.observedAt);
-    currentAuthority(preparation, input.current, at);
-    possession(preparation, input.proof, equals);
+    const command = readClosedRecord(input, [
+      "preparation",
+      "current",
+      "proof",
+      "ownerEvidence",
+      "observedAt",
+    ]) as unknown as typeof input;
+    const preparation = parseGuestBindingPreparation(command.preparation);
+    const at = parseCanonicalInstant(command.observedAt);
+    currentAuthority(preparation, command.current, at);
+    possession(preparation, command.proof, equals);
     if (
       preparation.status !== "Acknowledged" ||
       preparation.acknowledgedAt === null ||
       at < preparation.acknowledgedAt
     )
       return unavailable();
-    const evidence = readClosedRecord(input.ownerEvidence, [
+    const evidence = readClosedRecord(command.ownerEvidence, [
       "operationReference",
       "targetReference",
       "sessionReference",
@@ -328,14 +351,21 @@ export function completeGuestBinding(
   equals: GuestBindingHashEquals,
 ) {
   return safe(() => {
-    const preparation = parseGuestBindingPreparation(input.preparation);
-    const at = parseCanonicalInstant(input.observedAt);
-    const current = createGuestSessionRecord(input.current);
+    const command = readClosedRecord(input, [
+      "preparation",
+      "current",
+      "sessionSelectorHash",
+      "csrfSelectorHash",
+      "observedAt",
+    ]) as unknown as typeof input;
+    const preparation = parseGuestBindingPreparation(command.preparation);
+    const at = parseCanonicalInstant(command.observedAt);
+    const current = createGuestSessionRecord(command.current);
     assertGuestSessionUsable(current.session, at);
     const candidate = preparation.candidate;
     const checks = [
-      equals(parseGuestSelectorHash(input.sessionSelectorHash), current.sessionSelectorHash),
-      equals(parseGuestSelectorHash(input.csrfSelectorHash), current.csrfSelectorHash),
+      equals(parseGuestSelectorHash(command.sessionSelectorHash), current.sessionSelectorHash),
+      equals(parseGuestSelectorHash(command.csrfSelectorHash), current.csrfSelectorHash),
     ];
     if (
       preparation.status !== "Activated" ||
@@ -345,7 +375,7 @@ export function completeGuestBinding(
       immutableContext(current) !== immutableContext(candidate) ||
       current.sessionSelectorHash !== candidate.sessionSelectorHash ||
       current.csrfSelectorHash !== candidate.csrfSelectorHash ||
-      checks.some((matched) => !matched)
+      checks.some((matched) => matched !== true)
     )
       return unavailable();
     return Object.freeze({

@@ -329,3 +329,7 @@ WP-2291 exercises actual Identity ContextOnly creation, Dining Join/consume and 
 DiningBound rotation, including the inter-owner failure window and lost Identity acknowledgement.
 Dining785/785, Dining PostgreSQL9/9, full verification and forced uncached integration pass. Exact replay returns metadata,
 not recovered raw credentials; production public mapping and credential delivery recovery remain open.
+
+WP-2292 rejects malformed outer binding commands and nonboolean possession comparisons without
+executing caller getters. Identity264/264, full verification and forced uncached integration
+pass, including64 new boundary cases. Pickup-only preparation policy and stored lifecycle formats remain unchanged.
