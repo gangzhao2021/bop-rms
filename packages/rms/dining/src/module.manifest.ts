@@ -52,6 +52,7 @@ const moduleManifestInput =
         "dining_session_join_operation",
         "dining_closing_operation",
         "dining_session_move_operation",
+        "dining_admission_consumption_operation",
       ],
     },
     ownedJobs: [],

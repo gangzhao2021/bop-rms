@@ -32,3 +32,5 @@ export * from "./domain/dining-admission.js";
 
 export * from "./application/ports/dining-admission-ports.js";
 export * from "./application/dining-admission-service.js";
+
+export * from "./infrastructure/persistence/dining-admission-consumption-store.js";

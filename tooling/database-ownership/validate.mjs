@@ -242,6 +242,19 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_session_join_operation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-session-join-store.ts";
+        // WP-2290 admits only the scoped admission-consumption owner transaction.
+        const acceptedDiningAdmissionConsumptionAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          [
+            "dining_table",
+            "dining_session",
+            "dining_participant",
+            "dining_identity_admission",
+            "dining_session_join_operation",
+            "dining_admission_consumption_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/dining-admission-consumption-store.ts";
         // WP-2286 admits only fresh Join generation backed by a committed Dining Move.
         const acceptedDiningMovedJoinAsset =
           module.packageName === "@rms/dining" &&
@@ -347,6 +360,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningClosingAsset &&
           !acceptedDiningMoveAsset &&
           !acceptedDiningMovedJoinAsset &&
+          !acceptedDiningAdmissionConsumptionAsset &&
           !acceptedCartQueryAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&

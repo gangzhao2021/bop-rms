@@ -319,3 +319,8 @@ WP-2289 connects current Guest authority, original Join identity and current Din
 the admission-consumption service and complete original receipts. Dining760/760, full verification
 and forced uncached integration pass; atomic persistence and Identity/public-context composition
 remain separate.
+
+WP-2290 adds the Dining-owned transactional admission consumption adapter, scoped immutable
+receipts and Audit, with current Closing/Move fences on writes and retries. Dining785/785,
+Dining PostgreSQL9/9, full verification and forced uncached integration pass;
+Identity evidence, public Table mapping and shared Cart composition remain separate.
