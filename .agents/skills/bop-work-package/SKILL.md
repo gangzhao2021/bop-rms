@@ -18,6 +18,7 @@ description: Resolve and plan a BOP-RMS Work Package before implementation or ha
 2. Verify the repository root, current branch/worktree, baseline commit, remote state, and unrelated changes read-only.
 3. Record Definition of Ready inputs, dependencies, External Evidence, and real blockers. Treat future triggers as gates, not defects.
 4. Map each acceptance criterion to owned files, existing commands/tests, evidence, rollback, and a named non-goal.
+   Apply the root `AGENTS.md` verification policy: plan directly affected checks during iteration and one remaining closeout set. Inventory reusable evidence with its source run/revision, covered inputs, and validity rationale; do not treat reused checks as fresh runs. Name the milestone and existing commands for broader regression, plus concrete changes or risks that trigger it. Do not mechanically require full `pnpm verify` or forced uncached integration for every small WP. Preserve mandatory CI/higher-authority gates and explicitly reconcile conflicting brief requirements before execution.
 5. Produce or refresh the bounded WP brief without copying the full Handoff Package.
 6. Plan the smallest implementation. Keep one WP per branch/worktree and distinguish local edits from commit, push, PR, merge, deploy, Figma, or Provider actions.
 7. End with the next allowed WP/action and all skipped checks, deviations, or blockers.
