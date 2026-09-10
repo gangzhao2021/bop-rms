@@ -127,7 +127,7 @@ it(
           diningCart: cart.diningCart,
           diningAdmission: dining.options,
           scope,
-          entry: { ...f.options, session: { binding: dining.sessionBinding, credentials } },
+          entry: { ...f.options, session: { binding: f.options.session.binding, credentials } },
           menuStores: {
             resolvePublic: async (reference) =>
               reference === id(4) ? { ...scope, status: "Active" } : null,

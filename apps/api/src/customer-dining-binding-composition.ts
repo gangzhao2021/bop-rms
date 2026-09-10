@@ -48,6 +48,63 @@ function unavailable(): never {
   throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
 }
 
+const contextInput = (session: GuestSession, observedAt: CanonicalInstant) => ({
+  brandReference: session.brandReference,
+  storeReference: session.storeReference,
+  publicStoreReference: session.publicStoreReference,
+  publicTableReference: session.publicTableReference,
+  channel: session.channel,
+  qrRevocationVersion: session.qrRevocationVersion,
+  observedAt,
+});
+
+/** Shared current-owner binding policy; never substitutes participation for consumed admission. */
+export function createCustomerDiningSessionBinding(options: {
+  readonly scope: CustomerDiningBindingCompositionOptions["scope"];
+  readonly binding: GuestSessionServiceOptions["binding"];
+  readonly repository: DiningGuestBindingOptions["repository"];
+  readonly contexts: CustomerDiningBindingCompositionOptions["contexts"];
+  readonly now: () => unknown;
+}): GuestSessionServiceOptions["binding"] {
+  const rawScope = readClosedRecord(options.scope, ["brandReference", "storeReference"]);
+  const scope = Object.freeze({
+    brandReference: String(parseDiningReference(rawScope.brandReference)),
+    storeReference: String(parseDiningReference(rawScope.storeReference)),
+  });
+  const now = () => parseCanonicalInstant(options.now());
+  const query = createDiningGuestBindingQuery({ scope, repository: options.repository, now });
+  return Object.freeze({
+    async validate(session: GuestSession, observedAt: CanonicalInstant) {
+      try {
+        if (
+          session.brandReference !== scope.brandReference ||
+          session.storeReference !== scope.storeReference
+        )
+          return "Unavailable";
+        if ((await options.binding.validate(session, observedAt)) !== "Current")
+          return "Unavailable";
+        if (session.channel === "Pickup" || session.diningState === "ContextOnly") return "Current";
+        const context = assertCurrentDiningGuestTableContext(
+          contextInput(session, observedAt),
+          await options.contexts.resolve(
+            Object.freeze({ session, observedAt, purpose: "DiningAdmission" }),
+          ),
+        );
+        const current = await query.resolve({
+          purpose: "GuestSessionBinding",
+          diningSessionReference: session.diningSessionReference,
+          participantReference: session.diningParticipantReference,
+          tableReference: context.tableReference,
+        });
+        assertCurrentDiningGuestTableContext(contextInput(session, now()), context);
+        return current === null ? "Unavailable" : "Current";
+      } catch {
+        return "Unavailable";
+      }
+    },
+  });
+}
+
 /** Composition only: owners authorize, validate context, reserve, consume and atomically bind. */
 export function createCustomerDiningBindingComposition(
   options: CustomerDiningBindingCompositionOptions,
@@ -58,15 +115,6 @@ export function createCustomerDiningBindingComposition(
     storeReference: String(parseDiningReference(rawScope.storeReference)),
   });
   const now = () => parseCanonicalInstant(options.now());
-  const contextInput = (session: GuestSession, observedAt: CanonicalInstant) => ({
-    brandReference: session.brandReference,
-    storeReference: session.storeReference,
-    publicStoreReference: session.publicStoreReference,
-    publicTableReference: session.publicTableReference,
-    channel: session.channel,
-    qrRevocationVersion: session.qrRevocationVersion,
-    observedAt,
-  });
   async function contextFor(session: GuestSession, observedAt: CanonicalInstant) {
     if (
       session.brandReference !== scope.brandReference ||
@@ -84,30 +132,13 @@ export function createCustomerDiningBindingComposition(
     ...options.session,
     admission: { consume: async () => null },
     now,
-    binding: {
-      async validate(session, observedAt) {
-        try {
-          if ((await options.session.binding.validate(session, observedAt)) !== "Current")
-            return "Unavailable";
-          if (session.diningState === "ContextOnly") return "Current";
-          const context = await contextFor(session, observedAt);
-          const current = await createDiningGuestBindingQuery({
-            scope,
-            repository: options.dining.binding,
-            now,
-          }).resolve({
-            purpose: "GuestSessionBinding",
-            diningSessionReference: session.diningSessionReference,
-            participantReference: session.diningParticipantReference,
-            tableReference: context.tableReference,
-          });
-          assertCurrentDiningGuestTableContext(contextInput(session, now()), context);
-          return current === null ? "Unavailable" : "Current";
-        } catch {
-          return "Unavailable";
-        }
-      },
-    },
+    binding: createCustomerDiningSessionBinding({
+      scope,
+      binding: options.session.binding,
+      repository: options.dining.binding,
+      contexts: options.contexts,
+      now,
+    }),
   });
   function invocation() {
     // Never share the authenticated request's credentials or context with another invocation.

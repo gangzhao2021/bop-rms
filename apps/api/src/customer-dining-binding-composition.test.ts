@@ -15,6 +15,7 @@ import {
 import { parseQrTableContextEvidence, type DiningAdmissionSnapshot } from "@rms/dining";
 import {
   createCustomerDiningBindingComposition,
+  createCustomerDiningSessionBinding,
   type CustomerDiningBindingCompositionOptions,
 } from "./customer-dining-binding-composition.js";
 const id = (n: number) => `01902298-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -542,4 +543,71 @@ describe("WP-2298 explicit Dining binding composition", () => {
     await expect(f.service.complete(f.completion(prepared))).rejects.toMatchObject(unavailable);
     expect(f.options.session.binding.validate).toHaveBeenCalled();
   });
+});
+
+describe("WP-2326 shared current Dining binding guard", () => {
+  function guard(f: ReturnType<typeof fixture>) {
+    return createCustomerDiningSessionBinding({
+      scope: f.options.scope,
+      binding: f.options.session.binding,
+      repository: f.options.dining.binding,
+      contexts: f.options.contexts,
+      now: f.options.now,
+    });
+  }
+  it("keeps ContextOnly policy without querying bound owner state", async () => {
+    const f = fixture();
+    expect(await guard(f).validate(f.prior.session, at(0))).toBe("Current");
+    expect(f.options.contexts.resolve).not.toHaveBeenCalled();
+    expect(f.options.dining.binding.readCurrent).not.toHaveBeenCalled();
+  });
+  it.each(["brandReference", "storeReference"] as const)(
+    "rejects another %s before base policy",
+    async (field) => {
+      const f = fixture();
+      expect(await guard(f).validate({ ...f.prior.session, [field]: id(999) }, at(0))).toBe(
+        "Unavailable",
+      );
+      expect(f.options.session.binding.validate).not.toHaveBeenCalled();
+      expect(f.options.contexts.resolve).not.toHaveBeenCalled();
+    },
+  );
+  it("retains a base-policy denial before owner access", async () => {
+    const f = fixture();
+    vi.mocked(f.options.session.binding.validate).mockResolvedValue("Unavailable");
+    expect(await guard(f).validate(f.prior.session, at(0))).toBe("Unavailable");
+    expect(f.options.contexts.resolve).not.toHaveBeenCalled();
+  });
+  it.each(["current", "missing admission", "moved assignment", "expired after await"])(
+    "checks original consumed admission for %s",
+    async (scenario) => {
+      const f = fixture();
+      const prepared = await f.service.prepare(f.input);
+      f.setTime(1);
+      await f.service.activate(f.activation(prepared));
+      if (scenario === "missing admission") {
+        vi.mocked(f.options.dining.binding.readCurrent).mockResolvedValue(null);
+      }
+      if (scenario === "moved assignment") {
+        Object.assign(f.state.session, { tableAssignmentVersion: 9, version: 4 });
+        Object.assign(f.state.table, { assignmentVersion: 9 });
+      }
+      if (scenario === "expired after await") {
+        vi.mocked(f.options.dining.binding.readCurrent).mockImplementation(async () => {
+          f.setTime(600);
+          return {
+            session: f.state.session,
+            participant: f.state.participant,
+            table: f.state.table,
+            admission: f.state.admission,
+          };
+        });
+      }
+      expect(await guard(f).validate(f.saved().candidate.session, at(1))).toBe(
+        scenario === "current" ? "Current" : "Unavailable",
+      );
+      expect(f.options.dining.binding.readCurrent).toHaveBeenCalled();
+      expect(f.options.dining.store.consume).toHaveBeenCalledTimes(1);
+    },
+  );
 });

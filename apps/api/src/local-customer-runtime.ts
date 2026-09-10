@@ -11,6 +11,7 @@ import {
 } from "./customer-dining-join-composition.js";
 import {
   createCustomerDiningBindingComposition,
+  createCustomerDiningSessionBinding,
   type CustomerDiningBindingCompositionOptions,
 } from "./customer-dining-binding-composition.js";
 import {
@@ -162,6 +163,16 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       store,
       admission: { consume: async () => null },
       now,
+      binding:
+        options.diningAdmission === undefined
+          ? entry.session.binding
+          : createCustomerDiningSessionBinding({
+              scope,
+              binding: entry.session.binding,
+              repository: options.diningAdmission.binding.dining.binding,
+              contexts: options.diningAdmission.binding.contexts,
+              now,
+            }),
     });
     const catalog = createCatalogSelectionDisplayQuery(projections);
     const stores = createPublicStoreProfileService({
