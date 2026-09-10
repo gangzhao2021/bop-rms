@@ -6,9 +6,12 @@ This document belongs to [WP-2224](../work-packages/WP-2224.md). It closes the r
 not the business decisions or runtime. **Baseline** means a rule evidenced by an accepted local
 WP. **Proposal** means a recommended design awaiting source reconciliation and explicit decision.
 Command, record, state and decision names introduced here are design labels, not registered APIs,
-permissions, Events or new Work Packages. The external Handoff was unavailable to this review;
-an unresolved local reference does not prove that the external source lacks a rule. WP-2330
-reconciles current local progress without accepting remaining proposals.
+permissions, Events or new Work Packages. The external Handoff was unavailable during the original
+WP-2224 review. WP-2330 reconciled later local progress. [WP-2400](../work-packages/WP-2400.md)
+now reconciles the available local source text and decision status without accepting a replacement
+complete Handoff baseline or unresolved business choices. The [Specification Index](../README.md)
+retains authority; the [refund boundary record](./refund-approval-boundaries.md) separates observed
+source rules from remaining policy decisions.
 
 All four handoffs require authorization before source reads; explicit Tenant/Brand/Store, Actor,
 purpose and permission; exact expected versions; immutable operation intent and append-only Audit.
@@ -19,14 +22,14 @@ collaboration uses public contracts. This document authorizes no cross-Domain pr
 
 ## Baseline map
 
-| Handoff               | Repository-visible rule                                                                                                                                                                                                | Remaining boundary                                                                                                                     |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Guest to Cart         | [WP-1003](../work-packages/WP-1003.md) requires exact binding and Session rotation; [WP-1201](../work-packages/WP-1201.md) binds Pickup edits to the creating Session and DineIn edits to the exact Participant.       | Current owner-store/HTTP/browser composition is evidenced by WP-2325/2326/2327; cross-document credential continuity remains separate. |
-| Cart to submission    | [WP-1220](../work-packages/WP-1220.md) validates current Cart/Quote/Catalog/fulfillment evidence; [WP-1224](../work-packages/WP-1224.md) durably creates immutable submission, snapshots, number allocation and Audit. | Validation is not a capacity hold; Checkout Session/contact/capacity composition remains outside those WPs.                            |
-| Submission to Payment | [WP-1302](../work-packages/WP-1302.md) requires atomic durable submission/capacity evidence and a 30-minute capacity expiry; Payment claims its Intent/Attempt before calling the Provider.                            | The public preparation evidence has no accepted production source merely because its parser exists.                                    |
-| Payment to work       | [WP-1310](../work-packages/WP-1310.md) makes Ordering the sole producer of OrderConfirmed and the mutually exclusive unfulfillable disposition.                                                                        | Acceptance/cancellation/capacity-finality producers remain explicit dependencies.                                                      |
-| Work to closure       | [WP-1603](../work-packages/WP-1603.md) defines partial/full Pickup handoff; [WP-1605](../work-packages/WP-1605.md) preserves Fulfilled + Open.                                                                         | Order close/reopen remains a separate source action; Dining closure cannot close an Order.                                             |
-| Refund                | [WP-1301](../work-packages/WP-1301.md) defines original-method Provider ports; WP-1310 covers paid-without-fulfillable compensation.                                                                                   | Ordinary refund workflow was attributed to WP-2045, which actually owns webhook security review.                                       |
+| Handoff               | Repository-visible rule                                                                                                                                                                                                                                                      | Remaining boundary                                                                                                                                           |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Guest to Cart         | [WP-1003](../work-packages/WP-1003.md) requires exact binding and Session rotation; [WP-1201](../work-packages/WP-1201.md) binds Pickup edits to the creating Session and DineIn edits to the exact Participant.                                                             | Current owner-store/HTTP/browser composition is evidenced by WP-2325/2326/2327; cross-document credential continuity remains separate.                       |
+| Cart to submission    | [WP-1220](../work-packages/WP-1220.md) validates current Cart/Quote/Catalog/fulfillment evidence; [WP-1224](../work-packages/WP-1224.md) durably creates immutable submission, snapshots, number allocation and Audit.                                                       | Validation is not a capacity hold; Checkout Session/contact/capacity composition remains outside those WPs.                                                  |
+| Submission to Payment | [WP-1302](../work-packages/WP-1302.md) and the [accepted DEC-H03 addendum](./capacity-source-decision.md) require a durable owner capacity commitment plus atomic Ordering linkage and the original 30-minute expiry; Payment claims its Intent/Attempt before the Provider. | The public preparation evidence has no accepted production source merely because its parser exists.                                                          |
+| Payment to work       | [WP-1310](../work-packages/WP-1310.md) makes Ordering the sole producer of OrderConfirmed and the mutually exclusive unfulfillable disposition.                                                                                                                              | Acceptance/cancellation/capacity-finality producers remain explicit dependencies.                                                                            |
+| Work to closure       | [WP-1603](../work-packages/WP-1603.md) defines partial/full Pickup handoff; [WP-1605](../work-packages/WP-1605.md) preserves Fulfilled + Open.                                                                                                                               | Order close/reopen remains a separate source action; Dining closure cannot close an Order.                                                                   |
+| Refund                | [WP-1301](../work-packages/WP-1301.md) defines original-method Provider ports; WP-1310 covers paid-without-fulfillable compensation.                                                                                                                                         | The WP-2045 attribution is corrected; ordinary refund execution and the [precise approval boundaries](./refund-approval-boundaries.md) remain separate work. |
 
 ## H-CART-01: create, bind and recover the current Cart
 
@@ -126,8 +129,10 @@ it may repair an operation's progress, never infer a business binding from timin
 
 Checkout verifies one current Cart Version and attached Quote, revalidates Catalog selection and
 requires fresh fulfillment evidence. The resulting evidence is not a capacity reservation.
-WP-1302 requires submission plus capacity allocation committed in the same PostgreSQL transaction,
-and capacity expires exactly 30 minutes after Payment Intent creation. Payment then atomically
+WP-1302 originally stated a single-transaction submission/capacity requirement. The
+[accepted DEC-H03 addendum](./capacity-source-decision.md) supplies its current interpretation:
+a durable capacity-owner commitment plus atomic Ordering-owned submission/linkage. Capacity expires
+exactly 30 minutes after Payment Intent creation. Payment then atomically
 claims one Intent/Attempt/operation before Provider invocation. Unknown is not success or failure.
 The new-work Kill Switch precedes new preparation; accepted replay and recovery remain available.
 
@@ -138,8 +143,9 @@ then Ordering atomically stores its submission and owner-local linkage. That com
 the allocation requirement above. Failed Ordering persistence requires idempotent release and durable
 recovery when the release outcome is unknown. Neither Domain accesses the other's private tables.
 
-Topology approval is recorded; precise producer clock/receipt semantics and actual persistence,
-concurrency and compensation evidence remain implementation requirements before enabling preparation.
+The linked DEC-H03 record is the single authority for topology acceptance. Precise producer
+clock/receipt semantics and composed persistence, concurrency and compensation evidence remain
+implementation requirements before enabling preparation; they do not reopen that acceptance.
 Reservation policy configuration in [WP-2115](../work-packages/WP-2115.md) creates no capacity fact.
 The original Payment instant, exact30-minute expiry, final Inventory validation and unknown/late
 Payment reconciliation remain binding.
@@ -155,12 +161,13 @@ and fulfillment-slot policy must have their own approved source; unavailable is 
 
 1. Authorize Guest, scope and operation; resolve exact replay. Revalidate current Cart, Quote,
    selections and service eligibility. Changed versions require review and a new accepted intent.
-2. After DEC-H03 closure, obtain the exact public capacity commitment under a stable reservation
+2. Under the accepted DEC-H03 topology, obtain the exact public capacity commitment under a stable reservation
    operation; commit submission and required Ordering-owned facts atomically with snapshots,
    number allocation, permanent operation, Audit and OrderCreated Outbox intent.
 3. Bind the accepted Payment Intent creation instant and capacity expiry explicitly across the
    preparation/claim contracts. Delay/retry must not reset or extend the 30-minute window. The
-   clock owner and admission of an aged preparation require source reconciliation in DEC-H03.
+   producer clock/receipt contract and admission of aged preparations remain execution requirements
+   under the [capacity clock handoff](./capacity-checkout-handoff.md).
 4. Payment validates scope, Cart/Quote/submission/digests, current capacity validity and integer CAD
    allocation + tip = total, then locally claims the Intent/Attempt before any Provider call.
 5. If hold acquisition succeeds but submission rolls back, the capacity owner releases that exact
@@ -229,6 +236,11 @@ WP-1301's earlier referral of refund workflow/approval to WP-2045 was mismatched
 [WP-2045](../work-packages/WP-2045.md) owns webhook security review; it is not reassigned.
 WP-1310 remains the accepted full original-method paid-without-fulfillable compensation contract.
 It does not by itself authorize arbitrary Staff refunds or ordinary partial-refund policy.
+The [refund approval boundary record](./refund-approval-boundaries.md) preserves the available
+Section 87.9 source text on Full/item-based Partial Refund, original-snapshot allocation and
+approval controls. Those source rules are not all absent or new proposals; the record distinguishes
+them from unresolved day/window, cumulative-scope and concurrent-approval semantics. Its source
+provenance does not replace the accepted composite Handoff baseline.
 
 **Proposal DEC-H06.** Give the ordinary refund follow-up to Payment, with Ordering/Pricing source
 contracts and the [approval routing proposal](approval-and-operating-day.md). Payment owns request,
@@ -256,6 +268,9 @@ employee price or browser total is accepted. Return request state and safe recov
    cumulative refunds plus pending claims. Ordinary refunds and existing compensation must share
    the same balance exclusion contract: confirmed refunds + outstanding claims cannot exceed
    captured money. Conflicting claims cannot independently consume the same refundable remainder.
+   This financial balance guard does not define the cumulative approval threshold. The threshold
+   scope, included pending claims and concurrent approval fence remain explicit decisions in
+   [RF-D03/RF-D04](./refund-approval-boundaries.md).
 5. Retrieve Provider truth, claim the exact permitted remaining mutation with a stable Provider
    key, then invoke only the original-method port. Reconcile after every possible mutation. Unknown
    retains the claim and operation; it never frees balance for a second refund or reports success.
@@ -264,12 +279,14 @@ employee price or browser total is accepted. Return request state and safe recov
    Event and receipt/Order projection consumers require their own exact follow-up contract.
    Financial confirmation, Operations reconciliation and business-request closure stay distinct.
 
-**Source question DEC-H07.** Reconcile full/partial eligibility, refundable line/tax/fee/tip
-allocation, request/approval permissions, approval triggers, revocation and operational escalation
-with accepted source and professional policy. No amount threshold, deadline or automatic approval
-is invented. Until those inputs exist the relevant request/action is unavailable. Terminal Interac
-retains the accepted in-person/reader/Provider-confirmation boundary; it has no generic background
-refund shortcut. Receipt revisions append to the [WP-1709](../work-packages/WP-1709.md) chain.
+**Pending boundary decisions DEC-H07.** Use the [refund decision table](./refund-approval-boundaries.md)
+to retain the source-given modes, immutable allocation basis and approval controls, then resolve only
+the remaining precise policy inputs: day boundary, 24-hour anchor, cumulative scope, concurrent
+Pending/Unknown treatment, allocation details, action permissions and approval lifecycle.
+The owning execution WP must bind accepted decisions to exact contracts and acceptance evidence;
+no new threshold, deadline, default approval or live action is authorized here. Terminal Interac
+retains the accepted in-person/reader/Provider-confirmation boundary. Receipt revisions append to
+the [WP-1709](../work-packages/WP-1709.md) chain.
 
 ## Acceptance scenarios and future verification anchors
 
@@ -300,7 +317,13 @@ DEC-H01/H02 belong to Identity + Ordering + Customer composition; DEC-H03 to Ord
 source-confirmed capacity owner + Payment + Architecture; DEC-H04/H05 to Ordering and the
 collaborating execution/finality owners; DEC-H06/H07 to Payment + Ordering/Pricing + Operations.
 DEC-H01/H02 product choices are **accepted in WP-2228**, with the implemented and remaining
-mechanics distinguished above. DEC-H03–H07 remain **Proposal / source reconciliation pending**.
+mechanics distinguished above. **DEC-H03 topology is accepted**, with its sole acceptance record
+in [capacity-source-decision.md](./capacity-source-decision.md); producer/composition evidence
+remains required. **DEC-H03-DINING is proposed, not accepted**, as recorded in the
+[mode-specific handoff](./capacity-checkout-handoff.md). **DEC-H04/H05 remain proposed source
+decisions**. DEC-H06 still needs its ordinary-refund execution ownership/contract, and DEC-H07
+retains the scoped pending decisions in the [refund boundary record](./refund-approval-boundaries.md),
+not a claim that the available source omitted all refund rules.
 No named person, additional policy approval, production evidence, new permission or readiness for
 the unresolved handoffs is claimed.
 The next allowed increment is reconciliation and a separately scoped owning implementation brief

@@ -20,6 +20,12 @@ The Dine-in interpretation below is a proposal only. This document records no ne
   local claim as Processing without a Provider call or invented observation. This does not produce
   a valid Order/capacity preparation where the required owner facts are missing.
 
+Since this WP-2342 proposal was prepared, [WP-2343](../work-packages/WP-2343.md),
+[WP-2344](../work-packages/WP-2344.md) and [WP-2347](../work-packages/WP-2347.md) have recorded
+Scheduled owner writes/transitions with atomic Audit and actual PostgreSQL evidence.
+Current application authority, Ordering linkage and the clock-seal producer remain separate.
+This evidence update does not accept DEC-H03-DINING or claim the composed payment journey.
+
 ## Clock sequence for review
 
 The coordinator must establish Ordering business facts before calling Payment creation. It must
@@ -54,11 +60,11 @@ This sequencing document is not evidence that those producers already exist.
 
 ## Mode-specific capacity contract
 
-| Mode                      | Owning fact                                                                              | Implementation boundary                                                                               |
-| ------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Scheduled Pickup/Delivery | Fulfillment Scheduled Hold converted to Allocation with original slot/config/units       | Existing owner storage; application authority/Audit/Outbox and clock seal remain.                     |
-| ASAP Pickup/Delivery      | Fulfillment current capacity commitment for the authoritative Confirmed estimated Window | Final recheck and direct allocation contract required; no fake Scheduled Hold or fabricated ETA/slot. |
-| Dine-in                   | Dining-owned current Session/Table relationship                                          | The precise checkout commitment interpretation below requires explicit Owner acceptance.              |
+| Mode                      | Owning fact                                                                              | Implementation boundary                                                                                                                       |
+| ------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scheduled Pickup/Delivery | Fulfillment Scheduled Hold converted to Allocation with original slot/config/units       | Owner storage and atomic Audit have WP-2343/2344/2347 evidence; current application authority, Ordering linkage/Outbox and clock seal remain. |
+| ASAP Pickup/Delivery      | Fulfillment current capacity commitment for the authoritative Confirmed estimated Window | Final recheck and direct allocation contract required; no fake Scheduled Hold or fabricated ETA/slot.                                         |
+| Dine-in                   | Dining-owned current Session/Table relationship                                          | The precise checkout commitment interpretation below requires explicit Owner acceptance.                                                      |
 
 No mode may substitute a Catalog availability observation, Reservation policy configuration,
 unrestricted Store reference or synthetic fixture for a durable owner commitment.

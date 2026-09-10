@@ -11,7 +11,8 @@ Capacity Hold as an independent aggregate created before a Fulfillment exists. C
 occupancy are atomic; terminal Hold states cannot reopen. Hold-to-Allocation conversion is atomic
 without a second capacity decrement. Slot limits include Active Holds and unreleased Allocations.
 ASAP rechecks current capacity rather than creating a long-lived scheduled Hold. Kitchen capacity
-is separate. A local Fulfillment package exists, but its current manifest declares no capacity table.
+is separate. At the WP-2336 baseline fd31bdd, the local Fulfillment manifest declared no capacity table.
+Later owner persistence is tracked in the [current scenario evidence view](./business-scenario-coverage.md#current-scenario-evidence-view); it does not change this accepted topology.
 
 Higher87.9 and [WP-1302](../work-packages/WP-1302.md) require immutable Submitted/PaymentPending
 Ordering facts, snapshots and a capacity allocation committed in one PostgreSQL transaction before
