@@ -44,3 +44,138 @@ describe("WP-2235 binding store boundary", () => {
     );
   });
 });
+
+describe("WP-2293 captured store commands", () => {
+  const proof = () => ({
+    sessionSelectorHash: parseGuestSelectorHash("a".repeat(64)),
+    csrfSelectorHash: parseGuestSelectorHash("b".repeat(64)),
+    recoverySelectorHash: parseGuestSelectorHash("c".repeat(64)),
+  });
+  const observedAt = parseCanonicalInstant("2026-09-08T12:00:03.000Z");
+  const ownerEvidence = () => ({
+    operationReference: id(3),
+    targetReference: id(4),
+    sessionReference: id(5),
+    brandReference: id(1),
+    storeReference: id(2),
+    bindingVersion: 1,
+    preparedAt: parseCanonicalInstant("2026-09-08T12:00:02.000Z"),
+    validUntil: parseCanonicalInstant("2026-09-08T12:05:00.000Z"),
+  });
+  for (const name of ["acknowledge", "activate", "complete"] as const) {
+    for (const shape of [
+      "extra",
+      "missing",
+      "accessor",
+      "symbol",
+      "hidden",
+      "prototype",
+      "array",
+      "null",
+    ] as const) {
+      it(`${name} rejects ${shape} before transactions or getters`, async () => {
+        const run = vi.fn(async () => undefined);
+        const store = createPostgresGuestBindingStore(
+          { run: run as never },
+          { brandReference: id(1), storeReference: id(2) },
+          { append: vi.fn() },
+          (a, b) => a === b,
+        );
+        let input: unknown =
+          name === "complete"
+            ? {
+                operationReference: id(3),
+                sessionSelectorHash: proof().sessionSelectorHash,
+                csrfSelectorHash: proof().csrfSelectorHash,
+                observedAt,
+              }
+            : {
+                operationReference: id(3),
+                currentSelectorHash: proof().sessionSelectorHash,
+                proof: proof(),
+                ...(name === "activate" ? { ownerEvidence: ownerEvidence() } : {}),
+                observedAt,
+              };
+        let reads = 0;
+        if (shape === "extra") Object.assign(input as object, { extra: true });
+        if (shape === "missing") Reflect.deleteProperty(input as object, "operationReference");
+        if (shape === "accessor")
+          Object.defineProperty(input, "operationReference", {
+            enumerable: true,
+            get: () => {
+              reads++;
+              return id(3);
+            },
+          });
+        if (shape === "symbol") Object.assign(input as object, { [Symbol("extra")]: true });
+        if (shape === "hidden") Object.defineProperty(input, "extra", { value: true });
+        if (shape === "prototype") Object.setPrototypeOf(input, { extra: true });
+        if (shape === "array") input = [];
+        if (shape === "null") input = null;
+        let failure: unknown;
+        try {
+          await store[name](input as never);
+        } catch (error) {
+          failure = error;
+        }
+        expect(reads).toBe(0);
+        expect(run).not.toHaveBeenCalled();
+        expect(failure).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+      });
+    }
+  }
+  for (const field of ["proof", "ownerEvidence"] as const) {
+    it(`captures ${field} without nested getter evaluation before any transaction`, async () => {
+      const run = vi.fn(async () => undefined);
+      const store = createPostgresGuestBindingStore(
+        { run: run as never },
+        { brandReference: id(1), storeReference: id(2) },
+        { append: vi.fn() },
+        (a, b) => a === b,
+      );
+      const input = {
+        operationReference: id(3),
+        currentSelectorHash: proof().sessionSelectorHash,
+        proof: proof(),
+        ownerEvidence: ownerEvidence(),
+        observedAt,
+      };
+      let reads = 0;
+      Object.defineProperty(
+        input[field],
+        field === "proof" ? "sessionSelectorHash" : "targetReference",
+        {
+          enumerable: true,
+          get: () => {
+            reads++;
+            return id(4);
+          },
+        },
+      );
+      await expect(store.activate(input)).rejects.toMatchObject({
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      expect(reads).toBe(0);
+      expect(run).not.toHaveBeenCalled();
+    });
+  }
+  it("rejects constructor scope accessors without invoking them", () => {
+    let reads = 0;
+    const scope = {
+      get brandReference() {
+        reads++;
+        return id(1);
+      },
+      storeReference: id(2),
+    };
+    expect(() =>
+      createPostgresGuestBindingStore(
+        { run: vi.fn() },
+        scope,
+        { append: vi.fn() },
+        (a, b) => a === b,
+      ),
+    ).toThrow();
+    expect(reads).toBe(0);
+  });
+});

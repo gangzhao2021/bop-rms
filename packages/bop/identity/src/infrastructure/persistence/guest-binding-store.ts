@@ -18,6 +18,7 @@ import {
 import {
   parseCanonicalInstant,
   parseOpaqueUuidV7,
+  readClosedRecord,
   type CanonicalInstant,
 } from "../../contracts/identity-actor.js";
 import {
@@ -44,6 +45,48 @@ export interface GuestBindingAuditPort {
 function unavailable(): never {
   throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
 }
+function captured<T>(read: () => T): T {
+  try {
+    return read();
+  } catch {
+    return unavailable();
+  }
+}
+function captureProof(value: unknown): GuestBindingProof {
+  const raw = readClosedRecord(value, [
+    "sessionSelectorHash",
+    "csrfSelectorHash",
+    "recoverySelectorHash",
+  ]);
+  return Object.freeze({
+    sessionSelectorHash: parseGuestSelectorHash(raw.sessionSelectorHash),
+    csrfSelectorHash: parseGuestSelectorHash(raw.csrfSelectorHash),
+    recoverySelectorHash: parseGuestSelectorHash(raw.recoverySelectorHash),
+  });
+}
+function captureOwner(value: unknown): GuestBindingOwnerEvidence {
+  const raw = readClosedRecord(value, [
+    "operationReference",
+    "targetReference",
+    "sessionReference",
+    "brandReference",
+    "storeReference",
+    "bindingVersion",
+    "preparedAt",
+    "validUntil",
+  ]);
+  if (raw.bindingVersion !== 1) return unavailable();
+  return Object.freeze({
+    operationReference: parseGuestOperationReference(raw.operationReference),
+    targetReference: parseGuestOperationReference(raw.targetReference),
+    sessionReference: parseGuestOperationReference(raw.sessionReference),
+    brandReference: parseOpaqueUuidV7(raw.brandReference, "IDENTITY_INPUT_INVALID"),
+    storeReference: parseOpaqueUuidV7(raw.storeReference, "IDENTITY_INPUT_INVALID"),
+    bindingVersion: raw.bindingVersion,
+    preparedAt: parseCanonicalInstant(raw.preparedAt),
+    validUntil: parseCanonicalInstant(raw.validUntil),
+  });
+}
 function rows(value: unknown): readonly Record<string, unknown>[] {
   if (
     typeof value !== "object" ||
@@ -62,8 +105,15 @@ export function createPostgresGuestBindingStore(
   audit: GuestBindingAuditPort,
   equals: GuestBindingHashEquals,
 ) {
-  const brand = parseOpaqueUuidV7(scope.brandReference, "IDENTITY_INPUT_INVALID");
-  const store = parseOpaqueUuidV7(scope.storeReference, "IDENTITY_INPUT_INVALID");
+  const fixedScope = captured(() => {
+    const raw = readClosedRecord(scope, ["brandReference", "storeReference"]);
+    return Object.freeze({
+      brandReference: parseOpaqueUuidV7(raw.brandReference, "IDENTITY_INPUT_INVALID"),
+      storeReference: parseOpaqueUuidV7(raw.storeReference, "IDENTITY_INPUT_INVALID"),
+    });
+  });
+  const brand = fixedScope.brandReference;
+  const store = fixedScope.storeReference;
   if (typeof audit?.append !== "function" || typeof equals !== "function") unavailable();
   const scoped = (value: unknown) => {
     const record = parseGuestBindingPreparation(value);
@@ -88,7 +138,7 @@ export function createPostgresGuestBindingStore(
     }
   }
   const sessions = (tx: GuestSessionEntryTransaction) =>
-    createPostgresGuestSessionEntryStore({ run: (action) => action(tx) }, scope);
+    createPostgresGuestSessionEntryStore({ run: (action) => action(tx) }, fixedScope);
   async function current(
     tx: GuestSessionEntryTransaction,
     selector: GuestSelectorHash,
@@ -164,7 +214,7 @@ export function createPostgresGuestBindingStore(
   return Object.freeze({
     async prepare(value: GuestBindingPreparation, observedAt: CanonicalInstant) {
       const record = scoped(value);
-      const at = parseCanonicalInstant(observedAt);
+      const at = captured(() => parseCanonicalInstant(observedAt));
       if (record.status !== "Prepared" || at < record.preparedAt || at >= record.expiresAt)
         return unavailable();
       return run(async (tx) => {
@@ -185,15 +235,27 @@ export function createPostgresGuestBindingStore(
       readonly proof: GuestBindingProof;
       readonly observedAt: CanonicalInstant;
     }) {
-      const operation = parseGuestOperationReference(input.operationReference);
-      const selector = parseGuestSelectorHash(input.currentSelectorHash);
-      const at = parseCanonicalInstant(input.observedAt);
+      const command = captured(() => {
+        const raw = readClosedRecord(input, [
+          "operationReference",
+          "currentSelectorHash",
+          "proof",
+          "observedAt",
+        ]);
+        return Object.freeze({
+          operation: parseGuestOperationReference(raw.operationReference),
+          selector: parseGuestSelectorHash(raw.currentSelectorHash),
+          at: parseCanonicalInstant(raw.observedAt),
+          proof: captureProof(raw.proof),
+        });
+      });
+      const { operation, selector, at } = command;
       return run(async (tx) => {
         const predecessor = await current(tx, selector, at, true);
         const prior = await load(tx, operation);
         if (prior === null) return unavailable();
         const next = acknowledgeGuestBinding(
-          { preparation: prior, current: predecessor, proof: input.proof, observedAt: at },
+          { preparation: prior, current: predecessor, proof: command.proof, observedAt: at },
           equals,
         );
         return next.revision === prior.revision ? prior : append(tx, next, at);
@@ -206,9 +268,23 @@ export function createPostgresGuestBindingStore(
       readonly ownerEvidence: GuestBindingOwnerEvidence;
       readonly observedAt: CanonicalInstant;
     }) {
-      const operation = parseGuestOperationReference(input.operationReference);
-      const selector = parseGuestSelectorHash(input.currentSelectorHash);
-      const at = parseCanonicalInstant(input.observedAt);
+      const command = captured(() => {
+        const raw = readClosedRecord(input, [
+          "operationReference",
+          "currentSelectorHash",
+          "proof",
+          "ownerEvidence",
+          "observedAt",
+        ]);
+        return Object.freeze({
+          operation: parseGuestOperationReference(raw.operationReference),
+          selector: parseGuestSelectorHash(raw.currentSelectorHash),
+          at: parseCanonicalInstant(raw.observedAt),
+          proof: captureProof(raw.proof),
+          ownerEvidence: captureOwner(raw.ownerEvidence),
+        });
+      });
+      const { operation, selector, at } = command;
       return run(async (tx) => {
         const predecessor = await current(tx, selector, at, true);
         const prior = await load(tx, operation);
@@ -217,8 +293,8 @@ export function createPostgresGuestBindingStore(
           {
             preparation: prior,
             current: predecessor,
-            proof: input.proof,
-            ownerEvidence: input.ownerEvidence,
+            proof: command.proof,
+            ownerEvidence: command.ownerEvidence,
             observedAt: at,
           },
           equals,
@@ -289,9 +365,21 @@ export function createPostgresGuestBindingStore(
       readonly csrfSelectorHash: GuestSelectorHash;
       readonly observedAt: CanonicalInstant;
     }) {
-      const operation = parseGuestOperationReference(input.operationReference);
-      const selector = parseGuestSelectorHash(input.sessionSelectorHash);
-      const at = parseCanonicalInstant(input.observedAt);
+      const command = captured(() => {
+        const raw = readClosedRecord(input, [
+          "operationReference",
+          "sessionSelectorHash",
+          "csrfSelectorHash",
+          "observedAt",
+        ]);
+        return Object.freeze({
+          operation: parseGuestOperationReference(raw.operationReference),
+          selector: parseGuestSelectorHash(raw.sessionSelectorHash),
+          at: parseCanonicalInstant(raw.observedAt),
+          csrfSelectorHash: parseGuestSelectorHash(raw.csrfSelectorHash),
+        });
+      });
+      const { operation, selector, at } = command;
       return run(async (tx) => {
         const candidate = await current(tx, selector, at, true);
         const preparation = await load(tx, operation);
@@ -301,7 +389,7 @@ export function createPostgresGuestBindingStore(
             preparation,
             current: candidate,
             sessionSelectorHash: selector,
-            csrfSelectorHash: input.csrfSelectorHash,
+            csrfSelectorHash: command.csrfSelectorHash,
             observedAt: at,
           },
           equals,

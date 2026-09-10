@@ -473,6 +473,107 @@ it("atomically persists binding delivery, activation, Audit and response-loss co
         assert.equal(JSON.stringify(ownerPreparations).includes(raw), false);
       assert.equal(await count("bop_identity.guest_binding_preparation"), 10);
       assert.equal(await count("platform_audit.audit_record"), 10);
+      // WP-2293: caller mutation between invocation and database work must not change authority.
+      const mutateBeforeTransaction = (mutate) => ({
+        async run(action) {
+          await Promise.resolve();
+          mutate();
+          return runner().run(action);
+        },
+      });
+      const captured = fixture(700);
+      await sessions.create({ record: captured.predecessor });
+      await store.prepare(captured.preparation, at(0));
+      const changedProof = {
+        ...captured.acknowledge,
+        proof: { ...captured.proof, csrfSelectorHash: hash(999) },
+      };
+      const mutatingProofStore = createPostgresGuestBindingStore(
+        mutateBeforeTransaction(() => {
+          changedProof.proof.csrfSelectorHash = captured.proof.csrfSelectorHash;
+        }),
+        scope,
+        audit,
+        equals,
+      );
+      await assert.rejects(mutatingProofStore.acknowledge(changedProof), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT max(revision) AS revision FROM bop_identity.guest_binding_preparation WHERE operation_id=$1",
+            [captured.preparation.operationReference],
+          )
+        ).rows[0].revision,
+        1,
+      );
+      await store.acknowledge(captured.acknowledge);
+      const changedEvidence = {
+        ...captured.activate,
+        ownerEvidence: { ...captured.activate.ownerEvidence, targetReference: id(999) },
+      };
+      const mutatingEvidenceStore = createPostgresGuestBindingStore(
+        mutateBeforeTransaction(() => {
+          changedEvidence.ownerEvidence.targetReference =
+            captured.activate.ownerEvidence.targetReference;
+        }),
+        scope,
+        audit,
+        equals,
+      );
+      await assert.rejects(mutatingEvidenceStore.activate(changedEvidence), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.equal(
+        (await sessions.resolve(captured.predecessor.sessionSelectorHash)).session.status,
+        "Active",
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT max(revision) AS revision FROM bop_identity.guest_binding_preparation WHERE operation_id=$1",
+            [captured.preparation.operationReference],
+          )
+        ).rows[0].revision,
+        2,
+      );
+      await store.activate(captured.activate);
+      const changedCsrf = {
+        operationReference: captured.preparation.operationReference,
+        sessionSelectorHash: captured.candidate.sessionSelectorHash,
+        csrfSelectorHash: hash(999),
+        observedAt: at(4),
+      };
+      const mutatingCsrfStore = createPostgresGuestBindingStore(
+        mutateBeforeTransaction(() => {
+          changedCsrf.csrfSelectorHash = captured.candidate.csrfSelectorHash;
+        }),
+        scope,
+        audit,
+        equals,
+      );
+      await assert.rejects(mutatingCsrfStore.complete(changedCsrf), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      const originalScope = { ...scope };
+      const stableScopeStore = createPostgresGuestBindingStore(
+        runner(),
+        originalScope,
+        audit,
+        equals,
+      );
+      originalScope.storeReference = id(999);
+      const completion = await stableScopeStore.complete({
+        operationReference: captured.preparation.operationReference,
+        sessionSelectorHash: captured.candidate.sessionSelectorHash,
+        csrfSelectorHash: captured.candidate.csrfSelectorHash,
+        observedAt: at(4),
+      });
+      assert.equal(completion.storeReference, scope.storeReference);
+      assert.equal(completion.sessionReference, captured.candidate.session.sessionReference);
+      assert.equal(await count("bop_identity.guest_binding_preparation"), 13);
+      assert.equal(await count("platform_audit.audit_record"), 13);
       assert.equal(active, 0);
     } finally {
       await admin.query(`DROP OWNED BY ${role}`);

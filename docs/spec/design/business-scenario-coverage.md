@@ -333,3 +333,7 @@ not recovered raw credentials; production public mapping and credential delivery
 WP-2292 rejects malformed outer binding commands and nonboolean possession comparisons without
 executing caller getters. Identity264/264, full verification and forced uncached integration
 pass, including64 new boundary cases. Pickup-only preparation policy and stored lifecycle formats remain unchanged.
+
+WP-2293 captures complete binding store commands and constructor scope before database waits.
+Identity291/291, actual PostgreSQL proof/evidence/CSRF/scope mutation-barrier acceptance,
+full verification and forced uncached integration pass. The original invalid input cannot become authorized by later mutation.
