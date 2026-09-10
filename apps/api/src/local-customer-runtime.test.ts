@@ -47,6 +47,102 @@ async function start(options: LocalCustomerRuntimeOptions) {
 }
 
 describe("scoped local Customer runtime", () => {
+  function diningCartOptions() {
+    const write = vi.fn(async (): Promise<never> => {
+      throw new Error("synthetic selection writer must not run");
+    });
+    const configuration: NonNullable<LocalCustomerRuntimeOptions["diningCart"]> = {
+      participation: { resolve: vi.fn(async () => null) },
+      selectionTransactions: { run: write },
+      selection: {
+        sourceChannel: "Qr",
+        policy: {
+          policyVersionReference: id(750),
+          policyDigest: `sha256:${"a".repeat(64)}`,
+          idleTimeoutSeconds: 3600,
+          absoluteTimeoutSeconds: 7200,
+          validFrom: now,
+          validUntil: new Date(Date.parse(now) + 86400000).toISOString(),
+        },
+        generateReference: () => id(751),
+        audit: () => {
+          throw new Error("no selection audit");
+        },
+      },
+    };
+    return { configuration, write };
+  }
+  it("requires separate configured Dining Cart reads before runtime creation", () => {
+    const f = setup(),
+      dining = diningCartOptions();
+    expect(() =>
+      createLocalCustomerRuntime({ ...f.options, diningCart: dining.configuration }),
+    ).toThrow("LOCAL_DINING_CART_READS_REQUIRED");
+    expect(dining.write).not.toHaveBeenCalled();
+  });
+  it("rejects missing customer authority before the opt-in Dining selection writer", async () => {
+    const f = setup(),
+      dining = diningCartOptions();
+    const { root } = await start({
+      ...f.options,
+      cartTransactions: { run: f.run },
+      diningCart: dining.configuration,
+    });
+    const response = await fetch(`${root}/api/v1/carts`, {
+      method: "POST",
+      headers: {
+        origin: "https://customer.invalid",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "content-type": "application/json",
+        "x-csrf-token": "c".repeat(43),
+        "idempotency-key": id(752),
+      },
+      body: "{}",
+    });
+    expect(response.status).toBe(401);
+    expect(dining.write).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it("keeps the outer scope, Identity store and clock despite extra Dining configuration fields", async () => {
+    const f = setup(),
+      dining = diningCartOptions();
+    const forbidden = vi.fn((): never => {
+      throw new Error("nested runtime authority must not run");
+    });
+    const nested = {
+      ...dining.configuration,
+      scope: { brandReference: id(999), storeReference: id(998) },
+      sessions: { resolve: forbidden, authorize: forbidden },
+      now: forbidden,
+      cartTransactions: { run: forbidden },
+      catalog: { describeMany: forbidden },
+      stores: { getPublicStore: forbidden },
+    };
+    const { root } = await start({
+      ...f.options,
+      cartTransactions: { run: f.run },
+      diningCart: nested,
+    });
+    const response = await fetch(`${root}/api/v1/carts`, {
+      method: "POST",
+      headers: {
+        cookie: `__Host-bop-guest=${"g".repeat(43)}`,
+        origin: "https://customer.invalid",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "content-type": "application/json",
+        "x-csrf-token": "c".repeat(43),
+        "idempotency-key": id(753),
+      },
+      body: "{}",
+    });
+    expect(response.status).toBe(401);
+    expect(f.run).toHaveBeenCalled();
+    expect(forbidden).not.toHaveBeenCalled();
+    expect(dining.write).not.toHaveBeenCalled();
+  });
+
   function diningOptions() {
     const owner = vi.fn(async (): Promise<never> => {
       throw new Error("synthetic Dining unavailable");

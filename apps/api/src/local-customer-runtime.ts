@@ -1,3 +1,8 @@
+import {
+  createCustomerDiningCartComposition,
+  createCustomerCartChannelPort,
+  type CustomerDiningCartCompositionOptions,
+} from "./customer-dining-cart-composition.js";
 import { CustomerDiningJoinHandler } from "./customer-dining-join.js";
 import { CustomerDiningBindingHandler } from "./customer-dining-binding.js";
 import {
@@ -62,6 +67,10 @@ import {
 } from "./server.js";
 
 export interface LocalCustomerRuntimeOptions {
+  readonly diningCart?: Omit<
+    CustomerDiningCartCompositionOptions,
+    "scope" | "sessions" | "cartTransactions" | "catalog" | "stores" | "now"
+  >;
   readonly diningAdmission?: {
     readonly join: Omit<CustomerDiningJoinCompositionOptions, "scope" | "session" | "now">;
     readonly binding: Omit<CustomerDiningBindingCompositionOptions, "scope" | "session" | "now">;
@@ -105,6 +114,8 @@ export interface LocalCustomerRuntimeOptions {
 export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions): ApiServerRuntime {
   if (!["development", "test"].includes(process.env.NODE_ENV ?? "development"))
     throw new Error("LOCAL_CUSTOMER_RUNTIME_UNAVAILABLE");
+  if (options.diningCart !== undefined && options.cartTransactions === undefined)
+    throw new Error("LOCAL_DINING_CART_READS_REQUIRED");
   if (options.cartBinding !== undefined && options.cartTransactions === undefined)
     throw new Error("LOCAL_CART_BINDING_READS_REQUIRED");
   if (options.cartItems !== undefined && options.cartTransactions === undefined)
@@ -146,28 +157,31 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
   });
   let customerCart: CustomerCartHandler | undefined;
   if (options.cartTransactions !== undefined) {
+    const sessions = new GuestSessionService({
+      ...entry.session,
+      store,
+      admission: { consume: async () => null },
+      now,
+    });
+    const catalog = createCatalogSelectionDisplayQuery(projections);
+    const stores = createPublicStoreProfileService({
+      ...entry.profile,
+      resolution: {
+        async resolve(request) {
+          const resolved = await entry.profile.resolution.resolve(request);
+          return resolved !== null && sameScope(resolved) ? resolved : null;
+        },
+      },
+    });
     const query = createCustomerCartViewQuery({
       reads: createPickupCartReadService({
-        sessions: new GuestSessionService({
-          ...entry.session,
-          store,
-          admission: { consume: async () => null },
-          now,
-        }),
+        sessions,
         binding: createPostgresPickupCartBindingReader(options.cartTransactions, scope),
         scope,
         now,
       }),
-      catalog: createCatalogSelectionDisplayQuery(projections),
-      stores: createPublicStoreProfileService({
-        ...entry.profile,
-        resolution: {
-          async resolve(request) {
-            const resolved = await entry.profile.resolution.resolve(request);
-            return resolved !== null && sameScope(resolved) ? resolved : null;
-          },
-        },
-      }),
+      catalog,
+      stores,
       quotes: createPostgresCartQuoteReader(options.cartTransactions, scope),
     });
     const fallback =
@@ -195,7 +209,29 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             now,
             fallback,
           });
-    customerCart = new CustomerCartHandler({ allowedOrigin: options.allowedOrigin, now, port });
+    const composedPort =
+      options.diningCart === undefined
+        ? port
+        : createCustomerCartChannelPort({
+            scope,
+            sessions,
+            now,
+            pickup: port,
+            dining: createCustomerDiningCartComposition({
+              ...options.diningCart,
+              scope,
+              sessions,
+              cartTransactions: options.cartTransactions,
+              catalog,
+              stores,
+              now,
+            }),
+          });
+    customerCart = new CustomerCartHandler({
+      allowedOrigin: options.allowedOrigin,
+      now,
+      port: composedPort,
+    });
   }
   const customerCartBinding =
     options.cartBinding === undefined

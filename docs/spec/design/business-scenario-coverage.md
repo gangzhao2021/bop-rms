@@ -487,3 +487,7 @@ full verification and forced uncached integration pass.
 WP-2318 adds a safe shared Dining Cart display with current viewer checks and participant note minimization.
 HTTP/runtime and item-edit UI remain separate. Ordering790/790, Cart PostgreSQL9/9,
 full verification and forced uncached integration pass.
+
+WP-2319 composes current-authorized Dining Cart selection/read with the existing API routes.
+Local opt-in and synthetic-provider acceptance pass: API551/551, Cart PostgreSQL9/9, existing customer
+lab, full verification and forced integration. Dining item mutations and new browser activation remain open.

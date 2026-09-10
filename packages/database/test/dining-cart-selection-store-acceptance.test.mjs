@@ -1,3 +1,4 @@
+import { createCustomerDiningCartComposition } from "../../../apps/api/src/customer-dining-cart-composition.ts";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
@@ -136,11 +137,10 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
       };
       const store = createPostgresDiningCartSelectionStore(runner(), options);
       // WP-2317 composes the actual application guard and writer with explicit synthetic current providers.
-      function authorized(intent, selection = store) {
+      function authorities(intent) {
         const table = Number.parseInt(intent.diningSessionReference.slice(-12), 16);
-        return createDiningCartSelectionService({
+        return {
           scope,
-          selection,
           now: () => at(clock),
           sessions: {
             resolve: async () => {
@@ -195,7 +195,10 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
                 : null;
             },
           },
-        });
+        };
+      }
+      function authorized(intent, selection = store) {
+        return createDiningCartSelectionService({ ...authorities(intent), selection });
       }
       const commands = [command(10), command(11, 30, 41, 51)];
       const results = await Promise.all(
@@ -333,6 +336,133 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
         committedReceipt,
       );
       assert.equal(await count("platform_audit.audit_record"), beforePostEffect.audit + 1);
+
+      // WP-2319: real API/Ordering composition, synthetic current Identity/Dining/profile providers.
+      let profileAvailable = true;
+      let csrfChecks = 0;
+      function apiFor(intent) {
+        const current = authorities(intent);
+        return createCustomerDiningCartComposition({
+          scope,
+          now: () => at(clock),
+          participation: current.participation,
+          sessions: {
+            resolve: current.sessions.resolve,
+            authorize: async (request) => {
+              csrfChecks++;
+              assert.equal(request.csrfCredential, "s".repeat(43));
+              return current.sessions.resolve(request);
+            },
+          },
+          cartTransactions: runner(),
+          selectionTransactions: runner(),
+          selection: {
+            sourceChannel: options.sourceChannel,
+            policy: options.policy,
+            generateReference: options.generateReference,
+            audit: options.audit,
+          },
+          catalog: {
+            describeMany: async (requests) => {
+              assert.deepEqual(requests, []);
+              return [];
+            },
+          },
+          stores: {
+            getPublicStore: async (request) => {
+              if (!profileAvailable) throw new Error("synthetic profile unavailable");
+              assert.equal(request.publicStoreReference, id(7));
+              assert.equal(request.purpose, "CustomerCart");
+              return {
+                status: "Available",
+                profile: {
+                  profileReference: id(950),
+                  profileVersion: 1,
+                  releaseReference: id(951),
+                  contentDigest: `sha256:${"e".repeat(64)}`,
+                  defaultLocale: "en-CA",
+                  selectedLocale: "en-CA",
+                  currencyCode: "CAD",
+                  timeZone: "America/Toronto",
+                  brandDisplayName: "Synthetic Brand",
+                  storeDisplayName: "Synthetic Store",
+                  address: {
+                    countryCode: "CA",
+                    regionCode: "ON",
+                    locality: "Exampleville",
+                    postalCode: "A1A 1A1",
+                    addressLines: ["100 Example Avenue"],
+                  },
+                  businessPhone: null,
+                  website: null,
+                  logoAssetVersionReference: null,
+                },
+              };
+            },
+          },
+        });
+      }
+      const apiIntent = command(186, 86, 46, 56);
+      const api = apiFor(apiIntent);
+      const apiRequest = {
+        guestCredential: "d".repeat(43),
+        csrfCredential: "s".repeat(43),
+        operationReference: id(186),
+        requestedAt: at(),
+      };
+      const beforeCsrfDenied = transactions;
+      assert.deepEqual(await api.createCart({ ...apiRequest, csrfCredential: "t".repeat(43) }), {
+        status: "SessionExpired",
+      });
+      assert.equal(transactions, beforeCsrfDenied);
+      const beforeApi = {
+        carts: await count("rms_ordering.cart"),
+        audits: await count("platform_audit.audit_record"),
+      };
+      const checksBeforeCreate = csrfChecks;
+      const apiCreated = await api.createCart(apiRequest);
+      assert.equal(apiCreated.status, "Applied");
+      assert.equal(csrfChecks, checksBeforeCreate + 4);
+      assert.equal(apiCreated.view.cart.orderType, "DineIn");
+      assert.deepEqual(apiCreated.view.cart.items, []);
+      assert.equal(apiCreated.view.cart.quote, null);
+      for (const secret of [
+        apiRequest.guestCredential,
+        apiRequest.csrfCredential,
+        id(46),
+        id(56),
+        id(86),
+      ])
+        assert.equal(JSON.stringify(apiCreated).includes(secret), false);
+      const secondApi = apiFor(command(187, 86, 47, 57));
+      const apiSelected = await secondApi.createCart({
+        ...apiRequest,
+        operationReference: id(187),
+      });
+      assert.equal(apiSelected.status, "Current");
+      assert.equal(apiSelected.view.cart.cartReference, apiCreated.view.cart.cartReference);
+      assert.equal(await count("rms_ordering.cart"), beforeApi.carts + 1);
+      assert.equal(await count("platform_audit.audit_record"), beforeApi.audits + 2);
+      assert.deepEqual(
+        await api.getCurrentCart({
+          guestCredential: apiRequest.guestCredential,
+          requestedAt: at(),
+        }),
+        { status: "Found", view: apiCreated.view },
+      );
+      const unknownRequest = { ...apiRequest, operationReference: id(188) };
+      profileAvailable = false;
+      assert.deepEqual(await api.createCart(unknownRequest), { status: "Unavailable" });
+      const afterUnknown = await count("platform_audit.audit_record");
+      assert.equal(afterUnknown, beforeApi.audits + 3);
+      profileAvailable = true;
+      assert.equal((await api.createCart(unknownRequest)).status, "Current");
+      assert.equal(await count("platform_audit.audit_record"), afterUnknown);
+      participationAllowed = false;
+      const beforeRevoked = transactions;
+      assert.deepEqual(await api.createCart(apiRequest), { status: "SessionExpired" });
+      assert.equal(transactions, beforeRevoked);
+      participationAllowed = true;
 
       async function seed(cart, session, kind = "Active") {
         if (kind === "Legacy") {
