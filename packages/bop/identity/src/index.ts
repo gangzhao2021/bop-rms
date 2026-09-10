@@ -6,6 +6,7 @@ export {
   guestSessionErrorCodes,
   GuestSessionError,
   parseGuestAdmissionEvidence,
+  parseGuestDiningAdmissionEvidence,
   parseGuestEntryRequestReference,
   parseGuestOperationReference,
   parseGuestRawCredential,

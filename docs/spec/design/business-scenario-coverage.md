@@ -360,3 +360,9 @@ preserve admission, consumption history and Audit; consumed, Closing, moved or i
 is denied. Consumption still revalidates atomically and original recovery remains unchanged.
 Dining821/821, actual PostgreSQL acceptance, full verification and forced uncached integration pass. The receipt
 is internal owner evidence, not public Table mapping, finite Identity evidence or a write lease.
+
+WP-2298 composes real Identity credential coordination and Dining reservation/consumption through
+public ports. Dining owns current context lifecycle/revocation/expiry validation; each API request
+reauthorizes its own Guest and preserves distinct public/internal Table IDs. API388/388, Dining843/843
+and real combined PostgreSQL acceptance, full verification and forced uncached integration pass. Synthetic current QR
+mapping and bound-session validation remain explicit test inputs, not operational producers.

@@ -24,7 +24,11 @@ import {
   createGuestSessionCredentialProvider,
   createPostgresGuestSessionEntryStore,
   GuestSessionService,
+  createPostgresGuestDiningBindingStore,
+  createGuestDiningBindingCredentialProvider,
 } from "../../bop/identity/src/index.ts";
+import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
+import { createCustomerDiningBindingComposition } from "../../../apps/api/src/customer-dining-binding-composition.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client } = pg;
 const id = (n) => `01902290-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -79,7 +83,7 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         `GRANT UPDATE ON rms_dining.dining_join_capability,rms_dining.dining_session,rms_dining.dining_participant,rms_dining.dining_identity_admission TO ${role}`,
       );
       await admin.query(
-        `GRANT SELECT,INSERT ON bop_identity.guest_session,bop_identity.guest_session_operation TO ${role}`,
+        `GRANT SELECT,INSERT ON bop_identity.guest_session,bop_identity.guest_session_operation,bop_identity.guest_dining_binding_preparation TO ${role}`,
       );
       await admin.query(
         `GRANT UPDATE (status,revocation_reason,revoked_at,version) ON bop_identity.guest_session TO ${role}`,
@@ -1041,6 +1045,182 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         (await identityStore.resolve(k.selector)).session.revocationReason,
         "BindingChanged",
       );
+      // WP-2298: real public-port composition, with explicit synthetic current QR mapping only.
+      const diningBindingAudit = {
+        async append(tx, descriptor) {
+          await appendAuditRecordInTransaction(tx, {
+            ...audit(
+              `IDENTITY_GUEST_DINING_BINDING_${descriptor.action.toUpperCase()}`,
+              descriptor.operationReference,
+              descriptor.occurredAt,
+            ),
+            actor: { type: "System" },
+            targetType: "GuestDiningBindingPreparation",
+            sourceChannel: "CUSTOMER_PWA",
+            dataClassification: "Restricted",
+          });
+        },
+      };
+      const bindingStore = (transactionRunner = runner()) =>
+        createPostgresGuestDiningBindingStore(
+          transactionRunner,
+          identityScope,
+          diningBindingAudit,
+          identityCredentials.equals,
+        );
+      let minute = 3;
+      const contextRequests = [];
+      const compositionOptions = {
+        scope: identityScope,
+        session: {
+          store: identityStore,
+          credentials: identityCredentials,
+          binding: { validate: async () => "Current" },
+        },
+        bindings: bindingStore(),
+        dining: { credentials, store: consumptionWriter },
+        contexts: {
+          async resolve(input) {
+            contextRequests.push(input);
+            const table = publicMappings.get(input.session.publicTableReference);
+            if (!table) return null;
+            return {
+              publicStoreReference: input.session.publicStoreReference,
+              publicTableReference: input.session.publicTableReference,
+              brandReference: id(2),
+              storeReference: id(3),
+              tableReference: table,
+              brandLifecycle: "Active",
+              storeLifecycle: "Active",
+              tableLifecycle: "Active",
+              assignmentState: "Active",
+              channel: "DineIn",
+              qrState: "Enabled",
+              revocationVersion: input.session.qrRevocationVersion,
+              contextEvidenceReference: id(900),
+              validUntil: at(10),
+            };
+          },
+        },
+        recovery: createGuestDiningBindingCredentialProvider(new Uint8Array(32).fill(11)),
+        preparationLifetimeSeconds: 300,
+        now: () => at(minute),
+      };
+      const m = await makeIdentity(34, 114);
+      const mJoin = await firstJoin(34, 114);
+      const composed = createCustomerDiningBindingComposition(compositionOptions);
+      const prepared = await composed.prepare({
+        sessionCredential: m.sessionCredential,
+        csrfCredential: m.csrfCredential,
+        operationReference: id(124),
+        admissionReference: mJoin.joined.admission.admissionReference,
+      });
+      assert.deepEqual(await counts(), { operations: 8, audits: 8 });
+      const candidateHash = identityCredentials.hashCredential(
+        "Session",
+        prepared.sessionCredential,
+      );
+      assert.equal(await identityStore.resolve(candidateHash), null);
+      const activateInput = {
+        sessionCredential: m.sessionCredential,
+        csrfCredential: m.csrfCredential,
+        operationReference: id(124),
+        candidateSessionCredential: prepared.sessionCredential,
+        candidateCsrfCredential: prepared.csrfCredential,
+        recoveryProof: prepared.recoveryProof,
+      };
+      minute = 4;
+      const ownerRollback = createCustomerDiningBindingComposition({
+        ...compositionOptions,
+        dining: {
+          credentials,
+          store: {
+            ...consumptionWriter,
+            consume: createPostgresDiningAdmissionConsumptionStore(
+              runner({ failAudit: true }),
+              scope,
+              credentials,
+              consumptionAudit,
+            ).consume,
+          },
+        },
+      });
+      await assert.rejects(ownerRollback.activate(activateInput), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { operations: 8, audits: 8 });
+      const identityRollback = createCustomerDiningBindingComposition({
+        ...compositionOptions,
+        bindings: {
+          ...compositionOptions.bindings,
+          activate: bindingStore(runner({ failAudit: true })).activate,
+        },
+      });
+      await assert.rejects(identityRollback.activate(activateInput), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { operations: 9, audits: 9 });
+      assert.equal((await identityStore.resolve(m.selector)).session.status, "Active");
+      assert.equal(await identityStore.resolve(candidateHash), null);
+      const lostBinding = createCustomerDiningBindingComposition({
+        ...compositionOptions,
+        bindings: {
+          ...compositionOptions.bindings,
+          activate: bindingStore(runner({ loseAck: true })).activate,
+        },
+      });
+      await assert.rejects(lostBinding.activate(activateInput), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { operations: 9, audits: 9 });
+      const candidate = await identityStore.resolve(candidateHash);
+      assert.equal(
+        candidate.session.diningParticipantReference,
+        mJoin.joined.participant.participantReference,
+      );
+      assert.equal(candidate.session.diningSessionReference, mJoin.sessionId);
+      assert.equal(candidate.session.publicTableReference, m.record.session.publicTableReference);
+      assert.notEqual(candidate.session.sessionReference, m.record.session.sessionReference);
+      assert.equal(
+        (await identityStore.resolve(m.selector)).session.revocationReason,
+        "BindingChanged",
+      );
+      minute = 9;
+      assert.ok(at(minute) > prepared.expiresAt);
+      const completed = await createCustomerDiningBindingComposition(compositionOptions).complete({
+        operationReference: id(124),
+        sessionCredential: prepared.sessionCredential,
+        csrfCredential: prepared.csrfCredential,
+      });
+      assert.equal(completed.status, "Activated");
+      assert.equal(completed.sessionCredential, prepared.sessionCredential);
+      assert.deepEqual(await counts(), { operations: 9, audits: 9 });
+      const bindingHistory = (
+        await admin.query(
+          "SELECT record FROM bop_identity.guest_dining_binding_preparation WHERE operation_id=$1 ORDER BY revision",
+          [id(124)],
+        )
+      ).rows;
+      assert.equal(bindingHistory.length, 3);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::integer AS n FROM platform_audit.audit_record WHERE target_type='GuestDiningBindingPreparation' AND target_id=$1",
+            [id(124)],
+          )
+        ).rows[0].n,
+        3,
+      );
+      for (const secret of [
+        m.sessionCredential,
+        m.csrfCredential,
+        prepared.sessionCredential,
+        prepared.csrfCredential,
+        prepared.recoveryProof,
+      ]) {
+        assert.equal(JSON.stringify(bindingHistory).includes(secret), false);
+        assert.equal(JSON.stringify(contextRequests).includes(secret), false);
+      }
       assert.equal(active, 0);
     } finally {
       await admin.end();
