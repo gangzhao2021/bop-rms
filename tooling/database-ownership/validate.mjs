@@ -354,6 +354,21 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_identity_admission",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-guest-binding-store.ts";
+        // WP-2352 admits only the owner atomic Order writer with its current Cart dependencies.
+        const acceptedOrderCreationWriterAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "cart",
+            "cart_line",
+            "order_number_counter",
+            "order_number_allocation",
+            "order_header",
+            "order_submission_record",
+            "order_batch",
+            "order_item",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-creation-store.ts";
         // WP-2350 admits only the scoped immutable Order submission reader.
         const acceptedOrderCreationQueryAsset =
           module.packageName === "@rms/ordering" &&
@@ -461,6 +476,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningAdmissionConsumptionAsset &&
           !acceptedCartQueryAsset &&
           !acceptedOrderCreationQueryAsset &&
+          !acceptedOrderCreationWriterAsset &&
           !acceptedDiningCartQueryAsset &&
           !acceptedDiningCartSelectionAsset &&
           !acceptedCartOperationAsset &&

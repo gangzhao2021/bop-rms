@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { setTimeout } from "node:timers";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -8,9 +10,13 @@ import {
   encodeOrderItemSnapshot,
   decodeOrderItemSnapshot,
   createPostgresOrderCreationQueryStore,
+  createPostgresOrderCreationStore,
+  createOrderCreatedEnvelope,
 } from "../../rms/ordering/src/index.ts";
 import { orderSnapshotInput } from "../../rms/ordering/src/tests/order-item-snapshot.fixture.ts";
 import { orderQueryFixture } from "../../rms/ordering/src/tests/order-creation-query.fixture.ts";
+import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
+import { orderCreatedSourceInput } from "../../rms/ordering/src/application/order-created-source.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
@@ -566,6 +572,297 @@ async function prove(context) {
     ).rows[0];
     assert([null, ""].includes(cleared.brand));
     assert([null, ""].includes(cleared.store));
+
+    // WP-2352 synthetic current Cart sources and actual atomic writer transactions.
+    async function seedCart(f) {
+      const c = f.cart,
+        l = c.lifecycle;
+      assert(l);
+      await client.query(
+        `INSERT INTO rms_ordering.cart
+      (cart_id,brand_id,store_id,order_type,source_channel,dining_session_id,created_by_actor_id,
+       aggregate_version,created_at,updated_at,lifecycle_status,lifecycle_policy_version_id,lifecycle_policy_digest,
+       idle_timeout_seconds,absolute_timeout_seconds,idle_expires_at,absolute_expires_at,terminal_at,terminal_reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+        [
+          c.cartReference,
+          c.brandReference,
+          c.storeReference,
+          c.orderType,
+          c.sourceChannel,
+          c.diningSessionReference,
+          c.createdByActorReference,
+          c.aggregateVersion,
+          c.createdAt,
+          c.updatedAt,
+          l.status,
+          l.policyVersionReference,
+          l.policyDigest,
+          l.idleTimeoutSeconds,
+          l.absoluteTimeoutSeconds,
+          l.idleExpiresAt,
+          l.absoluteExpiresAt,
+          l.terminalAt,
+          l.terminalReason,
+        ],
+      );
+      for (const item of c.items)
+        await client.query(
+          `INSERT INTO rms_ordering.cart_line
+      (cart_line_id,cart_id,brand_id,store_id,sellable_id,quantity,option_selections_json,customer_note,
+       catalog_selection_evidence_json,added_by_actor_id,added_by_participant_id,added_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9::jsonb,$10,$11,$12)`,
+          [
+            item.cartItemReference,
+            c.cartReference,
+            c.brandReference,
+            c.storeReference,
+            item.sellableReference,
+            item.quantity,
+            JSON.stringify(item.optionSelections),
+            item.customerNote,
+            JSON.stringify(item.catalogSelectionEvidence),
+            item.addedByActorReference,
+            item.addedByParticipantReference,
+            item.addedAt,
+          ],
+        );
+    }
+    function writerRunner(options = {}) {
+      return {
+        async run(action) {
+          const connection = new Client({
+            ...context.clientConfig,
+            application_name: options.name ?? "bop_wp2352_writer",
+          });
+          await connection.connect();
+          let committed = false;
+          try {
+            await connection.query("BEGIN");
+            const value = await action({
+              async query(sql, values) {
+                if (options.fail && sql.includes(options.fail))
+                  throw new Error("synthetic write failure");
+                const result = await connection.query(sql, [...values]);
+                if (options.afterLock && sql.startsWith("SELECT pg_advisory_xact_lock"))
+                  await options.afterLock();
+                if (options.afterAudit && sql.startsWith("INSERT INTO platform_audit.audit_record"))
+                  await options.afterAudit();
+                return result;
+              },
+            });
+            await connection.query("COMMIT");
+            committed = true;
+            if (options.loseAck) throw new Error("synthetic lost acknowledgement");
+            return value;
+          } catch (error) {
+            if (!committed) await connection.query("ROLLBACK");
+            throw error;
+          } finally {
+            await connection.end();
+          }
+        },
+      };
+    }
+    async function counts(f) {
+      const result = await client.query(
+        `SELECT
+      (SELECT count(*)::int FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2) AS orders,
+      (SELECT count(*)::int FROM rms_ordering.order_number_counter WHERE brand_id=$1 AND store_id=$2) AS counters,
+      (SELECT count(*)::int FROM platform_audit.audit_record WHERE brand_id=$1 AND store_id=$2) AS audits,
+      (SELECT count(*)::int FROM platform_eventing.outbox_event WHERE brand_id=$1 AND store_id=$2) AS events`,
+        [f.scope.brandReference, f.scope.storeReference],
+      );
+      return result.rows[0];
+    }
+    for (const [index, fail] of [
+      "INSERT INTO platform_audit.audit_record",
+      "INSERT INTO platform_eventing.outbox_event",
+    ].entries()) {
+      const f = orderWriteFixture({ namespace: "018f780" + index });
+      await seedCart(f);
+      await assert.rejects(
+        createPostgresOrderCreationStore(writerRunner({ fail }), f.scope).append(f.request),
+        { code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" },
+      );
+      assert.deepEqual(await counts(f), { orders: 0, counters: 0, audits: 0, events: 0 });
+      const result = await createPostgresOrderCreationStore(writerRunner(), f.scope).append(
+        f.request,
+      );
+      assert.equal(result.status, "Created");
+      assert.equal(result.record.orderNumberAllocation.sequence, 1n);
+      assert.deepEqual(await counts(f), { orders: 1, counters: 1, audits: 1, events: 1 });
+    }
+    const lost = orderWriteFixture({ namespace: "018f7802" });
+    await seedCart(lost);
+    await assert.rejects(
+      createPostgresOrderCreationStore(writerRunner({ loseAck: true }), lost.scope).append(
+        lost.request,
+      ),
+      { code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" },
+    );
+    const recovered = await createPostgresOrderCreationStore(writerRunner(), lost.scope).append(
+      lost.request,
+    );
+    assert.equal(recovered.status, "Existing");
+    assert.deepEqual(await counts(lost), { orders: 1, counters: 1, audits: 1, events: 1 });
+    assert.deepEqual(recovered.record.items, lost.request.record.items);
+    const concurrent = orderWriteFixture({ namespace: "018f7803" });
+    await seedCart(concurrent);
+    let releaseLock, signalLocked;
+    const held = new Promise((resolve) => {
+      signalLocked = resolve;
+    });
+    const release = new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+    const first = createPostgresOrderCreationStore(
+      writerRunner({
+        afterLock: async () => {
+          signalLocked();
+          await release;
+        },
+      }),
+      concurrent.scope,
+    ).append(concurrent.request);
+    await held;
+    const second = createPostgresOrderCreationStore(
+      writerRunner({ name: "bop_wp2352_waiter" }),
+      concurrent.scope,
+    ).append(concurrent.request);
+    try {
+      let waiting = false;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        waiting = (
+          await client.query(
+            "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name='bop_wp2352_waiter' AND wait_event='advisory') AS waiting",
+          )
+        ).rows[0].waiting;
+        if (waiting) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert(waiting, "second writer must actually wait on the first submission lock");
+    } finally {
+      releaseLock();
+    }
+    const outcomes = await Promise.all([first, second]);
+    assert.deepEqual(
+      outcomes.map((x) => x.status),
+      ["Created", "Existing"],
+    );
+    assert.deepEqual(outcomes[0].record, outcomes[1].record);
+    assert.deepEqual(await counts(concurrent), { orders: 1, counters: 1, audits: 1, events: 1 });
+    const stale = orderWriteFixture({ namespace: "018f7804" });
+    await seedCart(stale);
+    await client.query(
+      "UPDATE rms_ordering.cart SET aggregate_version=aggregate_version+1 WHERE cart_id=$1",
+      [stale.cart.cartReference],
+    );
+    await assert.rejects(
+      createPostgresOrderCreationStore(writerRunner(), stale.scope).append(stale.request),
+      { code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" },
+    );
+    assert.deepEqual(await counts(stale), { orders: 0, counters: 0, audits: 0, events: 0 });
+    const expired = orderWriteFixture({
+      namespace: "018f7805",
+      at: new Date(Date.now() - 600000).toISOString(),
+    });
+    await seedCart(expired);
+    await assert.rejects(
+      createPostgresOrderCreationStore(writerRunner(), expired.scope).append(expired.request),
+      { code: "ORDER_CREATE_VALIDATION_EXPIRED" },
+    );
+    assert.deepEqual(await counts(expired), { orders: 0, counters: 0, audits: 0, events: 0 });
+    const late = orderWriteFixture({ namespace: "018f7806" });
+    await seedCart(late);
+    const expires = new Date(Date.now() + 1000).toISOString();
+    const lateRequest = {
+      ...late.request,
+      checkoutValidationEvidence: {
+        ...late.request.checkoutValidationEvidence,
+        validUntil: expires,
+      },
+    };
+    await assert.rejects(
+      createPostgresOrderCreationStore(
+        writerRunner({
+          afterAudit: async () => {
+            await new Promise((resolve) =>
+              setTimeout(resolve, Math.max(0, Date.parse(expires) - Date.now() + 25)),
+            );
+          },
+        }),
+        late.scope,
+      ).append(lateRequest),
+      { code: "ORDER_CREATE_VALIDATION_EXPIRED" },
+    );
+    assert.deepEqual(await counts(late), { orders: 0, counters: 0, audits: 0, events: 0 });
+
+    const replacementIds = new Map([
+      [lost.request.record.order.orderReference, "018f7802-0000-7000-8000-000000000700"],
+      [
+        lost.request.record.order.batches[0].orderBatchReference,
+        "018f7802-0000-7000-8000-000000000701",
+      ],
+      [lost.request.record.items[0].orderItemReference, "018f7802-0000-7000-8000-000000000702"],
+    ]);
+    const replaceIds = (value) => {
+      if (typeof value === "string") return replacementIds.get(value) ?? value;
+      if (Array.isArray(value)) return value.map(replaceIds);
+      if (value !== null && typeof value === "object")
+        return Object.fromEntries(Object.entries(value).map(([key, v]) => [key, replaceIds(v)]));
+      return value;
+    };
+    const alternate = replaceIds(lost.request);
+    alternate.event = createOrderCreatedEnvelope({
+      eventReference: alternate.event.eventId,
+      correlationReference: alternate.audit.correlationId,
+      sourceSnapshotDigest:
+        "sha256:" +
+        createHash("sha256")
+          .update(orderCreatedSourceInput(alternate.record, alternate.businessDateResolution))
+          .digest("hex"),
+      businessDate: alternate.businessDateResolution.businessDate,
+      record: alternate.record,
+    });
+    const alternateResult = await createPostgresOrderCreationStore(
+      writerRunner(),
+      lost.scope,
+    ).append(alternate);
+    assert.deepEqual(alternateResult, recovered);
+    await assert.rejects(
+      createPostgresOrderCreationStore(writerRunner(), {
+        ...lost.scope,
+        storeReference: id(399),
+      }).append(lost.request),
+      { code: "ORDER_CREATE_INPUT_INVALID" },
+    );
+    const exhausted = orderWriteFixture({ namespace: "018f7807" });
+    await seedCart(exhausted);
+    await client.query(
+      `INSERT INTO rms_ordering.order_number_counter
+      (brand_id,store_id,business_date,next_sequence,updated_at) VALUES ($1,$2,$3,9223372036854775807,$4)`,
+      [
+        exhausted.scope.brandReference,
+        exhausted.scope.storeReference,
+        exhausted.request.businessDateResolution.businessDate,
+        exhausted.request.record.createdAt,
+      ],
+    );
+    await assert.rejects(
+      createPostgresOrderCreationStore(writerRunner(), exhausted.scope).append(exhausted.request),
+      { code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" },
+    );
+    assert.deepEqual(await counts(exhausted), { orders: 0, counters: 1, audits: 0, events: 0 });
+    assert.equal(
+      (
+        await client.query(
+          "SELECT next_sequence::text AS sequence FROM rms_ordering.order_number_counter WHERE brand_id=$1 AND store_id=$2",
+          [exhausted.scope.brandReference, exhausted.scope.storeReference],
+        )
+      ).rows[0].sequence,
+      "9223372036854775807",
+    );
   } finally {
     await client.end();
   }

@@ -288,26 +288,42 @@ export function createPostgresOrderCreationQueryStore(
             "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
             [brand, store],
           );
-          const result = await transaction.query(selectHistory, [brand, store, reference]);
-          if (result === null || typeof result !== "object") return unavailable();
-          const d = Object.getOwnPropertyDescriptor(result, "rows");
-          if (!d?.enumerable || !("value" in d)) return unavailable();
-          const rows = capture(d.value);
-          if (!Array.isArray(rows) || rows.length > 1) return unavailable();
-          if (rows.length === 0) return null;
-          const row = exact(rows[0], ["history"]);
-          const record = decode(row.history);
-          if (
-            record.submissionReference !== reference ||
-            record.order.brandReference !== brand ||
-            record.order.storeReference !== store
-          )
-            return unavailable();
-          return record;
+          return readOrderCreationHistory(
+            transaction,
+            { brandReference: brand, storeReference: store },
+            reference,
+          );
         });
       } catch {
         return unavailable();
       }
     },
   });
+}
+
+/** Owner-local reuse inside a writer transaction; the caller owns isolation and local scope context. */
+export async function readOrderCreationHistory(
+  transaction: OrderCreationQueryTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  value: string,
+): Promise<OrderCreationRecord | null> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    reference = parseOrderingReference(value);
+  const result = await transaction.query(selectHistory, [brand, store, reference]);
+  if (result === null || typeof result !== "object") return unavailable();
+  const d = Object.getOwnPropertyDescriptor(result, "rows");
+  if (!d?.enumerable || !("value" in d)) return unavailable();
+  const rows = capture(d.value);
+  if (!Array.isArray(rows) || rows.length > 1) return unavailable();
+  if (rows.length === 0) return null;
+  const row = exact(rows[0], ["history"]);
+  const record = decode(row.history);
+  if (
+    record.submissionReference !== reference ||
+    record.order.brandReference !== brand ||
+    record.order.storeReference !== store
+  )
+    return unavailable();
+  return record;
 }

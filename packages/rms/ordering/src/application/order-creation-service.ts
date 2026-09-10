@@ -1,3 +1,4 @@
+import { orderCreatedSourceInput } from "./order-created-source.js";
 import { validateOrderSubmissionWriteFence } from "./order-submission-write-fence.js";
 import { canonicalizeRfc8785, validateAuditRecord } from "@bop/audit";
 import { assertGuestSessionUsable, createGuestSession, type GuestSession } from "@bop/identity";
@@ -160,31 +161,8 @@ function sourceSnapshotDigest(
   resolution: StoreBusinessDateResolution,
 ) {
   try {
-    const order = record.order;
-    const batch = order.batches[0];
     return parseOrderingHash(
-      ports.references.hashIntent(
-        `OrderCreatedSource:v1:${JSON.stringify({
-          orderReference: order.orderReference,
-          brandReference: order.brandReference,
-          storeReference: order.storeReference,
-          submissionReference: record.submissionReference,
-          orderBatchReference: batch.orderBatchReference,
-          orderType: order.orderType,
-          sourceChannel: order.sourceChannel,
-          aggregateVersion: order.aggregateVersion,
-          createdAt: record.createdAt,
-          businessDate: resolution.businessDate,
-          items: record.items.map((item) => ({
-            orderItemReference: item.orderItemReference,
-            catalogSnapshotDigest: item.catalog.snapshotDigest,
-            quoteInputDigest: item.pricing.quoteInputDigest,
-            quantity: item.quantity,
-            totalAmountMinor: item.pricing.total.amountMinor.toString(),
-            currencyCode: item.pricing.total.currencyCode,
-          })),
-        })}`,
-      ),
+      ports.references.hashIntent(orderCreatedSourceInput(record, resolution)),
     );
   } catch {
     return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
