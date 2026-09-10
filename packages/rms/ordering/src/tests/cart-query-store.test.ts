@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPostgresCartQueryStore } from "../infrastructure/persistence/cart-query-store.js";
+import {
+  createPostgresCartQueryStore,
+  createPostgresDiningCartCommandQueryStore,
+} from "../infrastructure/persistence/cart-query-store.js";
 
 const id = (n: number) => `018f5000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T14:00:00.000Z";
@@ -45,6 +48,66 @@ function fixture(result: unknown = { rows: [{ cart: cart() }] }) {
 }
 
 describe("scoped PostgreSQL Cart reader", () => {
+  it.each(["Qr", "Web"])(
+    "binds Dining command reads before restricted aggregate retrieval: %s",
+    async (sourceChannel) => {
+      const record = {
+        ...cart(),
+        orderType: "DineIn",
+        sourceChannel,
+        diningSessionReference: id(40),
+        items: [],
+      };
+      const f = fixture({ rows: [{ cart: record }] });
+      const mutable = { ...scope, diningSessionReference: id(40) };
+      const reader = createPostgresDiningCartCommandQueryStore(f.runner, mutable);
+      mutable.diningSessionReference = id(90);
+      expect(await reader.load(id(1))).toEqual(record);
+      expect(f.query.mock.calls[1]?.[1]).toEqual([id(2), id(3), id(1), id(40)]);
+      expect(f.query.mock.calls[1]?.[0]).toContain(
+        "AND c.dining_session_id = $4 AND c.order_type = 'DineIn' AND c.source_channel IN ('Qr', 'Web')",
+      );
+    },
+  );
+  it.each([
+    { diningSessionReference: id(90) },
+    { sourceChannel: "Pos" },
+    { orderType: "Pickup", diningSessionReference: null },
+  ])("denies mismatched Dining results even from a faulty adapter", async (override) => {
+    const f = fixture({
+      rows: [
+        {
+          cart: {
+            ...cart(),
+            orderType: "DineIn",
+            diningSessionReference: id(40),
+            items: [],
+            ...override,
+          },
+        },
+      ],
+    });
+    const reader = createPostgresDiningCartCommandQueryStore(f.runner, {
+      ...scope,
+      diningSessionReference: id(40),
+    });
+    await expect(reader.load(id(1))).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
+  });
+  it("rejects invalid Dining scope before a transaction and returns null for inaccessible Carts", async () => {
+    const f = fixture({ rows: [] });
+    expect(() =>
+      createPostgresDiningCartCommandQueryStore(f.runner, {
+        ...scope,
+        diningSessionReference: "invalid",
+      }),
+    ).toThrow();
+    expect(f.query).not.toHaveBeenCalled();
+    const reader = createPostgresDiningCartCommandQueryStore(f.runner, {
+      ...scope,
+      diningSessionReference: id(40),
+    });
+    expect(await reader.load(id(90))).toBeNull();
+  });
   it("reconstructs and freezes the accepted aggregate without inferring lifecycle or money", async () => {
     const f = fixture();
     const result = await f.reader.load(id(1));

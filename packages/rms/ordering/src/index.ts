@@ -58,6 +58,7 @@ export * from "./application/staff-order-entry-service.js";
 export * from "./application/ports/staff-order-entry-ports.js";
 export {
   createPostgresCartQueryStore,
+  createPostgresDiningCartCommandQueryStore,
   type CartQueryStore,
   type CartQueryTransaction,
   type CartQueryTransactionRunner,

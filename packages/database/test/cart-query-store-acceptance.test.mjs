@@ -3,6 +3,7 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresCartQueryStore,
+  createPostgresDiningCartCommandQueryStore,
   createPostgresDiningCartReadStore,
   createDiningCartReadService,
   createPostgresCartItemOperationStore,
@@ -341,6 +342,28 @@ it("reads only one eligible shared Dining Cart under scoped read-only transactio
       const request = { ...scope, diningSessionReference: id(40), observedAt };
       assert.equal((await reader.current(request)).cartReference, id(30));
       assert.equal(transactions, 1);
+      // WP-2321: command recovery reads bind the authorized session in the owner SQL,
+      // including history excluded from the current display reader.
+      const commandReader = createPostgresDiningCartCommandQueryStore(runner, {
+        ...scope,
+        diningSessionReference: id(40),
+      });
+      assert.equal((await commandReader.load(id(30))).items.length, 2);
+      for (const reference of [32, 33, 36, 90])
+        assert.equal(await commandReader.load(id(reference)), null);
+      assert.equal(
+        (await commandReader.load(id(34))).lifecycle.idleExpiresAt,
+        "2026-08-02T14:00:00.000Z",
+      );
+      assert.equal((await commandReader.load(id(35))).lifecycle, null);
+      assert.equal(
+        await createPostgresDiningCartCommandQueryStore(runner, {
+          ...scope,
+          brandReference: id(99),
+          diningSessionReference: id(40),
+        }).load(id(30)),
+        null,
+      );
       assert.equal(await reader.current({ ...request, diningSessionReference: id(91) }), null);
       assert.equal(
         await reader.current({ ...request, observedAt: "2026-08-02T15:00:00.000Z" }),
@@ -437,6 +460,7 @@ it("reads only one eligible shared Dining Cart under scoped read-only transactio
       );
       assert.equal((await reader.current(request)).cartReference, id(30));
       // An administrative fixture injection changes the owner version between two read statements.
+      assert.equal((await commandReader.load(id(31))).lifecycle.status, "Abandoned");
       afterAggregateRead = () =>
         admin.query(
           "UPDATE rms_ordering.cart SET aggregate_version=2,updated_at=$2 WHERE cart_id=$1",

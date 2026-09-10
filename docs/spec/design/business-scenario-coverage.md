@@ -495,3 +495,8 @@ lab, full verification and forced integration. Dining item mutations and new bro
 WP-2320 interprets shared Cart ownership in the UI and blocks new foreign-item intents.
 PWA639/639, selected browser50/50 and build/offline security pass. Verification reuses unchanged backend
 evidence under the Owner-approved affected-check plan; no new full uncached regression is claimed.
+
+WP-2321 binds Dining command aggregate reads to the authorized session in owner SQL, retaining
+expired/terminal history for original-operation recovery. Current caller authority remains required;
+item command composition is subsequent work. Ordering796/796, Cart PostgreSQL9/9 and affected
+static/security checks pass. No new full-repository regression is claimed.

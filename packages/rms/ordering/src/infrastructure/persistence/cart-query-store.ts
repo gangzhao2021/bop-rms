@@ -57,6 +57,31 @@ export function createPostgresCartQueryStore(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
 ): CartQueryStore {
+  return createScopedCartQueryStore(runner, scope);
+}
+
+// The caller supplies a currently authorized DiningSession, never a client assertion.
+// Lifecycle is deliberately not filtered: original-operation recovery needs historical Carts.
+export function createPostgresDiningCartCommandQueryStore(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{
+    brandReference: string;
+    storeReference: string;
+    diningSessionReference: string;
+  }>,
+): CartQueryStore {
+  return createScopedCartQueryStore(
+    runner,
+    scope,
+    parseOrderingReference(scope.diningSessionReference),
+  );
+}
+
+function createScopedCartQueryStore(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  diningSessionReference?: string,
+): CartQueryStore {
   const brand = parseOrderingReference(scope.brandReference);
   const store = parseOrderingReference(scope.storeReference);
   return Object.freeze({
@@ -68,7 +93,14 @@ export function createPostgresCartQueryStore(
             "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
             [brand, store],
           );
-          const result = await transaction.query(select, [brand, store, reference]);
+          const result = await transaction.query(
+            diningSessionReference === undefined
+              ? select
+              : `${select} AND c.dining_session_id = $4 AND c.order_type = 'DineIn' AND c.source_channel IN ('Qr', 'Web')`,
+            diningSessionReference === undefined
+              ? [brand, store, reference]
+              : [brand, store, reference, diningSessionReference],
+          );
           if (
             result === null ||
             typeof result !== "object" ||
@@ -82,7 +114,11 @@ export function createPostgresCartQueryStore(
           if (
             cart.cartReference !== reference ||
             cart.brandReference !== brand ||
-            cart.storeReference !== store
+            cart.storeReference !== store ||
+            (diningSessionReference !== undefined &&
+              (cart.diningSessionReference !== diningSessionReference ||
+                cart.orderType !== "DineIn" ||
+                !["Qr", "Web"].includes(cart.sourceChannel)))
           )
             throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
           return cart;
