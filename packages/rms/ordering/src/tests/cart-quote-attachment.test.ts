@@ -311,6 +311,52 @@ function pickupInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe("WP-2329 fresh expiry before Quote persistence", () => {
+  it.each([
+    ["2026-08-02T15:04:59.999Z", true],
+    ["2026-08-02T15:05:00.000Z", false],
+    ["2026-08-02T15:05:00.001Z", false],
+  ] as const)("checks Quote expiry after slow Pricing at %s", async (instant, allowed) => {
+    const state = pickupFixture();
+    state.pricing.quoteCart.mockImplementationOnce(async () => {
+      state.now.mockReturnValue(instant);
+      return quote();
+    });
+    if (allowed) {
+      expect((await state.service.attach(pickupInput())).status).toBe("Attached");
+      expect(state.write).toHaveBeenCalledTimes(1);
+    } else {
+      await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+        code: "CART_QUOTE_EXPIRED",
+      });
+      expect(state.write).not.toHaveBeenCalled();
+    }
+  });
+  it.each(["before Pricing", "during Pricing"])(
+    "denies Cart expiry %s without a write",
+    async (stage) => {
+      const state = pickupFixture();
+      const expire = () => state.now.mockReturnValue("2026-08-02T15:30:00.000Z");
+      if (stage === "before Pricing") {
+        vi.spyOn(state.ports.repository, "loadCart").mockImplementationOnce(async () => {
+          expire();
+          return cart();
+        });
+      } else {
+        state.pricing.quoteCart.mockImplementationOnce(async () => {
+          expire();
+          return quote();
+        });
+      }
+      await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+        code: "CART_EXPIRED",
+      });
+      expect(state.write).not.toHaveBeenCalled();
+      if (stage === "before Pricing") expect(state.pricing.quoteCart).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("WP-2328 current Pickup Quote authority", () => {
   it.each(["history", "Cart", "Pricing"])(
     "denies revocation during %s before attachment",

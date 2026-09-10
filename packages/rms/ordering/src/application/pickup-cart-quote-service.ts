@@ -15,6 +15,7 @@ import {
   type OrderingInstant,
   type OrderingReference,
 } from "../domain/cart.js";
+import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import { createCartQuoteAttachmentService } from "./cart-quote-attachment-service.js";
 import type {
   CartQuoteAttachmentPorts,
@@ -205,12 +206,18 @@ export function createPickupCartQuoteService(options: PickupCartQuoteOptions) {
           operationReference: raw.operationReference,
           observedAt: checkedAt,
         });
+        let loadedForQuote: CartAggregate | null = null;
+        const assertCurrentCart = () => {
+          if (loadedForQuote === null) throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+          assertCartLifecycleActive(loadedForQuote.lifecycle, lastObservedAt);
+        };
         const service = createCartQuoteAttachmentService({
           authorization: { authorize: async () => ({ guestSession: current, audit }) },
           references: options.references,
           pricing: {
             async quoteCart(pricingInput) {
               await assertCurrentAuthority();
+              assertCurrentCart();
               const quote = await options.pricing.quoteCart(pricingInput, identity);
               await assertCurrentAuthority();
               return quote;
@@ -220,6 +227,9 @@ export function createPickupCartQuoteService(options: PickupCartQuoteOptions) {
             resolveOperation: (reference) => options.repository.resolveOperation(reference),
             async attach(command) {
               await assertCurrentAuthority();
+              assertCurrentCart();
+              if (lastObservedAt >= command.attachment.quoteExpiresAt)
+                throw new CartError("CART_QUOTE_EXPIRED");
               return options.repository.attach(command);
             },
             loadCart: async (reference) => {
@@ -235,6 +245,7 @@ export function createPickupCartQuoteService(options: PickupCartQuoteOptions) {
                   JSON.stringify(latest) !== JSON.stringify(cart))
               )
                 throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+              loadedForQuote = latest;
               return latest;
             },
           },
