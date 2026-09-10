@@ -459,3 +459,11 @@ assignment and membership-version drift deny. Ordering591/591 tests pass. Persis
 production, creation, safe DTO/browser integration and atomic shared writes remain distinct unfinished
 work; this read observation is not a Closing write lease. Full verification and forced uncached
 integration pass.
+
+WP-2314 supplies the scoped PostgreSQL current Dining Cart adapter. Existing Dining Session association
+selects exactly one Active, unexpired Qr/Web DineIn Cart; absent/ineligible history is not selected and
+multiple eligible candidates deny. One read-only transaction reconstructs the aggregate and rechecks
+ID/version; real between-statement version drift denies. Ordering618/618 and Cart PostgreSQL8/8 pass;
+focused final query/race file2/2 passes. Identity/Dining authority inputs in this repository test are
+explicitly synthetic. No creation, uniqueness writer, HTTP/browser or atomic Closing lease is claimed;
+full verification and forced uncached integration pass.

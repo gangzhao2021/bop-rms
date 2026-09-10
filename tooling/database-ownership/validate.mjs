@@ -317,6 +317,14 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/cart-query-store.ts";
+        // WP-2314 admits only the current shared Dining Cart reader using the owned aggregate reader.
+        const acceptedDiningCartQueryAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "cart_line"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/dining-cart-read-store.ts";
         // WP-2230 accepts only the reader of existing Ordering operation history.
         const acceptedCartOperationAsset =
           module.packageName === "@rms/ordering" &&
@@ -382,6 +390,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningMovedJoinAsset &&
           !acceptedDiningAdmissionConsumptionAsset &&
           !acceptedCartQueryAsset &&
+          !acceptedDiningCartQueryAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&
           !acceptedPickupBindingAsset &&

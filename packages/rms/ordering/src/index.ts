@@ -115,3 +115,5 @@ export {
 } from "./application/pickup-cart-item-service.js";
 
 export * from "./application/dining-cart-read-service.js";
+
+export { createPostgresDiningCartReadStore } from "./infrastructure/persistence/dining-cart-read-store.js";
