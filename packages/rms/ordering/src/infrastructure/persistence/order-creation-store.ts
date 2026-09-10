@@ -21,6 +21,7 @@ import { validateOrderSubmissionWriteFence } from "../../application/order-submi
 import { createPostgresCartQueryStore } from "./cart-query-store.js";
 import {
   readOrderCreationHistory,
+  createPostgresOrderCreationQueryStore,
   type OrderCreationQueryTransactionRunner,
 } from "./order-creation-query-store.js";
 
@@ -508,5 +509,21 @@ export function createPostgresOrderCreationStore(
         return fail();
       }
     },
+  });
+}
+
+/** Compose dedicated read and write transactions; application authorization remains above this boundary. */
+export function createPostgresOrderCreationRepository(
+  runners: Readonly<{
+    query: OrderCreationQueryTransactionRunner;
+    write: OrderCreationQueryTransactionRunner;
+  }>,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+) {
+  const reader = createPostgresOrderCreationQueryStore(runners.query, scope);
+  const writer = createPostgresOrderCreationStore(runners.write, scope);
+  return Object.freeze({
+    resolveSubmission: reader.resolveSubmission,
+    commit: writer.append,
   });
 }

@@ -175,14 +175,25 @@ function verifyReplay(
     submissionReference: OrderingReference;
     submissionIntentHash: string;
     guestSessionReference: OrderingReference;
+    brandReference: string;
+    storeReference: string;
+    cartReference: OrderingReference;
+    expectedCartVersion: number;
+    quoteReference: OrderingReference;
   },
   ports: OrderCreationPorts,
 ): OrderCreationRecord {
   try {
     const prior = parseOrderCreationRecord(priorValue);
+    const batch = prior.order.batches[0];
     if (
       prior.submissionReference !== expected.submissionReference ||
       prior.guestSessionReference !== expected.guestSessionReference ||
+      prior.order.brandReference !== expected.brandReference ||
+      prior.order.storeReference !== expected.storeReference ||
+      batch.sourceCartReference !== expected.cartReference ||
+      batch.sourceCartVersion !== expected.expectedCartVersion ||
+      batch.quoteReference !== expected.quoteReference ||
       !ports.references.equals(prior.submissionIntentHash, expected.submissionIntentHash)
     )
       return fail("ORDER_CREATE_IDEMPOTENCY_CONFLICT");
@@ -348,6 +359,16 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
       if (authorized === null) return fail("ORDER_CREATE_PERMISSION_DENIED");
       const guestSession = session(authorized.guestSession, observedAt);
       const guestSessionReference = sessionReference(guestSession);
+      const replayExpected = {
+        submissionReference,
+        submissionIntentHash,
+        guestSessionReference,
+        brandReference: guestSession.brandReference,
+        storeReference: guestSession.storeReference,
+        cartReference,
+        expectedCartVersion,
+        quoteReference,
+      };
       const reauthorize = async () => {
         observedAt = currentTime(ports, observedAt);
         const current = await ports.authorization
@@ -384,11 +405,7 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
         await reauthorize();
         return Object.freeze({
           status: "AlreadyCreated" as const,
-          record: verifyReplay(
-            prior,
-            { submissionReference, submissionIntentHash, guestSessionReference },
-            ports,
-          ),
+          record: verifyReplay(prior, replayExpected, ports),
         });
       }
       if (Date.parse(requestedAt) > Date.parse(observedAt))
@@ -533,9 +550,24 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
           event,
         })
         .catch(dependency);
+      let result: Readonly<Record<string, unknown>>;
+      try {
+        result = exact(saved, ["status", "record"]);
+        if (result.status !== "Created" && result.status !== "Existing")
+          throw new Error("invalid result");
+      } catch {
+        return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
+      }
+      if (result.status === "Existing") {
+        await reauthorize();
+        return Object.freeze({
+          status: "AlreadyCreated" as const,
+          record: verifyReplay(result.record, replayExpected, ports),
+        });
+      }
       return Object.freeze({
         status: "Created" as const,
-        record: verifySaved(saved, provisional, resolution),
+        record: verifySaved(result.record, provisional, resolution),
       });
     },
   });

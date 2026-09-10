@@ -11,6 +11,8 @@ import {
   decodeOrderItemSnapshot,
   createPostgresOrderCreationQueryStore,
   createPostgresOrderCreationStore,
+  createPostgresOrderCreationRepository,
+  createOrderCreationService,
   createOrderCreatedEnvelope,
 } from "../../rms/ordering/src/index.ts";
 import { orderSnapshotInput } from "../../rms/ordering/src/tests/order-item-snapshot.fixture.ts";
@@ -863,6 +865,151 @@ async function prove(context) {
       ).rows[0].sequence,
       "9223372036854775807",
     );
+
+    // WP-2353: the actual application consumes explicit Created/Existing repository outcomes.
+    function application(f, variant = 0) {
+      const reference = (purpose) => {
+        if (purpose === "CheckoutValidation")
+          return f.request.checkoutValidationEvidence.validationReference;
+        if (variant === 0)
+          return {
+            Order: f.request.record.order.orderReference,
+            OrderBatch: f.request.record.order.batches[0].orderBatchReference,
+            OrderItem: f.request.record.items[0].orderItemReference,
+            Event: f.request.event.eventId,
+          }[purpose];
+        return { Order: id(930), OrderBatch: id(931), OrderItem: id(932), Event: id(933) }[purpose];
+      };
+      const repository = createPostgresOrderCreationRepository(
+        { query: writerRunner(), write: writerRunner() },
+        f.scope,
+      );
+      const guest = {
+        sessionReference: f.request.record.guestSessionReference,
+        status: "Active",
+        version: 1,
+        brandReference: f.scope.brandReference,
+        storeReference: f.scope.storeReference,
+        publicStoreReference: id(900),
+        publicTableReference: null,
+        channel: "Pickup",
+        locale: "en-CA",
+        qrReference: id(901),
+        qrRevocationVersion: 1,
+        diningState: "ContextOnly",
+        diningSessionReference: null,
+        diningParticipantReference: null,
+        createdAt: f.cart.createdAt,
+        lastSeenAt: f.request.record.createdAt,
+        idleExpiresAt: new Date(
+          Date.parse(f.request.record.createdAt) + 4 * 60 * 60 * 1000,
+        ).toISOString(),
+        absoluteExpiresAt: new Date(
+          Date.parse(f.cart.createdAt) + 24 * 60 * 60 * 1000,
+        ).toISOString(),
+        orderClosedAt: null,
+        closureExpiresAt: null,
+        rotatedFromGuestSessionReference: null,
+        revocationReason: null,
+        revokedAt: null,
+      };
+      const ports = {
+        clock: { now: () => new Date().toISOString() },
+        authorization: {
+          async authorize() {
+            return { guestSession: guest };
+          },
+        },
+        checkout: {
+          async validate() {
+            return f.request.checkoutValidationEvidence;
+          },
+        },
+        source: {
+          async load() {
+            return {
+              cart: f.cart,
+              lines: f.request.record.items.map((item) => ({
+                cartItemReference: item.cartItemReference,
+                catalog: item.catalog,
+                pricing: item.pricing,
+              })),
+            };
+          },
+        },
+        businessDate: {
+          async resolve() {
+            return f.request.businessDateResolution;
+          },
+        },
+        audit: {
+          async create(input) {
+            return {
+              ...f.request.audit,
+              targetId: input.order.orderReference,
+              auditId: variant === 0 ? f.request.audit.auditId : id(934),
+              correlationId: variant === 0 ? f.request.audit.correlationId : id(935),
+            };
+          },
+        },
+        references: {
+          generate: reference,
+          hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+          equals: (a, b) => a === b,
+        },
+        repository,
+      };
+      return { ports, service: createOrderCreationService(ports) };
+    }
+    const composed = orderWriteFixture({ namespace: "018f7808" });
+    await seedCart(composed);
+    const commandFor = (f) => ({
+      submissionReference: f.request.record.submissionReference,
+      cartReference: f.cart.cartReference,
+      expectedCartVersion: f.cart.aggregateVersion,
+      quoteReference: f.request.checkoutValidationEvidence.quoteReference,
+      requestedAt: f.request.record.createdAt,
+    });
+    const composedApp = application(composed);
+    const created = await composedApp.service.create(commandFor(composed));
+    const replayed = await composedApp.service.create(commandFor(composed));
+    assert.equal(created.status, "Created");
+    assert.equal(replayed.status, "AlreadyCreated");
+    assert.deepEqual(replayed.record, created.record);
+    assert.deepEqual(await counts(composed), { orders: 1, counters: 1, audits: 1, events: 1 });
+    const racing = orderWriteFixture({ namespace: "018f7809" });
+    await seedCart(racing);
+    let lookups = 0,
+      releaseLookups;
+    const bothRead = new Promise((resolve) => {
+      releaseLookups = resolve;
+    });
+    const appA = application(racing),
+      appB = application(racing, 1);
+    for (const app of [appA, appB]) {
+      const resolve = app.ports.repository.resolveSubmission;
+      app.ports.repository = {
+        ...app.ports.repository,
+        async resolveSubmission(reference) {
+          const result = await resolve(reference);
+          if (result === null) {
+            if (++lookups === 2) releaseLookups();
+            await bothRead;
+          }
+          return result;
+        },
+      };
+    }
+    const raced = await Promise.all([
+      appA.service.create(commandFor(racing)),
+      appB.service.create(commandFor(racing)),
+    ]);
+    assert.deepEqual(
+      new Set(raced.map((value) => value.status)),
+      new Set(["Created", "AlreadyCreated"]),
+    );
+    assert.deepEqual(raced[0].record, raced[1].record);
+    assert.deepEqual(await counts(racing), { orders: 1, counters: 1, audits: 1, events: 1 });
   } finally {
     await client.end();
   }

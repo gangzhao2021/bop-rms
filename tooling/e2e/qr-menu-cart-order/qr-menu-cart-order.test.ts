@@ -628,7 +628,7 @@ function orderPorts() {
             businessDateResolution: input.businessDateResolution,
           }),
         });
-        return stored;
+        return { status: "Created", record: stored } as const;
       },
     },
   };

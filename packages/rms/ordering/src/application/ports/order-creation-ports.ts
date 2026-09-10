@@ -5,6 +5,11 @@ import type { StoreBusinessDateResolution } from "@rms/store";
 import type { OrderingInstant, OrderingReference } from "../../domain/cart.js";
 import type { CheckoutValidationEvidence } from "../../domain/checkout-validation.js";
 import type { CreateOrderResult, OrderCreationRecord } from "../../domain/order-creation.js";
+export type OrderCreationCommitResult = Readonly<{
+  status: "Created" | "Existing";
+  record: OrderCreationRecord;
+}>;
+
 export interface OrderCreationSourceLine {
   readonly cartItemReference: unknown;
   readonly catalog: unknown;
@@ -65,7 +70,7 @@ export interface OrderCreationPorts {
       readonly businessDateResolution: StoreBusinessDateResolution;
       readonly audit: AppendAuditRecordInput;
       readonly event: OrderCreatedEnvelope;
-    }): Promise<OrderCreationRecord>;
+    }): Promise<OrderCreationCommitResult>;
   };
 }
 

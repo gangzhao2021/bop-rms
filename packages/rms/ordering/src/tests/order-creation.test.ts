@@ -358,7 +358,7 @@ function ports(
             businessDateResolution: input.businessDateResolution,
           }),
         });
-        return stored;
+        return { status: "Created", record: stored } as const;
       },
     },
   };
@@ -518,38 +518,47 @@ describe("WP-2345 exact submission evidence", () => {
       const fixture = ports();
       const commit = fixture.implementation.repository.commit;
       fixture.implementation.repository.commit = async (input) => {
-        const original = await commit(input);
+        const original = (await commit(input)).record;
         const item = original.items[0];
         if (item === undefined) throw new Error("fixture");
         if (kind === "item name")
           return {
-            ...original,
-            items: [
-              {
-                ...item,
-                catalog: {
-                  ...item.catalog,
-                  localizedNames: { "en-CA": "Different synthetic item" },
+            status: "Created",
+            record: {
+              ...original,
+              items: [
+                {
+                  ...item,
+                  catalog: {
+                    ...item.catalog,
+                    localizedNames: { "en-CA": "Different synthetic item" },
+                  },
                 },
-              },
-            ],
+              ],
+            },
           } as never;
         if (kind === "creator")
           return {
-            ...original,
-            order: { ...original.order, createdByActorReference: id(90) },
+            status: "Created",
+            record: {
+              ...original,
+              order: { ...original.order, createdByActorReference: id(90) },
+            },
           } as never;
         return {
-          ...original,
-          orderNumberAllocation: createOrderNumberAllocation({
-            orderReference: original.order.orderReference,
-            allocatedAt: original.createdAt,
-            sequence: original.orderNumberAllocation.sequence,
-            businessDateResolution: {
-              ...original.orderNumberAllocation.businessDateResolution,
-              configurationVersion: 2,
-            },
-          }),
+          status: "Created" as const,
+          record: {
+            ...original,
+            orderNumberAllocation: createOrderNumberAllocation({
+              orderReference: original.order.orderReference,
+              allocatedAt: original.createdAt,
+              sequence: original.orderNumberAllocation.sequence,
+              businessDateResolution: {
+                ...original.orderNumberAllocation.businessDateResolution,
+                configurationVersion: 2,
+              },
+            }),
+          },
         };
       };
       await expectCode(
@@ -1096,4 +1105,128 @@ describe("WP-2351 transaction write evidence handoff", () => {
       }),
     ).toThrow(expect.objectContaining({ code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" }));
   });
+});
+
+describe("WP-2353 original result composition", () => {
+  async function original() {
+    return (await createOrderCreationService(ports().implementation).create(command())).record;
+  }
+  it("accepts a raced Existing result with different generated candidate IDs", async () => {
+    const saved = await original(),
+      f = ports();
+    const generate = f.implementation.references.generate;
+    const replacements = { Order: id(90), OrderBatch: id(91), OrderItem: id(92), Event: id(93) };
+    f.implementation.references.generate = (purpose) =>
+      purpose === "CheckoutValidation" ? generate(purpose) : replacements[purpose];
+    f.implementation.repository.commit = async () => ({ status: "Existing", record: saved });
+    const result = await createOrderCreationService(f.implementation).create(command());
+    expect(result).toEqual({ status: "AlreadyCreated", record: saved });
+    expect(f.calls.filter((x) => x === "authorize")).toHaveLength(3);
+  });
+  it("does not renew Checkout evidence to recover an Existing result", async () => {
+    const saved = await original(),
+      f = ports();
+    let now = at;
+    f.implementation.clock.now = () => now;
+    f.implementation.repository.commit = async () => {
+      now = evidence().validUntil;
+      return { status: "Existing", record: saved };
+    };
+    expect(await createOrderCreationService(f.implementation).create(command())).toEqual({
+      status: "AlreadyCreated",
+      record: saved,
+    });
+  });
+  it("reauthorizes current Guest before returning a raced original", async () => {
+    const saved = await original(),
+      f = ports();
+    let authorizations = 0;
+    f.implementation.authorization.authorize = async () =>
+      ++authorizations === 3 ? null : { guestSession: guest() };
+    f.implementation.repository.commit = async () => ({ status: "Existing", record: saved });
+    await expectCode(
+      createOrderCreationService(f.implementation).create(command()),
+      "ORDER_CREATE_PERMISSION_DENIED",
+    );
+  });
+  it.each(["unknown status", "extra", "getter"])(
+    "rejects malformed commit result %s",
+    async (kind) => {
+      const saved = await original(),
+        f = ports();
+      let executed = 0;
+      const result = { status: "Existing", record: saved };
+      if (kind === "unknown status") result.status = "Unknown";
+      if (kind === "extra") Object.assign(result, { extra: true });
+      if (kind === "getter")
+        Object.defineProperty(result, "record", {
+          enumerable: true,
+          get() {
+            executed++;
+            return saved;
+          },
+        });
+      f.implementation.repository.commit = async () => result as never;
+      await expectCode(
+        createOrderCreationService(f.implementation).create(command()),
+        "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+      );
+      expect(executed).toBe(0);
+    },
+  );
+  it.each(["brand", "store", "cart", "version", "quote"])(
+    "rejects internally valid but foreign replay %s in both lookup and commit",
+    async (field) => {
+      const saved = await original();
+      const key = field + "Reference";
+      const order = { ...saved.order, batches: [{ ...saved.order.batches[0] }] };
+      let items = saved.items;
+      let allocation = saved.orderNumberAllocation;
+      if (field === "brand" || field === "store") {
+        Object.assign(order, { [key]: id(90) });
+        items = saved.items.map((item) => ({
+          ...item,
+          catalog: { ...item.catalog, [key]: id(90) },
+        }));
+        allocation = createOrderNumberAllocation({
+          orderReference: saved.order.orderReference,
+          allocatedAt: saved.createdAt,
+          sequence: allocation.sequence,
+          businessDateResolution: { ...allocation.businessDateResolution, [key]: id(90) },
+        });
+      } else {
+        const batch = order.batches[0];
+        if (!batch) throw new Error("fixture");
+        if (field === "cart") Object.assign(batch, { sourceCartReference: id(90) });
+        if (field === "version") Object.assign(batch, { sourceCartVersion: 6 });
+        if (field === "quote") {
+          Object.assign(batch, { quoteReference: id(90) });
+          items = items.map((item) => ({
+            ...item,
+            pricing: { ...item.pricing, quoteReference: id(90) as never },
+          }));
+        }
+      }
+      const foreign = parseOrderCreationRecord({
+        ...saved,
+        order,
+        items,
+        orderNumberAllocation: allocation,
+      });
+      const lookup = ports({ prior: foreign });
+      await expectCode(
+        createOrderCreationService(lookup.implementation).create(command()),
+        "ORDER_CREATE_IDEMPOTENCY_CONFLICT",
+      );
+      const commit = ports();
+      commit.implementation.repository.commit = async () => ({
+        status: "Existing",
+        record: foreign,
+      });
+      await expectCode(
+        createOrderCreationService(commit.implementation).create(command()),
+        "ORDER_CREATE_IDEMPOTENCY_CONFLICT",
+      );
+    },
+  );
 });

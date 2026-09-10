@@ -8,7 +8,7 @@
 - Locally readable source: an untracked `BOP-RMS Complete Handoff Package.md` identifying
   itself as `0.5.9`, used for the scoped reconciliation recorded in
   [WP-2336](./work-packages/WP-2336.md) and [WP-2400](./work-packages/WP-2400.md).
-- Current discussion node: `WP-2352 - Atomic Order Creation Store`.
+- Current discussion node: `WP-2353 - Order Repository Composition`.
 
 The 2026-07-23 Owner decision established the composite baseline because no newer Library file was
 then confirmed available. Current local availability and formal acceptance are separate facts:
@@ -37,8 +37,10 @@ A changed availability label alone does not supersede accepted decisions.
 Its Ordering adapter atomically writes original Order/Batch/Item history, number allocation,
 Audit and Outbox under current Cart/deadline fences, with scoped PostgreSQL evidence.
 [WP-2351](./work-packages/WP-2351.md) supplied the Checkout write fence.
-Created/Existing application integration and current Guest/capacity/Inventory/Payment clock
-composition remain before the complete submission-to-Payment journey is ready.
+[WP-2353](./work-packages/WP-2353.md) composes this writer and original-history reader with
+the application service: concurrent Existing results recover the original Order after current
+Guest reauthorization. Current authority/capacity/Inventory/Payment clock composition remains
+before the complete submission-to-Payment journey is ready.
 
 [WP-2400](./work-packages/WP-2400.md) is integrated locally with the Screen Registry repairs,
 current design/evidence views and explicit verification selection/stop rules in root AGENTS.md.
@@ -51,6 +53,10 @@ for service/API/database/browser progress, and the
 [Pilot readiness inventory](../runbooks/pilot-integration-readiness-inventory.md) for external gates.
 
 ## Latest Work Package Status
+
+- [WP-2353](./work-packages/WP-2353.md): scoped service/repository composition, with 135/135
+  focused tests and actual PostgreSQL application creation/replay/race evidence.
+  The brief owns verification details and remaining activation gates.
 
 - [WP-2352](./work-packages/WP-2352.md): committed atomic Order writer.
   Its recorded Ordering 1014/1014, ownership 230/230 and actual PostgreSQL rollback/concurrency/
