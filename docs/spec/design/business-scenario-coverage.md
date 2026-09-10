@@ -406,3 +406,8 @@ mutation. API500/500 and actual PostgreSQL/HTTP Join response-loss-to-binding ac
 original admission is recovered with one Join Audit, then the existing client/coordinator rotates
 identity once. Full verification and forced uncached integration pass. Production context/abuse
 providers and customer UI activation remain separate.
+
+WP-2306 supplies stateless browser Join transport with strict closed input/result, finite response
+bounds and explicit retry only. PWA561/561, security111/111/build and actual PostgreSQL/HTTP
+Join-client-to-binding recovery pass; one Join and one consumption remain. Full verification and
+forced uncached integration pass. UI coordination and production runtime activation remain separate.

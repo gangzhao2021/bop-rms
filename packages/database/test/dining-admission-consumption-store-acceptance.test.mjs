@@ -1,3 +1,4 @@
+import { createBrowserDiningJoinClient } from "../../../apps/customer-pwa/src/dining/dining-join-client.ts";
 import {
   CustomerDiningJoinHandler,
   customerDiningJoinRoute,
@@ -1826,21 +1827,35 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
       try {
         await new Promise((resolve) => journeyServer.listen(0, "127.0.0.1", resolve));
         const base = `http://127.0.0.1:${journeyServer.address().port}`;
-        const joinRequest = () =>
-          globalThis.fetch(base + customerDiningJoinRoute, {
-            method: "POST",
-            headers: {
-              origin,
-              "sec-fetch-site": "same-origin",
-              "sec-fetch-mode": "cors",
-              "content-type": "application/json",
-              "idempotency-key": id(140),
-              "x-csrf-token": joinedGuest.csrfCredential,
-              cookie: `__Host-bop-guest=${joinedGuest.sessionCredential}`,
-            },
-            body: JSON.stringify({ joinCredential: httpStart.joinCredential }),
-          });
-        const lost = await joinRequest();
+        let joinResponse;
+        const browserJoin = createBrowserDiningJoinClient({
+          online: () => true,
+          async fetch(path, init) {
+            assert.equal(path, customerDiningJoinRoute);
+            const response = await globalThis.fetch(base + path, {
+              ...init,
+              headers: {
+                ...init.headers,
+                origin,
+                "sec-fetch-site": "same-origin",
+                "sec-fetch-mode": "cors",
+                cookie: `__Host-bop-guest=${joinedGuest.sessionCredential}`,
+              },
+            });
+            joinResponse = response.clone();
+            return response;
+          },
+        });
+        const joinIntent = {
+          operationReference: id(140),
+          csrfToken: joinedGuest.csrfCredential,
+          joinCredential: httpStart.joinCredential,
+        };
+        await assert.rejects(browserJoin.join(joinIntent), {
+          code: "unavailable",
+          message: "dining join is unavailable",
+        });
+        const lost = joinResponse;
         assert.equal(lost.status, 503);
         assert.deepEqual(lost.headers.getSetCookie(), []);
         assert.deepEqual(await lost.json(), {
@@ -1851,10 +1866,11 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         });
         const originalJoin = await joinReader.resolveJoinOperation(id(140));
         assert.notEqual(originalJoin, null);
-        const recovered = await joinRequest();
+        const receipt = await browserJoin.join(joinIntent);
+        const recovered = joinResponse;
         assert.equal(recovered.status, 200);
         assert.deepEqual(recovered.headers.getSetCookie(), []);
-        const receipt = await recovered.json();
+        assert.deepEqual(await recovered.json(), receipt);
         assert.deepEqual(receipt, {
           status: "Joined",
           operationReference: id(140),
