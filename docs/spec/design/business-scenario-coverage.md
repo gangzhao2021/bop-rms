@@ -347,3 +347,10 @@ WP-2295 implements independent Identity Dining preparation persistence with atom
 revocation, DiningBound candidate installation, Session/preparation history and public Audit.
 Identity431/431, Identity PostgreSQL6/6, full verification and forced uncached integration pass. Actual Dining evidence
 production, application coordination and browser transport remain separate.
+
+WP-2296 adds an independent Identity coordinator and Dining-purpose recovery credential provider.
+Read-only preparation precedes admission consumption; exact acknowledgement, consumed evidence and
+atomic Identity activation preserve the delivered candidate through owner failure, rollback and
+lost commit acknowledgement. Identity476/476, actual PostgreSQL acceptance, full verification
+and forced uncached integration pass. Owner reservation/current Dining evidence remains synthetic in these composition tests;
+actual public Table mapping, production policy, transport and browser recovery remain separate.

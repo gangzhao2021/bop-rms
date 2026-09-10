@@ -3,6 +3,10 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createGuestSessionRecord,
+  GuestSessionService,
+  createGuestSessionCredentialProvider,
+  createGuestDiningBindingCredentialProvider,
+  createGuestDiningBindingService,
   createPostgresGuestSessionEntryStore,
   createPostgresGuestDiningBindingStore,
   prepareGuestDiningBinding,
@@ -558,6 +562,158 @@ it("atomically persists Dining credential delivery, activation, Audit and respon
       );
       assert.equal(await count("bop_identity.guest_dining_binding_preparation"), 10);
       assert.equal(await count("platform_audit.audit_record"), 10);
+      // WP-2296: real Identity coordinator/store; owner authority remains explicitly synthetic.
+      const credentials = createGuestSessionCredentialProvider(new Uint8Array(32).fill(7));
+      const recovery = createGuestDiningBindingCredentialProvider(new Uint8Array(32).fill(8));
+      const sessionCredential = credentials.generateCredential("Session");
+      const csrfCredential = credentials.generateCredential("Csrf");
+      const prior = createGuestSessionRecord({
+        ...fixture(900).predecessor,
+        sessionSelectorHash: credentials.hashCredential("Session", sessionCredential),
+        csrfSelectorHash: credentials.hashCredential("Csrf", csrfCredential),
+      });
+      await sessions.create({ record: prior });
+      let seconds = 0;
+      let failOwner = true;
+      const consumed = new Set();
+      const ownerRequests = [];
+      const options = {
+        credentials,
+        recovery,
+        sessions,
+        bindings: store,
+        preparationLifetimeSeconds: 300,
+        now: () => at(seconds),
+        authorization: new GuestSessionService({
+          store: sessions,
+          credentials,
+          admission: { consume: async () => null },
+          binding: { validate: async () => "Current" },
+          now: () => at(seconds),
+        }),
+        owner: {
+          async reserveAdmission(input) {
+            ownerRequests.push(input);
+            assert.equal(input.session.sessionReference, prior.session.sessionReference);
+            assert.equal(input.admissionReference, id(909));
+            return {
+              operationReference: input.operationReference,
+              admissionReference: id(909),
+              guestSessionReference: prior.session.sessionReference,
+              ...scope,
+              publicTableReference: id(40),
+              diningSessionReference: id(920),
+              diningParticipantReference: id(921),
+              expectedGuestVersion: prior.session.version,
+              evaluatedAt: at(seconds),
+              validUntil: at(300),
+            };
+          },
+          async consume(input) {
+            ownerRequests.push(input);
+            assert.equal(input.guestSessionReference, prior.session.sessionReference);
+            assert.equal(input.admissionReference, id(909));
+            assert.equal(input.operationReference, id(908));
+            if (failOwner) throw new Error("synthetic owner unavailable");
+            consumed.add(input.operationReference);
+            return {
+              decision: "Allowed",
+              operationReference: input.operationReference,
+              admissionReference: input.admissionReference,
+              guestSessionReference: input.guestSessionReference,
+              storeReference: scope.storeReference,
+              publicTableReference: id(40),
+              diningSessionReference: id(920),
+              diningParticipantReference: id(921),
+              evaluatedAt: at(seconds),
+              validUntil: at(300),
+            };
+          },
+        },
+      };
+      const coordinator = createGuestDiningBindingService(options);
+      const prepared = await coordinator.prepare({
+        sessionCredential,
+        csrfCredential,
+        operationReference: id(908),
+        admissionReference: id(909),
+      });
+      assert.equal(consumed.size, 0);
+      const candidateHash = credentials.hashCredential("Session", prepared.sessionCredential);
+      assert.equal(await sessions.resolve(candidateHash), null);
+      const activation = {
+        sessionCredential,
+        csrfCredential,
+        operationReference: id(908),
+        candidateSessionCredential: prepared.sessionCredential,
+        candidateCsrfCredential: prepared.csrfCredential,
+        recoveryProof: prepared.recoveryProof,
+      };
+      seconds = 1;
+      await assert.rejects(coordinator.activate(activation), { code: "GUEST_SESSION_UNAVAILABLE" });
+      assert.equal(await count("bop_identity.guest_dining_binding_preparation"), 12);
+      failOwner = false;
+      const rollbackCoordinator = createGuestDiningBindingService({
+        ...options,
+        bindings: { ...store, activate: failing.activate },
+      });
+      await assert.rejects(rollbackCoordinator.activate(activation), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.equal(consumed.size, 1);
+      assert.equal((await sessions.resolve(prior.sessionSelectorHash)).session.status, "Active");
+      assert.equal(await sessions.resolve(candidateHash), null);
+      assert.equal(await count("platform_audit.audit_record"), 12);
+      const lostCoordinator = createGuestDiningBindingService({
+        ...options,
+        bindings: { ...store, activate: lost.activate },
+      });
+      await assert.rejects(lostCoordinator.activate(activation), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.equal((await sessions.resolve(prior.sessionSelectorHash)).session.status, "Revoked");
+      const bound = await sessions.resolve(candidateHash);
+      assert.equal(bound.session.diningState, "DiningBound");
+      assert.equal(bound.session.diningParticipantReference, id(921));
+      for (const time of [2, 301]) {
+        seconds = time;
+        const result = await coordinator.complete({
+          operationReference: id(908),
+          sessionCredential: prepared.sessionCredential,
+          csrfCredential: prepared.csrfCredential,
+        });
+        assert.equal(result.status, "Activated");
+        assert.equal(result.sessionCredential, prepared.sessionCredential);
+        assert.equal(
+          (await sessions.resolve(candidateHash)).session.sessionReference,
+          bound.session.sessionReference,
+        );
+      }
+      await assert.rejects(
+        coordinator.complete({ operationReference: id(908), sessionCredential, csrfCredential }),
+        { code: "GUEST_SESSION_UNAVAILABLE" },
+      );
+      assert.equal(consumed.size, 1);
+      assert.equal(await count("bop_identity.guest_dining_binding_preparation"), 13);
+      assert.equal(await count("platform_audit.audit_record"), 13);
+      const persisted = JSON.stringify(
+        (
+          await admin.query(
+            "SELECT record FROM bop_identity.guest_dining_binding_preparation WHERE operation_id=$1",
+            [id(908)],
+          )
+        ).rows,
+      );
+      for (const secret of [
+        sessionCredential,
+        csrfCredential,
+        prepared.sessionCredential,
+        prepared.csrfCredential,
+        prepared.recoveryProof,
+      ]) {
+        assert.equal(persisted.includes(secret), false);
+        assert.equal(JSON.stringify(ownerRequests).includes(secret), false);
+      }
       assert.equal(active, 0);
     } finally {
       await admin.query(`DROP OWNED BY ${role}`);
