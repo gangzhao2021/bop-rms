@@ -131,22 +131,18 @@ and capacity expires exactly 30 minutes after Payment Intent creation. Payment t
 claims one Intent/Attempt/operation before Provider invocation. Unknown is not success or failure.
 The new-work Kill Switch precedes new preparation; accepted replay and recovery remain available.
 
-WP-2336 now reconciles the available local Handoff34.34-34.40 and higher87.9 with the current code in
-[the capacity source decision](./capacity-source-decision.md). The independent Hold lifecycle is
-source-backed; equivalence of an owner receipt plus Ordering-local linkage remains unaccepted.
+WP-2336 reconciles local Handoff34.34-34.40 and higher87.9 with the current code.
+The Owner accepted [DEC-H03](./capacity-source-decision.md) on 2026-09-10 as a scoped Handoff
+addendum: Fulfillment owns durable capacity commitments; a coordinator acquires the exact commitment,
+then Ordering atomically stores its submission and owner-local linkage. That combination satisfies
+the allocation requirement above. Failed Ordering persistence requires idempotent release and durable
+recovery when the release outcome is unknown. Neither Domain accesses the other's private tables.
 
-**Source question DEC-H03.** Identify the owner and precise fact meant by that capacity allocation.
-Reservation policy configuration in [WP-2115](../work-packages/WP-2115.md) creates no hold and cannot
-be substituted as proof. There is no permission here to move capacity facts into Ordering, query
-another Domain's tables, or call a cross-Domain transaction a local transaction.
-
-**Proposal.** If the authoritative source permits a separate capacity owner's durable public hold
-receipt plus an Ordering-owned submission allocation record, acquire the hold through that public
-owner first, then atomically persist only Ordering's submission/allocation evidence locally.
-The source must explicitly confirm that this satisfies WP-1302's allocation requirement; persisting
-a receipt alone is not presumed equivalent. If the source instead requires a foreign capacity
-mutation inside that transaction, stop for an owning architecture/ADR resolution. This handoff
-remains unavailable until DEC-H03 is reconciled; the proposal does not weaken the accepted rule.
+Topology approval is recorded; precise producer clock/receipt semantics and actual persistence,
+concurrency and compensation evidence remain implementation requirements before enabling preparation.
+Reservation policy configuration in [WP-2115](../work-packages/WP-2115.md) creates no capacity fact.
+The original Payment instant, exact30-minute expiry, final Inventory validation and unknown/late
+Payment reconciliation remain binding.
 
 ### Proposed request, result and failure sequence
 

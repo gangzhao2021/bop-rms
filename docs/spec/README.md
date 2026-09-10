@@ -15,7 +15,8 @@ Decision precedence follows Section 0: later numbered accepted sections supersed
 ## Latest Work Package Status
 
 - [WP-2336](./work-packages/WP-2336.md) reconciles local Handoff capacity facts and the existing Payment clock contract.
-  DEC-H03 topology acceptance and a precise producer handoff remain gated; no runtime rule changes.
+  The Owner accepted DEC-H03 on 2026-09-10 through its scoped Handoff addendum.
+  Precise producer handoff and durable evidence remain implementation requirements; no runtime change.
 
 - [WP-2335](./work-packages/WP-2335.md) composes Catalog rules with both required owner safety evidence kinds.
   Catalog204/204, Ordering879/879 and actual PostgreSQL1/1 pass; owner safety ports are synthetic in acceptance.

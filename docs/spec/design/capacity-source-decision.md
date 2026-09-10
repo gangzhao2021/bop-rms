@@ -1,6 +1,7 @@
 # DEC-H03 - Capacity owner and submission transaction boundary
 
-Status: source facts reconciled; proposed interpretation awaits explicit Owner/Architecture acceptance.
+Status: Accepted by the BOP-RMS Owner in the current session on 2026-09-10.
+This record is the scoped DEC-H03 Handoff acceptance addendum.
 Prepared in [WP-2336](../work-packages/WP-2336.md) from fd31bdd. This record changes no runtime rule.
 
 ## Resolved source facts
@@ -25,22 +26,21 @@ not permit an arbitrary fresh retry timestamp or a fresh30-minute extension. The
 [Ordering evidence parser](../../../packages/rms/ordering/src/application/order-payment-preparation.ts)
 validates an allocation reference and expiry; validation alone does not produce that fact.
 
-These facts resolve the early Hold lifecycle and identify a plausible Fulfillment owner. They do
-not establish that storing a receipt is equivalent to the capacity allocation required by87.9.
+These source facts resolve the early Hold lifecycle. The explicit Owner decision below supplies
+the interpretation of the allocation requirement in87.9.
 They also do not establish a new synchronous Ordering-to-Fulfillment dependency: the existing
 Fulfillment dependency already points to Ordering, so reverse coupling must not create a cycle.
 
-## Concrete proposal awaiting acceptance
+## Accepted topology
 
 1. Fulfillment owns capacity pools, occupancy, Holds, Allocations and immutable owner-issued
    receipts. An application coordinator uses public contracts; neither owner reads the other's tables.
 2. Obtain the exact scoped durable hold/allocation commitment through that owner before committing
    Ordering. Ordering atomically writes its immutable submission, first/new Batch, snapshots and an
    Ordering-owned linkage to the exact capacity commitment, with idempotency, Audit and Outbox.
-3. Explicitly accept that owner commitment plus atomic Ordering linkage satisfies87.9/WP-1302.
-   This is the required interpretation decision, not something established by existing tests.
-   If rejected, the current preparation remains unavailable until a different approved architecture
-   reconciles the transaction boundary. No distributed operation is called a single local transaction.
+3. The Owner explicitly accepts that owner commitment plus atomic Ordering linkage satisfies
+   the capacity-allocation transaction requirement in87.9/WP-1302. This scoped Handoff addendum
+   changes that interpretation only. No distributed operation is called a single local transaction.
 4. Preserve permanent operation identity and current authority around every wait. If Ordering fails
    after owner capacity acquisition, release that exact owner commitment idempotently; unknown
    release is recovered durably. Do not infer rollback of the other owner's committed work.
@@ -68,7 +68,14 @@ Fulfillment dependency already points to Ordering, so reverse coupling must not 
 
 ## Decision state
 
-The current session has been asked whether to accept the public owner commitment plus Ordering-local
-linkage topology. No answer is recorded yet. Until an explicit answer and the remaining clock/receipt
-contract are captured, implementation of the dependent submission/Payment path stays gated.
-This does not reopen accepted Cart sharing or credential-recovery decisions.
+The Owner explicitly accepted DEC-H03 in the current session on 2026-09-10 after the concrete
+topology and preserved constraints were presented. Acceptance applies to points1-6 above, including
+the fixed30-minute expiry, final Inventory validation and Payment reconciliation obligations.
+It is separate from prior permission to develop and make verified local commits.
+This scoped addendum resolves the conflicting transaction interpretation; it does not renumber
+the canonical Handoff, claim a new complete source version, or reopen Cart/credential decisions.
+
+The remaining producer clock/receipt contract and durable race/compensation evidence are execution
+requirements, not pending topology approval. A bounded Fulfillment capacity lifecycle WP may proceed.
+Enabling real submission/Payment still requires those implementation checks and authoritative inputs.
+No external service, production, Store, Provider, push, merge or deployment approval is implied.
