@@ -428,3 +428,11 @@ WP-2309 assembles optional Join/binding handlers in the scoped local runtime, fi
 scope/clock/Origin over sub-configuration. API508/508, real PostgreSQL/runtime double-ack recovery
 and existing HTTPS browser entry/menu lab pass. Full verification and forced uncached integration pass.
 Dining UI browser-to-database lab activation remains the next distinct scope; no production providers.
+
+WP-2310 connects main.lab admission to real scoped owner stores behind explicit local bootstrap.
+Desktop/mobile Chromium establishes Guest entry, joins and rotates to DiningBound, then reads persisted
+menu. Separate public Table/Staff-start fixtures preserve each QR mapping. Two Join/consumption and
+six Identity preparation/Audit records are observed; proof stays out of bootstrap/URL/storage/artifacts.
+PWA612/612, browser53/53, local browser acceptance, security/build, full verification and forced
+uncached integration pass. Production providers,
+shared-cart writes, cross-document recovery and deployment remain separate.

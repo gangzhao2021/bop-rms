@@ -12,7 +12,7 @@ import { chromium } from "@playwright/test";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-export async function startCustomerLab({ apiOrigin, token, stop }) {
+export async function startCustomerLab({ apiOrigin, token, stop, diningAdmissionEnabled = false }) {
   assert.equal(process.env.BOP_LOCAL_CUSTOMER_LAB, "1");
   assert(["development", "test"].includes(process.env.NODE_ENV));
   assert.match(apiOrigin, /^http:\/\/127\.0\.0\.1:\d+$/u);
@@ -81,7 +81,7 @@ export async function startCustomerLab({ apiOrigin, token, stop }) {
                 allowed
                   ? stopping
                     ? { status: "stopping" }
-                    : { qrToken: token() }
+                    : { qrToken: token(), diningAdmissionEnabled: diningAdmissionEnabled === true }
                   : { error: "unavailable" },
               ),
             );
@@ -104,7 +104,7 @@ export async function startCustomerLab({ apiOrigin, token, stop }) {
   }
 }
 
-export async function verifyCustomerLab(origin, sessionCount, stopAfter = false) {
+export async function verifyCustomerLab(origin, sessionCount, stopAfter = false, dining) {
   const production = await resolveConfig({ root, logLevel: "silent" }, "build", "production");
   const entryPlugin = production.plugins.find(
     (plugin) => plugin.name === "bop-local-customer-demo-entry",
@@ -119,7 +119,13 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false)
       { width: 1440, height: 900 },
       { width: 390, height: 844 },
     ]) {
-      const context = await browser.newContext({ viewport, ignoreHTTPSErrors: true });
+      let joinProof = dining ? await dining.prepare() : null;
+      const context = await browser.newContext({
+        viewport,
+        ignoreHTTPSErrors: true,
+        isMobile: viewport.width === 390,
+        hasTouch: viewport.width === 390,
+      });
       try {
         const denied = await context.request.post(`${origin}/__local/customer-entry`);
         assert.equal(denied.status(), 404);
@@ -157,6 +163,34 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false)
         const cookie = (await context.cookies()).find((value) => value.name === "__Host-bop-guest");
         assert(cookie?.secure && cookie.httpOnly && cookie.sameSite === "Lax");
         assert.equal(new URL(page.url()).hash, "");
+        if (dining) {
+          try {
+            await page.getByLabel("Join code or invitation", { exact: true }).fill(joinProof);
+          } catch {
+            throw new Error("protected dining input unavailable");
+          } finally {
+            joinProof = null;
+          }
+          await page.getByRole("button", { name: "Join table", exact: true }).click();
+          await page
+            .getByRole("heading", { name: "You’ve joined this table", exact: true })
+            .waitFor();
+          assert.equal(
+            await page.getByLabel("Join code or invitation", { exact: true }).count(),
+            0,
+          );
+          const bound = (await context.cookies()).find(
+            (value) => value.name === "__Host-bop-guest",
+          );
+          assert(bound?.secure && bound.httpOnly && bound.sameSite === "Lax");
+          assert(bound.value !== cookie.value);
+          assert.deepEqual(
+            (await context.cookies()).map((value) => value.name),
+            ["__Host-bop-guest"],
+          );
+          assert.equal(await sessionCount(), before + 2);
+          await dining.verify();
+        }
         await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
         await page.getByText("Latte", { exact: true }).first().waitFor();
         await page

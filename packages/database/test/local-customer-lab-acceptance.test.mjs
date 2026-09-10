@@ -20,9 +20,10 @@ import { createTenantTransactionRunner } from "../src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client, Pool } = pg;
 const scope = { brandReference: id(1), storeReference: id(2) };
+import { seedDining } from "../test-support/local-customer-dining-seed.mjs";
 import { seedMenu } from "../test-support/local-customer-menu-seed.mjs";
 it(
-  "runs the isolated browser entry and persisted menu lab",
+  "runs isolated browser QR entry, persisted Dining admission and menu",
   async () => {
     await withIsolatedDatabase({ caseId: "wp2222_runtime" }, async (context) => {
       const admin = new Client(context.clientConfig);
@@ -40,6 +41,7 @@ it(
       const logs = [];
 
       let runtime;
+      let dining;
       let lab;
       const priorLabFlag = process.env.BOP_LOCAL_CUSTOMER_LAB;
       process.env.BOP_LOCAL_CUSTOMER_LAB = "1";
@@ -117,7 +119,9 @@ it(
             }
           },
         };
+        dining = await seedDining({ admin, context, sessionRole, sessionTransactions, fixture: f });
         const options = {
+          diningAdmission: dining.options,
           scope,
           entry: { ...f.options, session: { binding: f.options.session.binding, credentials } },
           menuStores: {
@@ -142,6 +146,7 @@ it(
         lab = await startCustomerLab({
           apiOrigin: `http://127.0.0.1:${address.port}`,
           token: f.token,
+          diningAdmissionEnabled: true,
           stop: () => stop(),
         });
         assert.equal(lab.origin, options.allowedOrigin);
@@ -151,10 +156,11 @@ it(
             (await admin.query("SELECT count(*)::int AS count FROM bop_identity.guest_session"))
               .rows[0].count,
           process.env.BOP_LOCAL_CUSTOMER_INTERACTIVE !== "1",
+          dining,
         );
         if (process.env.BOP_LOCAL_CUSTOMER_INTERACTIVE === "1") {
           process.stdout.write(
-            `Synthetic entry/menu lab: ${lab.origin} — expires in 15 minutes.\n`,
+            `Synthetic entry/dining/menu lab: ${lab.origin} — expires in 15 minutes.\n`,
           );
           await new Promise((resolve) => {
             const timer = setTimeout(done, 900_000);
@@ -185,6 +191,7 @@ it(
             await admin.end();
           }
         }
+        dining?.close();
         key.fill(0);
       }
     });

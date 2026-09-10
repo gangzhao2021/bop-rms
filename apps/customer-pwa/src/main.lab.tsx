@@ -1,5 +1,14 @@
 import "@fontsource-variable/inter/index.css";
 import "@fontsource-variable/jetbrains-mono/index.css";
+import { v7 as uuidv7 } from "uuid";
+import { createDiningAdmissionJourney } from "./dining/dining-admission-journey.js";
+import { createBrowserDiningJoinClient } from "./dining/dining-join-client.js";
+import { createBrowserDiningBindingClient } from "./dining/dining-binding-client.js";
+import {
+  captureCustomerCsrfContext,
+  getCustomerCsrfCredential,
+  setCustomerCsrfCredential,
+} from "./session/customer-transaction-context.js";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
@@ -11,6 +20,7 @@ const root = document.getElementById("root");
 if (!root) throw new Error("Application root is missing");
 // A synthetic QR is delivered in memory. Never place it in the address bar or storage.
 let hash = "";
+let diningAdmissionEnabled = false;
 if (window.location.pathname === "/" && window.location.search === "") {
   try {
     const response = await window.fetch("/__local/customer-entry", {
@@ -22,8 +32,16 @@ if (window.location.pathname === "/" && window.location.search === "") {
     });
     if (response.ok) {
       const body: unknown = await response.json();
-      if (body && typeof body === "object" && "qrToken" in body && typeof body.qrToken === "string")
+      if (
+        body &&
+        typeof body === "object" &&
+        "qrToken" in body &&
+        typeof body.qrToken === "string"
+      ) {
         hash = `#qr=${body.qrToken}`;
+        diningAdmissionEnabled =
+          "diningAdmissionEnabled" in body && body.diningAdmissionEnabled === true;
+      }
     }
   } catch {
     // The canonical missing-entry screen remains actionable without fabricated context.
@@ -37,12 +55,30 @@ const entryClient = createCustomerEntryClient({
   replaceState: window.history.replaceState.bind(window.history),
   online: () => window.navigator.onLine,
 });
+const transport = { fetch: window.fetch.bind(window), online: () => window.navigator.onLine };
+const diningAdmission = diningAdmissionEnabled
+  ? {
+      journey: createDiningAdmissionJourney({
+        join: createBrowserDiningJoinClient(transport),
+        binding: createBrowserDiningBindingClient(transport),
+        online: transport.online,
+        generateBindingOperationReference: uuidv7,
+        generatePreparationReference: uuidv7,
+        csrf: {
+          get: getCustomerCsrfCredential,
+          set: setCustomerCsrfCredential,
+          capture: captureCustomerCsrfContext,
+        },
+      }),
+      generateOperationReference: uuidv7,
+    }
+  : undefined;
 createRoot(root).render(
   <StrictMode>
     <BrowserRouter>
       <aside aria-label="Local integration lab">
-        Synthetic local integration lab — temporary data. Entry and menu only; ordering and payment
-        are unavailable. The clock is fixed for repeatable verification.
+        Synthetic local integration lab — temporary data. Entry, dining admission and menu; ordering
+        and payment are unavailable. The clock is fixed for repeatable verification.
         <button
           type="button"
           onClick={async (event) => {
@@ -66,7 +102,7 @@ createRoot(root).render(
           Stop local lab
         </button>
       </aside>
-      <App entryClient={entryClient} />
+      <App entryClient={entryClient} diningAdmission={diningAdmission} />
     </BrowserRouter>
   </StrictMode>,
 );
