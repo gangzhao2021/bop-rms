@@ -856,3 +856,125 @@ describe("WP-2346 authorization context fence", () => {
     expect(observed).toEqual([at, "2026-08-02T18:02:00.000Z"]);
   });
 });
+
+describe("WP-2349 stored Order consistency", () => {
+  async function record() {
+    return (await createOrderCreationService(ports().implementation).create(command())).record;
+  }
+  async function pair() {
+    const original = await record();
+    const first = original.items[0];
+    if (!first) throw new Error("fixture");
+    const second = {
+      ...first,
+      orderItemReference: id(90),
+      cartItemReference: id(91),
+      pricing: { ...first.pricing, lineReference: id(91) },
+    };
+    return {
+      ...original,
+      items: [first, second],
+      order: {
+        ...original.order,
+        batches: [
+          {
+            ...original.order.batches[0],
+            items: [
+              ...original.order.batches[0].items,
+              {
+                orderItemReference: second.orderItemReference,
+                orderBatchReference: second.orderBatchReference,
+                cartItemReference: second.cartItemReference,
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
+  it("retains complete ordered multi-line history without querying current sources", async () => {
+    const original = await pair();
+    expect(parseOrderCreationRecord(original)).toEqual(original);
+  });
+  it.each(["brand", "store", "quote"])("rejects a foreign snapshot %s", async (kind) => {
+    const original = await record();
+    const item = original.items[0];
+    if (!item) throw new Error("fixture");
+    const changed =
+      kind === "quote"
+        ? { ...item, pricing: { ...item.pricing, quoteReference: id(90) } }
+        : { ...item, catalog: { ...item.catalog, [kind + "Reference"]: id(90) } };
+    expect(() => parseOrderCreationRecord({ ...original, items: [changed] })).toThrow(
+      OrderCreationError,
+    );
+  });
+  it.each(["duplicate", "reversed", "quote digest"])(
+    "rejects inconsistent %s lines",
+    async (kind) => {
+      const original = await pair();
+      const [first, second] = original.items;
+      if (!first || !second) throw new Error("fixture");
+      const items =
+        kind === "duplicate"
+          ? [first, first]
+          : kind === "reversed"
+            ? [second, first]
+            : [first, { ...second, pricing: { ...second.pricing, quoteInputDigest: digest("f") } }];
+      expect(() => parseOrderCreationRecord({ ...original, items })).toThrow(OrderCreationError);
+    },
+  );
+  it.each(["batch", "identity"])("rejects executable and malformed %s arrays", async (level) => {
+    const original = await record();
+    for (const kind of ["sparse", "accessor", "decorated", "map", "subclass"]) {
+      let executed = 0;
+      const entry =
+        level === "batch" ? original.order.batches[0] : original.order.batches[0].items[0];
+      const values: unknown[] = kind === "sparse" ? new Array(1) : [entry];
+      if (kind === "accessor")
+        Object.defineProperty(values, "0", {
+          enumerable: true,
+          get() {
+            executed++;
+            return entry;
+          },
+        });
+      if (kind === "decorated") Object.assign(values, { extra: true });
+      if (kind === "map")
+        Object.assign(values, {
+          map() {
+            executed++;
+            return [entry];
+          },
+        });
+      if (kind === "subclass") Object.setPrototypeOf(values, Object.create(Array.prototype));
+      const order = {
+        ...original.order,
+        batches:
+          level === "batch"
+            ? values
+            : [
+                {
+                  ...original.order.batches[0],
+                  items: values,
+                },
+              ],
+      };
+      expect(() => parseOrderCreationRecord({ ...original, order })).toThrow(OrderCreationError);
+      expect(executed).toBe(0);
+    }
+  });
+  it.each(["orderType", "sourceChannel"])("rejects executable %s coercion", async (field) => {
+    const original = await record();
+    let executed = 0;
+    const value = {
+      toString() {
+        executed++;
+        return original.order[field as "orderType" | "sourceChannel"];
+      },
+    };
+    expect(() =>
+      parseOrderCreationRecord({ ...original, order: { ...original.order, [field]: value } }),
+    ).toThrow(OrderCreationError);
+    expect(executed).toBe(0);
+  });
+});

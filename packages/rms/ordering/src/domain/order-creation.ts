@@ -134,7 +134,7 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
       businessDateResolution: allocationRaw.businessDateResolution,
     });
     const batch = order.batches[0];
-    const identities = new Map(batch.items.map((item) => [item.orderItemReference, item]));
+    const quoteInputDigest = items[0]?.pricing.quoteInputDigest;
     if (
       allocationRaw.brandReference !== allocation.brandReference ||
       allocationRaw.storeReference !== allocation.storeReference ||
@@ -149,11 +149,16 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
       allocation.brandReference !== order.brandReference ||
       allocation.storeReference !== order.storeReference ||
       allocation.allocatedAt !== createdAt ||
-      items.length !== identities.size ||
-      items.some((item) => {
-        const identity = identities.get(item.orderItemReference);
+      items.length !== batch.items.length ||
+      items.some((item, index) => {
+        const identity = batch.items[index];
         return (
           identity === undefined ||
+          identity.orderItemReference !== item.orderItemReference ||
+          item.catalog.brandReference !== order.brandReference ||
+          item.catalog.storeReference !== order.storeReference ||
+          item.pricing.quoteReference !== batch.quoteReference ||
+          item.pricing.quoteInputDigest !== quoteInputDigest ||
           identity.orderBatchReference !== item.orderBatchReference ||
           identity.cartItemReference !== item.cartItemReference ||
           item.orderBatchReference !== batch.orderBatchReference ||

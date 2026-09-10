@@ -156,6 +156,24 @@ function parseStoredItem(value: unknown): OrderItemIdentity {
   }
 }
 
+function inertArray(value: unknown, maximum: number): readonly unknown[] {
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype ||
+    value.length < 1 ||
+    value.length > maximum ||
+    Reflect.ownKeys(value).length !== value.length + 1
+  )
+    return invalid();
+  const values: unknown[] = [];
+  for (let index = 0; index < value.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor?.enumerable || !("value" in descriptor)) return invalid();
+    values.push(descriptor.value);
+  }
+  return Object.freeze(values);
+}
+
 function parseBatch(value: unknown): OrderBatch {
   const raw = closed(value, [
     "orderBatchReference",
@@ -169,10 +187,10 @@ function parseBatch(value: unknown): OrderBatch {
     "submittedAt",
     "items",
   ]);
-  if (!Array.isArray(raw.items) || raw.items.length < 1 || raw.items.length > 100) return invalid();
+  const capturedItems = inertArray(raw.items, 100);
   try {
     const orderBatchReference = parseOrderingReference(raw.orderBatchReference);
-    const items = Object.freeze(raw.items.map(parseStoredItem));
+    const items = Object.freeze(capturedItems.map(parseStoredItem));
     if (
       items.some((item) => item.orderBatchReference !== orderBatchReference) ||
       new Set(items.map((item) => item.orderItemReference)).size !== items.length ||
@@ -219,10 +237,10 @@ export function parseOrderAggregate(value: unknown): OrderAggregate {
     raw.canonicalPhase !== "Submitted" ||
     raw.closureStatus !== "Open" ||
     raw.paymentStatus !== "NotReported" ||
-    !["DineIn", "Pickup"].includes(String(raw.orderType)) ||
-    !["Api", "Pos", "Qr", "Web"].includes(String(raw.sourceChannel)) ||
-    !Array.isArray(raw.batches) ||
-    raw.batches.length !== 1
+    typeof raw.orderType !== "string" ||
+    !["DineIn", "Pickup"].includes(raw.orderType) ||
+    typeof raw.sourceChannel !== "string" ||
+    !["Api", "Pos", "Qr", "Web"].includes(raw.sourceChannel)
   )
     return invalid();
   try {
@@ -232,7 +250,7 @@ export function parseOrderAggregate(value: unknown): OrderAggregate {
       raw.diningSessionReference === null
         ? null
         : parseOrderingReference(raw.diningSessionReference);
-    const batch = parseBatch(raw.batches[0]);
+    const batch = parseBatch(inertArray(raw.batches, 1)[0]);
     if (
       (raw.orderType === "DineIn") !== (diningSessionReference !== null) ||
       batch.orderReference !== orderReference ||
