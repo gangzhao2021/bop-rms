@@ -1,5 +1,6 @@
 import { createCustomerDiningCartComposition } from "../../../apps/api/src/customer-dining-cart-composition.ts";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 import { it } from "vitest";
@@ -340,7 +341,7 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
       // WP-2319: real API/Ordering composition, synthetic current Identity/Dining/profile providers.
       let profileAvailable = true;
       let csrfChecks = 0;
-      function apiFor(intent) {
+      function apiFor(intent, enableItems = false) {
         const current = authorities(intent);
         return createCustomerDiningCartComposition({
           scope,
@@ -362,11 +363,57 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
             generateReference: options.generateReference,
             audit: options.audit,
           },
+          ...(enableItems
+            ? {
+                items: {
+                  writeTransactions: runner(),
+                  references: {
+                    generate: () => id(++generated),
+                    hashIntent: (value) =>
+                      `sha256:${createHash("sha256").update(value).digest("hex")}`,
+                    equals: (a, b) => a === b,
+                  },
+                  catalog: {
+                    validateSelection: async (request) => ({
+                      ...request,
+                      status: "Accepted",
+                      menuVersionReference: id(960),
+                      productVersionReference: id(961),
+                      catalogChannelCode: "PILOT_CHANNEL",
+                      catalogOrderTypeCode: "PILOT_ORDER_TYPE",
+                      ruleEvidence: [],
+                      validatedAt: request.observedAt,
+                    }),
+                  },
+                  audit: (input) => ({
+                    auditId: id(++generated),
+                    brandId: id(2),
+                    storeId: id(3),
+                    actor: { type: "System" },
+                    actionCode: `ORDERING_CART_ITEM_${input.action.toUpperCase()}`,
+                    targetType: "OrderingCart",
+                    targetId: input.cartReference,
+                    reasonCode: "AUTHORIZED_CART_MUTATION",
+                    correlationId: input.operationReference,
+                    occurredAt: input.observedAt,
+                    sourceChannel: "CUSTOMER_PWA",
+                    dataClassification: "Restricted",
+                    retentionPolicyCode: "AUDIT_DEFAULT",
+                    retentionPolicyVersion: 1,
+                  }),
+                },
+              }
+            : {}),
           catalog: {
-            describeMany: async (requests) => {
-              assert.deepEqual(requests, []);
-              return [];
-            },
+            describeMany: async (requests) =>
+              requests.map((request) => ({
+                status: "Found",
+                menuVersionReference: request.menuVersionReference,
+                productVersionReference: request.productVersionReference,
+                sellableReference: request.sellableReference,
+                displayName: "Synthetic dish",
+                options: [],
+              })),
           },
           stores: {
             getPublicStore: async (request) => {
@@ -639,6 +686,112 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
         "SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid='rms_ordering.dining_cart_operation'::regclass",
       );
       assert.deepEqual(constraints.rows, [{ relrowsecurity: true, relforcerowsecurity: true }]);
+      // WP-2324: actual API command/view composition with explicit synthetic public providers.
+      await admin.query(`GRANT UPDATE ON rms_ordering.cart TO ${role}`);
+      await admin.query(`GRANT INSERT,UPDATE,DELETE ON rms_ordering.cart_line TO ${role}`);
+      await admin.query(`GRANT SELECT,INSERT ON rms_ordering.cart_operation_record TO ${role}`);
+      clock = 0;
+      profileAvailable = true;
+      participationAllowed = true;
+      const beforeItemAudit = await count("platform_audit.audit_record");
+      const beforeItemOperations = await count("rms_ordering.cart_operation_record");
+      const itemIntent = command(4200, 4100, 4101, 4102);
+      const itemApi = apiFor(itemIntent, true);
+      const partnerApi = apiFor(command(4201, 4100, 4103, 4104), true);
+      const transport = {
+        guestCredential: "d".repeat(43),
+        csrfCredential: "s".repeat(43),
+        requestedAt: at(),
+      };
+      const itemCart = await itemApi.createCart({ ...transport, operationReference: id(4200) });
+      assert.equal(itemCart.status, "Applied");
+      const cartReference = itemCart.view.cart.cartReference;
+      const itemCommon = { ...transport, cartReference };
+      const addInput = {
+        ...itemCommon,
+        expectedCartVersion: 1,
+        operationReference: id(4202),
+        sellableReference: id(962),
+        quantity: 2,
+        optionSelections: [],
+        customerNote: "Synthetic owned note",
+      };
+      const added = await itemApi.addItem(addInput);
+      assert.equal(added.status, "Applied");
+      assert.equal(added.view.cart.version, 2);
+      const ownItem = added.view.cart.items[0].cartItemReference;
+      const partnered = await partnerApi.addItem({
+        ...addInput,
+        expectedCartVersion: 2,
+        operationReference: id(4203),
+        customerNote: "Synthetic other note",
+      });
+      assert.equal(partnered.status, "Applied");
+      const otherItem = partnered.view.cart.items.find(
+        (item) => item.cartItemReference !== ownItem,
+      ).cartItemReference;
+      const ownerView = await itemApi.getCart({
+        guestCredential: transport.guestCredential,
+        requestedAt: at(),
+        cartReference,
+      });
+      assert.equal(
+        ownerView.view.cart.items.find((item) => item.cartItemReference === ownItem).customerNote,
+        "Synthetic owned note",
+      );
+      const foreignItem = ownerView.view.cart.items.find(
+        (item) => item.cartItemReference === otherItem,
+      );
+      assert.equal(foreignItem.customerNote, null);
+      assert(foreignItem.warnings.includes("OTHER_PARTICIPANT_ITEM"));
+      assert.deepEqual(
+        await itemApi.removeItem({
+          ...itemCommon,
+          expectedCartVersion: 3,
+          operationReference: id(4204),
+          cartItemReference: otherItem,
+        }),
+        { status: "SessionExpired" },
+      );
+      const updateInput = {
+        ...itemCommon,
+        expectedCartVersion: 3,
+        operationReference: id(4205),
+        cartItemReference: ownItem,
+        quantity: 3,
+        optionSelections: [],
+        customerNote: null,
+      };
+      profileAvailable = false;
+      assert.deepEqual(await itemApi.updateItem(updateInput), { status: "Unavailable" });
+      const afterUnknownAudit = await count("platform_audit.audit_record");
+      profileAvailable = true;
+      const restored = await itemApi.updateItem(updateInput);
+      assert.equal(restored.status, "Applied");
+      assert.equal(restored.view.cart.version, 4);
+      assert.equal(await count("platform_audit.audit_record"), afterUnknownAudit);
+      const removed = await itemApi.removeItem({
+        ...itemCommon,
+        expectedCartVersion: 4,
+        operationReference: id(4206),
+        cartItemReference: ownItem,
+      });
+      assert.equal(removed.status, "Applied");
+      assert.equal(removed.view.cart.version, 5);
+      assert.equal(removed.view.cart.items.length, 1);
+      assert.equal(removed.view.cart.items[0].cartItemReference, otherItem);
+      assert.equal(await count("platform_audit.audit_record"), beforeItemAudit + 5);
+      assert.equal(await count("rms_ordering.cart_operation_record"), beforeItemOperations + 4);
+      for (const privateValue of [
+        transport.guestCredential,
+        transport.csrfCredential,
+        id(4101),
+        id(4102),
+        id(4103),
+        id(4104),
+        "Synthetic other note",
+      ])
+        assert(!JSON.stringify(removed).includes(privateValue));
       clock = 8000;
       const oldPolicyStore = createPostgresDiningCartSelectionStore(runner(), {
         ...options,

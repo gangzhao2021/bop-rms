@@ -10,6 +10,10 @@ import {
   createCustomerDiningCartViewQuery,
   createDiningCartReadService,
   createDiningCartSelectionService,
+  createDiningCartItemService,
+  createPostgresDiningCartCommandQueryStore,
+  createPostgresBoundCartItemOperationStore,
+  createPostgresCartItemCommandStore,
   createPostgresDiningCartReadStore,
   createPostgresDiningCartSelectionStore,
   parseDiningCartSelectionReceipt,
@@ -19,7 +23,11 @@ import {
   type CustomerDiningCartViewPorts,
   type DiningCartReadPorts,
   type DiningCartSelectionStoreOptions,
+  type DiningCartItemOptions,
+  type CartItemWriteTransactionRunner,
 } from "@rms/ordering";
+import { createCustomerCartItemPort } from "./customer-cart-item-composition.js";
+import { createCustomerCartRemovalPort } from "./customer-cart-removal-composition.js";
 import {
   createCustomerCartReadPort,
   type CustomerCartDisplayQuery,
@@ -51,6 +59,7 @@ function failure(error: unknown): CustomerCartPortResult {
 }
 export function createCustomerDiningCartPort(options: {
   readonly query: CustomerCartDisplayQuery;
+  readonly items?: ReturnType<typeof createDiningCartItemService>;
   readonly selection: {
     select(input: {
       readonly sessionCredential: string;
@@ -59,7 +68,7 @@ export function createCustomerDiningCartPort(options: {
     }): Promise<unknown>;
   };
 }): CustomerCartPort {
-  return Object.freeze<CustomerCartPort>({
+  const base = Object.freeze<CustomerCartPort>({
     ...createCustomerCartReadPort(options.query),
     async createCart(
       input: Parameters<CustomerCartPort["createCart"]>[0],
@@ -111,6 +120,38 @@ export function createCustomerDiningCartPort(options: {
       }
     },
   });
+  if (options.items === undefined) return base;
+  const query: CustomerCartDisplayQuery = {
+    async read(input) {
+      const view = await options.query.read(input);
+      if (view !== null && (view.schemaVersion !== 1 || view.cart.orderType !== "DineIn"))
+        throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+      return view;
+    },
+  };
+  const removal = createCustomerCartRemovalPort({ query, removal: options.items });
+  const items = createCustomerCartItemPort({ query, items: options.items, fallback: base });
+  return Object.freeze({
+    ...items,
+    async removeItem(input: Parameters<CustomerCartPort["removeItem"]>[0]) {
+      try {
+        const captured = Object.freeze(
+          readClosedRecord(input, [
+            "guestCredential",
+            "requestedAt",
+            "csrfCredential",
+            "operationReference",
+            "cartReference",
+            "cartItemReference",
+            "expectedCartVersion",
+          ]),
+        );
+        return await removal.removeItem(captured as unknown as typeof input);
+      } catch {
+        return unavailable;
+      }
+    },
+  });
 }
 export interface CustomerDiningCartCompositionOptions {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
@@ -122,10 +163,17 @@ export interface CustomerDiningCartCompositionOptions {
   readonly catalog: CustomerDiningCartViewPorts["catalog"];
   readonly stores: CustomerDiningCartViewPorts["stores"];
   readonly now: () => string;
+  readonly items?: {
+    readonly writeTransactions: CartItemWriteTransactionRunner;
+    readonly references: DiningCartItemOptions["references"];
+    readonly catalog: DiningCartItemOptions["catalog"];
+    readonly audit: DiningCartItemOptions["audit"];
+  };
 }
 export function createCustomerDiningCartComposition(
   options: CustomerDiningCartCompositionOptions,
 ): CustomerCartPort {
+  const itemOptions = options.items;
   const fixedScope = scope(options.scope);
   const now = options.now;
   const sessions = options.sessions;
@@ -148,6 +196,31 @@ export function createCustomerDiningCartComposition(
   });
   return createCustomerDiningCartPort({
     query,
+    ...(itemOptions === undefined
+      ? {}
+      : {
+          items: createDiningCartItemService({
+            scope: fixedScope,
+            sessions,
+            participation,
+            now,
+            references: itemOptions.references,
+            catalog: itemOptions.catalog,
+            audit: itemOptions.audit,
+            repository: (bound) => ({
+              load: createPostgresDiningCartCommandQueryStore(options.cartTransactions, bound).load,
+              resolveOperation: createPostgresBoundCartItemOperationStore(
+                options.cartTransactions,
+                bound,
+              ).resolveOperation,
+              commit: createPostgresCartItemCommandStore(
+                itemOptions.writeTransactions,
+                fixedScope,
+                itemOptions.references,
+              ).commit,
+            }),
+          }),
+        }),
     selection: {
       select: (command) =>
         createDiningCartSelectionService({

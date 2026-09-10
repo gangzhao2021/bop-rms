@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createGuestSession, type GuestSessionService } from "@bop/identity";
-import { CartError, type CustomerCartDisplayView } from "@rms/ordering";
+import { CartError, parseOrderingReference, type CustomerCartDisplayView } from "@rms/ordering";
 import { createApp } from "./app.js";
 import { CustomerCartHandler, type CustomerCartPort } from "./customer-cart.js";
 import {
@@ -426,5 +426,133 @@ describe("Dining Cart HTTP contract", () => {
     });
     expect(response.status).toBe(400);
     expect(f.select).not.toHaveBeenCalled();
+  });
+});
+
+describe("opt-in Dining Cart item API", () => {
+  function configured(action: "addItem" | "updateItem" | "removeItem") {
+    const itemReceipt = {
+      status: "Applied" as const,
+      cartReference: parseOrderingReference(id(11)),
+      cartItemReference: parseOrderingReference(id(12)),
+      aggregateVersion: 2,
+    };
+    const items = {
+      add: vi.fn(async () => itemReceipt),
+      update: vi.fn(async () => itemReceipt),
+      remove: vi.fn(async () => itemReceipt),
+    };
+    const current: CustomerCartDisplayView = {
+      ...view(),
+      cart: {
+        ...view().cart,
+        version: 2,
+        items:
+          action === "removeItem"
+            ? []
+            : [
+                {
+                  cartItemReference: id(12),
+                  sellableReference: id(13),
+                  displayName: "Synthetic dish",
+                  quantity: 2,
+                  configuration: [],
+                  customerNote: null,
+                  lineEstimate: { status: "Unavailable", reasonCode: "LINE_ESTIMATE_UNAVAILABLE" },
+                  warnings: [],
+                },
+              ],
+      },
+    };
+    const read = vi.fn(async (): Promise<CustomerCartDisplayView | null> => current);
+    const port = createCustomerDiningCartPort({
+      query: { read },
+      selection: { select: async () => receipt() },
+      items,
+    });
+    const common = { ...input(), cartReference: id(11), expectedCartVersion: 1 };
+    const request =
+      action === "removeItem"
+        ? { ...common, cartItemReference: id(12) }
+        : {
+            ...common,
+            ...(action === "addItem"
+              ? { sellableReference: id(13) }
+              : { cartItemReference: id(12) }),
+            quantity: 2,
+            optionSelections: [],
+            customerNote: null,
+          };
+    return { items, read, current, port, request, itemReceipt };
+  }
+  it.each(["addItem", "updateItem", "removeItem"] as const)(
+    "maps %s and publishes only a current Dining view",
+    async (action) => {
+      const f = configured(action);
+      expect(await f.port[action](f.request as never)).toEqual({
+        status: "Applied",
+        view: f.current,
+      });
+      const method = action === "addItem" ? "add" : action === "updateItem" ? "update" : "remove";
+      expect(f.items[method]).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionCredential: credential,
+          csrfCredential: csrf,
+          cartReference: id(11),
+          expectedAggregateVersion: 1,
+          operationReference: id(10),
+        }),
+      );
+      expect(f.read).toHaveBeenCalledWith({ sessionCredential: credential, cartReference: id(11) });
+    },
+  );
+  it.each(["addItem", "updateItem", "removeItem"] as const)(
+    "rejects wrong-channel post-%s views",
+    async (action) => {
+      const f = configured(action);
+      f.read.mockResolvedValue({
+        ...f.current,
+        cart: { ...f.current.cart, orderType: "Pickup", serviceMode: "Pickup" },
+      });
+      expect(await f.port[action](f.request as never)).toEqual({ status: "Unavailable" });
+    },
+  );
+  it("captures removal identifiers before awaiting the command", async () => {
+    const f = configured("removeItem");
+    f.items.remove.mockImplementation(async () => {
+      f.request.cartReference = id(90);
+      f.request.guestCredential = "z".repeat(43);
+      return f.itemReceipt;
+    });
+    expect((await f.port.removeItem(f.request as never)).status).toBe("Applied");
+    expect(f.read).toHaveBeenCalledWith({ sessionCredential: credential, cartReference: id(11) });
+  });
+  it("preserves selection when items are enabled", async () => {
+    const f = configured("addItem");
+    expect((await f.port.createCart(input())).status).toBe("Applied");
+  });
+  it("retains unknown outcomes after a failed current read", async () => {
+    const f = configured("updateItem");
+    f.read.mockRejectedValueOnce(new Error("synthetic query failure"));
+    expect(await f.port.updateItem(f.request as never)).toEqual({ status: "Unavailable" });
+    expect((await f.port.updateItem(f.request as never)).status).toBe("Applied");
+    expect(f.items.update).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    ["CART_PERMISSION_DENIED", "SessionExpired"],
+    ["CART_IDEMPOTENCY_CONFLICT", "IdempotencyConflict"],
+  ] as const)("maps bounded %s without reading private data", async (code, status) => {
+    const f = configured("removeItem");
+    f.items.remove.mockRejectedValue(new CartError(code));
+    expect(await f.port.removeItem(f.request as never)).toEqual({ status });
+    expect(f.read).not.toHaveBeenCalled();
+  });
+  it("maps version conflict through a current authorized view", async () => {
+    const f = configured("addItem");
+    f.items.add.mockRejectedValue(new CartError("CART_VERSION_CONFLICT"));
+    expect(await f.port.addItem(f.request as never)).toEqual({
+      status: "VersionConflict",
+      currentVersion: 2,
+    });
   });
 });

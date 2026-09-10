@@ -510,3 +510,8 @@ WP-2323 limits operation snapshot reads by Cart/Guest before restricted data ret
 Dining writer retries. Real owner-store composition with synthetic authority providers passes,
 including shared participant edits and lost-commit-ack recovery without duplicate history/Audit.
 Ordering829/829, final affected41/41, Cart PostgreSQL9/9 and static/security gates pass.
+
+WP-2324 connects optional Dining item commands to the API and current safe views. Actual API/owner
+persistence with synthetic public providers passes, including participant note minimization and
+post-effect read-loss recovery without duplicate Audit. API563/563, final affected12/12 and Cart
+PostgreSQL9/9 pass; browser activation remains next.
