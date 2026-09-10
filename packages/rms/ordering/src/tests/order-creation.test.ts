@@ -293,6 +293,7 @@ function ports(
     Event: [refs.event],
   };
   const implementation: OrderCreationPorts = {
+    clock: { now: () => at },
     authorization: {
       async authorize() {
         calls.push("authorize");
@@ -415,6 +416,7 @@ describe("WP-1224 Create Order application API", () => {
       "source",
       "business-date",
       "audit",
+      "authorize",
       "commit",
     ]);
   });
@@ -428,7 +430,7 @@ describe("WP-1224 Create Order application API", () => {
     );
     expect(result.status).toBe("AlreadyCreated");
     expect(result.record.order.orderReference).toBe(refs.order);
-    expect(replay.calls).toEqual(["authorize", "resolve"]);
+    expect(replay.calls).toEqual(["authorize", "resolve", "authorize"]);
     expect(replay.committedEvent()).toBeNull();
   });
 
@@ -442,7 +444,7 @@ describe("WP-1224 Create Order application API", () => {
       ),
       "ORDER_CREATE_IDEMPOTENCY_CONFLICT",
     );
-    expect(conflict.calls).toEqual(["authorize", "resolve"]);
+    expect(conflict.calls).toEqual(["authorize", "resolve", "authorize"]);
   });
 
   it("fails closed before lookup or snapshot reads when authorization is denied", async () => {
@@ -597,4 +599,260 @@ describe("WP-2345 exact submission evidence", () => {
       expect(executed).toBe(0);
     },
   );
+});
+
+describe("WP-2346 current-time submission fences", () => {
+  it.each(["checkout", "source", "business-date", "audit", "reauthorize"])(
+    "blocks evidence expiry across %s wait",
+    async (stage) => {
+      const f = ports();
+      let now = at;
+      f.implementation.clock.now = () => now;
+      const expire = () => {
+        now = "2026-08-02T18:05:00.000Z";
+      };
+      if (stage === "checkout") {
+        const original = f.implementation.checkout.validate;
+        f.implementation.checkout.validate = async (value) => {
+          const result = await original(value);
+          expire();
+          return result;
+        };
+      }
+      if (stage === "source") {
+        const original = f.implementation.source.load;
+        f.implementation.source.load = async (value) => {
+          const result = await original(value);
+          expire();
+          return result;
+        };
+      }
+      if (stage === "business-date") {
+        const original = f.implementation.businessDate.resolve;
+        f.implementation.businessDate.resolve = async (value) => {
+          const result = await original(value);
+          expire();
+          return result;
+        };
+      }
+      if (stage === "audit") {
+        const original = f.implementation.audit.create;
+        f.implementation.audit.create = async (value) => {
+          const result = await original(value);
+          expire();
+          return result;
+        };
+      }
+      if (stage === "reauthorize") {
+        let calls = 0;
+        const original = f.implementation.authorization.authorize;
+        f.implementation.authorization.authorize = async (value) => {
+          const result = await original(value);
+          if (++calls === 2) expire();
+          return result;
+        };
+      }
+      await expectCode(
+        createOrderCreationService(f.implementation).create(command()),
+        "ORDER_CREATE_VALIDATION_EXPIRED",
+      );
+      expect(f.calls).not.toContain("commit");
+    },
+  );
+  it.each(["authorization", "lookup"])("blocks Guest expiry across %s wait", async (stage) => {
+    const f = ports();
+    let now = at;
+    f.implementation.clock.now = () => now;
+    f.implementation.authorization.authorize = async () => {
+      if (stage === "authorization") now = "2026-08-02T18:01:01.000Z";
+      return { guestSession: guest({ idleExpiresAt: "2026-08-02T18:01:01.000Z" as never }) };
+    };
+    if (stage === "lookup")
+      f.implementation.repository.resolveSubmission = async () => {
+        now = "2026-08-02T18:01:01.000Z";
+        return null;
+      };
+    await expectCode(
+      createOrderCreationService(f.implementation).create(command()),
+      "ORDER_CREATE_PERMISSION_DENIED",
+    );
+    expect(f.calls).not.toContain("checkout");
+  });
+  it.each(["revoked", "version", "session", "store"])(
+    "denies %s authority at final commit gate",
+    async (kind) => {
+      const f = ports();
+      let count = 0;
+      f.implementation.authorization.authorize = async () => {
+        if (++count === 1) return { guestSession: guest() };
+        if (kind === "revoked") return null;
+        return {
+          guestSession: guest(
+            kind === "version"
+              ? { version: 2 }
+              : kind === "session"
+                ? { sessionReference: id(99) as GuestSession["sessionReference"] }
+                : { storeReference: id(99) as GuestSession["storeReference"] },
+          ),
+        };
+      };
+      await expectCode(
+        createOrderCreationService(f.implementation).create(command()),
+        "ORDER_CREATE_PERMISSION_DENIED",
+      );
+      expect(f.calls).not.toContain("commit");
+    },
+  );
+  it("checks the Cart deadline again after Audit", async () => {
+    const f = ports();
+    let now = at;
+    f.implementation.clock.now = () => now;
+    const source = f.implementation.source.load;
+    f.implementation.source.load = async (value) => {
+      const loaded = await source(value);
+      const original = cart();
+      return {
+        ...loaded,
+        cart: {
+          ...original,
+          lifecycle: { ...original.lifecycle, idleExpiresAt: "2026-08-02T18:01:01.000Z" },
+        },
+      };
+    };
+    const audit = f.implementation.audit.create;
+    f.implementation.audit.create = async (value) => {
+      const result = await audit(value);
+      now = "2026-08-02T18:01:01.000Z";
+      return result;
+    };
+    await expectCode(
+      createOrderCreationService(f.implementation).create(command()),
+      "ORDER_CREATE_VALIDATION_EXPIRED",
+    );
+    expect(f.calls).not.toContain("commit");
+  });
+  it.each(["malformed", "backward", "throw"])(
+    "fails closed on %s clock after Audit",
+    async (kind) => {
+      const f = ports();
+      let late = false;
+      f.implementation.clock.now = () => {
+        if (!late) return at;
+        if (kind === "throw") throw new Error("private clock");
+        return kind === "backward" ? "2026-08-02T18:00:59.999Z" : "invalid";
+      };
+      const original = f.implementation.audit.create;
+      f.implementation.audit.create = async (value) => {
+        const result = await original(value);
+        late = true;
+        return result;
+      };
+      await expectCode(
+        createOrderCreationService(f.implementation).create(command()),
+        "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+      );
+      expect(f.calls).not.toContain("commit");
+    },
+  );
+  it("rejects future request time for new work", async () => {
+    const f = ports();
+    await expectCode(
+      createOrderCreationService(f.implementation).create(
+        command({ requestedAt: "2026-08-02T18:02:00.000Z" }),
+      ),
+      "ORDER_CREATE_INPUT_INVALID",
+    );
+    expect(f.calls).toEqual(["authorize", "resolve"]);
+  });
+  it("accepts the last valid millisecond without changing submission timestamps", async () => {
+    const f = ports();
+    f.implementation.clock.now = () => "2026-08-02T18:04:59.999Z";
+    const result = await createOrderCreationService(f.implementation).create(command());
+    expect(result.status).toBe("Created");
+    expect(result.record.createdAt).toBe(at);
+  });
+  it("recovers original submission after Checkout expiry with current authorization", async () => {
+    const first = ports();
+    await createOrderCreationService(first.implementation).create(command());
+    const f = ports({ prior: first.stored() });
+    f.implementation.clock.now = () => "2026-08-02T18:06:00.000Z";
+    const result = await createOrderCreationService(f.implementation).create(
+      command({ requestedAt: "2026-08-02T18:06:00.000Z" }),
+    );
+    expect(result.status).toBe("AlreadyCreated");
+    expect(result.record.createdAt).toBe(at);
+    expect(f.calls).toEqual(["authorize", "resolve", "authorize"]);
+  });
+  it("refuses replay when authority is revoked during lookup", async () => {
+    const first = ports();
+    await createOrderCreationService(first.implementation).create(command());
+    const f = ports({ prior: first.stored() });
+    let count = 0;
+    f.implementation.authorization.authorize = async () =>
+      ++count === 1 ? { guestSession: guest() } : null;
+    await expectCode(
+      createOrderCreationService(f.implementation).create(command()),
+      "ORDER_CREATE_PERMISSION_DENIED",
+    );
+  });
+  it("retains a verified durable result when the commit response arrives after expiry", async () => {
+    const f = ports();
+    let now = at;
+    f.implementation.clock.now = () => now;
+    const commit = f.implementation.repository.commit;
+    f.implementation.repository.commit = async (value) => {
+      const result = await commit(value);
+      now = "2026-08-02T18:06:00.000Z";
+      return result;
+    };
+    expect((await createOrderCreationService(f.implementation).create(command())).status).toBe(
+      "Created",
+    );
+    expect(f.calls.filter((value) => value === "commit")).toHaveLength(1);
+  });
+});
+
+describe("WP-2346 authorization context fence", () => {
+  it.each(["public store", "QR revision"])(
+    "rejects changed %s without a second commit",
+    async (kind) => {
+      const f = ports();
+      let calls = 0;
+      f.implementation.authorization.authorize = async () => ({
+        guestSession:
+          ++calls === 1
+            ? guest()
+            : guest(
+                kind === "public store"
+                  ? { publicStoreReference: id(99) as GuestSession["publicStoreReference"] }
+                  : { qrRevocationVersion: 2 },
+              ),
+      });
+      await expectCode(
+        createOrderCreationService(f.implementation).create(command()),
+        "ORDER_CREATE_PERMISSION_DENIED",
+      );
+      expect(f.calls).not.toContain("commit");
+    },
+  );
+  it("supplies the latest server instant to final authorization", async () => {
+    const f = ports();
+    let now = at;
+    const observed: string[] = [];
+    f.implementation.clock.now = () => now;
+    f.implementation.authorization.authorize = async (value) => {
+      observed.push(value.observedAt);
+      return { guestSession: guest() };
+    };
+    const audit = f.implementation.audit.create;
+    f.implementation.audit.create = async (value) => {
+      const result = await audit(value);
+      now = "2026-08-02T18:02:00.000Z";
+      return result;
+    };
+    expect((await createOrderCreationService(f.implementation).create(command())).status).toBe(
+      "Created",
+    );
+    expect(observed).toEqual([at, "2026-08-02T18:02:00.000Z"]);
+  });
 });

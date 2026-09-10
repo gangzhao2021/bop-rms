@@ -2,7 +2,9 @@ import { canonicalizeRfc8785, validateAuditRecord } from "@bop/audit";
 import { assertGuestSessionUsable, createGuestSession, type GuestSession } from "@bop/identity";
 import type { StoreBusinessDateResolution } from "@rms/store";
 import { createOrderCreatedEnvelope } from "./order-created-event.js";
+import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import {
+  CartError,
   parseCartAggregate,
   parseOrderingHash,
   parseOrderingInstant,
@@ -315,6 +317,16 @@ function verifySaved(
   }
 }
 
+function currentTime(ports: OrderCreationPorts, previous?: OrderingInstant): OrderingInstant {
+  try {
+    const at = parseOrderingInstant(ports.clock.now());
+    if (previous !== undefined && Date.parse(at) < Date.parse(previous)) throw new Error("clock");
+    return at;
+  } catch {
+    return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
+  }
+}
+
 export function createOrderCreationService(ports: OrderCreationPorts) {
   return Object.freeze({
     async create(value: unknown): Promise<CreateOrderResult> {
@@ -338,6 +350,7 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
         return fail("ORDER_CREATE_INPUT_INVALID");
       }
       const expectedCartVersion = version(raw.expectedCartVersion);
+      let observedAt = currentTime(ports);
       const submissionIntentHash = intentHash(ports, {
         submissionReference,
         cartReference,
@@ -349,14 +362,47 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
           action: "CreateOrder",
           submissionReference,
           cartReference,
-          observedAt: requestedAt,
+          observedAt,
         })
         .catch(dependency);
+      observedAt = currentTime(ports, observedAt);
       if (authorized === null) return fail("ORDER_CREATE_PERMISSION_DENIED");
-      const guestSession = session(authorized.guestSession, requestedAt);
+      const guestSession = session(authorized.guestSession, observedAt);
       const guestSessionReference = sessionReference(guestSession);
+      const reauthorize = async () => {
+        observedAt = currentTime(ports, observedAt);
+        const current = await ports.authorization
+          .authorize({
+            action: "CreateOrder",
+            submissionReference,
+            cartReference,
+            observedAt,
+          })
+          .catch(dependency);
+        observedAt = currentTime(ports, observedAt);
+        if (current === null) return fail("ORDER_CREATE_PERMISSION_DENIED");
+        const next = session(current.guestSession, observedAt);
+        if (
+          next.sessionReference !== guestSession.sessionReference ||
+          next.version !== guestSession.version ||
+          next.brandReference !== guestSession.brandReference ||
+          next.storeReference !== guestSession.storeReference ||
+          next.channel !== guestSession.channel ||
+          next.publicStoreReference !== guestSession.publicStoreReference ||
+          next.publicTableReference !== guestSession.publicTableReference ||
+          next.qrReference !== guestSession.qrReference ||
+          next.qrRevocationVersion !== guestSession.qrRevocationVersion ||
+          next.diningState !== guestSession.diningState ||
+          next.diningSessionReference !== guestSession.diningSessionReference ||
+          next.diningParticipantReference !== guestSession.diningParticipantReference
+        )
+          return fail("ORDER_CREATE_PERMISSION_DENIED");
+      };
       const prior = await ports.repository.resolveSubmission(submissionReference).catch(dependency);
-      if (prior !== null)
+      observedAt = currentTime(ports, observedAt);
+      session(guestSession, observedAt);
+      if (prior !== null) {
+        await reauthorize();
         return Object.freeze({
           status: "AlreadyCreated" as const,
           record: verifyReplay(
@@ -365,6 +411,9 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
             ports,
           ),
         });
+      }
+      if (Date.parse(requestedAt) > Date.parse(observedAt))
+        return fail("ORDER_CREATE_INPUT_INVALID");
 
       const validationReference = reference(ports, "CheckoutValidation");
       const checkoutEvidence = await ports.checkout
@@ -389,9 +438,30 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
         evidence.quoteReference !== quoteReference
       )
         return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
+      const fresh = (cart?: CartAggregate) => {
+        observedAt = currentTime(ports, observedAt);
+        session(guestSession, observedAt);
+        if (Date.parse(observedAt) < Date.parse(evidence.validatedAt))
+          return fail("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
+        if (Date.parse(observedAt) >= Date.parse(evidence.validUntil))
+          return fail("ORDER_CREATE_VALIDATION_EXPIRED");
+        if (cart !== undefined) {
+          try {
+            assertCartLifecycleActive(cart.lifecycle, observedAt);
+          } catch (error) {
+            return fail(
+              error instanceof CartError && ["CART_EXPIRED", "CART_ABANDONED"].includes(error.code)
+                ? "ORDER_CREATE_VALIDATION_EXPIRED"
+                : "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+            );
+          }
+        }
+      };
+      fresh();
       authorizedForEvidence(guestSession, evidence);
       const loaded = await ports.source.load({ evidence }).catch(dependency);
       const sourceCart = sourceScope(loaded, evidence);
+      fresh(sourceCart);
       const orderReference = reference(ports, "Order");
       const orderBatchReference = reference(ports, "OrderBatch");
       const itemInputs = loaded.lines.map((line) => ({
@@ -436,6 +506,7 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
         })
         .then((value) => businessDate(value, orderReference, requestedAt, evidence))
         .catch(dependency);
+      fresh(sourceCart);
       const provisional = Object.freeze({
         submissionReference,
         submissionIntentHash,
@@ -452,6 +523,9 @@ export function createOrderCreationService(ports: OrderCreationPorts) {
         })
         .then((value) => audit(value, order, requestedAt))
         .catch(dependency);
+      fresh(sourceCart);
+      await reauthorize();
+      fresh(sourceCart);
       let event;
       try {
         event = createOrderCreatedEnvelope({

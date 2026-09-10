@@ -12,6 +12,7 @@ export interface OrderCreationSourceLine {
 }
 
 export interface OrderCreationPorts {
+  readonly clock: { now(): string };
   readonly authorization: {
     authorize(input: {
       readonly action: "CreateOrder";

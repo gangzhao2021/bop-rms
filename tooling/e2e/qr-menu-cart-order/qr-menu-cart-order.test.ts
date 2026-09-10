@@ -496,6 +496,7 @@ function orderPorts() {
     },
   });
   const ports: OrderCreationPorts = {
+    clock: { now: () => now },
     authorization: { authorize: async () => ({ guestSession: guestSession() }) },
     checkout: { validate: async () => checkoutEvidence() },
     source: {
