@@ -21,6 +21,7 @@ if (!root) throw new Error("Application root is missing");
 // A synthetic QR is delivered in memory. Never place it in the address bar or storage.
 let hash = "";
 let diningAdmissionEnabled = false;
+let cartEnabled = false;
 if (window.location.pathname === "/" && window.location.search === "") {
   try {
     const response = await window.fetch("/__local/customer-entry", {
@@ -41,6 +42,7 @@ if (window.location.pathname === "/" && window.location.search === "") {
         hash = `#qr=${body.qrToken}`;
         diningAdmissionEnabled =
           "diningAdmissionEnabled" in body && body.diningAdmissionEnabled === true;
+        cartEnabled = "cartEnabled" in body && body.cartEnabled === true;
       }
     }
   } catch {
@@ -77,8 +79,9 @@ createRoot(root).render(
   <StrictMode>
     <BrowserRouter>
       <aside aria-label="Local integration lab">
-        Synthetic local integration lab — temporary data. Entry, dining admission and menu; ordering
-        and payment are unavailable. The clock is fixed for repeatable verification.
+        Synthetic local integration lab — temporary data. Entry, dining admission and menu
+        {cartEnabled ? ", with Cart item editing" : ""}. Ordering and payment are unavailable. The
+        clock is fixed for repeatable verification.
         <button
           type="button"
           onClick={async (event) => {

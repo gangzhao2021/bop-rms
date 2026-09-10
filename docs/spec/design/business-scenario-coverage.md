@@ -515,3 +515,9 @@ WP-2324 connects optional Dining item commands to the API and current safe views
 persistence with synthetic public providers passes, including participant note minimization and
 post-effect read-loss recovery without duplicate Audit. API563/563, final affected12/12 and Cart
 PostgreSQL9/9 pass; browser activation remains next.
+
+WP-2325 activates the existing Dining configurator and Cart controls in the isolated browser lab,
+with real participation and consumed-admission reads. Desktop/mobile admission, menu add, quantity,
+removal and empty-state guidance pass against real owner stores; the discovered last-item UI gap is
+fixed. Lab1/1, PWA646/646, complete stage regression components and non-forced integration pass.
+Viewport runs use separate DiningSessions, not simultaneous shared-table browsers; launch gates remain.

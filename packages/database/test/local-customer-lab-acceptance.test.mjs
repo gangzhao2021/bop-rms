@@ -22,8 +22,9 @@ const { Client, Pool } = pg;
 const scope = { brandReference: id(1), storeReference: id(2) };
 import { seedDining } from "../test-support/local-customer-dining-seed.mjs";
 import { seedMenu } from "../test-support/local-customer-menu-seed.mjs";
+import { seedCart } from "../test-support/local-customer-cart-seed.mjs";
 it(
-  "runs isolated browser QR entry, persisted Dining admission and menu",
+  "runs isolated browser QR entry, persisted Dining admission, menu and Cart edits",
   async () => {
     await withIsolatedDatabase({ caseId: "wp2222_runtime" }, async (context) => {
       const admin = new Client(context.clientConfig);
@@ -120,10 +121,13 @@ it(
           },
         };
         dining = await seedDining({ admin, context, sessionRole, sessionTransactions, fixture: f });
+        const cart = await seedCart({ admin, context, dining });
         const options = {
+          cartTransactions: cart.cartTransactions,
+          diningCart: cart.diningCart,
           diningAdmission: dining.options,
           scope,
-          entry: { ...f.options, session: { binding: f.options.session.binding, credentials } },
+          entry: { ...f.options, session: { binding: dining.sessionBinding, credentials } },
           menuStores: {
             resolvePublic: async (reference) =>
               reference === id(4) ? { ...scope, status: "Active" } : null,
@@ -147,6 +151,7 @@ it(
           apiOrigin: `http://127.0.0.1:${address.port}`,
           token: f.token,
           diningAdmissionEnabled: true,
+          cartEnabled: true,
           stop: () => stop(),
         });
         assert.equal(lab.origin, options.allowedOrigin);
@@ -157,10 +162,11 @@ it(
               .rows[0].count,
           process.env.BOP_LOCAL_CUSTOMER_INTERACTIVE !== "1",
           dining,
+          cart,
         );
         if (process.env.BOP_LOCAL_CUSTOMER_INTERACTIVE === "1") {
           process.stdout.write(
-            `Synthetic entry/dining/menu lab: ${lab.origin} — expires in 15 minutes.\n`,
+            `Synthetic entry/dining/menu/Cart lab: ${lab.origin} — expires in 15 minutes.\n`,
           );
           await new Promise((resolve) => {
             const timer = setTimeout(done, 900_000);

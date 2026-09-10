@@ -12,6 +12,10 @@ import {
   createPostgresDiningSessionJoinStore,
   createPostgresDiningAdmissionConsumptionStore,
   createPostgresDiningGuestBindingStore,
+  createPostgresDiningParticipationStore,
+  createDiningCartParticipationQuery,
+  createDiningGuestBindingQuery,
+  assertCurrentDiningGuestTableContext,
 } from "../../rms/dining/src/index.ts";
 import {
   createPostgresGuestDiningBindingStore,
@@ -301,6 +305,45 @@ export async function seedDining({ admin, context, sessionRole, sessionTransacti
     credentials.equals,
   );
   return {
+    participation: createDiningCartParticipationQuery({
+      scope: identityScope,
+      repository: createPostgresDiningParticipationStore(runner(true), scope),
+      now: () => at,
+    }),
+    sessionBinding: {
+      async validate(session, observedAt) {
+        try {
+          if ((await fixture.options.session.binding.validate(session, observedAt)) !== "Current")
+            return "Unavailable";
+          if (session.diningState === "ContextOnly") return "Current";
+          const currentContext = assertCurrentDiningGuestTableContext(
+            {
+              brandReference: session.brandReference,
+              storeReference: session.storeReference,
+              publicStoreReference: session.publicStoreReference,
+              publicTableReference: session.publicTableReference,
+              channel: session.channel,
+              qrRevocationVersion: session.qrRevocationVersion,
+              observedAt,
+            },
+            await contexts.resolve({ session, observedAt, purpose: "DiningAdmission" }),
+          );
+          const current = await createDiningGuestBindingQuery({
+            scope: identityScope,
+            repository: createPostgresDiningGuestBindingStore(runner(true), scope),
+            now: () => at,
+          }).resolve({
+            purpose: "GuestSessionBinding",
+            diningSessionReference: session.diningSessionReference,
+            participantReference: session.diningParticipantReference,
+            tableReference: currentContext.tableReference,
+          });
+          return current === null ? "Unavailable" : "Current";
+        } catch {
+          return "Unavailable";
+        }
+      },
+    },
     options: {
       join: {
         contexts,

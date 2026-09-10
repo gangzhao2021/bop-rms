@@ -255,7 +255,13 @@ function CartContent({
         <p>Checking the latest server cart…</p>
       </StateMessage>
     );
-  if (state.status === "empty")
+  if (
+    state.status === "empty" ||
+    (state.status === "ready" &&
+      state.cart.cart.lifecycle.status === "Active" &&
+      state.cart.cart.items.length === 0 &&
+      state.cart.cart.warnings.length === 0)
+  )
     return (
       <StateMessage heading="Your cart is empty">
         <p>Add an available item from the current Store menu.</p>

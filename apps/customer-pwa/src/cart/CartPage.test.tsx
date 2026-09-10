@@ -211,3 +211,52 @@ it("disables superseding Cart changes while retaining explicit retry", () => {
   expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
   expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Remove<\/button>/u);
 });
+
+it.each(["Pickup", "DineIn"] as const)(
+  "shows the empty %s server Cart without checkout",
+  (orderType) => {
+    const empty = cart();
+    const state: CartState = {
+      status: "ready",
+      cart: {
+        ...empty,
+        cart: { ...empty.cart, orderType, serviceMode: orderType, items: [], quote: null },
+      },
+    };
+    const html = renderPage(state);
+    expect(html).toContain("Your cart is empty");
+    expect(html).toContain("Browse menu");
+    expect(html).not.toContain("Review checkout");
+    expect(state.cart.cart.cartReference).toBe(id(1));
+  },
+);
+it.each(["FEATURE_DISABLED", "PROJECTION_STALE"])(
+  "preserves %s for an empty server Cart",
+  (warning) => {
+    const empty = cart();
+    const html = renderPage({
+      status: "ready",
+      cart: { ...empty, cart: { ...empty.cart, items: [], warnings: [warning] } },
+    });
+    expect(html).not.toContain("Your cart is empty");
+    expect(html).toContain(
+      warning === "FEATURE_DISABLED" ? "Cart unavailable" : "Cart summary is stale",
+    );
+  },
+);
+it.each(["command-pending", "offline-readonly", "command-failed"] as const)(
+  "does not hide %s behind the empty Cart state",
+  (status) => {
+    const empty = cart();
+    const html = renderPage({
+      status,
+      cart: { ...empty, cart: { ...empty.cart, items: [] } },
+      issueCodes: [],
+      retryAfterSeconds: null,
+      canRetrySameOperation: true,
+    });
+    expect(html).not.toContain("Your cart is empty");
+    if (status === "command-failed") expect(html).toContain("Outcome not confirmed");
+    if (status === "offline-readonly") expect(html).toContain("Offline read-only");
+  },
+);

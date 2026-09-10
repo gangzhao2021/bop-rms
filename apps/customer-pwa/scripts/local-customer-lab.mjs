@@ -12,7 +12,13 @@ import { chromium } from "@playwright/test";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-export async function startCustomerLab({ apiOrigin, token, stop, diningAdmissionEnabled = false }) {
+export async function startCustomerLab({
+  apiOrigin,
+  token,
+  stop,
+  diningAdmissionEnabled = false,
+  cartEnabled = false,
+}) {
   assert.equal(process.env.BOP_LOCAL_CUSTOMER_LAB, "1");
   assert(["development", "test"].includes(process.env.NODE_ENV));
   assert.match(apiOrigin, /^http:\/\/127\.0\.0\.1:\d+$/u);
@@ -81,7 +87,11 @@ export async function startCustomerLab({ apiOrigin, token, stop, diningAdmission
                 allowed
                   ? stopping
                     ? { status: "stopping" }
-                    : { qrToken: token(), diningAdmissionEnabled: diningAdmissionEnabled === true }
+                    : {
+                        qrToken: token(),
+                        diningAdmissionEnabled: diningAdmissionEnabled === true,
+                        cartEnabled: cartEnabled === true,
+                      }
                   : { error: "unavailable" },
               ),
             );
@@ -104,7 +114,7 @@ export async function startCustomerLab({ apiOrigin, token, stop, diningAdmission
   }
 }
 
-export async function verifyCustomerLab(origin, sessionCount, stopAfter = false, dining) {
+export async function verifyCustomerLab(origin, sessionCount, stopAfter = false, dining, cart) {
   const production = await resolveConfig({ root, logLevel: "silent" }, "build", "production");
   const entryPlugin = production.plugins.find(
     (plugin) => plugin.name === "bop-local-customer-demo-entry",
@@ -114,6 +124,7 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
     '<script src="/src/main.tsx"></script>',
   );
   const browser = await chromium.launch();
+  let cartJourneys = 0;
   try {
     for (const viewport of [
       { width: 1440, height: 900 },
@@ -198,6 +209,25 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
           .first()
           .waitFor();
         assert.equal(new URL(page.url()).pathname, "/menu");
+        if (cart) {
+          await page.getByRole("link", { name: "View Latte", exact: true }).click();
+          await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+          await page.getByLabel("Quantity", { exact: true }).fill("2");
+          await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+          await page.getByRole("link", { name: "Review cart", exact: true }).click();
+          await page.getByLabel("Latte quantity", { exact: true }).waitFor();
+          assert.equal(await page.getByLabel("Latte quantity", { exact: true }).textContent(), "2");
+          await page.getByRole("button", { name: "Increase Latte quantity", exact: true }).click();
+          await page.waitForFunction(
+            () =>
+              globalThis.document.querySelector('[aria-label="Latte quantity"]')?.textContent ===
+              "3",
+          );
+          await page.getByRole("button", { name: "Remove", exact: true }).click();
+          await page.getByRole("heading", { name: "Your cart is empty", exact: true }).waitFor();
+          assert.equal(new URL(page.url()).pathname, "/cart");
+          await cart.verify(++cartJourneys);
+        }
         assert.equal((await page.request.get(`${origin}/ready`)).status(), 503);
         assert.equal(
           await page.evaluate(
