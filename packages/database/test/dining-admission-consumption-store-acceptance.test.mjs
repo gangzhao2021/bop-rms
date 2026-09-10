@@ -1,3 +1,4 @@
+import { createCustomerDiningJoinComposition } from "../../../apps/api/src/customer-dining-join-composition.ts";
 import { createDiningBindingCoordinator } from "../../../apps/customer-pwa/src/dining/dining-binding-coordinator.ts";
 import {
   captureCustomerCsrfContext,
@@ -1674,6 +1675,103 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         1,
       );
       assert.deepEqual(await counts(), { operations: 11, audits: 11 });
+      // WP-2304: current Identity/QR authority plus explicit request-bound synthetic abuse policy.
+      const r = await makeIdentity(40, 120);
+      await configure(40);
+      const rStart = await service().start(command(40, 136));
+      minute = 3;
+      const joinOptions = {
+        scope: identityScope,
+        session: compositionOptions.session,
+        dining: { store: { ...joinReader, join: joinWriter.join }, credentials, pepperVersion: 1 },
+        contexts: compositionOptions.contexts,
+        now: () => at(minute),
+      };
+      const requestAbuse = [];
+      let allowJoin = false;
+      const requestContext = {
+        abuse: {
+          async admit(input) {
+            requestAbuse.push(input);
+            assert.equal(input.guestSessionReference, id(120));
+            assert.equal(input.kind, "Invitation");
+            return allowJoin ? "Admitted" : "Cooldown";
+          },
+        },
+      };
+      const joinInput = {
+        sessionCredential: r.sessionCredential,
+        csrfCredential: r.csrfCredential,
+        joinCredential: rStart.joinCredential,
+        operationReference: id(137),
+      };
+      const guestJoin = createCustomerDiningJoinComposition(joinOptions);
+      await assert.rejects(guestJoin.join(joinInput, requestContext), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.equal(await joinReader.resolveJoinOperation(id(137)), null);
+      assert.equal((await reader.loadSession(rStart.session.diningSessionReference)).version, 1);
+      allowJoin = true;
+      const lostJoin = createCustomerDiningJoinComposition({
+        ...joinOptions,
+        dining: {
+          ...joinOptions.dining,
+          store: {
+            ...joinReader,
+            join: createPostgresDiningSessionJoinStore(
+              runner({ loseAck: true }),
+              scope,
+              credentials,
+              joinAudit,
+            ).join,
+          },
+        },
+      });
+      await assert.rejects(lostJoin.join(joinInput, requestContext), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      const joinedRecord = await joinReader.resolveJoinOperation(id(137));
+      assert.notEqual(joinedRecord, null);
+      assert.equal((await identityStore.resolve(r.selector)).session.status, "Active");
+      minute = 4;
+      const joinedReceipt = await guestJoin.join(joinInput, requestContext);
+      assert.deepEqual(joinedReceipt, {
+        status: "Joined",
+        operationReference: id(137),
+        admissionReference: joinedRecord.admission.admissionReference,
+      });
+      assert.deepEqual(await guestJoin.join(joinInput, requestContext), joinedReceipt);
+      assert.equal(requestAbuse.length, 4);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::integer AS n FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_JOIN' AND target_id=$1",
+            [rStart.session.diningSessionReference],
+          )
+        ).rows[0].n,
+        1,
+      );
+      await identityStore.revoke({
+        selectorHash: r.selector,
+        expectedVersion: 1,
+        reason: "RiskChanged",
+        observedAt: at(4),
+        operationReference: id(138),
+        operationIntentHash: identityCredentials.hashOperationIntent(
+          "synthetic current Join revocation",
+        ),
+      });
+      await assert.rejects(guestJoin.join(joinInput, requestContext), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.equal(requestAbuse.length, 4);
+      assert.deepEqual(await counts(), { operations: 11, audits: 11 });
+      for (const secret of [r.sessionCredential, r.csrfCredential, rStart.joinCredential]) {
+        assert.equal(JSON.stringify(joinedReceipt).includes(secret), false);
+        assert.equal(JSON.stringify(joinedRecord).includes(secret), false);
+        assert.equal(JSON.stringify(requestAbuse).includes(secret), false);
+        assert.equal(JSON.stringify(contextRequests).includes(secret), false);
+      }
       assert.equal(active, 0);
     } finally {
       await admin.end();

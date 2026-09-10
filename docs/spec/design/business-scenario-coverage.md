@@ -395,3 +395,8 @@ WP-2303 adds Dining-owned current-version joining from a separate credential, re
 Guest/abuse gates, original replay and exact atomic write versions. Dining951/951, actual
 PostgreSQL replay/race acceptance, full verification and forced uncached integration pass.
 This does not add Guest self-start, HTTP/UI or Identity binding authority.
+
+WP-2304 composes real current Identity/QR authority with owner-selected Dining Join versions and
+an explicitly separate trusted request abuse port. API456/456, actual PostgreSQL cooldown/
+recovery/revocation acceptance, full verification and forced uncached integration pass. HTTP/UI
+and production abuse/context providers remain separate.
