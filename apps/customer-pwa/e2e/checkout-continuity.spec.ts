@@ -60,6 +60,7 @@ for (const screen of [
           await page.route("**/bff/customer/entry", (route) =>
             route.fulfill({
               status: 201,
+              headers: { "cache-control": "no-store" },
               json: {
                 schemaVersion: 2,
                 status: "Established",

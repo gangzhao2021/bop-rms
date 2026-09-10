@@ -443,3 +443,11 @@ page. Duplicate retry is collapsed and synchronous/asynchronous failures remain 
 PWA613/613 and desktop/mobile/production browser76/76 pass. Transport credential publication and
 cross-document recovery are separate from this page lifecycle boundary. Security/build, real Dining lab,
 full verification and forced uncached integration pass.
+
+WP-2312 fences entry credential publication with the shared opaque generation and coalesces in-flight
+start/retry requests. Entry transport now bounds complete response reads to15 seconds/16 KiB and
+requires the existing no-store JSON/status contract; stale/offline/malformed/oversize responses cannot
+publish Established credentials. PWA634/634 and browser76/76 pass. Two existing browser fixtures now
+include the canonical Entry no-store response header. Browser-managed Cookie arrival and general
+cross-document recovery remain separate. Real Dining lab, security/build, full verification and forced
+uncached integration pass.

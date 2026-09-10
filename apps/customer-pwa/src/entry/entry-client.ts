@@ -5,10 +5,10 @@ import type {
   CustomerEntryServiceMode,
 } from "./types.js";
 import {
+  captureCustomerCsrfContext,
   setCustomerCsrfCredential,
   setPaymentOperationReference,
 } from "../session/customer-transaction-context.js";
-import { boundedFetch } from "../network/bounded-fetch.js";
 
 const compactTokenPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -143,24 +143,27 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
   });
 }
 
-function parseError(value: unknown): CustomerEntryScreenState {
+function parseError(status: number, value: unknown): CustomerEntryScreenState {
   const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery"]);
   const recovery = exact(raw.recovery, ["action", "storeSelection"]);
   if (raw.schemaVersion !== 1 || recovery.storeSelection !== "Hidden")
     return Object.freeze({ kind: "ServiceUnavailable" });
   if (
+    status === 400 &&
     raw.code === "entry_request_invalid" &&
     raw.messageKey === "customer.entry.request_invalid" &&
     recovery.action === "Rescan"
   )
     return Object.freeze({ kind: "RequestInvalid" });
   if (
+    status === 422 &&
     raw.code === "entry_unavailable" &&
     raw.messageKey === "customer.entry.unavailable" &&
     recovery.action === "RescanOrAskStaff"
   )
     return Object.freeze({ kind: "EntryUnavailable" });
   if (
+    status === 503 &&
     raw.code === "entry_service_unavailable" &&
     raw.messageKey === "customer.entry.service_unavailable" &&
     recovery.action === "RetryOrAskStaff"
@@ -193,42 +196,130 @@ export function createCustomerEntryClient(
 ): CustomerEntryClient {
   const token = consumeCustomerQrFragment(boundary);
   let settled: Promise<CustomerEntryScreenState> | null = null;
-
-  const execute = async (): Promise<CustomerEntryScreenState> => {
-    setCustomerCsrfCredential(null);
-    setPaymentOperationReference(null);
-    if (token === null) return Object.freeze({ kind: "Missing" });
-    if (!boundary.online()) return Object.freeze({ kind: "Offline" });
+  let flight: Promise<CustomerEntryScreenState> | null = null;
+  const fetcher = boundary.fetch;
+  const online = () => {
     try {
-      const response = await boundedFetch(boundary.fetch, "/bff/customer/entry", {
-        method: "POST",
-        credentials: "same-origin",
-        cache: "no-store",
-        referrerPolicy: "no-referrer",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ qrToken: token }),
-      });
-      const body: unknown = await response.json();
-      if (response.status === 201) {
-        const context = parseSuccess(body);
-        setCustomerCsrfCredential(context.csrfToken);
-        return Object.freeze({ kind: "Established", context });
-      }
-      return parseError(body);
+      return boundary.online() === true;
     } catch {
-      return Object.freeze({ kind: boundary.online() ? "CommandFailed" : "Offline" });
+      return false;
     }
   };
 
+  async function receive(current: () => boolean) {
+    const controller = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const guard = () => {
+      if (!online() || !current() || controller.signal.aborted)
+        throw new Error("entry unavailable");
+    };
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error("entry unavailable"));
+        controller.abort();
+      }, 15_000);
+    });
+    const request = async () => {
+      guard();
+      const response = await fetcher("/bff/customer/entry", {
+        method: "POST",
+        mode: "cors",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+        signal: controller.signal,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ qrToken: token }),
+      });
+      try {
+        guard();
+        if (
+          response.redirected ||
+          response.body === null ||
+          !response.headers
+            .get("cache-control")
+            ?.split(",")
+            .some((part) => part.trim().toLowerCase() === "no-store") ||
+          !/^application\/json(?:\s*;|$)/iu.test(response.headers.get("content-type") ?? "")
+        )
+          throw new Error("entry unavailable");
+      } catch {
+        if (response.body) void response.body.cancel().catch(() => undefined);
+        throw new Error("entry unavailable");
+      }
+      if (response.body === null) throw new Error("entry unavailable");
+      reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        guard();
+        const part = await reader.read();
+        guard();
+        if (part.done) break;
+        size += part.value.byteLength;
+        if (size > 16_384) throw new Error("entry unavailable");
+        chunks.push(part.value);
+      }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      const body: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      guard();
+      return { status: response.status, body };
+    };
+    try {
+      return await Promise.race([request(), timeout]);
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+      if (reader) {
+        void reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+      }
+    }
+  }
+  const execute = async (): Promise<CustomerEntryScreenState> => {
+    setCustomerCsrfCredential(null);
+    setPaymentOperationReference(null);
+    const current = captureCustomerCsrfContext();
+    if (token === null) return Object.freeze({ kind: "Missing" });
+    if (!online()) return Object.freeze({ kind: "Offline" });
+    try {
+      const { status, body } = await receive(current);
+      if (!online() || !current()) throw new Error("entry unavailable");
+      if (status === 201) {
+        const context = parseSuccess(body);
+        if (!online() || !current()) throw new Error("entry unavailable");
+        setCustomerCsrfCredential(context.csrfToken);
+        return Object.freeze({ kind: "Established", context });
+      }
+      return parseError(status, body);
+    } catch {
+      return Object.freeze({ kind: online() ? "CommandFailed" : "Offline" });
+    }
+  };
+  function launch() {
+    if (flight) return flight;
+    const pending = execute();
+    flight = pending;
+    settled = pending;
+    void pending.then(() => {
+      if (flight === pending) flight = null;
+    });
+    return pending;
+  }
   return Object.freeze({
     hasEntry: token !== null,
     start() {
-      settled ??= execute();
-      return settled;
+      return settled ?? launch();
     },
     retry() {
-      settled = execute();
-      return settled;
+      return flight ?? launch();
     },
   });
 }
