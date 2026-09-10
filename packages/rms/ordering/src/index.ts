@@ -110,6 +110,10 @@ export {
   type PickupCartQuoteExpiryResult,
 } from "./application/pickup-cart-quote-expiry-service.js";
 export {
+  createDiningCartItemService,
+  type DiningCartItemOptions,
+} from "./application/dining-cart-item-service.js";
+export {
   createPickupCartItemService,
   type PickupCartItemOptions,
   type PickupCartItemResult,

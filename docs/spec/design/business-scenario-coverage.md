@@ -500,3 +500,8 @@ WP-2321 binds Dining command aggregate reads to the authorized session in owner 
 expired/terminal history for original-operation recovery. Current caller authority remains required;
 item command composition is subsequent work. Ordering796/796, Cart PostgreSQL9/9 and affected
 static/security checks pass. No new full-repository regression is claimed.
+
+WP-2322 adds current Identity/CSRF and Dining authority around item Add/Update/Remove, with
+pre-history, pre-commit and post-result checks. Real owner-store/API wiring remains separate.
+Ordering816/816, final affected20/20 and static/security gates pass. No real-service PostgreSQL
+composition or new full-repository regression is claimed for this application-only work.
