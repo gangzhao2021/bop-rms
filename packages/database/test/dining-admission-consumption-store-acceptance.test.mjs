@@ -19,6 +19,12 @@ import {
   createPostgresDiningAdmissionConsumptionStore,
   createDiningAdmissionConsumptionService,
 } from "../../rms/dining/src/index.ts";
+import {
+  createGuestSessionRecord,
+  createGuestSessionCredentialProvider,
+  createPostgresGuestSessionEntryStore,
+  GuestSessionService,
+} from "../../bop/identity/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client } = pg;
 const id = (n) => `01902290-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -58,7 +64,7 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`,
       );
       await admin.query(
-        `GRANT USAGE ON SCHEMA rms_dining,platform_audit,platform_helpers TO ${role}`,
+        `GRANT USAGE ON SCHEMA rms_dining,bop_identity,platform_audit,platform_helpers TO ${role}`,
       );
       await admin.query(`GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ${role}`);
       await admin.query(
@@ -71,6 +77,12 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
       await admin.query(`GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`);
       await admin.query(
         `GRANT UPDATE ON rms_dining.dining_join_capability,rms_dining.dining_session,rms_dining.dining_participant,rms_dining.dining_identity_admission TO ${role}`,
+      );
+      await admin.query(
+        `GRANT SELECT,INSERT ON bop_identity.guest_session,bop_identity.guest_session_operation TO ${role}`,
+      );
+      await admin.query(
+        `GRANT UPDATE (status,revocation_reason,revoked_at,version) ON bop_identity.guest_session TO ${role}`,
       );
       function runner({ readOnly = false, failAudit = false, loseAck = false } = {}) {
         return {
@@ -774,6 +786,211 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
           })
         ).admission.status,
         "Active",
+      );
+      // WP-2291: explicit test-only public mapping and evidence validity, no production adapter.
+      const identityScope = { brandReference: id(2), storeReference: id(3) };
+      const identityStore = createPostgresGuestSessionEntryStore(runner(), identityScope);
+      const identityCredentials = createGuestSessionCredentialProvider(new Uint8Array(32).fill(9));
+      const identitySelectors = new Map();
+      const publicMappings = new Map();
+      const makeIdentity = async (table, guest) => {
+        const sessionCredential = identityCredentials.generateCredential("Session");
+        const csrfCredential = identityCredentials.generateCredential("Csrf");
+        const selector = identityCredentials.hashCredential("Session", sessionCredential);
+        const publicTable = id(table + 200);
+        assert.notEqual(publicTable, id(table));
+        publicMappings.set(publicTable, id(table));
+        const record = createGuestSessionRecord({
+          session: {
+            sessionReference: id(guest),
+            status: "Active",
+            version: 1,
+            ...identityScope,
+            publicStoreReference: id(200),
+            publicTableReference: publicTable,
+            channel: "DineIn",
+            locale: "en-CA",
+            qrReference: id(table + 300),
+            qrRevocationVersion: 1,
+            diningState: "ContextOnly",
+            diningSessionReference: null,
+            diningParticipantReference: null,
+            createdAt: at(0),
+            lastSeenAt: at(0),
+            idleExpiresAt: "2026-09-09T13:00:00.000Z",
+            absoluteExpiresAt: "2026-09-10T09:00:00.000Z",
+            orderClosedAt: null,
+            closureExpiresAt: null,
+            rotatedFromGuestSessionReference: null,
+            revocationReason: null,
+            revokedAt: null,
+          },
+          sessionSelectorHash: selector,
+          csrfSelectorHash: identityCredentials.hashCredential("Csrf", csrfCredential),
+          operationReference: id(guest + 400),
+          operationIntentHash: digest(`synthetic-entry:${guest}`),
+        });
+        await identityStore.create({ record });
+        identitySelectors.set(id(guest), selector);
+        return { sessionCredential, csrfCredential, selector, record };
+      };
+      const currentIdentity = async (guest, observedAt) => {
+        const selector = identitySelectors.get(guest);
+        if (!selector) return null;
+        const record = await identityStore.resolve(selector);
+        if (
+          !record ||
+          record.session.sessionReference !== guest ||
+          record.session.status !== "Active" ||
+          record.session.channel !== "DineIn" ||
+          record.session.diningState !== "ContextOnly" ||
+          record.session.idleExpiresAt <= observedAt ||
+          record.session.absoluteExpiresAt <= observedAt
+        )
+          return null;
+        return record.session;
+      };
+      const boundConsumption = createDiningAdmissionConsumptionService({
+        scope: identityScope,
+        credentials,
+        guests: {
+          resolve: async ({ guestSessionReference, observedAt }) => {
+            const current = await currentIdentity(guestSessionReference, observedAt);
+            const tableReference = current && publicMappings.get(current.publicTableReference);
+            return current && tableReference
+              ? {
+                  guestSessionReference,
+                  diningState: current.diningState,
+                  channel: current.channel,
+                  storeReference: current.storeReference,
+                  tableReference,
+                  observedAt,
+                }
+              : null;
+          },
+        },
+        store: consumptionWriter,
+      });
+      let admissionCalls = 0;
+      const bridge = {
+        consume: async (input) => {
+          admissionCalls++;
+          const current = await currentIdentity(input.guestSessionReference, input.requestedAt);
+          if (!current) return null;
+          const receipt = await boundConsumption.consume(input);
+          const admission = receipt.record.admission;
+          if (publicMappings.get(current.publicTableReference) !== admission.tableReference)
+            return null;
+          return {
+            guestSessionReference: input.guestSessionReference,
+            decision: "Allowed",
+            admissionReference: admission.admissionReference,
+            operationReference: input.operationReference,
+            storeReference: admission.storeReference,
+            publicTableReference: current.publicTableReference,
+            diningSessionReference: admission.diningSessionReference,
+            diningParticipantReference: admission.participantReference,
+            evaluatedAt: input.requestedAt,
+            validUntil: at(10),
+          };
+        },
+      };
+      const identityService = (store = identityStore) =>
+        new GuestSessionService({
+          store,
+          credentials: identityCredentials,
+          binding: { validate: async () => "Current" },
+          admission: { consume: async () => null },
+          diningAdmission: bridge,
+          now: () => at(3),
+        });
+      const bindRequest = (identity, entry, operation) => ({
+        sessionCredential: identity.sessionCredential,
+        expectedVersion: 1,
+        diningAdmissionReference: entry.joined.admission.admissionReference,
+        operationReference: id(operation),
+        requestedAt: at(3),
+      });
+      const i = await makeIdentity(30, 110);
+      const iJoin = await firstJoin(30, 110);
+      const wrong = await makeIdentity(33, 113);
+      await assert.rejects(identityService().bindDining(bindRequest(wrong, iJoin, 120)), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { operations: 5, audits: 5 });
+      const issued = await identityService().bindDining(bindRequest(i, iJoin, 120));
+      assert.equal(issued.status, "Issued");
+      assert.equal(issued.session.diningState, "DiningBound");
+      assert.equal(
+        issued.session.diningParticipantReference,
+        iJoin.joined.participant.participantReference,
+      );
+      assert.equal(issued.session.diningSessionReference, iJoin.sessionId);
+      assert.equal(issued.session.publicTableReference, i.record.session.publicTableReference);
+      assert.notEqual(issued.sessionCredential, i.sessionCredential);
+      assert.notEqual(issued.csrfCredential, i.csrfCredential);
+      const terminated = (await identityStore.resolve(i.selector)).session;
+      assert.equal(terminated.status, "Revoked");
+      assert.equal(terminated.revocationReason, "BindingChanged");
+      assert.equal(terminated.version, 2);
+      const callsBeforeReplay = admissionCalls;
+      const replay = await identityService().bindDining(bindRequest(i, iJoin, 120));
+      assert.equal(replay.status, "AlreadyApplied");
+      assert.deepEqual(replay.session, issued.session);
+      assert.equal(admissionCalls, callsBeforeReplay);
+      assert.equal(Object.hasOwn(replay, "sessionCredential"), false);
+      await assert.rejects(identityService().bindDining(bindRequest(i, iJoin, 121)), {
+        code: "GUEST_SESSION_UNAVAILABLE",
+      });
+      await assert.rejects(boundConsumption.consume(request(iJoin, 120, 4)), {
+        code: "DINING_SESSION_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(), { operations: 6, audits: 6 });
+
+      const j = await makeIdentity(31, 111);
+      const jJoin = await firstJoin(31, 111);
+      await assert.rejects(
+        identityService({
+          ...identityStore,
+          rotate: async () => {
+            throw new Error("synthetic identity outage before rotate");
+          },
+        }).bindDining(bindRequest(j, jJoin, 122)),
+        { code: "GUEST_SESSION_UNAVAILABLE" },
+      );
+      assert.deepEqual(await identityStore.resolve(j.selector), j.record);
+      assert.equal(await identityStore.resolveOperation(id(122)), null);
+      assert.deepEqual(await counts(), { operations: 7, audits: 7 });
+      const recovered = await identityService().bindDining(bindRequest(j, jJoin, 122));
+      assert.equal(recovered.status, "Issued");
+      assert.equal(
+        recovered.session.diningParticipantReference,
+        jJoin.joined.participant.participantReference,
+      );
+      assert.deepEqual(await counts(), { operations: 7, audits: 7 });
+
+      const k = await makeIdentity(32, 112);
+      const kJoin = await firstJoin(32, 112);
+      await assert.rejects(
+        identityService({
+          ...identityStore,
+          rotate: async (command) => {
+            await identityStore.rotate(command);
+            throw new Error("synthetic identity lost commit acknowledgement");
+          },
+        }).bindDining(bindRequest(k, kJoin, 123)),
+        { code: "GUEST_SESSION_UNAVAILABLE" },
+      );
+      const savedBinding = await identityStore.resolveOperation(id(123));
+      assert.equal(savedBinding.session.diningState, "DiningBound");
+      const recoveredAck = await identityService().bindDining(bindRequest(k, kJoin, 123));
+      assert.equal(recoveredAck.status, "AlreadyApplied");
+      assert.deepEqual(recoveredAck.session, savedBinding.session);
+      assert.equal(Object.hasOwn(recoveredAck, "sessionCredential"), false);
+      assert.deepEqual(await counts(), { operations: 8, audits: 8 });
+      assert.equal(
+        (await identityStore.resolve(k.selector)).session.revocationReason,
+        "BindingChanged",
       );
       assert.equal(active, 0);
     } finally {

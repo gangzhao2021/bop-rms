@@ -324,3 +324,8 @@ WP-2290 adds the Dining-owned transactional admission consumption adapter, scope
 receipts and Audit, with current Closing/Move fences on writes and retries. Dining785/785,
 Dining PostgreSQL9/9, full verification and forced uncached integration pass;
 Identity evidence, public Table mapping and shared Cart composition remain separate.
+
+WP-2291 exercises actual Identity ContextOnly creation, Dining Join/consume and Identity
+DiningBound rotation, including the inter-owner failure window and lost Identity acknowledgement.
+Dining785/785, Dining PostgreSQL9/9, full verification and forced uncached integration pass. Exact replay returns metadata,
+not recovered raw credentials; production public mapping and credential delivery recovery remain open.
