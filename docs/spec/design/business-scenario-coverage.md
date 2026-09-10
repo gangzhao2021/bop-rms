@@ -309,3 +309,8 @@ Dining610/610, Dining PostgreSQL8/8, full verification and forced integration pa
 WP-2287 binds Staff regeneration to the exact predecessor generation, including original retry and
 returned receipt identity. Dining623/623, Dining PostgreSQL8/8, full verification and forced
 uncached integration pass. Identity consumption and shared Cart remain separate.
+
+WP-2288 adds the pure Active-to-Consumed admission transition with exact current Session,
+Participant and Table assignment facts. Dining678/678, full verification and forced uncached
+integration pass; Guest authority, durable consumption recovery and Identity/public-context
+composition remain separate.
