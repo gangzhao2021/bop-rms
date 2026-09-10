@@ -872,6 +872,56 @@ describe("Database Schema Ownership Architecture Test", () => {
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
 
+  it("accepts only the WP-2350 scoped Order reader without driver imports", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "ordering", "rms_ordering", [
+      "order_submission_record",
+      "order_header",
+      "order_batch",
+      "order_item",
+      "order_number_allocation",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/order-creation-query-store.ts",
+    );
+    await writeFile(asset, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, "export const synthetic = true;\n");
+    await writeFile(join(dirname(asset), "other-store.ts"), "export const synthetic = true;\n");
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "owner",
+    "schema",
+    "order_submission_record",
+    "order_header",
+    "order_batch",
+    "order_item",
+    "order_number_allocation",
+  ])("does not transfer WP-2350 admission with changed %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "ordering",
+      changed === "schema" ? "rms_other" : "rms_ordering",
+      [
+        "order_submission_record",
+        "order_header",
+        "order_batch",
+        "order_item",
+        "order_number_allocation",
+      ].filter((t) => t !== changed),
+    );
+    await writeFile(
+      join(context.moduleRoot, "src/infrastructure/persistence/order-creation-query-store.ts"),
+      "export const synthetic = true;\n",
+    );
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
   it("accepts only the WP-2256 Pricing history reader without driver imports", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "pricing", "rms_pricing", ["price_quote"]);

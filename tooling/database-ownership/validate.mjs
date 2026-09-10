@@ -354,6 +354,18 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_identity_admission",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-guest-binding-store.ts";
+        // WP-2350 admits only the scoped immutable Order submission reader.
+        const acceptedOrderCreationQueryAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_submission_record",
+            "order_header",
+            "order_batch",
+            "order_item",
+            "order_number_allocation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-creation-query-store.ts";
         // WP-2223 accepts only the Ordering reader over its existing Cart and line tables.
         const acceptedCartQueryAsset =
           module.packageName === "@rms/ordering" &&
@@ -448,6 +460,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningMovedJoinAsset &&
           !acceptedDiningAdmissionConsumptionAsset &&
           !acceptedCartQueryAsset &&
+          !acceptedOrderCreationQueryAsset &&
           !acceptedDiningCartQueryAsset &&
           !acceptedDiningCartSelectionAsset &&
           !acceptedCartOperationAsset &&
