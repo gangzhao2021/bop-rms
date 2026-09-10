@@ -1,6 +1,6 @@
 import { DiningAdmissionPanel, type DiningAdmissionUi } from "../dining/DiningAdmissionPanel.js";
 import { AppFrame } from "@bop-rms/ui";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type {
   CustomerEntryClient,
@@ -35,35 +35,56 @@ export function EntryContextPage({
   onEstablished,
   diningAdmission,
 }: EntryContextPageProps) {
-  const [state, setState] = useState<CustomerEntryScreenState>(
-    client.hasEntry ? Object.freeze({ kind: "Loading" }) : Object.freeze({ kind: "Missing" }),
-  );
+  const initial = (): CustomerEntryScreenState =>
+    client.hasEntry ? Object.freeze({ kind: "Loading" }) : Object.freeze({ kind: "Missing" });
+  const [result, setResult] = useState<{
+    client: CustomerEntryClient;
+    state: CustomerEntryScreenState;
+  }>(() => ({ client, state: initial() }));
+  const state = result.client === client ? result.state : initial();
   const heading = useRef<HTMLHeadingElement>(null);
   const navigate = useNavigate();
+  const established = useRef(onEstablished);
+  const runCurrent = useRef<((action: "start" | "retry") => Promise<void>) | null>(null);
 
-  useEffect(() => {
-    let current = true;
-    void client.start().then((next) => {
-      if (current) {
-        if (next.kind === "Established") onEstablished?.(next.context);
-        setState(next);
+  useLayoutEffect(() => {
+    established.current = onEstablished;
+  }, [onEstablished]);
+  useLayoutEffect(() => {
+    let active = true;
+    let busy = false;
+    async function run(action: "start" | "retry") {
+      if (!active || busy) return;
+      busy = true;
+      setResult({ client, state: Object.freeze({ kind: "Loading" }) });
+      try {
+        // Start after commit, allowing StrictMode cleanup to retire its first generation.
+        await Promise.resolve();
+        if (!active) return;
+        const next = await client[action]();
+        if (!active) return;
+        setResult({ client, state: next });
+        if (next.kind === "Established") established.current?.(next.context);
+      } catch {
+        if (active) setResult({ client, state: Object.freeze({ kind: "ServiceUnavailable" }) });
+      } finally {
+        busy = false;
       }
-    });
+    }
+    runCurrent.current = run;
+    void run("start");
     return () => {
-      current = false;
+      active = false;
+      runCurrent.current = null;
     };
-  }, [client, onEstablished]);
+  }, [client]);
 
   useEffect(() => {
     if (state.kind !== "Loading") heading.current?.focus();
   }, [state.kind]);
 
   const retry = (): void => {
-    setState(Object.freeze({ kind: "Loading" }));
-    void client.retry().then((next) => {
-      if (next.kind === "Established") onEstablished?.(next.context);
-      setState(next);
-    });
+    void runCurrent.current?.("retry");
   };
 
   return (

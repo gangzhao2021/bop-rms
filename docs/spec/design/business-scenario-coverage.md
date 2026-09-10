@@ -436,3 +436,10 @@ six Identity preparation/Audit records are observed; proof stays out of bootstra
 PWA612/612, browser53/53, local browser acceptance, security/build, full verification and forced
 uncached integration pass. Production providers,
 shared-cart writes, cross-document recovery and deployment remain separate.
+
+WP-2311 guards CUST-ENTRY-CONTEXT result publication by mounted client generation. Callback updates
+do not restart entry; stale start/retry success or failure cannot publish to a replacement or unmounted
+page. Duplicate retry is collapsed and synchronous/asynchronous failures remain explicitly recoverable.
+PWA613/613 and desktop/mobile/production browser76/76 pass. Transport credential publication and
+cross-document recovery are separate from this page lifecycle boundary. Security/build, real Dining lab,
+full verification and forced uncached integration pass.

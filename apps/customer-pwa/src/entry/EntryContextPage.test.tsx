@@ -72,6 +72,13 @@ describe("CUST-ENTRY-CONTEXT", () => {
     expect(html).toContain(recovery);
   });
 
+  it("keeps service failure bounded and explicitly retryable", () => {
+    const html = render({ kind: "ServiceUnavailable" });
+    expect(html).toContain("Try again");
+    expect(html).toContain('role="alert"');
+    expect(html).not.toContain("synthetic entry failure");
+  });
+
   it("always supplies accessibility and allergen assistance", () => {
     const html = render({ kind: "Loading" });
     expect(html).toContain("accessible ordering option");
