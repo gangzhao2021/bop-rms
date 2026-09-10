@@ -125,6 +125,66 @@ const databaseAccessManifestInput = {
   ],
   accesses: [
     {
+      id: "capacity-transition.read.capacity_slot",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_slot" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/capacity-hold-transition-store.ts",
+    },
+    {
+      id: "capacity-transition.read.capacity_hold",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_hold" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/capacity-hold-transition-store.ts",
+    },
+    {
+      id: "capacity-transition.read.capacity_hold_terminal",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_hold_terminal" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/capacity-hold-transition-store.ts",
+    },
+    {
+      id: "capacity-transition.read.capacity_allocation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_allocation" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/capacity-hold-transition-store.ts",
+    },
+    {
+      id: "capacity-transition.write.capacity_hold_terminal",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_hold_terminal" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: null,
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/capacity-hold-transition-store.ts",
+    },
+    {
+      id: "capacity-transition.write.capacity_allocation",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_allocation" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: null,
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/capacity-hold-transition-store.ts",
+    },
+    {
       id: "capacity-hold.read.capacity_slot",
       operation: "read",
       mechanism: "repository",

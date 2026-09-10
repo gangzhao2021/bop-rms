@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 import { it } from "vitest";
-import { createPostgresCapacityQueryStore } from "../../rms/fulfillment/src/index.ts";
+import {
+  createPostgresCapacityHoldTransitionStore,
+  createPostgresCapacityQueryStore,
+} from "../../rms/fulfillment/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
@@ -510,6 +513,197 @@ async function prove(context) {
       await admin.query("RESET ROLE");
       await admin.query(`DROP OWNED BY ${reader}`);
       await admin.query(`DROP ROLE ${reader}`);
+    }
+
+    {
+      // WP-2344: public owner transition adapters preserve terminal/Audit atomicity.
+      await admin.query(`GRANT USAGE ON SCHEMA platform_audit TO ${role}`);
+      await admin.query(`GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`);
+      await admin.query(`GRANT SELECT,INSERT ON platform_audit.audit_record TO ${role}`);
+      const fixed = { brandReference: brand, storeReference: store };
+      const readOriginal = async (h) =>
+        createPostgresCapacityQueryStore(
+          {
+            async run(action) {
+              await admin.query("BEGIN");
+              try {
+                const result = await action(admin);
+                await admin.query("COMMIT");
+                return result;
+              } catch (error) {
+                await admin.query("ROLLBACK");
+                throw error;
+              }
+            },
+          },
+          fixed,
+        ).loadHold({ holdReference: id(h), cartReference: id(h + 10_000) });
+      const transitionRequest = async (h, mode = "Convert", operation = h + 70_000) => {
+        const current = await readOriginal(h);
+        assert(current);
+        const at = await stamp();
+        const common = { hold: current, scope: fixed, expectedVersion: 1, at };
+        return {
+          transition:
+            mode === "Convert"
+              ? {
+                  ...common,
+                  allocationReference: id(h + 30_000),
+                  orderReference: id(h + 40_000),
+                  fulfillmentReference: id(h + 50_000),
+                }
+              : { ...common, reason: mode },
+          operationReference: id(operation),
+          intentDigest: sha,
+          audit: {
+            auditId: id(operation + 10_000),
+            brandId: brand,
+            storeId: store,
+            actor: { type: "System" },
+            actionCode:
+              mode === "Convert"
+                ? "FULFILLMENT_CAPACITY_HOLD_CONVERT"
+                : "FULFILLMENT_CAPACITY_HOLD_RELEASE",
+            targetType: "FulfillmentCapacityHold",
+            targetId: id(h),
+            reasonCode: "AUTHORIZED_CHECKOUT_CAPACITY",
+            correlationId: id(operation + 20_000),
+            occurredAt: at,
+            sourceChannel: "CUSTOMER_PWA",
+            dataClassification: "Restricted",
+            retentionPolicyCode: "SYNTHETIC_RETENTION",
+            retentionPolicyVersion: 1,
+          },
+        };
+      };
+      const writer = (client, options = {}) =>
+        createPostgresCapacityHoldTransitionStore(
+          {
+            async run(action) {
+              await client.query("BEGIN");
+              try {
+                await client.query(`SET LOCAL ROLE ${role}`);
+                await client.query("SET LOCAL lock_timeout='3s'");
+                const result = await action({
+                  async query(sql, values) {
+                    if (
+                      options.failAudit &&
+                      sql.startsWith("INSERT INTO platform_audit.audit_record")
+                    )
+                      throw new Error("synthetic Audit failure");
+                    if (
+                      options.failAllocation &&
+                      sql.startsWith("INSERT INTO rms_fulfillment.capacity_allocation")
+                    )
+                      throw new Error("synthetic Allocation failure");
+                    return client.query(sql, [...values]);
+                  },
+                });
+                if (options.beforeCommit) await options.beforeCommit();
+                await client.query("COMMIT");
+                if (options.loseAck) throw new Error("synthetic lost acknowledgement");
+                return result;
+              } catch (error) {
+                await client.query("ROLLBACK");
+                throw error;
+              }
+            },
+          },
+          fixed,
+        );
+      const counts = async (h) =>
+        (
+          await admin.query(
+            `SELECT
+      (SELECT count(*)::int FROM rms_fulfillment.capacity_hold_terminal WHERE hold_id=$1) AS terminal,
+      (SELECT count(*)::int FROM rms_fulfillment.capacity_allocation WHERE hold_id=$1) AS allocation,
+      (SELECT count(*)::int FROM platform_audit.audit_record WHERE target_id=$1) AS audit`,
+            [id(h)],
+          )
+        ).rows[0];
+      const unavailable = { code: "CAPACITY_DEPENDENCY_UNAVAILABLE" };
+      await seed(30);
+      await hold(admin, 30, 300);
+      const conversion = await transitionRequest(300);
+      await assert.rejects(
+        writer(first, { failAllocation: true }).convert(conversion),
+        unavailable,
+      );
+      assert.deepEqual(await counts(300), { terminal: 0, allocation: 0, audit: 0 });
+      await assert.rejects(writer(first, { failAudit: true }).convert(conversion), unavailable);
+      assert.deepEqual(await counts(300), { terminal: 0, allocation: 0, audit: 0 });
+      await assert.rejects(writer(first, { loseAck: true }).convert(conversion), unavailable);
+      const recovered = await writer(first).convert(conversion);
+      assert.equal(recovered.status, "Existing");
+      assert.equal(recovered.hold.state, "Converted");
+      assert.deepEqual(await counts(300), { terminal: 1, allocation: 1, audit: 1 });
+      await assert.rejects(
+        writer(first).convert({ ...conversion, intentDigest: `sha256:${"c".repeat(64)}` }),
+        { code: "CAPACITY_IDEMPOTENCY_CONFLICT" },
+      );
+      // A later allocation terminal does not rewrite the historical conversion receipt.
+      await finish(admin, 30_300, "Released");
+      assert.deepEqual((await writer(first).convert(conversion)).allocation, recovered.allocation);
+      assert.deepEqual(await counts(300), { terminal: 1, allocation: 1, audit: 1 });
+
+      await seed(31);
+      await hold(admin, 31, 310);
+      const release = await transitionRequest(310, "Release");
+      const contender = await transitionRequest(310, "Convert", 71_310);
+      let releaseCommit;
+      const commitGate = new Promise((resolve) => {
+        releaseCommit = resolve;
+      });
+      let reachedCommit;
+      const entered = new Promise((resolve) => {
+        reachedCommit = resolve;
+      });
+      const releasing = writer(first, {
+        beforeCommit: async () => {
+          reachedCommit();
+          await commitGate;
+        },
+      }).release(release);
+      await entered;
+      const converting = writer(second)
+        .convert(contender)
+        .then(
+          () => null,
+          (error) => error.code,
+        );
+      try {
+        await waitForLock();
+      } finally {
+        releaseCommit();
+      }
+      assert.equal((await releasing).hold.state, "Released");
+      assert.equal(await converting, "CAPACITY_TRANSITION_CONFLICT");
+      assert.equal((await writer(first).release(release)).status, "Existing");
+      assert.deepEqual(await counts(310), { terminal: 1, allocation: 0, audit: 1 });
+      await hold(admin, 31, 311); // Released unit really returns to admission.
+
+      await seed(32);
+      await hold(admin, 32, 320, new Date(Date.parse(await stamp()) + 700).toISOString());
+      const aging = await transitionRequest(320);
+      await admin.query("SELECT pg_sleep(0.8)");
+      await assert.rejects(writer(first).convert(aging), unavailable);
+      assert.deepEqual(await counts(320), { terminal: 0, allocation: 0, audit: 0 });
+      const expiry = await transitionRequest(320, "Expire");
+      assert.equal((await writer(first).release(expiry)).hold.state, "Expired");
+      assert.deepEqual(await counts(320), { terminal: 1, allocation: 0, audit: 1 });
+
+      await seed(33);
+      await hold(admin, 33, 330);
+      const wrong = await transitionRequest(330);
+      wrong.transition.hold = { ...wrong.transition.hold, units: 2 };
+      await assert.rejects(writer(first).convert(wrong), { code: "CAPACITY_TRANSITION_CONFLICT" });
+      assert.deepEqual(await counts(330), { terminal: 0, allocation: 0, audit: 0 });
+      const foreign = await transitionRequest(330);
+      foreign.transition.hold = {
+        ...foreign.transition.hold,
+        slot: { ...foreign.transition.hold.slot, storeReference: id(99) },
+      };
+      await assert.rejects(writer(first).convert(foreign), { code: "CAPACITY_INPUT_INVALID" });
     }
   } finally {
     await Promise.all([
