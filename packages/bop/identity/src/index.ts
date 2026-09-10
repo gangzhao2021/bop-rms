@@ -256,3 +256,5 @@ export type {
 } from "./application/ports/guest-binding-ports.js";
 
 export * from "./contracts/guest-dining-binding-preparation.js";
+
+export * from "./infrastructure/persistence/guest-dining-binding-store.js";

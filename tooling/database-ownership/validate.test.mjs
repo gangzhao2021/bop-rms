@@ -1261,6 +1261,49 @@ describe("Database Schema Ownership Architecture Test", () => {
     },
   );
 
+  it("accepts only the WP-2295 owned Guest binding store without driver imports", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "BOP", "identity", "bop_identity", [
+      "guest_dining_binding_preparation",
+      "guest_session",
+      "guest_session_operation",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/guest-dining-binding-store.ts",
+    );
+    await writeFile(asset, "export const synthetic = true;\n");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg";\nexport { pg };\n');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, "export const synthetic = true;\n");
+    await writeFile(join(dirname(asset), "other-writer.ts"), "export const synthetic = true;\n");
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "owner",
+    "schema",
+    "guest_dining_binding_preparation",
+    "guest_session",
+    "guest_session_operation",
+  ])("does not transfer WP-2295 acceptance with changed %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "BOP",
+      changed === "owner" ? "other-owner" : "identity",
+      changed === "schema" ? "bop_other" : "bop_identity",
+      ["guest_dining_binding_preparation", "guest_session", "guest_session_operation"].filter(
+        (table) => table !== changed,
+      ),
+    );
+    await writeFile(
+      join(context.moduleRoot, "src/infrastructure/persistence/guest-dining-binding-store.ts"),
+      "export const synthetic = true;\n",
+    );
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
   it("accepts only the WP-2235 owned Guest binding store without driver imports", async () => {
     const root = await fixture();
     const context = await writeModule(root, "BOP", "identity", "bop_identity", [

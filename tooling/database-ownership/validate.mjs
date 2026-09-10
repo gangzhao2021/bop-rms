@@ -153,6 +153,13 @@ async function scanUnsupported(root, module, diagnostics) {
       } else if (entry.isFile() && !file.endsWith(evidencePath)) {
         const moduleRelative = relative(module.root, path).replaceAll("\\", "/");
         // WP-2209 accepts only this owner-scoped entry adapter; driver imports remain checked below.
+        const acceptedGuestDiningBindingAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          ["guest_dining_binding_preparation", "guest_session", "guest_session_operation"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/guest-dining-binding-store.ts";
         const acceptedGuestBindingAsset =
           module.packageName === "@bop/identity" &&
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
@@ -348,6 +355,7 @@ async function scanUnsupported(root, module, diagnostics) {
           ![...sharedAuthorityModules.values()].includes(module.packageName) &&
           !acceptedGuestEntryAsset &&
           !acceptedGuestBindingAsset &&
+          !acceptedGuestDiningBindingAsset &&
           !acceptedPublishedMenuAsset &&
           !acceptedPriceQuoteQueryAsset &&
           !acceptedPriceQuoteWriterAsset &&

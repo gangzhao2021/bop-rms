@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "identity", packageName: "@bop/identity", layer: "BOP" },
   tables: [
     {
+      table: "guest_dining_binding_preparation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/identity" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier", "credential"],
+    },
+    {
       table: "guest_binding_preparation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@bop/identity" },

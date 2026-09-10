@@ -342,3 +342,8 @@ WP-2294 adds pure DiningSessionBinding Prepared/Acknowledged/Activated contracts
 admission/Guest/public Table/Session/Participant evidence and active-candidate response-loss
 continuation. Identity402/402, full verification and forced uncached integration pass. This is not live persistence,
 credential transport, current Dining command authority or completed browser recovery.
+
+WP-2295 implements independent Identity Dining preparation persistence with atomic predecessor
+revocation, DiningBound candidate installation, Session/preparation history and public Audit.
+Identity431/431, Identity PostgreSQL6/6, full verification and forced uncached integration pass. Actual Dining evidence
+production, application coordination and browser transport remain separate.
