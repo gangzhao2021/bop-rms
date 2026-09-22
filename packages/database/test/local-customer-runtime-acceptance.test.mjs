@@ -63,7 +63,7 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
       );
       await admin.query(`GRANT USAGE ON SCHEMA rms_catalog TO ${menuRole}`);
       await admin.query(
-        `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint TO ${menuRole}`,
+        `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint, rms_catalog.menu_release_effective_period, rms_catalog.menu_publication_release, rms_catalog.menu_publication_revision, rms_catalog.menu_version_store, rms_catalog.menu_version_channel, rms_catalog.menu_version_order_type TO ${menuRole}`,
       );
       await admin.query(`GRANT USAGE ON SCHEMA rms_ordering TO ${cartRole}`);
       await admin.query(`GRANT SELECT ON rms_ordering.cart_binding_record TO ${cartRole}`);
@@ -147,6 +147,7 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
       };
       const options = {
         scope,
+        entryRequestAdmission: { consume: async () => ({ status: "Allowed" }) },
         entry: { ...f.options, session: { binding: f.options.session.binding, credentials } },
         menuStores: {
           resolvePublic: async (reference) =>
@@ -182,7 +183,7 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
         });
       const menu = (publicStore = id(4)) =>
         globalThis.fetch(
-          `${root}/api/v1/public/stores/${publicStore}/menu?channel=DINE_IN&orderType=TABLE_SERVICE&locale=en-CA`,
+          `${root}/api/v1/public/stores/${publicStore}/menu?channel=CUSTOMER_PWA&orderType=DINE_IN&locale=en-CA`,
         );
       for (const response of [
         await entry({ origin: "https://wrong.invalid" }),

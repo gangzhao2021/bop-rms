@@ -105,6 +105,42 @@ async function prove(context) {
       /payment_reconciliation_record_mode_shape_check/u,
     );
     await client.query(
+      `INSERT INTO rms_payment.payment_reconciliation_run
+       (reconciliation_run_id,brand_id,store_id,mode,actor_id,purpose,scheduled_at,cutoff_at,
+        max_candidates,completed_at,matched_count,healed_count,unresolved_count,unavailable_count,difference_count)
+       VALUES ($1,$2,$3,'DailySettlement',NULL,'ReconcilePayments',$4,$4,10,$5,1,0,0,0,0)`,
+      [id(20), id(2), id(3), scheduledAt, checkedAt],
+    );
+    await client.query(
+      `INSERT INTO rms_payment.payment_reconciliation_record
+       (reconciliation_check_id,reconciliation_run_id,candidate_id,brand_id,store_id,mode,
+        settlement_reference,outcome,internal_captured_minor,provider_captured_minor,
+        internal_refunded_minor,provider_refunded_minor,currency_code,checked_at)
+       VALUES ($1,$2,$3,$4,$5,'DailySettlement','set_SYNTHETIC_REFUNDONLY','Matched',0,0,1250,1250,'CAD',$6)`,
+      [id(21), id(20), id(22), id(2), id(3), checkedAt],
+    );
+    assert.deepEqual(
+      (
+        await client.query(
+          `SELECT internal_captured_minor::text,internal_refunded_minor::text
+       FROM rms_payment.payment_reconciliation_record WHERE reconciliation_check_id=$1`,
+          [id(21)],
+        )
+      ).rows,
+      [{ internal_captured_minor: "0", internal_refunded_minor: "1250" }],
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO rms_payment.payment_reconciliation_record
+       (reconciliation_check_id,reconciliation_run_id,candidate_id,brand_id,store_id,mode,
+        payment_intent_id,internal_status,provider_status,outcome,internal_captured_minor,
+        provider_captured_minor,internal_refunded_minor,provider_refunded_minor,currency_code,checked_at)
+       VALUES ($1,$2,$3,$4,$5,'Operational',$6,'Captured','Captured','Matched',0,0,1250,1250,'CAD',$7)`,
+        [id(23), id(1), id(24), id(2), id(3), id(25), checkedAt],
+      ),
+      /payment_reconciliation_record_amount_check/u,
+    );
+    await client.query(
       `UPDATE rms_payment.payment_reconciliation_record SET internal_captured_minor=9999
        WHERE reconciliation_check_id=$1`,
       [id(6)],
@@ -148,3 +184,152 @@ async function prove(context) {
 it("persists immutable Store-scoped Payment reconciliation runs, checks and exceptions", async () => {
   await withIsolatedDatabase({ caseId: "payment_recon", root }, prove);
 }, 180_000);
+
+it("retains Provider-only capture evidence with exact exception scope and immutable history", async () => {
+  await withIsolatedDatabase({ caseId: "provider_capture", root }, async (context) => {
+    const client = new Client(context.clientConfig);
+    await client.connect();
+    try {
+      await client.query(
+        "INSERT INTO rms_payment.payment_reconciliation_exception VALUES($1,$2,$3,$4,'AmountMismatch','Error','Open',$5)",
+        [id(101), id(102), id(103), id(104), checkedAt],
+      );
+      const sql =
+        "INSERT INTO rms_payment.provider_capture_exception_evidence VALUES($1,$2,$3,$4,$5,$6,'Test','pi_demo001',$7,$8,$9,$10,'CAD',$11,$12,$13)";
+      const values = [
+        id(104),
+        id(101),
+        id(105),
+        id(102),
+        id(103),
+        id(106),
+        "ch_demo001",
+        id(107),
+        id(108),
+        "2260",
+        scheduledAt,
+        checkedAt,
+        "sha256:" + "a".repeat(64),
+      ];
+      await client.query(sql, values);
+      assert.equal(
+        (
+          await client.query(
+            "SELECT amount_minor::text AS amount FROM rms_payment.provider_capture_exception_evidence",
+          )
+        ).rows[0].amount,
+        "2260",
+      );
+      await assert.rejects(client.query(sql, values), (error) => error.code === "23505");
+      for (const statement of [
+        "UPDATE rms_payment.provider_capture_exception_evidence SET amount_minor=1",
+        "DELETE FROM rms_payment.provider_capture_exception_evidence",
+        "TRUNCATE rms_payment.provider_capture_exception_evidence",
+      ])
+        await assert.rejects(client.query(statement), (error) => error.code === "55000");
+      await client.query(
+        "INSERT INTO rms_payment.payment_reconciliation_exception VALUES($1,$2,$3,$4,'AmountMismatch','Error','Open',$5)",
+        [id(111), id(102), id(103), id(114), checkedAt],
+      );
+      const next = [...values];
+      next[0] = id(114);
+      next[1] = id(111);
+      next[6] = "ch_demo002";
+      for (const [index, value, code] of [
+        [4, id(999), "23503"],
+        [9, "-1", "23514"],
+        [10, "2026-08-04T00:00:00.000Z", "23514"],
+      ]) {
+        const invalid = [...next];
+        invalid[index] = value;
+        await assert.rejects(client.query(sql, invalid), (error) => error.code === code);
+      }
+      next[6] = "ch_demo001";
+      await assert.rejects(client.query(sql, next), (error) => error.code === "23505");
+      const flags = (
+        await client.query(
+          "SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid='rms_payment.provider_capture_exception_evidence'::regclass",
+        )
+      ).rows[0];
+      assert.deepEqual(flags, { relrowsecurity: true, relforcerowsecurity: true });
+      assert.equal(
+        (
+          await client.query(
+            "SELECT count(*)::int AS n FROM information_schema.table_privileges WHERE table_schema='rms_payment' AND table_name='provider_capture_exception_evidence' AND grantee='PUBLIC'",
+          )
+        ).rows[0].n,
+        0,
+      );
+    } finally {
+      await client.end();
+    }
+  });
+}, 180000);
+
+it("persists append-only reconciliation follow-up versions bound to original exception scope", async () => {
+  await withIsolatedDatabase({ caseId: "recon_followup", root }, async (context) => {
+    const client = new Client(context.clientConfig);
+    await client.connect();
+    try {
+      await client.query(
+        "INSERT INTO rms_payment.payment_reconciliation_exception VALUES($1,$2,$3,$4,'AmountMismatch','Error','Open',$5)",
+        [id(201), id(202), id(203), id(204), checkedAt],
+      );
+      const sql =
+        "INSERT INTO rms_payment.reconciliation_follow_up_history VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)";
+      const values = [
+        id(205),
+        id(202),
+        id(203),
+        id(201),
+        id(204),
+        2,
+        id(206),
+        id(207),
+        "Acknowledge",
+        checkedAt,
+        JSON.stringify({ command: {}, before: {}, after: {} }),
+      ];
+      await client.query(sql, values);
+      await assert.rejects(client.query(sql, values), (e) => e.code === "23505");
+      for (const [index, value, code] of [
+        [6, id(208), "23505"],
+        [3, id(299), "23503"],
+        [5, 1, "23514"],
+        [8, "Resolve", "23514"],
+        [10, "{}", "23514"],
+      ]) {
+        const changed = [...values];
+        changed[5] = 3;
+        changed[6] = id(209);
+        changed[index] = value;
+        if (index === 6) changed[5] = 2;
+        await assert.rejects(client.query(sql, changed), (e) => e.code === code);
+      }
+      for (const action of [
+        "UPDATE rms_payment.reconciliation_follow_up_history SET version=3",
+        "DELETE FROM rms_payment.reconciliation_follow_up_history",
+        "TRUNCATE rms_payment.reconciliation_follow_up_history",
+      ])
+        await assert.rejects(client.query(action), (e) => e.code === "55000");
+      assert.deepEqual(
+        (
+          await client.query(
+            "SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid='rms_payment.reconciliation_follow_up_history'::regclass",
+          )
+        ).rows,
+        [{ relrowsecurity: true, relforcerowsecurity: true }],
+      );
+      assert.equal(
+        (
+          await client.query(
+            "SELECT count(*)::int AS n FROM information_schema.table_privileges WHERE table_schema='rms_payment' AND table_name='reconciliation_follow_up_history' AND grantee='PUBLIC'",
+          )
+        ).rows[0].n,
+        0,
+      );
+    } finally {
+      await client.end();
+    }
+  });
+}, 180000);

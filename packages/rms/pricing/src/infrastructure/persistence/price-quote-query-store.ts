@@ -1,6 +1,10 @@
 import { parsePricingReference } from "../../domain/money-tax-contract.js";
 import type { PriceQuoteSnapshot } from "../../domain/price-quote.js";
-import { decodePriceQuoteSnapshot } from "../../domain/price-quote-snapshot-codec.js";
+import type { ConfiguredPriceQuoteSnapshot } from "../../domain/configured-price-quote.js";
+import {
+  decodePriceQuoteSnapshot,
+  decodeConfiguredPriceQuoteSnapshot,
+} from "../../domain/price-quote-snapshot-codec.js";
 
 export interface PriceQuoteQueryTransaction {
   query(sql: string, parameters: readonly unknown[]): Promise<unknown>;
@@ -8,8 +12,9 @@ export interface PriceQuoteQueryTransaction {
 export interface PriceQuoteQueryTransactionRunner {
   run<T>(action: (transaction: PriceQuoteQueryTransaction) => Promise<T>): Promise<T>;
 }
-export interface PriceQuoteHistoryReader {
-  load(quoteReference: string): Promise<PriceQuoteSnapshot | null>;
+type StoredQuote = PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
+export interface PriceQuoteHistoryReader<T extends StoredQuote = PriceQuoteSnapshot> {
+  load(quoteReference: string): Promise<T | null>;
 }
 export class PriceQuoteQueryError extends Error {
   readonly code = "QUOTE_HISTORY_UNAVAILABLE";
@@ -61,7 +66,7 @@ const select = `SELECT q.complete_snapshot_text AS "snapshotText", jsonb_build_o
  ) AS summary FROM rms_pricing.price_quote q
  WHERE q.brand_id=$1 AND q.store_id=$2 AND q.price_quote_id=$3`;
 
-function expectedSummary(quote: PriceQuoteSnapshot): Record<string, unknown> {
+function expectedSummary(quote: StoredQuote): Record<string, unknown> {
   return {
     quoteReference: quote.quoteReference,
     quoteVersion: quote.quoteVersion,
@@ -88,10 +93,11 @@ function expectedSummary(quote: PriceQuoteSnapshot): Record<string, unknown> {
 }
 
 /** Historical owner read only. Caller supplies authorization; this does not establish current validity. */
-export function createPostgresPriceQuoteHistoryReader(
+function createHistoryReader<T extends StoredQuote>(
   runner: PriceQuoteQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
-): PriceQuoteHistoryReader {
+  decode: (text: string) => T,
+): PriceQuoteHistoryReader<T> {
   let brand: string;
   let store: string;
   try {
@@ -102,7 +108,7 @@ export function createPostgresPriceQuoteHistoryReader(
     return fail();
   }
   return Object.freeze({
-    async load(quoteReference: string): Promise<PriceQuoteSnapshot | null> {
+    async load(quoteReference: string): Promise<T | null> {
       try {
         const reference = parsePricingReference(quoteReference);
         return await runner.run(async (tx) => {
@@ -126,7 +132,7 @@ export function createPostgresPriceQuoteHistoryReader(
           if (rowDescriptor === undefined || !("value" in rowDescriptor)) fail();
           const row = closed(rowDescriptor.value, ["snapshotText", "summary"]);
           if (typeof row.snapshotText !== "string") fail();
-          const quote = decodePriceQuoteSnapshot(row.snapshotText);
+          const quote = decode(row.snapshotText);
           if (
             quote.quoteReference !== reference ||
             quote.brandReference !== brand ||
@@ -143,4 +149,18 @@ export function createPostgresPriceQuoteHistoryReader(
       }
     },
   });
+}
+
+export function createPostgresPriceQuoteHistoryReader(
+  runner: PriceQuoteQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+): PriceQuoteHistoryReader {
+  return createHistoryReader(runner, scope, decodePriceQuoteSnapshot);
+}
+
+export function createPostgresConfiguredPriceQuoteHistoryReader(
+  runner: PriceQuoteQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+): PriceQuoteHistoryReader<ConfiguredPriceQuoteSnapshot> {
+  return createHistoryReader(runner, scope, decodeConfiguredPriceQuoteSnapshot);
 }

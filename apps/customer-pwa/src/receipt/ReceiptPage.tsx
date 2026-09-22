@@ -35,6 +35,18 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
         ))}
       </ul>
       <dl className="receipt-page__totals">
+        {snapshot.adjustments ? (
+          <>
+            <div>
+              <dt>Discount</dt>
+              <dd>{money(snapshot.adjustments.discount)}</dd>
+            </div>
+            <div>
+              <dt>Fees</dt>
+              <dd>{money(snapshot.adjustments.fee)}</dd>
+            </div>
+          </>
+        ) : null}
         <div>
           <dt>Subtotal</dt>
           <dd>{money(snapshot.subtotal)}</dd>
@@ -64,9 +76,16 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
   );
 }
 
-function ReceiptContent({ view }: { readonly view: ReceiptView }) {
+function ReceiptContent({
+  view,
+  online,
+}: {
+  readonly view: ReceiptView;
+  readonly online: boolean;
+}) {
   const current = view.records.at(-1)?.snapshot;
   if (!current) return null;
+  const financial = online ? view.financial : null;
   return (
     <>
       <section aria-labelledby="receipt-merchant-heading">
@@ -78,9 +97,62 @@ function ReceiptContent({ view }: { readonly view: ReceiptView }) {
       </section>
       {view.freshnessStatus === "Stale" ? (
         <section role="status">
-          <h2>Receipt status may be delayed</h2>
+          <h2>Live receipt status is unavailable</h2>
+          <p>
+            {financial
+              ? "The receipt below is saved history. Payment amounts are shown separately; delivery and support status remain unavailable."
+              : "The receipt below is saved history. Current payment, delivery and support status is not available here."}
+          </p>
         </section>
       ) : null}
+      <section aria-labelledby="receipt-financial-heading">
+        <h2 id="receipt-financial-heading">Payment and refunds</h2>
+        {financial ? (
+          <>
+            <p>
+              Checked {new Date(financial.observedAt).toLocaleString(current.locale)}. Refresh to
+              check again.
+            </p>
+            <dl className="receipt-page__totals">
+              <div>
+                <dt>Captured</dt>
+                <dd>
+                  {money({
+                    amountMinor: financial.capturedMinor,
+                    currencyCode: financial.currencyCode,
+                  })}
+                </dd>
+              </div>
+              <div>
+                <dt>Confirmed refunds</dt>
+                <dd>
+                  {money({
+                    amountMinor: financial.confirmedRefundMinor,
+                    currencyCode: financial.currencyCode,
+                  })}
+                </dd>
+              </div>
+              <div>
+                <dt>Pending refunds</dt>
+                <dd>
+                  {money({
+                    amountMinor: financial.pendingRefundMinor,
+                    currencyCode: financial.currencyCode,
+                  })}
+                </dd>
+              </div>
+            </dl>
+            <p>Pending refunds are not confirmed refunds.</p>
+            {financial.unresolvedAttemptCount > 0 ? (
+              <p role="status">Some payment attempts still need a final result.</p>
+            ) : null}
+          </>
+        ) : (
+          <p>
+            Current payment and refund amounts are unavailable{online ? "." : " while offline."}
+          </p>
+        )}
+      </section>
       <section aria-labelledby="receipt-history-heading">
         <h2 id="receipt-history-heading">Immutable receipt history</h2>
         {view.records.map((record) => (
@@ -142,10 +214,7 @@ export function ReceiptPage({ controller: provided }: { readonly controller?: Re
     ],
     "not-found": ["Receipt not found", "No authorized receipt was found."],
     "feature-disabled": ["Digital receipt is disabled", "Contact the Store for support."],
-    unavailable: [
-      "Receipt is unavailable",
-      "The receipt adapter is not active. No request was retried.",
-    ],
+    unavailable: ["Receipt is unavailable", "Try again later or ask the Store for help."],
   };
   const message = messages[state.status];
   return (
@@ -155,6 +224,13 @@ export function ReceiptPage({ controller: provided }: { readonly controller?: Re
         <h1>Your receipt</h1>
         <p>This versioned record preserves the transaction facts issued for your order.</p>
       </header>
+      <button
+        type="button"
+        disabled={state.status !== "ready" && state.status !== "unavailable"}
+        onClick={() => void controller.load()}
+      >
+        Refresh receipt
+      </button>
       {message ? (
         <section role={state.status === "loading" ? "status" : "alert"}>
           <h2>{message[0]}</h2>
@@ -172,7 +248,7 @@ export function ReceiptPage({ controller: provided }: { readonly controller?: Re
           </p>
         </section>
       ) : null}
-      {view ? <ReceiptContent view={view} /> : null}
+      {view ? <ReceiptContent view={view} online={state.status === "ready"} /> : null}
       <Link to={`/orders/${orderReference}`}>Back to order status</Link>
     </main>
   );

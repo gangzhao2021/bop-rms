@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { exercisePaidKitchenLifecycle } from "../test-support/kitchen-paid-lifecycle.mjs";
+import { createHash } from "node:crypto";
+import { exerciseKitchenWorkLifecycleStore } from "../test-support/kitchen-work-lifecycle-store.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -1094,6 +1097,182 @@ async function prove(context) {
         }),
       ),
       /row-level security/u,
+    );
+
+    await client.query("RESET ROLE");
+    const lifecycleSource = source(6000);
+    await seedSource(client, lifecycleSource);
+    await exerciseKitchenWorkLifecycleStore(client, lifecycleSource, id);
+    const manualReadySource = source(6100);
+    await seedSource(client, manualReadySource);
+    await exerciseKitchenWorkLifecycleStore(
+      client,
+      manualReadySource,
+      (n) => id(n + 10000),
+      "Enabled",
+    );
+
+    // Two real normalized items and independent connections; Ordering eligibility is synthetic
+    // here. Restricted-role real Ordering/payment composition is covered by Pickup/Dining tests.
+    const multi = source(6200);
+    await seedSource(client, multi);
+    const firstItem = (
+      await client.query(
+        "SELECT * FROM rms_kitchen.kitchen_work_item WHERE kitchen_work_item_id=$1",
+        [multi.workItemId],
+      )
+    ).rows[0];
+    const secondItem = {
+      ...firstItem,
+      kitchen_work_item_id: id(6211),
+      order_item_id: id(6214),
+      source_item_ordinal: 2,
+    };
+    // pg decodes JSONB; insertRow requires serialized JSON values for array columns.
+    for (const [key, value] of Object.entries(secondItem))
+      if (key.endsWith("_json")) secondItem[key] = JSON.stringify(value);
+    await insertRow(client, "kitchen_work_item", secondItem);
+    const ownerRole = (await client.query("SELECT current_user AS role")).rows[0].role;
+    await exercisePaidKitchenLifecycle({
+      admin: client,
+      role: '"' + ownerRole.replaceAll('"', '""') + '"',
+      runner: () => ({
+        run: async (work) => {
+          const connection = new Client(context.clientConfig);
+          await connection.connect();
+          try {
+            await connection.query("BEGIN");
+            const result = await work({ query: (sql, values) => connection.query(sql, values) });
+            await connection.query("COMMIT");
+            return result;
+          } catch (error) {
+            await connection.query("ROLLBACK");
+            throw error;
+          } finally {
+            await connection.end();
+          }
+        },
+      }),
+      scope: { brandReference: multi.brandId, storeReference: multi.storeId },
+      ticket: {
+        ticketReference: multi.ticketId,
+        createdAt,
+        correlationReference: multi.correlationId,
+        sourceEvidenceDigest: sha("3"),
+        workItems: [
+          {
+            workItemReference: multi.workItemId,
+            orderItemReference: multi.orderItemId,
+            requiredQuantity: firstItem.required_quantity,
+          },
+          {
+            workItemReference: id(6211),
+            orderItemReference: id(6214),
+            requiredQuantity: secondItem.required_quantity,
+          },
+        ],
+      },
+      source: { resolve: async () => ({ evidenceDigest: sha("3") }) },
+      sourceQuery: {},
+      hash: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+      references: {
+        derive: (purpose, identity) => {
+          const digest = createHash("sha256")
+            .update(purpose + identity)
+            .digest("hex");
+          return (
+            "0198acdc-" +
+            digest.slice(0, 4) +
+            "-7" +
+            digest.slice(4, 7) +
+            "-8" +
+            digest.slice(7, 10) +
+            "-" +
+            digest.slice(10, 22)
+          );
+        },
+      },
+      id: (n) => id(n + 20000),
+    });
+
+    // Storage-column binding only; service codec tests separately validate the full semantic effect.
+    await client.query("RESET ROLE");
+    const recordedSource = source(3000);
+    await seedSource(client, recordedSource);
+    const recordedOperation = acceptOperation(
+      recordedSource,
+      id(4000),
+      "stored-lifecycle-record-0001",
+      {
+        audit_id: id(4001),
+        outbox_event_id: id(4002),
+        correlation_id: id(4003),
+      },
+    );
+    const paths = {
+      "operation.operationReference": "kitchen_work_lifecycle_operation_id",
+      "operation.brandReference": "brand_id",
+      "operation.storeReference": "store_id",
+      "operation.ticketReference": "kitchen_ticket_id",
+      "operation.workItemReference": "kitchen_work_item_id",
+      "operation.orderItemReference": "order_item_id",
+      "operation.idempotencyKey": "idempotency_key",
+      "operation.intentDigest": "intent_digest",
+      effectDigest: "effect_digest",
+      "operation.auditReference": "audit_id",
+      "operation.eventReference": "outbox_event_id",
+      "operation.expectedTicketVersion": "expected_ticket_version",
+      "operation.resultTicketVersion": "result_ticket_version",
+      "operation.expectedWorkItemVersion": "expected_work_item_version",
+      "operation.resultWorkItemVersion": "result_work_item_version",
+      "command.idempotencyKey": "idempotency_key",
+    };
+    const stored = { recordVersion: 1, effect: {} };
+    for (const [path, column] of Object.entries(paths)) {
+      const parts = path.split(".");
+      let target = stored.effect;
+      for (const part of parts.slice(0, -1)) target = target[part] ??= {};
+      const value = recordedOperation[column];
+      target[parts.at(-1)] = value === undefined || value === null ? null : String(value);
+    }
+    for (const [path] of Object.entries(paths)) {
+      const changed = globalThis.structuredClone(stored);
+      const parts = path.split(".");
+      let target = changed.effect;
+      for (const part of parts.slice(0, -1)) target = target[part];
+      target[parts.at(-1)] = "changed";
+      await assert.rejects(
+        insertRow(client, "kitchen_work_lifecycle_operation", {
+          ...recordedOperation,
+          effect_record_json: JSON.stringify(changed),
+        }),
+        /kitchen_work_lifecycle_effect_record_binding_check/u,
+      );
+    }
+    for (const changed of [{}, { ...stored, recordVersion: 2 }, { ...stored, unexpected: true }]) {
+      await assert.rejects(
+        insertRow(client, "kitchen_work_lifecycle_operation", {
+          ...recordedOperation,
+          effect_record_json: JSON.stringify(changed),
+        }),
+        /kitchen_work_lifecycle_effect_record_binding_check/u,
+      );
+    }
+    await insertRow(client, "kitchen_work_lifecycle_operation", {
+      ...recordedOperation,
+      effect_record_json: JSON.stringify(stored),
+    });
+    const recovered = await client.query(
+      "SELECT effect_record_json FROM rms_kitchen.kitchen_work_lifecycle_operation WHERE kitchen_work_lifecycle_operation_id=$1",
+      [recordedOperation.kitchen_work_lifecycle_operation_id],
+    );
+    assert.deepEqual(recovered.rows[0].effect_record_json, stored);
+    await assert.rejects(
+      client.query(
+        "UPDATE rms_kitchen.kitchen_work_lifecycle_operation SET effect_record_json=NULL WHERE kitchen_work_lifecycle_operation_id=$1",
+        [recordedOperation.kitchen_work_lifecycle_operation_id],
+      ),
+      /append-only/u,
     );
   } finally {
     await client.query(`RESET ROLE`).catch(() => undefined);

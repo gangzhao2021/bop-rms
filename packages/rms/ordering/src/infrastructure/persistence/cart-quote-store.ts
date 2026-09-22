@@ -9,6 +9,7 @@ import {
 } from "../../domain/cart.js";
 import {
   parseCartQuoteAttachment,
+  parseConfiguredCartQuoteAttachment,
   type CartQuoteAttachment,
 } from "../../domain/cart-quote-attachment.js";
 import { assertCartLifecycleActive } from "../../domain/cart-lifecycle.js";
@@ -17,17 +18,20 @@ import {
   type CartQueryTransaction,
   type CartQueryTransactionRunner,
 } from "./cart-query-store.js";
-type Attach = Parameters<CartQuoteAttachmentPorts["repository"]["attach"]>[0];
-export interface CartQuoteReader {
+type Attach<V extends 1 | 2 = 1> = Omit<
+  Parameters<CartQuoteAttachmentPorts["repository"]["attach"]>[0],
+  "attachment"
+> & { readonly attachment: CartQuoteAttachment<V> };
+export interface CartQuoteReader<V extends 1 | 2 = 1> {
   loadLatest(input: {
     readonly cartReference: string;
     readonly cartVersion: number;
     readonly observedAt: string;
-  }): Promise<CartQuoteAttachment | null>;
+  }): Promise<CartQuoteAttachment<V> | null>;
 }
-export interface CartQuoteStore extends CartQuoteReader {
-  resolveOperation(reference: string): Promise<CartQuoteAttachment | null>;
-  attach(input: Attach): Promise<CartQuoteAttachment>;
+export interface CartQuoteStore<V extends 1 | 2 = 1> extends CartQuoteReader<V> {
+  resolveOperation(reference: string): Promise<CartQuoteAttachment<V> | null>;
+  attach(input: Attach<V>): Promise<CartQuoteAttachment<V>>;
 }
 function fail(): never {
   throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
@@ -46,7 +50,10 @@ function rows(value: unknown): unknown[] {
   return value.rows;
 }
 const moneyFields = ["subtotal", "discount", "tax", "fee", "total"] as const;
-function decode(value: unknown) {
+function decode<V extends 1 | 2>(
+  value: unknown,
+  parse: (value: unknown) => CartQuoteAttachment<V>,
+) {
   const raw = closed(value, [
     "operationReference",
     "operationIntentHash",
@@ -79,9 +86,9 @@ function decode(value: unknown) {
       fail();
     decoded[field] = { amountMinor: BigInt(amount.amountMinor), currencyCode: amount.currencyCode };
   }
-  return parseCartQuoteAttachment(decoded);
+  return parse(decoded);
 }
-function canonical(value: CartQuoteAttachment) {
+function canonical(value: CartQuoteAttachment<1 | 2>) {
   return JSON.stringify(
     {
       ...value,
@@ -113,13 +120,14 @@ const select = `SELECT jsonb_build_object(
 
 // Infrastructure only. Current Session/Participant authorization and authoritative Pricing evidence
 // are service duties. This scoped adapter owns one transaction and no Pricing-private access.
-function createQuoteAccess(
+function createQuoteAccess<V extends 1 | 2>(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
+  parse: (value: unknown) => CartQuoteAttachment<V>,
 ) {
   const brand = parseOrderingReference(scope.brandReference);
   const store = parseOrderingReference(scope.storeReference);
-  function inScope(value: CartQuoteAttachment) {
+  function inScope(value: CartQuoteAttachment<V>) {
     if (
       value.brandReference !== brand ||
       value.storeReference !== store ||
@@ -141,7 +149,7 @@ function createQuoteAccess(
     if (result.length === 0) return null;
     if (result.length !== 1) fail();
     const raw = closed(result[0], ["attachment", "lineCount"]);
-    const attachment = decode(raw.attachment);
+    const attachment = decode(raw.attachment, parse);
     inScope(attachment);
     if (attachment.operationReference !== reference || attachment.lines.length !== raw.lineCount)
       fail();
@@ -185,16 +193,21 @@ export function createPostgresCartQuoteReader(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
 ): CartQuoteReader {
-  const { loadLatest } = createQuoteAccess(runner, scope);
+  const { loadLatest } = createQuoteAccess(runner, scope, parseCartQuoteAttachment);
   return Object.freeze({ loadLatest });
 }
 
-export function createPostgresCartQuoteStore(
+function createQuoteStore<V extends 1 | 2>(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
   references: CartQuoteAttachmentPorts["references"],
-): CartQuoteStore {
-  const { brand, store, inScope, run, resolve, loadLatest } = createQuoteAccess(runner, scope);
+  parse: (value: unknown) => CartQuoteAttachment<V>,
+): CartQuoteStore<V> {
+  const { brand, store, inScope, run, resolve, loadLatest } = createQuoteAccess(
+    runner,
+    scope,
+    parse,
+  );
   return Object.freeze({
     loadLatest,
     async resolveOperation(value: string) {
@@ -205,10 +218,10 @@ export function createPostgresCartQuoteStore(
         return fail();
       }
     },
-    async attach(value: Attach) {
+    async attach(value: Attach<V>) {
       try {
         const input = closed(value, ["attachment", "expectedCartVersion", "audit"]);
-        const next = parseCartQuoteAttachment(input.attachment);
+        const next = parse(input.attachment);
         inScope(next);
         const expectedCartVersion = input.expectedCartVersion;
         if (
@@ -403,4 +416,28 @@ export function createPostgresCartQuoteStore(
       }
     },
   });
+}
+
+export function createPostgresCartQuoteStore(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  references: CartQuoteAttachmentPorts["references"],
+): CartQuoteStore {
+  return createQuoteStore(runner, scope, references, parseCartQuoteAttachment);
+}
+
+export function createPostgresConfiguredCartQuoteStore(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  references: CartQuoteAttachmentPorts["references"],
+): CartQuoteStore<2> {
+  return createQuoteStore(runner, scope, references, parseConfiguredCartQuoteAttachment);
+}
+
+export function createPostgresConfiguredCartQuoteReader(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+): CartQuoteReader<2> {
+  const { loadLatest } = createQuoteAccess(runner, scope, parseConfiguredCartQuoteAttachment);
+  return Object.freeze({ loadLatest });
 }

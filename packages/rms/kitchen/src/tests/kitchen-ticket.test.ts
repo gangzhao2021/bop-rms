@@ -36,6 +36,11 @@ import {
   parseKitchenWorkPlan,
 } from "../index.js";
 
+import {
+  encodeKitchenTicketCreationRecord,
+  decodeKitchenTicketCreationRecord,
+} from "../application/kitchen-ticket-creation-record.js";
+
 function id(value: number): string {
   return `018f1000-0000-7000-8000-${value.toString(16).padStart(12, "0")}`;
 }
@@ -1438,4 +1443,77 @@ describe("WP-1401 Kitchen Ticket aggregate", () => {
     expect(() => parseKitchenCustomerNote("safe\u2029")).toThrow();
     expect(() => parseKitchenCustomerNote("x".repeat(241))).toThrow();
   });
+});
+
+describe("immutable Kitchen creation record encoding", () => {
+  async function original(version = 3n) {
+    const input = receipt({ sourceAggregateVersion: version });
+    const test = harness(input);
+    await test.service.create({
+      receipt: input,
+      transaction: { query: async () => ({ rowCount: 0, rows: [] }) },
+    });
+    const effect = test.durable();
+    if (effect === undefined) throw new Error("fixture effect missing");
+    return { test, effect, encoded: encodeKitchenTicketCreationRecord(effect, test.ports) };
+  }
+
+  it("recovers the exact original effect, including Audit/event IDs and all saved work snapshots", async () => {
+    const { test, effect, encoded } = await original(9007199254740993n);
+    expect(decodeKitchenTicketCreationRecord(encoded, test.ports)).toEqual(effect);
+    const stored = JSON.parse(encoded);
+    expect(stored.effect.ticket.sourceAggregateVersion).toBe("9007199254740993");
+    expect(stored.effect.event.payload.aggregateVersion).toBe(1);
+    expect(stored.effect.ticket.workItems[0].customerNote).toBe(
+      effect.ticket.workItems[0]?.customerNote,
+    );
+    expect(test.calls).toEqual({ source: 1, plan: 1, clock: 1, resolve: 1, commit: 1 });
+  });
+
+  it("preserves the full supported PostgreSQL version range", async () => {
+    const { test, effect, encoded } = await original(9223372036854775807n);
+    expect(decodeKitchenTicketCreationRecord(encoded, test.ports)).toEqual(effect);
+  });
+
+  it("rejects a source version that cannot be persisted losslessly", async () => {
+    await expect(original(9223372036854775808n)).rejects.toMatchObject({
+      code: "KITCHEN_TICKET_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+
+  it.each([
+    ["unknown format", ["recordVersion"], 2],
+    ["additional record field", ["currentStatus"], "Completed"],
+    ["rounded source number", ["effect", "ticket", "sourceAggregateVersion"], 3],
+    ["leading zero version", ["effect", "receipt", "sourceAggregateVersion"], "03"],
+    ["overflow version", ["effect", "ticket", "sourceAggregateVersion"], "9223372036854775808"],
+    ["altered completion", ["effect", "ticket", "workItems", "0", "completedQuantity"], 1],
+    ["changed note", ["effect", "ticket", "workItems", "0", "customerNote"], "altered"],
+    ["changed event ID", ["effect", "event", "eventId"], id(999)],
+    ["changed Audit ID", ["effect", "audit", "auditId"], id(999)],
+    ["changed digest", ["effect", "effectDigest"], sha256("altered")],
+    ["unknown effect field", ["effect", "refund"], true],
+    ["string payload version", ["effect", "event", "payload", "aggregateVersion"], "1"],
+  ] as const)("rejects %s instead of synthesizing recovery", async (_label, path, replacement) => {
+    const { test, encoded } = await original();
+    const stored: unknown = JSON.parse(encoded);
+    let target = stored as Record<string, unknown>;
+    for (const key of path.slice(0, -1)) target = target[key] as Record<string, unknown>;
+    const last = path.at(-1);
+    if (last === undefined) throw new Error("fixture mutation path missing");
+    target[last] = replacement;
+    expect(() =>
+      decodeKitchenTicketCreationRecord(JSON.stringify(stored), test.ports),
+    ).toThrowError(expect.objectContaining({ code: "KITCHEN_TICKET_DEPENDENCY_UNAVAILABLE" }));
+  });
+
+  it.each([null, {}, "null", "[]", "{", "{}"])(
+    "rejects malformed storage input %j",
+    async (value) => {
+      const { test } = await original();
+      expect(() => decodeKitchenTicketCreationRecord(value, test.ports)).toThrowError(
+        expect.objectContaining({ code: "KITCHEN_TICKET_DEPENDENCY_UNAVAILABLE" }),
+      );
+    },
+  );
 });

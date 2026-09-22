@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   CatalogError,
+  enumerateCatalogReviewSelections,
   createCatalogSelectionValidationService,
   type CatalogSelectionValidationPorts,
   type CurrentCatalogSelectionSnapshot,
@@ -312,5 +313,139 @@ describe("closed Catalog selection collections", () => {
     if (result.status !== "Accepted") throw new Error("expected synthetic acceptance");
     expect(Object.isFrozen(result.optionSelections)).toBe(true);
     expect(Object.isFrozen(result.optionSelections[0])).toBe(true);
+  });
+});
+
+describe("complete review configuration coverage", () => {
+  const budget = { maximumConfigurations: 100, maximumSearchSteps: 10000 };
+  const key = (items: readonly { optionReference: string; quantity: number }[]) =>
+    items
+      .map((item) => item.optionReference + ":" + item.quantity)
+      .sort()
+      .join(",");
+  it("matches live validation for every candidate with quantities, conflicts and conditional groups", async () => {
+    const current = snapshot();
+    const base = current.rules[0];
+    if (!base) throw new Error("fixture");
+    const rich = {
+      ...current,
+      rules: [
+        {
+          ...base,
+          options: base.options.map((option) => ({
+            ...option,
+            maximumQuantity: option.optionReference === ids.base ? 2 : 1,
+          })),
+        },
+        ...current.rules.slice(1),
+      ],
+    };
+    const expected: string[] = [];
+    for (let baseQuantity = 0; baseQuantity <= 2; baseQuantity++)
+      for (let trigger = 0; trigger <= 1; trigger++)
+        for (let conflict = 0; conflict <= 1; conflict++)
+          for (let child = 0; child <= 1; child++) {
+            const candidate = [
+              { optionReference: ids.base, quantity: baseQuantity },
+              { optionReference: ids.trigger, quantity: trigger },
+              { optionReference: ids.conflict, quantity: conflict },
+              { optionReference: ids.child, quantity: child },
+            ].filter((item) => item.quantity > 0);
+            if ((await service(rich).validateSelection(command(candidate))).status === "Accepted")
+              expected.push(key(candidate));
+          }
+    const actual = enumerateCatalogReviewSelections(rich.rules, budget);
+    expect(actual.map(key).sort()).toEqual(expected.sort());
+    expect(actual.some((items) => items.some((item) => item.quantity === 2))).toBe(true);
+    expect(actual.every((items) => items.every((item) => item.bindingReference.length > 0))).toBe(
+      true,
+    );
+    expect(enumerateCatalogReviewSelections([...rich.rules].reverse(), budget)).toEqual(actual);
+  });
+  it("keeps nested groups inactive until a selected active ancestor enables them", () => {
+    const current = snapshot();
+    const rules = [
+      {
+        bindingReference: id(20),
+        optionSetVersionReference: id(21),
+        activationOptionReferences: [ids.child],
+        minimumQuantity: 1,
+        maximumQuantity: 1,
+        options: [{ optionReference: id(22), maximumQuantity: 1, conflictOptionReferences: [] }],
+      },
+      ...current.rules,
+    ];
+    const actual = enumerateCatalogReviewSelections(rules, budget);
+    expect(actual).toHaveLength(5);
+    for (const items of actual) {
+      const selected = new Set(items.map((item) => String(item.optionReference)));
+      expect(selected.has(id(22))).toBe(selected.has(ids.trigger));
+      expect(selected.has(ids.child)).toBe(selected.has(ids.trigger));
+    }
+  });
+  it("respects the existing 100 selected-option request bound", () => {
+    const rules = Array.from({ length: 100 }, (_, index) => ({
+      bindingReference: id(1000 + index),
+      optionSetVersionReference: id(2000 + index),
+      activationOptionReferences: [],
+      minimumQuantity: index === 0 ? 2 : 1,
+      maximumQuantity: index === 0 ? 2 : 1,
+      options: Array.from({ length: index === 0 ? 2 : 1 }, (_, offset) => ({
+        optionReference: id(3000 + index * 2 + offset),
+        maximumQuantity: 1,
+        conflictOptionReferences: [],
+      })),
+    }));
+    expect(() => enumerateCatalogReviewSelections(rules, budget)).toThrowError(
+      expect.objectContaining({ code: "CATALOG_LIFECYCLE_CONFLICT" }),
+    );
+  });
+  it("returns the one empty configuration for no rules", () => {
+    expect(enumerateCatalogReviewSelections([], budget)).toEqual([[]]);
+  });
+  it("fails rather than exposing partial coverage when either budget is exhausted", () => {
+    expect(() =>
+      enumerateCatalogReviewSelections(snapshot().rules, {
+        ...budget,
+        maximumConfigurations: 1,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" }));
+    expect(() =>
+      enumerateCatalogReviewSelections(snapshot().rules, {
+        ...budget,
+        maximumSearchSteps: 1,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" }));
+  });
+  it("rejects unsatisfiable and cyclic rules", () => {
+    const current = snapshot();
+    const base = current.rules[0],
+      child = current.rules[1];
+    if (!base || !child) throw new Error("fixture");
+    expect(() =>
+      enumerateCatalogReviewSelections(
+        [
+          {
+            ...base,
+            options: [],
+            minimumQuantity: 1,
+            maximumQuantity: 1,
+          },
+        ],
+        budget,
+      ),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_LIFECYCLE_CONFLICT" }));
+    expect(() =>
+      enumerateCatalogReviewSelections(
+        [
+          {
+            ...base,
+            activationOptionReferences: [ids.child],
+          },
+          child,
+        ],
+        budget,
+      ),
+    ).toThrowError(CatalogError);
   });
 });

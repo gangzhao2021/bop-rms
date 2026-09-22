@@ -8,8 +8,8 @@ description: Resolve and plan a BOP-RMS Work Package before implementation or ha
 ## Required inputs
 
 - Repository root and named Work Package.
-- `docs/spec/README.md`, the current `docs/spec/work-packages/WP-xxxx.md`, and applicable `AGENTS.md` files.
-- The exact Canonical Handoff version and only the authoritative sections cited by the brief.
+- `docs/spec/README.md`, applicable `AGENTS.md` files, and the current `docs/spec/work-packages/WP-xxxx.md` when it exists; for a new brief, use the authorized task scope and accepted sources.
+- The exact Canonical Handoff version and only the authoritative sections cited by the brief or needed to prepare it.
 - Current Git/worktree state and explicit user authorization.
 
 ## Workflow
@@ -25,7 +25,9 @@ description: Resolve and plan a BOP-RMS Work Package before implementation or ha
 
 ## Hard stops
 
-- Stop on a stale or missing brief, a conflicting higher-authority decision, an unexplained dirty worktree, a wrong baseline, or missing authorization for the proposed mutation.
+- Do not begin implementation against a missing or stale brief. Continue authorized planning and creation/refresh of the brief from accepted sources; pause dependent implementation while scope or authority remains unresolved.
+- Pause writes that could overwrite unexplained worktree changes or depend on an uncertain baseline. Continue read-only investigation and safely isolated authorized work; preserve unrelated changes.
+- Stop the affected mutation on a conflicting higher-authority decision, a wrong baseline, or missing authorization.
 - Do not implement another WP, invent credentials/evidence, silently reopen an accepted decision, or treat a terminal request as broader authority.
 
 ## Output
@@ -34,5 +36,5 @@ Report WP identity, resolved sources/version, baseline, scope/files, non-goals, 
 
 ## Smoke scenarios
 
-- Positive: a clean exact-baseline task produces a bounded brief and executable verification map.
+- Positive: authorized new-WP planning creates a bounded brief and executable verification map when no brief exists, while preserving unrelated worktree changes.
 - Boundary: a request to add migration work to a documentation-only WP stops and reports the owning future WP instead of editing persistence files.

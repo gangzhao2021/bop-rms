@@ -31,6 +31,7 @@ const expectedNamespaces = [
   ["1600", "1600-rms-device"],
   ["1700", "1700-rms-fulfillment"],
   ["1800", "1800-rms-reporting"],
+  ["1900", "1900-rms-inventory"],
 ] as const;
 const namespaceByDirectory = new Map<string, string>(
   expectedNamespaces.map(([namespace, directory]) => [directory, namespace]),
@@ -60,6 +61,7 @@ const businessOwners = new Map([
   ["bop_identity", "@bop/identity"],
   ["bop_membership", "@bop/membership"],
   ["bop_permission", "@bop/permission"],
+  ["bop_workflow", "@bop/workflow"],
   ["bop_tenant", "@bop/tenant"],
   ["bop_operating_entity", "@bop/operating-entity"],
   ["rms_store", "@rms/store"],
@@ -73,6 +75,7 @@ const businessOwners = new Map([
   ["rms_device", "@rms/printing-device"],
   ["rms_fulfillment", "@rms/fulfillment"],
   ["rms_reporting", "@rms/business-intelligence"],
+  ["rms_inventory", "@rms/inventory"],
 ]);
 const metadataKeys = [
   "bop-rms-migration",
@@ -283,7 +286,7 @@ function validateSql(
       ),
     );
   const withoutFunctionBodies = body.replace(
-    /\bCREATE\s+FUNCTION\b[\s\S]*?\bAS\s+(\$[A-Za-z0-9_]*\$)[\s\S]*?\1\s*;/giu,
+    /\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\b[\s\S]*?\bAS\s+(\$[A-Za-z0-9_]*\$)[\s\S]*?\1\s*;/giu,
     "CREATE FUNCTION AS $$function-body$$;",
   );
   let caseDepth = 0;
@@ -317,7 +320,7 @@ function validateSql(
     const currentStatement = body.slice(body.lastIndexOf(";", match.index) + 1, match.index);
     const acceptedFunctionSetting =
       statement === "SET search_path = pg_catalog" &&
-      /\bCREATE\s+FUNCTION\b/iu.test(currentStatement);
+      /\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\b/iu.test(currentStatement);
     if (!acceptedFunctionSetting)
       diagnostics.push(
         diagnostic(
@@ -373,6 +376,7 @@ function validateSql(
       match[1] !== metadata.schema &&
       !(
         [
+          "platform_projection",
           "platform_audit",
           "platform_eventing",
           "bop_feature_control",
@@ -381,6 +385,7 @@ function validateSql(
           "bop_identity",
           "bop_membership",
           "bop_permission",
+          "bop_workflow",
           "bop_tenant",
           "bop_operating_entity",
           "rms_catalog",
@@ -394,6 +399,7 @@ function validateSql(
           "rms_reporting",
           "rms_store",
           "rms_dining",
+          "rms_inventory",
         ].includes(metadata.schema) && acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
       )
     )

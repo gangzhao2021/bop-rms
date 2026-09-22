@@ -48,3 +48,5 @@ export {
   appendAuditRecordInTransaction,
   AuditPersistenceError,
 } from "./infrastructure/persistence/append-audit-record.js";
+
+export * from "./infrastructure/persistence/verify-operation-binding.js";

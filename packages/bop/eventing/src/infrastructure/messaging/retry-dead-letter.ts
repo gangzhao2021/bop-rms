@@ -266,7 +266,10 @@ export async function scheduleParkedOutboxBatch(
     readonly batchSize: number;
     readonly now: string;
     readonly random: () => number;
-    readonly identities: (eventId: string) => {
+    readonly identities: (
+      eventId: string,
+      attemptNumber: number,
+    ) => {
       readonly attemptId: string;
       readonly deadLetterId: string;
       readonly idempotencyKey: string;
@@ -286,7 +289,7 @@ export async function scheduleParkedOutboxBatch(
   }>(parkedOutboxBatchSql, [input.batchSize]);
   const results: DeliveryDecisionResult[] = [];
   for (const row of parked.rows) {
-    const identities = input.identities(row.event_id);
+    const identities = input.identities(row.event_id, row.attempt_count);
     const firstAttemptAt =
       row.recorded_at instanceof Date
         ? row.recorded_at.toISOString()

@@ -97,6 +97,7 @@ export {
   createKitchenWorkPlanDigestBinding,
   parseKitchenCustomerNote,
   parseKitchenPlanningSource,
+  parseKitchenPreparationRequest,
   parseKitchenTicket,
   parseKitchenTicketCreationAction,
   parseKitchenTicketCreationResult,
@@ -342,3 +343,34 @@ export {
 export * from "./domain/production-batch.js";
 export * from "./application/production-batch-service.js";
 export * from "./application/ports/production-batch-ports.js";
+
+export { createPostgresKitchenTicketStore } from "./infrastructure/persistence/kitchen-ticket-store.js";
+
+export { createPostgresKitchenRoutingConfigurationStore } from "./infrastructure/persistence/kitchen-routing-configuration-store.js";
+export {
+  parseKitchenRoutingConfigurationRecord,
+  rebindKitchenRoutingEvidence,
+  type KitchenRoutingConfigurationRecord,
+} from "./domain/station-routing-configuration.js";
+
+export { createPostgresKitchenWorkLifecycleStore } from "./infrastructure/persistence/kitchen-work-lifecycle-store.js";
+
+export {
+  createPostgresKitchenCustomerStatusReader,
+  type KitchenCustomerBatchStatus,
+} from "./infrastructure/persistence/kitchen-customer-status-reader.js";
+
+export {
+  createPostgresKitchenQueueQueries,
+  lockPostgresKitchenQueueRead,
+} from "./infrastructure/persistence/kitchen-queue-queries.js";
+
+export { createPostgresKitchenQueueProjectionStore } from "./infrastructure/persistence/kitchen-queue-projection-store.js";
+
+export { createKitchenQueueLifecycleProofBundle } from "./application/kitchen-queue-lifecycle-proof.js";
+
+export { createPostgresKitchenQueueSourceReader } from "./infrastructure/persistence/kitchen-queue-source-reader.js";
+
+export { createKitchenQueueRebuildSource } from "./application/kitchen-queue-rebuild-source.js";
+
+export { createPostgresKitchenQueueReadModel } from "./infrastructure/kitchen-queue-read-model.js";

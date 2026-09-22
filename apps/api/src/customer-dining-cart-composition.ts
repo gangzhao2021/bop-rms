@@ -1,3 +1,9 @@
+import type { createPostgresCatalogSelectionService } from "@rms/catalog";
+import {
+  createCustomerCartSelectionInventory,
+  type CustomerCartSelectionInventoryOptions,
+} from "./customer-cart-selection-inventory.js";
+import { createCustomerDiningCartInventoryAuthorization } from "./customer-dining-cart-inventory-authorization.js";
 import {
   assertGuestSessionUsable,
   createGuestSession,
@@ -342,5 +348,44 @@ export function createCustomerCartChannelPort(options: {
         [...mutation, "cartReference", "cartItemReference", "expectedCartVersion"],
         (port, raw) => port.removeItem(raw),
       ),
+  });
+}
+
+/** Explicit production-owner selection/Inventory composition for shared Dining Carts. */
+export function createCustomerDiningCartWithCatalogInventoryComposition(
+  options: Omit<CustomerDiningCartCompositionOptions, "items"> & {
+    readonly items: Omit<NonNullable<CustomerDiningCartCompositionOptions["items"]>, "catalog">;
+    readonly catalogTransactions: Parameters<typeof createPostgresCatalogSelectionService>[0];
+    readonly catalogScope: Pick<
+      Parameters<typeof createPostgresCatalogSelectionService>[1],
+      "menuReference" | "sourceChannel" | "channelCode" | "orderTypeCode"
+    >;
+    readonly catalogSafety: Pick<
+      Parameters<typeof createPostgresCatalogSelectionService>[2],
+      "killSwitch" | "inventory"
+    >;
+    readonly selectedInventory: Omit<CustomerCartSelectionInventoryOptions, "authorize">;
+  },
+): CustomerCartPort {
+  const { catalogTransactions, catalogScope, catalogSafety, selectedInventory, items, ...cart } =
+    options;
+  return createCustomerDiningCartComposition({
+    ...cart,
+    items: {
+      ...items,
+      catalog: createCustomerCartSelectionInventory(
+        catalogTransactions,
+        {
+          ...catalogScope,
+          ...cart.scope,
+          orderType: "DineIn",
+        },
+        { ...catalogSafety, clock: { now: cart.now } },
+        {
+          ...selectedInventory,
+          authorize: createCustomerDiningCartInventoryAuthorization(cart.scope, cart.now),
+        },
+      ),
+    },
   });
 }

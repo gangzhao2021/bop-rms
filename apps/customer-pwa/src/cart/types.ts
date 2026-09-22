@@ -72,6 +72,8 @@ export type CartErrorCode =
   | "cart_version_conflict"
   | "cart_idempotency_conflict"
   | "cart_selection_invalid"
+  | "cart_replacement_forbidden"
+  | "cart_replacement_unavailable"
   | "cart_expired"
   | "cart_abandoned"
   | "cart_rate_limited"

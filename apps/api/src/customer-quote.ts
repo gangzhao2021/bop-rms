@@ -1,5 +1,10 @@
 import { readClosedRecord } from "@bop/identity";
-import type { PriceQuoteRequoteResult, PriceQuoteSnapshot, PricingReference } from "@rms/pricing";
+import type {
+  ConfiguredPriceQuoteSnapshot,
+  PriceQuoteRequoteResult,
+  PriceQuoteSnapshot,
+  PricingReference,
+} from "@rms/pricing";
 import type { Request, RequestHandler, Response } from "express";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -17,8 +22,14 @@ export interface QuoteCartCommand {
 }
 
 export type QuoteCartResult =
-  | { readonly status: "Created"; readonly quote: PriceQuoteSnapshot }
-  | { readonly status: "Current"; readonly quote: PriceQuoteSnapshot }
+  | {
+      readonly status: "Created";
+      readonly quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
+    }
+  | {
+      readonly status: "Current";
+      readonly quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
+    }
   | { readonly status: "Requoted"; readonly requote: PriceQuoteRequoteResult }
   | {
       readonly status: "Expired";
@@ -134,7 +145,10 @@ function parse(request: Request, now: () => string, allowedOrigin: string): Quot
 const money = (value: PriceQuoteSnapshot["subtotal"]) =>
   Object.freeze({ amountMinor: value.amountMinor.toString(), currency: value.currencyCode });
 
-function publicQuote(quote: PriceQuoteSnapshot, requote?: PriceQuoteRequoteResult) {
+function publicQuote(
+  quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot,
+  requote?: PriceQuoteRequoteResult,
+) {
   return {
     schemaVersion: 1,
     quote: {

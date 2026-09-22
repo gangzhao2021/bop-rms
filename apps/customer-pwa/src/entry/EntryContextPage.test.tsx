@@ -86,3 +86,13 @@ describe("CUST-ENTRY-CONTEXT", () => {
     expect(html).toContain('aria-live="polite"');
   });
 });
+
+it("shows a rate-limit wait without enabling retry or revealing context", () => {
+  const html = render({ kind: "RateLimited", retryAfterSeconds: 5 });
+  expect(html).toContain("Please wait before trying again");
+  expect(html).toContain("Try again in 5 seconds.");
+  expect(html).toContain('disabled=""');
+  expect(html).toContain('aria-live="off"');
+  expect(html).not.toContain("Continue to menu");
+  expect(html).not.toContain(context.csrfToken);
+});

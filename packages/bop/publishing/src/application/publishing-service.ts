@@ -408,14 +408,19 @@ export async function executePublishingMutation(
   if (!accepted(decision, actions[input.operation], next.scope))
     fail("PUBLISHING_PERMISSION_DENIED");
 
+  let retainedValidation: PublishingValidationEvidence | null = null;
+  let retainedApproval: PublishingApprovalEvidence | null = null;
+
   if (input.operation === "SubmitReview") {
     const validation = validateValidation(input.validationEvidence, next, occurredAt);
+    retainedValidation = validation;
     if (next.validationEvidenceReference !== validation.evidenceReference)
       fail("PUBLISHING_VALIDATION_DENIED");
   }
   if (input.operation === "Approve") {
     if (current === null) fail("PUBLISHING_MUTATION_INVALID");
     const approval = validateApproval(input.approvalEvidence, current, current.version, occurredAt);
+    retainedApproval = approval;
     if (
       next.approvalEvidenceReference !== approval.evidenceReference ||
       context.actor.actorReference === null ||
@@ -430,12 +435,14 @@ export async function executePublishingMutation(
   if (input.operation === "Publish" || input.operation === "Rollback") {
     if (current === null) fail("PUBLISHING_MUTATION_INVALID");
     const validation = validateValidation(input.validationEvidence, current, occurredAt);
+    retainedValidation = validation;
     const approval = validateApproval(
       input.approvalEvidence,
       current,
       current.version - 1,
       occurredAt,
     );
+    retainedApproval = approval;
     if (
       current.validationEvidenceReference !== validation.evidenceReference ||
       current.approvalEvidenceReference !== approval.evidenceReference
@@ -468,8 +475,12 @@ export async function executePublishingMutation(
     occurredAt,
     sourceChannel,
   });
+  let originalAuditReference: PublishingReference;
   try {
-    await ports.unitOfWork.commit({
+    const committed = await ports.unitOfWork.commit({
+      operation: input.operation,
+      validationEvidence: retainedValidation,
+      approvalEvidence: retainedApproval,
       expectedVersion,
       idempotencyKey,
       current,
@@ -479,10 +490,11 @@ export async function executePublishingMutation(
       rollbackTargetReleaseId: rollbackTarget?.releaseId ?? null,
       audit,
     });
+    originalAuditReference = parsePublishingReference(committed.auditReference);
   } catch {
     return fail("PUBLISHING_COMMIT_FAILED");
   }
-  return Object.freeze({ lifecycle: next, release, auditReference: auditId });
+  return Object.freeze({ lifecycle: next, release, auditReference: originalAuditReference });
 }
 
 export function schedulePublishing(): never {

@@ -106,7 +106,7 @@ function integer(value: unknown, minimum = 1): number {
   return value;
 }
 
-function slot(value: unknown): ScheduledCapacitySlot {
+export function parseScheduledCapacitySlot(value: unknown): ScheduledCapacitySlot {
   const raw = exact(value, [
     "brandReference",
     "storeReference",
@@ -146,7 +146,7 @@ const provenanceFields = [
 
 function provenance(raw: Record<string, unknown>): CapacityProvenance {
   return {
-    slot: slot(raw.slot),
+    slot: parseScheduledCapacitySlot(raw.slot),
     holdReference: parseFulfillmentReference(raw.holdReference),
     cartReference: parseFulfillmentReference(raw.cartReference),
     operationReference: parseFulfillmentReference(raw.operationReference),

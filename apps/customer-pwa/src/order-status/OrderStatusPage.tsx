@@ -24,12 +24,56 @@ function StatusContent({
   readonly view: OrderStatusView;
   readonly pickupController?: PickupCodeController | undefined;
 }) {
-  const complete = view.order.fulfillmentStatus === "Completed";
+  const complete =
+    view.order.orderType === "Pickup" && view.order.fulfillmentStatus === "Completed";
+  const kitchen = view.sources?.kitchen;
+  const kitchenLabel = !kitchen
+    ? "Not available yet"
+    : kitchen.batches.length === view.order.batches.length &&
+        kitchen.batches.every((batch) => batch.status === "Ready")
+      ? "Ready"
+      : kitchen.batches.some((batch) => batch.status !== "Queued")
+        ? "Preparing"
+        : "Queued";
+  const diningItems = view.order.orderType === "DineIn" ? view.sources?.dining?.items : undefined;
+  const allServed =
+    diningItems !== undefined &&
+    view.order.batches.every((batch) =>
+      batch.items.every((item) =>
+        diningItems.some(
+          (served) =>
+            served.orderBatchReference === batch.orderBatchReference &&
+            served.orderItemReference === item.orderItemReference &&
+            served.servedQuantity === item.quantity,
+        ),
+      ),
+    );
+  const someServed = diningItems?.some((item) => item.servedQuantity > 0) === true;
+  const [progressHeading, progressMessage] =
+    view.order.canonicalPhase === "Cancelled"
+      ? ["Order cancelled", "Your order has been cancelled."]
+      : view.order.canonicalPhase === "Rejected"
+        ? ["Order not accepted", "Your order was not accepted."]
+        : complete
+          ? ["Order collected", "Your order has been collected."]
+          : allServed
+            ? ["Items served", "All listed items have been served."]
+            : someServed
+              ? [
+                  "Serving your order",
+                  "Some items have been served. Check the remaining items below.",
+                ]
+              : kitchenLabel === "Ready"
+                ? ["Kitchen preparation complete", "All listed batches are ready."]
+                : kitchenLabel === "Preparing"
+                  ? ["Preparing your order", "The kitchen is preparing your order."]
+                  : ["Order submitted", "We have your order."];
+  const payments = view.sources?.payments;
   return (
     <>
       <section className="order-status__summary" aria-labelledby="order-progress-heading">
         <p className="cart-page__eyebrow">Order {view.order.orderNumber}</p>
-        <h2 id="order-progress-heading">{complete ? "Order completed" : "Order submitted"}</h2>
+        <h2 id="order-progress-heading">{progressHeading}</h2>
         <dl>
           <div>
             <dt>Order type</dt>
@@ -37,7 +81,7 @@ function StatusContent({
           </div>
           <div>
             <dt>Kitchen status</dt>
-            <dd>Not available yet</dd>
+            <dd>{kitchenLabel}</dd>
           </div>
           <div>
             <dt>Estimated time</dt>
@@ -45,20 +89,54 @@ function StatusContent({
           </div>
           <div>
             <dt>Payment status</dt>
-            <dd>Not reported on this screen</dd>
+            <dd>
+              {payments == null
+                ? "Payment updates are unavailable"
+                : payments.length === 0
+                  ? "No payment result has been reported yet"
+                  : "See individual payment updates below"}
+            </dd>
           </div>
         </dl>
-        <p>
-          {complete
-            ? "The Ordering record confirms fulfillment is complete."
-            : "We have your order."}
-        </p>
+        <p>{progressMessage}</p>
       </section>
+
+      {payments && payments.length > 0 ? (
+        <section aria-labelledby="order-payment-updates-heading">
+          <h2 id="order-payment-updates-heading">Payment updates</h2>
+          <ul>
+            {payments.map((payment, index) => (
+              <li key={index}>
+                <p>
+                  {payment.status === "Succeeded" && payment.amount
+                    ? `Payment received: ${money(payment.amount.amountMinor, payment.amount.currencyCode)}`
+                    : "Payment attempt failed"}
+                </p>
+                {payment.freshnessStatus !== "Fresh" ? (
+                  <p role="status">
+                    This payment update may be out of date. Refresh to check again.
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <p>
+            These are individual payment results. They do not confirm that the order is fully paid
+            or show any later refunds.
+          </p>
+        </section>
+      ) : null}
 
       {view.freshnessStatus !== "Fresh" ? (
         <section className="order-status__warning" role="status">
           <h2>Status may be delayed</h2>
-          <p>Projection state: {view.freshnessStatus}. Refresh before relying on a change.</p>
+          <p>
+            {view.freshnessStatus === "Rebuilding"
+              ? "We are updating your order status. Check again shortly."
+              : view.freshnessStatus === "Failed"
+                ? "We could not update your order status. The details below may be out of date."
+                : "The details below may be out of date. Refresh to check for an update."}
+          </p>
         </section>
       ) : null}
 
@@ -67,6 +145,23 @@ function StatusContent({
         {view.order.batches.map((batch, index) => (
           <article key={batch.orderBatchReference} className="order-status__batch">
             <h3>Batch {index + 1}</h3>
+            {kitchen ? (
+              <p>
+                {kitchen.batches.find(
+                  (entry) => entry.orderBatchReference === batch.orderBatchReference,
+                )?.status === "Ready"
+                  ? "Ready"
+                  : kitchen.batches.find(
+                        (entry) => entry.orderBatchReference === batch.orderBatchReference,
+                      )?.status === "InProgress"
+                    ? "Preparing"
+                    : kitchen.batches.some(
+                          (entry) => entry.orderBatchReference === batch.orderBatchReference,
+                        )
+                      ? "Queued"
+                      : "Not available yet"}
+              </p>
+            ) : null}
             <ul>
               {batch.items.map((item) => (
                 <li key={item.orderItemReference}>
@@ -74,6 +169,19 @@ function StatusContent({
                     {item.quantity} × {item.displayName}
                   </span>
                   <span>{money(item.lineTotal.amountMinor, item.lineTotal.currencyCode)}</span>
+                  {view.sources?.dining ? (
+                    <span>
+                      Served{" "}
+                      {
+                        view.sources.dining.items.find(
+                          (entry) =>
+                            entry.orderItemReference === item.orderItemReference &&
+                            entry.orderBatchReference === batch.orderBatchReference,
+                        )?.servedQuantity
+                      }{" "}
+                      of {item.quantity}
+                    </span>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -126,7 +234,7 @@ export function OrderStatusPage({
       <header>
         <p className="cart-page__eyebrow">Order status</p>
         <h1>Track your order</h1>
-        <p>The Order reference identifies this page. Your Guest Session authorizes access.</p>
+        <p>Check your order progress and pickup details.</p>
       </header>
 
       {state.status === "loading" ? (
@@ -143,13 +251,16 @@ export function OrderStatusPage({
       {state.status === "permission-denied" ? (
         <section role="alert">
           <h2>Order access denied</h2>
-          <p>This Guest Session is not authorized for that Order.</p>
+          <p>Open this order in the browser you used at checkout.</p>
         </section>
       ) : null}
       {state.status === "not-found" ? (
         <section role="alert">
-          <h2>Order not found</h2>
-          <p>No authorized Order was found for this link.</p>
+          <h2>This order cannot be opened</h2>
+          <p>
+            Check your order link and use the browser you used at checkout. Your access session may
+            have ended. Ask the store for help if you still cannot open it.
+          </p>
         </section>
       ) : null}
       {state.status === "feature-disabled" ? (
@@ -160,7 +271,7 @@ export function OrderStatusPage({
       {state.status === "unavailable" ? (
         <section role="alert">
           <h2>Order status is not available</h2>
-          <p>The public Guest Order adapter is not available. No request was retried.</p>
+          <p>We could not load your order status. Please try again.</p>
         </section>
       ) : null}
       {state.status === "offline" ? (
@@ -168,11 +279,16 @@ export function OrderStatusPage({
           <h2>Offline read-only</h2>
           <p>
             {view
-              ? "Showing the last accepted status from this page."
-              : "No accepted status is available on this page."}{" "}
+              ? "Showing the last status loaded on this page."
+              : "Connect to the internet to load your order status."}{" "}
             Reconnecting does not refresh automatically.
           </p>
         </section>
+      ) : null}
+      {state.status === "unavailable" || state.status === "offline" ? (
+        <button type="button" onClick={() => void controller.refresh()}>
+          Try loading status
+        </button>
       ) : null}
       {view ? <StatusContent view={view} pickupController={pickupController} /> : null}
       {state.status === "ready" ? (
@@ -180,10 +296,10 @@ export function OrderStatusPage({
           <h2>Updates</h2>
           <p>
             {state.realtime === "available"
-              ? "Realtime hints are connected."
+              ? "Order updates are connected."
               : state.realtime === "connecting"
-                ? "Connecting for update hints."
-                : "Realtime hints are unavailable; use manual refresh."}
+                ? "Connecting for order updates."
+                : "Automatic updates are unavailable. Refresh to check your order."}
           </p>
           <button
             type="button"

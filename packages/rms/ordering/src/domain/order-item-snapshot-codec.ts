@@ -1,5 +1,6 @@
 import {
   parseOrderItemTransactionSnapshot,
+  parseConfiguredOrderItemTransactionSnapshot,
   type OrderItemTransactionSnapshot,
 } from "./order-item-snapshot.js";
 
@@ -18,7 +19,7 @@ const minimumMinor = -(2n ** 63n),
   maximumMinor = 2n ** 63n - 1n;
 
 /** Copy inert bounded data without invoking property accessors, iterators or toJSON hooks. */
-function capture(value: unknown, wire: boolean): unknown {
+function capture(value: unknown, wire: boolean, configured = false): unknown {
   let nodes = 0,
     characters = 0;
   const ancestors = new Set<object>();
@@ -85,6 +86,13 @@ function capture(value: unknown, wire: boolean): unknown {
         if (parsed < minimumMinor || parsed > maximumMinor) fail();
         result.amountMinor = parsed;
       }
+      if (wire && configured && Object.hasOwn(result, "chargedQuantity")) {
+        const quantity = result.chargedQuantity;
+        if (typeof quantity !== "string" || !/^(0|[1-9][0-9]{0,18})$/u.test(quantity)) fail();
+        const parsed = BigInt(quantity);
+        if (parsed > maximumMinor) fail();
+        result.chargedQuantity = parsed;
+      }
       return Object.freeze(result);
     } finally {
       ancestors.delete(current);
@@ -92,7 +100,7 @@ function capture(value: unknown, wire: boolean): unknown {
   }
   return visit(value, 0);
 }
-function serialize(snapshot: OrderItemTransactionSnapshot): string {
+function serialize(snapshot: OrderItemTransactionSnapshot<1 | 2>): string {
   const encoded = JSON.stringify(snapshot, (_key, value: unknown) =>
     typeof value === "bigint" ? value.toString() : value,
   );
@@ -113,6 +121,24 @@ export function encodeOrderItemSnapshot(value: unknown): string {
 export function decodeOrderItemSnapshot(value: unknown): OrderItemTransactionSnapshot {
   try {
     const snapshot = parseOrderItemTransactionSnapshot(capture(value, true));
+    serialize(snapshot);
+    return snapshot;
+  } catch {
+    return fail();
+  }
+}
+
+/** Explicit v2 wire format; quoteVersion remains the immutable snapshot discriminator. */
+export function encodeConfiguredOrderItemSnapshot(value: unknown): string {
+  try {
+    return serialize(parseConfiguredOrderItemTransactionSnapshot(capture(value, false, true)));
+  } catch {
+    return fail();
+  }
+}
+export function decodeConfiguredOrderItemSnapshot(value: unknown): OrderItemTransactionSnapshot<2> {
+  try {
+    const snapshot = parseConfiguredOrderItemTransactionSnapshot(capture(value, true, true));
     serialize(snapshot);
     return snapshot;
   } catch {

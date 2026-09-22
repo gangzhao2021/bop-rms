@@ -7,7 +7,10 @@ import {
   type CartQuoteExpiryRecord,
 } from "../../domain/cart-quote-expiry.js";
 import type { CartQuoteAttachment } from "../../domain/cart-quote-attachment.js";
-import { createPostgresCartQuoteStore } from "./cart-quote-store.js";
+import {
+  createPostgresCartQuoteStore,
+  createPostgresConfiguredCartQuoteStore,
+} from "./cart-quote-store.js";
 import {
   createPostgresCartQueryStore,
   type CartQueryTransaction,
@@ -16,7 +19,7 @@ import {
 
 export type CartQuoteExpiryResult = Readonly<
   | { status: "Expired"; record: CartQuoteExpiryRecord }
-  | { status: "AlreadyAttached"; attachment: CartQuoteAttachment }
+  | { status: "AlreadyAttached"; attachment: CartQuoteAttachment<1 | 2> }
 >;
 function fail(): never {
   throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
@@ -51,6 +54,7 @@ const select = `SELECT jsonb_build_object(
 export function createPostgresCartQuoteExpiryStore(
   runner: CartQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
+  quoteVersion: 1 | 2 = 1,
 ) {
   const rawScope = readClosedRecord(
     scope,
@@ -96,9 +100,24 @@ export function createPostgresCartQuoteExpiryStore(
     async expire(value: {
       readonly record: CartQuoteExpiryRecord;
       readonly audit: unknown;
+      readonly diningSessionReference?: string;
     }): Promise<CartQuoteExpiryResult> {
       try {
-        const input = readClosedRecord(value, ["record", "audit"], "ACTOR_SHAPE_INVALID");
+        const input = readClosedRecord(
+          value,
+          [
+            "record",
+            "audit",
+            ...(Object.getOwnPropertyDescriptor(value, "diningSessionReference") === undefined
+              ? []
+              : ["diningSessionReference"]),
+          ],
+          "ACTOR_SHAPE_INVALID",
+        );
+        const diningSessionReference =
+          input.diningSessionReference === undefined
+            ? null
+            : parseOrderingReference(input.diningSessionReference);
         const next = parseCartQuoteExpiryRecord(input.record);
         if (next.brandReference !== brand || next.storeReference !== store) return fail();
         const rawAudit = readClosedRecord(
@@ -163,15 +182,22 @@ export function createPostgresCartQuoteExpiryStore(
           );
           if (
             cart === null ||
-            cart.orderType !== "Pickup" ||
-            cart.diningSessionReference !== null ||
+            (diningSessionReference === null
+              ? cart.orderType !== "Pickup" ||
+                cart.diningSessionReference !== null ||
+                cart.createdByActorReference !== next.guestSessionReference
+              : cart.orderType !== "DineIn" ||
+                cart.diningSessionReference !== diningSessionReference) ||
             !["Qr", "Web"].includes(cart.sourceChannel) ||
-            cart.createdByActorReference !== next.guestSessionReference ||
             cart.aggregateVersion < next.cartVersion ||
             cart.updatedAt > next.expiredAt
           )
             return fail();
-          const priorAttachment = await createPostgresCartQuoteStore(borrowed, ownedScope, {
+          const priorAttachment = await (
+            quoteVersion === 2
+              ? createPostgresConfiguredCartQuoteStore
+              : createPostgresCartQuoteStore
+          )(borrowed, ownedScope, {
             hashIntent: () => fail(),
             equals: (a, b) => a === b,
           }).resolveOperation(next.operationReference);

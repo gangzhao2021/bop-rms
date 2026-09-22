@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createDiningGuestBindingQuery,
+  createDiningHostSubmissionQuery,
   type DiningGuestBindingReadSnapshot,
 } from "../application/dining-guest-binding-query.js";
 const id = (n: number) => `018f2000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -160,7 +161,10 @@ describe("WP-2299 current Dining Guest binding facts", () => {
     const current = source();
     f.readCurrent.mockResolvedValue({
       ...current,
-      session: { ...current.session, hostParticipantReference: id(4) },
+      session: {
+        ...current.session,
+        hostParticipantReference: current.participant.participantReference,
+      },
       participant: { ...current.participant, status: "Left", leftAt: at },
     } as never);
     expect(await f.query.resolve(input)).toBeNull();
@@ -325,5 +329,63 @@ describe("WP-2299 current Dining Guest binding facts", () => {
       code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
     });
     expect(getter).not.toHaveBeenCalled();
+  });
+});
+
+describe("current Dining Host submission facts", () => {
+  const hostInput = { ...input, purpose: "DiningHostSubmission" };
+  function hostFixture() {
+    const snapshot = { ...source() };
+    const readCurrent = vi.fn(async () => snapshot);
+    return {
+      snapshot,
+      readCurrent,
+      query: createDiningHostSubmissionQuery({ scope, repository: { readCurrent }, now: () => at }),
+    };
+  }
+  it("accepts the current Host with the original coherent owner snapshot", async () => {
+    const f = hostFixture();
+    f.snapshot.session = {
+      ...f.snapshot.session,
+      hostParticipantReference: f.snapshot.participant.participantReference,
+    };
+    const result = await f.query.resolve(hostInput);
+    expect(result?.phase).toBe("Active");
+    expect(result?.participantReference).toBe(id(4));
+    expect(f.readCurrent).toHaveBeenCalledTimes(1);
+  });
+  it("does not grant submission authority to an ordinary bound participant", async () => {
+    const f = hostFixture();
+    expect(await f.query.resolve(hostInput)).toBeNull();
+  });
+  it("rejects a former Host after reassignment on the next read", async () => {
+    const f = hostFixture();
+    f.snapshot.session = {
+      ...f.snapshot.session,
+      hostParticipantReference: f.snapshot.participant.participantReference,
+    };
+    expect(await f.query.resolve(hostInput)).not.toBeNull();
+    f.snapshot.session = {
+      ...f.snapshot.session,
+      version: 4,
+      hostParticipantReference: source().session.hostParticipantReference,
+    };
+    expect(await f.query.resolve(hostInput)).toBeNull();
+  });
+  it("rejects Closing even when the participant remains Host", async () => {
+    const f = hostFixture();
+    f.snapshot.session = {
+      ...f.snapshot.session,
+      phase: "Closing",
+      hostParticipantReference: f.snapshot.participant.participantReference,
+    };
+    expect(await f.query.resolve(hostInput)).toBeNull();
+  });
+  it("does not accept the general binding purpose as a submission request", async () => {
+    const f = hostFixture();
+    await expect(f.query.resolve(input)).rejects.toMatchObject({
+      code: "DINING_SESSION_INPUT_INVALID",
+    });
+    expect(f.readCurrent).not.toHaveBeenCalled();
   });
 });

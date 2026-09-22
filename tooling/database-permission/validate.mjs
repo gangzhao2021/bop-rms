@@ -90,19 +90,42 @@ export function inspectMigrationPermissions(migrations) {
         diagnostic("RLS_POLICY_MISSING", file, table, "tenant table requires an explicit policy"),
       );
     else {
-      if (!/platform_helpers\.current_brand_id\(\)/u.test(policies))
-        diagnostics.push(
-          diagnostic("RLS_BRAND_SCOPE_MISSING", file, table, "policy must bind current Brand"),
-        );
-      if (/\bstore_id\b/iu.test(body) && !/platform_helpers\.current_store_id\(\)/u.test(policies))
-        diagnostics.push(
-          diagnostic(
-            "RLS_STORE_SCOPE_MISSING",
-            file,
-            table,
-            "Store table policy must bind current Store",
-          ),
-        );
+      if (table === "bop_identity.browser_session_selection") {
+        // Pre-Tenant Identity child: selected Brand/Store cannot authorize their own lookup.
+        // This is a closed contract, not an Identity-wide exemption from forced RLS.
+        const predicate =
+          "session_id = NULLIF(current_setting('bop.identity_session_id', true), '')::uuid AND actor_id = NULLIF(current_setting('bop.identity_actor_id', true), '')::uuid";
+        const expected = "USING (" + predicate + ") WITH CHECK (" + predicate + ")";
+        const normalized = policies.replace(/\s+/gu, " ").trim();
+        const parentBinding =
+          /FOREIGN KEY\s*\(session_id,\s*actor_id\)\s*REFERENCES bop_identity\.authentication_session\s*\(session_id,\s*actor_id\)/iu;
+        if (normalized !== expected || !parentBinding.test(body))
+          diagnostics.push(
+            diagnostic(
+              "RLS_IDENTITY_SESSION_SCOPE_INVALID",
+              file,
+              table,
+              "selection requires the exact session-and-Actor policy and composite authentication-session binding",
+            ),
+          );
+      } else {
+        if (!/platform_helpers\.current_brand_id\(\)/u.test(policies))
+          diagnostics.push(
+            diagnostic("RLS_BRAND_SCOPE_MISSING", file, table, "policy must bind current Brand"),
+          );
+        if (
+          /\bstore_id\b/iu.test(body) &&
+          !/platform_helpers\.current_store_id\(\)/u.test(policies)
+        )
+          diagnostics.push(
+            diagnostic(
+              "RLS_STORE_SCOPE_MISSING",
+              file,
+              table,
+              "Store table policy must bind current Store",
+            ),
+          );
+      }
       if (/\b(?:USING|WITH CHECK)\s*\(\s*true\s*\)/iu.test(policies))
         diagnostics.push(
           diagnostic("RLS_POLICY_OPEN", file, table, "unconditional tenant policy is prohibited"),
@@ -110,7 +133,9 @@ export function inspectMigrationPermissions(migrations) {
     }
     const revoked = statements.some(
       (statement) =>
-        /^REVOKE ALL ON TABLE /iu.test(statement) &&
+        /^REVOKE ALL ON (?:TABLE )?[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*(?:, ?[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*)* FROM PUBLIC$/iu.test(
+          statement,
+        ) &&
         new RegExp(`(?:^|[, ])${tablePattern}(?:$|[, ])`, "iu").test(statement) &&
         / FROM PUBLIC$/iu.test(statement),
     );

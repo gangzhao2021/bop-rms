@@ -51,6 +51,401 @@
         ],
         "additionalProperties": {}
       },
+      "CustomerPaymentIntentResponse": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "payment": {
+            "type": "object",
+            "properties": {
+              "checkoutSessionReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "paymentIntentReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "orderReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "creationStatus": {
+                "type": "string",
+                "enum": [
+                  "Created",
+                  "AlreadyCreated",
+                  "Processing"
+                ]
+              },
+              "total": {
+                "type": "object",
+                "properties": {
+                  "amountMinor": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]{0,18})$/u"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "enum": [
+                      "CAD"
+                    ]
+                  }
+                },
+                "required": [
+                  "amountMinor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "checkoutSessionReference",
+              "paymentIntentReference",
+              "orderReference",
+              "creationStatus",
+              "total"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "payment"
+        ],
+        "additionalProperties": false
+      },
+      "CustomerPaymentIntentError": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "payment_request_invalid",
+                  "payment_not_found",
+                  "payment_intent_conflict",
+                  "payment_not_ready",
+                  "payment_service_unavailable"
+                ]
+              },
+              "messageKey": {
+                "type": "string",
+                "pattern": "^customer\\.payment\\.[a-z_]+$/u"
+              }
+            },
+            "required": [
+              "code",
+              "messageKey"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "CheckoutSessionResponse": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "session": {
+            "type": "object",
+            "properties": {
+              "checkoutSessionReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "cartReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "cartVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "quoteReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "quoteVersion": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "enum": [
+                      1
+                    ]
+                  },
+                  {
+                    "type": "number",
+                    "enum": [
+                      2
+                    ]
+                  }
+                ]
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "checkoutSessionReference",
+              "cartReference",
+              "cartVersion",
+              "quoteReference",
+              "quoteVersion",
+              "createdAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "session"
+        ],
+        "additionalProperties": false
+      },
+      "CheckoutSessionError": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "checkout_session_request_invalid",
+                  "checkout_session_not_found",
+                  "checkout_session_intent_conflict",
+                  "checkout_session_service_unavailable"
+                ]
+              },
+              "messageKey": {
+                "type": "string",
+                "pattern": "^customer\\.checkoutSession\\.[a-z_]+$/u"
+              }
+            },
+            "required": [
+              "code",
+              "messageKey"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "OrderSubmissionResponse": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "order": {
+            "type": "object",
+            "properties": {
+              "orderReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "orderNumber": {
+                "type": "string",
+                "minLength": 1
+              },
+              "submissionReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "cartReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "cartVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "quoteReference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+              },
+              "quoteVersion": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "enum": [
+                      1
+                    ]
+                  },
+                  {
+                    "type": "number",
+                    "enum": [
+                      2
+                    ]
+                  }
+                ]
+              },
+              "orderType": {
+                "type": "string",
+                "enum": [
+                  "DineIn",
+                  "Pickup"
+                ]
+              },
+              "phase": {
+                "type": "string",
+                "enum": [
+                  "Submitted"
+                ]
+              },
+              "paymentStatus": {
+                "type": "string",
+                "enum": [
+                  "NotReported"
+                ]
+              },
+              "total": {
+                "type": "object",
+                "properties": {
+                  "amountMinor": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]{0,18})$/u"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "enum": [
+                      "CAD"
+                    ]
+                  }
+                },
+                "required": [
+                  "amountMinor",
+                  "currency"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "orderReference",
+              "orderNumber",
+              "submissionReference",
+              "cartReference",
+              "cartVersion",
+              "quoteReference",
+              "quoteVersion",
+              "orderType",
+              "phase",
+              "paymentStatus",
+              "total"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "order"
+        ],
+        "additionalProperties": false
+      },
+      "OrderSubmissionError": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "order_request_invalid",
+                  "order_not_found",
+                  "order_version_conflict",
+                  "order_idempotency_conflict",
+                  "order_requote_required",
+                  "order_service_unavailable"
+                ]
+              },
+              "messageKey": {
+                "type": "string",
+                "pattern": "^customer\\.order\\.[a-z_]+$/u"
+              }
+            },
+            "required": [
+              "code",
+              "messageKey"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "OrderSubmissionRequest": {
+        "type": "object",
+        "properties": {
+          "cartReference": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+          },
+          "cartVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "quoteReference": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+          }
+        },
+        "required": [
+          "cartReference",
+          "cartVersion",
+          "quoteReference"
+        ],
+        "additionalProperties": false
+      },
       "QuoteErrorResponse": {
         "type": "object",
         "properties": {
@@ -159,6 +554,949 @@
     "parameters": {}
   },
   "paths": {
+    "/api/v1/checkout-sessions/{checkout_session_id}/payment-result": {
+      "get": {
+        "operationId": "getCustomerPaymentResult",
+        "description": "Read the current Guest's exact CheckoutSession payment result. Current session authorization is checked before and after owner reads. Succeeded/Failed require committed Payment terminal facts; Provider snapshots alone remain unconfirmed. No Provider call or mutation. No query/body or caller operation IDs. Missing configuration fails closed. No-store/no-referrer.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+            },
+            "required": true,
+            "name": "checkout_session_id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "x-csrf-token",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "same-origin"
+              ]
+            },
+            "required": true,
+            "name": "sec-fetch-site",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "__Host-bop-guest",
+            "in": "cookie"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted payment result; Pending is not paid",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              },
+              "Referrer-Policy": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-referrer"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "payment": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkoutSessionReference": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+                            },
+                            "paymentIntentReference": {
+                              "type": "null"
+                            },
+                            "orderReference": {
+                              "type": "null"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "Pending"
+                              ]
+                            },
+                            "total": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "checkoutSessionReference",
+                            "paymentIntentReference",
+                            "orderReference",
+                            "status",
+                            "total"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkoutSessionReference": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+                            },
+                            "paymentIntentReference": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+                            },
+                            "orderReference": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "Pending",
+                                "Unknown",
+                                "Succeeded",
+                                "Failed"
+                              ]
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "amountMinor": {
+                                  "type": "string",
+                                  "pattern": "^(0|[1-9][0-9]{0,18})$/u",
+                                  "description": "CAD minor units at most signed int64 maximum"
+                                },
+                                "currency": {
+                                  "type": "string",
+                                  "enum": [
+                                    "CAD"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "amountMinor",
+                                "currency"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "checkoutSessionReference",
+                            "paymentIntentReference",
+                            "orderReference",
+                            "status",
+                            "total"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "payment"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "payment_result_request_invalid",
+                            "payment_result_not_found",
+                            "payment_result_service_unavailable"
+                          ]
+                        },
+                        "messageKey": {
+                          "type": "string",
+                          "pattern": "^customer\\.payment\\.result\\.[a-z_]+$/u"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "messageKey"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Current session access unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "payment_result_request_invalid",
+                            "payment_result_not_found",
+                            "payment_result_service_unavailable"
+                          ]
+                        },
+                        "messageKey": {
+                          "type": "string",
+                          "pattern": "^customer\\.payment\\.result\\.[a-z_]+$/u"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "messageKey"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Payment result dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "payment_result_request_invalid",
+                            "payment_result_not_found",
+                            "payment_result_service_unavailable"
+                          ]
+                        },
+                        "messageKey": {
+                          "type": "string",
+                          "pattern": "^customer\\.payment\\.result\\.[a-z_]+$/u"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "messageKey"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/checkout-sessions/{checkout_session_id}/payment-handoff": {
+      "post": {
+        "operationId": "getCustomerPaymentHandoff",
+        "description": "CUST-PAYMENT reads the original intent credential after current Guest/Store/Order/capacity/Inventory and confirmation-policy checks before and after Provider retrieval. Closed empty JSON body, no query or caller operation IDs. Same-origin CSRF-protected POST read: does not create, confirm or retry payment. TLS required. Response is no-store/no-referrer; credential remains in page memory and is passed only to Stripe.js. No paid-status inference. Missing configuration fails closed.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+            },
+            "required": true,
+            "name": "checkout_session_id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "x-csrf-token",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "same-origin"
+              ]
+            },
+            "required": true,
+            "name": "sec-fetch-site",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "__Host-bop-guest",
+            "in": "cookie"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ephemeral customer credential; not payment success",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              },
+              "Referrer-Policy": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-referrer"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "clientSecret": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "pattern": "^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/u",
+                      "description": "Ephemeral payment credential. Current customer page memory only; never log, cache or store in URLs/Web Storage."
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "clientSecret"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid closed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "payment_handoff_request_invalid",
+                            "payment_handoff_not_found",
+                            "payment_handoff_not_ready",
+                            "payment_handoff_service_unavailable"
+                          ]
+                        },
+                        "messageKey": {
+                          "type": "string",
+                          "pattern": "^customer\\.payment\\.handoff\\.[a-z_]+$/u"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "messageKey"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Current session access unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "payment_handoff_request_invalid",
+                            "payment_handoff_not_found",
+                            "payment_handoff_not_ready",
+                            "payment_handoff_service_unavailable"
+                          ]
+                        },
+                        "messageKey": {
+                          "type": "string",
+                          "pattern": "^customer\\.payment\\.handoff\\.[a-z_]+$/u"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "messageKey"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Current payment handoff not permitted or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "payment_handoff_request_invalid",
+                            "payment_handoff_not_found",
+                            "payment_handoff_not_ready",
+                            "payment_handoff_service_unavailable"
+                          ]
+                        },
+                        "messageKey": {
+                          "type": "string",
+                          "pattern": "^customer\\.payment\\.handoff\\.[a-z_]+$/u"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "messageKey"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe transport failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Handoff unavailable; no credential returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "payment_handoff_request_invalid",
+                            "payment_handoff_not_found",
+                            "payment_handoff_not_ready",
+                            "payment_handoff_service_unavailable"
+                          ]
+                        },
+                        "messageKey": {
+                          "type": "string",
+                          "pattern": "^customer\\.payment\\.handoff\\.[a-z_]+$/u"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "messageKey"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/checkout-sessions/{checkout_session_id}/payment-intents": {
+      "post": {
+        "operationId": "createCustomerPaymentIntent",
+        "description": "CUST-PAYMENT creation using current Guest/Store/session authorization and CSRF. Idempotency-Key is the immutable tip selection intent; repeat the original key and amount while uncertain. Amount is exact CAD minor units, maximum 9223372036854775807. Server session owns submission and payment operation IDs. No-store/no-referrer response. Creation status is not payment success; Provider secure handoff and authoritative payment result are separate. No Provider identifiers or secrets are returned.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+            },
+            "required": true,
+            "name": "checkout_session_id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "x-csrf-token",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "same-origin"
+              ]
+            },
+            "required": true,
+            "name": "sec-fetch-site",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "__Host-bop-guest",
+            "in": "cookie"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tip": {
+                    "type": "object",
+                    "properties": {
+                      "amountMinor": {
+                        "type": "string",
+                        "pattern": "^(0|[1-9][0-9]{0,18})$/u"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "enum": [
+                          "CAD"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "amountMinor",
+                      "currency"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "tip"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original creation outcome recovered, not a current paid status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPaymentIntentResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Payment intent created, not payment success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPaymentIntentResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Original local operation pending; preserve original intent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPaymentIntentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid closed request or exact amount",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPaymentIntentError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Current access or session unavailable without disclosure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPaymentIntentError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Different intent for original operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPaymentIntentError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Payment preparation not ready or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPaymentIntentError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe transport failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable or uncertain; preserve original operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPaymentIntentError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/checkout-sessions/{checkout_session_id}": {
+      "get": {
+        "operationId": "getCheckoutSession",
+        "description": "Current-authorized CUST-CHECKOUT recovery. Current Guest, Store, channel and persisted source Cart access are checked before returning historical session facts. No query parameters, writes, deadline renewal or payment permission. Responses use no-store and no-referrer. Same-origin browser GET may omit Origin; a supplied Origin must match.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+            },
+            "required": true,
+            "name": "checkout_session_id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "x-csrf-token",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "same-origin"
+              ]
+            },
+            "required": true,
+            "name": "sec-fetch-site",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "__Host-bop-guest",
+            "in": "cookie"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Historical session with current access; not payment admission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or inaccessible session without disclosure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Owner conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe transport failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/public/stores/{store_public_id}/menu": {
       "get": {
         "operationId": "getPublicStoreMenu",
@@ -301,6 +1639,315 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/carts/{cart_id}/checkout-sessions": {
+      "post": {
+        "operationId": "createCheckoutSession",
+        "description": "Ordering-owned CUST-CHECKOUT session creation. Current Guest/Store authorization and CSRF required. Responses are no-store/no-referrer. Retry the same idempotency key after an uncertain outcome. Historical creation does not grant current payment eligibility or renew the original validation deadline. Internal Guest/submission/payment operation IDs are excluded.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+            },
+            "required": true,
+            "name": "cart_id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "x-csrf-token",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "same-origin"
+              ]
+            },
+            "required": true,
+            "name": "sec-fetch-site",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "__Host-bop-guest",
+            "in": "cookie"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cartVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "quoteReference": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+                  }
+                },
+                "required": [
+                  "cartVersion",
+                  "quoteReference"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original currently authorized session recovered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Session created; payment eligibility is separately checked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Closed request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Current access or object unavailable without disclosure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original operation has a different intent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe transport failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable or uncertain; retry original key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/orders": {
+      "post": {
+        "operationId": "submitCustomerOrder",
+        "description": "Ordering-owned submission; customer_pwa CUST-CHECKOUT consumer. Current Guest/Store authorization and CSRF required. Restricted owner facts are projected to a minimal customer response. Responses use no-store and no-referrer; no browser persistence is granted. Replay the same idempotency-key while uncertain. Submitted/NotReported does not imply payment eligibility or payment success. Existing operation history is immutable; no deprecation is planned.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "x-csrf-token",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "same-origin"
+              ]
+            },
+            "required": true,
+            "name": "sec-fetch-site",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$/u"
+            },
+            "required": true,
+            "name": "__Host-bop-guest",
+            "in": "cookie"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderSubmissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original authorized submission recovered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderSubmissionResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Order created; payment not reported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderSubmissionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Closed request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderSubmissionError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Current access or object unavailable without disclosure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderSubmissionError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Version or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderSubmissionError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Current selection or quote requires review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderSubmissionError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe transport failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable or uncertain; retry original submission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderSubmissionError"
                 }
               }
             }

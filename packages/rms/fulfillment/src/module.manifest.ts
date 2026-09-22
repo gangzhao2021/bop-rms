@@ -37,10 +37,11 @@ const moduleManifestInput =
       },
     ],
     consumedEvents: ["rms.kitchen.kitchen-item-ready.v1", "rms.ordering.order-confirmed.v1"],
-    publishedEvents: [],
+    publishedEvents: ["rms.fulfillment.fulfillment-completed.v1"],
     ownedDatabase: {
       schema: "rms_fulfillment",
       tables: [
+        "capacity_asap_commitment",
         "capacity_hold_terminal",
         "capacity_allocation",
         "capacity_allocation_terminal",
@@ -56,13 +57,17 @@ const moduleManifestInput =
         "pickup_proof_operation",
         "pickup_proof_verification",
         "fulfillment_ready_operation",
+        "pickup_handoff_record",
+        "pickup_handoff_item",
+        "pickup_handoff_operation",
+        "fulfillment_completion_publication",
       ],
     },
     ownedJobs: [],
     featureFlags: [],
     killSwitches: [],
     piiClassification: {
-      classes: ["indirect_identifier", "credential"],
+      classes: ["indirect_identifier", "credential", "personal"],
       handling: {
         logs: "prohibited",
         urls: "prohibited",

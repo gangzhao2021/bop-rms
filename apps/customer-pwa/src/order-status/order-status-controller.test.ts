@@ -158,3 +158,214 @@ describe("WP-1705 Order Status controller", () => {
     expect(Object.isFrozen(accepted.order.batches[0]?.items[0]?.lineTotal)).toBe(true);
   });
 });
+
+describe("independent order status sources", () => {
+  function sourced() {
+    return {
+      ...view(),
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: {
+          batches: [
+            { orderBatchReference: id(3), status: "Ready", updatedAt: "2026-08-11T13:59:00.000Z" },
+          ],
+        },
+        payments: [
+          {
+            status: "Succeeded",
+            occurredAt: "2026-08-11T13:56:00.000Z",
+            amount: { amountMinor: 2598n, currencyCode: "CAD" },
+            freshnessStatus: "Stale",
+          },
+        ],
+      },
+    };
+  }
+  it("accepts a scoped nonempty subset without inventing another batch state", () => {
+    const input = sourced();
+    const first = input.order.batches[0];
+    if (!first) throw new Error("fixture");
+    input.order.batches.push({
+      ...first,
+      orderBatchReference: id(30),
+      items: first.items.map((item) => ({ ...item, orderItemReference: id(31) })),
+    });
+    const parsed = parseOrderStatusView(input, id(1));
+    expect(parsed.order.batches).toHaveLength(2);
+    expect(parsed.sources?.kitchen?.batches).toEqual(input.sources.kitchen.batches);
+  });
+  it("admits exact batch evidence and preserves independent payment freshness", () => {
+    const input = sourced();
+    expect(parseOrderStatusView(input, id(1)).sources).toEqual(input.sources);
+  });
+  it.each([
+    "missing-batch",
+    "wrong-batch",
+    "duplicate-batch",
+    "extra-field",
+    "future-time",
+    "invalid-date",
+    "failed-with-money",
+    "zero-success",
+    "wrong-currency",
+  ] as const)("rejects %s source claims", (kind) => {
+    const input = sourced();
+    const batch = input.sources.kitchen.batches[0];
+    const payment = input.sources.payments[0];
+    if (!batch || !payment) throw new Error("missing fixture source");
+    if (kind === "missing-batch") input.sources.kitchen.batches = [];
+    if (kind === "wrong-batch") batch.orderBatchReference = id(99);
+    if (kind === "duplicate-batch") input.sources.kitchen.batches.push(batch);
+    if (kind === "extra-field") Object.assign(input.sources, { privateReference: id(10) });
+    if (kind === "future-time") payment.occurredAt = "2026-08-12T14:00:00.000Z";
+    if (kind === "invalid-date") input.sources.checkedAt = "2026-02-30T14:00:00.000Z";
+    if (kind === "failed-with-money") payment.status = "Failed";
+    if (kind === "zero-success") payment.amount.amountMinor = 0n;
+    if (kind === "wrong-currency") payment.amount.currencyCode = "USD";
+    expect(() => parseOrderStatusView(input, id(1))).toThrow();
+  });
+  it("preserves unavailable sources and an empty terminal-result list without inferring payment", () => {
+    expect(
+      parseOrderStatusView(
+        {
+          ...view(),
+          sources: {
+            checkedAt: "2026-08-11T14:00:00.000Z",
+            kitchen: null,
+            payments: [],
+          },
+        },
+        id(1),
+      ),
+    ).toMatchObject({
+      sources: { kitchen: null, payments: [] },
+      order: { paymentStatus: "NotReported" },
+    });
+  });
+});
+
+it.each(["Accepted", "In Progress", "Ready", "Rejected", "Cancelled"])(
+  "accepts canonical %s without inventing fulfillment completion",
+  (canonicalPhase) => {
+    const original = view();
+    const parsed = parseOrderStatusView(
+      {
+        ...original,
+        order: { ...original.order, canonicalPhase },
+      },
+      id(1),
+    );
+    expect(parsed.order.canonicalPhase).toBe(canonicalPhase);
+    expect(parsed.order.fulfilledAt).toBeNull();
+  },
+);
+
+describe("Dining serving source", () => {
+  const parse = (value: unknown) => parseOrderStatusView(value, id(1));
+  const servedView = (servedQuantity = 1) => {
+    const result = view();
+    return {
+      ...result,
+      order: { ...result.order, orderType: "DineIn" },
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: null,
+        dining: {
+          items: [{ orderItemReference: id(4), orderBatchReference: id(3), servedQuantity }],
+        },
+      },
+    };
+  };
+  it("accepts partial serving without changing payment or canonical projection", () => {
+    const result = parse(servedView());
+    expect(result.sources?.dining?.items[0]?.servedQuantity).toBe(1);
+    expect(result.order.canonicalPhase).toBe("Submitted");
+    expect(result.order.paymentStatus).toBe("NotReported");
+  });
+  it.each([-1, 0.5, 3])("rejects impossible serving quantity %s", (quantity) => {
+    expect(() => parse(servedView(quantity))).toThrow();
+  });
+  it("rejects missing, foreign, duplicate and Pickup serving evidence", () => {
+    const result = servedView();
+    expect(() => parse({ ...result, order: { ...result.order, orderType: "Pickup" } })).toThrow();
+    expect(() =>
+      parse({ ...result, sources: { ...result.sources, dining: { items: [] } } }),
+    ).toThrow();
+    result.sources.dining.items[0] = {
+      orderItemReference: id(99),
+      orderBatchReference: id(3),
+      servedQuantity: 1,
+    };
+    expect(() => parse(result)).toThrow();
+    const duplicate = servedView();
+    duplicate.sources.dining.items.push({
+      orderItemReference: id(4),
+      orderBatchReference: id(3),
+      servedQuantity: 1,
+    });
+    expect(() => parse(duplicate)).toThrow();
+  });
+});
+
+it("resumes an explicit load after effect cleanup without accepting the old request", async () => {
+  let finishOld: (value: ReturnType<typeof view>) => void = () => undefined;
+  let calls = 0;
+  let subscriptions = 0;
+  const controller = createOrderStatusController(id(1), {
+    load: async () => {
+      calls++;
+      if (calls === 1)
+        return new Promise<ReturnType<typeof view>>((resolve) => {
+          finishOld = resolve;
+        });
+      return { ...view(), order: { ...view().order, orderNumber: "1002" } };
+    },
+    subscribe: () => {
+      subscriptions++;
+      return () => undefined;
+    },
+  });
+  const old = controller.load();
+  controller.dispose();
+  await controller.refresh();
+  expect(calls).toBe(1);
+  await controller.load();
+  finishOld(view());
+  await old;
+  expect(controller.getState()).toMatchObject({
+    status: "ready",
+    view: { order: { orderNumber: "1002" } },
+  });
+  expect(subscriptions).toBe(1);
+});
+
+it("ignores callbacks from a subscription disposed before remount", async () => {
+  const callbacks: OrderStatusSubscriptionCallbacks[] = [];
+  let calls = 0;
+  let closed = 0;
+  const controller = createOrderStatusController(id(1), {
+    load: async () => {
+      calls++;
+      return view();
+    },
+    subscribe: (_reference, next) => {
+      callbacks.push(next);
+      return () => {
+        closed++;
+      };
+    },
+  });
+  await controller.load();
+  controller.dispose();
+  await controller.load();
+  expect(closed).toBe(1);
+  callbacks[0]?.onOpen();
+  callbacks[0]?.onHint();
+  callbacks[0]?.onError();
+  expect(calls).toBe(2);
+  callbacks[1]?.onHint();
+  expect(calls).toBe(3);
+  controller.dispose();
+  expect(closed).toBe(2);
+});

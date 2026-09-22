@@ -1,5 +1,15 @@
+import { createCheckoutSessionClient } from "./session-client.js";
+import { createCheckoutSessionController } from "./session-controller.js";
+import { v7 as uuidv7 } from "uuid";
+import { parseTipAmount } from "./tip-amount.js";
+import {
+  setCheckoutSessionReference,
+  setCheckoutTipSelection,
+} from "../session/customer-transaction-context.js";
+import { captureCustomerCsrfContext } from "../session/customer-transaction-context.js";
+import { CheckoutDetailsForm, type CheckoutFormSelection } from "./CheckoutDetailsForm.js";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
 import { formatCartMoney } from "../cart/format-money.js";
 import {
@@ -24,6 +34,46 @@ export function CheckoutPage({
     controller.getState,
     controller.getState,
   );
+  const [detailsLocked, setDetailsLocked] = useState(false);
+  const [confirmedQuote, setConfirmedQuote] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const [sessionController] = useState(() =>
+    createCheckoutSessionController(createCheckoutSessionClient()),
+  );
+  const sessionState = useSyncExternalStore(
+    sessionController.subscribe,
+    sessionController.getState,
+    sessionController.getState,
+  );
+  const [tip, setTip] = useState("");
+  const tipAmount = parseTipAmount(tip);
+  const selectedTip = useRef<{ selectionReference: string; amountMinor: string } | null>(null);
+  const [readyDetails, setReadyDetails] = useState<CheckoutFormSelection | null>(null);
+  useEffect(() => {
+    if (sessionState.status === "ready" && selectedTip.current) {
+      setCheckoutSessionReference(sessionState.session.checkoutSessionReference);
+      setCheckoutTipSelection({
+        checkoutSessionReference: sessionState.session.checkoutSessionReference,
+        ...selectedTip.current,
+      });
+      void navigate("/checkout/payment");
+    }
+  }, [navigate, sessionState]);
+  useEffect(() => {
+    const offline = () => sessionController.setOnline(false);
+    const online = () => sessionController.setOnline(true);
+    window.addEventListener("offline", offline);
+    window.addEventListener("online", online);
+    return () => {
+      window.removeEventListener("offline", offline);
+      window.removeEventListener("online", online);
+    };
+  }, [sessionController]);
+
+  const [retained, setRetained] = useState<{
+    selection: CheckoutFormSelection;
+    current: () => boolean;
+  } | null>(null);
   const quoteAction = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (state.status === "quote-expired" && document.activeElement === document.body)
@@ -43,6 +93,33 @@ export function CheckoutPage({
   }, [controller]);
   const cart = "cart" in state ? state.cart : null;
   const quote = state.status === "ready" ? state.quote : null;
+  if (
+    cart &&
+    quote &&
+    (quote.quoteVersion === 1 || quote.quoteVersion === 2) &&
+    (cart.cart.orderType === "DineIn" || cart.cart.orderType === "Pickup") &&
+    retained?.selection.quoteReference !== quote.quoteReference
+  ) {
+    setRetained({
+      selection: {
+        cartReference: cart.cart.cartReference,
+        cartVersion: cart.cart.version,
+        quoteReference: quote.quoteReference,
+        quoteVersion: quote.quoteVersion,
+        orderType: cart.cart.orderType,
+        quoteExpiresAt: quote.expiresAt,
+      },
+      current: captureCustomerCsrfContext(),
+    });
+  }
+  const detailsSelection =
+    retained?.current() &&
+    cart &&
+    retained.selection.cartReference === cart.cart.cartReference &&
+    retained.selection.cartVersion === cart.cart.version &&
+    (state.status === "ready" || state.status === "offline")
+      ? retained.selection
+      : null;
   const quoteExpired = quote !== null && Date.parse(quote.expiresAt) <= now();
   useEffect(() => {
     if (quote === null || quoteExpired) return;
@@ -87,7 +164,12 @@ export function CheckoutPage({
       {cart &&
       quote === null &&
       ["ready", "conflict", "validation", "unavailable", "quote-expired"].includes(state.status) ? (
-        <button ref={quoteAction} type="button" onClick={() => void controller.quote()}>
+        <button
+          ref={quoteAction}
+          disabled={detailsLocked || sessionState.status !== "idle"}
+          type="button"
+          onClick={() => void controller.quote()}
+        >
           {state.status === "quote-expired" ? "Get a new quote" : "Get current quote"}
         </button>
       ) : null}
@@ -117,7 +199,11 @@ export function CheckoutPage({
           {quoteExpired ? (
             <div role="alert">
               <p>Quote expired. Request a current server Quote before continuing.</p>
-              <button type="button" onClick={() => void controller.quote()}>
+              <button
+                type="button"
+                disabled={detailsLocked || sessionState.status !== "idle"}
+                onClick={() => void controller.quote()}
+              >
                 Get a new quote
               </button>
             </div>
@@ -126,7 +212,15 @@ export function CheckoutPage({
             <div role="alert">
               <p>Price changed. Confirm the new total before continuing.</p>
               <label>
-                <input type="checkbox" /> I confirm the changed price
+                <input
+                  type="checkbox"
+                  checked={confirmedQuote === quote.quoteReference}
+                  disabled={sessionState.status !== "idle"}
+                  onChange={(event) =>
+                    setConfirmedQuote(event.target.checked ? quote.quoteReference : null)
+                  }
+                />{" "}
+                I confirm the changed price
               </label>
             </div>
           ) : null}
@@ -168,13 +262,85 @@ export function CheckoutPage({
           ) : null}
         </section>
       ) : null}
+      {detailsSelection ? (
+        <CheckoutDetailsForm
+          key={
+            detailsSelection.cartReference +
+            ":" +
+            detailsSelection.cartVersion +
+            ":" +
+            detailsSelection.quoteReference
+          }
+          now={now}
+          selection={detailsSelection}
+          onBusyChange={setDetailsLocked}
+          onReadyChange={setReadyDetails}
+        />
+      ) : null}
       <section className="checkout-boundary">
         <h2>Fulfillment and payment</h2>
-        <p>Contact, capacity hold, tip and receipt-choice adapters are unavailable.</p>
-        <button type="button" disabled>
-          Continue to payment
-        </button>
-        <p>Payment remains gated until an approved Provider and public Guest adapter exist.</p>
+        <p>Save your checkout details before continuing to secure payment.</p>
+        <label htmlFor="checkout-tip">Tip (CAD)</label>
+        <input
+          id="checkout-tip"
+          inputMode="decimal"
+          autoComplete="off"
+          value={tip}
+          disabled={sessionState.status !== "idle" || state.status !== "ready"}
+          onChange={(event) => setTip(event.target.value)}
+          aria-invalid={tip !== "" && tipAmount === null}
+          aria-describedby="checkout-tip-help"
+        />
+        <p id="checkout-tip-help">
+          {tip !== "" && tipAmount === null
+            ? "Enter a valid amount with up to two decimal places."
+            : "Enter 0 for no tip. Your selection is fixed when you continue to payment."}
+        </p>
+        {sessionState.status === "pending" ? <p role="status">Preparing secure payment…</p> : null}
+        {"canRetry" in sessionState ? (
+          <p role="alert">
+            {sessionState.canRetry
+              ? "We could not confirm checkout. Retry to recover the same checkout."
+              : "Checkout is unavailable. Review your cart and sign in again if needed."}
+          </p>
+        ) : null}
+        {"canRetry" in sessionState && sessionState.canRetry ? (
+          <button
+            type="button"
+            onClick={() => void sessionController.retry()}
+            disabled={state.status === "offline"}
+          >
+            Retry checkout
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={
+              sessionState.status !== "idle" ||
+              state.status !== "ready" ||
+              tipAmount === null ||
+              quoteExpired ||
+              quote === null ||
+              quote.blockingReasons.length > 0 ||
+              (quote.priceChange?.requiresReconfirmation === true &&
+                confirmedQuote !== quote.quoteReference) ||
+              detailsLocked ||
+              readyDetails === null ||
+              detailsSelection === null ||
+              readyDetails.cartReference !== detailsSelection.cartReference ||
+              readyDetails.cartVersion !== detailsSelection.cartVersion ||
+              readyDetails.quoteReference !== detailsSelection.quoteReference
+            }
+            onClick={() => {
+              if (detailsSelection && readyDetails && !quoteExpired && tipAmount !== null) {
+                selectedTip.current ??= { selectionReference: uuidv7(), amountMinor: tipAmount };
+                void sessionController.start(detailsSelection);
+              }
+            }}
+          >
+            Continue to payment
+          </button>
+        )}
       </section>
       <Link to="/cart">Back to cart</Link>
     </main>

@@ -281,7 +281,7 @@ interface ServiceHarnessOptions {
     | "BeforeInteracClaim"
     | "InteracDigest";
   readonly recordOutcomeTamper?:
-    "providerKey" | "amount" | "actionDigest" | "sourceSnapshot" | "claimedAt";
+    "providerKey" | "amount" | "actionDigest" | "sourceSnapshot" | "claimedAt" | "claimDisposition";
   readonly recordOutcomeThrows?: boolean;
   readonly duplicateRefundTamper?: boolean;
   readonly releaseThrows?: boolean;
@@ -531,21 +531,27 @@ function serviceHarness(options: ServiceHarnessOptions = {}) {
           phase: input.nextPhase,
         };
         const tampered: PaymentCompensationActionReceipt =
-          options.recordOutcomeTamper === "providerKey"
-            ? { ...updated, providerIdempotencyKey: `WP1310:${"f".repeat(64)}` as never }
-            : options.recordOutcomeTamper === "amount"
-              ? {
-                  ...updated,
-                  amount: { amountMinor: 1_999n, currencyCode: "CAD" as never },
-                }
-              : options.recordOutcomeTamper === "actionDigest"
-                ? { ...updated, actionDigest: digest("changed-action") as never }
-                : options.recordOutcomeTamper === "sourceSnapshot"
-                  ? { ...updated, sourceSnapshotDigest: digest("changed-source") as never }
-                  : options.recordOutcomeTamper === "claimedAt"
-                    ? { ...updated, claimedAt: "2026-08-08T15:59:30.000Z" as never }
-                    : updated;
-        if (options.recordOutcomeTamper === undefined) action = updated;
+          options.recordOutcomeTamper === "claimDisposition"
+            ? { ...updated, claimDisposition: "Claimed" }
+            : options.recordOutcomeTamper === "providerKey"
+              ? { ...updated, providerIdempotencyKey: `WP1310:${"f".repeat(64)}` as never }
+              : options.recordOutcomeTamper === "amount"
+                ? {
+                    ...updated,
+                    amount: { amountMinor: 1_999n, currencyCode: "CAD" as never },
+                  }
+                : options.recordOutcomeTamper === "actionDigest"
+                  ? { ...updated, actionDigest: digest("changed-action") as never }
+                  : options.recordOutcomeTamper === "sourceSnapshot"
+                    ? { ...updated, sourceSnapshotDigest: digest("changed-source") as never }
+                    : options.recordOutcomeTamper === "claimedAt"
+                      ? { ...updated, claimedAt: "2026-08-08T15:59:30.000Z" as never }
+                      : updated;
+        if (
+          options.recordOutcomeTamper === undefined ||
+          options.recordOutcomeTamper === "claimDisposition"
+        )
+          action = tampered;
         return tampered;
       },
     },

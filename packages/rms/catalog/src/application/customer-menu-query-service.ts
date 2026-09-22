@@ -119,6 +119,7 @@ function publicSellable(
   item: PublishedMenuProjection["snapshot"]["sections"][number]["sellables"][number],
   locale: string,
   defaultLocale: string,
+  channelCode: string,
 ): CustomerMenuSellableDto {
   return Object.freeze({
     sellableReference: item.sellableReference,
@@ -128,28 +129,37 @@ function publicSellable(
     pinned: item.pinned,
     availability: "Available",
     optionRules: Object.freeze(
-      item.optionRules.map((rule) =>
-        Object.freeze({
-          ...rule,
-          options: Object.freeze(
-            rule.options.map((option) =>
-              Object.freeze({
-                optionReference: option.optionReference,
-                name: localized(option.localizedNames, locale, defaultLocale),
-                maximumQuantity: option.maximumQuantity,
-                conflictOptionReferences: option.conflictOptionReferences,
-                selectedByDefault: option.selectedByDefault,
-                incrementalPrice: Object.freeze({
-                  status: "Unavailable" as const,
-                  amount: null,
-                  currency: null,
-                  reason: "PRICING_NOT_INTEGRATED" as const,
+      item.optionRules
+        .filter(
+          (rule) =>
+            rule.semanticsVersion !== 2 ||
+            rule.channelCodes?.some((channel) => channel === channelCode),
+        )
+        .map((rule) =>
+          Object.freeze({
+            ...rule,
+            options: Object.freeze(
+              rule.options.map((option) =>
+                Object.freeze({
+                  optionReference: option.optionReference,
+                  name: localized(option.localizedNames, locale, defaultLocale),
+                  maximumQuantity: option.maximumQuantity,
+                  conflictOptionReferences: option.conflictOptionReferences,
+                  selectedByDefault: option.selectedByDefault,
+                  ...(rule.semanticsVersion === 2
+                    ? { defaultQuantity: Number(option.defaultQuantity) }
+                    : {}),
+                  incrementalPrice: Object.freeze({
+                    status: "Unavailable" as const,
+                    amount: null,
+                    currency: null,
+                    reason: "PRICING_NOT_INTEGRATED" as const,
+                  }),
                 }),
-              }),
+              ),
             ),
-          ),
-        }),
-      ),
+          }),
+        ),
     ),
     allergenDisclosure: Object.freeze({
       registryVersionReference: item.allergenDisclosure.registryVersionReference,
@@ -205,7 +215,9 @@ function found(
             .includes(search);
         })
         .sort((left, right) => left.sortOrder - right.sortOrder)
-        .map((item) => publicSellable(item, input.locale, snapshot.defaultLocale));
+        .map((item) =>
+          publicSellable(item, input.locale, snapshot.defaultLocale, input.channelCode),
+        );
       return Object.freeze({
         sectionReference: section.sectionReference,
         name: localized(section.localizedNames, input.locale, snapshot.defaultLocale),
@@ -262,6 +274,9 @@ export function createCustomerMenuQueryService(ports: CustomerMenuQueryPorts) {
             await ports.projections.loadCandidates({
               brandReference: store.brandReference,
               storeReference: store.storeReference,
+              channelCode: input.channelCode,
+              orderTypeCode: input.orderTypeCode,
+              requestedAt: input.requestedAt,
             })
           ).map(parsePublishedMenuProjection),
         );

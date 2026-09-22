@@ -1,3 +1,8 @@
+import {
+  activeMenuOptionRules,
+  defaultMenuOptionSelections,
+  selectedMenuOptions,
+} from "./option-configuration.js";
 import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
 import { AppFrame } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -471,7 +476,7 @@ function SellableDetail({
                     Choose {rule.minimumSelections}–{rule.maximumSelections} from{" "}
                     {rule.options.length}
                     {rule.options.some((option) => option.selectedByDefault)
-                      ? `; ${rule.options.filter((option) => option.selectedByDefault).length} selected by default`
+                      ? `; ${rule.options.reduce((sum, option) => sum + (option.defaultQuantity ?? (option.selectedByDefault ? 1 : 0)), 0)} selected by default`
                       : ""}
                   </li>
                 ))}
@@ -509,7 +514,11 @@ function configurationIssues(
   const issues: string[] = [];
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100)
     issues.push("Quantity must be between 1 and 100.");
-  sellable.optionRules.forEach((rule, index) => {
+  const activeRules = activeMenuOptionRules(sellable.optionRules, selected);
+  const activeReferences = new Set(
+    activeRules.flatMap((rule) => rule.options.map((option) => option.optionReference)),
+  );
+  activeRules.forEach((rule, index) => {
     const count = rule.options.reduce(
       (total, option) => total + (selected.get(option.optionReference) ?? 0),
       0,
@@ -520,11 +529,18 @@ function configurationIssues(
       issues.push(`Choice group ${index + 1} allows at most ${rule.maximumSelections}.`);
     rule.options.forEach((option) => {
       const optionQuantity = selected.get(option.optionReference) ?? 0;
+      if (
+        selected.has(option.optionReference) &&
+        (!Number.isSafeInteger(optionQuantity) || optionQuantity < 1)
+      )
+        issues.push("Selected option quantities must be positive whole numbers.");
       if (optionQuantity > Math.min(option.maximumQuantity, 100))
         issues.push(`${option.name} allows at most ${Math.min(option.maximumQuantity, 100)}.`);
       if (
         optionQuantity > 0 &&
-        option.conflictOptionReferences.some((reference) => (selected.get(reference) ?? 0) > 0)
+        option.conflictOptionReferences.some(
+          (reference) => activeReferences.has(reference) && (selected.get(reference) ?? 0) > 0,
+        )
       )
         issues.push(`${option.name} conflicts with another selected choice.`);
     });
@@ -569,7 +585,8 @@ function ConfigureStatus({
     conflict: "Your cart changed. Review the current cart before trying again.",
     validation: "The server rejected this changed, conflicting or unavailable configuration.",
     "rate-limited": `Please wait${"retryAfterSeconds" in state && state.retryAfterSeconds !== null ? ` ${state.retryAfterSeconds} seconds` : ""} before trying again.`,
-    expired: "This cart expired. Return to the menu and start a current cart.",
+    expired:
+      "This cart expired and cannot accept more items. Ask staff for help continuing your order.",
     abandoned: "This cart is closed and cannot accept another item.",
     unavailable: "Cart service is unavailable. No success was assumed.",
     "outcome-unknown": "The network ended before the server outcome was confirmed.",
@@ -621,16 +638,10 @@ export function SellableConfigurator({
   );
   const [quantity, setQuantity] = useState(1);
   const [note, setNote] = useState("");
-  const [selected, setSelected] = useState<ReadonlyMap<string, number>>(
-    () =>
-      new Map(
-        sellable.optionRules.flatMap((rule) =>
-          rule.options
-            .filter((option) => option.selectedByDefault)
-            .map((option) => [option.optionReference, 1] as const),
-        ),
-      ),
+  const [selected, setSelected] = useState<ReadonlyMap<string, number>>(() =>
+    defaultMenuOptionSelections(sellable.optionRules),
   );
+  const activeRules = activeMenuOptionRules(sellable.optionRules, selected);
   const issues = configurationIssues(sellable, selected, quantity, note);
   const busy = state.status === "pending";
   const unresolved = state.status === "outcome-unknown" || state.status === "offline";
@@ -649,18 +660,7 @@ export function SellableConfigurator({
     if (issues.length > 0 || busy || unresolved || state.status === "added") return;
     const draft: CartItemDraft = Object.freeze({
       quantity,
-      optionSelections: Object.freeze(
-        sellable.optionRules.flatMap((rule) =>
-          rule.options
-            .filter((option) => selected.has(option.optionReference))
-            .map((option) =>
-              Object.freeze({
-                optionReference: option.optionReference,
-                quantity: selected.get(option.optionReference) ?? 1,
-              }),
-            ),
-        ),
-      ),
+      optionSelections: selectedMenuOptions(sellable.optionRules, selected),
       customerNote: note.trim() === "" ? null : note.normalize("NFC").trim(),
     });
     void controller.submit(sellable.sellableReference, draft);
@@ -683,7 +683,7 @@ export function SellableConfigurator({
         disabled={busy || unresolved || state.status === "added"}
         onChange={(event) => setQuantity(event.currentTarget.valueAsNumber)}
       />
-      {sellable.optionRules.map((rule, groupIndex) => (
+      {activeRules.map((rule, groupIndex) => (
         <fieldset key={`${rule.minimumSelections}-${rule.maximumSelections}-${groupIndex}`}>
           <legend>
             Choice group {groupIndex + 1} — select {rule.minimumSelections} to{" "}

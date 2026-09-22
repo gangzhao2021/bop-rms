@@ -12,6 +12,7 @@ export interface PaymentIntentCreationPorts {
   };
   readonly killSwitch: PaymentKillSwitchPort;
   readonly authorization: {
+    /** Re-resolve current access on every call; observedAt is current server time, not original requestedAt. */
     authorize(input: {
       readonly action: "CreatePaymentIntent";
       readonly paymentOperationReference: string;

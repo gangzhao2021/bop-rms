@@ -12,6 +12,7 @@ export class ReceiptClientError extends Error {
 
 export interface CustomerReceiptClient {
   load(orderReference: string): Promise<unknown>;
+  subscribeContextChange?(listener: () => void): () => void;
 }
 
 export interface ReceiptController {
@@ -97,15 +98,17 @@ function record(value: unknown, expectedVersion: number) {
     "total",
     "paymentStatus",
     "refundedTotal",
+    ...(Object.hasOwn(raw.snapshot, "adjustments") ? ["adjustments"] : []),
   ]);
   const amount = (candidate: unknown) => {
     const money = exact(candidate, ["amountMinor", "currencyCode"]);
     if (
       typeof money.amountMinor !== "string" ||
-      !/^[0-9]{1,18}$/u.test(money.amountMinor) ||
+      !/^(0|[1-9][0-9]{0,18})$/u.test(money.amountMinor) ||
       !currency.test(String(money.currencyCode))
     )
       return invalid();
+    if (BigInt(money.amountMinor) > 9223372036854775807n) return invalid();
     return Object.freeze({
       amountMinor: BigInt(money.amountMinor),
       currencyCode: String(money.currencyCode),
@@ -115,7 +118,7 @@ function record(value: unknown, expectedVersion: number) {
     !reference.test(String(snapshot.receiptReference)) ||
     typeof snapshot.operatingEntityDisplayName !== "string" ||
     snapshot.operatingEntityDisplayName.length < 1 ||
-    snapshot.operatingEntityDisplayName.length > 160 ||
+    snapshot.operatingEntityDisplayName.length > 200 ||
     typeof snapshot.storeDisplayName !== "string" ||
     snapshot.storeDisplayName.length < 1 ||
     snapshot.storeDisplayName.length > 160 ||
@@ -151,6 +154,40 @@ function record(value: unknown, expectedVersion: number) {
       lineTotal: amount(line.lineTotal),
     });
   });
+  const subtotal = amount(snapshot.subtotal);
+  const tax = amount(snapshot.tax);
+  const tip = amount(snapshot.tip);
+  const total = amount(snapshot.total);
+  const refundedTotal = amount(snapshot.refundedTotal);
+  const adjustmentRaw = Object.hasOwn(snapshot, "adjustments")
+    ? exact(snapshot.adjustments, ["discount", "fee"])
+    : undefined;
+  const adjustments = adjustmentRaw
+    ? Object.freeze({
+        discount: amount(adjustmentRaw.discount),
+        fee: amount(adjustmentRaw.fee),
+      })
+    : undefined;
+  const amounts = [
+    subtotal,
+    tax,
+    tip,
+    total,
+    refundedTotal,
+    ...lines.map((line) => line.lineTotal),
+    ...(adjustments ? [adjustments.discount, adjustments.fee] : []),
+  ];
+  if (
+    amounts.some((entry) => entry.currencyCode !== total.currencyCode) ||
+    (adjustments && adjustments.discount.amountMinor > subtotal.amountMinor) ||
+    subtotal.amountMinor -
+      (adjustments?.discount.amountMinor ?? 0n) +
+      tax.amountMinor +
+      (adjustments?.fee.amountMinor ?? 0n) +
+      tip.amountMinor !==
+      total.amountMinor
+  )
+    return invalid();
   return Object.freeze({
     recordReference: String(raw.recordReference),
     version: expectedVersion,
@@ -165,13 +202,59 @@ function record(value: unknown, expectedVersion: number) {
       issuedAt: snapshot.issuedAt,
       locale: snapshot.locale,
       lines: Object.freeze(lines),
-      subtotal: amount(snapshot.subtotal),
-      tax: amount(snapshot.tax),
-      tip: amount(snapshot.tip),
-      total: amount(snapshot.total),
+      subtotal,
+      tax,
+      tip,
+      total,
+      ...(adjustments ? { adjustments } : {}),
       paymentStatus: snapshot.paymentStatus as (typeof payments)[number],
-      refundedTotal: amount(snapshot.refundedTotal),
+      refundedTotal,
     }),
+  });
+}
+
+function financial(value: unknown) {
+  if (value === null) return null;
+  const raw = exact(value, [
+    "observedAt",
+    "currencyCode",
+    "capturedMinor",
+    "confirmedRefundMinor",
+    "pendingRefundMinor",
+    "unresolvedAttemptCount",
+  ]);
+  const amount = (v: unknown) => {
+    if (
+      typeof v !== "string" ||
+      !/^(0|[1-9][0-9]{0,18})$/u.test(v) ||
+      BigInt(v) > 9223372036854775807n
+    )
+      return invalid();
+    return BigInt(v);
+  };
+  const capturedMinor = amount(raw.capturedMinor),
+    confirmedRefundMinor = amount(raw.confirmedRefundMinor),
+    pendingRefundMinor = amount(raw.pendingRefundMinor);
+  if (
+    typeof raw.observedAt !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(raw.observedAt) ||
+    Number.isNaN(Date.parse(raw.observedAt)) ||
+    new Date(raw.observedAt).toISOString() !== raw.observedAt ||
+    typeof raw.currencyCode !== "string" ||
+    !currency.test(raw.currencyCode) ||
+    typeof raw.unresolvedAttemptCount !== "number" ||
+    !Number.isSafeInteger(raw.unresolvedAttemptCount) ||
+    raw.unresolvedAttemptCount < 0 ||
+    confirmedRefundMinor + pendingRefundMinor > capturedMinor
+  )
+    return invalid();
+  return Object.freeze({
+    observedAt: raw.observedAt,
+    currencyCode: raw.currencyCode,
+    capturedMinor,
+    confirmedRefundMinor,
+    pendingRefundMinor,
+    unresolvedAttemptCount: raw.unresolvedAttemptCount,
   });
 }
 
@@ -183,6 +266,9 @@ export function parseReceiptView(value: unknown, expectedReference: string): Rec
     "supportEligible",
     "cancellationEligible",
     "records",
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "financial")
+      ? ["financial"]
+      : []),
   ]);
   if (
     raw.orderReference !== expectedReference ||
@@ -196,6 +282,7 @@ export function parseReceiptView(value: unknown, expectedReference: string): Rec
     return invalid();
   return Object.freeze({
     orderReference: expectedReference,
+    ...(Object.hasOwn(raw, "financial") ? { financial: financial(raw.financial) } : {}),
     freshnessStatus: raw.freshnessStatus as "Fresh" | "Stale",
     deliveryStatus: raw.deliveryStatus as ReceiptView["deliveryStatus"],
     supportEligible: raw.supportEligible,
@@ -218,12 +305,14 @@ export function createReceiptController(
 ): ReceiptController {
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
   let accepted: ReceiptView | null = null;
+  let requestVersion = 0;
   let state: ReceiptState = reference.test(orderReference)
     ? online
       ? { status: "loading" }
       : { status: "offline", view: null }
     : { status: "invalid-reference" };
   const listeners = new Set<() => void>();
+  let unsubscribeContext: (() => void) | undefined;
   const publish = (next: ReceiptState) => {
     state = Object.freeze(next);
     listeners.forEach((listener) => listener());
@@ -232,15 +321,34 @@ export function createReceiptController(
     getState: () => state,
     subscribe(listener: () => void) {
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      if (listeners.size === 1) {
+        unsubscribeContext = client.subscribeContextChange?.(() => {
+          requestVersion += 1;
+          accepted = null;
+          publish({ status: "permission-denied" });
+        });
+      }
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          unsubscribeContext?.();
+          unsubscribeContext = undefined;
+          requestVersion += 1;
+        }
+      };
     },
     async load() {
       if (!reference.test(orderReference) || !online) return;
+      const version = ++requestVersion;
       publish({ status: "loading" });
       try {
-        accepted = parseReceiptView(await client.load(orderReference), orderReference);
+        const response = await client.load(orderReference);
+        if (version !== requestVersion || !online) return;
+        accepted = parseReceiptView(response, orderReference);
         publish({ status: "ready", view: accepted });
       } catch (error) {
+        if (version !== requestVersion || !online) return;
+        accepted = null;
         if (error instanceof ReceiptClientError) {
           const mapped =
             error.code === "service_unavailable" ? "unavailable" : error.code.replaceAll("_", "-");
@@ -253,8 +361,10 @@ export function createReceiptController(
     },
     setOnline(next: boolean) {
       online = next;
-      if (!online) publish({ status: "offline", view: accepted });
-      else if (state.status === "offline")
+      if (!online) {
+        requestVersion += 1;
+        publish({ status: "offline", view: accepted });
+      } else if (state.status === "offline")
         publish(accepted ? { status: "ready", view: accepted } : { status: "unavailable" });
     },
   });

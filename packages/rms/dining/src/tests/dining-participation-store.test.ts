@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createPostgresDiningParticipationStore,
+  createPostgresDiningHostParticipationFence,
   type DiningTableTransactionRunner,
 } from "../index.js";
 const id = (n: number) => `01902280-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -193,4 +194,61 @@ describe("WP-2280 coherent current participation storage", () => {
       code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
     });
   });
+});
+
+function fencedFixture(change: { moved?: boolean; missing?: boolean; nonHost?: boolean } = {}) {
+  const query = vi.fn<(sql: string, values: readonly unknown[]) => Promise<unknown>>(
+    async (sql) => {
+      if (sql.startsWith("SELECT set_config")) return { rows: [] };
+      if (sql.includes("JOIN rms_dining")) {
+        const current = snapshot();
+        if (change.nonHost) current.session.hostParticipantReference = id(99);
+        return { rows: [current] };
+      }
+      if (sql.startsWith("SELECT participant_id")) return { rows: [{ participant_id: id(6) }] };
+      if (change.missing && !sql.includes("FOR UPDATE")) return { rows: [] };
+      if (change.moved && sql.includes("dining_session") && sql.includes("FOR UPDATE"))
+        return { rows: [{ table_id: id(99) }] };
+      return { rows: [{ table_id: id(4) }] };
+    },
+  );
+  const run = vi.fn();
+  const runner: DiningTableTransactionRunner = {
+    async run(action) {
+      run();
+      return action({ query });
+    },
+  };
+  return { query, run, store: createPostgresDiningHostParticipationFence(runner, scope) };
+}
+it("retains table then session then participant locks before returning the current Host", async () => {
+  const f = fencedFixture();
+  const result = await f.store.readCurrent(input() as never);
+  expect(result?.session.hostParticipantReference).toBe(id(6));
+  expect(f.run).toHaveBeenCalledTimes(1);
+  const locked = f.query.mock.calls.filter(([sql]) => sql.includes("FOR UPDATE"));
+  expect(locked.map(([sql]) => sql.split(" FROM ")[1]?.split(" WHERE ")[0])).toEqual([
+    "rms_dining.dining_table",
+    "rms_dining.dining_session",
+    "rms_dining.dining_participant",
+  ]);
+  expect(locked.map(([, parameters]) => parameters)).toEqual([
+    [id(1), id(2), id(3), id(4)],
+    [id(1), id(2), id(3), id(5)],
+    [id(1), id(2), id(3), id(5), id(6)],
+  ]);
+});
+it("rejects a concurrent move without locking a new table after Session", async () => {
+  const f = fencedFixture({ moved: true });
+  expect(await f.store.readCurrent(input() as never)).toBeNull();
+  expect(f.query.mock.calls.filter(([sql]) => sql.includes("FOR UPDATE"))).toHaveLength(2);
+  expect(f.query.mock.calls.some(([sql]) => sql.includes("JOIN rms_dining"))).toBe(false);
+});
+it("does not infer Host from active membership", async () => {
+  expect(await fencedFixture({ nonHost: true }).store.readCurrent(input() as never)).toBeNull();
+});
+it("does not invent a table for missing Session", async () => {
+  const f = fencedFixture({ missing: true });
+  expect(await f.store.readCurrent(input() as never)).toBeNull();
+  expect(f.query.mock.calls.some(([sql]) => sql.includes("FOR UPDATE"))).toBe(false);
 });

@@ -1,3 +1,4 @@
+import { CartError } from "@rms/ordering";
 import type { Request, RequestHandler, Response } from "express";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -12,6 +13,7 @@ class GuestSessionError extends Error {}
 export const customerCartRoutes = Object.freeze({
   create: "/api/v1/carts",
   current: "/bff/customer/cart",
+  replacement: "/api/v1/carts/:cart_id/replacement",
   read: "/api/v1/carts/:cart_id",
   addItem: "/api/v1/carts/:cart_id/items",
   updateItem: "/api/v1/carts/:cart_id/items/:cart_item_id",
@@ -91,6 +93,16 @@ export type CustomerCartPortResult =
   | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
   | { readonly status: "Unavailable" };
 
+export interface CustomerCartReplacementPort {
+  replace(input: {
+    readonly sessionCredential: string;
+    readonly csrfCredential: string;
+    readonly operationReference: string;
+    readonly previousCartReference: string;
+    readonly expectedCartVersion: number;
+  }): Promise<unknown>;
+}
+
 export interface CustomerCartPort {
   createCart(input: CustomerCartMutationContext): Promise<CustomerCartPortResult>;
   getCurrentCart(input: CustomerCartContext): Promise<CustomerCartPortResult>;
@@ -140,6 +152,8 @@ type ErrorCode =
   | "cart_idempotency_conflict"
   | "cart_selection_invalid"
   | "cart_expired"
+  | "cart_replacement_forbidden"
+  | "cart_replacement_unavailable"
   | "cart_abandoned"
   | "cart_rate_limited"
   | "cart_service_unavailable";
@@ -152,6 +166,11 @@ const errors = Object.freeze({
   cart_idempotency_conflict: { status: 409, messageKey: "customer.cart.idempotency_conflict" },
   cart_selection_invalid: { status: 422, messageKey: "customer.cart.selection_invalid" },
   cart_expired: { status: 409, messageKey: "customer.cart.expired" },
+  cart_replacement_forbidden: { status: 403, messageKey: "customer.cart.replacement_forbidden" },
+  cart_replacement_unavailable: {
+    status: 409,
+    messageKey: "customer.cart.replacement_unavailable",
+  },
   cart_abandoned: { status: 409, messageKey: "customer.cart.abandoned" },
   cart_rate_limited: { status: 429, messageKey: "customer.cart.rate_limited" },
   cart_service_unavailable: { status: 503, messageKey: "customer.cart.service_unavailable" },
@@ -515,19 +534,23 @@ export class CustomerCartHandler {
   readonly #allowedOrigin: string;
   readonly #now: () => string;
   readonly #port: CustomerCartPort;
+  readonly #replacement: CustomerCartReplacementPort | undefined;
 
   constructor({
     allowedOrigin,
     now = () => new Date().toISOString(),
     port,
+    replacement,
   }: {
     readonly allowedOrigin: string;
     readonly now?: () => string;
     readonly port: CustomerCartPort;
+    readonly replacement?: CustomerCartReplacementPort;
   }) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
     this.#port = port;
+    this.#replacement = replacement;
   }
 
   #context(request: Request): CustomerCartContext {
@@ -562,6 +585,73 @@ export class CustomerCartHandler {
         await invoke(response, this.#port.createCart(input), true);
       } catch (error) {
         this.#requestError(response, error);
+      }
+    };
+  }
+
+  replace(): RequestHandler {
+    return async (request, response) => {
+      responseControls(response);
+      let input: Parameters<CustomerCartReplacementPort["replace"]>[0];
+      try {
+        const context = this.#mutation(request);
+        body(request, []);
+        input = {
+          sessionCredential: context.guestCredential,
+          csrfCredential: context.csrfCredential,
+          operationReference: context.operationReference,
+          previousCartReference: scalar(request.params.cart_id, uuidV7),
+          expectedCartVersion: versionHeader(request),
+        };
+      } catch (error) {
+        this.#requestError(response, error);
+        return;
+      }
+      if (this.#replacement === undefined) {
+        sendError(response, "cart_service_unavailable");
+        return;
+      }
+      try {
+        const raw = closed(await this.#replacement.replace(input), [
+          "operationReference",
+          "previousCartReference",
+          "cartReference",
+          "occurredAt",
+          "expiresAt",
+        ]);
+        const receipt = {
+          schemaVersion: 1,
+          operationReference: scalar(raw.operationReference, uuidV7),
+          previousCartReference: scalar(raw.previousCartReference, uuidV7),
+          cartReference: scalar(raw.cartReference, uuidV7),
+          occurredAt: canonicalInstant(raw.occurredAt),
+          expiresAt: canonicalInstant(raw.expiresAt),
+        };
+        if (
+          receipt.operationReference !== input.operationReference ||
+          receipt.previousCartReference !== input.previousCartReference ||
+          receipt.cartReference === input.previousCartReference ||
+          Date.parse(receipt.expiresAt) - Date.parse(receipt.occurredAt) !== 86400000
+        )
+          throw new Error("invalid replacement receipt");
+        response.setHeader("Location", `/api/v1/carts/${receipt.cartReference}`);
+        // This is an operation receipt, not a current Cart version/ETag.
+        response.status(200).type("application/json").end(JSON.stringify(receipt));
+      } catch (error) {
+        const mapping = {
+          CART_PERMISSION_DENIED: "cart_session_expired",
+          CART_REPLACEMENT_FORBIDDEN: "cart_replacement_forbidden",
+          CART_VERSION_CONFLICT: "cart_version_conflict",
+          CART_IDEMPOTENCY_CONFLICT: "cart_idempotency_conflict",
+          CART_LIFECYCLE_UNAVAILABLE: "cart_replacement_unavailable",
+          CART_EXPIRED: "cart_expired",
+        } as const;
+        sendError(
+          response,
+          error instanceof CartError && error.code in mapping
+            ? mapping[error.code as keyof typeof mapping]
+            : "cart_service_unavailable",
+        );
       }
     };
   }

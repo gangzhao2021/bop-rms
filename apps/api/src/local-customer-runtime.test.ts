@@ -1,3 +1,4 @@
+import { HealthReadinessController } from "./health-readiness.js";
 import { createGuestBindingCredentialProvider } from "@bop/identity";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixture, id, now } from "../test-support/customer-entry-composition-fixture.js";
@@ -21,6 +22,7 @@ function setup() {
   const options: LocalCustomerRuntimeOptions = {
     scope: { brandReference: id(1), storeReference: id(2) },
     entry: f.options,
+    entryRequestAdmission: { consume: async () => ({ status: "Allowed" }) }, // Synthetic.
     menuStores: { resolvePublic: vi.fn(async () => null) },
     sessionTransactions: { run },
     menuTransactions: { run },
@@ -47,6 +49,330 @@ async function start(options: LocalCustomerRuntimeOptions) {
 }
 
 describe("scoped local Customer runtime", () => {
+  it("connects request-bound payment intent through existing request guards", async () => {
+    const { options } = setup();
+    const create = vi.fn(async (): Promise<never> => {
+      throw new Error("synthetic owner unavailable");
+    });
+    const { root } = await start({ ...options, paymentIntent: { create } });
+    const path = root + "/api/v1/checkout-sessions/" + id(30) + "/payment-intents";
+    const headers = {
+      origin: options.allowedOrigin,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+      "idempotency-key": id(31),
+      "x-csrf-token": "b".repeat(43),
+      cookie: "__Host-bop-guest=" + "a".repeat(43),
+    };
+    const body = JSON.stringify({ tip: { amountMinor: "0", currency: "CAD" } });
+    for (const invalid of [
+      { ...headers, origin: "https://wrong.invalid" },
+      { ...headers, "x-csrf-token": "" },
+      { ...headers, cookie: "" },
+    ]) {
+      const rejected = await fetch(path, { method: "POST", headers: invalid, body });
+      expect(rejected.status).toBe(400);
+      await rejected.text();
+    }
+    expect(create).not.toHaveBeenCalled();
+    const response = await fetch(path, { method: "POST", headers, body });
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("synthetic");
+    expect(create).toHaveBeenCalledExactlyOnceWith({
+      sessionCredential: "a".repeat(43),
+      csrfCredential: "b".repeat(43),
+      checkoutSessionReference: id(30),
+      selectionReference: id(31),
+      tip: { amountMinor: 0n, currencyCode: "CAD" },
+    });
+  });
+
+  it("connects standalone result reads through session authorization", async () => {
+    const { options, run } = setup();
+    const read = vi.fn(async () => null);
+    const resolveOperation = vi.fn(async () => null);
+    const { root } = await start({
+      ...options,
+      paymentResult: {
+        access: { transactions: { run }, binding: () => options.entry.session.binding },
+        history: { resolveOperation },
+        terminal: { read },
+      },
+    });
+    const path = root + "/api/v1/checkout-sessions/" + id(30) + "/payment-result";
+    const headers = {
+      origin: options.allowedOrigin,
+      "sec-fetch-site": "same-origin",
+      "x-csrf-token": "b".repeat(43),
+      cookie: "__Host-bop-guest=" + "a".repeat(43),
+    };
+    const rejected = await fetch(path, {
+      headers: { ...headers, origin: "https://wrong.invalid" },
+    });
+    expect(rejected.status).toBe(400);
+    await rejected.text();
+    expect(run).not.toHaveBeenCalled();
+    const response = await fetch(path, { headers });
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("synthetic");
+    expect(run).toHaveBeenCalledOnce();
+    expect(resolveOperation).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("uses the configured database probe and reports lost readiness", async () => {
+    const { options } = setup();
+    let available = true;
+    const probe = vi.fn(async () => (available ? ("ready" as const) : ("not_ready" as const)));
+    const { root } = await start({
+      ...options,
+      runtime: {
+        ...options.runtime,
+        healthReadiness: new HealthReadinessController({
+          databaseProbe: probe,
+          positiveCacheMilliseconds: 0,
+          negativeCacheMilliseconds: 0,
+        }),
+      },
+    });
+    const ready = await fetch(root + "/ready");
+    expect(ready.status).toBe(200);
+    expect(await ready.json()).toMatchObject({
+      status: "ready",
+      dependencies: { database: { status: "ready" } },
+    });
+    available = false;
+    const unavailable = await fetch(root + "/ready");
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toMatchObject({
+      status: "not_ready",
+      dependencies: { database: { status: "not_ready" } },
+    });
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it("connects checkout reads and order submission without bypassing Origin guards", async () => {
+    const { options } = setup();
+    const create = vi.fn(async (): Promise<never> => {
+      throw new Error("synthetic owner unavailable");
+    });
+    const read = vi.fn(async () => ({
+      cartReference: id(30),
+      cartVersion: 1,
+      orderType: "Pickup" as const,
+      details: null,
+    }));
+    const save = vi.fn(async (): Promise<never> => {
+      throw new Error("unexpected save");
+    });
+    const { root } = await start({
+      ...options,
+      orderSubmission: { quoteVersion: 2, create },
+      checkoutDetails: { quoteVersion: 2, read, save },
+    });
+    const headers = {
+      origin: options.allowedOrigin,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+      "idempotency-key": id(31),
+      "x-csrf-token": "b".repeat(43),
+      cookie: "__Host-bop-guest=" + "a".repeat(43),
+    };
+    for (const [path, body, operation, status] of [
+      [
+        "/bff/customer/checkout-details/current",
+        { cartReference: id(30), cartVersion: 1 },
+        read,
+        200,
+      ],
+      [
+        "/api/v1/orders",
+        { cartReference: id(30), cartVersion: 1, quoteReference: id(32) },
+        create,
+        503,
+      ],
+    ] as const) {
+      const rejected = await fetch(root + path, {
+        method: "POST",
+        headers: { ...headers, origin: "https://wrong.invalid" },
+        body: JSON.stringify(body),
+      });
+      expect(rejected.status).toBe(400);
+      await rejected.text();
+      expect(operation).not.toHaveBeenCalled();
+      const result = await fetch(root + path, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      expect(result.status).toBe(status);
+      expect(await result.text()).not.toContain("synthetic");
+      expect(operation).toHaveBeenCalledOnce();
+    }
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("routes configured checkout creation and recovery through actual owner adapters", async () => {
+    const { options } = setup();
+    const run = vi.fn(async (): Promise<never> => {
+      throw new Error("synthetic checkout database unavailable");
+    });
+    const validate = vi.fn(async (): Promise<never> => {
+      throw new Error("validation must not run without authorized database access");
+    });
+    const audit = vi.fn((): never => {
+      throw new Error("audit must not run without authorized database access");
+    });
+    const { root } = await start({
+      ...options,
+      checkoutSessions: {
+        quoteVersion: 1,
+        transactions: { run },
+        binding: () => options.entry.session.binding,
+        nextReference: () => id(810),
+        validate,
+        allocationAudit: audit,
+        audit,
+      },
+    });
+    expect(run).not.toHaveBeenCalled();
+    const headers = {
+      origin: options.allowedOrigin,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+      "idempotency-key": id(811),
+      "x-csrf-token": "b".repeat(43),
+      cookie: "__Host-bop-guest=" + "a".repeat(43),
+    };
+    const path = "/api/v1/carts/" + id(30) + "/checkout-sessions";
+    const body = JSON.stringify({ cartVersion: 1, quoteReference: id(31) });
+    const rejected = await fetch(root + path, {
+      method: "POST",
+      headers: { ...headers, origin: "https://wrong.invalid" },
+      body,
+    });
+    expect(rejected.status).toBe(400);
+    await rejected.text();
+    expect(run).not.toHaveBeenCalled();
+    const created = await fetch(root + path, { method: "POST", headers, body });
+    expect([404, 503]).toContain(created.status);
+    expect(await created.text()).not.toContain("synthetic");
+    expect(run).toHaveBeenCalledOnce();
+    const restored = await fetch(root + "/api/v1/checkout-sessions/" + id(812), {
+      method: "GET",
+      headers,
+    });
+    expect(restored.status).toBe(503);
+    expect(await restored.text()).not.toContain("synthetic");
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(validate).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["orderStatus", "status"],
+    ["receipt", "receipt"],
+  ] as const)(
+    "routes configured %s reads and retains Origin protection",
+    async (option, suffix) => {
+      const { options } = setup();
+      const run = vi.fn(async (): Promise<never> => {
+        throw new Error("synthetic order read unavailable");
+      });
+      const { root } = await start({
+        ...options,
+        [option]: {
+          transactions: { run },
+          binding: () => options.entry.session.binding,
+        },
+      });
+      expect(run).not.toHaveBeenCalled();
+      const headers = {
+        "sec-fetch-site": "same-origin",
+        "x-csrf-token": "b".repeat(43),
+        cookie: "__Host-bop-guest=" + "a".repeat(43),
+      };
+      const url = root + "/api/v1/orders/" + id(820) + "/" + suffix;
+      const wrong = await fetch(url, { headers: { ...headers, origin: "https://wrong.invalid" } });
+      expect(wrong.status).toBe(400);
+      await wrong.text();
+      expect(run).not.toHaveBeenCalled();
+      const result = await fetch(url, { headers });
+      expect(result.status).toBe(503);
+      expect(result.headers.get("cache-control")).toContain("no-store");
+      expect(await result.text()).not.toContain("synthetic");
+      expect(run).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("installs the payment journey with shared session access before financial effects", async () => {
+    const { options } = setup();
+    const run = vi.fn(async (): Promise<never> => {
+      throw new Error("synthetic payment session database unavailable");
+    });
+    const effect = vi.fn((): never => {
+      throw new Error("financial effect must not run before session authorization");
+    });
+    const history = vi.fn(async () => null);
+    const terminal = vi.fn(async () => null);
+    const { root } = await start({
+      ...options,
+      payment: {
+        access: { transactions: { run }, binding: () => options.entry.session.binding },
+        history: { resolveOperation: history },
+        intent: {
+          tenantReference: id(830),
+          orders: { create: effect, preparePaymentClock: effect },
+          tips: { select: effect },
+          inventory: { load: effect },
+          nextPreparationReference: effect,
+          payment: effect,
+        },
+        handoff: {
+          transactions: { run: effect },
+          currentAdmission: effect,
+          allowConfirmation: effect,
+          provider: { retrieve: effect },
+        },
+        result: { terminal: { read: terminal } },
+      },
+    });
+    expect(run).not.toHaveBeenCalled();
+    const headers = {
+      origin: options.allowedOrigin,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+      "idempotency-key": id(831),
+      "x-csrf-token": "b".repeat(43),
+      cookie: "__Host-bop-guest=" + "a".repeat(43),
+    };
+    const base = root + "/api/v1/checkout-sessions/" + id(832);
+    for (const [suffix, body] of [
+      ["payment-intents", JSON.stringify({ tip: { amountMinor: "0", currency: "CAD" } })],
+      ["payment-handoff", "{}"],
+      ["payment-result", undefined],
+    ] as const) {
+      const request = {
+        method: body === undefined ? "GET" : "POST",
+        headers,
+        ...(body === undefined ? {} : { body }),
+      };
+      const rejected = await fetch(base + "/" + suffix, {
+        ...request,
+        headers: { ...headers, origin: "https://wrong.invalid" },
+      });
+      expect(rejected.status).toBe(400);
+      await rejected.text();
+      const result = await fetch(base + "/" + suffix, request);
+      expect(result.status).toBe(503);
+      expect(await result.text()).not.toContain("synthetic");
+    }
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(effect).not.toHaveBeenCalled();
+    expect(history).not.toHaveBeenCalled();
+    expect(terminal).not.toHaveBeenCalled();
+  });
+
   function diningCartOptions() {
     const write = vi.fn(async (): Promise<never> => {
       throw new Error("synthetic selection writer must not run");
@@ -719,4 +1045,217 @@ describe("optional local Cart item runtime", () => {
     expect(items.audit).not.toHaveBeenCalled();
     expect(f.options.session.credentials.generateCredential).not.toHaveBeenCalled();
   });
+});
+
+it("dispatches persistent entry without legacy placeholders and rejects configured scope mismatch", async () => {
+  const { f, options, run: legacyRun } = setup();
+  const tx = { query: vi.fn() };
+  const sources = vi.fn(async (transaction: unknown): Promise<never> => {
+    void transaction;
+    throw new Error("synthetic entry source unavailable");
+  });
+  const transactions = { run: async <T>(work: (transaction: typeof tx) => Promise<T>) => work(tx) };
+  const profile = {
+    binding: { ...options.scope },
+  } as import("./persistent-public-store-profile.js").PersistentPublicStoreProfileOptions;
+  const persistent = { transactions, profile, sources };
+  const entry = { session: options.entry.session, persistent };
+  expect(() =>
+    createLocalCustomerRuntime({
+      ...options,
+      entry: {
+        ...entry,
+        persistent: {
+          ...persistent,
+          profile: { ...profile, binding: { ...profile.binding, storeReference: id(99) } },
+        },
+      },
+    }),
+  ).toThrow("LOCAL_PUBLIC_STORE_SCOPE_MISMATCH");
+  const { root } = await start({ ...options, entry });
+  expect(sources).not.toHaveBeenCalled();
+  const response = await fetch(root + "/bff/customer/entry", {
+    method: "POST",
+    headers: {
+      origin: options.allowedOrigin,
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+      "sec-fetch-mode": "cors",
+    },
+    body: JSON.stringify({ qrToken: f.token() }),
+  });
+  expect(response.status).toBe(422);
+  expect(await response.json()).toMatchObject({ code: "entry_unavailable" });
+  expect(sources).toHaveBeenCalledOnce();
+  expect(sources.mock.calls[0]?.[0]).toBe(tx);
+  expect(legacyRun).not.toHaveBeenCalled();
+});
+
+describe("configured Catalog/Inventory runtime assembly", () => {
+  function configured() {
+    const { options, run } = setup();
+    const unexpected = () => {
+      throw new Error("unavailable fixture dependency");
+    };
+    const items = {
+      writeTransactions: { run },
+      references: {
+        generate: unexpected,
+        hashIntent: unexpected,
+        equals: (a: string, b: string) => a === b,
+      },
+      audit: unexpected,
+    };
+    const selection = {
+      catalogTransactions: { run },
+      catalogScope: {
+        menuReference: id(800),
+        sourceChannel: "Qr" as const,
+        channelCode: "CUSTOMER_PWA",
+        orderTypeCode: "PICKUP",
+      },
+      catalogSafety: {
+        killSwitch: { loadEvidence: async () => null },
+        inventory: { loadEvidence: async () => null },
+      },
+      selectedInventory: {
+        scope: { ...options.scope, tenantReference: id(801), stockSiteReference: id(802) },
+        transactions: { run },
+        resolveExpiryCutoff: unexpected,
+      },
+    };
+    const pickup: NonNullable<LocalCustomerRuntimeOptions["catalogCartItems"]> = {
+      ...items,
+      ...selection,
+    };
+    const dining: NonNullable<LocalCustomerRuntimeOptions["catalogDiningCart"]> = {
+      ...selection,
+      catalogScope: { ...selection.catalogScope, orderTypeCode: "DINE_IN" },
+      items,
+      participation: { resolve: async () => null },
+      selectionTransactions: { run },
+      selection: {
+        sourceChannel: "Qr",
+        generateReference: unexpected,
+        audit: unexpected,
+        policy: {
+          policyVersionReference: id(803),
+          policyDigest: "sha256:" + "a".repeat(64),
+          idleTimeoutSeconds: 3600,
+          absoluteTimeoutSeconds: 7200,
+          validFrom: now,
+          validUntil: new Date(Date.parse(now) + 86400000).toISOString(),
+        },
+      },
+    };
+    return { options, run, pickup, dining };
+  }
+  it("requires reads for both configured item paths", () => {
+    const { options, pickup, dining } = configured();
+    expect(() => createLocalCustomerRuntime({ ...options, catalogCartItems: pickup })).toThrow(
+      "LOCAL_CART_ITEM_READS_REQUIRED",
+    );
+    expect(() => createLocalCustomerRuntime({ ...options, catalogDiningCart: dining })).toThrow(
+      "LOCAL_DINING_CART_READS_REQUIRED",
+    );
+  });
+  it("rejects ambiguous legacy and configured paths before opening dependencies", () => {
+    const { options, run, pickup, dining } = configured();
+    expect(() =>
+      createLocalCustomerRuntime({ ...options, catalogCartItems: pickup, cartItems: {} as never }),
+    ).toThrow("LOCAL_CART_ITEM_CONFIGURATION_CONFLICT");
+    expect(() =>
+      createLocalCustomerRuntime({
+        ...options,
+        catalogDiningCart: dining,
+        diningCart: {} as never,
+      }),
+    ).toThrow("LOCAL_DINING_CART_CONFIGURATION_CONFLICT");
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("constructs both real factories and retains the HTTP credential boundary", async () => {
+    const { options, run, pickup, dining } = configured();
+    const { root } = await start({
+      ...options,
+      cartTransactions: { run },
+      catalogCartItems: pickup,
+      catalogDiningCart: dining,
+    });
+    const response = await fetch(root + "/api/v1/carts/" + id(804) + "/items", {
+      method: "POST",
+      headers: {
+        origin: options.allowedOrigin,
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "content-type": "application/json",
+        "if-match": '"1"',
+        "idempotency-key": id(805),
+      },
+      body: JSON.stringify({
+        sellableReference: id(806),
+        quantity: 1,
+        optionSelections: [],
+        customerNote: null,
+      }),
+    });
+    expect(response.status).toBe(401);
+    await response.text();
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("rejects mismatched Inventory Store scope during real factory assembly", () => {
+    const { options, run, pickup } = configured();
+    expect(() =>
+      createLocalCustomerRuntime({
+        ...options,
+        cartTransactions: { run },
+        catalogCartItems: {
+          ...pickup,
+          selectedInventory: {
+            ...pickup.selectedInventory,
+            scope: { ...pickup.selectedInventory.scope, storeReference: id(999) },
+          },
+        },
+      }),
+    ).toThrow();
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+it("rejects ambiguous or resource-less configured quote routing", () => {
+  const { options, run } = setup();
+  const quoteCart = vi.fn(async () => ({ status: "Unavailable" as const }));
+  const configuredCartQuote = { pickup: { quoteCart }, dining: { quoteCart } };
+  expect(() => createLocalCustomerRuntime({ ...options, configuredCartQuote })).toThrow(
+    "LOCAL_CART_QUOTE_READS_REQUIRED",
+  );
+  expect(() =>
+    createLocalCustomerRuntime({ ...options, configuredCartQuote, cartQuote: {} as never }),
+  ).toThrow("LOCAL_CART_QUOTE_CONFIGURATION_CONFLICT");
+  expect(run).not.toHaveBeenCalled();
+});
+
+it("rejects ambiguous or resource-less dual-channel checkout details", () => {
+  const { options, run } = setup();
+  const port = { quoteVersion: 2, read: vi.fn(), policy: vi.fn(), save: vi.fn() } as never;
+  const channelCheckoutDetails = { pickup: port, dining: port };
+  expect(() => createLocalCustomerRuntime({ ...options, channelCheckoutDetails })).toThrow(
+    "LOCAL_CHECKOUT_DETAILS_READS_REQUIRED",
+  );
+  expect(() =>
+    createLocalCustomerRuntime({ ...options, channelCheckoutDetails, checkoutDetails: port }),
+  ).toThrow("LOCAL_CHECKOUT_DETAILS_CONFIGURATION_CONFLICT");
+  expect(run).not.toHaveBeenCalled();
+});
+
+it("rejects ambiguous or resource-less dual-channel order submission", () => {
+  const { options, run } = setup();
+  const port = { quoteVersion: 2, create: vi.fn() } as never;
+  const channelOrderSubmission = { pickup: port, dining: port };
+  expect(() => createLocalCustomerRuntime({ ...options, channelOrderSubmission })).toThrow(
+    "LOCAL_ORDER_SUBMISSION_READS_REQUIRED",
+  );
+  expect(() =>
+    createLocalCustomerRuntime({ ...options, channelOrderSubmission, orderSubmission: port }),
+  ).toThrow("LOCAL_ORDER_SUBMISSION_CONFIGURATION_CONFLICT");
+  expect(run).not.toHaveBeenCalled();
 });

@@ -22,7 +22,7 @@ describe("WP-1804 Kitchen Board screens", () => {
       "12 minutes",
       "ReviewRequired",
       "Accept",
-      "Start / ready by policy",
+      "Start",
     ])
       expect(html).toContain(value);
   });
@@ -48,4 +48,23 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(html).toContain("absent facts are not inferred");
     expect(html).toContain("No Kitchen transition is assumed");
   });
+});
+
+it("offers manual refresh and does not claim unavailable operator or safety facts", () => {
+  const view = parseKitchenBoardView({
+    ...kitchenBoardFixture(),
+    operatorStatus: "Unavailable",
+    items: [
+      { ...kitchenItemFixture(), allergenCue: "Unavailable", exceptionStatus: "Unavailable" },
+    ],
+  });
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <KitchenBoardScreen view={view} onRefresh={() => undefined} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Board locked — read-only");
+  expect(html).toContain("Not available");
+  expect(html).toContain("Refresh from source");
+  expect(html).not.toContain("Named operator</dd>");
 });

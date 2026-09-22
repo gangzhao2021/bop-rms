@@ -182,6 +182,8 @@ async function prove(context) {
         `GRANT SELECT,INSERT,UPDATE,DELETE,TRUNCATE ON rms_fulfillment.${table} TO ${role}`,
       );
 
+    await admin.query("GRANT SELECT ON rms_fulfillment.capacity_asap_commitment TO " + role);
+
     const security = await admin.query(
       `SELECT relrowsecurity,relforcerowsecurity FROM pg_class
       WHERE oid=ANY($1::regclass[])`,

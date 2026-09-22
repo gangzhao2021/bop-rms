@@ -4,6 +4,15 @@ const databaseAccessManifestInput = {
   tables: [],
   accesses: [
     {
+      id: "verify-operation-binding",
+      operation: "read",
+      mechanism: "raw-sql",
+      target: { schema: "platform_audit", table: "audit_record" },
+      principal: { kind: "shared-infrastructure", id: "audit-infrastructure" },
+      readPattern: "owner-repository",
+      source: "packages/bop/audit/src/infrastructure/persistence/verify-operation-binding.ts",
+    },
+    {
       id: "append-audit-record",
       operation: "write",
       mechanism: "raw-sql",

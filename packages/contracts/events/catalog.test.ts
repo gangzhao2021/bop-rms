@@ -47,7 +47,7 @@ const registration = (
 
 describe("Event Catalog source", () => {
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(98);
+    expect(eventCatalog).toHaveLength(99);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     for (const eventType of [
       "DeviceActivated",
@@ -379,6 +379,7 @@ describe("Event Catalog source", () => {
       "OrderAmended:v1",
       "OrderConfirmed:v1",
       "OrderCreated:v1",
+      "OrderSubmitted:v1",
       "PaymentFailed:v1",
       "PaymentRefunded:v1",
       "PaymentSucceeded:v1",
@@ -939,7 +940,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(107);
+    expect(eventConsumerContracts).toHaveLength(108);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();
@@ -1057,4 +1058,25 @@ describe("Event Catalog generation", () => {
     expect(document).toBeDefined();
     expect(diagnostics.filter(({ severity }) => severity === 0)).toEqual([]);
   }, 15_000);
+});
+
+it("keeps submitted Batch payload bounded and independent of payment or release", () => {
+  const entry = eventCatalog.find((event) => event.eventType === "OrderSubmitted");
+  expect(entry?.stability).toBe("experimental");
+  const payload = {
+    orderReference: "0190ed31-0000-7000-8000-000000000001",
+    orderBatchReference: "0190ed31-0000-7000-8000-000000000002",
+    submissionReference: "0190ed31-0000-7000-8000-000000000003",
+    sourceSnapshotDigest: "sha256:" + "a".repeat(64),
+    itemCount: 1,
+    batchSequence: 2,
+  };
+  expect(entry?.payloadSchema.safeParse(payload).success).toBe(true);
+  for (const patch of [
+    { batchSequence: 0 },
+    { itemCount: 101 },
+    { paymentStatus: "Paid" },
+    { guestName: "Synthetic" },
+  ])
+    expect(entry?.payloadSchema.safeParse({ ...payload, ...patch }).success).toBe(false);
 });

@@ -292,3 +292,67 @@ export function createPostgresCartLifecycleStore(
     },
   });
 }
+
+/** Owner discovery only. A candidate is not authorization: the lifecycle command
+ * rechecks current version and deadline before its audited transition.
+ */
+export function createPostgresDueCartSource(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+) {
+  const brand = parseOrderingReference(scope.brandReference);
+  const store = parseOrderingReference(scope.storeReference);
+  return Object.freeze({
+    async discover(input: {
+      readonly evaluatedAt: string;
+      readonly limit: number;
+      readonly after: string | null;
+    }) {
+      try {
+        const raw = closed(input, ["evaluatedAt", "limit", "after"]);
+        const at = parseOrderingInstant(raw.evaluatedAt);
+        const limit = raw.limit;
+        const after = raw.after === null ? null : parseOrderingReference(raw.after);
+        if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 100)
+          return fail();
+        return await runner.run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+            [brand, store],
+          );
+          const found = rows(
+            await tx.query(
+              `SELECT cart_id AS "cartReference", aggregate_version AS "expectedAggregateVersion"
+             FROM rms_ordering.cart
+             WHERE brand_id=$1 AND store_id=$2 AND lifecycle_status='Active'
+               AND (idle_expires_at <= $3::timestamptz OR absolute_expires_at <= $3::timestamptz)
+               AND ($4::uuid IS NULL OR cart_id > $4::uuid)
+             ORDER BY cart_id LIMIT $5`,
+              [brand, store, at, after, limit],
+            ),
+          );
+          if (found.length > limit) return fail();
+          let previous = after;
+          const result = found.map((row) => {
+            const candidate = closed(row, ["cartReference", "expectedAggregateVersion"]);
+            const cartReference = parseOrderingReference(candidate.cartReference);
+            const expectedAggregateVersion = candidate.expectedAggregateVersion;
+            if (
+              (previous !== null && cartReference <= previous) ||
+              typeof expectedAggregateVersion !== "number" ||
+              !Number.isSafeInteger(expectedAggregateVersion) ||
+              expectedAggregateVersion < 1 ||
+              expectedAggregateVersion >= 2147483647
+            )
+              return fail();
+            previous = cartReference;
+            return Object.freeze({ cartReference, expectedAggregateVersion });
+          });
+          return Object.freeze(result);
+        });
+      } catch {
+        return fail();
+      }
+    },
+  });
+}

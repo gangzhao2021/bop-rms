@@ -13,6 +13,12 @@ import {
 } from "./money-tax-contract.js";
 import { calculateTax } from "./money-tax.js";
 import type { PriceQuoteSnapshot } from "./price-quote.js";
+import type { ConfiguredPriceQuoteSnapshot } from "./configured-price-quote.js";
+import {
+  createOptionPriceRuleSnapshot,
+  resolveOptionPrice,
+  type OptionPriceRuleSnapshot,
+} from "./option-price.js";
 
 export class PriceQuoteSnapshotCodecError extends Error {
   readonly code = "QUOTE_SNAPSHOT_INVALID";
@@ -132,46 +138,87 @@ const explanation = object({
   ruleVersionDigest: parsePricingDigest,
 });
 const amounts = { subtotal: money, discount: money, tax: money, fee: money, total: money };
-const snapshot = object({
-  quoteReference: parsePricingReference,
-  quoteVersion: oneOf(1),
+const optionContext = object({
   brandReference: parsePricingReference,
   storeReference: parsePricingReference,
-  cartReference: parsePricingReference,
-  cartVersion: positive,
-  inputDigest: parsePricingDigest,
+  storeGroupReference: nullable(parsePricingReference),
+  regionReference: nullable(parsePricingReference),
+  bindingReference: parsePricingReference,
+  optionReference: parsePricingReference,
+  skuReference: parsePricingReference,
+  channelCode: parsePricingCode,
+  orderType: oneOf("DineIn", "Pickup"),
   currencyMetadata: metadata,
-  ...amounts,
-  lines: array(
-    object({
-      lineReference: parsePricingReference,
-      sellableReference: parsePricingReference,
-      productVersionReference: parsePricingReference,
-      menuVersionReference: parsePricingReference,
-      quantity: positive,
-      unitPrice: money,
-      ...amounts,
-      resolvedPrice,
-      taxResolution: resolution,
-      taxLines: array(
-        object({
-          taxAmount: money,
-          explanation,
-          calculationOrder: positive,
-          compoundOnPriorTax: bool,
-          ruleReference: parsePricingReference,
-        }),
-        1,
-      ),
-    }),
-    1,
-  ),
-  appliedPromotionReferences: array(parsePricingReference, 0, 0),
-  warnings: array(parsePricingCode, 0, 0),
-  blockingReasons: array(parsePricingCode, 0, 0),
-  createdAt: at,
-  expiresAt: at,
+  selectedQuantity: positive,
+  itemQuantity: positive,
+  evaluatedAt: at,
 });
+const optionPrice = object({
+  rule: (value) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return fail();
+    const raw = value as Record<string, unknown>;
+    return createOptionPriceRuleSnapshot({
+      ...raw,
+      unitAmount: money(raw.unitAmount),
+    } as OptionPriceRuleSnapshot);
+  },
+  context: optionContext,
+  priority: positive,
+  skuReference: parsePricingReference,
+  selectedQuantity: positive,
+  itemQuantity: positive,
+  chargedQuantityPerItem: (v) =>
+    typeof integer(v) === "number" && (v as number) >= 0 ? v : fail(),
+  chargedQuantity: (v) =>
+    typeof v === "string" && /^(?:0|[1-9][0-9]{0,31})$/u.test(v) ? BigInt(v) : fail(),
+  amount: money,
+  evaluatedAt: at,
+  taxBasis: oneOf("ParentSellable"),
+  taxClassificationReference: parsePricingReference,
+});
+function snapshotReader(configured: boolean): Reader {
+  return object({
+    quoteReference: parsePricingReference,
+    quoteVersion: oneOf(configured ? 2 : 1),
+    brandReference: parsePricingReference,
+    storeReference: parsePricingReference,
+    cartReference: parsePricingReference,
+    cartVersion: positive,
+    inputDigest: parsePricingDigest,
+    currencyMetadata: metadata,
+    ...amounts,
+    lines: array(
+      object({
+        lineReference: parsePricingReference,
+        sellableReference: parsePricingReference,
+        productVersionReference: parsePricingReference,
+        menuVersionReference: parsePricingReference,
+        quantity: positive,
+        unitPrice: money,
+        ...(configured ? { baseUnitPrice: money, optionPrices: array(optionPrice) } : {}),
+        ...amounts,
+        resolvedPrice,
+        taxResolution: resolution,
+        taxLines: array(
+          object({
+            taxAmount: money,
+            explanation,
+            calculationOrder: positive,
+            compoundOnPriorTax: bool,
+            ruleReference: parsePricingReference,
+          }),
+          1,
+        ),
+      }),
+      1,
+    ),
+    appliedPromotionReferences: array(parsePricingReference, 0, 0),
+    warnings: array(parsePricingCode, 0, 0),
+    blockingReasons: array(parsePricingCode, 0, 0),
+    createdAt: at,
+    expiresAt: at,
+  });
+}
 
 // Copy data through descriptors before invoking validators or JSON. No getters/toJSON are read.
 // Repeated immutable Money instances are valid; only cycles along the current path are rejected.
@@ -181,7 +228,7 @@ function wireTree(value: unknown, native: boolean): unknown {
   const path = new Set<object>();
   function visit(v: unknown, depth: number, key: string): unknown {
     if (++count > 100_000 || depth > 24) fail();
-    if (key === "amountMinor") {
+    if (key === "amountMinor" || key === "chargedQuantity") {
       if (native && typeof v !== "bigint") fail();
       if (!native && typeof v !== "string") fail();
       return typeof v === "bigint" ? v.toString() : v;
@@ -248,8 +295,14 @@ function effective(p: EffectivePeriod, createdAt: string): void {
   )
     fail();
 }
-function validate(value: unknown): PriceQuoteSnapshot {
-  const quote = snapshot(value) as PriceQuoteSnapshot;
+function validate(value: unknown): PriceQuoteSnapshot;
+function validate(value: unknown, configured: true): ConfiguredPriceQuoteSnapshot;
+function validate(
+  value: unknown,
+  configured = false,
+): PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot {
+  const quote = snapshotReader(configured)(value) as
+    PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
   if (quote.expiresAt <= quote.createdAt) fail();
   const currency = quote.currencyMetadata.currencyCode;
   let subtotal = 0n;
@@ -257,6 +310,8 @@ function validate(value: unknown): PriceQuoteSnapshot {
   const seen = new Set<string>();
   const entries = new Map<string, string>();
   const ruleEvidence = new Map<string, string>();
+  const optionEvidence = new Map<string, string>();
+  let optionCount = 0;
   const first = quote.lines[0];
   if (first === undefined) fail();
   for (const line of quote.lines) {
@@ -281,13 +336,72 @@ function validate(value: unknown): PriceQuoteSnapshot {
     entries.set(price.entryReference, entry);
     effective(price.effectivePeriod, quote.createdAt);
     effective(line.taxResolution.effectivePeriod, quote.createdAt);
+    let expectedUnit = price.amount.amountMinor;
+    if ("optionPrices" in line) {
+      if (
+        line.baseUnitPrice.amountMinor !== expectedUnit ||
+        line.baseUnitPrice.currencyCode !== currency
+      )
+        fail();
+      const choices = new Set<string>();
+      let firstContext: (typeof line.optionPrices)[number]["context"] | undefined;
+      for (const saved of line.optionPrices) {
+        optionCount++;
+        const { taxBasis, taxClassificationReference, ...resolution } = saved;
+        if (
+          taxBasis !== "ParentSellable" ||
+          taxClassificationReference !==
+            line.taxResolution.rules[0]?.resolvedRule.taxClassificationReference
+        )
+          fail();
+        const context = saved.context;
+        if (
+          context.brandReference !== quote.brandReference ||
+          context.storeReference !== quote.storeReference ||
+          context.skuReference !== line.sellableReference ||
+          context.itemQuantity !== line.quantity ||
+          context.evaluatedAt !== quote.createdAt ||
+          canonical(context.currencyMetadata) !== canonical(quote.currencyMetadata) ||
+          (price.channelCode !== null && price.channelCode !== context.channelCode) ||
+          (price.orderType !== null && price.orderType !== context.orderType) ||
+          (price.scopeKind === "Region" && price.scopeReference !== context.regionReference) ||
+          (price.scopeKind === "StoreGroup" && price.scopeReference !== context.storeGroupReference)
+        )
+          fail();
+        if (
+          firstContext !== undefined &&
+          ["storeGroupReference", "regionReference", "channelCode", "orderType"].some(
+            (key) =>
+              firstContext?.[key as keyof typeof context] !== context[key as keyof typeof context],
+          )
+        )
+          fail();
+        firstContext = context;
+        const choice = saved.rule.bindingReference + ":" + saved.rule.optionReference;
+        if (choices.has(choice)) fail();
+        choices.add(choice);
+        const recomputed = resolveOptionPrice([saved.rule], context);
+        if (canonical(recomputed) !== canonical(resolution)) fail();
+        const end = saved.rule.effectivePeriod.effectiveUntil?.instant;
+        if (end !== undefined && quote.expiresAt > end) fail();
+        const evidence = canonical(saved.rule);
+        for (const ruleKey of [
+          "version:" + saved.rule.versionReference,
+          "rule:" + saved.rule.ruleReference,
+        ]) {
+          if (optionEvidence.has(ruleKey) && optionEvidence.get(ruleKey) !== evidence) fail();
+          optionEvidence.set(ruleKey, evidence);
+        }
+        expectedUnit += saved.rule.unitAmount.amountMinor * BigInt(saved.chargedQuantityPerItem);
+      }
+    }
     const base = { Store: 1, StoreGroup: 3, Region: 5, Brand: 7 }[price.scopeKind];
     if (
       price.priority !== base + (price.channelCode === null && price.orderType === null ? 1 : 0) ||
       (price.scopeKind === "Brand") !== (price.scopeReference === null) ||
       (price.scopeKind === "Store" && price.scopeReference !== quote.storeReference) ||
       price.sellableReference !== line.sellableReference ||
-      price.amount.amountMinor !== line.unitPrice.amountMinor ||
+      expectedUnit !== line.unitPrice.amountMinor ||
       line.subtotal.amountMinor !== line.unitPrice.amountMinor * BigInt(line.quantity) ||
       line.taxLines.length !== line.taxResolution.rules.length
     )
@@ -385,6 +499,7 @@ function validate(value: unknown): PriceQuoteSnapshot {
     quote.total.amountMinor !== subtotal + tax
   )
     fail();
+  if (configured && optionCount === 0) fail();
   return quote;
 }
 
@@ -412,6 +527,35 @@ export function decodePriceQuoteSnapshot(text: string): PriceQuoteSnapshot {
     ) as { snapshot: unknown };
     const quote = validate(envelope.snapshot);
     if (canonical({ codecVersion: 1, snapshot: quote }) !== text) fail();
+    return quote;
+  } catch {
+    return fail();
+  }
+}
+
+/** Complete configured v2 evidence; current authorization remains a separate caller duty. */
+export function encodeConfiguredPriceQuoteSnapshot(value: ConfiguredPriceQuoteSnapshot): string {
+  try {
+    const quote = validate(wireTree(value, true), true);
+    return canonical({ codecVersion: 2, snapshot: quote });
+  } catch {
+    return fail();
+  }
+}
+
+export function decodeConfiguredPriceQuoteSnapshot(text: string): ConfiguredPriceQuoteSnapshot {
+  try {
+    if (
+      typeof text !== "string" ||
+      text.length > maximumBytes ||
+      new TextEncoder().encode(text).byteLength > maximumBytes
+    )
+      fail();
+    const envelope = object({ codecVersion: oneOf(2), snapshot: (v) => v })(
+      wireTree(JSON.parse(text), false),
+    ) as { snapshot: unknown };
+    const quote = validate(envelope.snapshot, true);
+    if (canonical({ codecVersion: 2, snapshot: quote }) !== text) fail();
     return quote;
   } catch {
     return fail();

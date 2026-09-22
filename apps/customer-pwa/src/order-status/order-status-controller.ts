@@ -1,4 +1,9 @@
-import type { OrderStatusState, OrderStatusView, RealtimeAvailability } from "./types.js";
+import type {
+  OrderStatusSources,
+  OrderStatusState,
+  OrderStatusView,
+  RealtimeAvailability,
+} from "./types.js";
 
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
@@ -85,6 +90,7 @@ function parseReference(value: unknown): string {
 function parseInstant(value: unknown): string {
   if (typeof value !== "string" || !instant.test(value) || !Number.isFinite(Date.parse(value)))
     return invalid();
+  if (new Date(value).toISOString().slice(0, 19) !== value.slice(0, 19)) return invalid();
   return value;
 }
 
@@ -133,6 +139,126 @@ function parseBatch(value: unknown) {
   });
 }
 
+function parseSources(
+  value: unknown,
+  batches: OrderStatusView["order"]["batches"],
+  submittedAt: string,
+  orderType: string,
+): OrderStatusSources {
+  const raw = exact(value, [
+    "checkedAt",
+    "kitchen",
+    "payments",
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "dining")
+      ? ["dining"]
+      : []),
+  ]);
+  const checkedAt = parseInstant(raw.checkedAt);
+  if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
+  const sourceInstant = (value: unknown) => {
+    const parsed = parseInstant(value);
+    if (Date.parse(parsed) < Date.parse(submittedAt) || Date.parse(parsed) > Date.parse(checkedAt))
+      return invalid();
+    return parsed;
+  };
+  let dining: OrderStatusSources["dining"];
+  if (Object.hasOwn(raw, "dining")) {
+    if (orderType !== "DineIn") return invalid();
+    const entry = exact(raw.dining, ["items"]);
+    const members = batches.flatMap((batch) =>
+      batch.items.map((item) => ({
+        ...item,
+        orderBatchReference: batch.orderBatchReference,
+      })),
+    );
+    if (!Array.isArray(entry.items) || entry.items.length !== members.length) return invalid();
+    const seen = new Set<string>();
+    const items = entry.items.map((value: unknown) => {
+      const fact = exact(value, ["orderItemReference", "orderBatchReference", "servedQuantity"]);
+      const orderItemReference = parseReference(fact.orderItemReference);
+      const orderBatchReference = parseReference(fact.orderBatchReference);
+      const member = members.find(
+        (item) =>
+          item.orderItemReference === orderItemReference &&
+          item.orderBatchReference === orderBatchReference,
+      );
+      if (
+        !member ||
+        seen.has(orderItemReference) ||
+        typeof fact.servedQuantity !== "number" ||
+        !Number.isSafeInteger(fact.servedQuantity) ||
+        fact.servedQuantity < 0 ||
+        fact.servedQuantity > member.quantity
+      )
+        return invalid();
+      seen.add(orderItemReference);
+      return Object.freeze({
+        orderItemReference,
+        orderBatchReference,
+        servedQuantity: fact.servedQuantity,
+      });
+    });
+    dining = Object.freeze({ items: Object.freeze(items) });
+  }
+  let kitchen: OrderStatusSources["kitchen"] = null;
+  if (raw.kitchen !== null) {
+    const entry = exact(raw.kitchen, ["batches"]);
+    if (
+      !Array.isArray(entry.batches) ||
+      entry.batches.length === 0 ||
+      entry.batches.length > batches.length
+    )
+      return invalid();
+    const expected = new Set(batches.map((batch) => batch.orderBatchReference));
+    const seen = new Set<string>();
+    const values = entry.batches.map((value: unknown) => {
+      const batch = exact(value, ["orderBatchReference", "status", "updatedAt"]);
+      const orderBatchReference = parseReference(batch.orderBatchReference);
+      if (
+        !expected.has(orderBatchReference) ||
+        seen.has(orderBatchReference) ||
+        !["Queued", "InProgress", "Ready"].includes(String(batch.status))
+      )
+        return invalid();
+      seen.add(orderBatchReference);
+      return Object.freeze({
+        orderBatchReference,
+        status: batch.status as "Queued" | "InProgress" | "Ready",
+        updatedAt: sourceInstant(batch.updatedAt),
+      });
+    });
+    kitchen = Object.freeze({ batches: Object.freeze(values) });
+  }
+  let payments: OrderStatusSources["payments"] = null;
+  if (raw.payments !== null) {
+    if (!Array.isArray(raw.payments) || raw.payments.length > 100) return invalid();
+    payments = Object.freeze(
+      raw.payments.map((value: unknown) => {
+        const payment = exact(value, ["status", "occurredAt", "amount", "freshnessStatus"]);
+        if (
+          !["Succeeded", "Failed"].includes(String(payment.status)) ||
+          !["Fresh", "Stale", "Rebuilding", "Failed"].includes(String(payment.freshnessStatus))
+        )
+          return invalid();
+        const amount = payment.amount === null ? null : parseMoney(payment.amount);
+        if (
+          (payment.status === "Succeeded" &&
+            (amount === null || amount.amountMinor <= 0n || amount.currencyCode !== "CAD")) ||
+          (payment.status === "Failed" && amount !== null)
+        )
+          return invalid();
+        return Object.freeze({
+          status: payment.status as "Succeeded" | "Failed",
+          occurredAt: sourceInstant(payment.occurredAt),
+          amount,
+          freshnessStatus: payment.freshnessStatus as OrderStatusView["freshnessStatus"],
+        });
+      }),
+    );
+  }
+  return Object.freeze({ checkedAt, kitchen, payments, ...(dining ? { dining } : {}) });
+}
+
 export function parseOrderStatusView(value: unknown, expectedReference: string): OrderStatusView {
   const raw = exact(value, [
     "projectionName",
@@ -141,6 +267,9 @@ export function parseOrderStatusView(value: unknown, expectedReference: string):
     "projectedAt",
     "freshnessStatus",
     "order",
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "sources")
+      ? ["sources"]
+      : []),
   ]);
   if (
     raw.projectionName !== "ordering_order_status_v1" ||
@@ -166,7 +295,15 @@ export function parseOrderStatusView(value: unknown, expectedReference: string):
     typeof order.orderNumber !== "string" ||
     !/^[1-9][0-9]{0,18}$/u.test(order.orderNumber) ||
     !["DineIn", "Pickup"].includes(String(order.orderType)) ||
-    !["Submitted", "Fulfilled"].includes(String(order.canonicalPhase)) ||
+    ![
+      "Submitted",
+      "Accepted",
+      "In Progress",
+      "Ready",
+      "Fulfilled",
+      "Rejected",
+      "Cancelled",
+    ].includes(String(order.canonicalPhase)) ||
     order.paymentStatus !== "NotReported" ||
     order.kitchenStatus !== "Unavailable" ||
     !["Unavailable", "Completed"].includes(String(order.fulfillmentStatus)) ||
@@ -187,7 +324,7 @@ export function parseOrderStatusView(value: unknown, expectedReference: string):
     batches.some((batch) => Date.parse(batch.submittedAt) < Date.parse(submittedAt)) ||
     currencies.size !== 1 ||
     (order.fulfillmentStatus === "Unavailable" &&
-      (order.canonicalPhase !== "Submitted" || fulfilledAt !== null)) ||
+      (order.canonicalPhase === "Fulfilled" || fulfilledAt !== null)) ||
     (order.fulfillmentStatus === "Completed" &&
       (order.canonicalPhase !== "Fulfilled" ||
         fulfilledAt === null ||
@@ -200,11 +337,16 @@ export function parseOrderStatusView(value: unknown, expectedReference: string):
     sourceCheckpoint: parseReference(raw.sourceCheckpoint),
     projectedAt: parseInstant(raw.projectedAt),
     freshnessStatus: raw.freshnessStatus as OrderStatusView["freshnessStatus"],
+    ...(Object.hasOwn(raw, "sources")
+      ? {
+          sources: parseSources(raw.sources, batches, submittedAt, String(order.orderType)),
+        }
+      : {}),
     order: Object.freeze({
       orderReference: expectedReference,
       orderNumber: order.orderNumber,
       orderType: order.orderType as "DineIn" | "Pickup",
-      canonicalPhase: order.canonicalPhase as "Submitted" | "Fulfilled",
+      canonicalPhase: order.canonicalPhase as OrderStatusView["order"]["canonicalPhase"],
       paymentStatus: "NotReported",
       kitchenStatus: "Unavailable",
       fulfillmentStatus: order.fulfillmentStatus as "Unavailable" | "Completed",
@@ -234,6 +376,7 @@ export function createOrderStatusController(
     : { status: "invalid-reference" };
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
   let stopped = false;
+  let lifecycle = 0;
   let request = 0;
   let realtime: RealtimeAvailability = "connecting";
   let unsubscribeRealtime: (() => void) | null = null;
@@ -279,18 +422,20 @@ export function createOrderStatusController(
   };
   const startRealtime = () => {
     if (!online || stopped || !reference.test(orderReference) || unsubscribeRealtime) return;
+    const activeLifecycle = lifecycle;
+    const active = () => online && !stopped && activeLifecycle === lifecycle;
     try {
       const candidate = client.subscribe(orderReference, {
         onOpen: () => {
-          if (!online || stopped) return;
+          if (!active()) return;
           updateRealtime("available");
           void loadCanonical();
         },
         onHint: () => {
-          if (online && !stopped) void loadCanonical();
+          if (active()) void loadCanonical();
         },
         onError: () => {
-          if (online && !stopped) updateRealtime("unavailable");
+          if (active()) updateRealtime("unavailable");
         },
       });
       if (typeof candidate !== "function") {
@@ -306,8 +451,10 @@ export function createOrderStatusController(
     getState: () => state,
     async load() {
       if (!reference.test(orderReference)) return;
+      stopped = false;
+      const activeLifecycle = lifecycle;
       await loadCanonical();
-      startRealtime();
+      if (!stopped && activeLifecycle === lifecycle) startRealtime();
     },
     refresh: loadCanonical,
     setOnline(value: boolean) {
@@ -321,6 +468,7 @@ export function createOrderStatusController(
     },
     dispose() {
       stopped = true;
+      lifecycle += 1;
       request += 1;
       unsubscribeRealtime?.();
       unsubscribeRealtime = null;

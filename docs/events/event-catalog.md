@@ -62,6 +62,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `OrderAmended:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderConfirmed:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderCreated:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
+- `OrderSubmitted:v1` — owner `@rms/ordering`; experimental; store; indirect_identifier
 - `PaymentFailed:v1` — owner `@rms/payment`; stable; store; payment
 - `PaymentRefunded:v1` — owner `@rms/payment`; stable; store; payment
 - `PaymentSucceeded:v1` — owner `@rms/payment`; stable; store; payment

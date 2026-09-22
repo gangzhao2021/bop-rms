@@ -71,7 +71,28 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
   ],
-  accesses: [],
+  accesses: [
+    {
+      id: "receipt-issuer-source.read.store_operating_entity_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_operating_entity", table: "store_operating_entity_assignment" },
+      principal: { kind: "module", id: "@bop/operating-entity" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/operating-entity/src/infrastructure/persistence/receipt-issuer-source.ts",
+    },
+    {
+      id: "receipt-issuer-source.read.operating_entity",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_operating_entity", table: "operating_entity" },
+      principal: { kind: "module", id: "@bop/operating-entity" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/operating-entity/src/infrastructure/persistence/receipt-issuer-source.ts",
+    },
+  ],
 } as const;
 
 export const databaseAccessManifest = databaseAccessManifestInput;

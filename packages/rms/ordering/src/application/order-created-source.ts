@@ -2,7 +2,7 @@ import type { StoreBusinessDateResolution } from "@rms/store";
 import type { OrderCreationRecord } from "../domain/order-creation.js";
 
 export function orderCreatedSourceInput(
-  record: Omit<OrderCreationRecord, "orderNumberAllocation">,
+  record: Omit<OrderCreationRecord<1 | 2>, "orderNumberAllocation">,
   resolution: StoreBusinessDateResolution,
 ): string {
   const order = record.order;

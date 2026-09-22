@@ -235,6 +235,55 @@ async function prove(context) {
         "2026-08-11T18:20:00.000Z",
       ],
     );
+    // A second explicit verification of a still-valid generation has its own evidence.
+    await client.query(
+      `INSERT INTO rms_fulfillment.pickup_proof_verification (
+       pickup_proof_verification_id,brand_id,store_id,fulfillment_id,capability_id,generation,
+       verification_method,validation_status,verified_at,correlation_id,data_classification
+       ) VALUES ($1,$2,$3,$4,$5,2,'HumanCode','Validated',$6,$7,'IndirectIdentifier')`,
+      [id(155), id(2), id(3), id(100), id(140), "2026-08-11T18:21:00.000Z", id(156)],
+    );
+    const verificationSql = `INSERT INTO rms_fulfillment.pickup_proof_operation (
+       pickup_proof_operation_id,brand_id,store_id,fulfillment_id,capability_id,verification_id,
+       idempotency_id,correlation_id,operation_kind,generation,aggregate_version_before,
+       aggregate_version_after,occurred_at,data_classification
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Verify',2,NULL,NULL,$9,'IndirectIdentifier')`;
+    await client.query(verificationSql, [
+      id(157),
+      id(2),
+      id(3),
+      id(100),
+      id(140),
+      id(155),
+      id(158),
+      id(156),
+      "2026-08-11T18:21:00.000Z",
+    ]);
+    await assert.rejects(
+      client.query(verificationSql, [
+        id(159),
+        id(2),
+        id(3),
+        id(100),
+        id(140),
+        id(155),
+        id(158),
+        id(156),
+        "2026-08-11T18:21:00.000Z",
+      ]),
+      /pickup_proof_operation_idempotency_unique/u,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO rms_fulfillment.pickup_proof_operation (
+         pickup_proof_operation_id,brand_id,store_id,fulfillment_id,capability_id,
+         idempotency_id,correlation_id,operation_kind,generation,aggregate_version_before,
+         aggregate_version_after,occurred_at,data_classification
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'Regenerate',2,3,4,$8,'IndirectIdentifier')`,
+        [id(160), id(2), id(3), id(100), id(140), id(161), id(162), "2026-08-11T18:21:00.000Z"],
+      ),
+      /pickup_proof_operation_issue_generation_unique/u,
+    );
     const current = await client.query(
       `SELECT capability_id,generation FROM rms_fulfillment.pickup_proof_generation
        WHERE brand_id=$1 AND store_id=$2 AND fulfillment_id=$3

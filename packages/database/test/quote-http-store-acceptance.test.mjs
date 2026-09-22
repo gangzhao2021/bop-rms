@@ -1,3 +1,5 @@
+import { seedPriceBook } from "../test-support/price-book-seed.mjs";
+import { seedTaxConfiguration } from "../test-support/tax-configuration-seed.mjs";
 import { createCustomerCartItemComposition } from "../../../apps/api/src/customer-cart-item-composition.ts";
 import { CustomerCartHandler } from "../../../apps/api/src/customer-cart.ts";
 import assert from "node:assert/strict";
@@ -7,7 +9,7 @@ import { createServer } from "node:http";
 import pg from "pg";
 import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
-import { createCustomerQuoteComposition } from "../../../apps/api/src/customer-quote-composition.ts";
+import { createCustomerQuoteWithPoliciesComposition } from "../../../apps/api/src/customer-quote-composition.ts";
 import { CustomerQuoteHandler } from "../../../apps/api/src/customer-quote.ts";
 import { createApp } from "../../../apps/api/src/app.ts";
 import {
@@ -30,10 +32,7 @@ import {
   createPostgresCartQuoteExpiryStore,
   parseCartQuoteExpiryRecord,
 } from "../../rms/ordering/src/index.ts";
-import {
-  createPriceQuote,
-  createPostgresPriceQuoteRequestStore,
-} from "../../rms/pricing/src/index.ts";
+import { createPostgresPriceQuoteRequestStore } from "../../rms/pricing/src/index.ts";
 import { input as quoteInput } from "../../rms/pricing/src/tests/price-quote.fixture.ts";
 const { Client } = pg;
 const id = (n) => `01902262-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -41,9 +40,9 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
   await withIsolatedDatabase({ caseId: "wp2268_quote_http" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
-    const roles = ["i", "o", "p"].map((kind) => `wp2268_${kind}_${context.runId}`);
-    roles.forEach((role) => assert.match(role, /^wp2268_[iop]_[a-f0-9]+$/u));
-    const [identityRole, orderingRole, pricingRole] = roles;
+    const roles = ["i", "o", "p", "r"].map((kind) => `wp2268_${kind}_${context.runId}`);
+    roles.forEach((role) => assert.match(role, /^wp2268_[iopr]_[a-f0-9]+$/u));
+    const [identityRole, orderingRole, pricingRole, policyRole] = roles;
     let active = 0;
     let sequence = 1000;
     let clock = 0;
@@ -69,7 +68,9 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
           let committed = false;
           let wrote = null;
           try {
-            await client.query("BEGIN");
+            await client.query(
+              role === policyRole ? "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" : "BEGIN",
+            );
             await client.query(`SET LOCAL ROLE ${role}`);
             await client.query("SET LOCAL lock_timeout='5s'");
             await client.query("SET LOCAL statement_timeout='5s'");
@@ -157,10 +158,12 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
         await admin.query(
           `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
         );
-        await admin.query(`GRANT SELECT,INSERT ON platform_audit.audit_record TO ${role}`);
-        await admin.query(
-          `GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`,
-        );
+        if (role !== policyRole) {
+          await admin.query(`GRANT SELECT,INSERT ON platform_audit.audit_record TO ${role}`);
+          await admin.query(
+            `GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`,
+          );
+        }
       }
       await admin.query(`GRANT USAGE ON SCHEMA bop_identity TO ${identityRole}`);
       await admin.query(
@@ -412,7 +415,28 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
         now: () => at(),
       });
       const baseline = await counts();
-      const port = createCustomerQuoteComposition({
+      await admin.query("GRANT USAGE ON SCHEMA rms_pricing,platform_helpers TO " + policyRole);
+      await admin.query(
+        "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+          policyRole,
+      );
+      await admin.query(
+        "GRANT SELECT ON rms_pricing.price_book,rms_pricing.price_book_version,rms_pricing.price_entry,rms_pricing.tax_configuration,rms_pricing.tax_configuration_version,rms_pricing.tax_configuration_rule TO " +
+          policyRole,
+      );
+      await seedPriceBook(
+        admin,
+        {
+          ...source.priceBook,
+          entries: source.priceBook.entries.map((entry) => ({
+            ...entry,
+            amount: { ...entry.amount, amountMinor: 9007199254740993n },
+          })),
+        },
+        id(990),
+      );
+      await seedTaxConfiguration(admin, source.taxConfiguration, id(990));
+      const port = createCustomerQuoteWithPoliciesComposition({
         expiryAudit: (record) =>
           audit(
             "ORDERING_CART_QUOTE_EXPIRE",
@@ -438,21 +462,26 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
             descriptor.observedAt,
           ),
         now: () => at(),
-        candidate: async (input) => {
+        policyTransactions: runner(policyRole),
+        policies: {
+          priceBookReference: source.priceBook.priceBookReference,
+          taxConfigurationReference: source.taxConfiguration.configurationReference,
+          currencyMetadata: source.currencyMetadata,
+          evidence: {
+            load: async () => ({
+              registrationEvidence: source.taxConfiguration.registrationEvidence,
+              professionalEvidence: source.taxConfiguration.professionalEvidence,
+            }),
+          },
+        },
+        quoteRequest: async (input) => {
           candidates++;
-          const quote = createPriceQuote({
+          const request = {
             ...source,
             quoteReference: id(sequence++),
             cartVersion: input.cartVersion,
             createdAt: input.requestedAt,
             expiresAt: new Date(Date.parse(input.requestedAt) + 300000).toISOString(),
-            priceBook: {
-              ...source.priceBook,
-              entries: source.priceBook.entries.map((entry) => ({
-                ...entry,
-                amount: { ...entry.amount, amountMinor: 9007199254740993n },
-              })),
-            },
             lines: input.lines.map((item) => {
               const template = source.lines.find(
                 (candidate) => candidate.sellableReference === item.sellableReference,
@@ -467,19 +496,22 @@ it("recovers actual Quote HTTP commits across Identity, Ordering, Pricing and Au
                 taxContext: { ...template.taxContext, evaluatedAt: input.requestedAt },
               };
             }),
-          });
+          };
+          delete request.priceBook;
+          delete request.taxConfiguration;
+          delete request.currencyMetadata;
+          return request;
+        },
+        quoteAudit: async (quote) => {
           quotes.push(quote);
           if (holdCandidate !== null) await holdCandidate();
-          return {
-            quote,
-            audit: audit(
-              "PRICING_QUOTE_CREATE",
-              "AUTHORIZED_CART_QUOTE",
-              "PricingPriceQuote",
-              quote.quoteReference,
-              quote.createdAt,
-            ),
-          };
+          return audit(
+            "PRICING_QUOTE_CREATE",
+            "AUTHORIZED_CART_QUOTE",
+            "PricingPriceQuote",
+            quote.quoteReference,
+            quote.createdAt,
+          );
         },
       });
       server = createServer(

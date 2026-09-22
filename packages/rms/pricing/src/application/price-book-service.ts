@@ -218,6 +218,28 @@ function successor(
   )
     invalid();
 }
+// Publishing materializes a new immutable version/entry identity, but cannot
+// introduce content authored by the approver under another actor's draft.
+function publicationContent(snapshot: PriceBookSnapshot): string {
+  return JSON.stringify({
+    currencyMetadata: snapshot.currencyMetadata,
+    entries: snapshot.entries
+      .map((entry) =>
+        JSON.stringify([
+          entry.sellableReference,
+          entry.scopeKind,
+          entry.scopeReference,
+          entry.channelCode,
+          entry.orderType,
+          entry.amount.amountMinor.toString(),
+          entry.amount.currencyCode,
+          entry.effectivePeriod,
+          entry.reasonCode,
+        ]),
+      )
+      .sort(),
+  });
+}
 export function createPriceBookService(ports: PriceBookPorts) {
   async function commit(
     action: Exclude<PriceBookAction, "CreateDraft">,
@@ -259,6 +281,8 @@ export function createPriceBookService(ports: PriceBookPorts) {
       (!auth.approvalAllowed || auth.draftAuthor === null || auth.draftAuthor === auth.actor)
     )
       throw new PriceBookWorkflowError("PRICE_BOOK_APPROVAL_REQUIRED");
+    if (action === "Publish" && publicationContent(candidate) !== publicationContent(current))
+      throw new PriceBookWorkflowError("PRICE_BOOK_INPUT_INVALID");
     if (
       action === "Publish" &&
       analyzePriceCoverage(candidate, contexts).some((item) => item.status !== "Covered")

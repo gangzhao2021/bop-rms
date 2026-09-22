@@ -1,3 +1,4 @@
+export type { PickupQueueReadItem, PickupQueueReadPage } from "./contracts/pickup-queue.js";
 export { moduleManifest } from "./module.manifest.js";
 export * from "./contracts/pickup-fulfillment.js";
 export * from "./domain/pickup-fulfillment.js";
@@ -33,3 +34,30 @@ export * from "./infrastructure/persistence/capacity-query-store.js";
 export * from "./infrastructure/persistence/capacity-hold-store.js";
 export * from "./infrastructure/persistence/capacity-hold-transition-store.js";
 export * from "./infrastructure/persistence/capacity-allocation-terminal-store.js";
+
+export * from "./domain/asap-capacity.js";
+
+export * from "./infrastructure/persistence/asap-capacity-store.js";
+
+export * from "./application/asap-capacity-service.js";
+
+export * from "./infrastructure/persistence/current-pickup-capacity-store.js";
+
+export * from "./application/pickup-capacity-units.js";
+
+export {
+  createAsapCapacityClockService,
+  type AsapCapacityClockOptions,
+} from "./application/asap-capacity-clock-service.js";
+
+export { createPostgresPickupFulfillmentStore } from "./infrastructure/persistence/pickup-fulfillment-store.js";
+
+export { createPostgresFulfillmentReadinessStore } from "./infrastructure/persistence/fulfillment-readiness-store.js";
+
+export { createPostgresPickupProofStore } from "./infrastructure/persistence/pickup-proof-store.js";
+
+export { createPostgresPickupHandoffStore } from "./infrastructure/persistence/pickup-handoff-store.js";
+
+export { createPickupCredentialProvider } from "./infrastructure/crypto/pickup-credential-provider.js";
+
+export { createPostgresPickupProofIssuer } from "./infrastructure/persistence/pickup-proof-issuer.js";

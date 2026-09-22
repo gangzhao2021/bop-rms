@@ -236,9 +236,9 @@ export function createPickupCartItemService(options: PickupCartItemOptions) {
         authorization: { authorize: async () => ({ guestSession: current, audit }) },
         references: options.references,
         catalog: {
-          async validateSelection(selection) {
+          async validateSelection(selection, selectionContext) {
             await assertCurrentAuthority(true);
-            const result = await options.catalog.validateSelection(selection);
+            const result = await options.catalog.validateSelection(selection, selectionContext);
             await assertCurrentAuthority(true);
             return result;
           },

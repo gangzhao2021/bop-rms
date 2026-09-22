@@ -144,3 +144,83 @@ describe("WP-1706 Pickup Code controller", () => {
       );
   });
 });
+
+it("clears proof during refresh and rejects a late reply after session context changes", async () => {
+  let change!: () => void, finish!: (value: unknown) => void;
+  const release = vi.fn(),
+    load = vi
+      .fn<() => Promise<unknown>>()
+      .mockResolvedValueOnce(ready())
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+  const controller = createPickupCodeController(
+    id(1),
+    "1001",
+    {
+      load,
+      subscribeContextChange(listener) {
+        change = listener;
+        return release;
+      },
+    },
+    () => now,
+  );
+  const unsubscribe = controller.subscribe(() => undefined);
+  await controller.reveal();
+  expect(controller.getState().status).toBe("ready");
+  const pending = controller.refresh();
+  expect(controller.getState()).toEqual({ status: "loading" });
+  change();
+  expect(controller.getState()).toEqual({ status: "permission-denied" });
+  finish(ready());
+  await pending;
+  expect(controller.getState()).toEqual({ status: "permission-denied" });
+  unsubscribe();
+  expect(release).toHaveBeenCalledTimes(1);
+  expect(controller.getState()).toEqual({ status: "hidden" });
+  controller.dispose();
+});
+it("clears already displayed proof immediately on session change", async () => {
+  let change!: () => void;
+  const release = vi.fn();
+  const controller = createPickupCodeController(
+    id(1),
+    "1001",
+    {
+      load: async () => ready(),
+      subscribeContextChange(listener) {
+        change = listener;
+        return release;
+      },
+    },
+    () => now,
+  );
+  controller.subscribe(() => undefined);
+  await controller.reveal();
+  change();
+  expect(controller.getState()).toEqual({ status: "permission-denied" });
+  controller.dispose();
+  expect(release).toHaveBeenCalledTimes(1);
+});
+it("rejects noncanonical opaque proof encoding", () => {
+  expect(() =>
+    parsePickupCodeResult(
+      ready({ proofKind: "Opaque", proofValue: "A".repeat(21) + "B" }),
+      id(1),
+      "1001",
+      now,
+    ),
+  ).toThrow();
+  expect(
+    parsePickupCodeResult(
+      ready({ proofKind: "Opaque", proofValue: "A".repeat(22) }),
+      id(1),
+      "1001",
+      now,
+    ).status,
+  ).toBe("Ready");
+});

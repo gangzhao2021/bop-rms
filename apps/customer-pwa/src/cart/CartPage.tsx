@@ -129,18 +129,19 @@ function CartItem({
 }
 
 function CartSummary({ cart }: { readonly cart: CartView }) {
+  if (cart.cart.lifecycle.status !== "Active")
+    return (
+      <section className="cart-summary" aria-labelledby="cart-summary-heading">
+        <h2 id="cart-summary-heading">Order summary</h2>
+        <p>Checkout is unavailable for this cart.</p>
+      </section>
+    );
   const quote = cart.cart.quote;
   if (quote === null || quote.cartVersion !== cart.cart.version)
     return (
       <section className="cart-summary" aria-labelledby="cart-summary-heading">
         <h2 id="cart-summary-heading">Order summary</h2>
-        <p>No current quote is attached. Requote is required before checkout.</p>
-        <button type="button" disabled aria-describedby="requote-boundary">
-          Requote
-        </button>
-        <p id="requote-boundary" className="cart-boundary">
-          Requote becomes available when the Customer Quote session adapter is composed.
-        </p>
+        <p>Review checkout to request a current quote before payment.</p>
       </section>
     );
   return (
@@ -193,6 +194,10 @@ function ErrorState({
   if (!("cart" in state) || !("issueCodes" in state)) return null;
   const retry = state.status === "command-failed" && state.canRetrySameOperation;
   const messages = {
+    "replacement-forbidden": [
+      "Cart replacement not permitted",
+      "Ask the table host or staff to help you continue ordering.",
+    ],
     "session-expired": ["Session expired", "Resume your Store session before opening this cart."],
     "not-found": ["Cart unavailable", "This cart is not available in the current Store session."],
     conflict: [
@@ -207,7 +212,10 @@ function ErrorState({
       "Please wait",
       `Try again${state.retryAfterSeconds === null ? " shortly" : ` in ${state.retryAfterSeconds} seconds`}.`,
     ],
-    expired: ["Cart expired", "Return to the menu to start a current cart."],
+    expired: [
+      "Cart expired",
+      "This cart cannot accept more items. Ask staff for help continuing your order.",
+    ],
     abandoned: ["Cart closed", "This cart was abandoned and cannot be changed."],
     "command-failed": [
       "Outcome not confirmed",
@@ -296,6 +304,37 @@ function CartContent({
   const terminal = cart.cart.lifecycle.status !== "Active";
   return (
     <>
+      {terminal ? (
+        <StateMessage
+          heading={cart.cart.lifecycle.status === "Expired" ? "Cart expired" : "Cart closed"}
+          tone="warning"
+        >
+          <p>This cart cannot accept more items. Your previously paid orders remain unchanged.</p>
+          {cart.cart.orderType === "DineIn" && controller.replaceExpiredCart !== undefined ? (
+            <>
+              <p>
+                The table host can start an empty cart to continue ordering. Previous items will not
+                be copied.
+              </p>
+              <button
+                type="button"
+                disabled={
+                  readOnly ||
+                  pending ||
+                  state.status === "command-failed" ||
+                  state.status === "replacement-forbidden" ||
+                  cart.cart.warnings.includes("PROJECTION_STALE")
+                }
+                onClick={() => void controller.replaceExpiredCart?.()}
+              >
+                Start an empty cart
+              </button>
+            </>
+          ) : (
+            <p>Ask staff for help continuing your order.</p>
+          )}
+        </StateMessage>
+      ) : null}
       {readOnly ? (
         <div className="cart-offline" role="status">
           Offline read-only. Changes and checkout are disabled; nothing will replay on reconnect.
@@ -342,15 +381,17 @@ function CartContent({
         <CartSummary cart={cart} />
       </div>
       <section className="cart-next-actions" aria-label="Cart actions">
-        <Link to="/menu">Continue shopping</Link>
+        <Link to="/menu">{terminal ? "Browse menu" : "Continue shopping"}</Link>
         <button type="button" disabled aria-describedby="clear-boundary">
           Clear cart
         </button>
-        <Link to="/checkout">Review checkout</Link>
+        {!terminal && !readOnly ? <Link to="/checkout">Review checkout</Link> : null}
       </section>
       <div className="cart-boundaries">
         <p id="clear-boundary">Clear cart requires an atomic server command and is unavailable.</p>
-        <p id="checkout-boundary">Payment remains unavailable until the Provider gate is closed.</p>
+        <p id="checkout-boundary">
+          Available payment options and the final total are shown at checkout.
+        </p>
       </div>
       <p className="cart-version">
         Cart version {cart.cart.version} · {cart.cart.serviceMode}

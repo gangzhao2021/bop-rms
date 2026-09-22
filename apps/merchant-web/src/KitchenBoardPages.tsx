@@ -1,5 +1,8 @@
+import { useKitchenActions } from "./use-kitchen-actions.js";
+import type { KitchenAction } from "./kitchen-work-client.js";
+import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Link, useParams } from "react-router";
 import {
   KitchenBoardClientError,
@@ -25,9 +28,14 @@ type LoadState<T> =
     }
   | { readonly kind: "Found"; readonly view: T };
 function useLoad<T>(load: () => Promise<T>, key: string): LoadState<T> {
-  const [state, setState] = useState<LoadState<T>>({ kind: "Loading" });
+  const [stored, setStored] = useState<{
+    key: string;
+    load: () => Promise<T>;
+    state: LoadState<T>;
+  }>({ key, load, state: { kind: "Loading" } });
   useEffect(() => {
     let active = true;
+    const setState = (state: LoadState<T>) => setStored({ key, load, state });
     setState({ kind: "Loading" });
     void load()
       .then((view) => {
@@ -41,7 +49,7 @@ function useLoad<T>(load: () => Promise<T>, key: string): LoadState<T> {
       active = false;
     };
   }, [key, load]);
-  return state;
+  return stored.key === key && stored.load === load ? stored.state : { kind: "Loading" };
 }
 
 export function KitchenBoardStatePanel({
@@ -67,7 +75,7 @@ export function KitchenBoardStatePanel({
     CommandFailed: ["Command failed", "No Kitchen transition is assumed. Refresh before retrying."],
     Unavailable: [
       "Kitchen Board unavailable",
-      "The Kitchen browser adapter is not connected. No command was sent.",
+      "The authorized Kitchen queue could not be loaded. Refresh to try again.",
     ],
   } as const;
   return (
@@ -82,17 +90,19 @@ function WorkCard({
   item,
   readOnly,
   observedAt,
+  onAction,
 }: {
   readonly item: KitchenBoardItem;
   readonly readOnly: boolean;
   readonly observedAt: string;
+  readonly onAction?: (item: KitchenBoardItem, action: KitchenAction) => void;
 }) {
   const age = Math.max(
     0,
     Math.floor((Date.parse(observedAt) - Date.parse(item.createdAt)) / 60_000),
   );
   return (
-    <article className="store-card">
+    <article className="store-card" data-read-only={readOnly}>
       <header>
         <div>
           <p className="bop-eyebrow">
@@ -119,14 +129,58 @@ function WorkCard({
         </div>
         <div>
           <dt>Claim</dt>
-          <dd>Named operator</dd>
+          <dd>Not available</dd>
         </div>
       </dl>
       <div className="card-actions">
         <Link to={`/operations/kitchen/work-items/${item.workItemReference}`}>Open work item</Link>
-        <button disabled={readOnly || item.status !== "Queued"}>Accept</button>
-        <button disabled={readOnly || !["Queued", "In Progress"].includes(item.status)}>
-          Start / ready by policy
+        <button
+          disabled={
+            readOnly ||
+            !onAction ||
+            !item.execution ||
+            item.status !== "Queued" ||
+            item.execution.acceptedAt !== null
+          }
+          onClick={() => onAction?.(item, "AcceptKitchenWorkItem")}
+        >
+          Accept
+        </button>
+        <button
+          disabled={
+            readOnly ||
+            !onAction ||
+            !item.execution ||
+            item.status !== "Queued" ||
+            item.execution.acceptedAt === null
+          }
+          onClick={() => onAction?.(item, "StartKitchenWorkItem")}
+        >
+          Start
+        </button>
+        <button
+          disabled={
+            readOnly ||
+            !onAction ||
+            !item.execution ||
+            item.status !== "In Progress" ||
+            item.completedQuantity >= item.requiredQuantity
+          }
+          onClick={() => onAction?.(item, "CompleteKitchenWorkItem")}
+        >
+          Complete remaining quantity
+        </button>
+        <button
+          disabled={
+            readOnly ||
+            !onAction ||
+            !item.execution ||
+            item.status !== "Completed" ||
+            item.execution.readyAt !== null
+          }
+          onClick={() => onAction?.(item, "MarkKitchenOrderItemReady")}
+        >
+          Mark ready
         </button>
         <button disabled>Hold / prioritize unavailable</button>
       </div>
@@ -134,7 +188,19 @@ function WorkCard({
   );
 }
 
-export function KitchenBoardScreen({ view }: { readonly view: KitchenBoardView }) {
+export function KitchenBoardScreen({
+  view,
+  onRefresh,
+  refreshButtonRef,
+  onAction,
+  actionsBlocked = true,
+}: {
+  readonly view: KitchenBoardView;
+  readonly onAction?: (item: KitchenBoardItem, action: KitchenAction) => void;
+  readonly actionsBlocked?: boolean;
+  readonly onRefresh?: () => void;
+  readonly refreshButtonRef?: RefObject<HTMLButtonElement | null>;
+}) {
   const [station, setStation] = useState("All");
   const readOnly = view.freshnessStatus !== "Fresh" || view.operatorStatus !== "Named";
   const stations = [...new Set(view.items.map((item) => item.stationLabel))];
@@ -148,7 +214,9 @@ export function KitchenBoardScreen({ view }: { readonly view: KitchenBoardView }
             {view.freshnessStatus} · {view.operatorStatus} operator · {view.projectedAt}
           </p>
         </div>
-        <button disabled>Refresh from source</button>
+        <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
+          Refresh from source
+        </button>
       </header>
       {readOnly ? (
         <StatePanel heading="Board locked — read-only" tone="offline" status>
@@ -179,7 +247,8 @@ export function KitchenBoardScreen({ view }: { readonly view: KitchenBoardView }
             <WorkCard
               key={item.workItemReference}
               item={item}
-              readOnly={readOnly}
+              readOnly={readOnly || actionsBlocked}
+              {...(onAction ? { onAction } : {})}
               observedAt={view.projectedAt}
             />
           ))}
@@ -207,39 +276,124 @@ export function KitchenWorkItemScreen({ item }: { readonly item: KitchenBoardIte
   );
 }
 
-export function KitchenBoardPage({
-  client = unavailableKitchenBoardClient,
-}: {
+interface KitchenPageProps {
   readonly client?: KitchenBoardClient;
-}) {
-  const load = useCallback(() => client.loadQueue().then(parseKitchenBoardView), [client]);
-  const state = useLoad(load, "queue");
-  return state.kind === "Found" ? (
-    <KitchenBoardScreen view={state.view} />
-  ) : (
-    <KitchenBoardStatePanel state={state.kind} />
+  readonly csrf?: string;
+  readonly storeLabel?: string;
+  readonly storeReference?: string;
+}
+function useClient({ client, csrf, storeLabel, storeReference }: KitchenPageProps) {
+  return useMemo(
+    () =>
+      client ??
+      (csrf && storeLabel && storeReference
+        ? createKitchenBoardClient({ csrf, storeLabel, storeReference })
+        : unavailableKitchenBoardClient),
+    [client, csrf, storeLabel, storeReference],
   );
 }
-export function KitchenWorkItemPage({
-  client = unavailableKitchenBoardClient,
-}: {
-  readonly client?: KitchenBoardClient;
-}) {
-  const { id = "" } = useParams();
-  let reference: string;
-  try {
-    reference = parseKitchenRouteReference(id);
-  } catch {
-    return <KitchenBoardStatePanel state="NotFound" />;
-  }
-  const load = useCallback(
-    () => client.loadWorkItem(reference).then(parseKitchenWorkItemView),
-    [client, reference],
+export function KitchenBoardPage(props: KitchenPageProps) {
+  const client = useClient(props),
+    [revision, setRevision] = useState(0);
+  const refresh = () => setRevision((value) => value + 1);
+  const load = useCallback(() => client.loadQueue().then(parseKitchenBoardView), [client]);
+  const state = useLoad(load, "queue:" + revision);
+  const actions = useKitchenActions({
+    csrf: props.csrf,
+    storeReference: props.storeReference,
+    view: state.kind === "Found" ? state.view : null,
+    revision,
+  });
+  const refreshButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (revision > 0 && state.kind !== "Loading") refreshButtonRef.current?.focus();
+  }, [revision, state.kind]);
+  return (
+    <>
+      {actions.state.kind !== "Idle" ? (
+        <StatePanel
+          heading={
+            actions.state.kind === "Submitting"
+              ? "Submitting Kitchen action"
+              : actions.state.kind === "Unknown"
+                ? "Action result unknown"
+                : actions.state.kind === "Confirmed"
+                  ? actions.reflected
+                    ? "Kitchen action confirmed"
+                    : "Waiting for refreshed queue"
+                  : "Kitchen action not completed"
+          }
+          status
+        >
+          <p>
+            {actions.state.kind === "Submitting"
+              ? "Please wait before taking another action."
+              : actions.state.kind === "Unknown"
+                ? "The response was lost. Retry this same operation to recover its result; do not create another operation."
+                : actions.state.kind === "Confirmed"
+                  ? actions.reflected
+                    ? "The queue now reflects the confirmed operation."
+                    : "The operation is confirmed. Refresh from source until the queue reflects its new version."
+                  : actions.rejectedRefreshed
+                    ? "The queue has been refreshed. Review the current item before choosing an action."
+                    : actions.state.code === "PermissionDenied"
+                      ? "Your current permission or Store scope no longer allows this action. Refresh before continuing."
+                      : actions.state.code === "Conflict"
+                        ? "The work item changed. Refresh and review its current state before choosing an action."
+                        : "The action was not accepted. Refresh and review the current work item."}
+          </p>
+          {actions.state.kind === "Unknown" ? (
+            <button disabled={!actions.canRetry} onClick={actions.retry}>
+              Retry same operation
+            </button>
+          ) : null}
+        </StatePanel>
+      ) : null}
+      {state.kind === "Found" ? (
+        <KitchenBoardScreen
+          view={state.view}
+          onRefresh={refresh}
+          refreshButtonRef={refreshButtonRef}
+          onAction={actions.act}
+          actionsBlocked={actions.blocked}
+        />
+      ) : (
+        <>
+          <KitchenBoardStatePanel state={state.kind} />
+          {state.kind !== "Loading" ? (
+            <button ref={refreshButtonRef} onClick={refresh}>
+              Refresh from source
+            </button>
+          ) : null}
+        </>
+      )}
+    </>
   );
-  const state = useLoad(load, reference);
-  return state.kind === "Found" ? (
-    <KitchenWorkItemScreen item={state.view} />
-  ) : (
-    <KitchenBoardStatePanel state={state.kind} />
+}
+export function KitchenWorkItemPage(props: KitchenPageProps) {
+  const client = useClient(props),
+    { id = "" } = useParams(),
+    [revision, setRevision] = useState(0);
+  const load = useCallback(async () => {
+    let reference: string;
+    try {
+      reference = parseKitchenRouteReference(id);
+    } catch {
+      throw new KitchenBoardClientError("NotFound");
+    }
+    return parseKitchenWorkItemView(await client.loadWorkItem(reference));
+  }, [client, id]);
+  const state = useLoad(load, id + ":" + revision);
+  return (
+    <>
+      {state.kind === "Found" ? (
+        <KitchenWorkItemScreen item={state.view} />
+      ) : (
+        <KitchenBoardStatePanel state={state.kind} />
+      )}
+      {state.kind !== "Loading" ? (
+        <button onClick={() => setRevision((value) => value + 1)}>Refresh from source</button>
+      ) : null}
+    </>
   );
 }

@@ -10,6 +10,7 @@ export default defineConfig({
       "packages/database/test/cart-binding-store-acceptance.test.mjs",
       "packages/database/test/cart-lifecycle-store-acceptance.test.mjs",
       "packages/database/test/cart-quote-store-acceptance.test.mjs",
+      "packages/database/test/configured-cart-quote-service-acceptance.test.mjs",
     ],
     testTimeout: 120_000,
     hookTimeout: 120_000,

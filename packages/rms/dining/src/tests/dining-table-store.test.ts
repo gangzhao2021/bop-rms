@@ -179,3 +179,55 @@ describe("WP-2272 Dining Table storage boundary", () => {
       });
   });
 });
+
+describe("authorized table pagination", () => {
+  function setup(values: unknown[]) {
+    const query = vi.fn(async (sql: string) => ({
+      rows: sql.startsWith("SELECT table_snapshot") ? values : [],
+    }));
+    const store = createPostgresDiningTableStore({ run: (work) => work({ query }) }, scope, refs);
+    const authorize = vi.fn(async () => true);
+    return {
+      query,
+      authorize,
+      read: (limit = 1, afterTableReference: string | null = null) =>
+        store.listTables({ limit, afterTableReference, authorize }),
+    };
+  }
+  it("returns bounded page and next cursor with scoped query", async () => {
+    const first = table(),
+      second = { ...first, tableReference: id(10) };
+    const f = setup([{ table: first }, { table: second }]);
+    const result = await f.read();
+    expect(result.items).toEqual([first]);
+    expect(result.nextAfterTableReference).toBe(first.tableReference);
+    expect(f.query).toHaveBeenCalledWith(
+      expect.stringContaining("tenant_id=$1 AND brand_id=$2 AND store_id=$3"),
+      [id(1), id(2), id(3), null, 2],
+    );
+    expect(f.authorize).toHaveBeenCalledTimes(2);
+  });
+  it("returns no next cursor for empty or exhausted page", async () => {
+    expect(await setup([]).read()).toEqual({ items: [], nextAfterTableReference: null });
+    expect((await setup([{ table: table() }]).read()).nextAfterTableReference).toBeNull();
+  });
+  it("denies before query and after revocation", async () => {
+    const f = setup([]);
+    f.authorize.mockResolvedValue(false);
+    await expect(f.read()).rejects.toThrow();
+    expect(f.query).not.toHaveBeenCalled();
+    f.authorize.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await expect(f.read()).rejects.toThrow();
+  });
+  it.each([
+    { values: [{ table: { ...table(), storeReference: id(9) } }] },
+    { values: [{ table: table() }, { table: table() }] },
+  ])("rejects wrong-scope or unordered/duplicate data", async ({ values }) => {
+    await expect(setup(values).read()).rejects.toThrow();
+  });
+  it("rejects unbounded reads before SQL", async () => {
+    const f = setup([]);
+    await expect(f.read(101)).rejects.toThrow();
+    expect(f.query).not.toHaveBeenCalled();
+  });
+});

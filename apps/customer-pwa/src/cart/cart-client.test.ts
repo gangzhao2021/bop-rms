@@ -697,3 +697,87 @@ it.each(["createCart", "addItem", "updateItem", "removeItem"] as const)(
     expect(getCustomerCsrfCredential()).toBe("d".repeat(43));
   },
 );
+
+describe("Dining replacement client", () => {
+  const receipt = {
+    schemaVersion: 1,
+    operationReference: id(20),
+    previousCartReference: id(1),
+    cartReference: id(30),
+    occurredAt: "2026-08-02T20:00:00.000Z",
+    expiresAt: "2026-08-03T20:00:00.000Z",
+  };
+  it("reads current server Cart after receipt without inventing successor contents", async () => {
+    const current: CartView = {
+      ...cart(),
+      cart: { ...cart().cart, cartReference: id(30), orderType: "DineIn", version: 4 },
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(receipt))
+      .mockResolvedValueOnce(Response.json(current));
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCartCsrfCredential("c".repeat(43));
+    const result = await replacementClient()({
+      cart: cart(),
+      operationReference: id(20),
+    });
+    expect(result).toEqual(current);
+    expect(fetch.mock.calls[0]?.[0]).toBe(`/api/v1/carts/${id(1)}/replacement`);
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: "{}",
+      headers: { "idempotency-key": id(20), "if-match": '"3"' },
+    });
+    expect(fetch.mock.calls[1]?.[0]).toBe("/bff/customer/cart");
+  });
+  it.each(["malformed", "read-failed", "wrong-cart"])(
+    "keeps unknown outcome for %s",
+    async (mode) => {
+      const fetch = vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json(
+            mode === "malformed" ? { ...receipt, operationReference: id(99) } : receipt,
+          ),
+        );
+      if (mode === "read-failed") fetch.mockRejectedValueOnce(new Error("offline"));
+      else fetch.mockResolvedValueOnce(Response.json(cart()));
+      vi.stubGlobal("fetch", fetch);
+      setCustomerCartCsrfCredential("c".repeat(43));
+      await expect(
+        replacementClient()({
+          cart: cart(),
+          operationReference: id(20),
+        }),
+      ).rejects.toMatchObject({ code: "network_unknown" });
+      if (mode === "malformed") expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+function replacementClient() {
+  const replacement = createBrowserCustomerCartClient().replaceExpiredCart;
+  if (replacement === undefined) throw new Error("replacement missing");
+  return replacement;
+}
+
+it("keeps known replacement permission refusal distinct from unknown outcome", async () => {
+  const fetch = vi.fn().mockResolvedValue(
+    Response.json(
+      {
+        error: {
+          code: "cart_replacement_forbidden",
+          messageKey: "customer.cart.replacement_forbidden",
+        },
+      },
+      { status: 403 },
+    ),
+  );
+  vi.stubGlobal("fetch", fetch);
+  setCustomerCartCsrfCredential("c".repeat(43));
+  await expect(
+    replacementClient()({ cart: cart(), operationReference: id(20) }),
+  ).rejects.toMatchObject({ code: "cart_replacement_forbidden" });
+  expect(fetch).toHaveBeenCalledTimes(1);
+});

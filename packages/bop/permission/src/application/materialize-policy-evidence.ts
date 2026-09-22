@@ -43,6 +43,7 @@ export interface PermissionPolicyMaterialization {
   readonly policySnapshotReference: PolicyReference;
   readonly policyVersion: PolicyVersion;
   readonly evidence: readonly PermissionEvidence[];
+  readonly activeRoleCodes: readonly string[];
   readonly audit: {
     readonly source: "PermissionPolicy";
     readonly evidenceCount: number;
@@ -175,6 +176,7 @@ export function materializePermissionEvidence(
       );
     }
 
+    const activeRoleCodes = new Set<string>();
     for (const assignment of input.roleAssignments) {
       const role = roles.get(assignment.roleReference) ?? fail();
       if (
@@ -196,6 +198,7 @@ export function materializePermissionEvidence(
             assignment.storeAssignmentReference !== storeAssignment.storeAssignmentReference
       )
         fail();
+      activeRoleCodes.add(role.code);
       for (const grant of input.permissionGrants) {
         if (
           grant.roleReference !== role.roleReference ||
@@ -240,6 +243,7 @@ export function materializePermissionEvidence(
       policySnapshotReference: parsePolicyReference(input.policyState.snapshotReference),
       policyVersion: parsePolicyVersion(input.policyState.version),
       evidence: normalized,
+      activeRoleCodes: Object.freeze([...activeRoleCodes].sort()),
       audit: Object.freeze({
         source: "PermissionPolicy",
         evidenceCount: normalized.length,

@@ -22,10 +22,22 @@ export interface CartItemOperationRecord {
   readonly expiresAt: OrderingInstant;
 }
 
+/** Trusted context captured after current Guest/Cart authorization. Observations
+ * may deny a new mutation; they never establish an Inventory reservation.
+ */
+export interface CartSelectionContext {
+  readonly diningSessionReference: OrderingReference | null;
+  readonly cartReference: OrderingReference;
+  readonly cartVersion: number;
+  readonly guestSessionReference: OrderingReference;
+  readonly quantity: number;
+}
+
 export interface CartItemCommandPorts {
   readonly catalog: {
     validateSelection(
       input: ValidateCatalogSelectionInput,
+      context: CartSelectionContext,
     ): Promise<CatalogSelectionValidationResult>;
   };
   readonly authorization: {

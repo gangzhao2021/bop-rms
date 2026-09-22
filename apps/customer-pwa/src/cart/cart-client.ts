@@ -14,6 +14,8 @@ const errorStatuses: Partial<Record<CartErrorCode, number>> = {
   cart_idempotency_conflict: 409,
   cart_selection_invalid: 422,
   cart_expired: 409,
+  cart_replacement_forbidden: 403,
+  cart_replacement_unavailable: 409,
   cart_abandoned: 409,
   cart_rate_limited: 429,
   cart_service_unavailable: 503,
@@ -139,6 +141,11 @@ function view(value: unknown): CartView {
 }
 
 export interface CustomerCartClient {
+  replaceExpiredCart?(input: {
+    readonly cart: CartView;
+    readonly operationReference: string;
+  }): Promise<CartView>;
+
   loadCurrent(signal?: AbortSignal): Promise<CartView | null>;
   createCart(input: { readonly operationReference: string }): Promise<CartView>;
   addItem(input: {
@@ -218,7 +225,7 @@ function parse(response: Response, payload: unknown): CartView | null {
   });
 }
 
-async function request(url: string, init: RequestInit): Promise<CartView | null> {
+async function request(url: string, init: RequestInit, decode = parse): Promise<CartView | null> {
   const contextCurrent = captureCustomerCsrfContext();
   const controller = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -280,7 +287,7 @@ async function request(url: string, init: RequestInit): Promise<CartView | null>
     } catch {
       throw new CartClientError("cart_service_unavailable");
     }
-    return parse(response, payload);
+    return decode(response, payload);
   };
   try {
     const result = await Promise.race([operation(), cancellation]);
@@ -309,6 +316,69 @@ async function request(url: string, init: RequestInit): Promise<CartView | null>
 
 export function createBrowserCustomerCartClient(): CustomerCartClient {
   const client: CustomerCartClient = {
+    async replaceExpiredCart(input) {
+      const contextCurrent = captureCustomerCsrfContext();
+      let successor: string | null = null;
+      await request(
+        `/api/v1/carts/${input.cart.cart.cartReference}/replacement`,
+        {
+          method: "POST",
+          headers: headers({
+            operationReference: input.operationReference,
+            version: input.cart.cart.version,
+          }),
+          body: "{}",
+        },
+        (response, payload) => {
+          if (!response.ok) {
+            parse(response, payload);
+            throw new CartClientError("cart_not_found");
+          }
+          const receipt = record(payload);
+          const expected = [
+            "schemaVersion",
+            "operationReference",
+            "previousCartReference",
+            "cartReference",
+            "occurredAt",
+            "expiresAt",
+          ];
+          const occurredAt = string(receipt.occurredAt, canonicalInstant);
+          const expiresAt = string(receipt.expiresAt, canonicalInstant);
+          successor = string(receipt.cartReference, uuidV7);
+          if (
+            Object.keys(receipt).length !== expected.length ||
+            Object.keys(receipt).some((key) => !expected.includes(key)) ||
+            receipt.schemaVersion !== 1 ||
+            receipt.operationReference !== input.operationReference ||
+            receipt.previousCartReference !== input.cart.cart.cartReference ||
+            successor === input.cart.cart.cartReference ||
+            !Number.isFinite(Date.parse(occurredAt)) ||
+            new Date(occurredAt).toISOString() !== occurredAt ||
+            !Number.isFinite(Date.parse(expiresAt)) ||
+            new Date(expiresAt).toISOString() !== expiresAt ||
+            Date.parse(expiresAt) - Date.parse(occurredAt) !== 86400000
+          )
+            throw new CartClientError("cart_service_unavailable");
+          return null;
+        },
+      );
+      // A receipt is historical. Only a fresh authorized read supplies current Cart state.
+      try {
+        if (!contextCurrent()) throw new CartClientError("network_unknown");
+        const current = await client.loadCurrent();
+        if (
+          !contextCurrent() ||
+          current === null ||
+          current.cart.cartReference !== successor ||
+          current.cart.orderType !== "DineIn"
+        )
+          throw new CartClientError("network_unknown");
+        return current;
+      } catch {
+        throw new CartClientError("network_unknown");
+      }
+    },
     loadCurrent: (signal?: AbortSignal) =>
       request("/bff/customer/cart", { method: "GET", ...(signal === undefined ? {} : { signal }) }),
     async createCart(input) {

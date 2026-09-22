@@ -183,7 +183,7 @@ export interface StoreWeeklyServiceDay {
   readonly isoWeekday: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   readonly intervals: readonly StoreServiceInterval[];
 }
-function weeklySchedule(value: unknown): readonly StoreWeeklyServiceDay[] {
+export function parseStoreWeeklyServiceSchedule(value: unknown): readonly StoreWeeklyServiceDay[] {
   if (!Array.isArray(value) || value.length !== 7) return fail();
   return Object.freeze(
     value.map((entry, index) => {
@@ -202,7 +202,7 @@ export interface StoreServiceException {
   readonly kind: "Holiday" | "TemporaryClosure" | "Override";
   readonly intervals: readonly StoreServiceInterval[];
 }
-function exceptions(value: unknown): readonly StoreServiceException[] {
+export function parseStoreServiceExceptions(value: unknown): readonly StoreServiceException[] {
   if (!Array.isArray(value) || value.length > 366) return fail();
   const result = value.map((entry) => {
     const input = exact(entry, ["localDate", "kind", "intervals"]);
@@ -340,8 +340,8 @@ export function createStoreConfigurationVersion(value: unknown): StoreConfigurat
     ),
     capacityConfigurationReference: nullableReference(input.capacityConfigurationReference),
     enabledServiceModes: modes(input.enabledServiceModes),
-    weeklySchedule: weeklySchedule(input.weeklySchedule),
-    exceptions: exceptions(input.exceptions),
+    weeklySchedule: parseStoreWeeklyServiceSchedule(input.weeklySchedule),
+    exceptions: parseStoreServiceExceptions(input.exceptions),
     effectiveFrom,
     effectiveUntil,
     supersedesConfigurationReference: supersedes,
@@ -370,7 +370,7 @@ export function validateStoreConfigurationForPublication(
     !configuration.weeklySchedule.some((day) => day.intervals.length > 0)
   )
     fail("STORE_CONFIGURATION_GATE_REQUIRED");
-  for (const day of configuration.weeklySchedule)
+  for (const day of [...configuration.weeklySchedule, ...configuration.exceptions])
     for (const entry of day.intervals)
       if (entry.serviceModes.some((mode) => !configuration.enabledServiceModes.includes(mode)))
         fail("STORE_CONFIGURATION_STATE_INVALID");

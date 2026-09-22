@@ -2,9 +2,13 @@ import { parseOrderingReference } from "../../domain/cart.js";
 import {
   OrderCreationError,
   parseOrderCreationRecord,
+  parseConfiguredOrderCreationRecord,
   type OrderCreationRecord,
 } from "../../domain/order-creation.js";
-import { decodeOrderItemSnapshot } from "../../domain/order-item-snapshot-codec.js";
+import {
+  decodeOrderItemSnapshot,
+  decodeConfiguredOrderItemSnapshot,
+} from "../../domain/order-item-snapshot-codec.js";
 
 export interface OrderCreationQueryTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
@@ -79,7 +83,7 @@ LEFT JOIN rms_ordering.order_header h ON h.order_id=s.order_id AND h.brand_id=$1
 LEFT JOIN rms_ordering.order_batch b ON b.order_id=h.order_id AND b.submission_id=s.submission_id
  AND b.brand_id=$1 AND b.store_id=$2
 LEFT JOIN rms_ordering.order_number_allocation n ON n.order_id=h.order_id AND n.brand_id=$1 AND n.store_id=$2
-WHERE s.brand_id=$1 AND s.store_id=$2 AND s.submission_id=$3 LIMIT 2`;
+WHERE s.brand_id=$1 AND s.store_id=$2 AND s.submission_id=$3 AND s.submission_kind='Initial' LIMIT 2`;
 
 function unavailable(): never {
   throw new OrderCreationError("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
@@ -157,7 +161,7 @@ function capture(value: unknown): unknown {
   }
   return visit(value, 0);
 }
-function decode(history: unknown): OrderCreationRecord {
+function decode<V extends 1 | 2>(history: unknown, quoteVersion: V): OrderCreationRecord<V> {
   const h = exact(history, ["record", "source", "items"]);
   const r = exact(h.record, [
     "submissionReference",
@@ -221,7 +225,9 @@ function decode(history: unknown): OrderCreationRecord {
       "snapshot",
     ]);
     if (row.ordinal !== index + 1) return unavailable();
-    const item = decodeOrderItemSnapshot(row.snapshot);
+    const item = (quoteVersion === 2 ? decodeConfiguredOrderItemSnapshot : decodeOrderItemSnapshot)(
+      row.snapshot,
+    );
     if (
       row.orderItemReference !== item.orderItemReference ||
       row.orderBatchReference !== item.orderBatchReference ||
@@ -251,7 +257,9 @@ function decode(history: unknown): OrderCreationRecord {
   ]);
   if (typeof n.sequence !== "string" || !/^[1-9][0-9]{0,18}$/u.test(n.sequence))
     return unavailable();
-  const parsed = parseOrderCreationRecord({
+  const parsed = (
+    quoteVersion === 2 ? parseConfiguredOrderCreationRecord : parseOrderCreationRecord
+  )({
     ...r,
     items: snapshots,
     order: { ...o, batches: [{ ...b, items: identities }] },
@@ -267,19 +275,60 @@ function decode(history: unknown): OrderCreationRecord {
     s.orderNumber !== parsed.orderNumberAllocation.orderNumber
   )
     return unavailable();
-  return parsed;
+  return parsed as OrderCreationRecord<V>;
 }
 
 /** Internal immutable history, including restricted notes; caller must authorize current access. */
-export function createPostgresOrderCreationQueryStore(
+export function createPostgresOrderCreationQueryStore<V extends 1 | 2 = 1>(
   runner: OrderCreationQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
+  quoteVersion: V = 1 as V,
 ) {
   const fixed = exact(scope, ["brandReference", "storeReference"]);
   const brand = parseOrderingReference(fixed.brandReference),
     store = parseOrderingReference(fixed.storeReference);
   return Object.freeze({
-    async resolveSubmission(value: string): Promise<OrderCreationRecord | null> {
+    /** Current initial Order state; caller authorizes access and retains this transaction through commit. */
+    async withCurrentSubmission<T>(
+      value: string,
+      work: (
+        transaction: OrderCreationQueryTransaction,
+        record: OrderCreationRecord<V>,
+      ) => Promise<T>,
+    ): Promise<T | null> {
+      const reference = parseOrderingReference(value);
+      try {
+        return await runner.run(async (transaction) => {
+          await transaction.query(
+            "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+            [brand, store],
+          );
+          const result = await transaction.query(
+            "SELECT h.order_id AS reference FROM rms_ordering.order_header h JOIN rms_ordering.order_submission_record s ON s.order_id=h.order_id AND s.brand_id=h.brand_id AND s.store_id=h.store_id WHERE h.brand_id=$1 AND h.store_id=$2 AND s.submission_id=$3 AND s.submission_kind='Initial' FOR UPDATE OF h",
+            [brand, store, reference],
+          );
+          if (result === null || typeof result !== "object") return unavailable();
+          const descriptor = Object.getOwnPropertyDescriptor(result, "rows");
+          if (!descriptor || !("value" in descriptor)) return unavailable();
+          const locked = capture(descriptor.value);
+          if (!Array.isArray(locked) || locked.length > 1) return unavailable();
+          if (locked.length === 0) return null;
+          const orderReference = parseOrderingReference(exact(locked[0], ["reference"]).reference);
+          const record = await readOrderCreationHistory(
+            transaction,
+            { brandReference: brand, storeReference: store },
+            reference,
+            quoteVersion,
+          );
+          if (record === null || record.order.orderReference !== orderReference)
+            return unavailable();
+          return work(transaction, record);
+        });
+      } catch {
+        return unavailable();
+      }
+    },
+    async resolveSubmission(value: string): Promise<OrderCreationRecord<V> | null> {
       const reference = parseOrderingReference(value);
       try {
         return await runner.run(async (transaction) => {
@@ -292,6 +341,7 @@ export function createPostgresOrderCreationQueryStore(
             transaction,
             { brandReference: brand, storeReference: store },
             reference,
+            quoteVersion,
           );
         });
       } catch {
@@ -302,11 +352,12 @@ export function createPostgresOrderCreationQueryStore(
 }
 
 /** Owner-local reuse inside a writer transaction; the caller owns isolation and local scope context. */
-export async function readOrderCreationHistory(
+export async function readOrderCreationHistory<V extends 1 | 2 = 1>(
   transaction: OrderCreationQueryTransaction,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
   value: string,
-): Promise<OrderCreationRecord | null> {
+  quoteVersion: V = 1 as V,
+): Promise<OrderCreationRecord<V> | null> {
   const brand = parseOrderingReference(scope.brandReference),
     store = parseOrderingReference(scope.storeReference),
     reference = parseOrderingReference(value);
@@ -318,7 +369,7 @@ export async function readOrderCreationHistory(
   if (!Array.isArray(rows) || rows.length > 1) return unavailable();
   if (rows.length === 0) return null;
   const row = exact(rows[0], ["history"]);
-  const record = decode(row.history);
+  const record = decode(row.history, quoteVersion);
   if (
     record.submissionReference !== reference ||
     record.order.brandReference !== brand ||

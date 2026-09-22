@@ -1,3 +1,8 @@
+import { RefundPaymentPage } from "./RefundPaymentPage.js";
+import { DiningSessionWorkspace } from "./DiningSessionWorkspace.js";
+import { CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
+import { StoreServiceControlPanel } from "./StoreServiceControlPanel.js";
+import { StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { MerchantShell } from "./MerchantShell.js";
@@ -15,7 +20,7 @@ import { TaxConfigPage } from "./TaxConfigPage.js";
 import { PromotionEditorPage, PromotionListPage } from "./PromotionPages.js";
 import { RecipeEditorPage, RecipeListPage } from "./RecipePages.js";
 import { ProductionBatchPage } from "./ProductionBatchPage.js";
-import { DiningFloorPage, DiningTableListPage } from "./DiningPages.js";
+import { DiningTableListPage } from "./DiningPages.js";
 import {
   ReservationCalendarPage,
   ReservationDetailPage,
@@ -243,7 +248,19 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
         path="/app/organization/stores/:id/service"
         element={
           <LocalDemoRoute notice={demo?.Notice ?? null}>
-            <StoreHoursServicePage {...clientProps(demo?.storeAdmin)} />
+            {demo !== null ? (
+              <StoreHoursServicePage {...clientProps(demo.storeAdmin)} />
+            ) : state.kind === "Ready" && !state.switching ? (
+              <StoreServiceControlPanel
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                store={state.workspace.selectedScope.storeReference}
+                csrf={state.csrf}
+              />
+            ) : (
+              <StatePanel heading="Hours and service unavailable" status>
+                <p>A current merchant session and Store are required.</p>
+              </StatePanel>
+            )}
           </LocalDemoRoute>
         }
       />
@@ -302,7 +319,19 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
         path="/operations/orders"
         element={
           <LocalDemoRoute notice={demo?.Notice ?? null}>
-            <OrderQueuePage {...clientProps(demo?.orderQueue)} />
+            {demo !== null ? (
+              <OrderQueuePage {...clientProps(demo.orderQueue)} />
+            ) : state.kind === "Ready" && !state.switching ? (
+              <CurrentOrderQueuePage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                storeLabel={state.workspace.selectedScope.storeLabel}
+                csrf={state.csrf}
+              />
+            ) : (
+              <StatePanel heading="Order Queue unavailable" status>
+                <p>A current merchant session and Store are required.</p>
+              </StatePanel>
+            )}
           </LocalDemoRoute>
         }
       />
@@ -396,17 +425,64 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
           </LocalDemoRoute>
         }
       />
+      {["/app/operations/payments/:id", "/app/operations/payments/:id/refund"].map((path) => (
+        <Route
+          key={path}
+          path={path}
+          element={
+            state.kind === "Ready" && !state.switching ? (
+              <RefundPaymentPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                csrf={state.csrf}
+                storeLabel={state.workspace.selectedScope.storeLabel}
+              />
+            ) : (
+              <StatePanel heading="Payment unavailable" status>
+                <p>Sign in and select a Store to continue.</p>
+              </StatePanel>
+            )
+          }
+        />
+      ))}
       <Route path="/operations/orders/:id/amend" element={<OrderAmendmentPage />} />
       <Route
         path="/operations/kitchen"
         element={
           <LocalDemoRoute notice={demo?.Notice ?? null}>
-            <KitchenBoardPage {...clientProps(demo?.kitchenBoard)} />
+            {demo?.kitchenBoard ? (
+              <KitchenBoardPage client={demo.kitchenBoard} />
+            ) : state.kind === "Ready" && !state.switching ? (
+              <KitchenBoardPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                csrf={state.csrf}
+                storeReference={state.workspace.selectedScope.storeReference}
+                storeLabel={state.workspace.selectedScope.storeLabel}
+              />
+            ) : (
+              <StatePanel heading="Kitchen Board unavailable">
+                <p>A current merchant session and Store are required.</p>
+              </StatePanel>
+            )}
           </LocalDemoRoute>
         }
       />
       <Route path="/operations/production-batches" element={<ProductionBatchPage />} />
-      <Route path="/operations/dining" element={<DiningFloorPage />} />
+      <Route
+        path="/operations/dining"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <DiningSessionWorkspace
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              csrf={state.csrf}
+              storeLabel={state.workspace.selectedScope.storeLabel}
+            />
+          ) : (
+            <StatePanel heading="Dining unavailable">
+              <p>A current merchant session and Store are required.</p>
+            </StatePanel>
+          )
+        }
+      />
       <Route path="/operations/reservations/calendar" element={<ReservationCalendarPage />} />
       <Route path="/operations/reservations/:id" element={<ReservationDetailPage />} />
       <Route path="/operations/reservations" element={<ReservationListPage />} />
@@ -416,14 +492,57 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
         path="/operations/kitchen/work-items/:id"
         element={
           <LocalDemoRoute notice={demo?.Notice ?? null}>
-            <KitchenWorkItemPage {...clientProps(demo?.kitchenBoard)} />
+            {demo?.kitchenBoard ? (
+              <KitchenWorkItemPage client={demo.kitchenBoard} />
+            ) : state.kind === "Ready" && !state.switching ? (
+              <KitchenWorkItemPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                csrf={state.csrf}
+                storeReference={state.workspace.selectedScope.storeReference}
+                storeLabel={state.workspace.selectedScope.storeLabel}
+              />
+            ) : (
+              <StatePanel heading="Kitchen work item unavailable">
+                <p>A current merchant session and Store are required.</p>
+              </StatePanel>
+            )}
           </LocalDemoRoute>
         }
       />
-      <Route path="/operations/pickup" element={<PickupQueuePage />} />
+      <Route
+        path="/operations/pickup"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <PickupQueuePage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              csrf={state.csrf}
+              storeReference={state.workspace.selectedScope.storeReference}
+              storeLabel={state.workspace.selectedScope.storeLabel}
+            />
+          ) : (
+            <StatePanel heading="Pickup Queue unavailable">
+              <p>A current merchant session and Store are required.</p>
+            </StatePanel>
+          )
+        }
+      />
       <Route path="/app/integrations/kds-profiles" element={<KdsProfilePage />} />
       <Route path="/app/operations/tables" element={<DiningTableListPage />} />
-      <Route path="/operations/order-exceptions" element={<OrderExceptionPage />} />
+      <Route
+        path="/operations/order-exceptions"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <OrderExceptionPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              csrf={state.csrf}
+            />
+          ) : (
+            <StatePanel heading="Order Exception Workbench unavailable" tone="error" status>
+              <p>A current merchant session and Store are required.</p>
+            </StatePanel>
+          )
+        }
+      />
       <Route path="*" element={<Navigate replace to="/app" />} />
     </Routes>
   );

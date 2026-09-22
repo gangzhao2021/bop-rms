@@ -1,289 +1,22 @@
-import type { AppendAuditRecordInput } from "@bop/audit";
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
   createPaymentIntentCreationService,
-  createPaymentProviderSnapshot,
   PaymentIntentCreationError,
-  paymentProviderAdmissionKillSwitchKey,
   type PaymentIntentCreationPorts,
   type PaymentIntentCreationRecord,
 } from "../index.js";
 
-const id = (n: number) => `0198a003-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
-const digest = (character: string) => `sha256:${character.repeat(64)}`;
-const at = "2026-08-03T15:00:00.000Z";
-const refs = {
-  operation: id(1),
-  submission: id(2),
-  cart: id(3),
-  quote: id(4),
-  session: id(5),
-  brand: id(6),
-  store: id(7),
-  preparation: id(8),
-  order: id(9),
-  batch: id(10),
-  capacity: id(11),
-  intent: id(12),
-  attempt: id(13),
-  control: id(14),
-};
-
-function killSwitchEvaluation(
-  options: {
-    reason?: "KILL_INACTIVE" | "KILL_ACTIVE" | "KILL_RECOVERY_ALLOWED" | "KILL_RECOVERY_BLOCKED";
-    killMode?: "BlockNew" | "SafePause" | "Terminate";
-    evaluatedAt?: string;
-  } = {},
-) {
-  const reason = options.reason ?? "KILL_INACTIVE";
-  const backendExecution =
-    reason === "KILL_INACTIVE" || reason === "KILL_RECOVERY_ALLOWED" ? "Allow" : "Deny";
-  const frontendVisibility = backendExecution === "Allow" ? "Show" : "Hide";
-  const killMode = options.killMode ?? "BlockNew";
-  const scope = Object.freeze({
-    kind: "Store" as const,
-    brandReference: refs.brand,
-    storeReference: refs.store,
-  });
-  return Object.freeze({
-    effectiveControl: Object.freeze({ controlId: refs.control, version: 1, scope }),
-    backendExecution,
-    frontendVisibility,
-    reason,
-    killMode,
-    inFlightPolicy: "AllowToComplete" as const,
-    record: Object.freeze({
-      key: paymentProviderAdmissionKillSwitchKey,
-      kind: "KillSwitch" as const,
-      version: 1,
-      scopeKind: "Store" as const,
-      backendExecution,
-      frontendVisibility,
-      reason,
-      killMode,
-      evaluatedAt: options.evaluatedAt ?? at,
-    }),
-  });
-}
-
-function preparation(overrides: Record<string, unknown> = {}) {
-  return {
-    preparationReference: refs.preparation,
-    orderReference: refs.order,
-    orderBatchReference: refs.batch,
-    submissionReference: refs.submission,
-    sourceCartReference: refs.cart,
-    sourceCartVersion: 3,
-    brandReference: refs.brand,
-    storeReference: refs.store,
-    guestSessionReference: refs.session,
-    quoteReference: refs.quote,
-    capacityAllocationReference: refs.capacity,
-    readiness: "PaymentPending",
-    transactionBoundary: "OrderSubmissionPaymentPreparation",
-    orderAllocation: { amountMinor: 2_000n, currencyCode: "CAD" },
-    tip: { amountMinor: 200n, currencyCode: "CAD" },
-    total: { amountMinor: 2_200n, currencyCode: "CAD" },
-    committedAt: "2026-08-03T14:59:00.000Z",
-    capacityExpiresAt: "2026-08-03T15:30:00.000Z",
-    sourceDigest: digest("a"),
-    ...overrides,
-  };
-}
-
-function audit(intentReference: string): AppendAuditRecordInput {
-  return {
-    auditId: id(20),
-    brandId: refs.brand,
-    storeId: refs.store,
-    actor: { type: "System" },
-    actionCode: "PAYMENT_INTENT_CREATE",
-    targetType: "PaymentIntent",
-    targetId: intentReference,
-    reasonCode: "AUTHORIZED_PAYMENT_INTENT_CREATE",
-    correlationId: id(21),
-    occurredAt: at,
-    sourceChannel: "CUSTOMER_PWA",
-    dataClassification: "Restricted",
-    retentionPolicyCode: "AUDIT_STANDARD",
-    retentionPolicyVersion: 1,
-  };
-}
-
-function command(overrides: Record<string, unknown> = {}) {
-  return {
-    paymentOperationReference: refs.operation,
-    submissionReference: refs.submission,
-    cartReference: refs.cart,
-    expectedCartVersion: 3,
-    quoteReference: refs.quote,
-    tipSelectionReference: null,
-    requestedAt: at,
-    ...overrides,
-  };
-}
-
-function harness(
-  options: {
-    denied?: boolean;
-    prior?: PaymentIntentCreationRecord | null;
-    prepared?: unknown;
-    claimStatus?: "Claimed" | "Existing";
-    claimExisting?: PaymentIntentCreationRecord;
-    providerThrows?: boolean;
-    providerScopeMismatch?: boolean;
-    killSwitchEvaluation?: unknown;
-    killSwitchThrows?: boolean;
-    clockNow?: string;
-    advanceAfter?: Partial<Record<"prepare" | "audit" | "claim" | "provider", string | Error>>;
-    authorizationResult?: unknown;
-  } = {},
-) {
-  let stored = options.prior ?? null;
-  let currentClock: string | Error = options.clockNow ?? at;
-  const advance = (phase: "prepare" | "audit" | "claim" | "provider") => {
-    currentClock = options.advanceAfter?.[phase] ?? currentClock;
-  };
-  const calls: string[] = [];
-  let providerCalls = 0;
-  let referenceIndex = 0;
-  const generated = [refs.intent, refs.attempt];
-  const killSwitchInputs: unknown[] = [];
-  const ports: PaymentIntentCreationPorts = {
-    providerEnvironment: "Test",
-    clock: {
-      now() {
-        calls.push("read-clock");
-        if (currentClock instanceof Error) throw currentClock;
-        return currentClock;
-      },
-    },
-    killSwitch: {
-      async evaluate(input) {
-        calls.push("evaluate-kill-switch");
-        killSwitchInputs.push(input);
-        if (options.killSwitchThrows) throw new Error("synthetic control dependency failure");
-        return (
-          options.killSwitchEvaluation === undefined
-            ? killSwitchEvaluation({ evaluatedAt: input.evaluatedAt })
-            : options.killSwitchEvaluation
-        ) as never;
-      },
-    },
-    authorization: {
-      async authorize() {
-        calls.push("authorize");
-        if (Object.hasOwn(options, "authorizationResult"))
-          return options.authorizationResult as never;
-        return options.denied
-          ? null
-          : {
-              action: "CreatePaymentIntent",
-              guestSessionReference: refs.session,
-              brandReference: refs.brand,
-              storeReference: refs.store,
-            };
-      },
-    },
-    ordering: {
-      async preparePayment() {
-        calls.push("prepare-order");
-        advance("prepare");
-        return (options.prepared ?? preparation()) as never;
-      },
-    },
-    audit: {
-      async create(input) {
-        calls.push("audit");
-        advance("audit");
-        return audit(input.paymentIntentReference);
-      },
-    },
-    references: {
-      generate() {
-        return generated[referenceIndex++] ?? id(99);
-      },
-      hash(value) {
-        return `sha256:${createHash("sha256").update(value).digest("hex")}`;
-      },
-      equals(left, right) {
-        return left === right;
-      },
-      providerIdempotencyKey(input) {
-        return `BOP:${input.environment}:${input.paymentOperationReference}:${input.paymentAttemptReference}`;
-      },
-    },
-    repository: {
-      async resolveOperation() {
-        calls.push("resolve-operation");
-        return stored;
-      },
-      async claim(input) {
-        calls.push("claim");
-        advance("claim");
-        if (options.claimStatus === "Existing" && options.claimExisting !== undefined)
-          return { status: "Existing", record: options.claimExisting };
-        stored = input.record;
-        return { status: "Claimed", record: input.record };
-      },
-      async recordObservation(input) {
-        calls.push("record-observation");
-        stored = input.record;
-        return input.record;
-      },
-    },
-    provider: {
-      async createIntent(request) {
-        calls.push("provider-create");
-        providerCalls += 1;
-        advance("provider");
-        if (options.providerThrows) throw new Error("synthetic transport failure");
-        return createPaymentProviderSnapshot({
-          kind: "Snapshot",
-          context: {
-            ...request.context,
-            storeReference: options.providerScopeMismatch
-              ? (id(90) as never)
-              : request.context.storeReference,
-          },
-          providerIntentReference: "pi_SYNTHETIC_1302" as never,
-          providerTransactionReference: null,
-          paymentMethod: "OnlineCard",
-          captureMode: "Automatic",
-          status: "RequiresCustomerAction",
-          requestedAmount: request.amount,
-          authorizedAmount: { amountMinor: 0n, currencyCode: "CAD" as never },
-          capturedAmount: { amountMinor: 0n, currencyCode: "CAD" as never },
-          refundedAmount: { amountMinor: 0n, currencyCode: "CAD" as never },
-          observedAt: at,
-          evidenceDigest: digest("c") as never,
-        });
-      },
-      async retrieveIntent() {
-        throw new Error("not used");
-      },
-      async cancelIntent() {
-        throw new Error("not used");
-      },
-      async captureIntent() {
-        throw new Error("not used");
-      },
-      async refundPayment() {
-        throw new Error("not used");
-      },
-    },
-  };
-  return {
-    calls,
-    ports,
-    providerCalls: () => providerCalls,
-    killSwitchInputs,
-    stored: () => stored,
-  };
-}
+import {
+  id,
+  digest,
+  at,
+  refs,
+  killSwitchEvaluation,
+  preparation,
+  command,
+  harness,
+} from "./payment-intent-creation.fixture.js";
 
 function expectCode(action: () => Promise<unknown>, code: PaymentIntentCreationError["code"]) {
   return expect(action()).rejects.toMatchObject({ code });
@@ -297,6 +30,7 @@ describe("Payment Intent creation service", () => {
     expect(result.record.providerOutcome?.kind).toBe("Snapshot");
     expect(test.providerCalls()).toBe(1);
     expect(test.calls).toEqual([
+      "read-clock",
       "authorize",
       "resolve-operation",
       "read-clock",
@@ -305,10 +39,16 @@ describe("Payment Intent creation service", () => {
       "read-clock",
       "audit",
       "read-clock",
+      "authorize",
+      "read-clock",
       "claim",
+      "read-clock",
+      "authorize",
       "read-clock",
       "provider-create",
       "record-observation",
+      "read-clock",
+      "authorize",
     ]);
     expect(test.killSwitchInputs).toEqual([
       {
@@ -328,10 +68,10 @@ describe("Payment Intent creation service", () => {
       () => createPaymentIntentCreationService(test.ports).create(command()),
       "PAYMENT_INTENT_PERMISSION_DENIED",
     );
-    expect(test.calls).toEqual(["authorize"]);
+    expect(test.calls).toEqual(["read-clock", "authorize"]);
   });
 
-  it("rejects malformed authorization evidence before clock, control, or Domain reads", async () => {
+  it("rejects malformed authorization evidence before control or Domain reads", async () => {
     const test = harness({
       authorizationResult: {
         action: "CreatePaymentIntent",
@@ -345,7 +85,7 @@ describe("Payment Intent creation service", () => {
       () => createPaymentIntentCreationService(test.ports).create(command()),
       "PAYMENT_INTENT_PERMISSION_DENIED",
     );
-    expect(test.calls).toEqual(["authorize"]);
+    expect(test.calls).toEqual(["read-clock", "authorize"]);
     expect(test.killSwitchInputs).toHaveLength(0);
     expect(test.providerCalls()).toBe(0);
   });
@@ -357,7 +97,13 @@ describe("Payment Intent creation service", () => {
     const result = await createPaymentIntentCreationService(replay.ports).create(command());
     expect(result.status).toBe("AlreadyCreated");
     expect(replay.providerCalls()).toBe(0);
-    expect(replay.calls).toEqual(["authorize", "resolve-operation"]);
+    expect(replay.calls).toEqual([
+      "read-clock",
+      "authorize",
+      "resolve-operation",
+      "read-clock",
+      "authorize",
+    ]);
   });
 
   it("keeps an exact replay visible while the new-work switch is active", async () => {
@@ -369,7 +115,13 @@ describe("Payment Intent creation service", () => {
     });
     const result = await createPaymentIntentCreationService(replay.ports).create(command());
     expect(result.status).toBe("AlreadyCreated");
-    expect(replay.calls).toEqual(["authorize", "resolve-operation"]);
+    expect(replay.calls).toEqual([
+      "read-clock",
+      "authorize",
+      "resolve-operation",
+      "read-clock",
+      "authorize",
+    ]);
     expect(replay.killSwitchInputs).toHaveLength(0);
     expect(replay.providerCalls()).toBe(0);
   });
@@ -403,6 +155,7 @@ describe("Payment Intent creation service", () => {
         "PAYMENT_INTENT_PROVIDER_DISABLED",
       );
       expect(test.calls).toEqual([
+        "read-clock",
         "authorize",
         "resolve-operation",
         "read-clock",
@@ -450,6 +203,7 @@ describe("Payment Intent creation service", () => {
       },
     ]);
     expect(test.calls).toEqual([
+      "read-clock",
       "authorize",
       "resolve-operation",
       "read-clock",
@@ -579,13 +333,7 @@ describe("WP-2341 current capacity expiry around Payment creation waits", () => 
     expect(test.calls).not.toContain("claim");
     expect(test.providerCalls()).toBe(0);
   });
-  it.each([
-    expiry,
-    "2026-08-03T15:30:00.001Z",
-    "invalid",
-    "2026-08-03T14:59:59.999Z",
-    new Error("private clock failure"),
-  ])(
+  it.each([expiry, "2026-08-03T15:30:00.001Z"])(
     "retains a committed claim without new Provider work when its clock is no longer usable",
     async (time) => {
       const test = harness({ advanceAfter: { claim: time } });
@@ -601,7 +349,13 @@ describe("WP-2341 current capacity expiry around Payment creation waits", () => 
       expect(
         (await createPaymentIntentCreationService(replay.ports).create(command())).status,
       ).toBe("Processing");
-      expect(replay.calls).toEqual(["authorize", "resolve-operation"]);
+      expect(replay.calls).toEqual([
+        "read-clock",
+        "authorize",
+        "resolve-operation",
+        "read-clock",
+        "authorize",
+      ]);
       expect(replay.providerCalls()).toBe(0);
     },
   );
@@ -690,6 +444,110 @@ describe("WP-2341 current capacity expiry around Payment creation waits", () => 
         createPaymentIntentCreationService(ports).create(command()),
       ).rejects.toMatchObject({ code: "PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE" });
       expect(test.providerCalls()).toBe(0);
+    },
+  );
+});
+
+describe("current authorization around durable payment effects", () => {
+  it.each(["prepare", "audit", "claim", "provider", "observation"] as const)(
+    "denies revocation during %s while preserving already committed facts",
+    async (phase) => {
+      const f = harness();
+      let allowed = true;
+      const authorize = f.ports.authorization.authorize;
+      f.ports.authorization.authorize = async (input) => (allowed ? authorize(input) : null);
+      if (phase === "prepare") {
+        const original = f.ports.ordering.preparePayment;
+        f.ports.ordering.preparePayment = async (input) => {
+          const result = await original(input);
+          allowed = false;
+          return result;
+        };
+      }
+      if (phase === "audit") {
+        const original = f.ports.audit.create;
+        f.ports.audit.create = async (input) => {
+          const result = await original(input);
+          allowed = false;
+          return result;
+        };
+      }
+      if (phase === "claim") {
+        const original = f.ports.repository.claim;
+        f.ports.repository.claim = async (input) => {
+          const result = await original(input);
+          allowed = false;
+          return result;
+        };
+      }
+      if (phase === "provider") {
+        const original = f.ports.provider.createIntent;
+        f.ports.provider.createIntent = async (input) => {
+          const result = await original(input);
+          allowed = false;
+          return result;
+        };
+      }
+      if (phase === "observation") {
+        const original = f.ports.repository.recordObservation;
+        f.ports.repository.recordObservation = async (input) => {
+          const result = await original(input);
+          allowed = false;
+          return result;
+        };
+      }
+      await expect(
+        createPaymentIntentCreationService(f.ports).create(command()),
+      ).rejects.toMatchObject({ code: "PAYMENT_INTENT_PERMISSION_DENIED" });
+      if (phase === "prepare" || phase === "audit") {
+        expect(f.stored()).toBeNull();
+        expect(f.providerCalls()).toBe(0);
+      } else if (phase === "claim") {
+        expect(f.stored()?.providerOutcome).toBeNull();
+        expect(f.providerCalls()).toBe(0);
+      } else {
+        expect(f.stored()?.providerOutcome?.kind).toBe("Snapshot");
+        expect(f.providerCalls()).toBe(1);
+      }
+    },
+  );
+  it("reauthorizes recovered history after its read completes", async () => {
+    const first = await createPaymentIntentCreationService(harness().ports).create(command());
+    const f = harness({ prior: first.record });
+    const original = f.ports.repository.resolveOperation;
+    f.ports.repository.resolveOperation = async (input) => {
+      const result = await original(input);
+      f.ports.authorization.authorize = async () => null;
+      return result;
+    };
+    await expect(
+      createPaymentIntentCreationService(f.ports).create(command()),
+    ).rejects.toMatchObject({ code: "PAYMENT_INTENT_PERMISSION_DENIED" });
+    expect(f.providerCalls()).toBe(0);
+  });
+  it("uses current time for authorization but preserves original payment time", async () => {
+    const current = "2026-08-03T15:01:00.000Z",
+      f = harness({ clockNow: current });
+    const observations: string[] = [],
+      original = f.ports.authorization.authorize;
+    f.ports.authorization.authorize = async (input) => {
+      observations.push(input.observedAt);
+      return original(input);
+    };
+    const result = await createPaymentIntentCreationService(f.ports).create(command());
+    expect(observations.length).toBeGreaterThan(1);
+    expect(observations.every((at) => at === current)).toBe(true);
+    expect(result.record.intent.createdAt).toBe(at);
+  });
+  it.each(["invalid", "2026-08-03T14:59:59.999Z", new Error("synthetic clock failure")])(
+    "keeps the claim but refuses disclosure if current authorization time cannot be established",
+    async (time) => {
+      const f = harness({ advanceAfter: { claim: time } });
+      await expect(
+        createPaymentIntentCreationService(f.ports).create(command()),
+      ).rejects.toMatchObject({ code: "PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE" });
+      expect(f.stored()?.providerOutcome).toBeNull();
+      expect(f.providerCalls()).toBe(0);
     },
   );
 });

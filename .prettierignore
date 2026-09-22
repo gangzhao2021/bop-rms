@@ -9,3 +9,5 @@ test-results/
 packages/contracts/rest/generated/
 BOP-RMS Complete Handoff Package.md
 BOP-RMS Complete Handoff Package.md:Zone.Identifier
+
+.local/

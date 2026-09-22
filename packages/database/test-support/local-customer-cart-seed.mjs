@@ -21,12 +21,14 @@ export async function seedCart({ admin, context, dining }) {
     `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
   );
   await admin.query(`GRANT SELECT,INSERT,UPDATE ON rms_ordering.cart TO ${role}`);
+  await admin.query(`GRANT SELECT ON rms_ordering.dining_cart_replacement TO ${role}`);
   await admin.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON rms_ordering.cart_line TO ${role}`);
   await admin.query(
     `GRANT SELECT,INSERT ON rms_ordering.cart_operation_record,rms_ordering.dining_cart_operation,platform_audit.audit_record TO ${role}`,
   );
   await admin.query(`GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`);
   let sequence = 2000;
+  const diagnostics = [];
   function runner(readOnly = false) {
     return {
       async run(action) {
@@ -51,6 +53,9 @@ export async function seedCart({ admin, context, dining }) {
           assert(!cleared.brand && !cleared.store);
           return value;
         } catch (error) {
+          diagnostics.push({
+            code: typeof error?.code === "string" ? error.code : "OWNER_FAILURE",
+          });
           await client.query("ROLLBACK");
           throw error;
         } finally {
@@ -76,6 +81,12 @@ export async function seedCart({ admin, context, dining }) {
     retentionPolicyVersion: 1,
   });
   return {
+    async inspect() {
+      const counts = await admin.query(
+        "SELECT (SELECT count(*)::int FROM rms_ordering.cart_line) AS lines, (SELECT count(*)::int FROM rms_ordering.cart_operation_record) AS operations",
+      );
+      return { ...counts.rows[0], diagnostics };
+    },
     cartTransactions: runner(true),
     diningCart: {
       participation: dining.participation,
@@ -117,8 +128,8 @@ export async function seedCart({ admin, context, dining }) {
               status: "Accepted",
               menuVersionReference: id(4),
               productVersionReference: id(14),
-              catalogChannelCode: "DINE_IN",
-              catalogOrderTypeCode: "TABLE_SERVICE",
+              catalogChannelCode: "CUSTOMER_PWA",
+              catalogOrderTypeCode: "DINE_IN",
               ruleEvidence: [],
               validatedAt: input.observedAt,
             };

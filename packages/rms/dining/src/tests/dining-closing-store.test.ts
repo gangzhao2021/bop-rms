@@ -248,3 +248,19 @@ it("WP-2282 preserves Finalize Task references and closure digest", async () => 
   const { store } = fixture({ rows: [{ ...source, record: final }] });
   expect(await store.resolveOperation(id(7) as never)).toEqual(final);
 });
+
+it("reads authorized original receipt including time and expected version", async () => {
+  const f = fixture({ rows: [row()] }),
+    authorize = vi.fn(async () => true);
+  const receipt = await f.store.readReceipt(id(7), authorize);
+  expect(receipt).toEqual({ record: record(), expectedVersion: 2, occurredAt: at });
+  expect(authorize).toHaveBeenCalledTimes(2);
+});
+it("denies receipt before IO and after missing result", async () => {
+  const f = fixture(),
+    authorize = vi.fn(async () => false);
+  await expect(f.store.readReceipt(id(7), authorize)).rejects.toMatchObject(denied);
+  expect(f.query).not.toHaveBeenCalled();
+  authorize.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  await expect(f.store.readReceipt(id(7), authorize)).rejects.toMatchObject(denied);
+});

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CatalogError,
+  parseCatalogReference,
   createMenuAllergenValidationService,
   transitionMenuPublication,
   type MenuAllergenProvenanceSnapshot,
@@ -198,4 +199,42 @@ describe("WP-1028 Pilot allergen provenance", () => {
       } as never),
     ).rejects.toBeInstanceOf(CatalogError);
   });
+});
+
+it("unions shared source evidence across base and options but rejects repeats within one path", async () => {
+  const ref = (n: number) => parseCatalogReference(id(n));
+  const value = snapshot();
+  const path = value.paths[0];
+  if (!path) throw new Error("fixture");
+  const shared = {
+    ...value,
+    paths: [
+      {
+        ...path,
+        optionEvidenceReferences: {
+          [ref(15)]: [ref(6), ref(9)],
+          [ref(20)]: [ref(9)],
+        },
+      },
+    ],
+  } as MenuAllergenProvenanceSnapshot;
+  const result = await service(shared).validate(command);
+  expect(result.disclosures[id(13)]?.items).toHaveLength(2);
+  await expect(
+    service({
+      ...shared,
+      paths: [{ ...path, evidenceReferences: [ref(6), ref(6)] }],
+    } as MenuAllergenProvenanceSnapshot).validate(command),
+  ).rejects.toBeInstanceOf(CatalogError);
+  await expect(
+    service({
+      ...shared,
+      paths: [
+        {
+          ...path,
+          optionEvidenceReferences: { [ref(15)]: [ref(9), ref(9)] },
+        },
+      ],
+    } as MenuAllergenProvenanceSnapshot).validate(command),
+  ).rejects.toBeInstanceOf(CatalogError);
 });

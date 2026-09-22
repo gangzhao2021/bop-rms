@@ -40,6 +40,7 @@ import {
   createDiningAdmissionConsumptionService,
   createPostgresDiningGuestBindingStore,
   createDiningGuestBindingQuery,
+  createDiningHostSubmissionQuery,
   createPostgresDiningParticipationStore,
   createDiningCartParticipationQuery,
 } from "../../rms/dining/src/index.ts";
@@ -1265,6 +1266,18 @@ it("consumes exact Guest admissions atomically with current Dining fences and im
         tableReference: id(20),
       });
       assert.equal(closingFacts.phase, "Closing");
+      const closingSubmissionFacts = await createDiningHostSubmissionQuery({
+        scope: identityScope,
+        repository: currentBinding,
+        now: () => at(15),
+      }).resolve({
+        purpose: "DiningHostSubmission",
+        diningSessionReference: a.sessionId,
+        participantReference: a.joined.participant.participantReference,
+        tableReference: id(20),
+      });
+      assert.equal(closingSubmissionFacts, null);
+
       const cartFacts = await createDiningCartParticipationQuery({
         scope: identityScope,
         repository: createPostgresDiningParticipationStore(runner({ readOnly: true }), scope),

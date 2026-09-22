@@ -1,9 +1,6 @@
+import { createHttpPickupCodeClient } from "./pickup-code-client.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import {
-  createPickupCodeController,
-  createUnavailablePickupCodeClient,
-  type PickupCodeController,
-} from "./pickup-code-controller.js";
+import { createPickupCodeController, type PickupCodeController } from "./pickup-code-controller.js";
 
 export function PickupCodePanel({
   orderReference,
@@ -17,7 +14,7 @@ export function PickupCodePanel({
   const [controller] = useState(
     () =>
       provided ??
-      createPickupCodeController(orderReference, orderNumber, createUnavailablePickupCodeClient()),
+      createPickupCodeController(orderReference, orderNumber, createHttpPickupCodeClient()),
   );
   const state = useSyncExternalStore(
     controller.subscribe,

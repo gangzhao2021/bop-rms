@@ -1,9 +1,14 @@
 import { assertGuestSessionUsable, createGuestSession } from "@bop/identity";
 import type { CatalogSelectionAccepted } from "@rms/catalog";
-import { parseCartQuoteAttachment } from "../domain/cart-quote-attachment.js";
+import {
+  parseCartQuoteAttachment,
+  parseConfiguredCartQuoteAttachment,
+  type CartQuoteAttachment,
+} from "../domain/cart-quote-attachment.js";
 import {
   CheckoutValidationError,
   parseCheckoutValidationEvidence,
+  parseConfiguredCheckoutValidationEvidence,
   type CheckoutCatalogLineEvidence,
   type CheckoutFulfillmentAccepted,
   type CheckoutFulfillmentRejectionReason,
@@ -282,9 +287,18 @@ function fulfillmentRejection(value: unknown): CheckoutFulfillmentRejectionReaso
   }
 }
 
-export function createCheckoutValidationService(ports: CheckoutValidationPorts) {
+/** Internal versioned core; v2 callers must supply full configured evidence verification. */
+export function createVersionedCheckoutValidationService<V extends 1 | 2>(
+  ports: CheckoutValidationPorts<V>,
+  quoteVersion: V,
+  verifyConfiguration?: (
+    cart: CartAggregate,
+    quote: CartQuoteAttachment<1 | 2>,
+    observedAt: OrderingInstant,
+  ) => Promise<void>,
+) {
   return Object.freeze({
-    async validate(value: unknown): Promise<CheckoutValidationEvidence> {
+    async validate(value: unknown): Promise<CheckoutValidationEvidence<V>> {
       const raw = exact(value, [
         "validationReference",
         "cartReference",
@@ -337,9 +351,12 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
       const session = sessionScope(authorized.guestSession, cart, requestedAt);
       if (cart.items.length === 0) return fail("CHECKOUT_CART_EMPTY");
       if (loadedQuote === null) return fail("CHECKOUT_QUOTE_MISSING");
-      let quote: ReturnType<typeof parseCartQuoteAttachment>;
+      let quote: CartQuoteAttachment<1 | 2>;
       try {
-        quote = parseCartQuoteAttachment(loadedQuote);
+        quote =
+          quoteVersion === 2
+            ? parseConfiguredCartQuoteAttachment(loadedQuote)
+            : parseCartQuoteAttachment(loadedQuote);
       } catch {
         return fail("CHECKOUT_DEPENDENCY_UNAVAILABLE");
       }
@@ -395,6 +412,10 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
           return catalogEvidence(result, cart, cart.items[index] as CartItem, requestedAt);
         }),
       );
+      if (quoteVersion === 2) {
+        if (verifyConfiguration === undefined) return fail("CHECKOUT_DEPENDENCY_UNAVAILABLE");
+        await dependency(verifyConfiguration(cart, quote, requestedAt));
+      }
       const fulfillmentResult = await dependency(
         ports.fulfillment.validate({
           brandReference: cart.brandReference,
@@ -422,7 +443,11 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
       );
       if (Date.parse(validUntil) <= Date.parse(requestedAt))
         return fail("CHECKOUT_DEPENDENCY_UNAVAILABLE");
-      return parseCheckoutValidationEvidence({
+      return (
+        quoteVersion === 2
+          ? parseConfiguredCheckoutValidationEvidence
+          : parseCheckoutValidationEvidence
+      )({
         validationReference,
         validationIntentHash,
         guestSessionReference: parseOrderingReference(session.sessionReference),
@@ -431,7 +456,7 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
         cartReference: cart.cartReference,
         cartVersion: cart.aggregateVersion,
         quoteReference: quote.quoteReference,
-        quoteVersion: 1,
+        quoteVersion,
         quoteInputDigest: quote.quoteInputDigest,
         orderType: cart.orderType,
         sourceChannel: cart.sourceChannel,
@@ -439,7 +464,11 @@ export function createCheckoutValidationService(ports: CheckoutValidationPorts) 
         fulfillment: acceptedFulfillment,
         validatedAt: requestedAt,
         validUntil,
-      });
+      }) as CheckoutValidationEvidence<V>;
     },
   });
+}
+
+export function createCheckoutValidationService(ports: CheckoutValidationPorts) {
+  return createVersionedCheckoutValidationService(ports, 1);
 }

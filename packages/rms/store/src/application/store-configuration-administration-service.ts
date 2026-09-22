@@ -85,6 +85,7 @@ function parseInput(value: unknown) {
   }
 }
 type Input = ReturnType<typeof parseInput>;
+export type StoreConfigurationAdministrationInput = Input;
 
 function same(
   left: StoreConfigurationVersion,
@@ -120,7 +121,19 @@ export function createStoreConfigurationAdministrationService(
         .catch(dependency))
     )
       return fail("STORE_CONFIGURATION_PERMISSION_DENIED");
-    const digest = ports.references.hashIntent(JSON.stringify({ command, ...input }));
+    // Server reception time is execution metadata, not a new business intent.
+    // Replay retains the original persisted Audit/operation and rechecks current permission.
+    const digest = ports.references.hashIntent(
+      JSON.stringify({
+        command,
+        operationReference: input.operationReference,
+        actorReference: input.actorReference,
+        purposeCode: input.purposeCode,
+        auditReference: input.auditReference,
+        expectedVersion: input.expectedVersion,
+        configuration: input.configuration,
+      }),
+    );
     const existing = await ports.repository
       .resolveOperation(input.operationReference)
       .catch(dependency);

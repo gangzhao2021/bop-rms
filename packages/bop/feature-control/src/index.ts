@@ -5,3 +5,7 @@ export * from "./application/feature-control-service.js";
 export * from "./application/ports/feature-control-ports.js";
 export * from "./application/feature-control-administration-service.js";
 export * from "./application/ports/feature-control-administration-ports.js";
+
+export * from "./infrastructure/persistence/kill-switch-query-store.js";
+
+export * from "./application/current-kill-switch-evaluation.js";

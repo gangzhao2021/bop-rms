@@ -1,3 +1,4 @@
+import { createDiningCartQuoteExpiryService } from "../application/dining-cart-quote-expiry-service.js";
 import { describe, expect, it, vi } from "vitest";
 import { createGuestSession } from "@bop/identity";
 import { createPriceQuote, parsePriceQuoteRequestRecord } from "@rms/pricing";
@@ -7,8 +8,27 @@ import { parseCartQuoteAttachment } from "../domain/cart-quote-attachment.js";
 import { type CartQuoteExpiryRecord } from "../domain/cart-quote-expiry.js";
 import { at, id, quoteInput } from "./pickup-cart-quote-expiry.fixture.js";
 const time = (s = 0) => new Date(Date.parse(at) + s * 1000).toISOString();
-function fixture() {
-  const quote = createPriceQuote(quoteInput());
+function fixture(dineIn = false) {
+  const source = quoteInput();
+  const quote = createPriceQuote(
+    dineIn
+      ? {
+          ...source,
+          taxConfiguration: {
+            ...source.taxConfiguration,
+            rules: source.taxConfiguration.rules.map((rule) => ({
+              ...rule,
+              orderType: "DineIn" as const,
+            })),
+          },
+          lines: source.lines.map((line) => ({
+            ...line,
+            priceContext: { ...line.priceContext, orderType: "DineIn" as const },
+            taxContext: { ...line.taxContext, orderType: "DineIn" as const },
+          })),
+        }
+      : source,
+  );
   const scope = {
     brandReference: String(quote.brandReference),
     storeReference: String(quote.storeReference),
@@ -26,14 +46,14 @@ function fixture() {
     version: 1,
     ...scope,
     publicStoreReference: id(93),
-    publicTableReference: null,
-    channel: "Pickup",
+    publicTableReference: dineIn ? id(101) : null,
+    channel: dineIn ? "DineIn" : "Pickup",
     locale: "en-CA",
     qrReference: id(94),
     qrRevocationVersion: 1,
-    diningState: "ContextOnly",
-    diningSessionReference: null,
-    diningParticipantReference: null,
+    diningState: dineIn ? "DiningBound" : "ContextOnly",
+    diningSessionReference: dineIn ? id(102) : null,
+    diningParticipantReference: dineIn ? id(103) : null,
     createdAt: time(-120),
     lastSeenAt: time(),
     idleExpiresAt: time(14400),
@@ -47,10 +67,10 @@ function fixture() {
   const cart = parseCartAggregate({
     ...scope,
     cartReference: quote.cartReference,
-    orderType: "Pickup",
+    orderType: dineIn ? "DineIn" : "Pickup",
     sourceChannel: "Web",
-    diningSessionReference: null,
-    createdByActorReference: guest.sessionReference,
+    diningSessionReference: dineIn ? id(102) : null,
+    createdByActorReference: dineIn ? id(104) : guest.sessionReference,
     aggregateVersion: quote.cartVersion,
     createdAt: time(-60),
     updatedAt: time(),
@@ -76,12 +96,12 @@ function fixture() {
         menuVersionReference: line.menuVersionReference,
         productVersionReference: line.productVersionReference,
         catalogChannelCode: "SYNTHETIC",
-        catalogOrderTypeCode: "PICKUP",
+        catalogOrderTypeCode: dineIn ? "DINE_IN" : "PICKUP",
         ruleEvidence: [],
         validatedAt: time(),
       },
       addedByActorReference: guest.sessionReference,
-      addedByParticipantReference: null,
+      addedByParticipantReference: dineIn ? id(103) : null,
       addedAt: time(),
     })),
   });
@@ -387,4 +407,104 @@ it("rejects incomplete complete-Quote evidence without writing expiry", async ()
     code: "CART_DEPENDENCY_UNAVAILABLE",
   });
   expect(f.expire).not.toHaveBeenCalled();
+});
+
+function diningFixture() {
+  const f = fixture(true);
+  const participation = vi.fn(async (): Promise<unknown> => ({
+    schemaVersion: 1,
+    ...f.options.scope,
+    diningSessionReference: id(102),
+    participantReference: id(103),
+    tableReference: id(101),
+    tableAssignmentVersion: 1,
+    diningSessionVersion: 1,
+    participantVersion: 1,
+    observedAt: f.now(),
+  }));
+  const service = createDiningCartQuoteExpiryService({
+    ...f.options,
+    participation: { resolve: participation },
+    carts: { loadCart: f.current },
+  });
+  return { ...f, service, participation };
+}
+describe("Dining Quote expiry current authority", () => {
+  it("expires a shared Cart request without requiring the requester to be its creator", async () => {
+    const f = diningFixture();
+    expect(f.cart.createdByActorReference).not.toBe(f.guest.sessionReference);
+    expect(await f.service.reconcile(f.input)).toMatchObject({
+      status: "Expired",
+      record: { requestCreatedAt: at, requestExpiresAt: time(86400) },
+    });
+    expect(f.expire).toHaveBeenCalledOnce();
+  });
+  it("returns no expiry for a still-current Quote", async () => {
+    const f = diningFixture();
+    f.now.mockReturnValue(time(299));
+    expect(await f.service.reconcile(f.input)).toEqual({ status: "NoExpiredRequest" });
+    expect(f.expire).not.toHaveBeenCalled();
+  });
+  it("denies CSRF before reading request history", async () => {
+    const f = diningFixture();
+    f.authorize.mockRejectedValue(new Error("synthetic invalid CSRF"));
+    await expect(f.service.reconcile(f.input)).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.resolve).not.toHaveBeenCalled();
+    expect(f.expire).not.toHaveBeenCalled();
+  });
+  it("rejects a different DiningSession Cart", async () => {
+    const f = diningFixture();
+    f.current.mockResolvedValue(parseCartAggregate({ ...f.cart, diningSessionReference: id(105) }));
+    await expect(f.service.reconcile(f.input)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.expire).not.toHaveBeenCalled();
+  });
+  it("rejects participation loss while reading original history", async () => {
+    const f = diningFixture();
+    f.resolve.mockImplementation(async () => {
+      f.participation.mockResolvedValue(null);
+      return { record: f.record, quote: f.quote };
+    });
+    await expect(f.service.reconcile(f.input)).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.expire).not.toHaveBeenCalled();
+  });
+  it("rejects changed table assignment before writing", async () => {
+    const f = diningFixture();
+    const receipt = await f.participation();
+    f.resolve.mockImplementation(async () => {
+      f.participation.mockResolvedValue({ ...(receipt as object), tableAssignmentVersion: 2 });
+      return { record: f.record, quote: f.quote };
+    });
+    await expect(f.service.reconcile(f.input)).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.expire).not.toHaveBeenCalled();
+  });
+  it("keeps a committed result undisclosed after participation loss", async () => {
+    const f = diningFixture();
+    f.expire.mockImplementation(async ({ record }) => {
+      f.participation.mockResolvedValue(null);
+      return { status: "Expired", record };
+    });
+    await expect(f.service.reconcile(f.input)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.expire).toHaveBeenCalledOnce();
+  });
+  it("rejects clock regression across history awaits", async () => {
+    const f = diningFixture();
+    f.resolve.mockImplementation(async () => {
+      f.now.mockReturnValue(time(300));
+      return { record: f.record, quote: f.quote };
+    });
+    await expect(f.service.reconcile(f.input)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.expire).not.toHaveBeenCalled();
+  });
 });

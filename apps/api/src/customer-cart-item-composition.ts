@@ -1,3 +1,9 @@
+import { createCustomerPickupCartInventoryAuthorization } from "./customer-pickup-cart-inventory-authorization.js";
+import {
+  createCustomerCartSelectionInventory,
+  type CustomerCartSelectionInventoryOptions,
+} from "./customer-cart-selection-inventory.js";
+import { createPostgresCatalogSelectionService } from "@rms/catalog";
 import {
   GuestSessionService,
   createPostgresGuestSessionEntryStore,
@@ -237,5 +243,50 @@ export function createCustomerCartItemComposition(
         commit: writes.commit,
       },
     }),
+  });
+}
+
+/** Server-owned Catalog configuration; the existing cart service owns Guest/CSRF authorization. */
+export function createCustomerCartItemWithCatalogComposition(
+  options: Omit<CustomerCartItemCompositionOptions, "catalog"> & {
+    readonly catalogTransactions: Parameters<typeof createPostgresCatalogSelectionService>[0];
+    readonly catalogScope: Pick<
+      Parameters<typeof createPostgresCatalogSelectionService>[1],
+      "menuReference" | "sourceChannel" | "channelCode" | "orderTypeCode"
+    >;
+    readonly selectedInventory?: Omit<CustomerCartSelectionInventoryOptions, "authorize">;
+    readonly catalogSafety: Pick<
+      Parameters<typeof createPostgresCatalogSelectionService>[2],
+      "killSwitch" | "inventory"
+    >;
+  },
+): CustomerCartPort {
+  const { catalogTransactions, catalogScope, catalogSafety, selectedInventory, ...cart } = options;
+  const createCatalog: (
+    ...args: Parameters<typeof createPostgresCatalogSelectionService>
+  ) => PickupCartItemOptions["catalog"] =
+    selectedInventory === undefined
+      ? createPostgresCatalogSelectionService
+      : (runner, scope, safety) =>
+          createCustomerCartSelectionInventory(runner, scope, safety, {
+            ...selectedInventory,
+            authorize: createCustomerPickupCartInventoryAuthorization(cart.scope, cart.now),
+          });
+  return createCustomerCartItemComposition({
+    ...cart,
+    catalog: createCatalog(
+      catalogTransactions,
+      {
+        ...catalogScope,
+        brandReference: cart.scope.brandReference,
+        storeReference: cart.scope.storeReference,
+        orderType: "Pickup",
+      },
+      {
+        killSwitch: catalogSafety.killSwitch,
+        inventory: catalogSafety.inventory,
+        clock: { now: cart.now },
+      },
+    ),
   });
 }

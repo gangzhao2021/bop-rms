@@ -769,7 +769,27 @@ describe("actual Catalog validator and Ordering composition", () => {
     const validator = createCatalogSelectionValidationService({ snapshots: { resolveCurrent } });
     const composed = createCartItemCommandService({ ...state.ports, catalog: validator });
     const original = addInput({ customerNote: null });
-    const first = await composed.add(original);
+    const contexts: unknown[] = [];
+    const contextual = createCartItemCommandService({
+      ...state.ports,
+      catalog: {
+        validateSelection: (input, selectionContext) => {
+          contexts.push(selectionContext);
+          return validator.validateSelection(input);
+        },
+      },
+    });
+    const first = await contextual.add(original);
+    expect(contexts).toEqual([
+      {
+        diningSessionReference: null,
+        cartReference: original.cartReference,
+        cartVersion: original.expectedAggregateVersion,
+        quantity: original.quantity,
+        guestSessionReference: first.aggregate.createdByActorReference,
+      },
+    ]);
+    expect(Object.isFrozen(contexts[0])).toBe(true);
     expect(first.aggregate.items[0]?.catalogSelectionEvidence).toMatchObject({
       menuVersionReference: ids.menuVersion,
       productVersionReference: ids.productVersion,

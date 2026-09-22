@@ -44,7 +44,7 @@ const NAVIGATION = Object.freeze({
   "HOME-OVERVIEW": ["/app", "merchant.access"],
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
   "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.read"],
-  "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.read"],
+  "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],

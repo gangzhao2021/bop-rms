@@ -221,6 +221,7 @@ export * from "./application/api-client-service.js";
 export * from "./application/ports/api-client-ports.js";
 export {
   createPostgresGuestSessionEntryStore,
+  createPostgresFencedGuestSessionEntryStore,
   createPostgresGuestSessionLegacyInspector,
   type GuestSessionEntryStore,
   type GuestSessionLegacyClassification,
@@ -264,3 +265,18 @@ export * from "./infrastructure/persistence/guest-dining-binding-store.js";
 export * from "./application/guest-dining-binding-service.js";
 export * from "./application/ports/guest-dining-binding-ports.js";
 export * from "./infrastructure/crypto/guest-dining-binding-credential-provider.js";
+
+export * from "./infrastructure/persistence/current-browser-session-source.js";
+
+export * from "./infrastructure/persistence/oidc-authorization-store.js";
+
+export * from "./infrastructure/persistence/browser-session-store.js";
+
+export * from "./infrastructure/persistence/browser-session-selection-store.js";
+
+export { createPostgresCurrentWorkforceMfaSource } from "./infrastructure/persistence/current-workforce-mfa-source.js";
+
+export * from "./infrastructure/persistence/guest-entry-admission-store.js";
+
+export * from "./application/guest-session-request-admission.js";
+export * from "./infrastructure/crypto/guest-session-abuse-keys.js";

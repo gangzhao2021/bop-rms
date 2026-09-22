@@ -286,16 +286,38 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
         return fail("PAYMENT_INTENT_INPUT_INVALID");
       }
       const expectedCartVersion = positiveVersion(raw.expectedCartVersion);
-      const authorizedValue = await ports.authorization
-        .authorize({
-          action: "CreatePaymentIntent",
-          paymentOperationReference: operation,
-          submissionReference,
-          observedAt: requestedAt,
-        })
-        .catch(dependency);
-      if (authorizedValue === null) return fail("PAYMENT_INTENT_PERMISSION_DENIED");
-      const authorized = authorization(authorizedValue);
+      let authorizationAt: PaymentInstant | undefined;
+      const authorizeCurrent = async () => {
+        let at: PaymentInstant;
+        try {
+          at = parsePaymentInstant(ports.clock.now());
+        } catch {
+          return fail(
+            authorizationAt === undefined
+              ? "PAYMENT_INTENT_PROVIDER_DISABLED"
+              : "PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE",
+          );
+        }
+        if (authorizationAt !== undefined && Date.parse(at) < Date.parse(authorizationAt))
+          return fail("PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE");
+        authorizationAt = at;
+        const value = await ports.authorization
+          .authorize({
+            action: "CreatePaymentIntent",
+            paymentOperationReference: operation,
+            submissionReference,
+            observedAt: at,
+          })
+          .catch(dependency);
+        if (value === null) return fail("PAYMENT_INTENT_PERMISSION_DENIED");
+        return authorization(value);
+      };
+      const authorized = await authorizeCurrent();
+      const reauthorize = async () => {
+        const current = await authorizeCurrent();
+        if (JSON.stringify(current) !== JSON.stringify(authorized))
+          return fail("PAYMENT_INTENT_PERMISSION_DENIED");
+      };
       const intentDigest = digest(
         ports,
         `CreatePaymentIntent:v1:${JSON.stringify({
@@ -310,6 +332,7 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
       const replayExpected = { operation, intentDigest, authorization: authorized };
       const prior = await ports.repository.resolveOperation(operation).catch(dependency);
       if (prior !== null) {
+        await reauthorize();
         const record = verifyReplay(prior, replayExpected, ports);
         return Object.freeze({
           status: record.providerOutcome === null ? "Processing" : "AlreadyCreated",
@@ -418,12 +441,14 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
           }),
         )
         .catch(dependency);
+      await reauthorize();
       evaluatedAt = requireCurrentPreparation(ports, preparation, evaluatedAt);
       const claimed = await ports.repository.claim({ record: pending, audit }).catch(dependency);
       const claimedRaw = exactPaymentObject(claimed, ["status", "record"]);
       if (claimedRaw.status !== "Claimed" && claimedRaw.status !== "Existing")
         return fail("PAYMENT_INTENT_DEPENDENCY_UNAVAILABLE");
       const claimedRecord = verifyReplay(claimedRaw.record, replayExpected, ports);
+      await reauthorize();
       if (claimedRaw.status === "Existing")
         return Object.freeze({
           status: claimedRecord.providerOutcome === null ? "Processing" : "AlreadyCreated",
@@ -471,6 +496,8 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
         .recordObservation({ record: observed })
         .then(parsePaymentIntentCreationRecord)
         .catch(dependency);
+      // Persist financial observation even if access was revoked while Provider was in flight.
+      await reauthorize();
       return Object.freeze({ status: "Created", record: saved });
     },
   });

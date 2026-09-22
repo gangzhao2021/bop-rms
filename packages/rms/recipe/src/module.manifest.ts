@@ -10,6 +10,7 @@ const moduleManifestInput =
     lifecycle: "Later",
     publicExports: ["."],
     allowedSynchronousDependencies: [
+      { moduleName: "eventing", packageName: "@bop/eventing", layer: "BOP" },
       {
         moduleName: "audit",
         packageName: "@bop/audit",
@@ -44,6 +45,8 @@ const moduleManifestInput =
       tables: [
         "recipe",
         "recipe_version",
+        "recipe_modifier_version",
+        "recipe_preparation_content",
         "recipe_ingredient_requirement",
         "recipe_allergen_evidence",
         "recipe_preparation_step",

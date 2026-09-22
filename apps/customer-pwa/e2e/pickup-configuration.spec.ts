@@ -107,7 +107,7 @@ for (const screen of [
               },
               scope: {
                 publicStoreReference: id(4),
-                channelCode: "PICKUP",
+                channelCode: "CUSTOMER_PWA",
                 orderTypeCode: "PICKUP",
                 effectiveAt: at,
               },
@@ -248,7 +248,7 @@ for (const screen of [
         });
         await page.getByRole("link", { name: "View Synthetic tea", exact: true }).click();
         await expect(
-          page.getByRole("heading", { name: "Synthetic tea", exact: true }),
+          page.getByRole("main").getByRole("heading", { name: "Synthetic tea", exact: true }),
         ).toBeVisible();
         expect(bindingCalls).toHaveLength(0);
         expect(addCalls).toHaveLength(0);

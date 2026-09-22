@@ -19,7 +19,26 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
   ],
-  accesses: [],
+  accesses: [
+    {
+      id: "current-membership.membership",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "membership" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: "owner-repository",
+      source: "packages/bop/membership/src/infrastructure/persistence/current-membership-store.ts",
+    },
+    {
+      id: "current-membership.store_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "store_assignment" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: "owner-repository",
+      source: "packages/bop/membership/src/infrastructure/persistence/current-membership-store.ts",
+    },
+  ],
 } as const;
 
 export const databaseAccessManifest = databaseAccessManifestInput;

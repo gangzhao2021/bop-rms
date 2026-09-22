@@ -5,10 +5,13 @@ import {
   parsePricingReference,
   type PricingDigest,
 } from "../../domain/money-tax-contract.js";
+import type { ConfiguredPriceQuoteSnapshot } from "../../domain/configured-price-quote.js";
 import type { PriceQuoteSnapshot } from "../../domain/price-quote.js";
 import {
   encodePriceQuoteSnapshot,
   decodePriceQuoteSnapshot,
+  encodeConfiguredPriceQuoteSnapshot,
+  decodeConfiguredPriceQuoteSnapshot,
 } from "../../domain/price-quote-snapshot-codec.js";
 import {
   assertPriceQuoteRequestReplay,
@@ -21,13 +24,20 @@ import {
 } from "../../domain/price-quote-request.js";
 import {
   createPostgresPriceQuoteHistoryReader,
+  createPostgresConfiguredPriceQuoteHistoryReader,
+  type PriceQuoteHistoryReader,
   type PriceQuoteQueryTransaction,
   type PriceQuoteQueryTransactionRunner,
 } from "./price-quote-query-store.js";
-import { createPostgresPriceQuoteStore } from "./price-quote-store.js";
-export interface PriceQuoteRequestResult {
+import {
+  createPostgresPriceQuoteStore,
+  createPostgresConfiguredPriceQuoteStore,
+  type PriceQuoteStore,
+} from "./price-quote-store.js";
+type StoredQuote = PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
+export interface PriceQuoteRequestResult<T extends StoredQuote = PriceQuoteSnapshot> {
   readonly record: PriceQuoteRequestRecord;
-  readonly quote: PriceQuoteSnapshot;
+  readonly quote: T;
 }
 export interface PriceQuoteRequestLookup {
   readonly operationReference: string;
@@ -36,15 +46,15 @@ export interface PriceQuoteRequestLookup {
   readonly cartVersion: number;
   readonly observedAt: string;
 }
-export interface PriceQuoteRequestStore {
-  resolve(input: PriceQuoteRequestLookup): Promise<PriceQuoteRequestResult | null>;
+export interface PriceQuoteRequestStore<T extends StoredQuote = PriceQuoteSnapshot> {
+  resolve(input: PriceQuoteRequestLookup): Promise<PriceQuoteRequestResult<T> | null>;
   append(input: {
     readonly operationReference: string;
     readonly guestSessionReference: string;
     readonly observedAt: string;
-    readonly quote: PriceQuoteSnapshot;
+    readonly quote: T;
     readonly audit: AppendAuditRecordInput;
-  }): Promise<PriceQuoteRequestResult>;
+  }): Promise<PriceQuoteRequestResult<T>>;
 }
 function fail(): never {
   throw new PriceQuoteRequestError("QUOTE_REQUEST_UNAVAILABLE");
@@ -96,7 +106,7 @@ const insert = `INSERT INTO rms_pricing.price_quote_request
  (operation_id,brand_id,store_id,guest_session_id,cart_id,cart_version,record_version,intent_digest,quote_id,quote_outcome,created_at,idempotency_expires_at)
  VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11) RETURNING operation_id AS reference`;
 /** Owner-scoped history only. Caller must authorize the current Session before lookup or append. */
-export function createPostgresPriceQuoteRequestStore(
+function createRequestStore<T extends StoredQuote>(
   runner: PriceQuoteQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
   references: {
@@ -104,7 +114,20 @@ export function createPostgresPriceQuoteRequestStore(
     hashIntent(value: string): string;
     equals(left: PricingDigest, right: PricingDigest): boolean;
   },
-): PriceQuoteRequestStore {
+  codec: {
+    encode(value: T): string;
+    decode(text: string): T;
+    history(
+      runner: PriceQuoteQueryTransactionRunner,
+      scope: Readonly<{ brandReference: string; storeReference: string }>,
+    ): PriceQuoteHistoryReader<T>;
+    store(
+      runner: PriceQuoteQueryTransactionRunner,
+      scope: Readonly<{ brandReference: string; storeReference: string }>,
+      references: { generateReference(): string },
+    ): PriceQuoteStore<T>;
+  },
+): PriceQuoteRequestStore<T> {
   let brand: string;
   let store: string;
   try {
@@ -126,16 +149,15 @@ export function createPostgresPriceQuoteRequestStore(
     tx: PriceQuoteQueryTransaction,
     identity: PriceQuoteRequestIdentity,
     observedAt: string,
-  ): Promise<PriceQuoteRequestResult | null> {
+  ): Promise<PriceQuoteRequestResult<T> | null> {
     const result = rows(await tx.query(select, [brand, store, identity.operationReference]));
     if (result.length === 0) return null;
     const record = parsePriceQuoteRequestRecord(closed(result[0], ["record"]).record);
     assertPriceQuoteRequestReplay(record, identity, observedAt);
     if (!references.equals(record.intentDigest, digest(identity))) fail();
-    const quote = await createPostgresPriceQuoteHistoryReader(
-      { run: async (action) => action(tx) },
-      ownedScope,
-    ).load(record.quoteReference);
+    const quote = await codec
+      .history({ run: async (action) => action(tx) }, ownedScope)
+      .load(record.quoteReference);
     if (
       quote === null ||
       quote.brandReference !== brand ||
@@ -174,7 +196,7 @@ export function createPostgresPriceQuoteRequestStore(
         return failure(error);
       }
     },
-    async append(input: Parameters<PriceQuoteRequestStore["append"]>[0]) {
+    async append(input: Parameters<PriceQuoteRequestStore<T>["append"]>[0]) {
       try {
         const raw = closed(input, [
           "operationReference",
@@ -184,9 +206,7 @@ export function createPostgresPriceQuoteRequestStore(
           "audit",
         ]);
         const observedAt = parseCanonicalInstant(raw.observedAt);
-        const quote = decodePriceQuoteSnapshot(
-          encodePriceQuoteSnapshot(raw.quote as PriceQuoteSnapshot),
-        );
+        const quote = codec.decode(codec.encode(raw.quote as T));
         if (quote.brandReference !== brand || quote.storeReference !== store) fail();
         const identity = parsePriceQuoteRequestIdentity({
           ...ownedScope,
@@ -236,11 +256,9 @@ export function createPostgresPriceQuoteRequestStore(
           if (prior !== null) return prior;
           if (observedAt < quote.createdAt || observedAt >= quote.expiresAt) fail();
           const borrowed: PriceQuoteQueryTransactionRunner = { run: async (action) => action(tx) };
-          const persisted = await createPostgresPriceQuoteStore(
-            borrowed,
-            ownedScope,
-            references,
-          ).append({ quote, audit });
+          const persisted = await codec
+            .store(borrowed, ownedScope, references)
+            .append({ quote, audit });
           const record = parsePriceQuoteRequestRecord({
             ...identity,
             recordVersion: 1,
@@ -281,5 +299,31 @@ export function createPostgresPriceQuoteRequestStore(
         return failure(error);
       }
     },
+  });
+}
+
+export function createPostgresPriceQuoteRequestStore(
+  runner: PriceQuoteQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  references: Parameters<typeof createRequestStore>[2],
+): PriceQuoteRequestStore {
+  return createRequestStore(runner, scope, references, {
+    encode: encodePriceQuoteSnapshot,
+    decode: decodePriceQuoteSnapshot,
+    history: createPostgresPriceQuoteHistoryReader,
+    store: createPostgresPriceQuoteStore,
+  });
+}
+
+export function createPostgresConfiguredPriceQuoteRequestStore(
+  runner: PriceQuoteQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  references: Parameters<typeof createRequestStore>[2],
+): PriceQuoteRequestStore<ConfiguredPriceQuoteSnapshot> {
+  return createRequestStore(runner, scope, references, {
+    encode: encodeConfiguredPriceQuoteSnapshot,
+    decode: decodeConfiguredPriceQuoteSnapshot,
+    history: createPostgresConfiguredPriceQuoteHistoryReader,
+    store: createPostgresConfiguredPriceQuoteStore,
   });
 }

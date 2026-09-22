@@ -76,7 +76,7 @@ function render(state: CheckoutState, now = Date.parse("2026-08-12T00:01:00.000Z
 }
 
 describe("CUST-CHECKOUT page contract", () => {
-  it("renders only server Cart and Quote facts with the Payment boundary disabled", () => {
+  it("renders only server Cart and Quote facts with payment gated by saved details", () => {
     const html = render({ status: "ready", cart, quote });
     expect(html).toContain("Synthetic tea");
     expect(html).toContain("CAD 1.13");
@@ -84,9 +84,7 @@ describe("CUST-CHECKOUT page contract", () => {
     expect(html).toContain("SYNTHETIC_BLOCK");
     expect(html).toContain("Price changed");
     expect(html).toContain("I confirm the changed price");
-    expect(html).toContain(
-      "Contact, capacity hold, tip and receipt-choice adapters are unavailable",
-    );
+    expect(html).toContain("Save your checkout details before continuing to secure payment.");
     expect(html).toContain("disabled");
   });
 

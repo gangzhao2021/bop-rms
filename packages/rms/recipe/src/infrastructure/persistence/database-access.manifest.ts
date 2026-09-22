@@ -3,6 +3,22 @@ const databaseAccessManifestInput = {
   module: { moduleName: "recipe", packageName: "@rms/recipe", layer: "RMS" },
   tables: [
     {
+      table: "recipe_preparation_content",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/recipe" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
+      table: "recipe_modifier_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@rms/recipe" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "recipe",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@rms/recipe" },

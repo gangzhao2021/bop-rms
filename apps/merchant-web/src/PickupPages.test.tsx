@@ -23,6 +23,29 @@ describe("WP-1805 Pickup screens", () => {
     ])
       expect(html).toContain(value);
   });
+  it("shows completed pickups as handed over without waiting or handoff actions", () => {
+    const fixture = pickupQueueFixture();
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            items: fixture.items.map((item) => ({ ...item, phase: "Completed" })),
+          })}
+          includeCompleted
+        />
+      </MemoryRouter>,
+    );
+    const card = html.slice(html.indexOf("<article"), html.indexOf("</article>"));
+    expect(card).toContain("Handed over");
+    expect(card).toContain("Completed");
+    expect(card).not.toContain("Ready 20 minutes");
+    expect(card).not.toContain("Overdue");
+    expect(card).not.toContain("Waiting");
+    expect(card).not.toContain("Open proof verification");
+    expect(card).not.toContain("Explicit handoff confirmation required");
+    expect(card).not.toContain("<button");
+  });
   it("locks stale queues and exposes safe command failure", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>

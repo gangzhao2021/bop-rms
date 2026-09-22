@@ -155,12 +155,46 @@ function StateHeading({
   );
 }
 
-function RetryAction({ onRetry }: Readonly<{ onRetry?: (() => void) | undefined }>) {
+function RetryAction({
+  onRetry,
+  disabled = false,
+}: Readonly<{ onRetry?: (() => void) | undefined; disabled?: boolean }>) {
   return onRetry ? (
-    <button className="entry-action" type="button" onClick={onRetry}>
+    <button className="entry-action" type="button" onClick={onRetry} disabled={disabled}>
       Try again
     </button>
   ) : null;
+}
+
+function RateLimitedState({
+  seconds,
+  onRetry,
+  headingRef,
+}: Readonly<{
+  seconds: number;
+  onRetry?: (() => void) | undefined;
+  headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
+}>) {
+  const [remaining, setRemaining] = useState(seconds);
+  useEffect(() => {
+    const until = performance.now() + seconds * 1000;
+    const timer = setInterval(() => {
+      const next = Math.max(0, Math.ceil((until - performance.now()) / 1000));
+      setRemaining(next);
+      if (next === 0) clearInterval(timer);
+    }, 250);
+    return () => clearInterval(timer);
+  }, [seconds]);
+  return (
+    <div className="entry-state entry-state--warning" role="status">
+      <StateHeading headingRef={headingRef}>Please wait before trying again</StateHeading>
+      <p>No order was submitted. You can ask a staff member for help.</p>
+      <p aria-live="off">
+        {remaining > 0 ? "Try again in " + remaining + " seconds." : "You can try again now."}
+      </p>
+      <RetryAction onRetry={onRetry} disabled={remaining > 0} />
+    </div>
+  );
 }
 
 function EntryState({
@@ -194,6 +228,16 @@ function EntryState({
         <StateHeading headingRef={headingRef}>This entry link can’t be used</StateHeading>
         <p>Scan the location QR code again or ask a staff member for help.</p>
       </div>
+    );
+
+  if (state.kind === "RateLimited")
+    return (
+      <RateLimitedState
+        key={state.retryAfterSeconds}
+        seconds={state.retryAfterSeconds}
+        headingRef={headingRef}
+        onRetry={onRetry}
+      />
     );
 
   if (state.kind === "Offline")

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseReceiptView } from "./receipt-controller.js";
+import {
+  createReceiptController,
+  ReceiptClientError,
+  parseReceiptView,
+} from "./receipt-controller.js";
 
 const id = (n: number) => `018f8a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 function payload() {
@@ -67,4 +71,145 @@ describe("receipt response parser", () => {
     expect(() => parseReceiptView(candidate, id(1))).toThrow("invalid receipt");
     expect(invoked).toBe(false);
   });
+});
+
+describe("receipt request lifetime", () => {
+  it("does not restore an old receipt after current access is denied", async () => {
+    let permitted = true;
+    const controller = createReceiptController(id(1), {
+      async load() {
+        if (!permitted) throw new ReceiptClientError("permission_denied");
+        return payload();
+      },
+    });
+    await controller.load();
+    expect(controller.getState().status).toBe("ready");
+    permitted = false;
+    await controller.load();
+    expect(controller.getState().status).toBe("permission-denied");
+    controller.setOnline(false);
+    expect(controller.getState()).toEqual({ status: "offline", view: null });
+    controller.setOnline(true);
+    expect(controller.getState().status).toBe("unavailable");
+  });
+
+  it("discards in-flight responses when the page goes offline", async () => {
+    let resolve!: (value: unknown) => void;
+    const controller = createReceiptController(id(1), {
+      load: () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    });
+    const loading = controller.load();
+    controller.setOnline(false);
+    resolve(payload());
+    await loading;
+    expect(controller.getState()).toEqual({ status: "offline", view: null });
+    controller.setOnline(true);
+    expect(controller.getState().status).toBe("unavailable");
+  });
+
+  it("does not let an older response undo the newest denial", async () => {
+    let resolve!: (value: unknown) => void;
+    let calls = 0;
+    const controller = createReceiptController(id(1), {
+      load() {
+        calls += 1;
+        if (calls === 1)
+          return new Promise((done) => {
+            resolve = done;
+          });
+        return Promise.reject(new ReceiptClientError("permission_denied"));
+      },
+    });
+    const older = controller.load();
+    await controller.load();
+    resolve(payload());
+    await older;
+    expect(controller.getState().status).toBe("permission-denied");
+    controller.setOnline(false);
+    expect(controller.getState()).toEqual({ status: "offline", view: null });
+  });
+});
+
+describe("receipt adjustments", () => {
+  it("preserves old snapshots without adding adjustment fields", () => {
+    expect(parseReceiptView(payload(), id(1)).records[0]?.snapshot).not.toHaveProperty(
+      "adjustments",
+    );
+  });
+  it.each([
+    "valid",
+    "missing-fee",
+    "extra",
+    "negative",
+    "overflow",
+    "currency",
+    "excess-discount",
+    "wrong-total",
+  ] as const)("validates adjustments: %s", (kind) => {
+    const input = payload();
+    const record = input.records[0];
+    if (!record) throw new Error("missing fixture");
+    const discount = { amountMinor: "100", currencyCode: "CAD" };
+    const fee = { amountMinor: "50", currencyCode: "CAD" };
+    const adjustments: Record<string, unknown> = { discount, fee };
+    record.snapshot.total.amountMinor = "1080";
+    if (kind === "missing-fee") delete adjustments.fee;
+    if (kind === "extra") adjustments.extra = true;
+    if (kind === "negative") discount.amountMinor = "-1";
+    if (kind === "overflow") fee.amountMinor = "9223372036854775808";
+    if (kind === "currency") fee.currencyCode = "USD";
+    if (kind === "excess-discount") discount.amountMinor = "1001";
+    if (kind === "wrong-total") record.snapshot.total.amountMinor = "1081";
+    Object.assign(record.snapshot, { adjustments });
+    if (kind === "valid")
+      expect(parseReceiptView(input, id(1)).records[0]?.snapshot.adjustments).toEqual({
+        discount: { amountMinor: 100n, currencyCode: "CAD" },
+        fee: { amountMinor: 50n, currencyCode: "CAD" },
+      });
+    else expect(() => parseReceiptView(input, id(1))).toThrow("invalid receipt");
+  });
+});
+
+it("keeps the complete issuer legal name and rejects an oversized source", () => {
+  const candidate = payload();
+  const record = candidate.records[0];
+  if (!record) throw new Error("missing synthetic receipt");
+  record.snapshot.operatingEntityDisplayName = "S".repeat(200);
+  expect(parseReceiptView(candidate, id(1)).records[0]?.snapshot.operatingEntityDisplayName).toBe(
+    "S".repeat(200),
+  );
+  record.snapshot.operatingEntityDisplayName += "S";
+  expect(() => parseReceiptView(candidate, id(1))).toThrow("invalid receipt");
+});
+
+const financialPayload = () => ({
+  observedAt: "2026-09-21T13:00:00.000Z",
+  currencyCode: "CAD",
+  capturedMinor: "1130",
+  confirmedRefundMinor: "100",
+  pendingRefundMinor: "600",
+  unresolvedAttemptCount: 1,
+});
+it("parses optional financial facts separately and preserves old responses", () => {
+  expect(parseReceiptView(payload(), id(1)).financial).toBeUndefined();
+  expect(parseReceiptView({ ...payload(), financial: null }, id(1)).financial).toBeNull();
+  const result = parseReceiptView({ ...payload(), financial: financialPayload() }, id(1));
+  expect(result.financial?.pendingRefundMinor).toBe(600n);
+  expect(result.records[0]?.snapshot.refundedTotal.amountMinor).toBe(0n);
+});
+it.each([
+  { capturedMinor: "1" },
+  { pendingRefundMinor: "-1" },
+  { capturedMinor: "9223372036854775808" },
+  { unresolvedAttemptCount: -1 },
+  { observedAt: "2026-02-30T13:00:00.000Z" },
+  { currencyCode: "cad" },
+  { secret: "unrecognized" },
+])("rejects malformed financial data %j", (change) => {
+  expect(() =>
+    parseReceiptView({ ...payload(), financial: { ...financialPayload(), ...change } }, id(1)),
+  ).toThrow();
 });

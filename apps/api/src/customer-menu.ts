@@ -143,6 +143,12 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
           pinned: sellable.pinned,
           availability: sellable.availability,
           optionRules: sellable.optionRules.map((rule) => ({
+            ...(rule.semanticsVersion === 2
+              ? {
+                  semanticsVersion: 2,
+                  activationOptionReferences: [...(rule.activationOptionReferences ?? [])],
+                }
+              : {}),
             bindingReference: rule.bindingReference,
             optionSetVersionReference: rule.optionSetVersionReference,
             minimumSelections: rule.minimumSelections,
@@ -155,6 +161,9 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
               maximumQuantity: option.maximumQuantity,
               conflictOptionReferences: [...option.conflictOptionReferences],
               selectedByDefault: option.selectedByDefault,
+              ...(rule.semanticsVersion === 2
+                ? { defaultQuantity: Number(option.defaultQuantity) }
+                : {}),
               incrementalPrice: {
                 status: option.incrementalPrice.status,
                 amount: option.incrementalPrice.amount,

@@ -41,6 +41,7 @@ async function prove(context) {
       { table_name: "order_amendment_operation_record" },
       { table_name: "order_amendment_state_record" },
       { table_name: "order_batch" },
+      { table_name: "order_capacity_link" },
       { table_name: "order_header" },
       { table_name: "order_item" },
       { table_name: "order_number_allocation" },

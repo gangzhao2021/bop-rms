@@ -5,3 +5,6 @@ export * from "./application/ports/device-management-ports.js";
 export * from "./contracts/kds-profile-management.js";
 export * from "./application/kds-profile-management-service.js";
 export * from "./application/ports/kds-profile-management-ports.js";
+export * from "./contracts/digital-receipt-template.js";
+export * from "./infrastructure/persistence/digital-receipt-template-store.js";
+export { createPostgresReceiptTemplatePublicationProof } from "./infrastructure/template-publication-proof.js";

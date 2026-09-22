@@ -4,8 +4,24 @@ import type { OrderingInstant, OrderingReference } from "../../domain/cart.js";
 import type { OrderStatusProjection } from "../../domain/order-status-projection.js";
 
 export interface FulfillmentCompletedEventConsumerPorts {
+  readonly authorization: {
+    authorize(
+      transaction: ConsumerTransaction,
+      envelope: FulfillmentCompletedEnvelope,
+    ): Promise<boolean>;
+  };
+  readonly completions: {
+    /** Commit or recover authoritative owner history with Workflow and Audit in this transaction. */
+    commit(
+      transaction: ConsumerTransaction,
+      envelope: FulfillmentCompletedEnvelope,
+    ): Promise<unknown>;
+  };
   readonly projections: {
-    load(orderReference: OrderingReference): Promise<OrderStatusProjection | null>;
+    load(input: {
+      readonly orderReference: OrderingReference;
+      readonly transaction: ConsumerTransaction;
+    }): Promise<OrderStatusProjection | null>;
     replace(input: {
       readonly projection: OrderStatusProjection;
       readonly envelope: FulfillmentCompletedEnvelope;

@@ -20,3 +20,10 @@ Thumbs.db
 .vscode/
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# Local browser sessions can contain private transaction references.
+output/playwright/
+
+# Private source reference: docs/spec/README.md requires it outside Git.
+/BOP-RMS Complete Handoff Package.md
+/BOP-RMS Complete Handoff Package.md:Zone.Identifier

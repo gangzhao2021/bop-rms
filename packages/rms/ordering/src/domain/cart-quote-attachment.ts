@@ -21,7 +21,7 @@ export interface CartQuoteLineEvidence {
   readonly quantity: number;
 }
 
-export interface CartQuoteAttachment {
+export interface CartQuoteAttachment<V extends 1 | 2 = 1> {
   readonly operationReference: OrderingReference;
   readonly operationIntentHash: OrderingHash;
   readonly guestSessionReference: OrderingReference;
@@ -30,7 +30,7 @@ export interface CartQuoteAttachment {
   readonly storeReference: OrderingReference;
   readonly cartVersion: number;
   readonly quoteReference: OrderingReference;
-  readonly quoteVersion: 1;
+  readonly quoteVersion: V;
   readonly quoteInputDigest: OrderingHash;
   readonly currencyCode: string;
   readonly currencyMetadataVersion: number;
@@ -144,7 +144,10 @@ function warnings(value: unknown): readonly string[] {
   return Object.freeze(parsed);
 }
 
-export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
+function parseAttachment<V extends 1 | 2>(
+  value: unknown,
+  expectedVersion: V,
+): CartQuoteAttachment<V> {
   const raw = exact(value, [
     "operationReference",
     "operationIntentHash",
@@ -171,7 +174,7 @@ export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
     "attachedAt",
     "idempotencyExpiresAt",
   ]);
-  if (raw.quoteVersion !== 1 || !Array.isArray(raw.lines) || raw.lines.length > 100)
+  if (raw.quoteVersion !== expectedVersion || !Array.isArray(raw.lines) || raw.lines.length > 100)
     return invalid();
   const currencyCode = currency(raw.currencyCode);
   const parsedLines = raw.lines.map(line);
@@ -208,7 +211,7 @@ export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
     storeReference: parseOrderingReference(raw.storeReference),
     cartVersion: positive(raw.cartVersion),
     quoteReference: parseOrderingReference(raw.quoteReference),
-    quoteVersion: 1,
+    quoteVersion: expectedVersion,
     quoteInputDigest: parseOrderingHash(raw.quoteInputDigest),
     currencyCode,
     currencyMetadataVersion: positive(raw.currencyMetadataVersion),
@@ -225,4 +228,12 @@ export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
     attachedAt,
     idempotencyExpiresAt,
   });
+}
+
+export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
+  return parseAttachment(value, 1);
+}
+
+export function parseConfiguredCartQuoteAttachment(value: unknown): CartQuoteAttachment<2> {
+  return parseAttachment(value, 2);
 }

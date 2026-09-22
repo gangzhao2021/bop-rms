@@ -5,9 +5,9 @@ import type { StoreBusinessDateResolution } from "@rms/store";
 import type { OrderingInstant, OrderingReference } from "../../domain/cart.js";
 import type { CheckoutValidationEvidence } from "../../domain/checkout-validation.js";
 import type { CreateOrderResult, OrderCreationRecord } from "../../domain/order-creation.js";
-export type OrderCreationCommitResult = Readonly<{
+export type OrderCreationCommitResult<V extends 1 | 2 = 1> = Readonly<{
   status: "Created" | "Existing";
-  record: OrderCreationRecord;
+  record: OrderCreationRecord<V>;
 }>;
 
 export interface OrderCreationSourceLine {
@@ -16,7 +16,7 @@ export interface OrderCreationSourceLine {
   readonly pricing: unknown;
 }
 
-export interface OrderCreationPorts {
+export interface OrderCreationPorts<V extends 1 | 2 = 1> {
   readonly clock: { now(): string };
   readonly authorization: {
     authorize(input: {
@@ -40,10 +40,10 @@ export interface OrderCreationPorts {
       readonly expectedCartVersion: number;
       readonly quoteReference: OrderingReference;
       readonly requestedAt: OrderingInstant;
-    }): Promise<CheckoutValidationEvidence>;
+    }): Promise<CheckoutValidationEvidence<V>>;
   };
   readonly source: {
-    load(input: { readonly evidence: CheckoutValidationEvidence }): Promise<{
+    load(input: { readonly evidence: CheckoutValidationEvidence<V> }): Promise<{
       readonly cart: unknown;
       readonly lines: readonly OrderCreationSourceLine[];
     }>;
@@ -63,15 +63,17 @@ export interface OrderCreationPorts {
     equals(left: string, right: string): boolean;
   };
   readonly repository: {
-    resolveSubmission(submissionReference: OrderingReference): Promise<OrderCreationRecord | null>;
+    resolveSubmission(
+      submissionReference: OrderingReference,
+    ): Promise<OrderCreationRecord<V> | null>;
     commit(input: {
-      readonly checkoutValidationEvidence: CheckoutValidationEvidence;
-      readonly record: Omit<OrderCreationRecord, "orderNumberAllocation">;
+      readonly checkoutValidationEvidence: CheckoutValidationEvidence<V>;
+      readonly record: Omit<OrderCreationRecord<V>, "orderNumberAllocation">;
       readonly businessDateResolution: StoreBusinessDateResolution;
       readonly audit: AppendAuditRecordInput;
       readonly event: OrderCreatedEnvelope;
-    }): Promise<OrderCreationCommitResult>;
+    }): Promise<OrderCreationCommitResult<V>>;
   };
 }
 
-export type OrderCreationCommandResult = CreateOrderResult;
+export type OrderCreationCommandResult<V extends 1 | 2 = 1> = CreateOrderResult<V>;

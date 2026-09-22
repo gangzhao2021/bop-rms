@@ -143,7 +143,11 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
   });
 }
 
-function parseError(status: number, value: unknown): CustomerEntryScreenState {
+function parseError(
+  status: number,
+  value: unknown,
+  retryAfter: string | null,
+): CustomerEntryScreenState {
   const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery"]);
   const recovery = exact(raw.recovery, ["action", "storeSelection"]);
   if (raw.schemaVersion !== 1 || recovery.storeSelection !== "Hidden")
@@ -162,6 +166,16 @@ function parseError(status: number, value: unknown): CustomerEntryScreenState {
     recovery.action === "RescanOrAskStaff"
   )
     return Object.freeze({ kind: "EntryUnavailable" });
+  if (
+    status === 429 &&
+    raw.code === "entry_rate_limited" &&
+    raw.messageKey === "customer.entry.rate_limited" &&
+    recovery.action === "RetryOrAskStaff" &&
+    retryAfter !== null &&
+    /^[1-9][0-9]{0,4}$/u.test(retryAfter) &&
+    Number(retryAfter) <= 86400
+  )
+    return Object.freeze({ kind: "RateLimited", retryAfterSeconds: Number(retryAfter) });
   if (
     status === 503 &&
     raw.code === "entry_service_unavailable" &&
@@ -193,9 +207,26 @@ export function consumeCustomerQrFragment(input: {
 
 export function createCustomerEntryClient(
   boundary: CustomerEntryBrowserBoundary,
+  inMemoryToken?: string,
 ): CustomerEntryClient {
-  const token = consumeCustomerQrFragment(boundary);
+  const fragmentToken = consumeCustomerQrFragment(boundary);
+  const token =
+    inMemoryToken === undefined
+      ? fragmentToken
+      : boundary.pathname === "/" &&
+          boundary.search === "" &&
+          inMemoryToken.length > 0 &&
+          inMemoryToken.length <= 2048 &&
+          compactTokenPattern.test(inMemoryToken)
+        ? inMemoryToken
+        : null;
   let settled: Promise<CustomerEntryScreenState> | null = null;
+  let retryUntil: number | null = null;
+  const cooldown = (): CustomerEntryScreenState =>
+    Object.freeze({
+      kind: "RateLimited",
+      retryAfterSeconds: Math.max(0, Math.ceil(((retryUntil ?? 0) - performance.now()) / 1000)),
+    });
   let flight: Promise<CustomerEntryScreenState> | null = null;
   const fetcher = boundary.fetch;
   const online = () => {
@@ -270,7 +301,7 @@ export function createCustomerEntryClient(
       }
       const body: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
       guard();
-      return { status: response.status, body };
+      return { status: response.status, body, retryAfter: response.headers.get("retry-after") };
     };
     try {
       return await Promise.race([request(), timeout]);
@@ -290,7 +321,7 @@ export function createCustomerEntryClient(
     if (token === null) return Object.freeze({ kind: "Missing" });
     if (!online()) return Object.freeze({ kind: "Offline" });
     try {
-      const { status, body } = await receive(current);
+      const { status, body, retryAfter } = await receive(current);
       if (!online() || !current()) throw new Error("entry unavailable");
       if (status === 201) {
         const context = parseSuccess(body);
@@ -298,13 +329,18 @@ export function createCustomerEntryClient(
         setCustomerCsrfCredential(context.csrfToken);
         return Object.freeze({ kind: "Established", context });
       }
-      return parseError(status, body);
+      const error = parseError(status, body, retryAfter);
+      retryUntil =
+        error.kind === "RateLimited" ? performance.now() + error.retryAfterSeconds * 1000 : null;
+      return error;
     } catch {
       return Object.freeze({ kind: online() ? "CommandFailed" : "Offline" });
     }
   };
   function launch() {
     if (flight) return flight;
+    if (retryUntil !== null && performance.now() < retryUntil) return Promise.resolve(cooldown());
+    retryUntil = null;
     const pending = execute();
     flight = pending;
     settled = pending;
@@ -316,7 +352,7 @@ export function createCustomerEntryClient(
   return Object.freeze({
     hasEntry: token !== null,
     start() {
-      return settled ?? launch();
+      return retryUntil === null ? (settled ?? launch()) : Promise.resolve(cooldown());
     },
     retry() {
       return flight ?? launch();

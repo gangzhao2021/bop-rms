@@ -645,6 +645,7 @@ async function listen(input: {
   const server = createServer(
     createApp({
       customerEntry: new CustomerEntryHandler({
+        requestAdmission: { consume: async () => ({ status: "Allowed" }) },
         allowedOrigin: origin,
         now: () => now,
         port: input.entry,

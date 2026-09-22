@@ -2,26 +2,37 @@ import type { StoreBusinessDateResolution } from "@rms/store";
 import { parseOrderingInstant } from "../domain/cart.js";
 import {
   parseCheckoutValidationEvidence,
+  parseConfiguredCheckoutValidationEvidence,
   type CheckoutValidationEvidence,
 } from "../domain/checkout-validation.js";
 import {
   OrderCreationError,
   parseOrderCreationRecord,
+  parseConfiguredOrderCreationRecord,
   type OrderCreationRecord,
 } from "../domain/order-creation.js";
 import { createOrderNumberAllocation } from "../domain/order-number.js";
 
 /** Pure owner fence over already captured transaction inputs; observedAt must come from the current server/database clock. */
-export function validateOrderSubmissionWriteFence(input: {
-  readonly record: Omit<OrderCreationRecord, "orderNumberAllocation">;
-  readonly businessDateResolution: StoreBusinessDateResolution;
-  readonly checkoutValidationEvidence: CheckoutValidationEvidence;
-  readonly observedAt: string;
-}) {
+export function validateOrderSubmissionWriteFence<V extends 1 | 2 = 1>(
+  input: {
+    readonly record: Omit<OrderCreationRecord<V>, "orderNumberAllocation">;
+    readonly businessDateResolution: StoreBusinessDateResolution;
+    readonly checkoutValidationEvidence: CheckoutValidationEvidence<V>;
+    readonly observedAt: string;
+  },
+  quoteVersion: V = 1 as V,
+) {
   try {
-    const evidence = parseCheckoutValidationEvidence(input.checkoutValidationEvidence);
+    const evidence = (
+      quoteVersion === 2
+        ? parseConfiguredCheckoutValidationEvidence
+        : parseCheckoutValidationEvidence
+    )(input.checkoutValidationEvidence);
     // Sequence one is used only to validate the existing resolution contract; no number is allocated or returned.
-    const parsed = parseOrderCreationRecord({
+    const parsed = (
+      quoteVersion === 2 ? parseConfiguredOrderCreationRecord : parseOrderCreationRecord
+    )({
       ...input.record,
       orderNumberAllocation: createOrderNumberAllocation({
         orderReference: input.record.order.orderReference,
@@ -59,7 +70,8 @@ export function validateOrderSubmissionWriteFence(input: {
           line.sellableReference !== item.catalog.sellableReference ||
           line.productVersionReference !== item.catalog.productVersionReference ||
           line.menuVersionReference !== item.catalog.menuVersionReference ||
-          item.pricing.quoteInputDigest !== evidence.quoteInputDigest
+          item.pricing.quoteInputDigest !== evidence.quoteInputDigest ||
+          item.pricing.quoteVersion !== evidence.quoteVersion
         );
       })
     )

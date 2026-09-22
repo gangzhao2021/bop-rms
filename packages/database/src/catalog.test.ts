@@ -24,6 +24,29 @@ afterEach(async () => {
 });
 
 describe("migration catalog", () => {
+  it("admits only the canonical Workflow owner for the new version table", async () => {
+    const root = await fixture();
+    const file = path.join(
+      root,
+      "migrations/0300-bop-governance/0300_003_create_workflow_definition.sql",
+    );
+    const catalog = await readMigrationCatalog(root);
+    expect(catalog.diagnostics).toEqual([]);
+    expect(
+      catalog.migrations.find((m) => m.id === "0300_003_create_workflow_definition")?.metadata
+        .owner,
+    ).toBe("@bop/workflow");
+    await writeFile(
+      file,
+      (await readFile(file, "utf8")).replace("-- owner: @bop/workflow", "-- owner: @rms/store"),
+    );
+    expect(
+      (await readMigrationCatalog(root)).diagnostics.some(
+        (d) => d.code === "MIGRATION_OWNER_MISMATCH",
+      ),
+    ).toBe(true);
+  });
+
   it("registers WP-2348 immutable Order Item ordinal without invented backfill", async () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
     const migration = catalog.migrations.find(
@@ -121,6 +144,8 @@ describe("migration catalog", () => {
       "0000_014_create_audit_record",
       "0000_015_alter_audit_hash_chain",
       "0000_016_create_security_abuse_bucket",
+      "0000_017_create_order_exception_source",
+      "0000_018_create_manual_outbox_recovery",
       "0200_001_create_tenant_organization",
       "0200_002_create_operating_entity",
       "0200_003_create_membership",
@@ -135,12 +160,31 @@ describe("migration catalog", () => {
       "0200_012_create_guest_session_operation",
       "0200_013_create_guest_binding_preparation",
       "0200_014_create_guest_dining_binding_preparation",
+      "0200_015_alter_organization_revision_trigger",
+      "0200_016_create_browser_session_selection",
+      "0200_017_alter_browser_session_selection_isolation",
+      "0200_018_create_guest_entry_admission",
+      "0200_019_alter_brand_admin_artifact_snapshot",
       "0300_001_create_permission",
       "0300_002_create_role_administration",
+      "0300_003_create_workflow_definition",
+      "0300_004_alter_permission_action_identifiers",
       "0400_001_create_feature_control_administration",
       "0400_002_create_live_gate_workflow",
       "0400_003_create_support_case",
+      "0400_004_create_kill_switch_version",
+      "0400_005_alter_kill_switch_operation_digest",
+      "0400_006_create_publishing_mutation",
+      "0400_007_alter_publishing_history_guard",
+      "0400_008_create_task_version",
       "1000_001_create_store_configuration",
+      "1000_002_create_store_exception_content",
+      "1000_003_create_store_service_pause_content",
+      "1000_004_create_store_publication_content",
+      "1000_005_create_store_configuration_authoring",
+      "1000_006_create_store_review_snapshot",
+      "1000_007_create_public_store_profile",
+      "1000_008_create_public_store_profile_timing",
       "1001_001_create_dining_table",
       "1001_002_create_dining_session_start",
       "1001_003_create_dining_join_regeneration",
@@ -149,11 +193,19 @@ describe("migration catalog", () => {
       "1001_006_create_dining_move_operation",
       "1001_007_alter_moved_join_regeneration",
       "1001_008_create_dining_admission_consumption",
+      "1001_009_create_dining_checkout_commitment",
+      "1001_010_create_dining_item_service",
+      "1001_011_create_dining_exception_task",
+      "1001_012_create_dining_table_release_operation",
+      "1001_013_create_dining_host_transfer_operation",
       "1100_001_create_product_aggregate",
+      "1100_002_create_product_operation_snapshot",
       "1101_001_create_category_menu_structure",
       "1102_001_create_option_set_binding",
       "1103_001_create_availability_rule",
       "1104_001_create_menu_publication",
+      "1104_002_create_menu_publication_snapshot",
+      "1104_003_create_menu_review_content",
       "1105_001_create_published_menu_projection",
       "1106_001_create_allergen_provenance",
       "1106_002_alter_catalog_function_permissions",
@@ -168,7 +220,13 @@ describe("migration catalog", () => {
       "1200_007_alter_price_quote_snapshot",
       "1200_008_alter_price_quote_line_source",
       "1200_009_create_price_quote_request",
+      "1200_010_alter_price_quote_configured",
+      "1200_011_create_option_price_rule",
       "1250_001_create_recipe_management",
+      "1250_002_alter_recipe_snapshot",
+      "1250_003_alter_recipe_child_identity",
+      "1250_004_create_recipe_modifier",
+      "1250_005_create_recipe_preparation_content",
       "1300_001_create_cart_aggregate",
       "1300_002_alter_cart_item_commands",
       "1300_003_alter_cart_selection_evidence",
@@ -182,11 +240,52 @@ describe("migration catalog", () => {
       "1300_011_create_cart_quote_expiry",
       "1300_012_create_dining_cart_operation",
       "1300_013_alter_order_item_ordinal",
+      "1300_014_create_order_capacity_link",
+      "1300_015_alter_order_capacity_link_owner",
+      "1300_016_alter_cart_quote_configured",
+      "1300_017_create_checkout_details",
+      "1300_018_create_order_checkout_details_link",
+      "1300_019_create_checkout_session",
+      "1300_020_create_checkout_session_allocation",
+      "1300_021_create_order_payment_failure",
+      "1300_022_create_order_payment_disposition",
+      "1300_023_create_order_acceptance_record",
+      "1300_024_create_order_termination_record",
+      "1300_025_create_order_fulfillment_completion_record",
+      "1300_026_create_digital_receipt_record",
+      "1300_027_alter_order_submission_kind",
+      "1300_028_create_order_revision",
+      "1300_029_create_additional_dining_batch_record",
+      "1300_030_alter_order_submission_cardinality",
+      "1300_031_create_order_payment_acceptance_wait",
+      "1300_032_create_dining_cart_replacement",
+      "1300_033_create_order_cancellation_request_version",
+      "1300_034_create_order_closure_version",
+      "1300_035_create_order_batch_checkout_expiry",
+      "1300_036_create_order_batch_checkout_cancellation",
       "1400_001_create_payment_intent",
       "1400_002_create_provider_webhook_inbox",
       "1400_003_create_payment_terminal_fact",
       "1400_004_create_payment_status_projection",
       "1400_005_create_payment_reconciliation",
+      "1400_006_create_payment_tip_selection",
+      "1400_007_create_payment_compensation_lease_history",
+      "1400_008_create_payment_compensation_operation_history",
+      "1400_009_create_payment_compensation_case_history",
+      "1400_010_create_payment_compensation_action_history",
+      "1400_011_create_payment_compensation_refund",
+      "1400_012_create_payment_compensation_operations",
+      "1400_013_create_payment_refund_status_projection",
+      "1400_014_create_ordinary_refund_request",
+      "1400_015_create_ordinary_refund_approval",
+      "1400_016_create_ordinary_refund_operation",
+      "1400_017_create_ordinary_refund_dispatch",
+      "1400_018_create_ordinary_refund_observation",
+      "1400_019_alter_ordinary_refund_observation",
+      "1400_020_create_order_settled_finality",
+      "1400_021_alter_daily_reconciliation_amounts",
+      "1400_022_create_provider_capture_exception_evidence",
+      "1400_023_create_reconciliation_follow_up_history",
       "1500_001_create_kitchen_ticket_aggregate",
       "1500_002_create_kitchen_work_queue_projection",
       "1500_003_create_kitchen_work_lifecycle",
@@ -194,8 +293,12 @@ describe("migration catalog", () => {
       "1500_005_create_kitchen_allergen_safety",
       "1500_006_create_kds_continuity",
       "1500_007_create_production_batch",
+      "1500_008_create_kitchen_creation_record",
+      "1500_009_create_kitchen_routing_configuration",
+      "1500_010_alter_kitchen_lifecycle_effect_record",
       "1600_001_create_device_management",
       "1600_002_create_kds_profile_management",
+      "1600_003_create_digital_receipt_template",
       "1700_001_create_pickup_fulfillment",
       "1700_002_create_fulfillment_readiness",
       "1700_003_create_pickup_proof",
@@ -203,12 +306,26 @@ describe("migration catalog", () => {
       "1700_005_create_fulfillment_completion_publication",
       "1700_006_create_capacity_hold",
       "1700_007_create_capacity_allocation",
+      "1700_008_create_asap_capacity_commitment",
+      "1700_009_alter_pickup_fulfillment_record",
+      "1700_010_alter_fulfillment_ready_record",
+      "1700_011_alter_pickup_handoff_record",
+      "1700_012_alter_pickup_proof_operation",
       "1800_001_create_report_definition",
       "1800_002_create_report_run",
       "1800_003_create_metric_definition",
       "1800_004_create_data_quality_reconciliation",
       "1800_005_create_pipeline_run",
       "1800_006_create_export_job",
+      "1900_001_create_inventory_item",
+      "1900_002_alter_inventory_item_operation_audit",
+      "1900_003_create_stock_ledger",
+      "1900_004_create_stock_reservation",
+      "1900_005_create_item_stock_history",
+      "1900_006_create_lot_hold",
+      "1900_007_create_reservation_set",
+      "1900_008_create_submission_final_validation",
+      "1900_009_alter_submission_validation_cardinality",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -1208,8 +1325,15 @@ describe("migration catalog", () => {
       ["0200_012_create_guest_session_operation", "@bop/identity", "bop_identity"],
       ["0200_013_create_guest_binding_preparation", "@bop/identity", "bop_identity"],
       ["0200_014_create_guest_dining_binding_preparation", "@bop/identity", "bop_identity"],
+      ["0200_015_alter_organization_revision_trigger", "@bop/tenant", "bop_tenant"],
+      ["0200_016_create_browser_session_selection", "@bop/identity", "bop_identity"],
+      ["0200_017_alter_browser_session_selection_isolation", "@bop/identity", "bop_identity"],
+      ["0200_018_create_guest_entry_admission", "@bop/identity", "bop_identity"],
+      ["0200_019_alter_brand_admin_artifact_snapshot", "@bop/tenant", "bop_tenant"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
       ["0300_002_create_role_administration", "@bop/permission", "bop_permission"],
+      ["0300_003_create_workflow_definition", "@bop/workflow", "bop_workflow"],
+      ["0300_004_alter_permission_action_identifiers", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",
@@ -1266,17 +1390,20 @@ describe("migration catalog", () => {
     );
   });
 
-  it("rejects a changed namespace registry", async () => {
-    const root = await fixture();
-    const registry = path.join(root, "migrations", "namespaces.json");
-    await writeFile(
-      registry,
-      (await readFile(registry, "utf8")).replace("1800-rms-reporting", "1800-rms-report"),
-    );
-    expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
-      "MIGRATION_NAMESPACE_UNKNOWN",
-    );
-  });
+  it.each(["1800-rms-reporting", "1900-rms-inventory"])(
+    "rejects a changed namespace registry: %s",
+    async (directory) => {
+      const root = await fixture();
+      const registry = path.join(root, "migrations", "namespaces.json");
+      await writeFile(
+        registry,
+        (await readFile(registry, "utf8")).replace(directory, directory + "-changed"),
+      );
+      expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
+        "MIGRATION_NAMESPACE_UNKNOWN",
+      );
+    },
+  );
 
   it("rejects metadata order and values", async () => {
     const root = await fixture();
@@ -1331,13 +1458,15 @@ describe("migration catalog", () => {
     );
   });
 
-  it("does not confuse a PL/pgSQL block with runner-owned transaction control", async () => {
-    const root = await fixture();
-    const file = migrationPath(root);
-    await writeFile(
-      file,
-      `${await readFile(file, "utf8")}
-CREATE FUNCTION platform_core.wp1021_trigger_probe() RETURNS trigger
+  it.each(["CREATE", "CREATE OR REPLACE"])(
+    "does not confuse a %s PL/pgSQL block with runner-owned transaction control",
+    async (declaration) => {
+      const root = await fixture();
+      const file = migrationPath(root);
+      await writeFile(
+        file,
+        `${await readFile(file, "utf8")}
+${declaration} FUNCTION platform_core.wp1021_trigger_probe() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog
 AS $$
@@ -1346,9 +1475,10 @@ BEGIN
 END;
 $$;
 `,
-    );
-    expect((await readMigrationCatalog(root)).diagnostics).toEqual([]);
-  });
+      );
+      expect((await readMigrationCatalog(root)).diagnostics).toEqual([]);
+    },
+  );
 
   it("still rejects transaction control hidden in a non-function dollar quote", async () => {
     const root = await fixture();

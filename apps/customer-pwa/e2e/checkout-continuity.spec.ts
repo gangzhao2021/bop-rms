@@ -12,7 +12,7 @@ for (const screen of [
       isMobile: screen.touch,
       serviceWorkers: "block",
     });
-    for (const terminal of ["attached", "expired"])
+    for (const terminal of ["attached", "expired", "payment", "payment-failed"])
       test(
         "retains one Quote intent across unknown, offline and explicit retry: " + terminal,
         async ({ page, context }) => {
@@ -80,6 +80,88 @@ for (const screen of [
           await page.route("**/bff/customer/cart", (route) =>
             route.fulfill({ status: 200, json: view }),
           );
+          const policyDocument = {
+            documentReference: id(8),
+            documentVersion: 1,
+            documentDigest: "sha256:" + "a".repeat(64),
+            purposeCode: "CHECKOUT_TERMS",
+          };
+          const savedDetails = {
+            detailsReference: id(7),
+            detailsVersion: 2,
+            cartReference: id(1),
+            cartVersion: 2,
+            quoteReference: id(6),
+            quoteVersion: 1,
+            pickupContact: { name: "Synthetic Guest", channel: "Phone", value: "+15555550100" },
+            receipt: { choice: "InSession", email: null },
+            policies: [policyDocument],
+            recordedAt: new Date(Date.now() - 60_000).toISOString(),
+          };
+          await page.route("**/bff/customer/checkout-details/current", (route) =>
+            route.fulfill({
+              json: {
+                schemaVersion: 1,
+                checkout: {
+                  cartReference: id(1),
+                  cartVersion: 3,
+                  orderType: "Pickup",
+                  details: savedDetails,
+                },
+              },
+            }),
+          );
+          await page.route("**/bff/customer/checkout-details/policy", (route) =>
+            route.fulfill({
+              json: {
+                schemaVersion: 1,
+                policy: {
+                  cartReference: id(1),
+                  cartVersion: 3,
+                  orderType: "Pickup",
+                  checkedAt: new Date(Date.now() - 1000).toISOString(),
+                  validUntil: expiresAt,
+                  documents: [
+                    {
+                      ...policyDocument,
+                      title: "Synthetic checkout terms",
+                      bodyText:
+                        "<script>window.policyExecuted=true</script>\nSynthetic display only.",
+                    },
+                  ],
+                },
+              },
+            }),
+          );
+          const detailCalls: { key: string | undefined; body: Record<string, unknown> }[] = [];
+          await page.route("**/bff/customer/checkout-details", async (route) => {
+            const request = route.request(),
+              body = request.postDataJSON() as Record<string, unknown>;
+            expect(request.headers()["x-csrf-token"]).toBe(csrf);
+            detailCalls.push({ key: request.headers()["idempotency-key"], body });
+            if (detailCalls.length === 1) {
+              await route.fulfill({ status: 200, body: "{" }); // Synthetic lost/invalid response.
+              return;
+            }
+            await route.fulfill({
+              status: 200,
+              json: {
+                schemaVersion: 1,
+                details: {
+                  operationReference: request.headers()["idempotency-key"],
+                  detailsReference: body.detailsReference,
+                  detailsVersion: Number(body.expectedVersion) + 1,
+                  cartReference: id(1),
+                  cartVersion: 3,
+                  quoteReference: id(5),
+                  quoteVersion: 1,
+                  orderType: "Pickup",
+                  receiptChoice: "InSession",
+                  recordedAt: new Date().toISOString(),
+                },
+              },
+            });
+          });
           await page.route("**/api/v1/carts/*/quote", async (route) => {
             const request = route.request();
             expect(request.method()).toBe("POST");
@@ -141,6 +223,7 @@ for (const screen of [
               },
             });
           });
+          await page.clock.install();
           await page.goto("/#qr=aaa.bbb.ccc");
           await expect(
             page.getByRole("heading", { name: "Synthetic Checkout Store", exact: true }),
@@ -210,6 +293,362 @@ for (const screen of [
               () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
             ),
           ).toBe(true);
+          const name = page.getByLabel("Pickup name", { exact: true });
+          const confirm = page.getByRole("checkbox", {
+            name: "I have read and agree to the policies above",
+          });
+          const save = page.getByRole("button", { name: "Save checkout details", exact: true });
+          await expect(name).toHaveValue("Synthetic Guest");
+          await expect(confirm).not.toBeChecked();
+          await expect(save).toBeDisabled();
+          await page.getByText("Synthetic checkout terms", { exact: true }).click();
+          await expect(
+            page.getByText("<script>window.policyExecuted=true</script>", { exact: false }),
+          ).toBeVisible();
+          expect(await page.evaluate(() => Object.hasOwn(window, "policyExecuted"))).toBe(false);
+          await confirm.focus();
+          await page.keyboard.press("Space");
+          await expect(save).toBeEnabled();
+          await save.click();
+          const retryDetails = page.getByRole("button", {
+            name: "Retry saving details",
+            exact: true,
+          });
+          await expect(retryDetails).toBeEnabled();
+          await expect(name).toBeDisabled();
+          expect(detailCalls).toHaveLength(1);
+          await context.setOffline(true);
+          await expect(retryDetails).toBeDisabled();
+          await context.setOffline(false);
+          await expect(retryDetails).toBeEnabled();
+          await expect(name).toHaveValue("Synthetic Guest");
+          expect(detailCalls).toHaveLength(1);
+          await expect(
+            page.getByRole("button", { name: "Get current quote", exact: true }),
+          ).toBeDisabled();
+          if (screen.touch) await retryDetails.tap();
+          else await retryDetails.click();
+          await expect(page.getByText("Checkout details saved.", { exact: true })).toBeVisible();
+          expect(detailCalls).toHaveLength(2);
+          expect(detailCalls[1]).toEqual(detailCalls[0]);
+          expect(detailCalls[0]?.body).toMatchObject({
+            detailsReference: id(7),
+            expectedVersion: 2,
+            cartVersion: 3,
+            quoteReference: id(5),
+            policies: [policyDocument],
+          });
+          expect(detailCalls[0]?.body).not.toHaveProperty("orderType");
+          await expect(save).toBeDisabled();
+          if (terminal.startsWith("payment")) {
+            // Reconnection requires a fresh Quote before starting a new checkout.
+            await page.getByRole("button", { name: "Get current quote", exact: true }).click();
+            await expect(
+              page.getByRole("heading", { name: "Quote summary", exact: true }),
+            ).toBeVisible();
+            await confirm.check();
+            await save.click();
+            await expect(page.getByText("Checkout details saved.", { exact: true })).toBeVisible();
+            const sessionView = {
+              schemaVersion: 1,
+              session: {
+                checkoutSessionReference: id(10),
+                cartReference: id(1),
+                cartVersion: 3,
+                quoteReference: id(5),
+                quoteVersion: 1,
+                createdAt: new Date().toISOString(),
+              },
+            };
+            const sessionCalls: { key: string | undefined; body: unknown }[] = [];
+            await page.route("**/api/v1/carts/*/checkout-sessions", async (route) => {
+              const request = route.request();
+              expect(request.headers()["x-csrf-token"]).toBe(csrf);
+              sessionCalls.push({
+                key: request.headers()["idempotency-key"],
+                body: request.postDataJSON(),
+              });
+              await route.fulfill(
+                sessionCalls.length === 1
+                  ? { status: 200, body: "{" }
+                  : { status: 200, json: sessionView },
+              );
+            });
+            await page.route("**/api/v1/checkout-sessions/" + id(10), (route) =>
+              route.fulfill({ json: sessionView }),
+            );
+            const paymentCalls: { key: string | undefined; body: unknown }[] = [];
+            await page.route("**/api/v1/checkout-sessions/*/payment-intents", async (route) => {
+              const request = route.request();
+              expect(request.headers()["x-csrf-token"]).toBe(csrf);
+              paymentCalls.push({
+                key: request.headers()["idempotency-key"],
+                body: request.postDataJSON(),
+              });
+              await route.fulfill(
+                paymentCalls.length === 1
+                  ? { status: 200, body: "{" }
+                  : {
+                      status: paymentCalls.length === 2 ? 202 : 200,
+                      json: {
+                        schemaVersion: 1,
+                        payment: {
+                          checkoutSessionReference: id(10),
+                          paymentIntentReference: id(11),
+                          orderReference: id(12),
+                          creationStatus:
+                            paymentCalls.length === 2 ? "Processing" : "AlreadyCreated",
+                          total: { amountMinor: "238", currency: "CAD" },
+                        },
+                      },
+                    },
+              );
+            });
+            let resultCalls = 0;
+            await page.route(
+              /\/api\/v1\/checkout-sessions\/[^/]+\/payment-(?:result|reconciliation)$/u,
+              (route) => {
+                const reconciliation = route.request().url().endsWith("/payment-reconciliation");
+                expect(route.request().method()).toBe(reconciliation ? "POST" : "GET");
+                expect(reconciliation).toBe(resultCalls > 0);
+                if (reconciliation) expect(route.request().postDataJSON()).toEqual({});
+                expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
+                resultCalls++;
+                return route.fulfill({
+                  headers: { "cache-control": "no-store" },
+                  json: {
+                    schemaVersion: 1,
+                    payment: {
+                      checkoutSessionReference: id(10),
+                      paymentIntentReference: id(11),
+                      orderReference: id(12),
+                      status:
+                        resultCalls === 1
+                          ? "Pending"
+                          : terminal === "payment-failed"
+                            ? "Failed"
+                            : "Succeeded",
+                      total: { amountMinor: "238", currency: "CAD" },
+                    },
+                  },
+                });
+              },
+            );
+            let handoffCalls = 0;
+            await page.route("**/api/v1/checkout-sessions/*/payment-handoff", (route) => {
+              handoffCalls += 1;
+              return route.fulfill({
+                headers: { "cache-control": "no-store" },
+                json: {
+                  schemaVersion: 1,
+                  clientSecret: "pi_SyntheticBrowser_secret_SyntheticOnly",
+                },
+              });
+            });
+            // Synthetic SDK boundary, not Stripe network/3DS/iframe acceptance.
+            await page.route("https://js.stripe.com/**", (route) =>
+              route.fulfill({
+                contentType: "application/javascript",
+                body: `window.syntheticCard = { mounts: 0, destroys: 0, confirms: 0 };
+                window.Stripe = function() { return {
+                  elements: function() { return {
+                    create: function(type, options) {
+                      if (type !== "payment" || options.wallets.applePay !== "never" ||
+                          options.wallets.googlePay !== "never") throw Error("invalid secure options");
+                      var handlers = {}, host;
+                      return {
+                        on: function(event, callback) { handlers[event] = callback; },
+                        mount: function(target) {
+                          host = target; host.textContent = "Synthetic secure card component";
+                          window.syntheticCard.mounts++;
+                          queueMicrotask(function() { handlers.ready(); });
+                        },
+                        destroy: function() { if (host) host.textContent = ""; window.syntheticCard.destroys++; }
+                      };
+                    },
+                    submit: async function() {
+                      if (window.syntheticHoldSubmit)
+                        return new Promise(function(resolve) { window.syntheticResolveSubmit = resolve; });
+                      return {};
+                    }
+                  }; },
+                  confirmPayment: async function(options) {
+                    if (options.redirect !== "if_required" ||
+                        options.confirmParams.return_url !== "https://synthetic-return.invalid/return")
+                      throw Error("invalid confirmation options");
+                    window.syntheticCard.confirms++;
+                    return { paymentIntent: { status: "succeeded" } };
+                  }
+                }; };`,
+              }),
+            );
+            const proceed = page.getByRole("button", { name: "Continue to payment", exact: true });
+            const tip = page.getByLabel("Tip (CAD)", { exact: true });
+            await expect(proceed).toBeDisabled();
+            await tip.fill("1.251");
+            await expect(tip).toHaveAttribute("aria-invalid", "true");
+            await expect(proceed).toBeDisabled();
+            await tip.fill("1.25");
+            await expect(proceed).toBeEnabled();
+            await proceed.click();
+            const retrySession = page.getByRole("button", { name: "Retry checkout", exact: true });
+            await expect(retrySession).toBeEnabled();
+            await expect(tip).toBeDisabled();
+            await context.setOffline(true);
+            await expect(retrySession).toBeDisabled();
+            await context.setOffline(false);
+            await expect(retrySession).toBeEnabled();
+            expect(sessionCalls).toHaveLength(1);
+            await retrySession.click();
+            await expect(page).toHaveURL(/\/checkout\/payment$/u);
+            expect(sessionCalls).toHaveLength(2);
+            expect(sessionCalls[1]).toEqual(sessionCalls[0]);
+            await expect(page.getByText("Selected tip:", { exact: false })).toContainText(
+              "CAD 1.25",
+            );
+            await expect(page.getByLabel("Tip (CAD)", { exact: true })).toHaveCount(0);
+            await page.getByRole("button", { name: "Review payment total", exact: true }).click();
+            const retryPayment = page.getByRole("button", {
+              name: "Check payment readiness",
+              exact: true,
+            });
+            await expect(retryPayment).toBeEnabled();
+            await context.setOffline(true);
+            await expect(retryPayment).toBeDisabled();
+            await context.setOffline(false);
+            await expect(retryPayment).toBeEnabled();
+            expect(paymentCalls).toHaveLength(1);
+            await retryPayment.click();
+            await expect(page.getByText("Total to pay:", { exact: false })).toContainText(
+              "CAD 2.38",
+            );
+            expect(paymentCalls).toHaveLength(2);
+            expect(paymentCalls[1]).toEqual(paymentCalls[0]);
+            expect(paymentCalls[0]?.body).toEqual({ tip: { amountMinor: "125", currency: "CAD" } });
+            // SPA remount must preserve payment identity; synthetic Processing is never Paid.
+            await page.evaluate(() => {
+              history.pushState(null, "", "/cart");
+              window.dispatchEvent(new PopStateEvent("popstate"));
+            });
+            await expect(
+              page.getByRole("heading", { name: "Secure payment", exact: true }),
+            ).toHaveCount(0);
+            await page.evaluate(() => {
+              history.pushState(null, "", "/checkout/payment");
+              window.dispatchEvent(new PopStateEvent("popstate"));
+            });
+            await page.getByRole("button", { name: "Review payment total", exact: true }).click();
+            const pay = page.getByRole("button", { name: "Pay securely", exact: true });
+            await expect(pay).toBeEnabled();
+            expect(paymentCalls).toHaveLength(3);
+            expect(paymentCalls[2]).toEqual(paymentCalls[0]);
+            expect(handoffCalls).toBe(1);
+            await page.evaluate(() => Reflect.set(window, "syntheticHoldSubmit", true));
+            await pay.click();
+            await expect(
+              page.getByRole("button", { name: "Submitting payment…", exact: true }),
+            ).toBeDisabled();
+            await context.setOffline(true);
+            await expect(pay).toHaveCount(0);
+            await context.setOffline(false);
+            await expect(retryPayment).toBeEnabled();
+            expect(paymentCalls).toHaveLength(3);
+            await page.evaluate(async () => {
+              Reflect.set(window, "syntheticHoldSubmit", false);
+              const resolve = Reflect.get(window, "syntheticResolveSubmit") as (
+                value: object,
+              ) => void;
+              resolve({});
+              await Promise.resolve();
+            });
+            expect(await page.evaluate(() => Reflect.get(window, "syntheticCard"))).toEqual({
+              mounts: 1,
+              destroys: 1,
+              confirms: 0,
+            });
+            await retryPayment.click();
+            await expect(pay).toBeEnabled();
+            expect(paymentCalls[3]).toEqual(paymentCalls[0]);
+            expect(handoffCalls).toBe(2);
+            await pay.click();
+            await expect(page).toHaveURL(/\/checkout\/result$/u);
+            await expect(
+              page.getByText("Payment confirmation is pending.", { exact: true }),
+            ).toBeVisible();
+            expect(resultCalls).toBe(1);
+            await expect(
+              page.getByRole("heading", { name: "Payment confirmed", exact: true }),
+            ).toHaveCount(0);
+            await context.setOffline(true);
+            await expect(
+              page.getByRole("button", { name: "Check payment status", exact: true }),
+            ).toHaveCount(0);
+            await context.setOffline(false);
+            const checkResult = page.getByRole("button", {
+              name: "Check payment status",
+              exact: true,
+            });
+            await expect(checkResult).toBeEnabled();
+            expect(resultCalls).toBe(1);
+            await checkResult.click();
+            if (terminal === "payment-failed") {
+              await expect(
+                page.getByRole("heading", { name: "Payment failed", exact: true }),
+              ).toBeVisible();
+              await expect(
+                page.getByRole("link", { name: "View order status", exact: true }),
+              ).toHaveCount(0);
+              await expect(
+                page.getByRole("heading", { name: "Payment confirmed", exact: true }),
+              ).toHaveCount(0);
+            } else {
+              await expect(
+                page.getByRole("heading", { name: "Payment confirmed", exact: true }),
+              ).toBeVisible();
+              await expect(
+                page.getByRole("link", { name: "View order status", exact: true }),
+              ).toHaveAttribute("href", "/orders/" + id(12));
+            }
+            expect(resultCalls).toBe(2);
+            expect(paymentCalls).toHaveLength(4);
+            await expect(pay).toHaveCount(0);
+            expect(await page.evaluate(() => Reflect.get(window, "syntheticCard"))).toEqual({
+              mounts: 2,
+              destroys: 2,
+              confirms: 1,
+            });
+            expect(await page.content()).not.toContain("pi_SyntheticBrowser_secret_SyntheticOnly");
+            expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
+            if (terminal === "payment-failed") {
+              await page.goto("/checkout/result?paid=true");
+              await expect(
+                page.getByText("This payment cannot be identified in this window.", {
+                  exact: false,
+                }),
+              ).toBeVisible();
+              await expect(
+                page.getByRole("heading", { name: "Payment confirmed", exact: true }),
+              ).toHaveCount(0);
+              expect(resultCalls).toBe(2);
+              expect(paymentCalls).toHaveLength(4);
+            }
+            expect(failures).toEqual([]);
+            return;
+          }
+          await page.getByRole("button", { name: "Reload checkout details", exact: true }).click();
+          await expect(confirm).not.toBeChecked();
+          await expect(save).toBeDisabled();
+          expect(
+            await page.evaluate(
+              () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+            ),
+          ).toBe(true);
+          await page.clock.fastForward(600_001);
+          await expect(
+            page.getByText("Checkout information expired.", { exact: false }),
+          ).toBeVisible();
+          await expect(name).toBeDisabled();
+          expect(detailCalls).toHaveLength(2);
           expect(failures).toEqual([]);
         },
       );

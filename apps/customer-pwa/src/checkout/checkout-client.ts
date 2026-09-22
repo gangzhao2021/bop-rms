@@ -137,8 +137,12 @@ export interface CheckoutClient {
   quote(cart: CartView, operationReference: string): Promise<CheckoutQuote>;
 }
 
-/** Quote writes remain uncertain when the complete response cannot be confirmed. */
-async function requestQuote(url: string, init: RequestInit, contextCurrent: () => boolean) {
+/** Checkout writes remain uncertain when the complete response cannot be confirmed. */
+export async function requestCheckoutMutation(
+  url: string,
+  init: RequestInit,
+  contextCurrent: () => boolean,
+) {
   const controller = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let rejectCancellation: (error: CartClientError) => void = () => undefined;
@@ -228,7 +232,7 @@ export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutCl
       } catch {
         throw new CartClientError("cart_request_invalid");
       }
-      const { response, payload } = await requestQuote(
+      const { response, payload } = await requestCheckoutMutation(
         "/api/v1/carts/" + cartReference + "/quote",
         {
           method: "POST",

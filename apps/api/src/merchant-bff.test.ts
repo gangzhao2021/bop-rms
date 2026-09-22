@@ -1,3 +1,18 @@
+import { BrowserSessionError } from "@bop/identity";
+import { parsePaymentReference, ReconciliationFollowUpError } from "@rms/payment";
+import { parsePaymentInstant } from "@rms/payment";
+import { parseDiningReference } from "@rms/dining";
+import { FulfillmentReadinessError } from "@rms/fulfillment";
+import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
+import {
+  KitchenQueueProjectionError,
+  KitchenWorkLifecycleError,
+  parseKitchenWorkLifecycleResult,
+} from "@rms/kitchen";
+import { CatalogError } from "@rms/catalog";
+import { PriceBookWorkflowError } from "@rms/pricing";
+import { parseStoreReference, parseCanonicalInstant } from "@bop/tenant";
+import { parseStoreAdministrationReference } from "@rms/store";
 import {
   authorizationCookie,
   createAuthenticationSession,
@@ -9,7 +24,12 @@ import {
 import express from "express";
 import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMerchantBffRouter, type MerchantBffService } from "./merchant-bff.js";
+import {
+  createMerchantBffRouter,
+  parseMerchantWorkspaceSnapshot,
+  type MerchantBffService,
+  type MerchantBffRouterOptions,
+} from "./merchant-bff.js";
 
 const serverTime = "2026-07-29T12:00:00.000Z";
 const secret = (byte: number) =>
@@ -42,6 +62,14 @@ const workspace = Object.freeze({
   storeStatus: "Open",
   freshness: "Current",
   dashboardAvailability: "UnavailableUntilWP1905",
+  navigation: [
+    {
+      screenId: "OPS-ORDER-EXCEPTION",
+      label: "Order exceptions",
+      href: "/operations/order-exceptions",
+      permission: "operations.order-exception.manage",
+    },
+  ],
 });
 const session = createAuthenticationSession({
   sessionReference: "018f7f9a-ad3e-7a11-8d01-000000000001",
@@ -120,12 +148,52 @@ function fakeService(): MerchantBffService {
   };
 }
 
-async function serve(service: MerchantBffService) {
+async function serve(
+  service: MerchantBffService,
+  orderExceptions?: MerchantBffRouterOptions["orderExceptions"],
+  serviceControl?: MerchantBffRouterOptions["serviceControl"],
+  serviceControlState?: MerchantBffRouterOptions["serviceControlState"],
+  storeConfiguration?: MerchantBffRouterOptions["storeConfiguration"],
+  diningItemService?: MerchantBffRouterOptions["diningItemService"],
+  orderAcceptance?: MerchantBffRouterOptions["orderAcceptance"],
+  orderQueue?: MerchantBffRouterOptions["orderQueue"],
+  priceBooks?: MerchantBffRouterOptions["priceBooks"],
+  productLifecycle?: MerchantBffRouterOptions["productLifecycle"],
+  productCreation?: MerchantBffRouterOptions["productCreation"],
+  menuDraft?: MerchantBffRouterOptions["menuDraft"],
+  menuPublication?: MerchantBffRouterOptions["menuPublication"],
+  ordinaryRefund?: MerchantBffRouterOptions["ordinaryRefund"],
+  productDraft?: MerchantBffRouterOptions["productDraft"],
+  kitchenCommand?: MerchantBffRouterOptions["kitchenCommand"],
+  kitchenQuery?: MerchantBffRouterOptions["kitchenQuery"],
+  pickupHandoff?: MerchantBffRouterOptions["pickupHandoff"],
+  pickupProof?: MerchantBffRouterOptions["pickupProof"],
+  pickupQuery?: MerchantBffRouterOptions["pickupQuery"],
+) {
   const app = express();
   app.use(
     "/merchant",
     createMerchantBffRouter({
       service,
+      ...(kitchenCommand ? { kitchenCommand } : {}),
+      ...(kitchenQuery ? { kitchenQuery } : {}),
+      ...(pickupHandoff ? { pickupHandoff } : {}),
+      ...(pickupProof ? { pickupProof } : {}),
+      ...(pickupQuery ? { pickupQuery } : {}),
+      ...(diningItemService ? { diningItemService } : {}),
+      ...(orderAcceptance ? { orderAcceptance } : {}),
+      ...(orderQueue ? { orderQueue } : {}),
+      ...(priceBooks ? { priceBooks } : {}),
+      ...(productLifecycle ? { productLifecycle } : {}),
+      ...(productCreation ? { productCreation } : {}),
+      ...(productDraft ? { productDraft } : {}),
+      ...(menuDraft ? { menuDraft } : {}),
+      ...(menuPublication ? { menuPublication } : {}),
+      ...(ordinaryRefund ? { ordinaryRefund } : {}),
+      ...(orderExceptions ? { orderExceptions } : {}),
+      ...(serviceControl ? { serviceControl } : {}),
+      ...(storeConfiguration ? { storeConfiguration } : {}),
+      ...(serviceControlState ? { serviceControlState } : {}),
       exactOrigin: "https://merchant.invalid",
       acceptedHost: "merchant.invalid",
     }),
@@ -375,4 +443,2635 @@ describe("isolated merchant BFF transport", () => {
     );
     expect(service.logout).toHaveBeenCalledWith(sessionCookie);
   });
+});
+
+describe("merchant order exception read route", () => {
+  it("passes only the session cookie to the authorized reader and disables caching", async () => {
+    const read = vi.fn(async () => ({
+      screenId: "OPS-ORDER-EXCEPTION" as const,
+      projectionName: "merchant_order_exception_v1" as const,
+      storeLabel: "Synthetic Store",
+      businessDate: "2026-09-12",
+      projectedAt: "2026-09-12T15:00:00.000Z",
+      freshnessStatus: "Stale" as const,
+      items: [],
+    }));
+    const root = await serve(fakeService(), read);
+    const result = await request(root, "/merchant/order-exceptions", {
+      headers: {
+        host: "merchant.invalid",
+        cookie: "__Host-bop-merchant=" + sessionCookie,
+        "sec-fetch-site": "same-origin",
+      },
+    });
+    expect(result.status).toBe(200);
+    expect(read).toHaveBeenCalledExactlyOnceWith(sessionCookie);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+  });
+  it.each([
+    {
+      path: "/merchant/order-exceptions?store_id=synthetic",
+      headers: {
+        host: "merchant.invalid",
+        "sec-fetch-site": "same-origin",
+        cookie: "__Host-bop-merchant=" + sessionCookie,
+      },
+    },
+    {
+      path: "/merchant/order-exceptions",
+      headers: {
+        host: "merchant.invalid",
+        "sec-fetch-site": "cross-site",
+        cookie: "__Host-bop-merchant=" + sessionCookie,
+      },
+    },
+    {
+      path: "/merchant/order-exceptions",
+      headers: {
+        host: "merchant.invalid",
+        "sec-fetch-site": "same-origin",
+        cookie: "__Host-bop-merchant=a; __Host-bop-merchant=b",
+      },
+    },
+  ])("rejects an unsafe exception request before reading $path", async ({ path, headers }) => {
+    const read = vi.fn(async () => {
+      throw Error("must not read");
+    });
+    const root = await serve(fakeService(), read);
+    expect((await request(root, path, { headers })).status).toBe(403);
+    expect(read).not.toHaveBeenCalled();
+  });
+});
+
+it.each(
+  [
+    [{ ...workspace.navigation[0], href: "https://foreign.example.test" }],
+    [{ ...workspace.navigation[0], permission: "merchant.access" }],
+    [{ ...workspace.navigation[0], extra: "denied" }],
+    [workspace.navigation[0], workspace.navigation[0]],
+    [{ ...workspace.navigation[0], screenId: "constructor" }],
+  ].map((navigation) => ({ navigation })),
+)("rejects unbounded or inconsistent navigation entries", ({ navigation }) => {
+  expect(() => parseMerchantWorkspaceSnapshot({ ...workspace, navigation })).toThrow(
+    "MERCHANT_WORKSPACE_DENIED",
+  );
+});
+
+it("protects service-control transport and exposes only bounded results", async () => {
+  const control = vi.fn<NonNullable<MerchantBffRouterOptions["serviceControl"]>>(async () => ({
+    status: "Applied",
+    resultingVersion: 1,
+  }));
+  const root = await serve(fakeService(), undefined, control);
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/service-control") =>
+    request(root, path, {
+      method: "POST",
+      body: JSON.stringify({ command: "PauseService" }),
+      headers: { ...headers, ...extra },
+    });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({}, "/merchant/service-control?store=other")).status).toBe(403);
+  expect(control).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ status: "Applied", resultingVersion: 1 });
+  expect(control).toHaveBeenCalledWith({
+    sessionCookie,
+    csrf,
+    command: { command: "PauseService" },
+  });
+  control.mockRejectedValueOnce(new Error("STORE_SERVICE_VERSION_CONFLICT"));
+  expect((await submit()).status).toBe(409);
+  control.mockRejectedValueOnce(new Error("synthetic private failure detail"));
+  const failed = await submit();
+  expect(failed.status).toBe(403);
+  expect(await failed.json()).toEqual({ error: "request_denied" });
+});
+
+it("protects store-configuration transport and exposes only bounded results", async () => {
+  const control = vi.fn<NonNullable<MerchantBffRouterOptions["storeConfiguration"]>>(async () => ({
+    status: "Applied",
+    resultingVersion: 1,
+  }));
+  const root = await serve(fakeService(), undefined, undefined, undefined, control);
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/store-configuration") =>
+    request(root, path, {
+      method: "POST",
+      body: JSON.stringify({ command: "SaveDraft" }),
+      headers: { ...headers, ...extra },
+    });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({}, "/merchant/store-configuration?store=other")).status).toBe(403);
+  expect(control).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ status: "Applied", resultingVersion: 1 });
+  expect(control).toHaveBeenCalledWith({
+    sessionCookie,
+    csrf,
+    command: { command: "SaveDraft" },
+  });
+  control.mockRejectedValueOnce(
+    Object.assign(new Error("safe"), { code: "STORE_CONFIGURATION_VERSION_CONFLICT" }),
+  );
+  expect((await submit()).status).toBe(409);
+  control.mockRejectedValueOnce(new Error("synthetic private failure detail"));
+  const failed = await submit();
+  expect(failed.status).toBe(403);
+  expect(await failed.json()).toEqual({ error: "request_denied" });
+});
+
+it("restricts service-control state reads to safe scoped requests", async () => {
+  const snapshot = {
+    hours: {
+      configurationSource: "StoreOverride" as const,
+      effectiveFrom: parseCanonicalInstant(serverTime),
+      effectiveUntil: null,
+      businessDayStartLocalTime: "04:00:00",
+      weeklySchedule: [],
+      exceptions: [],
+    },
+    screenId: "STORE-HOURS-SERVICE" as const,
+    storeReference: parseStoreReference(storeReference),
+    configurationReference: parseStoreAdministrationReference(storeReference),
+    timeZone: "America/Toronto",
+    enabledServiceModes: ["Pickup" as const],
+    expectedVersion: 0,
+    activePauses: [],
+    observedAt: parseCanonicalInstant(serverTime),
+  };
+  const read = vi.fn(async () => snapshot);
+  const root = await serve(fakeService(), undefined, undefined, read);
+  const headers = { ...safeHeaders, Cookie: "__Host-bop-merchant=" + sessionCookie };
+  const response = await request(root, "/merchant/service-control", { headers });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual(snapshot);
+  expect(read).toHaveBeenCalledExactlyOnceWith(sessionCookie);
+  expect((await request(root, "/merchant/service-control?store=other", { headers })).status).toBe(
+    403,
+  );
+  expect(
+    (
+      await request(root, "/merchant/service-control", {
+        headers: { ...headers, Origin: "https://foreign.invalid" },
+      })
+    ).status,
+  ).toBe(403);
+  expect(read).toHaveBeenCalledTimes(1);
+  read.mockRejectedValueOnce(new Error("synthetic internal detail"));
+  const denied = await request(root, "/merchant/service-control", { headers });
+  expect(denied.status).toBe(403);
+  expect(await denied.json()).toEqual({ error: "request_denied" });
+});
+
+it("protects Dining serving transport and excludes private record fields", async () => {
+  type Result = Awaited<ReturnType<NonNullable<MerchantBffRouterOptions["diningItemService"]>>>;
+  const serving = vi.fn<NonNullable<MerchantBffRouterOptions["diningItemService"]>>(
+    async () =>
+      ({
+        status: "Created",
+        record: { itemServiceVersion: 1, auditReference: "synthetic-private-audit" },
+      }) as unknown as Result,
+  );
+  const root = await serve(fakeService(), undefined, undefined, undefined, undefined, serving);
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/dining/item-service") =>
+    request(root, path, {
+      method: "POST",
+      body: JSON.stringify({ syntheticCommand: true }),
+      headers: { ...headers, ...extra },
+    });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/dining/item-service?store=other")).status).toBe(403);
+  expect(serving).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ status: "Created", itemServiceVersion: 1 });
+  expect(serving).toHaveBeenCalledWith({
+    sessionCookie,
+    csrf,
+    command: { syntheticCommand: true },
+  });
+  serving.mockResolvedValueOnce({
+    status: "AlreadyCommitted",
+    record: { itemServiceVersion: 1 },
+  } as unknown as Result);
+  expect(await (await submit()).json()).toEqual({
+    status: "AlreadyCommitted",
+    itemServiceVersion: 1,
+  });
+  serving.mockRejectedValueOnce(new Error("synthetic private failure"));
+  const failure = await submit();
+  expect(failure.status).toBe(403);
+  expect(await failure.json()).toEqual({ error: "request_denied" });
+  const unavailable = await serve(fakeService());
+  expect(
+    (
+      await request(unavailable, "/merchant/dining/item-service", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("protects order acceptance transport and returns only public status/version", async () => {
+  const accept = vi.fn<NonNullable<MerchantBffRouterOptions["orderAcceptance"]>>(async () => ({
+    status: "Created",
+    acceptedOrderVersion: 2,
+    sourceDigest: "synthetic-private-source",
+  }));
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    accept,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/orders/accept") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+    { Cookie: "__Host-bop-merchant=" + sessionCookie + "; __Host-bop-merchant=" + sessionCookie },
+  ])
+    expect((await submit(extra)).status).toBe(403);
+  expect((await submit({}, "/merchant/orders/accept?store=other")).status).toBe(403);
+  expect(accept).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ status: "Created", acceptedOrderVersion: 2 });
+  expect(accept).toHaveBeenCalledWith({ sessionCookie, csrf, command: {} });
+  accept.mockResolvedValueOnce({ status: "AlreadyCommitted", acceptedOrderVersion: 2 });
+  expect(await (await submit()).json()).toEqual({
+    status: "AlreadyCommitted",
+    acceptedOrderVersion: 2,
+  });
+  accept.mockRejectedValueOnce(new Error("synthetic-private-source"));
+  const failure = await submit();
+  expect(failure.status).toBe(403);
+  expect(await failure.json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  const unavailable = await request(unconfigured, "/merchant/orders/accept", {
+    method: "POST",
+    headers,
+    body: "{}",
+  });
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.json()).toEqual({ error: "order_acceptance_unavailable" });
+});
+
+it("protects current order queue reads and bounds cursor authority", async () => {
+  const queue = vi.fn<NonNullable<MerchantBffRouterOptions["orderQueue"]>>(async () => ({
+    items: [],
+    nextAfterOrderReference: null,
+  }));
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    queue,
+  );
+  const headers = { ...safeHeaders, Cookie: "__Host-bop-merchant=" + sessionCookie };
+  expect((await request(root, "/merchant/orders?store=foreign", { headers })).status).toBe(403);
+  expect((await request(root, "/merchant/orders?after=invalid", { headers })).status).toBe(403);
+  expect(
+    (
+      await request(root, "/merchant/orders?after=" + storeReference + "&after=" + storeReference, {
+        headers,
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await request(root, "/merchant/orders", {
+        headers: { ...headers, Origin: "https://foreign.invalid" },
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    (await request(root, "/merchant/orders", { headers: { ...headers, Cookie: "" } })).status,
+  ).toBe(403);
+  expect(queue).not.toHaveBeenCalled();
+  const response = await request(root, "/merchant/orders?after=" + storeReference, { headers });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ items: [], nextAfterOrderReference: null });
+  expect(queue).toHaveBeenCalledWith({ sessionCookie, afterOrderReference: storeReference });
+  queue.mockRejectedValueOnce(new Error("synthetic-private-source"));
+  const failed = await request(root, "/merchant/orders", { headers });
+  expect(failed.status).toBe(403);
+  expect(await failed.json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  expect((await request(unconfigured, "/merchant/orders", { headers })).status).toBe(503);
+});
+
+it("protects price management transport and sanitizes command failures", async () => {
+  const result = {
+    status: "Applied" as const,
+    priceBookReference: "synthetic-book",
+    versionReference: "synthetic-version",
+    aggregateVersion: 1,
+    lifecycle: "Draft" as const,
+    snapshotDigest: "sha256:" + "a".repeat(64),
+  };
+  const write = vi.fn<NonNullable<MerchantBffRouterOptions["priceBooks"]>>(
+    async () => result as never,
+  );
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    write,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/pricing/price-books") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ Host: "foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/pricing/price-books?brand=other")).status).toBe(403);
+  expect(write).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual(result);
+  for (const [code, status] of [
+    ["PRICE_BOOK_INPUT_INVALID", 400],
+    ["PRICE_BOOK_APPROVAL_REQUIRED", 403],
+    ["PRICE_BOOK_VERSION_CONFLICT", 409],
+    ["PRICE_BOOK_COVERAGE_INVALID", 422],
+    ["PRICE_BOOK_DEPENDENCY_UNAVAILABLE", 503],
+  ] as const) {
+    write.mockRejectedValueOnce(new PriceBookWorkflowError(code));
+    const failed = await submit();
+    expect(failed.status).toBe(status);
+    expect(JSON.stringify(await failed.json())).not.toContain(code);
+  }
+  write.mockRejectedValueOnce(new Error("synthetic-private-error"));
+  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  expect(
+    (
+      await request(unconfigured, "/merchant/pricing/price-books", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("protects Product lifecycle transport and sanitizes command failures", async () => {
+  const result = {
+    status: "Applied" as const,
+    productReference: "synthetic-product",
+    skuReference: null,
+    aggregateVersion: 2,
+    productLifecycle: "Active" as const,
+    skuLifecycle: null,
+  };
+  const write = vi.fn<NonNullable<MerchantBffRouterOptions["productLifecycle"]>>(
+    async () => result as never,
+  );
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    write,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+  };
+  const submit = (
+    extra: Record<string, string> = {},
+    path = "/merchant/catalog/products/lifecycle",
+  ) => request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ Host: "foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({ Cookie: "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/catalog/products/lifecycle?brand=other")).status).toBe(403);
+  expect(write).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual(result);
+  for (const [code, status] of [
+    ["CATALOG_INPUT_INVALID", 400],
+    ["CATALOG_PERMISSION_DENIED", 403],
+    ["CATALOG_VERSION_CONFLICT", 409],
+    ["CATALOG_LIFECYCLE_CONFLICT", 409],
+    ["CATALOG_DEPENDENCY_UNAVAILABLE", 503],
+  ] as const) {
+    write.mockRejectedValueOnce(new CatalogError(code));
+    const failed = await submit();
+    expect(failed.status).toBe(status);
+    expect(JSON.stringify(await failed.json())).not.toContain(code);
+  }
+  write.mockRejectedValueOnce(new Error("synthetic-private-error"));
+  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  expect(
+    (
+      await request(unconfigured, "/merchant/catalog/products/lifecycle", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it.each(["creation", "draft"] as const)(
+  "protects Product %s against foreign origins and missing CSRF with safe errors",
+  async (mode) => {
+    const route =
+      mode === "creation" ? "/merchant/catalog/products" : "/merchant/catalog/products/draft";
+    const result = {
+      status: "Applied" as const,
+      productReference: "synthetic-product",
+      versionReference: "synthetic-version",
+      aggregateVersion: 1,
+      lifecycle: "Draft" as const,
+      skus: [],
+    };
+    const write = vi.fn<NonNullable<MerchantBffRouterOptions["productCreation"]>>(
+      async () => result as never,
+    );
+    const root = await serve(
+      fakeService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      mode === "creation" ? write : undefined,
+      undefined,
+      undefined,
+      undefined,
+      mode === "draft"
+        ? (write as unknown as NonNullable<MerchantBffRouterOptions["productDraft"]>)
+        : undefined,
+    );
+    const headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+    };
+    const submit = (extra: Record<string, string> = {}, path = route) =>
+      request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+    for (const extra of [
+      { Origin: "https://foreign.invalid" },
+      { Host: "foreign.invalid" },
+      { "Sec-Fetch-Site": "cross-site" },
+      { "X-BOP-CSRF": "" },
+      { Cookie: "" },
+    ])
+      expect((await submit(extra)).status).toBe(403);
+    expect((await submit({}, route + "?brand=other")).status).toBe(403);
+    expect(write).not.toHaveBeenCalled();
+    const response = await submit();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(result);
+    for (const [code, status] of [
+      ["CATALOG_INPUT_INVALID", 400],
+      ["CATALOG_PERMISSION_DENIED", 403],
+      ["CATALOG_CODE_CONFLICT", 409],
+      ["CATALOG_IDEMPOTENCY_CONFLICT", 409],
+      ["CATALOG_DEPENDENCY_UNAVAILABLE", 503],
+    ] as const) {
+      write.mockRejectedValueOnce(new CatalogError(code));
+      const failed = await submit();
+      expect(failed.status).toBe(status);
+      expect(JSON.stringify(await failed.json())).not.toContain(code);
+    }
+    write.mockRejectedValueOnce(new Error("synthetic-private-error"));
+    expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+    const unconfigured = await serve(fakeService());
+    expect(
+      (
+        await request(unconfigured, route, {
+          method: "POST",
+          headers,
+          body: "{}",
+        })
+      ).status,
+    ).toBe(503);
+  },
+);
+
+it("protects complete Menu Draft reads behind the same session and CSRF boundary", async () => {
+  const read = vi.fn<NonNullable<MerchantBffRouterOptions["menuDraft"]>>(
+    async () => ({ status: "Found" }) as never,
+  );
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    read,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/catalog/menus/draft") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/catalog/menus/draft?brand=other")).status).toBe(403);
+  expect(read).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  read.mockRejectedValueOnce(new Error("synthetic-private-menu"));
+  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  read.mockRejectedValueOnce(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"));
+  expect((await submit()).status).toBe(503);
+  const unconfigured = await serve(fakeService());
+  expect(
+    (
+      await request(unconfigured, "/merchant/catalog/menus/draft", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("protects Menu publication commands and returns safe status errors", async () => {
+  const write = vi.fn<NonNullable<MerchantBffRouterOptions["menuPublication"]>>(
+    async () => ({ status: "Applied" }) as never,
+  );
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    write,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+  };
+  const submit = (
+    extra: Record<string, string> = {},
+    path = "/merchant/catalog/menus/publication",
+  ) => request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+  ])
+    expect((await submit(extra)).status).toBe(403);
+  expect((await submit({}, "/merchant/catalog/menus/publication?brand=other")).status).toBe(403);
+  expect(write).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  for (const [code, status] of [
+    ["CATALOG_INPUT_INVALID", 400],
+    ["CATALOG_PERMISSION_DENIED", 403],
+    ["CATALOG_VERSION_CONFLICT", 409],
+    ["CATALOG_IDEMPOTENCY_CONFLICT", 409],
+    ["CATALOG_LIFECYCLE_CONFLICT", 409],
+    ["CATALOG_DEPENDENCY_UNAVAILABLE", 503],
+  ] as const) {
+    write.mockRejectedValueOnce(new CatalogError(code));
+    const failed = await submit();
+    expect(failed.status).toBe(status);
+    expect(JSON.stringify(await failed.json())).not.toContain(code);
+  }
+  write.mockRejectedValueOnce(new Error("synthetic-private-menu"));
+  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  expect(
+    (
+      await request(unconfigured, "/merchant/catalog/menus/publication", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("protects ordinary refund preparation and does not claim Provider success or expose internal facts", async () => {
+  const operationReference = "01909974-0000-7000-8000-000000000009";
+  const prepare = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefund"]>>(async () => ({
+    status: "Created",
+    operationReference,
+    internalProviderFact: "synthetic-private",
+  }));
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    prepare,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+  };
+  const post = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, "/merchant/payments/refunds/prepare" + suffix, {
+      method: "POST",
+      body: "{}",
+      headers: { ...headers, ...extra },
+    });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+  ])
+    expect((await post(extra)).status).toBe(403);
+  expect((await post({}, "?store=other")).status).toBe(403);
+  expect(prepare).not.toHaveBeenCalled();
+  const accepted = await post();
+  expect(accepted.status).toBe(202);
+  expect(accepted.headers.get("cache-control")).toBe("no-store");
+  expect(await accepted.json()).toEqual({
+    status: "PreparationRecorded",
+    operationReference,
+    replayed: false,
+  });
+  prepare.mockResolvedValueOnce({ status: "AlreadyCommitted", operationReference });
+  expect(await (await post()).json()).toEqual({
+    status: "PreparationRecorded",
+    operationReference,
+    replayed: true,
+  });
+  prepare.mockRejectedValueOnce(new Error("synthetic-private-provider-detail"));
+  expect(await (await post()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  expect(
+    (
+      await request(unconfigured, "/merchant/payments/refunds/prepare", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("protects Kitchen commands and preserves typed recovery outcomes", async () => {
+  const execute = vi.fn<NonNullable<MerchantBffRouterOptions["kitchenCommand"]>>();
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    execute,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/kitchen/work") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/kitchen/work?store=other")).status).toBe(403);
+  expect(execute).not.toHaveBeenCalled();
+  for (const [code, status] of [
+    ["KITCHEN_WORK_INPUT_INVALID", 400],
+    ["KITCHEN_WORK_PERMISSION_DENIED", 403],
+    ["KITCHEN_WORK_NOT_FOUND", 404],
+    ["KITCHEN_WORK_VERSION_CONFLICT", 409],
+    ["KITCHEN_WORK_PRECONDITION_FAILED", 422],
+    ["KITCHEN_WORK_DEPENDENCY_UNAVAILABLE", 503],
+  ] as const) {
+    execute.mockRejectedValueOnce(new KitchenWorkLifecycleError(code));
+    const result = await submit();
+    expect(result.status).toBe(status);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toEqual({ error: code });
+  }
+  const result = parseKitchenWorkLifecycleResult({
+    operationReference: "018f7f9a-ad3e-7a11-8d01-000000000011",
+    action: "AcceptKitchenWorkItem" as const,
+    outcome: "Accepted" as const,
+    ticketReference: "018f7f9a-ad3e-7a11-8d01-000000000012",
+    workItemReference: "018f7f9a-ad3e-7a11-8d01-000000000013",
+    orderItemReference: "018f7f9a-ad3e-7a11-8d01-000000000014",
+    ticketVersion: "2",
+    workItemVersion: "2",
+    workItemStatus: "Queued" as const,
+    completedQuantity: 0,
+    requiredQuantity: 1,
+    occurredAt: serverTime,
+    readyResultReference: null,
+    readyQuantity: null,
+    projectionName: "kitchen_work_queue_v1" as const,
+    projectionPending: true as const,
+    projectionTriggers: ["KitchenLifecycleEvent"] as const,
+  });
+  execute.mockResolvedValueOnce(result);
+  const success = await submit();
+  expect(success.status).toBe(200);
+  expect(await success.json()).toEqual(result);
+  expect(execute).toHaveBeenLastCalledWith({ sessionCookie, csrf, command: {} });
+  const unavailable = await serve(fakeService());
+  expect(
+    (
+      await request(unavailable, "/merchant/kitchen/work", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+  execute.mockRejectedValueOnce(new Error("private adapter details"));
+  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+});
+
+it("protects Kitchen queries and exposes only typed public failures", async () => {
+  const query = vi.fn<NonNullable<MerchantBffRouterOptions["kitchenQuery"]>>();
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    query,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/kitchen/query") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/kitchen/query?item=other")).status).toBe(403);
+  expect(query).not.toHaveBeenCalled();
+  for (const [code, status] of [
+    ["KITCHEN_QUEUE_INPUT_INVALID", 400],
+    ["KITCHEN_QUEUE_PERMISSION_DENIED", 403],
+    ["KITCHEN_QUEUE_NOT_FOUND", 404],
+    ["KITCHEN_QUEUE_VERSION_CONFLICT", 409],
+    ["KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE", 503],
+  ] as const) {
+    query.mockRejectedValueOnce(new KitchenQueueProjectionError(code));
+    const response = await submit();
+    expect(response.status).toBe(status);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: code });
+  }
+  query.mockRejectedValueOnce(new Error("private SQL"));
+  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  expect(
+    (
+      await request(unconfigured, "/merchant/kitchen/query", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("protects Pickup handoff and exposes only typed public failures", async () => {
+  const query = vi.fn<NonNullable<MerchantBffRouterOptions["pickupHandoff"]>>();
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    query,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/pickup/handoff") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/pickup/handoff?item=other")).status).toBe(403);
+  expect(query).not.toHaveBeenCalled();
+  for (const [code, status] of [
+    ["PICKUP_HANDOFF_INPUT_INVALID", 400],
+    ["PICKUP_HANDOFF_PERMISSION_DENIED", 403],
+    ["PICKUP_HANDOFF_NOT_READY", 422],
+    ["PICKUP_HANDOFF_VERIFICATION_FAILED", 422],
+    ["PICKUP_HANDOFF_ALREADY_COMPLETED", 409],
+    ["PICKUP_HANDOFF_VERSION_CONFLICT", 409],
+  ] as const) {
+    query.mockRejectedValueOnce(new PickupHandoffError(code));
+    const response = await submit();
+    expect(response.status).toBe(status);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: code });
+  }
+  query.mockRejectedValueOnce(new Error("private SQL"));
+  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  expect(
+    (
+      await request(unconfigured, "/merchant/pickup/handoff", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("protects Pickup proof and exposes only typed public failures", async () => {
+  const query = vi.fn<NonNullable<MerchantBffRouterOptions["pickupProof"]>>();
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    query,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/pickup/proof") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/pickup/proof?item=other")).status).toBe(403);
+  expect(query).not.toHaveBeenCalled();
+  for (const [code, status] of [
+    ["PICKUP_PROOF_INPUT_INVALID", 400],
+    ["PICKUP_PROOF_NOT_READY", 422],
+    ["PICKUP_PROOF_VERSION_CONFLICT", 409],
+    ["PICKUP_PROOF_UNAVAILABLE", 422],
+  ] as const) {
+    query.mockRejectedValueOnce(new PickupProofError(code));
+    const response = await submit();
+    expect(response.status).toBe(status);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: code });
+  }
+  query.mockRejectedValueOnce(new Error("private SQL"));
+  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  expect(
+    (
+      await request(unconfigured, "/merchant/pickup/proof", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("protects Pickup queue and exposes only typed public failures", async () => {
+  const query = vi.fn<NonNullable<MerchantBffRouterOptions["pickupQuery"]>>();
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    query,
+  );
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/pickup/query") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/pickup/query?item=other")).status).toBe(403);
+  expect(query).not.toHaveBeenCalled();
+  for (const [code, status] of [
+    ["FULFILLMENT_READINESS_INPUT_INVALID", 400],
+    ["FULFILLMENT_READINESS_PERMISSION_DENIED", 403],
+    ["FULFILLMENT_READINESS_NOT_FOUND", 404],
+    ["FULFILLMENT_READINESS_CONFLICT", 409],
+    ["FULFILLMENT_READINESS_DEPENDENCY_UNAVAILABLE", 503],
+  ] as const) {
+    query.mockRejectedValueOnce(new FulfillmentReadinessError(code));
+    const response = await submit();
+    expect(response.status).toBe(status);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: code });
+  }
+  query.mockRejectedValueOnce(new Error("private SQL"));
+  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serve(fakeService());
+  expect(
+    (
+      await request(unconfigured, "/merchant/pickup/query", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("protects Dining progress transport and returns only operational fields", async () => {
+  type Reader = NonNullable<MerchantBffRouterOptions["diningOrderProgress"]>;
+  const current = {
+    orderReference: storeReference,
+    tableLabel: "T1",
+    sessionVersion: 2,
+    tableAssignmentVersion: 3,
+    orderVersion: 3,
+    phase: "Fulfilled",
+    observedAt: serverTime,
+    brandReference: "private-brand",
+    guestSessionReference: "private-guest",
+    items: [
+      {
+        orderItemReference: storeReference,
+        orderBatchReference: storeReference,
+        displayName: "Meal",
+        batchSequence: 1,
+        itemOrdinal: 1,
+        phase: "Fulfilled",
+        orderedQuantity: 2,
+        deliveredQuantity: 2,
+        remainingQuantity: 0,
+        itemServiceVersion: 1,
+        auditReference: "private-audit",
+      },
+    ],
+  };
+  const read = vi.fn<Reader>().mockResolvedValue(current as unknown as Awaited<ReturnType<Reader>>);
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      diningOrderProgress: read,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/dining/order-progress") =>
+    request(root, path, {
+      method: "POST",
+      body: JSON.stringify({ orderReference: storeReference }),
+      headers: { ...headers, ...extra },
+    });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({ Cookie: "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/dining/order-progress?store=other")).status).toBe(403);
+  expect(read).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    orderReference: storeReference,
+    tableLabel: "T1",
+    sessionVersion: 2,
+    tableAssignmentVersion: 3,
+    orderVersion: 3,
+    phase: "Fulfilled",
+    observedAt: serverTime,
+    items: [
+      {
+        orderItemReference: storeReference,
+        orderBatchReference: storeReference,
+        displayName: "Meal",
+        batchSequence: 1,
+        itemOrdinal: 1,
+        phase: "Fulfilled",
+        orderedQuantity: 2,
+        deliveredQuantity: 2,
+        remainingQuantity: 0,
+        itemServiceVersion: 1,
+      },
+    ],
+  });
+  expect(read).toHaveBeenCalledWith({
+    sessionCookie,
+    csrf,
+    query: { orderReference: storeReference },
+  });
+  read.mockResolvedValueOnce(null);
+  expect((await submit()).status).toBe(404);
+  read.mockRejectedValueOnce(new Error("private failure"));
+  const denied = await submit();
+  expect(denied.status).toBe(403);
+  expect(await denied.json()).toEqual({ error: "request_denied" });
+  const unavailable = await serve(fakeService());
+  expect(
+    (
+      await request(unavailable, "/merchant/dining/order-progress", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it("protects the minimal Dining serve command and keeps private facts out of responses", async () => {
+  const command = vi
+    .fn<NonNullable<MerchantBffRouterOptions["diningServe"]>>()
+    .mockResolvedValue({ status: "Created", itemServiceVersion: 2 });
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      diningServe: command,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/dining/serve") =>
+    request(root, path, {
+      method: "POST",
+      body: JSON.stringify({ syntheticIntent: true }),
+      headers: { ...headers, ...extra },
+    });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect((await submit({ Cookie: "" })).status).toBe(403);
+  expect((await submit({}, "/merchant/dining/serve?store=other")).status).toBe(403);
+  expect(command).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ status: "Created", itemServiceVersion: 2 });
+  expect(command).toHaveBeenCalledWith({ sessionCookie, csrf, command: { syntheticIntent: true } });
+  command.mockResolvedValueOnce({ status: "AlreadyCommitted", itemServiceVersion: 2 });
+  expect(await (await submit()).json()).toEqual({
+    status: "AlreadyCommitted",
+    itemServiceVersion: 2,
+  });
+  command.mockRejectedValueOnce(new Error("private details"));
+  const failure = await submit();
+  expect(failure.status).toBe(403);
+  expect(await failure.json()).toEqual({ error: "request_denied" });
+  const absent = await serve(fakeService());
+  expect(
+    (await request(absent, "/merchant/dining/serve", { method: "POST", headers, body: "{}" }))
+      .status,
+  ).toBe(503);
+});
+
+async function serveOrderClose(orderClosure?: MerchantBffRouterOptions["orderClosure"]) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(orderClosure ? { orderClosure } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+it("protects order closure transport, exact retry and bounded response", async () => {
+  const close = vi.fn<NonNullable<MerchantBffRouterOptions["orderClosure"]>>(async () => ({
+    status: "Committed",
+    closedOrderVersion: 3,
+    closureVersion: 1,
+    privateEvidence: "synthetic-private",
+  }));
+  const root = await serveOrderClose(close),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/orders/close") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+    { Cookie: "__Host-bop-merchant=" + sessionCookie + "; __Host-bop-merchant=" + sessionCookie },
+  ])
+    expect((await submit(extra)).status).toBe(403);
+  expect((await submit({}, "/merchant/orders/close?store=other")).status).toBe(403);
+  expect(close).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    status: "Committed",
+    closedOrderVersion: 3,
+    closureVersion: 1,
+  });
+  expect(close).toHaveBeenCalledWith({ sessionCookie, csrf, command: {} });
+  close.mockResolvedValueOnce({
+    status: "AlreadyCommitted",
+    closedOrderVersion: 3,
+    closureVersion: 1,
+  });
+  expect(await (await submit()).json()).toEqual({
+    status: "AlreadyCommitted",
+    closedOrderVersion: 3,
+    closureVersion: 1,
+  });
+  close.mockRejectedValueOnce(new Error("synthetic-private"));
+  const denied = await submit();
+  expect(denied.status).toBe(403);
+  expect(await denied.json()).toEqual({ error: "request_denied" });
+  close.mockResolvedValueOnce({ status: "Committed", closedOrderVersion: 0, closureVersion: 1 });
+  expect((await submit()).status).toBe(403);
+  const unconfigured = await serveOrderClose(),
+    unavailable = await request(unconfigured, "/merchant/orders/close", {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.json()).toEqual({ error: "order_closure_unavailable" });
+});
+
+async function serveDiningClosing(diningClosing?: MerchantBffRouterOptions["diningClosing"]) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(diningClosing ? { diningClosing } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+it("protects dining closing transport, exact retry and bounded response", async () => {
+  const close = vi.fn<NonNullable<MerchantBffRouterOptions["diningClosing"]>>(async () => ({
+    status: "Applied",
+    phase: "Closing",
+    sessionVersion: 3,
+    privateEvidence: "synthetic-private",
+  }));
+  const root = await serveDiningClosing(close),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/dining/closing") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+    { Cookie: "__Host-bop-merchant=" + sessionCookie + "; __Host-bop-merchant=" + sessionCookie },
+  ])
+    expect((await submit(extra)).status).toBe(403);
+  expect((await submit({}, "/merchant/dining/closing?store=other")).status).toBe(403);
+  expect(close).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    status: "Applied",
+    phase: "Closing",
+    sessionVersion: 3,
+  });
+  expect(close).toHaveBeenCalledWith({ sessionCookie, csrf, command: {} });
+  close.mockResolvedValueOnce({
+    status: "AlreadyApplied",
+    phase: "Closing",
+    sessionVersion: 3,
+  });
+  expect(await (await submit()).json()).toEqual({
+    status: "AlreadyApplied",
+    phase: "Closing",
+    sessionVersion: 3,
+  });
+  close.mockRejectedValueOnce(new Error("synthetic-private"));
+  const denied = await submit();
+  expect(denied.status).toBe(403);
+  expect(await denied.json()).toEqual({ error: "request_denied" });
+  close.mockResolvedValueOnce({ status: "Applied", phase: "Closing", sessionVersion: 0 });
+  expect((await submit()).status).toBe(403);
+  const unconfigured = await serveDiningClosing(),
+    unavailable = await request(unconfigured, "/merchant/dining/closing", {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.json()).toEqual({ error: "dining_closing_unavailable" });
+});
+
+async function serveDiningSessionStart(
+  diningSessionStart?: MerchantBffRouterOptions["diningSessionStart"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(diningSessionStart ? { diningSessionStart } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+it("protects session start and returns one-time credentials only for Issued", async () => {
+  const result = {
+    status: "Issued" as const,
+    diningSessionReference: parseDiningReference("01909988-0000-7000-8000-000000000001"),
+    tableReference: parseDiningReference("01909988-0000-7000-8000-000000000002"),
+    sessionVersion: 1,
+    tableAssignmentVersion: 2,
+    joinKind: "HumanCode" as const,
+    joinCredential: "123456" as never,
+  };
+  const start = vi.fn<NonNullable<MerchantBffRouterOptions["diningSessionStart"]>>(async () => ({
+    ...result,
+    privateEvidence: "private",
+  }));
+  const root = await serveDiningSessionStart(start),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/dining/sessions/start") =>
+    request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { Cookie: "" },
+    { "X-BOP-CSRF": "" },
+  ])
+    expect((await submit(extra)).status).toBe(403);
+  expect((await submit({}, "/merchant/dining/sessions/start?store=other")).status).toBe(403);
+  expect(start).not.toHaveBeenCalled();
+  const issued = await submit();
+  expect(issued.status).toBe(200);
+  expect(issued.headers.get("cache-control")).toBe("no-store");
+  expect(await issued.json()).toEqual(result);
+  start.mockResolvedValueOnce({ ...result, status: "AlreadyApplied" });
+  const retry = await (await submit()).json();
+  expect(retry).not.toHaveProperty("joinCredential");
+  expect(retry).not.toHaveProperty("privateEvidence");
+  start.mockResolvedValueOnce({ ...result, joinCredential: "invalid" as never });
+  expect((await submit()).status).toBe(403);
+  const unavailable = await serveDiningSessionStart();
+  expect(
+    (
+      await request(unavailable, "/merchant/dining/sessions/start", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+async function serveDiningRegenerate(
+  diningJoinRegenerate?: MerchantBffRouterOptions["diningJoinRegenerate"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(diningJoinRegenerate ? { diningJoinRegenerate } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+it("regeneration transport never replays plaintext or extra credential material", async () => {
+  const command = vi.fn<NonNullable<MerchantBffRouterOptions["diningJoinRegenerate"]>>(
+    async () => ({
+      status: "Issued",
+      generation: 2,
+      capabilityVersion: 1,
+      joinKind: "HumanCode",
+      joinCredential: "123456" as never,
+      selectorHash: "private",
+    }),
+  );
+  const root = await serveDiningRegenerate(command),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const send = (extra: Record<string, string> = {}) =>
+    request(root, "/merchant/dining/sessions/regenerate", {
+      method: "POST",
+      body: "{}",
+      headers: { ...headers, ...extra },
+    });
+  expect((await send({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect(command).not.toHaveBeenCalled();
+  const issued = await send();
+  expect(issued.headers.get("cache-control")).toBe("no-store");
+  expect(await issued.json()).toEqual({
+    status: "Issued",
+    generation: 2,
+    capabilityVersion: 1,
+    joinKind: "HumanCode",
+    joinCredential: "123456",
+  });
+  command.mockResolvedValueOnce({
+    status: "AlreadyApplied",
+    generation: 2,
+    capabilityVersion: 1,
+    joinKind: "HumanCode",
+    joinCredential: "123456" as never,
+  });
+  expect(await (await send()).json()).not.toHaveProperty("joinCredential");
+});
+
+async function serveRefundRequest(
+  ordinaryRefundRequest?: MerchantBffRouterOptions["ordinaryRefundRequest"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(ordinaryRefundRequest ? { ordinaryRefundRequest } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+it("protects refund request transport and returns only request evidence", async () => {
+  const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const data = {
+    status: "Created" as const,
+    requestReference: id(1),
+    operationReference: id(2),
+    claimVersion: 1,
+    currencyCode: "CAD" as const,
+    amountMinor: "1130",
+    paymentAttemptReferences: [id(3)],
+    internalQuote: "private",
+  };
+  const command = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundRequest"]>>(
+    async () => data,
+  );
+  const root = await serveRefundRequest(command),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const send = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, "/merchant/payments/refunds/request" + suffix, {
+      method: "POST",
+      body: "{}",
+      headers: { ...headers, ...extra },
+    });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { Cookie: "" },
+    { "X-BOP-CSRF": "" },
+  ])
+    expect((await send(extra)).status).toBe(403);
+  expect((await send({}, "?store=other")).status).toBe(403);
+  expect(command).not.toHaveBeenCalled();
+  const first = await send();
+  expect(first.status).toBe(202);
+  expect(first.headers.get("cache-control")).toBe("no-store");
+  expect(await first.json()).toEqual({
+    status: "RequestRecorded",
+    requestReference: id(1),
+    operationReference: id(2),
+    claimVersion: 1,
+    currencyCode: "CAD",
+    amountMinor: "1130",
+    paymentAttemptReferences: [id(3)],
+    replayed: false,
+  });
+  command.mockResolvedValueOnce({ ...data, status: "AlreadyCommitted" });
+  expect(await (await send()).json()).toMatchObject({ status: "RequestRecorded", replayed: true });
+  command.mockRejectedValueOnce(new Error("private"));
+  expect(await (await send()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serveRefundRequest();
+  expect(
+    (
+      await request(unconfigured, "/merchant/payments/refunds/request", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+async function serveRefundItems(
+  ordinaryRefundItems?: MerchantBffRouterOptions["ordinaryRefundItems"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(ordinaryRefundItems ? { ordinaryRefundItems } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+it("protects refund items transport and strips private nested data", async () => {
+  const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const item = {
+    orderBatchReference: id(2),
+    orderItemReference: id(3),
+    label: "Latte",
+    quantity: 2,
+    unclaimedQuantity: 1,
+    paymentCaptured: true,
+    paymentIntentReference: id(31),
+  };
+  const query = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundItems"]>>(async () => ({
+    orderReference: id(1),
+    orderNumber: "12",
+    claimVersion: 1,
+    recentRequests: [
+      {
+        requestReference: id(40),
+        operationReference: id(41),
+        claimVersion: 1,
+        requestedAt: "2026-09-20T12:00:00.000Z",
+        reasonCode: "CUSTOMER_REQUEST",
+        currencyCode: "CAD",
+        amountMinor: "1130",
+      },
+    ],
+    items: [{ ...item, customerNote: "private" }],
+    guest: "private",
+  }));
+  const root = await serveRefundItems(query),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const send = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, "/merchant/payments/refunds/items" + suffix, {
+      method: "POST",
+      body: "{}",
+      headers: { ...headers, ...extra },
+    });
+  for (const extra of [{ Origin: "https://foreign.invalid" }, { Cookie: "" }, { "X-BOP-CSRF": "" }])
+    expect((await send(extra)).status).toBe(403);
+  expect((await send({}, "?store=other")).status).toBe(403);
+  expect(query).not.toHaveBeenCalled();
+  const result = await send();
+  expect(result.status).toBe(200);
+  expect(result.headers.get("cache-control")).toBe("no-store");
+  expect(await result.json()).toEqual({
+    orderReference: id(1),
+    orderNumber: "12",
+    claimVersion: 1,
+    recentRequests: [
+      {
+        requestReference: id(40),
+        operationReference: id(41),
+        claimVersion: 1,
+        requestedAt: "2026-09-20T12:00:00.000Z",
+        reasonCode: "CUSTOMER_REQUEST",
+        currencyCode: "CAD",
+        amountMinor: "1130",
+      },
+    ],
+    items: [item],
+  });
+  query.mockRejectedValueOnce(new Error("private"));
+  expect(await (await send()).json()).toEqual({ error: "request_denied" });
+  const unconfigured = await serveRefundItems();
+  expect(
+    (
+      await request(unconfigured, "/merchant/payments/refunds/items", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
+});
+
+async function serveRefundPreview(
+  ordinaryRefundPreview?: MerchantBffRouterOptions["ordinaryRefundPreview"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(ordinaryRefundPreview ? { ordinaryRefundPreview } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+it("protects refund preview transport and whitelists component amounts", async () => {
+  const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const components = {
+    netAmountMinor: "1000",
+    taxAmountMinor: "130",
+    tipAmountMinor: "0",
+    serviceChargeAmountMinor: "0",
+    serviceChargeTaxAmountMinor: "0",
+  };
+  const data = {
+    status: "Previewed" as const,
+    requestReference: id(1),
+    operationReference: id(2),
+    claimVersion: 0,
+    currencyCode: "CAD" as const,
+    amountMinor: "1130",
+    paymentAttemptReferences: [id(3)],
+    components,
+  };
+  const preview = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundPreview"]>>(
+    async () => ({
+      ...data,
+      sourceDigest: "private",
+      components: { ...components, audit: "private" },
+    }),
+  );
+  const root = await serveRefundPreview(preview),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const send = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, "/merchant/payments/refunds/preview" + suffix, {
+      method: "POST",
+      headers: { ...headers, ...extra },
+      body: "{}",
+    });
+  for (const extra of [{ Origin: "https://foreign.invalid" }, { Cookie: "" }, { "X-BOP-CSRF": "" }])
+    expect((await send(extra)).status).toBe(403);
+  expect((await send({}, "?store=other")).status).toBe(403);
+  expect(preview).not.toHaveBeenCalled();
+  const result = await send();
+  expect(result.status).toBe(200);
+  expect(result.headers.get("cache-control")).toBe("no-store");
+  expect(await result.json()).toEqual(data);
+  const unconfigured = await serveRefundPreview();
+  expect(
+    (
+      await request(unconfigured, "/merchant/payments/refunds/preview", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
+});
+
+async function serveRefundContext(
+  refundPaymentContext?: MerchantBffRouterOptions["refundPaymentContext"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(refundPaymentContext ? { refundPaymentContext } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+it("protects refund payment context and preserves unknown amounts", async () => {
+  const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const data = {
+    paymentIntentReference: id(1),
+    paymentAttemptReference: id(2),
+    orderReference: id(3),
+    orderBatchReference: id(4),
+    observedAt: "2026-09-20T12:00:00.000Z",
+    paymentState: "Unresolved" as const,
+    currencyCode: null,
+    capturedAmountMinor: null,
+    confirmedRefundMinor: null,
+    pendingRefundMinor: null,
+  };
+  const query = vi.fn<NonNullable<MerchantBffRouterOptions["refundPaymentContext"]>>(async () => ({
+    ...data,
+    rawProvider: "private",
+  }));
+  const root = await serveRefundContext(query),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const send = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, "/merchant/payments/refunds/context" + suffix, {
+      method: "POST",
+      body: "{}",
+      headers: { ...headers, ...extra },
+    });
+  for (const extra of [{ Origin: "https://foreign.invalid" }, { Cookie: "" }, { "X-BOP-CSRF": "" }])
+    expect((await send(extra)).status).toBe(403);
+  expect((await send({}, "?store=other")).status).toBe(403);
+  expect(query).not.toHaveBeenCalled();
+  const result = await send();
+  expect(result.status).toBe(200);
+  expect(result.headers.get("cache-control")).toBe("no-store");
+  expect(await result.json()).toEqual(data);
+  const unconfigured = await serveRefundContext();
+  expect(
+    (
+      await request(unconfigured, "/merchant/payments/refunds/context", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+async function serveRefundStatus(
+  ordinaryRefundStatus?: MerchantBffRouterOptions["ordinaryRefundStatus"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(ordinaryRefundStatus ? { ordinaryRefundStatus } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+it("protects refund status and strips private execution details", async () => {
+  const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const payment = {
+    paymentAttemptReference: id(2),
+    paymentIntentReference: id(1),
+    state: "NotDispatched" as const,
+    executionOperationReference: null,
+    amountMinor: "1130",
+    confirmedMinor: "0",
+    pendingMinor: "1130",
+  };
+  const data = {
+    orderReference: id(3),
+    requestReference: id(4),
+    operationReference: id(5),
+    observedAt: "2026-09-20T12:00:00.000Z",
+    currencyCode: "CAD" as const,
+    amountMinor: "1130",
+    payments: [payment],
+  };
+  const query = vi.fn<NonNullable<MerchantBffRouterOptions["ordinaryRefundStatus"]>>(async () => ({
+    ...data,
+    rawProvider: "private",
+    payments: [{ ...payment, providerRefundReference: "private" }],
+  }));
+  const root = await serveRefundStatus(query),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const send = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, "/merchant/payments/refunds/status" + suffix, {
+      method: "POST",
+      body: "{}",
+      headers: { ...headers, ...extra },
+    });
+  for (const extra of [{ Origin: "https://foreign.invalid" }, { Cookie: "" }, { "X-BOP-CSRF": "" }])
+    expect((await send(extra)).status).toBe(403);
+  expect((await send({}, "?store=other")).status).toBe(403);
+  expect(query).not.toHaveBeenCalled();
+  const result = await send();
+  expect(result.status).toBe(200);
+  expect(result.headers.get("cache-control")).toBe("no-store");
+  expect(await result.json()).toEqual(data);
+  const unconfigured = await serveRefundStatus();
+  expect(
+    (
+      await request(unconfigured, "/merchant/payments/refunds/status", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+async function serveDiningHostTransfer(
+  diningHostTransfer?: MerchantBffRouterOptions["diningHostTransfer"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(diningHostTransfer ? { diningHostTransfer } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+it("protects Host transfer and whitelists original operation receipt", async () => {
+  const reference = (n: number) =>
+    parseDiningReference("0190fa41-0000-7000-8000-" + n.toString(16).padStart(12, "0"));
+  const result = {
+    status: "Applied" as const,
+    operationReference: reference(1),
+    diningSessionReference: reference(2),
+    previousHostParticipantReference: reference(3),
+    hostParticipantReference: reference(4),
+    sessionVersion: 5,
+    transferredAt: "2026-09-21T03:45:00.000Z" as never,
+  };
+  const command = vi.fn<NonNullable<MerchantBffRouterOptions["diningHostTransfer"]>>(async () => ({
+    ...result,
+    privateEvidence: "private",
+  }));
+  const root = await serveDiningHostTransfer(command),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const submit = (
+    extra: Record<string, string> = {},
+    path = "/merchant/dining/sessions/host-transfer",
+  ) => request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { Cookie: "" },
+    { "X-BOP-CSRF": "" },
+  ])
+    expect((await submit(extra)).status).toBe(403);
+  expect((await submit({}, "/merchant/dining/sessions/host-transfer?store=other")).status).toBe(
+    403,
+  );
+  expect(command).not.toHaveBeenCalled();
+  const applied = await submit();
+  expect(applied.status).toBe(200);
+  expect(applied.headers.get("cache-control")).toBe("no-store");
+  expect(await applied.json()).toEqual(result);
+  command.mockResolvedValueOnce({ ...result, status: "AlreadyApplied" });
+  expect(await (await submit()).json()).toEqual({ ...result, status: "AlreadyApplied" });
+  command.mockResolvedValueOnce({
+    ...result,
+    hostParticipantReference: result.previousHostParticipantReference,
+  });
+  expect((await submit()).status).toBe(403);
+  command.mockRejectedValueOnce(new Error("private"));
+  expect((await submit()).status).toBe(403);
+  const unavailable = await serveDiningHostTransfer();
+  expect(
+    (
+      await request(unavailable, "/merchant/dining/sessions/host-transfer", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+async function serveDiningHostSelection(
+  diningHostSelection?: MerchantBffRouterOptions["diningHostSelection"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(diningHostSelection ? { diningHostSelection } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+it("protects Host selection and excludes private participant fields", async () => {
+  const ref = (n: number) =>
+    parseDiningReference("0190fa42-0000-7000-8000-" + n.toString(16).padStart(12, "0"));
+  const at = "2026-09-21T03:55:00.000Z" as never;
+  const result = {
+    diningSessionReference: ref(1),
+    sessionVersion: 3,
+    phase: "Active" as const,
+    hostParticipantReference: ref(2),
+    observedAt: at,
+    participants: [{ participantReference: ref(3), joinedAt: at, isHost: false }],
+  };
+  const read = vi.fn<NonNullable<MerchantBffRouterOptions["diningHostSelection"]>>(async () => ({
+    ...result,
+    participants: result.participants.map((p) => ({ ...p, privateEvidence: "private" })),
+  }));
+  const root = await serveDiningHostSelection(read),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const send = (extra: Record<string, string> = {}) =>
+    request(root, "/merchant/dining/sessions/host-selection", {
+      method: "POST",
+      body: "{}",
+      headers: { ...headers, ...extra },
+    });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { Cookie: "" },
+    { "X-BOP-CSRF": "" },
+  ])
+    expect((await send(extra)).status).toBe(403);
+  expect(read).not.toHaveBeenCalled();
+  const response = await send();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual(result);
+  read.mockResolvedValueOnce({
+    ...result,
+    participants: [...result.participants, ...result.participants],
+  });
+  expect((await send()).status).toBe(403);
+  const unavailable = await serveDiningHostSelection();
+  expect(
+    (
+      await request(unavailable, "/merchant/dining/sessions/host-selection", {
+        method: "POST",
+        body: "{}",
+        headers,
+      })
+    ).status,
+  ).toBe(503);
+});
+
+it.each([
+  ["send", "ordinaryRefundSend", "DispatchRecorded"],
+  ["reconcile", "ordinaryRefundReconciliation", "ReconciliationRecorded"],
+] as const)(
+  "protects refund execution %s and hides all internal financial evidence",
+  async (path, capability, status) => {
+    const receipt = { status: "Existing", version: 1, kind: "Original" };
+    const execute = vi.fn(async () => ({ privateEvidence: "do-not-expose", receipt }));
+    const app = express();
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        service: fakeService(),
+        exactOrigin: "https://merchant.invalid",
+        acceptedHost: "merchant.invalid",
+        [capability]: execute,
+      } as MerchantBffRouterOptions),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("listener unavailable");
+    const root = `http://127.0.0.1:${address.port}`;
+    const headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+    };
+    const post = (extra: Record<string, string> = {}, suffix = "") =>
+      request(root, "/merchant/payments/refunds/" + path + suffix, {
+        method: "POST",
+        body: "{}",
+        headers: { ...headers, ...extra },
+      });
+    for (const extra of [
+      { Origin: "https://foreign.invalid" },
+      { Host: "foreign.invalid" },
+      { "Sec-Fetch-Site": "cross-site" },
+      { "X-BOP-CSRF": "" },
+      { Cookie: "" },
+    ])
+      expect((await post(extra)).status).toBe(403);
+    expect((await post({}, "?store=other")).status).toBe(403);
+    expect(execute).not.toHaveBeenCalled();
+    const accepted = await post();
+    expect(accepted.status).toBe(202);
+    expect(accepted.headers.get("cache-control")).toBe("no-store");
+    expect(await accepted.json()).toEqual(path === "send" ? { status } : { status, receipt });
+    execute.mockRejectedValueOnce(new Error("private-provider-failure"));
+    const unknown = await post();
+    expect(unknown.status).toBe(503);
+    expect(await unknown.json()).toEqual({ error: "refund_execution_unknown" });
+    const unconfigured = await serve(fakeService());
+    const unavailable = await request(unconfigured, "/merchant/payments/refunds/" + path, {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toEqual({ error: "refund_execution_unavailable" });
+  },
+);
+
+it("protects compensation acknowledgment and returns no Case closure or internal evidence", async () => {
+  const execute = vi.fn(async () => ({
+    status: "Created" as "Created" | "Duplicate",
+    reconciledAt: parsePaymentInstant(serverTime),
+    privateEvidence: "do-not-expose",
+  }));
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      compensationReconciliation: execute,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`,
+    path = "/merchant/operations/compensations/reconcile";
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+  };
+  const post = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, path + suffix, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+  ])
+    expect((await post(extra)).status).toBe(403);
+  expect((await post({}, "?store=other")).status).toBe(403);
+  expect(execute).not.toHaveBeenCalled();
+  const accepted = await post();
+  expect(accepted.status).toBe(202);
+  expect(accepted.headers.get("cache-control")).toBe("no-store");
+  expect(await accepted.json()).toEqual({
+    status: "ReconciliationRecorded",
+    replayed: false,
+    reconciledAt: parsePaymentInstant(serverTime),
+  });
+  execute.mockResolvedValueOnce({
+    status: "Duplicate",
+    reconciledAt: parsePaymentInstant(serverTime),
+    privateEvidence: "hidden",
+  });
+  expect(await (await post()).json()).toEqual({
+    status: "ReconciliationRecorded",
+    replayed: true,
+    reconciledAt: parsePaymentInstant(serverTime),
+  });
+  execute.mockRejectedValueOnce(new Error("private-failure"));
+  const unknown = await post();
+  expect(unknown.status).toBe(503);
+  expect(await unknown.json()).toEqual({ error: "compensation_reconciliation_unknown" });
+  const unconfigured = await serve(fakeService());
+  const unavailable = await request(unconfigured, path, { method: "POST", headers, body: "{}" });
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.json()).toEqual({ error: "compensation_reconciliation_unavailable" });
+});
+
+it("protects reconciliation follow-up and returns no source or employee identifiers", async () => {
+  const execute = vi.fn(async () => ({
+    status: "Created" as "Created" | "Duplicate",
+    version: 2,
+    followUpStatus: "Acknowledged" as const,
+    updatedAt: parsePaymentInstant(serverTime),
+    ownerReference: null,
+    acknowledgedByReference: parsePaymentReference("0190fa82-0000-7000-8000-000000000004"),
+    privateEvidence: "do-not-expose",
+  }));
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      reconciliationFollowUp: execute,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`,
+    path = "/merchant/operations/order-exceptions/follow-up";
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+  };
+  const post = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, path + suffix, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+  ])
+    expect((await post(extra)).status).toBe(403);
+  expect((await post({}, "?store=other")).status).toBe(403);
+  expect(execute).not.toHaveBeenCalled();
+  const accepted = await post();
+  expect(accepted.status).toBe(202);
+  expect(accepted.headers.get("cache-control")).toBe("no-store");
+  expect(await accepted.json()).toEqual({
+    status: "FollowUpRecorded",
+    replayed: false,
+    version: 2,
+    followUpStatus: "Acknowledged" as const,
+    updatedAt: parsePaymentInstant(serverTime),
+  });
+  execute.mockResolvedValueOnce({
+    status: "Duplicate",
+    version: 2,
+    followUpStatus: "Acknowledged" as const,
+    updatedAt: parsePaymentInstant(serverTime),
+    ownerReference: null,
+    acknowledgedByReference: parsePaymentReference("0190fa82-0000-7000-8000-000000000004"),
+    privateEvidence: "hidden",
+  });
+  expect(await (await post()).json()).toEqual({
+    status: "FollowUpRecorded",
+    replayed: true,
+    version: 2,
+    followUpStatus: "Acknowledged" as const,
+    updatedAt: parsePaymentInstant(serverTime),
+  });
+  for (const [code, status] of [
+    ["RECONCILIATION_FOLLOW_UP_CONFLICT", 409],
+    ["RECONCILIATION_FOLLOW_UP_PERMISSION_DENIED", 403],
+    ["RECONCILIATION_FOLLOW_UP_INVALID", 400],
+  ] as const) {
+    execute.mockRejectedValueOnce(new ReconciliationFollowUpError(code));
+    expect((await post()).status).toBe(status);
+  }
+  execute.mockRejectedValueOnce(new BrowserSessionError("BROWSER_SESSION_DENIED"));
+  const deniedSession = await post();
+  expect(deniedSession.status).toBe(403);
+  expect(await deniedSession.json()).toEqual({ error: "request_denied" });
+  execute.mockRejectedValueOnce(new Error("private-failure"));
+  const unknown = await post();
+  expect(unknown.status).toBe(503);
+  expect(await unknown.json()).toEqual({ error: "reconciliation_follow_up_unknown" });
+  const unconfigured = await serve(fakeService());
+  const unavailable = await request(unconfigured, path, { method: "POST", headers, body: "{}" });
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.json()).toEqual({ error: "reconciliation_follow_up_unavailable" });
+});
+
+it("protects compensation preparation query and hides evidence", async () => {
+  const model = {
+    caseVersion: 2,
+    caseState: "Open" as const,
+    refund: { amountMinor: "1130", currencyCode: "CAD", confirmedAt: serverTime },
+    acknowledgmentRecorded: false,
+  };
+  const execute = vi.fn(async () => ({ ...model, privateEvidence: "hidden" }));
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      compensationQuery: execute,
+    } as unknown as MerchantBffRouterOptions),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`,
+    path = "/merchant/operations/compensations/query",
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+    };
+  const post = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, path + suffix, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+  ])
+    expect((await post(extra)).status).toBe(403);
+  expect((await post({}, "?store=other")).status).toBe(403);
+  expect(execute).not.toHaveBeenCalled();
+  const result = await post();
+  expect(result.status).toBe(200);
+  expect(result.headers.get("cache-control")).toBe("no-store");
+  expect(await result.json()).toEqual(model);
+  execute.mockRejectedValueOnce(new Error("private-source-failure"));
+  const failed = await post();
+  expect(failed.status).toBe(503);
+  expect(await failed.json()).toEqual({ error: "compensation_reconciliation_unavailable" });
+  const unconfigured = await serve(fakeService());
+  expect((await request(unconfigured, path, { method: "POST", body: "{}", headers })).status).toBe(
+    503,
+  );
+});
+
+it("protects follow-up state query and rejects invalid owner state", async () => {
+  const model = {
+    version: 1,
+    followUpStatus: "Open" as const,
+    acknowledged: false,
+    assigned: false,
+    updatedAt: parsePaymentInstant(serverTime),
+    privateEvidence: "hidden",
+  };
+  const execute = vi.fn(async () => model),
+    app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      reconciliationFollowUpQuery: execute,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`,
+    path = "/merchant/operations/order-exceptions/follow-up-query";
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+  };
+  const post = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, path + suffix, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+  ])
+    expect((await post(extra)).status).toBe(403);
+  expect((await post({}, "?store=other")).status).toBe(403);
+  expect(execute).not.toHaveBeenCalled();
+  const response = await post();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    version: 1,
+    followUpStatus: "Open",
+    acknowledged: false,
+    assigned: false,
+    updatedAt: serverTime,
+  });
+  execute.mockResolvedValueOnce({ ...model, version: 0 });
+  expect((await post()).status).toBe(503);
+  execute.mockResolvedValueOnce({ ...model, assigned: true });
+  expect((await post()).status).toBe(503);
+  execute.mockRejectedValueOnce(new Error("private detail"));
+  expect(await (await post()).json()).toEqual({ error: "reconciliation_follow_up_unavailable" });
+  const unconfigured = await serve(fakeService());
+  expect((await request(unconfigured, path, { method: "POST", headers, body: "{}" })).status).toBe(
+    503,
+  );
+});
+
+it("protects reconciliation evidence and emits only the validated summary", async () => {
+  const model = {
+    amountMinor: "2260",
+    currencyCode: "CAD" as const,
+    environment: "Test" as const,
+    occurredAt: parsePaymentInstant("2026-09-20T03:35:37.236Z"),
+    observedAt: parsePaymentInstant(serverTime),
+    recordedReason: "ProviderCaptureWithoutInternalOperation" as const,
+  };
+  // Use a fixed observed time later than the original capture regardless of other suite fixtures.
+  model.observedAt = parsePaymentInstant("2026-09-22T00:00:00.000Z");
+  const execute = vi.fn(async () => ({ ...model, privateEvidence: "hidden" }));
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      reconciliationEvidenceQuery: execute,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`,
+    path = "/merchant/operations/order-exceptions/follow-up-evidence";
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+  };
+  const post = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, path + suffix, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+  ])
+    expect((await post(extra)).status).toBe(403);
+  expect((await post({}, "?scope=other")).status).toBe(403);
+  expect(execute).not.toHaveBeenCalled();
+  const result = await post();
+  expect(result.headers.get("cache-control")).toBe("no-store");
+  expect(await result.json()).toEqual({ evidence: model });
+  execute.mockResolvedValueOnce({ ...model, amountMinor: "0", privateEvidence: "hidden" });
+  expect((await post()).status).toBe(503);
+  execute.mockResolvedValueOnce({
+    ...model,
+    observedAt: parsePaymentInstant("2026-01-01T00:00:00.000Z"),
+    privateEvidence: "hidden",
+  });
+  expect((await post()).status).toBe(503);
+  execute.mockRejectedValueOnce(new BrowserSessionError("BROWSER_SESSION_DENIED"));
+  expect((await post()).status).toBe(403);
+  execute.mockRejectedValueOnce(new Error("private-query-details"));
+  expect(await (await post()).json()).toEqual({ error: "reconciliation_evidence_unavailable" });
+  const unconfigured = await serve(fakeService());
+  expect((await request(unconfigured, path, { method: "POST", headers, body: "{}" })).status).toBe(
+    503,
+  );
+});
+
+it("protects reconciliation assignee directory and bounds public output", async () => {
+  const item = { actorReference: "01950000-0000-7000-8000-000000000001", label: "Pilot operator" };
+  const model = { items: [item], nextAfterActorReference: null as string | null };
+  const execute = vi.fn(async () => ({ ...model, privateIdentity: "hidden" }));
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      reconciliationAssigneeQuery: execute,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`,
+    path = "/merchant/operations/order-exceptions/follow-up-assignees";
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+  };
+  const post = (extra: Record<string, string> = {}, suffix = "") =>
+    request(root, path + suffix, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { Host: "foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { Cookie: "" },
+    { "X-BOP-CSRF": "" },
+  ])
+    expect((await post(extra)).status).toBe(403);
+  expect((await post({}, "?store=other")).status).toBe(403);
+  expect(execute).not.toHaveBeenCalled();
+  const result = await post();
+  expect(result.headers.get("cache-control")).toBe("no-store");
+  expect(await result.json()).toEqual(model);
+  for (const invalid of [
+    { ...model, items: Array.from({ length: 26 }, () => item) },
+    { ...model, items: [item, item] },
+    { ...model, items: [{ ...item, label: "private@example.invalid" }] },
+    { ...model, items: [{ ...item, actorReference: "invalid" }] },
+    { ...model, nextAfterActorReference: "invalid" },
+  ]) {
+    execute.mockResolvedValueOnce({ ...invalid, privateIdentity: "hidden" });
+    expect(await (await post()).json()).toEqual({ error: "reconciliation_assignees_unavailable" });
+  }
+  execute.mockResolvedValueOnce({
+    items: [],
+    nextAfterActorReference: item.actorReference,
+    privateIdentity: "hidden",
+  });
+  expect(await (await post()).json()).toEqual({
+    items: [],
+    nextAfterActorReference: item.actorReference,
+  });
+  execute.mockRejectedValueOnce(new BrowserSessionError("BROWSER_SESSION_DENIED"));
+  expect((await post()).status).toBe(403);
+  execute.mockRejectedValueOnce(Error("private identity details"));
+  expect(await (await post()).json()).toEqual({ error: "reconciliation_assignees_unavailable" });
+  const unconfigured = await serve(fakeService());
+  expect((await request(unconfigured, path, { method: "POST", headers, body: "{}" })).status).toBe(
+    503,
+  );
 });

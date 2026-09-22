@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
+import { createAbuseBudgetConsumer } from "../src/abuse-budget.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
@@ -15,11 +16,13 @@ async function consume(context, role, key, observedAt, bucketClass = "PICKUP_PRO
   await client.connect();
   try {
     await client.query(`SET ROLE ${role}`);
-    const result = await client.query(
-      `SELECT * FROM security.consume_abuse_budget($1,$2,$3,$4,$5,$6)`,
-      [bucketClass, digest(key), "2026-08-12T12:00:00.000Z", 600, 5, observedAt],
-    );
-    return result.rows[0];
+    return await createAbuseBudgetConsumer({
+      bucketClass,
+      windowSeconds: 600,
+      limitCount: 5,
+      now: () => observedAt,
+      query: (sql, values) => client.query(sql, [...values]),
+    }).consume(digest(key));
   } finally {
     await client.end();
   }

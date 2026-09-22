@@ -2,7 +2,8 @@
 
 Prepared in [WP-2342](../work-packages/WP-2342.md).
 Related topology record: [DEC-H03](./capacity-source-decision.md).
-The Dine-in interpretation below is a proposal only. This document records no new Owner approval.
+DEC-H03-DINING was explicitly accepted by the Owner on 2026-09-10 in this task.
+The disposition below is authoritative; implementation and acceptance evidence remain separate.
 
 ## Source facts and implemented scope
 
@@ -24,7 +25,8 @@ Since this WP-2342 proposal was prepared, [WP-2343](../work-packages/WP-2343.md)
 [WP-2344](../work-packages/WP-2344.md) and [WP-2347](../work-packages/WP-2347.md) have recorded
 Scheduled owner writes/transitions with atomic Audit and actual PostgreSQL evidence.
 Current application authority, Ordering linkage and the clock-seal producer remain separate.
-This evidence update does not accept DEC-H03-DINING or claim the composed payment journey.
+Those implementation results do not prove the composed payment journey. The later Owner
+disposition below separately accepts DEC-H03-DINING.
 
 ## Clock sequence for review
 
@@ -64,14 +66,19 @@ This sequencing document is not evidence that those producers already exist.
 | ------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Scheduled Pickup/Delivery | Fulfillment Scheduled Hold converted to Allocation with original slot/config/units       | Owner storage and atomic Audit have WP-2343/2344/2347 evidence; current application authority, Ordering linkage/Outbox and clock seal remain. |
 | ASAP Pickup/Delivery      | Fulfillment current capacity commitment for the authoritative Confirmed estimated Window | Final recheck and direct allocation contract required; no fake Scheduled Hold or fabricated ETA/slot.                                         |
-| Dine-in                   | Dining-owned current Session/Table relationship                                          | The precise checkout commitment interpretation below requires explicit Owner acceptance.                                                      |
+| Dine-in                   | Dining-owned current Session/Table relationship                                          | The interpretation below is accepted; durable owner lifecycle, linkage and race evidence remain required.                                     |
 
 No mode may substitute a Catalog availability observation, Reservation policy configuration,
 unrestricted Store reference or synthetic fixture for a durable owner commitment.
 
 ## Proposed Dine-in interpretation: DEC-H03-DINING
 
-Proposed for Owner acceptance, not yet effective:
+**Disposition: Accepted, 2026-09-10.** The Owner answered
+“批准该堂食解释（推荐）” to the explicit question linking this proposal and describing Dining-owned
+Session/Table commitment, no Pickup capacity record, and the unpaid-Batch-only timeout.
+This accepts the following five points as a scoped business interpretation. The original heading
+is retained for stable links; “Proposed” describes its origin, not its current disposition.
+[WP-2402](../work-packages/WP-2402.md) records the implementation follow-up.
 
 1. Dining owns the Dine-in checkout capacity commitment, based on the current authorized and
    applicable Dining Session/Table relationship. It is bound to the exact Store, Session, Cart,
@@ -91,7 +98,12 @@ Proposed for Owner acceptance, not yet effective:
    Acceptance of this interpretation does not resolve DEC-H04/H05 Order finality or refund gates,
    create Provider/Store evidence, or authorize deployment.
 
-The question is whether an exact Dining commitment to the existing in-use Session/Table is the
-capacity allocation required by 87.9 for a Dine-in Batch, with the 30-minute deadline limited as above.
-This is a new transaction-fact interpretation; generic development or local-commit permission is
-not its acceptance. Until disposition, Dine-in Payment preparation remains unavailable.
+The accepted interpretation makes the exact Dining commitment to the existing in-use Session/Table
+the capacity allocation required by 87.9 for a Dine-in Batch, with the deadline limited as above.
+[WP-2402](../work-packages/WP-2402.md) adds the commitment lifecycle and scoped owner persistence
+with unit and real PostgreSQL evidence.
+Current-authorized preparation and Identity/CSRF composition have separate service/API evidence.
+Atomic Ordering linkage has real PostgreSQL evidence in the same WP.
+Implementation remains pending: connected submission authority and cross-owner closure/move coordination,
+permanent Payment clock and composed acceptance evidence are required
+before enabling Dine-in Payment preparation. This approval alone does not enable that path.

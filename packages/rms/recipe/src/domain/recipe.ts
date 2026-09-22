@@ -123,7 +123,13 @@ function plain(value: unknown, keys: readonly string[]): Record<string, unknown>
     Reflect.ownKeys(value).some((key) => typeof key !== "string" || !keys.includes(key))
   )
     return fail("RECIPE_INPUT_INVALID");
-  return value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor?.enumerable || !("value" in descriptor)) return fail("RECIPE_INPUT_INVALID");
+    result[key] = descriptor.value;
+  }
+  return result;
 }
 function allergen(value: unknown): AllergenEvidence {
   const raw = plain(value, ["allergenReference", "evidenceReference", "verified"]);
@@ -329,12 +335,17 @@ export function validateRecipeGraph(
   availableInputs: readonly RecipeSnapshot[],
 ) {
   const root = createRecipeSnapshot(rootInput);
-  const available = new Map(
-    availableInputs.map((input) => {
-      const snapshot = createRecipeSnapshot(input);
-      return [snapshot.versionReference, snapshot] as const;
-    }),
-  );
+  const available = new Map<RecipeReference, RecipeSnapshot>();
+  for (const input of availableInputs) {
+    const snapshot = createRecipeSnapshot(input);
+    if (
+      snapshot.brandReference !== root.brandReference ||
+      snapshot.versionReference === root.versionReference ||
+      available.has(snapshot.versionReference)
+    )
+      return fail("RECIPE_GRAPH_UNRESOLVED");
+    available.set(snapshot.versionReference, snapshot);
+  }
   available.set(root.versionReference, root);
   const visiting = new Set<RecipeReference>();
   const visited = new Set<RecipeReference>();

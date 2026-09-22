@@ -20,6 +20,7 @@ export type CustomerEntryScreenState =
   | Readonly<{ kind: "RequestInvalid" }>
   | Readonly<{ kind: "EntryUnavailable" }>
   | Readonly<{ kind: "ServiceUnavailable" }>
+  | Readonly<{ kind: "RateLimited"; retryAfterSeconds: number }>
   | Readonly<{ kind: "Offline" }>
   | Readonly<{ kind: "CommandFailed" }>
   | Readonly<{ kind: "Established"; context: CustomerEntryEstablishedContext }>;

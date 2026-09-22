@@ -101,7 +101,7 @@ export function createOrderCreatedEnvelope(input: {
   readonly correlationReference: unknown;
   readonly sourceSnapshotDigest: unknown;
   readonly businessDate: unknown;
-  readonly record: Omit<OrderCreationRecord, "orderNumberAllocation">;
+  readonly record: Omit<OrderCreationRecord<1 | 2>, "orderNumberAllocation">;
 }): OrderCreatedEnvelope {
   try {
     const order = input.record.order;

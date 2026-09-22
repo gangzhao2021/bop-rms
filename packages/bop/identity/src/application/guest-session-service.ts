@@ -318,6 +318,22 @@ export class GuestSessionService {
     }
   }
 
+  /** Read-only bootstrap for a same-origin foreground request; does not renew idle expiry. */
+  async recoverForegroundCsrf(input: {
+    readonly sessionCredential: unknown;
+  }): Promise<GuestRawCredential> {
+    const raw = command(input, ["sessionCredential"]);
+    const sessionCredential = parseGuestRawCredential(raw.sessionCredential);
+    await this.resolve({ sessionCredential, activity: "Background" });
+    if (!this.#credentials.deriveForegroundCsrf)
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    try {
+      return parseGuestRawCredential(this.#credentials.deriveForegroundCsrf(sessionCredential));
+    } catch {
+      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    }
+  }
+
   async authorize(input: {
     readonly sessionCredential: unknown;
     readonly csrfCredential: unknown;
@@ -333,10 +349,20 @@ export class GuestSessionService {
       );
       if (
         record === null ||
-        !this.#credentials.equals(
+        (!this.#credentials.equals(
           this.#credentials.hashCredential("Csrf", csrfCredential),
           record.csrfSelectorHash,
-        )
+        ) &&
+          !(
+            this.#credentials.deriveForegroundCsrf &&
+            this.#credentials.equals(
+              this.#credentials.hashCredential("Csrf", csrfCredential),
+              this.#credentials.hashCredential(
+                "Csrf",
+                parseGuestRawCredential(this.#credentials.deriveForegroundCsrf(sessionCredential)),
+              ),
+            )
+          ))
       ) {
         throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
       }

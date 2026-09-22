@@ -1,3 +1,9 @@
+import { createKitchenQueueLifecycleProofBundle } from "../application/kitchen-queue-lifecycle-proof.js";
+import { createKitchenWorkLifecycleRows } from "../infrastructure/persistence/kitchen-work-lifecycle-rows.js";
+import {
+  encodeKitchenWorkLifecycleRecord,
+  decodeKitchenWorkLifecycleRecord,
+} from "../application/kitchen-work-lifecycle-record.js";
 import { createHash } from "node:crypto";
 
 import type { ConsumerTransaction } from "@bop/eventing";
@@ -941,6 +947,20 @@ describe("Kitchen work lifecycle service", () => {
     });
     expect(readyTest.resolveExpo).not.toHaveBeenCalled();
     expect(readyTest.effect()?.event).toBeNull();
+    const readyRows = createKitchenWorkLifecycleRows(readyTest.effect(), readyTest.ports);
+    expect(readyRows.automaticOperation).toBeNull();
+    expect(readyRows.readyResult?.causal_operation_id).toBe(
+      readyRows.operation.kitchen_work_lifecycle_operation_id,
+    );
+    expect(readyRows.readyResult?.expo_source_operation_id).toBe(
+      captured?.sourceOperationReference,
+    );
+    expect(
+      decodeKitchenWorkLifecycleRecord(
+        encodeKitchenWorkLifecycleRecord(readyTest.effect(), readyTest.ports),
+        readyTest.ports,
+      ),
+    ).toEqual(readyTest.effect());
     expect(readyTest.effect()?.operation.actorReference).toBe(refs.expoActor);
     expect(readyTest.effect()?.readyPublication).toMatchObject({
       orderReference: refs.order,
@@ -1879,3 +1899,129 @@ describe("Kitchen work lifecycle service", () => {
     expect(fenceFailure.resolveByIdempotency).not.toHaveBeenCalled();
   });
 });
+
+describe("Kitchen lifecycle immutable storage record", () => {
+  it.each([
+    ["AcceptKitchenWorkItem", "Accept", 1, "Enabled"],
+    ["StartKitchenWorkItem", "Start", 1, "Enabled"],
+    ["CompleteKitchenWorkItem", "Complete", 1, "Enabled"],
+    ["CompleteKitchenWorkItem", "Complete", 3, "Enabled"],
+    ["CompleteKitchenWorkItem", "Complete", 3, "Disabled"],
+  ] as const)(
+    "round trips %s / %s / quantity %s / Expo %s",
+    async (action, state, quantityDelta, expoMode) => {
+      const selected = command(
+        action,
+        action === "CompleteKitchenWorkItem" ? { quantityDelta } : {},
+      );
+      const test = harness({ command: selected, source: source(state), expoMode });
+      await test.service.execute(selected);
+      const effect = test.effect();
+      const encoded = encodeKitchenWorkLifecycleRecord(effect, test.ports);
+      const recovered = decodeKitchenWorkLifecycleRecord(encoded, test.ports);
+      expect(recovered).toEqual(effect);
+      expect(typeof recovered.mutation.resultTicketVersion).toBe("bigint");
+      expect(typeof recovered.command.expectedTicketVersion).toBe("string");
+      expect(typeof recovered.result.ticketVersion).toBe("string");
+      const rows = createKitchenWorkLifecycleRows(effect, test.ports);
+      expect(
+        decodeKitchenWorkLifecycleRecord(rows.operation.effect_record_json, test.ports),
+      ).toEqual(effect);
+      expect(rows.operation.result_ticket_version).toBe(recovered.result.ticketVersion);
+      expect(typeof rows.operation.result_ticket_version).toBe("string");
+      if (recovered.automaticReadyOperation) {
+        expect(rows.automaticOperation?.idempotency_key).toBeNull();
+        expect(rows.automaticOperation?.effect_record_json).toBeNull();
+        expect(rows.operation.automatic_child_operation_id).toBe(
+          rows.automaticOperation?.kitchen_work_lifecycle_operation_id,
+        );
+        expect(rows.readyResult?.causal_operation_id).toBe(
+          rows.automaticOperation?.kitchen_work_lifecycle_operation_id,
+        );
+        expect(rows.automaticOperation?.audit_id).not.toBe(rows.operation.audit_id);
+      }
+      if (recovered.readyPublication) {
+        expect(rows.readyPublication?.item_outbox_event_id).toBe(
+          recovered.readyPublication.itemEvent.eventId,
+        );
+        expect(rows.readyPublication?.ticket_version).toBe(
+          recovered.readyPublication.ticketVersion.toString(),
+        );
+      }
+    },
+  );
+  it.each(["0", "01", "-1", "1.0", "1e0", "9223372036854775808", 2, null])(
+    "rejects corrupt stored version %s",
+    async (version) => {
+      const test = harness();
+      await test.service.execute(command());
+      const record = JSON.parse(encodeKitchenWorkLifecycleRecord(test.effect(), test.ports));
+      record.effect.mutation.resultTicketVersion = version;
+      expect(() => decodeKitchenWorkLifecycleRecord(JSON.stringify(record), test.ports)).toThrow(
+        "kitchen work is unavailable",
+      );
+    },
+  );
+  it("rejects unknown record version and semantic tampering", async () => {
+    const test = harness();
+    await test.service.execute(command());
+    const encoded = encodeKitchenWorkLifecycleRecord(test.effect(), test.ports);
+    const record = JSON.parse(encoded);
+    expect(() =>
+      decodeKitchenWorkLifecycleRecord(JSON.stringify({ ...record, recordVersion: 2 }), test.ports),
+    ).toThrow();
+    record.effect.operation.actorReference = refs.expoActor;
+    expect(() => decodeKitchenWorkLifecycleRecord(JSON.stringify(record), test.ports)).toThrow();
+  });
+});
+
+it.each(["Enabled", "Disabled"] as const)(
+  "derives complete queue proofs from %s Expo owner effects",
+  async (expoMode) => {
+    const accept = harness({ referenceSeed: 100 });
+    await accept.service.execute(command());
+    const startCommand = command("StartKitchenWorkItem");
+    const start = harness({ command: startCommand, source: source("Start"), referenceSeed: 200 });
+    await start.service.execute(startCommand);
+    const completeCommand = command("CompleteKitchenWorkItem", { quantityDelta: 3 });
+    const complete = harness({
+      command: completeCommand,
+      source: source("Complete"),
+      expoMode,
+      referenceSeed: 300,
+    });
+    await complete.service.execute(completeCommand);
+    const effects = [accept.effect(), start.effect(), complete.effect()];
+    if (expoMode === "Enabled") {
+      const captured = complete.effect()?.operation.capturedExpo;
+      if (!captured) throw new Error("missing captured Expo");
+      const readyCommand = command("MarkKitchenOrderItemReady");
+      const ready = harness({
+        command: readyCommand,
+        source: source("MarkReady", captured),
+        referenceSeed: 400,
+      });
+      ready.setObservedAt("2026-08-09T12:10:00.000Z");
+      ready.setNow("2026-08-09T12:10:01.000Z");
+      await ready.service.execute(readyCommand);
+      effects.push(ready.effect());
+    }
+    const build = (history: readonly unknown[]) =>
+      createKitchenQueueLifecycleProofBundle({
+        ticketReference: refs.ticket,
+        effects: history,
+        validation: accept.ports,
+      });
+    const result = build(effects);
+    expect(result.operationCount).toBe(4);
+    expect(result.readyResultCount).toBe(1);
+    expect(result.proofs.map((proof) => proof.kind)).toContain(
+      expoMode === "Enabled" ? "ManualReady" : "AutomaticReady",
+    );
+    expect(() => build(effects.slice(1))).toThrow();
+    expect(() => build([...effects, effects[0]])).toThrow();
+    expect(() =>
+      build([{ ...accept.effect(), effectDigest: "sha256:" + "f".repeat(64) }]),
+    ).toThrow();
+  },
+);

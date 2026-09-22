@@ -12,12 +12,17 @@ import {
   createPostgresOrderCreationQueryStore,
   createPostgresOrderCreationStore,
   createPostgresOrderCreationRepository,
+  createPostgresCapacityLinkedOrderCreationRepository,
   createOrderCreationService,
+  createCapacityLinkedOrderCreationService,
   createOrderCreatedEnvelope,
 } from "../../rms/ordering/src/index.ts";
 import { orderSnapshotInput } from "../../rms/ordering/src/tests/order-item-snapshot.fixture.ts";
 import { orderQueryFixture } from "../../rms/ordering/src/tests/order-creation-query.fixture.ts";
-import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
+import {
+  orderWriteFixture,
+  orderCapacityLinkFixture,
+} from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
 import { orderCreatedSourceInput } from "../../rms/ordering/src/application/order-created-source.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
@@ -37,10 +42,11 @@ async function prove(context) {
          'rms_ordering.order_submission_record'::regclass,
          'rms_ordering.order_batch'::regclass,
          'rms_ordering.order_item'::regclass,
+         'rms_ordering.order_capacity_link'::regclass,
          'platform_eventing.outbox_event'::regclass
        ) ORDER BY relname`,
     );
-    assert.equal(forced.rows.length, 5);
+    assert.equal(forced.rows.length, 6);
     assert.equal(
       forced.rows.every((row) => row.relforcerowsecurity),
       true,
@@ -135,7 +141,7 @@ async function prove(context) {
     await client.query("COMMIT");
 
     const snapshot = await client.query(
-      `SELECT header.order_number,submission.submission_id,item.transaction_snapshot_json
+      `SELECT header.order_number,submission.submission_id,submission.submission_kind,item.transaction_snapshot_json
        FROM rms_ordering.order_header AS header
        JOIN rms_ordering.order_submission_record AS submission USING (order_id,brand_id,store_id)
        JOIN rms_ordering.order_item AS item USING (order_id,brand_id,store_id)
@@ -144,6 +150,7 @@ async function prove(context) {
     );
     assert.equal(snapshot.rowCount, 1);
     assert.equal(snapshot.rows[0].order_number, "1");
+    assert.equal(snapshot.rows[0].submission_kind, "Initial");
     assert.equal(snapshot.rows[0].transaction_snapshot_json.pricing.total.amountMinor, "1130");
     const outbox = await client.query(
       `SELECT event_type,schema_version,producer_module,brand_id::text,store_id::text,
@@ -891,14 +898,15 @@ async function prove(context) {
         brandReference: f.scope.brandReference,
         storeReference: f.scope.storeReference,
         publicStoreReference: id(900),
-        publicTableReference: null,
-        channel: "Pickup",
+        publicTableReference: f.cart.orderType === "DineIn" ? id(903) : null,
+        channel: f.cart.orderType,
         locale: "en-CA",
         qrReference: id(901),
         qrRevocationVersion: 1,
-        diningState: "ContextOnly",
-        diningSessionReference: null,
-        diningParticipantReference: null,
+        diningState: f.cart.orderType === "DineIn" ? "DiningBound" : "ContextOnly",
+        diningSessionReference: f.cart.diningSessionReference,
+        diningParticipantReference:
+          f.cart.orderType === "DineIn" ? f.cart.items[0].addedByParticipantReference : null,
         createdAt: f.cart.createdAt,
         lastSeenAt: f.request.record.createdAt,
         idleExpiresAt: new Date(
@@ -909,7 +917,7 @@ async function prove(context) {
         ).toISOString(),
         orderClosedAt: null,
         closureExpiresAt: null,
-        rotatedFromGuestSessionReference: null,
+        rotatedFromGuestSessionReference: f.cart.orderType === "DineIn" ? id(904) : null,
         revocationReason: null,
         revokedAt: null,
       };
@@ -961,6 +969,241 @@ async function prove(context) {
       };
       return { ports, service: createOrderCreationService(ports) };
     }
+    // WP-2402: required owner-capacity link is part of the same original Order transaction.
+    const linkCount = async (f) =>
+      Number(
+        (
+          await client.query(
+            "SELECT count(*)::text AS count FROM rms_ordering.order_capacity_link WHERE brand_id=$1 AND store_id=$2",
+            [f.scope.brandReference, f.scope.storeReference],
+          )
+        ).rows[0].count,
+      );
+    const linked = (f, options = {}, link = orderCapacityLinkFixture(f)) =>
+      createPostgresCapacityLinkedOrderCreationRepository(
+        { query: writerRunner(), write: writerRunner(options) },
+        f.scope,
+        link,
+      );
+    for (const [index, fail] of [
+      "INSERT INTO rms_ordering.order_capacity_link",
+      "INSERT INTO platform_audit.audit_record",
+      "INSERT INTO platform_eventing.outbox_event",
+    ].entries()) {
+      const f = orderWriteFixture({ namespace: "018f791" + index, dineIn: true });
+      await seedCart(f);
+      await assert.rejects(linked(f, { fail }).commit(f.request), {
+        code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+      });
+      assert.deepEqual(await counts(f), { orders: 0, counters: 0, audits: 0, events: 0 });
+      assert.equal(await linkCount(f), 0);
+      const saved = await linked(f).commit(f.request);
+      assert.equal(saved.status, "Created");
+      assert.deepEqual(
+        await linked(f).resolveCapacityLink(f.request.record.submissionReference),
+        orderCapacityLinkFixture(f),
+      );
+      assert.deepEqual(await counts(f), { orders: 1, counters: 1, audits: 1, events: 1 });
+      assert.equal(await linkCount(f), 1);
+    }
+    // Pickup uses the same atomic Ordering write and original owner-link recovery.
+    const pickupLinked = orderWriteFixture({ namespace: "018f7920" });
+    await seedCart(pickupLinked);
+    await assert.rejects(linked(pickupLinked, { loseAck: true }).commit(pickupLinked.request), {
+      code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+    });
+    assert.equal((await linked(pickupLinked).commit(pickupLinked.request)).status, "Existing");
+    assert.deepEqual(
+      await linked(pickupLinked).resolveCapacityLink(
+        pickupLinked.request.record.submissionReference,
+      ),
+      orderCapacityLinkFixture(pickupLinked),
+    );
+    assert.equal(await linkCount(pickupLinked), 1);
+    assert.deepEqual(await counts(pickupLinked), { orders: 1, counters: 1, audits: 1, events: 1 });
+    await client.query("BEGIN");
+    try {
+      await assert.rejects(
+        client.query(
+          "INSERT INTO rms_ordering.order_capacity_link (brand_id,store_id,submission_id,order_id,order_batch_id,commitment_id,payment_operation_id,created_at,link_json) " +
+            "SELECT brand_id,store_id,submission_id,order_id,order_batch_id,commitment_id,payment_operation_id,created_at," +
+            "jsonb_set(link_json,'{owner}',to_jsonb('Dining'::text)) FROM rms_ordering.order_capacity_link WHERE brand_id=$1 AND store_id=$2",
+          [pickupLinked.scope.brandReference, pickupLinked.scope.storeReference],
+        ),
+        { code: "23514" },
+      );
+    } finally {
+      await client.query("ROLLBACK");
+    }
+    const capacityRace = orderWriteFixture({ namespace: "018f7913", dineIn: true });
+    await seedCart(capacityRace);
+    const capacityResults = await Promise.all([
+      linked(capacityRace).commit(capacityRace.request),
+      linked(capacityRace).commit(capacityRace.request),
+    ]);
+    assert.deepEqual(capacityResults.map((r) => r.status).sort(), ["Created", "Existing"]);
+    assert.equal(await linkCount(capacityRace), 1);
+    const capacityLost = orderWriteFixture({ namespace: "018f7914", dineIn: true });
+    await seedCart(capacityLost);
+    await assert.rejects(linked(capacityLost, { loseAck: true }).commit(capacityLost.request), {
+      code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+    });
+    const originalLink = orderCapacityLinkFixture(capacityLost);
+    assert.deepEqual(
+      await linked(capacityLost).resolveCapacityLink(
+        capacityLost.request.record.submissionReference,
+      ),
+      originalLink,
+    );
+    assert.equal((await linked(capacityLost).commit(capacityLost.request)).status, "Existing");
+    const different = { ...originalLink, paymentOperationReference: id(9001) };
+    await assert.rejects(linked(capacityLost, {}, different).commit(capacityLost.request), {
+      code: "ORDER_CREATE_IDEMPOTENCY_CONFLICT",
+    });
+    await assert.rejects(
+      linked(capacityLost, {}, different).resolveSubmission(
+        capacityLost.request.record.submissionReference,
+      ),
+      { code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" },
+    );
+    const legacyDining = orderWriteFixture({ namespace: "018f7915", dineIn: true });
+    await seedCart(legacyDining);
+    await createPostgresOrderCreationStore(writerRunner(), legacyDining.scope).append(
+      legacyDining.request,
+    );
+    await assert.rejects(
+      linked(legacyDining).resolveSubmission(legacyDining.request.record.submissionReference),
+      { code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE" },
+    );
+    await assert.rejects(linked(legacyDining).commit(legacyDining.request), {
+      code: "ORDER_CREATE_IDEMPOTENCY_CONFLICT",
+    });
+    assert.equal(await linkCount(legacyDining), 0);
+    assert.deepEqual(await counts(legacyDining), { orders: 1, counters: 1, audits: 1, events: 1 });
+    assert.equal(
+      (
+        await client.query(
+          "UPDATE rms_ordering.order_capacity_link SET created_at=created_at WHERE brand_id=$1",
+          [capacityLost.scope.brandReference],
+        )
+      ).rowCount,
+      0,
+    );
+    assert.equal(
+      (
+        await client.query("DELETE FROM rms_ordering.order_capacity_link WHERE brand_id=$1", [
+          capacityLost.scope.brandReference,
+        ])
+      ).rowCount,
+      0,
+    );
+    const capacityRole = "wp2402_link_" + context.runId;
+    assert.match(capacityRole, /^wp2402_link_[a-f0-9]+$/u);
+    await client.query("CREATE ROLE " + capacityRole + " NOLOGIN NOSUPERUSER NOBYPASSRLS");
+    const scopedClient = new Client(context.clientConfig);
+    await scopedClient.connect();
+    try {
+      await client.query("GRANT USAGE ON SCHEMA rms_ordering,platform_helpers TO " + capacityRole);
+      await client.query("GRANT SELECT ON rms_ordering.order_capacity_link TO " + capacityRole);
+      await client.query(
+        "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+          capacityRole,
+      );
+      await scopedClient.query("BEGIN");
+      await scopedClient.query("SET LOCAL ROLE " + capacityRole);
+      await scopedClient.query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [capacityLost.scope.brandReference, capacityLost.scope.storeReference],
+      );
+      assert.equal(
+        (await scopedClient.query("SELECT submission_id FROM rms_ordering.order_capacity_link"))
+          .rows.length,
+        1,
+      );
+      await scopedClient.query("SELECT set_config('bop.store_id',$1,true)", [id(9002)]);
+      assert.equal(
+        (await scopedClient.query("SELECT submission_id FROM rms_ordering.order_capacity_link"))
+          .rows.length,
+        0,
+      );
+      await scopedClient.query("ROLLBACK");
+    } finally {
+      await scopedClient.end();
+      await client.query("DROP OWNED BY " + capacityRole);
+      await client.query("DROP ROLE " + capacityRole);
+    }
+
+    // Real required-link service binds owner IDs even when the ordinary generator differs.
+    const permanent = orderWriteFixture({ namespace: "018f7916", dineIn: true });
+    await seedCart(permanent);
+    const permanentLink = orderCapacityLinkFixture(permanent);
+    const permanentPorts = application(permanent).ports;
+    const ordinaryGenerate = permanentPorts.references.generate;
+    permanentPorts.references.generate = (purpose) => {
+      assert(!["Order", "OrderBatch"].includes(purpose), "permanent IDs must not be regenerated");
+      return ordinaryGenerate(purpose);
+    };
+    permanentPorts.repository = createPostgresCapacityLinkedOrderCreationRepository(
+      { query: writerRunner(), write: writerRunner() },
+      permanent.scope,
+      permanentLink,
+    );
+    const permanentService = createCapacityLinkedOrderCreationService(
+      permanentPorts,
+      permanentLink,
+    );
+    const permanentCommand = {
+      submissionReference: permanent.request.record.submissionReference,
+      cartReference: permanent.cart.cartReference,
+      expectedCartVersion: permanent.cart.aggregateVersion,
+      quoteReference: permanent.request.checkoutValidationEvidence.quoteReference,
+      requestedAt: permanent.request.record.createdAt,
+    };
+    const permanentOutcomes = await Promise.all([
+      permanentService.create(permanentCommand),
+      permanentService.create(permanentCommand),
+    ]);
+    assert.deepEqual(permanentOutcomes.map((r) => r.status).sort(), ["AlreadyCreated", "Created"]);
+    assert(
+      permanentOutcomes.every(
+        (r) => r.record.order.orderReference === permanentLink.orderReference,
+      ),
+    );
+    assert(
+      permanentOutcomes.every(
+        (r) => r.record.order.batches[0].orderBatchReference === permanentLink.orderBatchReference,
+      ),
+    );
+    assert.deepEqual(await counts(permanent), { orders: 1, counters: 1, audits: 1, events: 1 });
+
+    const permanentLost = orderWriteFixture({ namespace: "018f7917", dineIn: true });
+    await seedCart(permanentLost);
+    const permanentLostLink = orderCapacityLinkFixture(permanentLost);
+    const permanentLostPorts = application(permanentLost).ports;
+    permanentLostPorts.repository = createPostgresCapacityLinkedOrderCreationRepository(
+      { query: writerRunner(), write: writerRunner({ loseAck: true }) },
+      permanentLost.scope,
+      permanentLostLink,
+    );
+    const lostService = createCapacityLinkedOrderCreationService(
+      permanentLostPorts,
+      permanentLostLink,
+    );
+    const lostCommand = {
+      submissionReference: permanentLost.request.record.submissionReference,
+      cartReference: permanentLost.cart.cartReference,
+      expectedCartVersion: permanentLost.cart.aggregateVersion,
+      quoteReference: permanentLost.request.checkoutValidationEvidence.quoteReference,
+      requestedAt: permanentLost.request.record.createdAt,
+    };
+    await assert.rejects(lostService.create(lostCommand), {
+      code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+    });
+    const originalLost = await lostService.create(lostCommand);
+    assert.equal(originalLost.status, "AlreadyCreated");
+    assert.equal(originalLost.record.order.orderReference, permanentLostLink.orderReference);
+    assert.deepEqual(await counts(permanentLost), { orders: 1, counters: 1, audits: 1, events: 1 });
+
     const composed = orderWriteFixture({ namespace: "018f7808" });
     await seedCart(composed);
     const commandFor = (f) => ({

@@ -30,6 +30,7 @@ export interface DigitalReceiptSnapshot {
   readonly templateVersion: string;
   readonly lines: readonly ReceiptLineSnapshot[];
   readonly subtotal: ReceiptMoney;
+  readonly adjustments?: { readonly discount: ReceiptMoney; readonly fee: ReceiptMoney };
   readonly tax: ReceiptMoney;
   readonly tip: ReceiptMoney;
   readonly total: ReceiptMoney;
@@ -131,7 +132,12 @@ function instant(value: unknown): string {
 
 function money(value: unknown): ReceiptMoney {
   const raw = exact(value, ["amountMinor", "currencyCode"]);
-  if (typeof raw.amountMinor !== "bigint" || raw.amountMinor < 0n) return fail();
+  if (
+    typeof raw.amountMinor !== "bigint" ||
+    raw.amountMinor < 0n ||
+    raw.amountMinor > 9223372036854775807n
+  )
+    return fail();
   if (typeof raw.currencyCode !== "string" || !currencyPattern.test(raw.currencyCode))
     return fail();
   return Object.freeze({ amountMinor: raw.amountMinor, currencyCode: raw.currencyCode });
@@ -149,6 +155,10 @@ function line(value: unknown): ReceiptLineSnapshot {
 }
 
 export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnapshot {
+  const hasAdjustments =
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "adjustments");
   const raw = exact(value, [
     "receiptReference",
     "orderReference",
@@ -169,6 +179,7 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
     "total",
     "paymentStatus",
     "refundedTotal",
+    ...(hasAdjustments ? ["adjustments"] : []),
   ]);
   if (!Array.isArray(raw.lines) || raw.lines.length < 1 || raw.lines.length > 200) return fail();
   if (typeof raw.locale !== "string" || !localePattern.test(raw.locale)) return fail();
@@ -179,12 +190,21 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
     !paymentStatuses.includes(raw.paymentStatus as ReceiptPaymentStatus)
   )
     return fail();
+  const adjustments = hasAdjustments ? exact(raw.adjustments, ["discount", "fee"]) : null;
   const parsed = Object.freeze({
+    ...(adjustments === null
+      ? {}
+      : {
+          adjustments: Object.freeze({
+            discount: money(adjustments.discount),
+            fee: money(adjustments.fee),
+          }),
+        }),
     receiptReference: reference(raw.receiptReference),
     orderReference: reference(raw.orderReference),
     guestSessionReference: reference(raw.guestSessionReference),
     operatingEntityReference: reference(raw.operatingEntityReference),
-    operatingEntityDisplayName: text(raw.operatingEntityDisplayName),
+    operatingEntityDisplayName: text(raw.operatingEntityDisplayName, 200),
     brandReference: reference(raw.brandReference),
     storeReference: reference(raw.storeReference),
     storeDisplayName: text(raw.storeDisplayName),
@@ -207,9 +227,15 @@ export function parseDigitalReceiptSnapshot(value: unknown): DigitalReceiptSnaps
       parsed.tax,
       parsed.tip,
       parsed.refundedTotal,
+      ...(parsed.adjustments ? [parsed.adjustments.discount, parsed.adjustments.fee] : []),
       ...parsed.lines.map((item) => item.lineTotal),
     ].some((amount) => amount.currencyCode !== currency) ||
-    parsed.subtotal.amountMinor + parsed.tax.amountMinor + parsed.tip.amountMinor !==
+    (parsed.adjustments?.discount.amountMinor ?? 0n) > parsed.subtotal.amountMinor ||
+    parsed.subtotal.amountMinor -
+      (parsed.adjustments?.discount.amountMinor ?? 0n) +
+      parsed.tax.amountMinor +
+      (parsed.adjustments?.fee.amountMinor ?? 0n) +
+      parsed.tip.amountMinor !==
       parsed.total.amountMinor ||
     parsed.refundedTotal.amountMinor > parsed.total.amountMinor
   )

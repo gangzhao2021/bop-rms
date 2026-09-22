@@ -43,7 +43,7 @@ export interface CheckoutCatalogLineEvidence {
   readonly validatedAt: OrderingInstant;
 }
 
-export interface CheckoutValidationEvidence {
+export interface CheckoutValidationEvidence<V extends 1 | 2 = 1> {
   readonly validationReference: OrderingReference;
   readonly validationIntentHash: OrderingHash;
   readonly guestSessionReference: OrderingReference;
@@ -52,7 +52,7 @@ export interface CheckoutValidationEvidence {
   readonly cartReference: OrderingReference;
   readonly cartVersion: number;
   readonly quoteReference: OrderingReference;
-  readonly quoteVersion: 1;
+  readonly quoteVersion: V;
   readonly quoteInputDigest: OrderingHash;
   readonly orderType: CartOrderType;
   readonly sourceChannel: CartSourceChannel;
@@ -229,7 +229,10 @@ function fulfillment(value: unknown): CheckoutFulfillmentAccepted {
   }
 }
 
-export function parseCheckoutValidationEvidence(value: unknown): CheckoutValidationEvidence {
+function parseEvidence<V extends 1 | 2>(
+  value: unknown,
+  quoteVersion: V,
+): CheckoutValidationEvidence<V> {
   const raw = exact(value, [
     "validationReference",
     "validationIntentHash",
@@ -249,7 +252,7 @@ export function parseCheckoutValidationEvidence(value: unknown): CheckoutValidat
     "validUntil",
   ]);
   if (
-    raw.quoteVersion !== 1 ||
+    raw.quoteVersion !== quoteVersion ||
     !["DineIn", "Pickup"].includes(String(raw.orderType)) ||
     !["Api", "Pos", "Qr", "Web"].includes(String(raw.sourceChannel)) ||
     !Array.isArray(raw.catalogLines)
@@ -290,7 +293,7 @@ export function parseCheckoutValidationEvidence(value: unknown): CheckoutValidat
       cartReference,
       cartVersion,
       quoteReference,
-      quoteVersion: 1,
+      quoteVersion,
       quoteInputDigest: parseOrderingHash(raw.quoteInputDigest),
       orderType: raw.orderType as CheckoutValidationEvidence["orderType"],
       sourceChannel: raw.sourceChannel as CheckoutValidationEvidence["sourceChannel"],
@@ -303,4 +306,13 @@ export function parseCheckoutValidationEvidence(value: unknown): CheckoutValidat
     if (error instanceof CheckoutValidationError) throw error;
     return invalid();
   }
+}
+
+export function parseCheckoutValidationEvidence(value: unknown): CheckoutValidationEvidence {
+  return parseEvidence(value, 1);
+}
+export function parseConfiguredCheckoutValidationEvidence(
+  value: unknown,
+): CheckoutValidationEvidence<2> {
+  return parseEvidence(value, 2);
 }

@@ -100,6 +100,7 @@ export function createDigitalReceiptQueryService(ports: DigitalReceiptQueryPorts
       }
       const first = chain.records[0]?.snapshot;
       if (
+        chain.orderReference !== request.orderReference ||
         !first ||
         first.brandReference !== authorization.brandReference ||
         first.storeReference !== authorization.storeReference ||

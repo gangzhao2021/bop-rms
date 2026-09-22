@@ -4,21 +4,27 @@ import {
   type AppendAuditRecordInput,
 } from "@bop/audit";
 import { parsePricingReference } from "../../domain/money-tax-contract.js";
+import type { ConfiguredPriceQuoteSnapshot } from "../../domain/configured-price-quote.js";
 import type { PriceQuoteSnapshot } from "../../domain/price-quote.js";
 import {
   encodePriceQuoteSnapshot,
   decodePriceQuoteSnapshot,
+  encodeConfiguredPriceQuoteSnapshot,
+  decodeConfiguredPriceQuoteSnapshot,
 } from "../../domain/price-quote-snapshot-codec.js";
 import {
   createPostgresPriceQuoteHistoryReader,
+  createPostgresConfiguredPriceQuoteHistoryReader,
+  type PriceQuoteHistoryReader,
   type PriceQuoteQueryTransactionRunner,
 } from "./price-quote-query-store.js";
 
-export interface PriceQuoteStore {
+type StoredQuote = PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
+export interface PriceQuoteStore<T extends StoredQuote = PriceQuoteSnapshot> {
   append(input: {
-    readonly quote: PriceQuoteSnapshot;
+    readonly quote: T;
     readonly audit: AppendAuditRecordInput;
-  }): Promise<Readonly<{ status: "Created" | "Existing"; quote: PriceQuoteSnapshot }>>;
+  }): Promise<Readonly<{ status: "Created" | "Existing"; quote: T }>>;
 }
 export class PriceQuoteStoreError extends Error {
   constructor(readonly code: "QUOTE_WRITE_UNAVAILABLE" | "QUOTE_SNAPSHOT_CONFLICT") {
@@ -72,7 +78,7 @@ const insertRoot = `INSERT INTO rms_pricing.price_quote
   currency_metadata_version,currency_metadata_version_id,currency_metadata_digest,subtotal_minor,
   discount_minor,tax_minor,fee_minor,total_minor,applied_promotion_references_json,warnings_json,
   blocking_reasons_json,created_at,expires_at,complete_snapshot_text)
- VALUES ($1,1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21)
+ VALUES ($1,$22,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21)
  RETURNING price_quote_id AS reference`;
 const insertLine = `INSERT INTO rms_pricing.price_quote_line
  (price_quote_line_id,price_quote_id,brand_id,store_id,sellable_id,product_version_id,menu_version_id,
@@ -89,11 +95,19 @@ const insertTax = `INSERT INTO rms_pricing.price_quote_tax_line
  RETURNING price_quote_tax_line_id AS reference`;
 
 /** Scoped append identity only; application authorization and operation idempotency remain caller duties. */
-export function createPostgresPriceQuoteStore(
+function createQuoteStore<T extends StoredQuote>(
   runner: PriceQuoteQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
   references: { generateReference(): string },
-): PriceQuoteStore {
+  codec: {
+    encode(value: T): string;
+    decode(text: string): T;
+    reader(
+      runner: PriceQuoteQueryTransactionRunner,
+      scope: Readonly<{ brandReference: string; storeReference: string }>,
+    ): PriceQuoteHistoryReader<T>;
+  },
+): PriceQuoteStore<T> {
   let brand: string;
   let store: string;
   try {
@@ -104,11 +118,11 @@ export function createPostgresPriceQuoteStore(
     return fail();
   }
   return Object.freeze({
-    async append(input: Parameters<PriceQuoteStore["append"]>[0]) {
+    async append(input: Parameters<PriceQuoteStore<T>["append"]>[0]) {
       try {
         const raw = closed(input, ["quote", "audit"]);
-        const encoded = encodePriceQuoteSnapshot(raw.quote as PriceQuoteSnapshot);
-        const quote = decodePriceQuoteSnapshot(encoded);
+        const encoded = codec.encode(raw.quote as T);
+        const quote = codec.decode(encoded);
         if (quote.brandReference !== brand || quote.storeReference !== store) fail();
         const auditInput = closed(raw.audit, [
           "auditId",
@@ -167,13 +181,13 @@ export function createPostgresPriceQuoteStore(
           await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
             `pricing.quote:${quote.quoteReference}`,
           ]);
-          const reader = createPostgresPriceQuoteHistoryReader(
+          const reader = codec.reader(
             { run: async (action) => action(tx) },
             { brandReference: brand, storeReference: store },
           );
           const prior = await reader.load(quote.quoteReference);
           if (prior !== null) {
-            if (encodePriceQuoteSnapshot(prior) !== encoded)
+            if (codec.encode(prior) !== encoded)
               throw new PriceQuoteStoreError("QUOTE_SNAPSHOT_CONFLICT");
             return Object.freeze({ status: "Existing" as const, quote: prior });
           }
@@ -200,6 +214,7 @@ export function createPostgresPriceQuoteStore(
               quote.createdAt,
               quote.expiresAt,
               encoded,
+              quote.quoteVersion,
             ]),
             quote.quoteReference,
           );
@@ -273,7 +288,7 @@ export function createPostgresPriceQuoteStore(
             }
           }
           const persisted = await reader.load(quote.quoteReference);
-          if (persisted === null || encodePriceQuoteSnapshot(persisted) !== encoded) fail();
+          if (persisted === null || codec.encode(persisted) !== encoded) fail();
           await appendAuditRecordInTransaction(tx, audit);
           return Object.freeze({ status: "Created" as const, quote: persisted });
         });
@@ -283,5 +298,29 @@ export function createPostgresPriceQuoteStore(
         return fail();
       }
     },
+  });
+}
+
+export function createPostgresPriceQuoteStore(
+  runner: PriceQuoteQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  references: { generateReference(): string },
+): PriceQuoteStore {
+  return createQuoteStore(runner, scope, references, {
+    encode: encodePriceQuoteSnapshot,
+    decode: decodePriceQuoteSnapshot,
+    reader: createPostgresPriceQuoteHistoryReader,
+  });
+}
+
+export function createPostgresConfiguredPriceQuoteStore(
+  runner: PriceQuoteQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  references: { generateReference(): string },
+): PriceQuoteStore<ConfiguredPriceQuoteSnapshot> {
+  return createQuoteStore(runner, scope, references, {
+    encode: encodeConfiguredPriceQuoteSnapshot,
+    decode: decodeConfiguredPriceQuoteSnapshot,
+    reader: createPostgresConfiguredPriceQuoteHistoryReader,
   });
 }

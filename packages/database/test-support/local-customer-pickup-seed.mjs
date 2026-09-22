@@ -148,7 +148,7 @@ export async function seedPickup({ admin, context, sessionRole }) {
         status: "Accepted",
         menuVersionReference: id(4),
         productVersionReference: id(14),
-        catalogChannelCode: "PICKUP",
+        catalogChannelCode: "CUSTOMER_PWA",
         catalogOrderTypeCode: "PICKUP",
         ruleEvidence: [],
         validatedAt: input.observedAt,
@@ -321,6 +321,12 @@ export async function seedPickup({ admin, context, sessionRole }) {
   return {
     options,
     diagnostics,
+    async inspect() {
+      const counts = await admin.query(
+        "SELECT (SELECT count(*)::int FROM rms_ordering.cart_line) AS lines, (SELECT count(*)::int FROM rms_ordering.cart_operation_record) AS operations",
+      );
+      return counts.rows[0];
+    },
     async verify(journeys) {
       const counts = (
         await admin.query(

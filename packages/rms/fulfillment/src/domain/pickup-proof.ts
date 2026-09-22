@@ -475,3 +475,201 @@ export function validatePickupProof(value: unknown): PickupProofVerificationReco
     grantsCompletionAuthority: false,
   });
 }
+
+/** Parses immutable issue history; current authority still belongs to the caller's locked source. */
+export function parsePickupProofIssueEffect(value: unknown): PickupProofIssueEffect {
+  const raw = exact(value, ["generation", "invalidation", "operation"]);
+  const g = exact(raw.generation, [
+    "capabilityReference",
+    "fulfillmentReference",
+    "brandReference",
+    "storeReference",
+    "kind",
+    "publicOrderReference",
+    "selectorHash",
+    "pepperVersion",
+    "generation",
+    "readyAt",
+    "expiresAt",
+    "issuedAt",
+  ]);
+  const candidate = capability({
+    capabilityReference: g.capabilityReference,
+    purpose: "PickupHandoff",
+    kind: g.kind,
+    storeReference: g.storeReference,
+    fulfillmentReference: g.fulfillmentReference,
+    publicOrderReference: g.publicOrderReference,
+    selectorHash: g.selectorHash,
+    pepperVersion: g.pepperVersion,
+    generation: g.generation,
+    status: "Active",
+    version: 1,
+    readyAt: g.readyAt,
+    expiresAt: g.expiresAt,
+    revokedAt: null,
+  });
+  const brandReference = parsePickupProofReference(g.brandReference);
+  const fulfillmentReference = parsePickupProofReference(g.fulfillmentReference);
+  const storeReference = parsePickupProofReference(g.storeReference);
+  const issuedAt = parsePickupProofInstant(g.issuedAt);
+  if (
+    Date.parse(issuedAt) < Date.parse(candidate.readyAt) ||
+    Date.parse(issuedAt) >= Date.parse(candidate.expiresAt)
+  )
+    return invalid();
+  const generation: PickupProofGenerationRecord = Object.freeze({
+    capabilityReference: parsePickupProofReference(candidate.capabilityReference),
+    fulfillmentReference,
+    brandReference,
+    storeReference,
+    kind: candidate.kind,
+    publicOrderReference: candidate.publicOrderReference,
+    selectorHash: candidate.selectorHash,
+    pepperVersion: candidate.pepperVersion,
+    generation: candidate.generation,
+    readyAt: parsePickupProofInstant(candidate.readyAt),
+    expiresAt: parsePickupProofInstant(candidate.expiresAt),
+    issuedAt,
+  });
+  const o = exact(raw.operation, [
+    "operationReference",
+    "idempotencyReference",
+    "correlationReference",
+    "fulfillmentReference",
+    "brandReference",
+    "storeReference",
+    "operationKind",
+    "capabilityReference",
+    "generation",
+    "aggregateVersionBefore",
+    "aggregateVersionAfter",
+    "occurredAt",
+  ]);
+  const operationReference = parsePickupProofReference(o.operationReference);
+  const idempotencyReference = parsePickupProofReference(o.idempotencyReference);
+  const correlationReference = parsePickupProofReference(o.correlationReference);
+  if (
+    new Set([operationReference, idempotencyReference, correlationReference]).size !== 3 ||
+    operationReference === generation.capabilityReference ||
+    o.fulfillmentReference !== fulfillmentReference ||
+    o.brandReference !== brandReference ||
+    o.storeReference !== storeReference ||
+    o.capabilityReference !== generation.capabilityReference ||
+    o.generation !== generation.generation ||
+    o.occurredAt !== issuedAt ||
+    typeof o.aggregateVersionBefore !== "bigint" ||
+    o.aggregateVersionBefore < 1n ||
+    o.aggregateVersionBefore >= maximumBigint ||
+    o.aggregateVersionAfter !== o.aggregateVersionBefore + 1n ||
+    (o.operationKind !== "Issue" && o.operationKind !== "Regenerate")
+  )
+    return invalid();
+  let invalidation: PickupProofInvalidationRecord | null = null;
+  if (o.operationKind === "Issue") {
+    if (generation.generation !== 1 || raw.invalidation !== null) return invalid();
+  } else {
+    const i = exact(raw.invalidation, [
+      "invalidationReference",
+      "fulfillmentReference",
+      "priorCapabilityReference",
+      "replacementCapabilityReference",
+      "priorGeneration",
+      "replacementGeneration",
+      "invalidatedAt",
+      "reason",
+    ]);
+    const invalidationReference = parsePickupProofReference(i.invalidationReference);
+    const priorCapabilityReference = parsePickupProofReference(i.priorCapabilityReference);
+    const priorGeneration = positive(i.priorGeneration);
+    if (
+      generation.generation <= 1 ||
+      priorGeneration !== generation.generation - 1 ||
+      i.replacementGeneration !== generation.generation ||
+      i.fulfillmentReference !== fulfillmentReference ||
+      i.replacementCapabilityReference !== generation.capabilityReference ||
+      i.invalidatedAt !== issuedAt ||
+      i.reason !== "Regenerated" ||
+      new Set([invalidationReference, priorCapabilityReference, generation.capabilityReference])
+        .size !== 3
+    )
+      return invalid();
+    invalidation = Object.freeze({
+      invalidationReference,
+      fulfillmentReference,
+      priorCapabilityReference,
+      replacementCapabilityReference: generation.capabilityReference,
+      priorGeneration,
+      replacementGeneration: generation.generation,
+      invalidatedAt: issuedAt,
+      reason: "Regenerated",
+    });
+  }
+  return Object.freeze({
+    generation,
+    invalidation,
+    operation: Object.freeze({
+      operationReference,
+      idempotencyReference,
+      correlationReference,
+      fulfillmentReference,
+      brandReference,
+      storeReference,
+      operationKind: o.operationKind,
+      capabilityReference: generation.capabilityReference,
+      generation: generation.generation,
+      aggregateVersionBefore: o.aggregateVersionBefore,
+      aggregateVersionAfter: o.aggregateVersionBefore + 1n,
+      occurredAt: issuedAt,
+    }),
+  });
+}
+
+/** A historical validation result is never completion authority. */
+export function parsePickupProofVerificationRecord(value: unknown): PickupProofVerificationRecord {
+  const raw = exact(value, [
+    "verificationReference",
+    "operationReference",
+    "idempotencyReference",
+    "correlationReference",
+    "fulfillmentReference",
+    "brandReference",
+    "storeReference",
+    "capabilityReference",
+    "generation",
+    "verificationMethod",
+    "validationStatus",
+    "verifiedAt",
+    "grantsCompletionAuthority",
+  ]);
+  const verificationReference = parsePickupProofReference(raw.verificationReference);
+  const operationReference = parsePickupProofReference(raw.operationReference);
+  const idempotencyReference = parsePickupProofReference(raw.idempotencyReference);
+  const correlationReference = parsePickupProofReference(raw.correlationReference);
+  const capabilityReference = parsePickupProofReference(raw.capabilityReference);
+  if (
+    new Set([verificationReference, operationReference, idempotencyReference, correlationReference])
+      .size !== 4 ||
+    verificationReference === capabilityReference ||
+    operationReference === capabilityReference ||
+    (raw.verificationMethod !== "Opaque" && raw.verificationMethod !== "HumanCode") ||
+    raw.validationStatus !== "Validated" ||
+    raw.grantsCompletionAuthority !== false
+  )
+    return invalid();
+  return Object.freeze({
+    verificationReference,
+    operationReference,
+    idempotencyReference,
+    correlationReference,
+    fulfillmentReference: parsePickupProofReference(raw.fulfillmentReference),
+    brandReference: parsePickupProofReference(raw.brandReference),
+    storeReference: parsePickupProofReference(raw.storeReference),
+    capabilityReference,
+    generation: positive(raw.generation),
+    verificationMethod: raw.verificationMethod,
+    validationStatus: "Validated",
+    verifiedAt: parsePickupProofInstant(raw.verifiedAt),
+    grantsCompletionAuthority: false,
+  });
+}

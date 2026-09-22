@@ -299,18 +299,29 @@ async function catalogEvidence(
   sellableReference: OrderingReference,
   optionSelections: readonly CartOptionSelection[],
   observedAt: OrderingInstant,
+  quantity: number,
+  guestSessionReference: OrderingReference,
 ): Promise<CatalogSelectionEvidence> {
   let result;
   try {
-    result = await ports.catalog.validateSelection({
-      brandReference: cart.brandReference as never,
-      storeReference: cart.storeReference as never,
-      sourceChannel: cart.sourceChannel,
-      orderType: cart.orderType,
-      sellableReference: sellableReference as never,
-      optionSelections: optionSelections as never,
-      observedAt: observedAt as never,
-    });
+    result = await ports.catalog.validateSelection(
+      {
+        brandReference: cart.brandReference as never,
+        storeReference: cart.storeReference as never,
+        sourceChannel: cart.sourceChannel,
+        orderType: cart.orderType,
+        sellableReference: sellableReference as never,
+        optionSelections: optionSelections as never,
+        observedAt: observedAt as never,
+      },
+      Object.freeze({
+        diningSessionReference: cart.diningSessionReference,
+        cartReference: cart.cartReference,
+        cartVersion: cart.aggregateVersion,
+        guestSessionReference,
+        quantity,
+      }),
+    );
   } catch {
     throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
   }
@@ -478,6 +489,8 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         sellableReference,
         optionSelections,
         requestedAt,
+        quantity,
+        parseOrderingReference(current.session.sessionReference),
       );
       const cartItemReference = parseOrderingReference(ports.references.generate("CartItem"));
       const item = parseCartItem({
@@ -578,6 +591,8 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         item.sellableReference,
         optionSelections,
         requestedAt,
+        quantity,
+        parseOrderingReference(current.session.sessionReference),
       );
       const replacement = parseCartItem({
         ...item,

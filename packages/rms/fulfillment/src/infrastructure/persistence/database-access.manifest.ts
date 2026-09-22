@@ -3,6 +3,46 @@ const databaseAccessManifestInput = {
   module: { moduleName: "fulfillment", packageName: "@rms/fulfillment", layer: "RMS" },
   tables: [
     {
+      table: "fulfillment_completion_publication",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "pickup_handoff_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
+      table: "pickup_handoff_item",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "pickup_handoff_record",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
+      table: "capacity_asap_commitment",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "capacity_hold_terminal",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/fulfillment" },
@@ -124,6 +164,105 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "current-pickup-capacity.read.capacity_slot",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_slot" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/current-pickup-capacity-store.ts",
+    },
+    {
+      id: "current-pickup-capacity.read.capacity_slot_configuration",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_slot_configuration" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/current-pickup-capacity-store.ts",
+    },
+    {
+      id: "current-pickup-capacity.read.capacity_hold",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_hold" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/current-pickup-capacity-store.ts",
+    },
+    {
+      id: "current-pickup-capacity.read.capacity_hold_terminal",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_hold_terminal" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/current-pickup-capacity-store.ts",
+    },
+    {
+      id: "current-pickup-capacity.read.capacity_allocation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_allocation" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/current-pickup-capacity-store.ts",
+    },
+    {
+      id: "current-pickup-capacity.read.capacity_allocation_terminal",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_allocation_terminal" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/current-pickup-capacity-store.ts",
+    },
+    {
+      id: "current-pickup-capacity.read.capacity_asap_commitment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_asap_commitment" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/fulfillment/src/infrastructure/persistence/current-pickup-capacity-store.ts",
+    },
+
+    {
+      id: "asap-capacity.read.capacity_asap_commitment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_asap_commitment" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source: "packages/rms/fulfillment/src/infrastructure/persistence/asap-capacity-store.ts",
+    },
+    {
+      id: "asap-capacity.write.capacity_asap_commitment",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_asap_commitment" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: null,
+      source: "packages/rms/fulfillment/src/infrastructure/persistence/asap-capacity-store.ts",
+    },
+    {
+      id: "asap-capacity.read.capacity_slot",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_fulfillment", table: "capacity_slot" },
+      principal: { kind: "module", id: "@rms/fulfillment" },
+      readPattern: "owner-repository",
+      source: "packages/rms/fulfillment/src/infrastructure/persistence/asap-capacity-store.ts",
+    },
+
     {
       id: "capacity-allocation-terminal.read.capacity_slot",
       operation: "read",

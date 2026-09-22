@@ -1,5 +1,9 @@
 import { appendAuditRecordInTransaction } from "@bop/audit";
-import { parseDiningReference, type DiningReference } from "../../contracts/dining-session.js";
+import {
+  parseDiningInstant,
+  parseDiningReference,
+  type DiningReference,
+} from "../../contracts/dining-session.js";
 import {
   createDiningTable,
   replaceDiningTableDraft,
@@ -31,7 +35,16 @@ export interface DiningTableTransactionRunner {
 export type DiningTableConfigurationStore = Pick<
   DiningTablePorts["repository"],
   "loadTable" | "resolveTableOperation" | "commitTable"
->;
+> & {
+  listTables(input: {
+    afterTableReference: string | null;
+    limit: number;
+    authorize(transaction: DiningTableTransaction): Promise<boolean>;
+  }): Promise<{
+    readonly items: readonly DiningTable[];
+    readonly nextAfterTableReference: string | null;
+  }>;
+};
 export interface DiningTableStoreScope {
   readonly tenantReference: string;
   readonly brandReference: string;
@@ -154,6 +167,42 @@ export function createPostgresDiningTableStore(
     return record;
   };
   return Object.freeze({
+    async listTables(input) {
+      const after =
+        input.afterTableReference === null ? null : reference(input.afterTableReference);
+      if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100)
+        throw new DiningTableWorkflowError("DINING_TABLE_INPUT_INVALID");
+      const limit = input.limit;
+      try {
+        return await runner.run(async (transaction) => {
+          if ((await input.authorize(transaction)) !== true) return dependency();
+          await context(transaction);
+          const result = await transaction.query(
+            'SELECT table_snapshot AS "table" FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND ($4::uuid IS NULL OR table_id>$4::uuid) ORDER BY table_id LIMIT $5',
+            [tenant, brand, store, after, limit + 1],
+          );
+          if (!result || typeof result !== "object") return dependency();
+          const raw = snapshot(Object.getOwnPropertyDescriptor(result, "rows")?.value);
+          if (!Array.isArray(raw) || raw.length > limit + 1) return dependency();
+          let previous: string | null = after;
+          const tables = raw.map((row) => {
+            const table = scoped(createDiningTable(closed(row, ["table"]).table));
+            if (previous !== null && table.tableReference <= previous) return dependency();
+            previous = table.tableReference;
+            return table;
+          });
+          if ((await input.authorize(transaction)) !== true) return dependency();
+          const items = Object.freeze(tables.slice(0, limit));
+          return Object.freeze({
+            items,
+            nextAfterTableReference:
+              tables.length > limit ? (items[items.length - 1]?.tableReference ?? null) : null,
+          });
+        });
+      } catch {
+        return dependency();
+      }
+    },
     async loadTable(value: string) {
       const tableReference = reference(value);
       try {
@@ -281,6 +330,93 @@ export function createPostgresDiningTableStore(
         });
       } catch (error) {
         return failure(error);
+      }
+    },
+  });
+}
+
+/** Restricted public fact query; never grants Staff permissions or discovers tables.
+ * The caller must retain this transaction through the dependent operation and fence
+ * authorization for the exact public mapping and purpose before/after this read.
+ */
+export function createPostgresDiningPublicTableReader(options: {
+  transaction: DiningTableTransaction;
+  scope: DiningTableStoreScope;
+  authorize(
+    transaction: DiningTableTransaction,
+    request: Readonly<{
+      tenantReference: string;
+      brandReference: string;
+      storeReference: string;
+      tableReference: string;
+      purpose: "CustomerEntry" | "GuestSessionBinding" | "DiningJoin" | "DiningAdmission";
+      observedAt: string;
+    }>,
+  ): Promise<boolean>;
+}) {
+  const scope = Object.freeze({
+    tenantReference: reference(options.scope.tenantReference),
+    brandReference: reference(options.scope.brandReference),
+    storeReference: reference(options.scope.storeReference),
+  });
+  return Object.freeze({
+    async read(input: {
+      tableReference: string;
+      purpose: "CustomerEntry" | "GuestSessionBinding" | "DiningJoin" | "DiningAdmission";
+      observedAt: string;
+    }) {
+      try {
+        const raw = closed(snapshot(input), ["tableReference", "purpose", "observedAt"]);
+        const tableReference = reference(raw.tableReference);
+        const observedAt = parseDiningInstant(raw.observedAt);
+        if (
+          !["CustomerEntry", "GuestSessionBinding", "DiningJoin", "DiningAdmission"].includes(
+            String(raw.purpose),
+          )
+        )
+          return null;
+        const request = Object.freeze({
+          ...scope,
+          tableReference,
+          observedAt,
+          purpose: input.purpose,
+        });
+        const tx = options.transaction;
+        if ((await options.authorize(tx, request)) !== true) return null;
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true), set_config('bop.store_id',$2,true)",
+          [scope.brandReference, scope.storeReference],
+        );
+        const result = rows(
+          await tx.query(
+            'SELECT table_snapshot AS "table" FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4 FOR SHARE',
+            [scope.tenantReference, scope.brandReference, scope.storeReference, tableReference],
+          ),
+        );
+        if (result.length !== 1) return null;
+        const table = createDiningTable(closed(result[0], ["table"]).table);
+        if (
+          table.tenantReference !== scope.tenantReference ||
+          table.brandReference !== scope.brandReference ||
+          table.storeReference !== scope.storeReference ||
+          table.tableReference !== tableReference ||
+          table.lifecycle !== "Published" ||
+          table.qrStatus !== "Active" ||
+          table.observedAt > observedAt ||
+          (await options.authorize(tx, request)) !== true
+        )
+          return null;
+        return Object.freeze({
+          ...scope,
+          tableReference,
+          qrVersion: table.qrVersion,
+          aggregateVersion: table.aggregateVersion,
+          operationalState: table.operationalState,
+          activeDiningSessionReference: table.activeDiningSessionReference,
+          observedAt,
+        });
+      } catch {
+        return null;
       }
     },
   });

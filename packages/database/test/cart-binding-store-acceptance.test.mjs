@@ -1,4 +1,7 @@
-import { createCustomerCartItemComposition } from "../../../apps/api/src/customer-cart-item-composition.ts";
+import { seedCartRecipeInventory } from "../test-support/cart-recipe-inventory.mjs";
+import { createCustomerPickupCartInventoryAuthorization } from "../../../apps/api/src/customer-pickup-cart-inventory-authorization.ts";
+import { seedCartCatalog, cartCatalogTables } from "../test-support/cart-catalog-seed.mjs";
+import { createCustomerCartItemWithCatalogComposition } from "../../../apps/api/src/customer-cart-item-composition.ts";
 import { createCustomerCartRemovalComposition } from "../../../apps/api/src/customer-cart-removal-composition.ts";
 import { createHash } from "node:crypto";
 import { createPickupCartCreationCoordinator } from "../../../apps/customer-pwa/src/cart/pickup-cart-creation.ts";
@@ -1040,7 +1043,7 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
           removalServer.closeAllConnections();
           await new Promise((resolve) => removalServer.close(() => resolve()));
         }
-        // WP-2265: actual Identity/Ordering/Audit with an explicitly synthetic Catalog owner port.
+        // WP-2402: actual Identity/Ordering/Catalog with explicit synthetic safety observations.
         clock = 1300;
         const itemSession = guest(970);
         const itemCredential = credentials.generateCredential("Session");
@@ -1071,17 +1074,144 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
           sessionReference: id(970),
           activatedAt: at(1300),
         });
+        // Actual scoped Cart recheck inside the authenticated Inventory observation.
+        const inventoryCartContext = {
+          cartReference: id(973),
+          cartVersion: 1,
+          guestSessionReference: id(970),
+          quantity: 2,
+        };
+        const inventorySelection = {
+          sellableReference: id(958),
+          productVersionReference: id(957),
+          quantity: 2,
+          selections: [],
+          observedAt: at(clock),
+        };
+        const checkInventoryCart = (
+          selection = inventorySelection,
+          cartContext = inventoryCartContext,
+          currentTime = () => at(clock),
+          currentScope = scope,
+        ) =>
+          runner(orderingRole).run(async (tx) => {
+            await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", []);
+            return createCustomerPickupCartInventoryAuthorization(currentScope, currentTime)(
+              tx,
+              selection,
+              cartContext,
+            );
+          });
+        const beforeInventoryAuthorization = await counts();
+        assert.equal(await checkInventoryCart(), true);
+        for (const patch of [
+          { cartReference: id(976) },
+          { cartVersion: 2 },
+          { guestSessionReference: id(974) },
+          { quantity: 3 },
+        ])
+          assert.equal(
+            await checkInventoryCart(inventorySelection, { ...inventoryCartContext, ...patch }),
+            false,
+          );
+        assert.equal(
+          await checkInventoryCart({ ...inventorySelection, observedAt: at(clock + 1) }),
+          false,
+        );
+        assert.equal(
+          await checkInventoryCart(inventorySelection, inventoryCartContext, () => at(100000)),
+          false,
+        );
+        assert.equal(
+          await checkInventoryCart(inventorySelection, inventoryCartContext, () => at(clock), {
+            ...scope,
+            storeReference: id(999),
+          }),
+          false,
+        );
+        assert.deepEqual(await counts(), beforeInventoryAuthorization);
         let loseItemAck = true;
         let failItemRead = false;
         let itemAllocations = 0;
         let catalogValidations = 0;
         const itemWriteRunner = runner(orderingRole);
+        const catalogId = (n) =>
+          n === 2
+            ? id(2)
+            : n === 20
+              ? id(3)
+              : n === 13
+                ? id(958)
+                : n === 14
+                  ? id(957)
+                  : n === 4
+                    ? id(956)
+                    : id(2000 + n);
+        await seedCartCatalog(admin, catalogId, at(0));
+        const catalogRole = "wp2402_cart_catalog_" + context.runId;
+        await admin.query("CREATE ROLE " + catalogRole + " NOLOGIN NOSUPERUSER NOBYPASSRLS");
+        await admin.query("GRANT USAGE ON SCHEMA rms_catalog,platform_helpers TO " + catalogRole);
+        await admin.query(
+          "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+            catalogRole,
+        );
+        await admin.query(
+          "GRANT SELECT ON " +
+            cartCatalogTables.map((table) => "rms_catalog." + table).join(",") +
+            " TO " +
+            catalogRole,
+        );
+        const catalogTransactions = {
+          async run(work) {
+            const client = new Client(context.clientConfig);
+            await client.connect();
+            active++;
+            try {
+              await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+              await client.query("SET LOCAL ROLE " + catalogRole);
+              const result = await work({ query: (sql, values) => client.query(sql, values) });
+              await client.query("COMMIT");
+              return result;
+            } finally {
+              await client.query("ROLLBACK");
+              await client.end();
+              active--;
+            }
+          },
+        };
+        const safetyEvidence = (request, kind, status) => ({
+          kind,
+          brandReference: request.brandReference,
+          storeReference: request.storeReference,
+          sellableReference: request.sellableReference,
+          status,
+          observedAt: request.observedAt,
+          expiresAt: at(clock + 60),
+          reasonCode: "SYNTHETIC_SAFETY",
+        });
+
+        const inventoryScope = await seedCartRecipeInventory({
+          admin,
+          role: orderingRole,
+          runner: runner(orderingRole),
+          id,
+          at: at(0),
+          skuReference: id(958),
+          storeReference: scope.storeReference,
+        });
+        const inventoryTransactions = {
+          run: (work) =>
+            runner(orderingRole).run(async (tx) => {
+              await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", []);
+              return work(tx);
+            }),
+        };
         const itemServer = createServer(
           createApp({
             customerCart: new CustomerCartHandler({
               allowedOrigin: "https://customer.example.test",
               now: () => at(clock),
-              port: createCustomerCartItemComposition({
+              port: createCustomerCartItemWithCatalogComposition({
                 scope,
                 session: { credentials, binding: { validate: async () => "Current" } },
                 sessionTransactions: runner(identityRole),
@@ -1104,19 +1234,29 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
                   },
                 },
                 audit: itemAudit,
-                catalog: {
-                  validateSelection: async (request) => {
-                    catalogValidations++;
-                    return {
-                      ...request,
-                      status: "Accepted",
-                      menuVersionReference: id(956),
-                      productVersionReference: id(957),
-                      catalogChannelCode: "PILOT_CHANNEL",
-                      catalogOrderTypeCode: "PILOT_ORDER_TYPE",
-                      ruleEvidence: [],
-                      validatedAt: request.observedAt,
-                    };
+                catalogTransactions,
+                catalogScope: {
+                  menuReference: catalogId(1),
+                  sourceChannel: "Qr",
+                  channelCode: "CUSTOMER_PWA",
+                  orderTypeCode: "PICKUP",
+                },
+                selectedInventory: {
+                  scope: inventoryScope,
+                  transactions: inventoryTransactions,
+                  resolveExpiryCutoff: async () => {
+                    throw new Error("NoLot fixture");
+                  },
+                },
+                catalogSafety: {
+                  killSwitch: {
+                    loadEvidence: async (request) => safetyEvidence(request, "KillSwitch", "Clear"),
+                  },
+                  inventory: {
+                    loadEvidence: async (request) => {
+                      catalogValidations++;
+                      return safetyEvidence(request, "Inventory", "Available");
+                    },
                   },
                 },
                 query: {
@@ -1183,10 +1323,27 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
           }
           assert.deepEqual(await itemFacts(), beforeItems);
           assert.equal(catalogValidations, 0);
+          const beforeShortage = await itemReader.load(id(973));
+          const shortage = await sendItem({ quantity: 100, operation: id(28100) });
+          assert.equal(shortage.status, 422);
+          assert.equal((await shortage.json()).error.code, "cart_selection_invalid");
+          assert.deepEqual(await itemReader.load(id(973)), beforeShortage);
+          assert.deepEqual(await itemFacts(), beforeItems);
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT count(*)::int n FROM rms_inventory.stock_reservation_version",
+              )
+            ).rows[0].n,
+            0,
+          );
+          assert.equal(catalogValidations, 1);
+          catalogValidations = 0; // Existing assertions below count the accepted operation/replays.
           const lost = await sendItem();
           assert.equal(lost.status, 503);
           await lost.text();
           assert.equal((await itemReader.load(id(973))).aggregateVersion, 2);
+          assert.equal(await checkInventoryCart(), false); // committed mutation invalidates old context
           assert.equal((await itemReader.load(id(973))).items.length, 1);
           clock = 1301;
           for (const response of await Promise.all([sendItem(), sendItem(), sendItem()])) {
@@ -1239,6 +1396,19 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
             operations: beforeItems.operations + 2,
           };
           assert.deepEqual(await itemFacts(), finalItems);
+          await admin.query("UPDATE rms_catalog.sku SET lifecycle='Archived' WHERE sku_id=$1", [
+            id(958),
+          ]);
+          const withdrawn = await sendItem({
+            action: "Update",
+            quantity: 3,
+            version: 3,
+            operation: id(982),
+          });
+          assert.equal(withdrawn.status, 422);
+          await withdrawn.text();
+          assert.equal((await itemReader.load(id(973))).aggregateVersion, 3);
+          assert.deepEqual(await itemFacts(), finalItems);
           await sessions.revoke({
             selectorHash: credentials.hashCredential("Session", itemCredential),
             expectedVersion: 1,
@@ -1255,6 +1425,8 @@ it("composes actual Identity and Ordering stores with atomic, isolated and repea
           assert.deepEqual(await itemFacts(), finalItems);
           assert.equal(catalogValidations, 2);
         } finally {
+          await admin.query("DROP OWNED BY " + catalogRole);
+          await admin.query("DROP ROLE " + catalogRole);
           itemServer.closeAllConnections();
           await new Promise((resolve) => itemServer.close(() => resolve()));
         }

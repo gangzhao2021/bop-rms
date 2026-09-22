@@ -7,11 +7,16 @@ import {
 } from "./cart-query-store.js";
 
 const selectCurrent = `SELECT cart_id AS "cartReference", aggregate_version AS "aggregateVersion"
-FROM rms_ordering.cart
+FROM rms_ordering.cart AS candidate
 WHERE brand_id = $1 AND store_id = $2 AND dining_session_id = $3
   AND order_type = 'DineIn' AND source_channel IN ('Qr', 'Web')
-  AND lifecycle_status = 'Active'
-  AND idle_expires_at > $4::timestamptz AND absolute_expires_at > $4::timestamptz
+  AND NOT EXISTS (
+    SELECT 1 FROM rms_ordering.dining_cart_replacement AS replacement
+    WHERE replacement.brand_id = candidate.brand_id
+      AND replacement.store_id = candidate.store_id
+      AND replacement.dining_session_id = candidate.dining_session_id
+      AND replacement.previous_cart_id = candidate.cart_id
+  )
 ORDER BY cart_id LIMIT 2`;
 function unavailable(): never {
   throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
@@ -37,7 +42,9 @@ function header(result: unknown) {
     return unavailable();
   return Object.freeze({ cartReference, aggregateVersion: raw.aggregateVersion });
 }
-/** Infrastructure-only current observation; callers must use current Identity/Dining authorization. */
+/** Observe the unreplaced Session cart, including its terminal state. The read service derives
+ * effective lifecycle; absence must not imply an expired cart may be replaced.
+ * Callers must use current Identity/Dining authorization. */
 export function createPostgresDiningCartReadStore(
   runner: CartQueryTransactionRunner,
   scope: { readonly brandReference: string; readonly storeReference: string },
@@ -78,7 +85,7 @@ export function createPostgresDiningCartReadStore(
             "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
             [brand, store],
           );
-          const parameters = Object.freeze([brand, store, diningSessionReference, observedAt]);
+          const parameters = Object.freeze([brand, store, diningSessionReference]);
           const first = header(await transaction.query(selectCurrent, parameters));
           if (first === null) return null;
           const reader = createPostgresCartQueryStore(
@@ -93,9 +100,7 @@ export function createPostgresDiningCartReadStore(
             cart.diningSessionReference !== diningSessionReference ||
             !["Qr", "Web"].includes(cart.sourceChannel) ||
             cart.updatedAt > observedAt ||
-            cart.lifecycle?.status !== "Active" ||
-            cart.lifecycle.idleExpiresAt <= observedAt ||
-            cart.lifecycle.absoluteExpiresAt <= observedAt
+            cart.lifecycle === null
           )
             return unavailable();
           const last = header(await transaction.query(selectCurrent, parameters));

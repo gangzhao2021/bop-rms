@@ -59,6 +59,8 @@ const moduleManifestInput =
         "kitchen_action_record",
         "kitchen_order_item_ready_result",
         "kitchen_ready_publication",
+        "kitchen_routing_configuration",
+        "kitchen_creation_record",
         "kitchen_ticket",
         "kitchen_work_item",
         "kitchen_work_lifecycle_operation",

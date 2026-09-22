@@ -218,7 +218,18 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
           await page.getByRole("button", { name: "Add to cart", exact: true }).click();
           await page.getByLabel("Quantity", { exact: true }).fill("2");
           await page.getByRole("button", { name: "Add to cart", exact: true }).click();
-          await page.getByRole("link", { name: "Review cart", exact: true }).click();
+          await page
+            .getByRole("link", { name: "Review cart", exact: true })
+            .click()
+            .catch(async () => {
+              throw new Error(
+                JSON.stringify({
+                  stage: "dining-add",
+                  persisted: await cart.inspect(),
+                  alerts: await page.getByRole("alert").allTextContents(),
+                }),
+              );
+            });
           await page.getByLabel("Latte quantity", { exact: true }).waitFor();
           assert.equal(await page.getByLabel("Latte quantity", { exact: true }).textContent(), "2");
           await page.getByRole("button", { name: "Increase Latte quantity", exact: true }).click();

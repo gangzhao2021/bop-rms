@@ -4,7 +4,7 @@ import type { CheckoutFulfillmentValidationResult } from "../../contracts/checko
 import type { CartQuoteAttachment } from "../../domain/cart-quote-attachment.js";
 import type { CartAggregate, OrderingInstant, OrderingReference } from "../../domain/cart.js";
 
-export interface CheckoutValidationPorts {
+export interface CheckoutValidationPorts<V extends 1 | 2 = 1> {
   readonly authorization: {
     authorize(input: {
       readonly action: "ValidateCheckout";
@@ -35,6 +35,6 @@ export interface CheckoutValidationPorts {
   };
   readonly repository: {
     loadCart(cartReference: OrderingReference): Promise<CartAggregate | null>;
-    loadQuote(cartReference: OrderingReference): Promise<CartQuoteAttachment | null>;
+    loadQuote(cartReference: OrderingReference): Promise<CartQuoteAttachment<V> | null>;
   };
 }

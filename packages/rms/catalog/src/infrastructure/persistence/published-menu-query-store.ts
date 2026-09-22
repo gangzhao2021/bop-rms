@@ -1,3 +1,22 @@
+import { createPostgresMenuReviewContentStore } from "./menu-review-content-store.js";
+import {
+  publishedMenuConsumerRegistration,
+  createPublishedMenuProjectionService,
+} from "../../application/published-menu-projection-service.js";
+import { createPostgresCurrentMenuReleaseStore } from "./current-menu-release-store.js";
+import { parseCatalogCode, parseCatalogInstant } from "../../contracts/product.js";
+import { canonicalizeRfc8785 } from "@bop/audit";
+import {
+  validateDomainEventEnvelope,
+  type ConsumerTransaction,
+  type ConsumerRegistration,
+  type DomainEventEnvelope,
+} from "@bop/eventing";
+import {
+  buildPublishedMenuProjection,
+  type MenuPublishedEnvelope,
+  type PublishedMenuSnapshot,
+} from "../../contracts/published-menu-projection.js";
 import type { CatalogSelectionDisplayPorts } from "../../application/selection-display-query-service.js";
 import type { CustomerMenuQueryPorts } from "../../application/ports/customer-menu-query-ports.js";
 import { CatalogError, parseCatalogReference } from "../../contracts/product.js";
@@ -167,6 +186,9 @@ export function createPostgresPublishedMenuQueryStore(
           parseCatalogReference(input.storeReference) !== store
         )
           throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        const channelCode = parseCatalogCode(input.channelCode);
+        const orderTypeCode = parseCatalogCode(input.orderTypeCode);
+        const observedAt = parseCatalogInstant(input.requestedAt);
         return await runner.run(async (transaction) => {
           // Projection RLS is Brand-only; Store applicability is filtered in the read below.
           await transaction.query(
@@ -194,11 +216,333 @@ export function createPostgresPublishedMenuQueryStore(
             candidates.length
           )
             throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-          return Object.freeze(candidates);
+          const releases = createPostgresCurrentMenuReleaseStore(
+            { run: (work) => work(transaction) },
+            { brandReference: brand, storeReference: store },
+          );
+          const current: PublishedMenuProjection[] = [];
+          for (const candidate of candidates) {
+            const snapshot = candidate.snapshot;
+            if (
+              !snapshot.channelCodes.includes(channelCode) ||
+              !snapshot.orderTypeCodes.includes(orderTypeCode)
+            )
+              continue;
+            const release = await releases.load({
+              menuReference: snapshot.menuReference,
+              channelCode,
+              orderTypeCode,
+              observedAt,
+            });
+            if (release === null) continue;
+            if (
+              release.menuVersionReference !== snapshot.menuVersionReference ||
+              release.releaseReference !== snapshot.releaseReference ||
+              release.snapshotDigest !== snapshot.snapshotDigest ||
+              release.effectiveFrom !== snapshot.effectiveFrom ||
+              release.effectiveUntil !== snapshot.effectiveUntil
+            )
+              throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+            current.push(candidate);
+          }
+          return Object.freeze(current);
         });
       } catch {
         throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
       }
     },
+  });
+}
+
+const selectCurrentMenu =
+  select.slice(0, select.indexOf("\nWHERE c.consumer_name")) +
+  "\nWHERE c.consumer_name='catalog.published-menu-projection' AND c.brand_id=$1 AND c.menu_id=$2";
+
+/** Owner storage joined to the Eventing consumer transaction. Exact historical
+ * publication verification is mandatory; caller owns commit/rollback and Inbox.
+ */
+export function createPostgresPublishedMenuProjectionStore(options: {
+  transaction: ConsumerTransaction;
+  brandReference: string;
+  menuReference: string;
+  verifyPublished(
+    transaction: ConsumerTransaction,
+    envelope: MenuPublishedEnvelope,
+    snapshot: PublishedMenuSnapshot,
+  ): Promise<boolean>;
+}) {
+  const brand = parseCatalogReference(options.brandReference);
+  const menu = parseCatalogReference(options.menuReference);
+  const tx = options.transaction;
+  const fail = (): never => {
+    throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+  };
+  const context = () =>
+    tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
+      brand,
+    ]);
+  const load = async (reference: string): Promise<PublishedMenuProjection | null> => {
+    if (reference !== menu) return fail();
+    await context();
+    const result = await tx.query<{ projection: unknown }>(selectCurrentMenu, [brand, menu]);
+    if (result.rows.length > 1) return fail();
+    if (result.rows.length === 0) return null;
+    const value = parsePublishedMenuProjection(
+      result.rows[0]?.projection as PublishedMenuProjection,
+    );
+    if (value.snapshot.brandReference !== brand || value.snapshot.menuReference !== menu)
+      return fail();
+    return value;
+  };
+  return Object.freeze({
+    load,
+    async replace(input: {
+      projection: PublishedMenuProjection;
+      envelope: MenuPublishedEnvelope;
+      transaction: ConsumerTransaction;
+    }): Promise<PublishedMenuProjection> {
+      if (input.transaction !== tx) return fail();
+      const envelope = validateDomainEventEnvelope(input.envelope) as MenuPublishedEnvelope;
+      const projection = parsePublishedMenuProjection(input.projection);
+      const expected = buildPublishedMenuProjection({
+        envelope,
+        snapshot: projection.snapshot,
+        generationReference: projection.generationReference,
+        projectedAt: projection.lastRebuiltAt,
+      });
+      if (
+        projection.snapshot.brandReference !== brand ||
+        projection.snapshot.menuReference !== menu ||
+        canonicalizeRfc8785(expected) !== canonicalizeRfc8785(projection) ||
+        (await options.verifyPublished(tx, envelope, projection.snapshot)) !== true
+      )
+        return fail();
+      await context();
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "catalog.published-menu:" + brand + ":" + menu,
+      ]);
+      const current = await load(menu);
+      if (current && current.sourceAggregateVersion >= projection.sourceAggregateVersion) {
+        if (
+          current.sourceAggregateVersion === projection.sourceAggregateVersion &&
+          (current.sourceEventReference !== projection.sourceEventReference ||
+            canonicalizeRfc8785(current.snapshot) !== canonicalizeRfc8785(projection.snapshot))
+        )
+          return fail();
+        if ((await options.verifyPublished(tx, envelope, projection.snapshot)) !== true)
+          return fail();
+        return current;
+      }
+      const snapshot = projection.snapshot;
+      const generation = projection.generationReference;
+      await tx.query(
+        "INSERT INTO rms_catalog.published_menu_projection_generation (generation_id,brand_id,menu_id,projection_name,projection_version,generation_status,source_event_id,source_aggregate_version,source_checkpoint,last_rebuilt_at,freshness_status) VALUES($1,$2,$3,'catalog_published_menu_v1',1,'Building',$4,$5,$4,$6,'Fresh')",
+        [
+          generation,
+          brand,
+          menu,
+          projection.sourceEventReference,
+          projection.sourceAggregateVersion,
+          projection.lastRebuiltAt,
+        ],
+      );
+      await tx.query(
+        "INSERT INTO rms_catalog.published_menu_projection (generation_id,brand_id,menu_id,menu_version_id,release_id,snapshot_digest,default_locale,localized_names_json,store_ids_json,channel_codes_json,order_type_codes_json,time_zone,effective_from,effective_until) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13,$14)",
+        [
+          generation,
+          brand,
+          menu,
+          snapshot.menuVersionReference,
+          snapshot.releaseReference,
+          snapshot.snapshotDigest,
+          snapshot.defaultLocale,
+          JSON.stringify(snapshot.localizedNames),
+          JSON.stringify(snapshot.storeReferences),
+          JSON.stringify(snapshot.channelCodes),
+          JSON.stringify(snapshot.orderTypeCodes),
+          snapshot.timeZone,
+          snapshot.effectiveFrom,
+          snapshot.effectiveUntil,
+        ],
+      );
+      for (const section of snapshot.sections) {
+        await tx.query(
+          "INSERT INTO rms_catalog.published_menu_projection_section (generation_id,brand_id,menu_id,section_id,internal_code,localized_names_json,sort_order) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)",
+          [
+            generation,
+            brand,
+            menu,
+            section.sectionReference,
+            section.internalCode,
+            JSON.stringify(section.localizedNames),
+            section.sortOrder,
+          ],
+        );
+        for (const item of section.sellables)
+          await tx.query(
+            "INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13::jsonb,$14::jsonb)",
+            [
+              generation,
+              brand,
+              menu,
+              section.sectionReference,
+              item.placementReference,
+              item.sellableReference,
+              item.productVersionReference,
+              JSON.stringify(item.localizedNames),
+              item.presentationRole,
+              item.sortOrder,
+              item.pinned,
+              item.configuredAvailability,
+              JSON.stringify(item.optionRules),
+              JSON.stringify(item.allergenDisclosure),
+            ],
+          );
+      }
+      await tx.query(
+        "UPDATE rms_catalog.published_menu_projection_generation SET generation_status='Retired' WHERE brand_id=$1 AND menu_id=$2 AND generation_status='Active'",
+        [brand, menu],
+      );
+      await tx.query(
+        "UPDATE rms_catalog.published_menu_projection_generation SET generation_status='Active' WHERE brand_id=$1 AND menu_id=$2 AND generation_id=$3 AND generation_status='Building'",
+        [brand, menu, generation],
+      );
+      await tx.query(
+        "INSERT INTO rms_catalog.published_menu_projection_checkpoint (consumer_name,brand_id,menu_id,active_generation_id,source_event_id,source_aggregate_version,projected_at) VALUES('catalog.published-menu-projection',$1,$2,$3,$4,$5,$6) ON CONFLICT (consumer_name,brand_id,menu_id) DO UPDATE SET active_generation_id=EXCLUDED.active_generation_id,source_event_id=EXCLUDED.source_event_id,source_aggregate_version=EXCLUDED.source_aggregate_version,projected_at=EXCLUDED.projected_at",
+        [
+          brand,
+          menu,
+          generation,
+          projection.sourceEventReference,
+          projection.sourceAggregateVersion,
+          projection.lastRebuiltAt,
+        ],
+      );
+      if ((await options.verifyPublished(tx, envelope, snapshot)) !== true) return fail();
+      const saved = await load(menu);
+      if (!saved || canonicalizeRfc8785(saved) !== canonicalizeRfc8785(projection)) return fail();
+      return saved;
+    },
+  });
+}
+
+/** One owner/event-consumer transaction; caller commits only after consume succeeds.
+ * Intended for a real dispatcher, not a background loop created by this factory.
+ */
+export function createPostgresPublishedMenuConsumer(options: {
+  transaction: ConsumerTransaction;
+  brandReference: string;
+  menuReference: string;
+  authorize: Parameters<typeof createPostgresMenuReviewContentStore>[0]["authorize"];
+  generateGeneration(): string;
+  now(): string;
+}) {
+  const brand = parseCatalogReference(options.brandReference);
+  const menu = parseCatalogReference(options.menuReference);
+  const tx = options.transaction;
+  const content = createPostgresMenuReviewContentStore({
+    brandReference: brand,
+    menuReference: menu,
+    authorize: options.authorize,
+  });
+  const exact = (event: MenuPublishedEnvelope) => ({
+    brandReference: brand,
+    menuReference: menu,
+    menuVersionReference: parseCatalogReference(event.payload.menuVersionReference),
+    releaseReference: parseCatalogReference(event.payload.releaseReference),
+    snapshotDigest: event.payload.snapshotDigest,
+  });
+  const projections = createPostgresPublishedMenuProjectionStore({
+    transaction: tx,
+    brandReference: brand,
+    menuReference: menu,
+    verifyPublished: async (transaction, event, snapshot) =>
+      canonicalizeRfc8785(await content.loadExact(transaction, exact(event))) ===
+      canonicalizeRfc8785(snapshot),
+  });
+  const service = createPublishedMenuProjectionService({
+    snapshots: { loadExact: (input) => content.loadExact(tx, input) },
+    projections,
+    references: {
+      generateGeneration: options.generateGeneration,
+      now: () => parseCatalogInstant(options.now()),
+    },
+  });
+  async function prepare(input: MenuPublishedEnvelope) {
+    const event = validateDomainEventEnvelope(input) as MenuPublishedEnvelope;
+    if (
+      event.tenantId !== brand ||
+      event.aggregateId !== menu ||
+      event.payload.menuReference !== menu ||
+      event.eventType !== "MenuPublished" ||
+      event.producerModule !== "@rms/catalog" ||
+      event.schemaVersion !== 1 ||
+      event.storeId !== undefined
+    )
+      throw new CatalogError("CATALOG_INPUT_INVALID");
+    // Exact historical owner read also establishes Brand context before Inbox.
+    if ((await content.loadExact(tx, exact(event))) === null)
+      throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+    return event;
+  }
+  const registration: ConsumerRegistration = Object.freeze({
+    ...service.registration,
+    async handler(input: Parameters<ConsumerRegistration["handler"]>[0]) {
+      if (input.transaction !== tx) throw new CatalogError("CATALOG_INPUT_INVALID");
+      await prepare(input.envelope as MenuPublishedEnvelope);
+      return service.registration.handler(input);
+    },
+  });
+  return Object.freeze({
+    registration,
+    async consume(input: MenuPublishedEnvelope) {
+      return service.consume(tx, await prepare(input));
+    },
+  });
+}
+
+/** Brand-bound owner service accepted by the Worker runtime. The reviewed snapshot
+ * authorizer must authorize the actual Menu; envelope identifiers grant no rights.
+ */
+export function createPostgresPublishedMenuConsumerService(
+  options: Omit<
+    Parameters<typeof createPostgresPublishedMenuConsumer>[0],
+    "transaction" | "menuReference" | "authorize"
+  > & {
+    authorize(
+      transaction: ConsumerTransaction,
+      request: Readonly<{
+        brandReference: string;
+        menuReference: string;
+        menuVersionReference: string;
+        operation: "Read" | "Save";
+      }>,
+    ): Promise<boolean>;
+  },
+) {
+  const brand = parseCatalogReference(options.brandReference);
+  const owner = (transaction: ConsumerTransaction, envelope: DomainEventEnvelope) =>
+    createPostgresPublishedMenuConsumer({
+      ...options,
+      brandReference: brand,
+      transaction,
+      menuReference: envelope.aggregateId,
+      authorize: (_tx, operation, menuVersionReference) =>
+        options.authorize(transaction, {
+          brandReference: brand,
+          menuReference: envelope.aggregateId,
+          menuVersionReference,
+          operation,
+        }),
+    });
+  const registration: ConsumerRegistration = Object.freeze({
+    ...publishedMenuConsumerRegistration,
+    handler: (input: Parameters<ConsumerRegistration["handler"]>[0]) =>
+      owner(input.transaction, input.envelope).registration.handler(input),
+  });
+  return Object.freeze({
+    registration,
+    consume: (transaction: ConsumerTransaction, envelope: DomainEventEnvelope) =>
+      owner(transaction, envelope).consume(envelope as MenuPublishedEnvelope),
   });
 }

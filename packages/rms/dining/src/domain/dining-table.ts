@@ -297,3 +297,33 @@ export function assignStartedDiningSession(
     observedAt: session.startedAt,
   });
 }
+
+/** Release only the exact closed occupant. Recovery and retries must use the owning
+ * operation receipt; an empty table or later occupant is not another release. */
+export function releaseClosedDiningSession(
+  sessionInput: DiningSession,
+  tableInput: DiningTable,
+  observedAtInput: DiningInstant,
+): DiningTable {
+  const session = parseDiningSession(sessionInput),
+    table = createDiningTable(tableInput),
+    observedAt = parseDiningInstant(observedAtInput);
+  if (
+    session.phase !== "Closed" ||
+    session.brandReference !== table.brandReference ||
+    session.storeReference !== table.storeReference ||
+    session.tableReference !== table.tableReference ||
+    table.activeDiningSessionReference !== session.diningSessionReference ||
+    table.lifecycle !== "Published" ||
+    session.tableAssignmentVersion >= table.aggregateVersion ||
+    observedAt < table.observedAt ||
+    observedAt < session.startedAt
+  )
+    return fail("DINING_TABLE_SESSION_CONFLICT");
+  return createDiningTable({
+    ...table,
+    activeDiningSessionReference: null,
+    aggregateVersion: table.aggregateVersion + 1,
+    observedAt,
+  });
+}

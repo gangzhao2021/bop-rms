@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "printing-device", packageName: "@rms/printing-device", layer: "RMS" },
   tables: [
     {
+      table: "digital_receipt_template_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "device",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@rms/printing-device" },
@@ -99,7 +107,28 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
   ],
-  accesses: [],
+  accesses: [
+    {
+      id: "digital-receipt-template-store.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_version" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-store.ts",
+    },
+    {
+      id: "digital-receipt-template-store.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_version" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-store.ts",
+    },
+  ],
 } as const;
 
 export const databaseAccessManifest = databaseAccessManifestInput;

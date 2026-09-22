@@ -90,7 +90,7 @@ for (const mode of modes)
             );
             await admin.query(`GRANT USAGE ON SCHEMA rms_catalog TO ${menuRole}`);
             await admin.query(
-              `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint TO ${menuRole}`,
+              `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint, rms_catalog.menu_release_effective_period, rms_catalog.menu_publication_release, rms_catalog.menu_publication_revision, rms_catalog.menu_version_store, rms_catalog.menu_version_channel, rms_catalog.menu_version_order_type TO ${menuRole}`,
             );
             await seedMenu(admin, mode);
             const sessionRunner = createTenantTransactionRunner(
@@ -160,6 +160,8 @@ for (const mode of modes)
                   }
                 : pickup.options),
               scope,
+              // Synthetic request admission for this isolated browser/Cart fixture.
+              entryRequestAdmission: { consume: async () => ({ status: "Allowed" }) },
               entry: { ...f.options, session: { binding: f.options.session.binding, credentials } },
               menuStores: {
                 resolvePublic: async (reference) =>

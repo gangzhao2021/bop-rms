@@ -1,6 +1,6 @@
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
-const opaqueProof = /^[A-Za-z0-9_-]{22}$/u;
+const opaqueProof = /^[A-Za-z0-9_-]{21}[AQgw]$/u;
 const humanCode = /^\d{6}$/u;
 
 export interface PickupCodeView {
@@ -31,6 +31,7 @@ export type PickupCodeState =
   | { readonly status: "ready"; readonly view: PickupCodeView; readonly refreshing: boolean };
 
 export interface CustomerPickupCodeClient {
+  subscribeContextChange?(listener: () => void): () => void;
   load(orderReference: string): Promise<unknown>;
 }
 
@@ -211,6 +212,7 @@ export function createPickupCodeController(
   let request = 0;
   let expiryTimer: ReturnType<typeof setTimeout> | null = null;
   const listeners = new Set<() => void>();
+  let unsubscribeContext: (() => void) | undefined;
   const clearExpiry = () => {
     if (expiryTimer) clearTimeout(expiryTimer);
     expiryTimer = null;
@@ -234,8 +236,8 @@ export function createPickupCodeController(
       return;
     }
     const token = ++request;
-    if (state.status === "ready") publish({ ...state, refreshing: true });
-    else publish({ status: "loading" });
+    clearExpiry();
+    publish({ status: "loading" });
     try {
       const result = parsePickupCodeResult(
         await client.load(orderReference),
@@ -285,12 +287,26 @@ export function createPickupCodeController(
       stopped = true;
       request += 1;
       clearExpiry();
+      unsubscribeContext?.();
+      unsubscribeContext = undefined;
       listeners.clear();
       state = { status: "hidden" };
     },
     subscribe(listener: () => void) {
+      if (stopped) return () => undefined;
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      if (listeners.size === 1)
+        unsubscribeContext = client.subscribeContextChange?.(() =>
+          clearProof({ status: "permission-denied" }),
+        );
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          unsubscribeContext?.();
+          unsubscribeContext = undefined;
+          clearProof({ status: "hidden" });
+        }
+      };
     },
   });
 }

@@ -15,6 +15,7 @@ const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const id = (n) => `018f7300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T16:00:00.000Z";
+const contextInput = { channelCode: "DINE_IN", orderTypeCode: "TABLE_SERVICE", requestedAt: at };
 const optionRules = [
   {
     bindingReference: id(31),
@@ -57,6 +58,26 @@ async function prove(context) {
     await admin.query(
       `INSERT INTO rms_catalog.menu_publication_release (release_id,lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,release_sequence,release_kind,snapshot_digest,created_at) VALUES ($1,$2,4,$3,$4,$5,1,'Publish',$6,$7)`,
       [id(8), id(5), id(1), id(4), id(2), digest, at],
+    );
+    // Synthetic published owner facts, not a production approval.
+    for (const [table, field, value] of [
+      ["menu_version_store", "store_id", id(20)],
+      ["menu_version_channel", "channel_code", "DINE_IN"],
+      ["menu_version_order_type", "order_type_code", "TABLE_SERVICE"],
+    ])
+      await admin.query(
+        "INSERT INTO rms_catalog." +
+          table +
+          " (menu_version_id,menu_id,brand_id," +
+          field +
+          ") VALUES ($1,$2,$3,$4)",
+        [id(4), id(1), id(2), value],
+      );
+    await admin.query(
+      `INSERT INTO rms_catalog.menu_release_effective_period
+       (timing_version_id,release_id,menu_id,brand_id,time_zone,effective_from,period_digest,approval_evidence_id,created_at)
+       VALUES ($1,$2,$3,$4,'UTC',$5,$6,$7,$5)`,
+      [id(50), id(8), id(1), id(2), at, digest, id(7)],
     );
     await admin.query(
       `INSERT INTO rms_catalog.published_menu_projection_generation (generation_id,brand_id,menu_id,projection_name,projection_version,generation_status,source_event_id,source_aggregate_version,source_checkpoint,last_rebuilt_at,freshness_status) VALUES ($1,$2,$3,'catalog_published_menu_v1',1,'Active',$4,4,$4,$5,'Fresh')`,
@@ -106,6 +127,12 @@ async function prove(context) {
     await admin.query(
       `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint TO ${role}`,
     );
+    await admin.query(
+      `GRANT SELECT ON rms_catalog.menu_release_effective_period,
+      rms_catalog.menu_publication_release,rms_catalog.menu_publication_revision,
+      rms_catalog.menu_version_store,rms_catalog.menu_version_channel,
+      rms_catalog.menu_version_order_type TO ` + role,
+    );
     await admin.query(`SET ROLE ${role}`);
     assert.equal(
       (await admin.query(`SELECT * FROM rms_catalog.published_menu_projection`)).rowCount,
@@ -143,8 +170,8 @@ async function prove(context) {
       },
     };
     const store = createPostgresPublishedMenuQueryStore(runner, scope);
-    const [candidate] = await store.loadCandidates(scope);
-    assert.equal(reads, 1);
+    const [candidate] = await store.loadCandidates({ ...scope, ...contextInput });
+    assert.equal(reads, 2);
     assert.equal(candidate.generationReference, id(9));
     assert.equal(candidate.lastRebuiltAt, at);
     assert.equal(candidate.snapshot.effectiveFrom, at);
@@ -154,18 +181,24 @@ async function prove(context) {
       candidate.snapshot.sections[0].sellables[0].allergenDisclosure.allergenFreeClaim,
       false,
     );
-    assert.deepEqual(await store.loadCandidates(scope), [candidate]);
+    assert.deepEqual(await store.loadCandidates({ ...scope, ...contextInput }), [candidate]);
     const beforeDenied = reads;
-    await assert.rejects(store.loadCandidates({ ...scope, storeReference: id(99) }), {
-      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
-    });
+    await assert.rejects(
+      store.loadCandidates({ ...scope, ...contextInput, storeReference: id(99) }),
+      {
+        code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+      },
+    );
     assert.equal(reads, beforeDenied);
     for (const other of [
       { ...scope, brandReference: id(99) },
       { ...scope, storeReference: id(99) },
     ])
       assert.deepEqual(
-        await createPostgresPublishedMenuQueryStore(runner, other).loadCandidates(other),
+        await createPostgresPublishedMenuQueryStore(runner, other).loadCandidates({
+          ...other,
+          ...contextInput,
+        }),
         [],
       );
     const query = createCustomerMenuQueryService({
@@ -272,7 +305,7 @@ async function prove(context) {
       "UPDATE rms_catalog.published_menu_projection_generation SET source_checkpoint=$1 WHERE generation_id=$2",
       [id(10), id(9)],
     );
-    assert.deepEqual(await store.loadCandidates(scope), [candidate]);
+    assert.deepEqual(await store.loadCandidates({ ...scope, ...contextInput }), [candidate]);
     const versionRequest = { ...scope, menuVersionReference: id(4) };
     assert.deepEqual(await store.loadVersionCandidates(versionRequest), [candidate]);
     assert.deepEqual(
@@ -330,16 +363,17 @@ async function prove(context) {
       }).loadVersionCandidates({ ...versionRequest, storeReference: id(99) }),
       [],
     );
-    const global = await store.loadCandidates(scope);
+    const global = await store.loadCandidates({ ...scope, ...contextInput });
     assert.equal(global.length, 1);
     assert.equal(global[0].generationReference, id(40));
     assert.deepEqual(global[0].snapshot.storeReferences, []);
     const otherStoreScope = { ...scope, storeReference: id(99) };
     assert.deepEqual(
-      await createPostgresPublishedMenuQueryStore(runner, otherStoreScope).loadCandidates(
-        otherStoreScope,
-      ),
-      global,
+      await createPostgresPublishedMenuQueryStore(runner, otherStoreScope).loadCandidates({
+        ...otherStoreScope,
+        ...contextInput,
+      }),
+      [],
     );
     for (const sql of [
       "SELECT * FROM rms_catalog.menu",

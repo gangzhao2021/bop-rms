@@ -1,3 +1,5 @@
+import { SessionPaymentResultPage } from "./SessionPaymentResultPage.js";
+import { SessionPaymentPage } from "./SessionPaymentPage.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import {
@@ -7,7 +9,7 @@ import {
 } from "./payment-controller.js";
 import type { PaymentMode } from "./types.js";
 
-export function PaymentPage({
+function LegacyPaymentPage({
   mode,
   controller: provided,
 }: {
@@ -118,4 +120,12 @@ export function PaymentPage({
       <Link to="/checkout">Back to checkout</Link>
     </main>
   );
+}
+
+export function PaymentPage(props: {
+  readonly mode: PaymentMode;
+  readonly controller?: PaymentController;
+}) {
+  if (props.controller !== undefined) return <LegacyPaymentPage {...props} />;
+  return props.mode === "handoff" ? <SessionPaymentPage /> : <SessionPaymentResultPage />;
 }

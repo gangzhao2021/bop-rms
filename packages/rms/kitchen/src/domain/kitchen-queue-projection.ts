@@ -1380,7 +1380,7 @@ function lifecycleProofOccurredAt(proof: KitchenQueueLifecycleProjectionProof): 
   return proof.kind === "Event" ? proof.occurredAt : proof.readyAt;
 }
 
-function parseLifecycleProofBundle(
+export function parseLifecycleProofBundle(
   value: unknown,
   sha256: KitchenQueueDigestPort,
 ): KitchenQueueLifecycleProofBundle {

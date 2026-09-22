@@ -3,6 +3,7 @@ import {
   createPostgresOrderCreationStore,
   createOrderNumberAllocation,
   parseOrderCreationRecord,
+  type OrderSubmissionInventoryFinalizer,
 } from "../index.js";
 import { orderWriteFixture } from "./order-creation-store.fixture.js";
 const mocks = vi.hoisted(() => ({ audit: vi.fn(), outbox: vi.fn(), read: vi.fn() }));
@@ -20,7 +21,7 @@ vi.mock("../infrastructure/persistence/order-creation-query-store.js", async (im
   >()),
   readOrderCreationHistory: mocks.read,
 }));
-function setup() {
+function setup(inventoryFinalizer?: OrderSubmissionInventoryFinalizer) {
   const f = orderWriteFixture();
   const expected = parseOrderCreationRecord({
     ...f.request.record,
@@ -58,6 +59,11 @@ function setup() {
       },
     },
     f.scope,
+    undefined,
+    1,
+    undefined,
+    undefined,
+    inventoryFinalizer,
   );
   return {
     ...f,
@@ -78,6 +84,65 @@ beforeEach(() => {
   mocks.outbox.mockReset().mockResolvedValue(undefined);
   mocks.read.mockReset();
 });
+describe("WP-2402 inventory finalization at the Order boundary", () => {
+  it("passes the locked current Cart and same transaction before allocating an Order number", async () => {
+    let statementsAtFinalization: string[] = [];
+    let auditCallsAtFinalization = -1;
+    const finalize = vi.fn<OrderSubmissionInventoryFinalizer["finalize"]>(async () => {
+      statementsAtFinalization = f.query.mock.calls.map(([sql]) => sql);
+      auditCallsAtFinalization = mocks.audit.mock.calls.length;
+    });
+    const f = setup({ finalize });
+    expect(await f.store.append(f.request)).toEqual({ status: "Created", record: f.expected });
+    const input = finalize.mock.calls[0]?.[0];
+    if (input === undefined) throw new Error("inventory finalizer was not called");
+    expect(input.transaction.query).toBe(f.query);
+    expect(input.cart).toEqual(f.cart);
+    expect(input.record).toEqual(f.request.record);
+    expect(input.checkoutValidationEvidence).toEqual(f.request.checkoutValidationEvidence);
+    expect(input.observedAt).toBe(f.request.record.createdAt);
+    expect(statementsAtFinalization.some((sql) => sql.startsWith("SELECT cart_id"))).toBe(true);
+    expect(statementsAtFinalization.some((sql) => sql.startsWith("INSERT"))).toBe(false);
+    expect(auditCallsAtFinalization).toBe(0);
+    expect(finalize).toHaveBeenCalledTimes(1);
+    expect(f.query.mock.calls.filter(([sql]) => sql.startsWith("WITH observed"))).toHaveLength(4);
+  });
+
+  it("propagates finalization failure without creating an Order or exposing dependency details", async () => {
+    const finalize = vi.fn().mockRejectedValue(new Error("private inventory detail"));
+    const f = setup({ finalize });
+    await expect(f.store.append(f.request)).rejects.toMatchObject({
+      code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+      message: "order creation is unavailable",
+    });
+    expect(finalize).toHaveBeenCalledTimes(1);
+    expect(f.query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
+    expect(mocks.audit).not.toHaveBeenCalled();
+    expect(mocks.outbox).not.toHaveBeenCalled();
+  });
+
+  it("rejects a deadline crossed during inventory work before writing the Order", async () => {
+    const finalize = vi.fn().mockResolvedValue(undefined);
+    const f = setup({ finalize });
+    f.late();
+    await expect(f.store.append(f.request)).rejects.toMatchObject({
+      code: "ORDER_CREATE_VALIDATION_EXPIRED",
+    });
+    expect(finalize).toHaveBeenCalledTimes(1);
+    expect(f.query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
+    expect(mocks.audit).not.toHaveBeenCalled();
+  });
+
+  it("recovers the original submission without reserving inventory again", async () => {
+    const finalize = vi.fn().mockResolvedValue(undefined);
+    const f = setup({ finalize });
+    mocks.read.mockReset().mockResolvedValue(f.expected);
+    expect(await f.store.append(f.request)).toEqual({ status: "Existing", record: f.expected });
+    expect(finalize).not.toHaveBeenCalled();
+    expect(mocks.audit).not.toHaveBeenCalled();
+  });
+});
+
 describe("WP-2352 atomic Order write boundary", () => {
   it("captures the request before an asynchronous runner can mutate caller-owned data", async () => {
     const f = setup();
@@ -96,7 +161,18 @@ describe("WP-2352 atomic Order write boundary", () => {
     expect(mocks.outbox).toHaveBeenCalledTimes(1);
     expect(f.query.mock.calls[0]?.[0]).toBe("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
     expect(f.query.mock.calls.filter(([s]) => s.startsWith("WITH observed"))).toHaveLength(3);
-    expect(f.query.mock.calls.filter(([s]) => s.startsWith("INSERT"))).toHaveLength(6);
+    expect(f.query.mock.calls.filter(([s]) => s.startsWith("INSERT"))).toHaveLength(7);
+    expect(
+      f.query.mock.calls.find(([s]) =>
+        s.startsWith("INSERT INTO rms_ordering.order_revision"),
+      )?.[1],
+    ).toEqual([
+      f.expected.submissionReference,
+      f.expected.order.brandReference,
+      f.expected.order.storeReference,
+      f.expected.order.orderReference,
+      f.expected.createdAt,
+    ]);
   });
   it("recovers original expired history without touching Cart, counter, Audit or Outbox", async () => {
     const f = setup();

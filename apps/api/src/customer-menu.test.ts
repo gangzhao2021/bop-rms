@@ -231,3 +231,45 @@ describe("WP-1026 Customer Menu REST API", () => {
     expect(JSON.stringify(await response.json())).not.toContain("raw-secret");
   });
 });
+
+it("transmits explicit quantity semantics and defaults without channel internals", async () => {
+  const value = found();
+  if (value.status !== "Found") throw new Error("fixture");
+  const rule = value.menu.sections[0]?.sellables[0]?.optionRules[0];
+  const option = rule?.options[0];
+  if (!rule || !option) throw new Error("fixture");
+  Object.assign(rule, {
+    semanticsVersion: 2,
+    activationOptionReferences: [],
+    minimumSelections: 2,
+    maximumSelections: 3,
+    defaultOptionReferences: [option.optionReference],
+  });
+  Object.assign(option, { maximumQuantity: 3, selectedByDefault: true, defaultQuantity: 2 });
+  const catalog = new MutablePort();
+  catalog.result = value;
+  const port = await listen(catalog);
+  const result = await fetch(url(port));
+  expect(result.status).toBe(200);
+  const body = await result.json();
+  expect(body).toMatchObject({
+    menu: {
+      sections: [
+        {
+          sellables: [
+            {
+              optionRules: [
+                {
+                  semanticsVersion: 2,
+                  activationOptionReferences: [],
+                  options: [{ defaultQuantity: 2 }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(JSON.stringify(body)).not.toContain('"channelCodes"');
+});

@@ -31,6 +31,11 @@ export default defineConfig({
     },
     {
       command: "pnpm preview:demo-proof",
+      // Browser fixtures intercept all payment endpoints; never real Provider configuration.
+      env: {
+        VITE_BOP_STRIPE_PUBLISHABLE_KEY: "pk_test_SyntheticBrowserOnly",
+        VITE_BOP_PAYMENT_RETURN_URL: "https://synthetic-return.invalid/return",
+      },
       url: productionUrl,
       reuseExistingServer: false,
       timeout: 120_000,

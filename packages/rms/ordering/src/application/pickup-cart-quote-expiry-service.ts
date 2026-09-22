@@ -8,6 +8,9 @@ import {
 } from "@bop/identity";
 import {
   decodePriceQuoteSnapshot,
+  decodeConfiguredPriceQuoteSnapshot,
+  encodeConfiguredPriceQuoteSnapshot,
+  type ConfiguredPriceQuoteSnapshot,
   encodePriceQuoteSnapshot,
   parsePriceQuoteRequestRecord,
   PriceQuoteRequestError,
@@ -24,6 +27,7 @@ import {
 } from "../domain/cart.js";
 import {
   parseCartQuoteAttachment,
+  parseConfiguredCartQuoteAttachment,
   type CartQuoteAttachment,
 } from "../domain/cart-quote-attachment.js";
 import {
@@ -35,14 +39,18 @@ import type { PickupCartQuoteOptions } from "./pickup-cart-quote-service.js";
 
 export type PickupCartQuoteExpiryResult = Readonly<
   | { status: "NoExpiredRequest" }
-  | { status: "AlreadyAttached"; attachment: CartQuoteAttachment }
+  | { status: "AlreadyAttached"; attachment: CartQuoteAttachment<1 | 2> }
   | { status: "Expired"; record: CartQuoteExpiryRecord }
 >;
 export interface PickupCartQuoteExpiryOptions {
   readonly scope: PickupCartQuoteOptions["scope"];
   readonly sessions: PickupCartQuoteOptions["sessions"];
   readonly binding: PickupCartQuoteOptions["binding"];
-  readonly requests: Pick<PriceQuoteRequestStore, "resolve">;
+  readonly quoteVersion?: 1 | 2;
+  readonly requests: Pick<
+    PriceQuoteRequestStore<PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot>,
+    "resolve"
+  >;
   readonly expiry: {
     expire(input: {
       readonly record: CartQuoteExpiryRecord;
@@ -183,9 +191,13 @@ export function createPickupCartQuoteExpiryService(options: PickupCartQuoteExpir
         const quote =
           history === null
             ? null
-            : decodePriceQuoteSnapshot(
-                encodePriceQuoteSnapshot(history.quote as PriceQuoteSnapshot),
-              );
+            : options.quoteVersion === 2
+              ? decodeConfiguredPriceQuoteSnapshot(
+                  encodeConfiguredPriceQuoteSnapshot(history.quote as ConfiguredPriceQuoteSnapshot),
+                )
+              : decodePriceQuoteSnapshot(
+                  encodePriceQuoteSnapshot(history.quote as PriceQuoteSnapshot),
+                );
         const before = await checkpoint(raw, first);
         if (request === null || quote === null)
           return Object.freeze({ status: "NoExpiredRequest" });
@@ -243,7 +255,10 @@ export function createPickupCartQuoteExpiryService(options: PickupCartQuoteExpir
             return unavailable();
           resolved = Object.freeze({ status: "Expired", record: saved });
         } else if (status.status === "AlreadyAttached") {
-          const saved = parseCartQuoteAttachment(status.attachment);
+          const saved =
+            options.quoteVersion === 2
+              ? parseConfiguredCartQuoteAttachment(status.attachment)
+              : parseCartQuoteAttachment(status.attachment);
           for (const field of [
             "brandReference",
             "storeReference",

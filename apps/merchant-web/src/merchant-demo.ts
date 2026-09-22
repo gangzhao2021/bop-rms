@@ -158,7 +158,7 @@ export const localMerchantWorkspace: MerchantWorkspaceSnapshot = parseMerchantWo
       screenId: "OPS-ORDER-QUEUE",
       label: "Orders",
       href: "/operations/orders",
-      permission: "ordering.read",
+      permission: "ordering.operate",
     },
     {
       screenId: "KIT-KITCHEN-QUEUE",

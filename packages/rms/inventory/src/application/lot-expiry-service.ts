@@ -114,7 +114,7 @@ function sameScope(left: MovementStockScope, right: MovementStockScope): boolean
   return left.scopeType === right.scopeType && left.scopeReference === right.scopeReference;
 }
 
-function command(value: unknown): LotHoldCommand {
+export function parseLotHoldCommand(value: unknown): LotHoldCommand {
   const raw = exact(value, [
     "tenantReference",
     "brandReference",
@@ -489,6 +489,7 @@ function validateRecord(
   hold: LotHoldAggregate,
   audit: LotHoldCommandRecord["audit"],
 ): LotHoldCommandRecord {
+  if (record.outcome === "AlreadyApplied") return validateReplay(record, command, intentHash);
   if (
     record.operationReference !== command.operationReference ||
     record.intentHash !== intentHash ||
@@ -505,7 +506,7 @@ function validateRecord(
 }
 
 export async function executeLotHold(value: unknown, ports: LotExpiryPorts) {
-  const input = command(value);
+  const input = parseLotHoldCommand(value);
   const payload = input.payload as {
     readonly stockScope: MovementStockScope;
     readonly locationReference: InventoryReference;

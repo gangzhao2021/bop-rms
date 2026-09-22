@@ -7,6 +7,9 @@ import {
   createPaymentReconciliationQueryService,
   createPaymentReconciliationService,
   parsePaymentReference,
+  parseSettlementReconciliationCandidate,
+  parsePaymentReconciliationRunResult,
+  parsePaymentReconciliationCheck,
   PaymentReconciliationError,
   type PaymentOperationalReconciliationCandidate,
   type PaymentProviderOutcome,
@@ -108,6 +111,7 @@ function settlement(providerCaptured = 1_250n): PaymentSettlementReconciliationC
 
 function fixture(
   options: {
+    now?: () => string;
     deny?: boolean;
     lease?: boolean;
     existing?: PaymentReconciliationRunResult;
@@ -115,7 +119,11 @@ function fixture(
     settlements?: readonly PaymentSettlementReconciliationCandidate[];
     provider?: PaymentProviderOutcome;
     providerThrows?: boolean;
+    observationFails?: boolean;
+    observationMismatch?: boolean;
     terminalReference?: string;
+    occurrence?: { status: "Captured" | "Failed" | "Cancelled"; occurredAt: string };
+    occurrenceFails?: boolean;
     conflict?: boolean;
   } = {},
 ) {
@@ -167,7 +175,28 @@ function fixture(
         return options.provider ?? provider();
       },
     },
+    observations: {
+      record: async (input) => {
+        calls.push("observation");
+        if (options.observationFails) throw new Error("storage unavailable");
+        expect(input.paymentIntentReference).toBe(id(11));
+        expect(input.snapshot).toEqual(options.provider ?? provider());
+        return {
+          status: "Recorded",
+          observationReference: options.observationMismatch ? id(999) : input.observationReference,
+        };
+      },
+    },
     terminal: {
+      occurrence: async ({ snapshot }) => {
+        if (options.occurrenceFails) throw Error("occurrence-unavailable");
+        return (
+          options.occurrence ?? {
+            status: snapshot.status as "Captured" | "Failed" | "Cancelled",
+            occurredAt: observedAt,
+          }
+        );
+      },
       record: async (observation) => {
         calls.push("terminal");
         terminal.push(observation);
@@ -181,7 +210,7 @@ function fixture(
       generate: () => id(generated++),
       exceptionFor: () => id(80),
     },
-    clock: { now: () => checkedAt },
+    clock: { now: options.now ?? (() => checkedAt) },
   };
   return { service: createPaymentReconciliationService(ports), calls, terminal };
 }
@@ -217,11 +246,59 @@ describe("WP-1307 Payment reconciliation job", () => {
     ]);
   });
 
+  it("accepts an observation obtained during retrieval and records actual completion time", async () => {
+    const returnedAt = "2026-08-03T18:01:02.000Z";
+    const finishedAt = "2026-08-03T18:01:03.000Z";
+    const times = [checkedAt, returnedAt, finishedAt];
+    const value = fixture({
+      provider: provider("Captured", { observedAt: returnedAt }),
+      now: () => times.shift() ?? finishedAt,
+    });
+    const result = await value.service.run(run());
+    expect(result.result.checks[0]?.checkedAt).toBe(returnedAt);
+    expect(result.result.completedAt).toBe(finishedAt);
+    expect(result.result.counts.Healed).toBe(1);
+  });
+
+  it.each([
+    { name: "future observation", observation: "2026-08-03T18:01:05.000Z", after: checkedAt },
+    { name: "regressing clock", observation: observedAt, after: observedAt },
+  ])("rejects $name before recording a terminal fact", async ({ observation, after }) => {
+    let first = true;
+    const value = fixture({
+      provider: provider("Captured", { observedAt: observation }),
+      now: () => {
+        if (first) {
+          first = false;
+          return checkedAt;
+        }
+        return after;
+      },
+    });
+    expect(await code(value.service.run(run()))).toBe(
+      "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE",
+    );
+    expect(value.terminal).toHaveLength(0);
+    expect(value.calls).not.toContain("commit");
+  });
+
+  it("rejects a Live response for a Test candidate", async () => {
+    const snapshot = provider("Captured");
+    const value = fixture({
+      provider: provider("Captured", { context: { ...snapshot.context, environment: "Live" } }),
+    });
+    expect(await code(value.service.run(run()))).toBe(
+      "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE",
+    );
+    expect(value.terminal).toHaveLength(0);
+  });
+
   it("hands exact retrieved terminal truth to WP-1305 with no webhook identifiers", async () => {
     const value = fixture({ provider: provider("Captured") });
     const result = await value.service.run(run());
     expect(result.result.checks[0]?.outcome).toBe("Healed");
     expect(value.terminal).toHaveLength(1);
+    expect(value.calls.indexOf("observation")).toBeLessThan(value.calls.indexOf("terminal"));
     expect(value.terminal[0]).toMatchObject({
       causationReference: id(1),
       webhookReceiptReference: null,
@@ -231,6 +308,19 @@ describe("WP-1307 Payment reconciliation job", () => {
       amount: { amountMinor: 1_250n },
     });
   });
+
+  it.each([{ observationFails: true }, { observationMismatch: true }])(
+    "does not heal without exact durable observation acknowledgement: %j",
+    async (options) => {
+      const value = fixture({ ...options, provider: provider("Captured") });
+      expect(await code(value.service.run(run()))).toBe(
+        "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE",
+      );
+      expect(value.terminal).toHaveLength(0);
+      expect(value.calls).not.toContain("commit");
+      expect(value.calls.at(-1)).toBe("release");
+    },
+  );
 
   it("fails closed when the WP-1305 terminal bridge returns malformed identity", async () => {
     const value = fixture({
@@ -316,11 +406,61 @@ describe("WP-1307 Payment reconciliation job", () => {
     );
     expect(missing.calls).not.toContain("commit");
     const impossible = fixture({
-      settlements: [{ ...settlement(), internalRefundedAmount: money(1_251n) }],
+      settlements: [{ ...settlement(), businessDate: "2026-02-30" }],
     });
     expect(await code(impossible.service.run(run("DailySettlement")))).toBe(
       "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE",
     );
+  });
+
+  it("reconciles refunds of earlier captures on a day without captures and preserves replay", async () => {
+    const daily = {
+      ...settlement(),
+      internalCapturedAmount: money(0n),
+      providerCapturedAmount: money(0n),
+      internalRefundedAmount: money(1_250n),
+      providerRefundedAmount: money(1_250n),
+    };
+    const first = await fixture({ settlements: [daily] }).service.run(run("DailySettlement"));
+    expect(first.result.checks[0]?.outcome).toBe("Matched");
+    expect(parsePaymentReconciliationRunResult(first.result)).toEqual(first.result);
+    expect(() =>
+      parsePaymentReconciliationCheck({
+        ...first.result.checks[0],
+        mode: "Operational",
+        paymentIntentReference: id(90),
+        settlementReference: null,
+        internalStatus: "Captured",
+        providerStatus: "Captured",
+      }),
+    ).toThrow();
+    expect(
+      (await fixture({ existing: first.result }).service.run(run("DailySettlement"))).status,
+    ).toBe("Duplicate");
+    const different = await fixture({
+      settlements: [{ ...daily, providerRefundedAmount: money(1_249n) }],
+    }).service.run(run("DailySettlement"));
+    expect(different.result.checks[0]).toMatchObject({
+      outcome: "Difference",
+      differenceReason: "RefundMismatch",
+    });
+    expect(parsePaymentReconciliationRunResult(different.result)).toEqual(different.result);
+  });
+
+  it.each(["2026-02-29", "2026-02-30", "2026-04-31", "2026-13-01"])(
+    "rejects impossible business date %s",
+    (businessDate) => {
+      expect(() =>
+        parseSettlementReconciliationCandidate({ ...settlement(), businessDate }),
+      ).toThrow();
+    },
+  );
+
+  it("accepts a real leap day without normalizing the business date", () => {
+    expect(
+      parseSettlementReconciliationCandidate({ ...settlement(), businessDate: "2024-02-29" })
+        .businessDate,
+    ).toBe("2024-02-29");
   });
 
   it("returns an identical duplicate and rejects run conflict before candidate/provider reads", async () => {
@@ -423,3 +563,31 @@ describe("WP-1307 Payment reconciliation queries", () => {
     );
   });
 });
+
+it("heals with actual occurrence earlier than retrieval observation", async () => {
+  const f = fixture({
+    provider: provider("Captured"),
+    occurrence: { status: "Captured", occurredAt: "2026-08-03T17:57:00.000Z" },
+  });
+  const result = await f.service.run(run());
+  expect(result.result.counts.Healed).toBe(1);
+  expect(f.terminal[0]).toMatchObject({ occurredAt: "2026-08-03T17:57:00.000Z" });
+});
+it.each(["missing", "future", "status", "invalid"])(
+  "rejects %s occurrence before observation or terminal writes",
+  async (kind) => {
+    const f = fixture({
+      provider: provider("Captured"),
+      occurrenceFails: kind === "missing",
+      occurrence: {
+        status: kind === "status" ? "Failed" : "Captured",
+        occurredAt: kind === "invalid" ? "invalid" : kind === "future" ? checkedAt : observedAt,
+      },
+    });
+    expect(await code(f.service.run(run()))).toBe("PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE");
+    expect(f.calls).not.toContain("observation");
+    expect(f.calls).not.toContain("terminal");
+    expect(f.calls).not.toContain("commit");
+    expect(f.calls.at(-1)).toBe("release");
+  },
+);

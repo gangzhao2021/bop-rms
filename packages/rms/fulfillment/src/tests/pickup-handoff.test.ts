@@ -1,7 +1,12 @@
+import {
+  encodePickupHandoffRecord,
+  decodePickupHandoffRecord,
+} from "../application/pickup-handoff-record.js";
 import { describe, expect, it } from "vitest";
 import {
   PickupHandoffError,
   planCompletePickupHandoff,
+  parseCompletePickupHandoffCommand,
   type CompletePickupHandoffCommand,
   type PickupHandoffReference,
   type PickupHandoffSource,
@@ -250,5 +255,126 @@ describe("WP-1603 Complete Pickup Handoff", () => {
         ),
       "PICKUP_HANDOFF_NOT_READY",
     );
+  });
+});
+
+describe("WP-2402 handoff persistence boundary", () => {
+  it("recovers original full and partial effects with exact bigint versions", () => {
+    for (const request of [
+      command(),
+      command({ quantities: [{ fulfillmentItemReference: refs.item1, quantity: 1 }] }),
+    ]) {
+      const effect = planCompletePickupHandoff(source(), request);
+      const recovered = decodePickupHandoffRecord(encodePickupHandoffRecord(effect));
+      expect(recovered).toEqual(effect);
+      expect(Object.isFrozen(recovered.items)).toBe(true);
+      expect(Object.isFrozen(recovered.audit)).toBe(true);
+    }
+  });
+  it("rejects raw fields, accessor commands, prototype objects and untrusted proof authority", () => {
+    expect(() =>
+      parseCompletePickupHandoffCommand({ ...command(), rawProof: "synthetic-forbidden" }),
+    ).toThrow(PickupHandoffError);
+    const accessor = command();
+    let evaluated = false;
+    Object.defineProperty(accessor, "recipientDisplayMask", {
+      enumerable: true,
+      get: () => {
+        evaluated = true;
+        return "R***";
+      },
+    });
+    expect(() => parseCompletePickupHandoffCommand(accessor)).toThrow(PickupHandoffError);
+    expect(evaluated).toBe(false);
+    expect(() =>
+      parseCompletePickupHandoffCommand(Object.assign(Object.create(null), command())),
+    ).toThrow(PickupHandoffError);
+    expect(() =>
+      planCompletePickupHandoff(
+        source(),
+        command({
+          verification: verification({ grantsCompletionAuthority: true }),
+        }),
+      ),
+    ).toThrow(PickupHandoffError);
+    expect(() =>
+      parseCompletePickupHandoffCommand({
+        ...command(),
+        quantities: [
+          {
+            fulfillmentItemReference: refs.item1,
+            quantity: 1,
+            rawNote: "synthetic-forbidden",
+          },
+        ],
+      }),
+    ).toThrow(PickupHandoffError);
+  });
+  it("rejects sparse or accessor quantities and invalid calendar instants without invoking getters", () => {
+    const sparse = new Array(2);
+    sparse[1] = { fulfillmentItemReference: refs.item1, quantity: 1 };
+    expect(() => parseCompletePickupHandoffCommand({ ...command(), quantities: sparse })).toThrow(
+      PickupHandoffError,
+    );
+    const accessor = [{ fulfillmentItemReference: refs.item1, quantity: 1 }];
+    let evaluated = false;
+    Object.defineProperty(accessor, "0", {
+      enumerable: true,
+      get: () => {
+        evaluated = true;
+        return {};
+      },
+    });
+    expect(() => parseCompletePickupHandoffCommand({ ...command(), quantities: accessor })).toThrow(
+      PickupHandoffError,
+    );
+    expect(evaluated).toBe(false);
+    expect(() =>
+      parseCompletePickupHandoffCommand({ ...command(), handedOverAt: "2026-99-11T12:03:00.000Z" }),
+    ).toThrow(PickupHandoffError);
+  });
+  it("rejects inconsistent history versions, audit identity, quantity and recipient fields", () => {
+    const record = JSON.parse(
+      encodePickupHandoffRecord(planCompletePickupHandoff(source(), command())),
+    );
+    for (const change of [
+      { nextAggregateVersion: "7" },
+      { nextPhase: "InProgress" },
+      { audit: { ...record.effect.audit, actorReference: refs.device } },
+      { audit: { ...record.effect.audit, permission: "fulfillment.pickup.read" } },
+      { operation: { ...record.effect.operation, aggregateVersionAfter: "7" } },
+      { record: { ...record.effect.record, handedOverAt: "2026-08-11T12:04:00.000Z" } },
+      { record: { ...record.effect.record, recipientDisplayMask: "name@example.com" } },
+      { items: [{ ...record.effect.items[0], cumulativeHandedOverQuantity: 1 }] },
+      { items: [record.effect.items[0], record.effect.items[0]] },
+    ]) {
+      expect(() =>
+        decodePickupHandoffRecord(
+          JSON.stringify({ ...record, effect: { ...record.effect, ...change } }),
+        ),
+      ).toThrow(PickupHandoffError);
+    }
+    for (const key of ["aggregateVersionBefore", "aggregateVersionAfter"]) {
+      for (const value of [6, "06", "0", "-1", "6e0", "9223372036854775808", null]) {
+        expect(() =>
+          decodePickupHandoffRecord(
+            JSON.stringify({
+              ...record,
+              effect: {
+                ...record.effect,
+                operation: { ...record.effect.operation, [key]: value },
+              },
+            }),
+          ),
+        ).toThrow(PickupHandoffError);
+      }
+    }
+    for (const value of [
+      "{}",
+      "invalid",
+      JSON.stringify({ ...record, recordVersion: 2 }),
+      JSON.stringify({ ...record, extra: true }),
+    ])
+      expect(() => decodePickupHandoffRecord(value)).toThrow(PickupHandoffError);
   });
 });

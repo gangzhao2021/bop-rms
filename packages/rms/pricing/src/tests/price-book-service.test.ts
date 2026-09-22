@@ -242,7 +242,7 @@ describe("Price Book administration workflow", () => {
   it("requires an independent authorized approver and complete coverage to publish", async () => {
     const same = fixture({ sameActorApproval: true });
     await same.service.createDraft({
-      candidate: snapshot(),
+      candidate: snapshot({ entries: true }),
       operationReference: ids.operation,
       requestedAt: at,
     });
@@ -266,7 +266,7 @@ describe("Price Book administration workflow", () => {
     });
     const state = fixture();
     await state.service.createDraft({
-      candidate: snapshot(),
+      candidate: snapshot({ entries: true }),
       operationReference: ids.operation,
       requestedAt: at,
     });
@@ -276,6 +276,68 @@ describe("Price Book administration workflow", () => {
     });
     expect(state.operation(ids.operation2)?.event.eventType).toBe("PriceBookVersionPublished");
   });
+  it.each(["amount", "removedEntry", "currencyMetadata"])(
+    "rejects %s changes introduced during approval",
+    async (change) => {
+      const state = fixture();
+      const draft = snapshot({ entries: true });
+      await state.service.createDraft({
+        candidate:
+          change === "removedEntry"
+            ? {
+                ...draft,
+                entries: [
+                  ...draft.entries,
+                  ...draft.entries.map((entry) => ({
+                    ...entry,
+                    entryReference: parsePricingReference(id(16)),
+                    sellableReference: parsePricingReference(id(17)),
+                  })),
+                ],
+              }
+            : draft,
+        operationReference: ids.operation,
+        requestedAt: at,
+      });
+      const candidate = snapshot({
+        lifecycle: "Published",
+        aggregateVersion: 2,
+        versionNumber: 2,
+        versionReference: ids.version2,
+        createdAt: later,
+        entries: true,
+      });
+      const changed =
+        change === "amount"
+          ? {
+              ...candidate,
+              entries: candidate.entries.map((entry) => ({
+                ...entry,
+                amount: { ...entry.amount, amountMinor: 1300n },
+              })),
+            }
+          : change === "removedEntry"
+            ? candidate
+            : {
+                ...candidate,
+                currencyMetadata: {
+                  ...candidate.currencyMetadata,
+                  metadataVersion: 2,
+                },
+              };
+      await expect(
+        state.service.publish({
+          priceBookReference: ids.book,
+          expectedAggregateVersion: 1,
+          candidate: changed,
+          coverageContexts: coverage,
+          operationReference: ids.operation2,
+          requestedAt: later,
+        }),
+      ).rejects.toMatchObject({ code: "PRICE_BOOK_INPUT_INVALID" });
+      expect(state.operation(ids.operation2)).toBeUndefined();
+    },
+  );
   it("fails closed on denied permission and stale Expected Version", async () => {
     await expect(
       fixture({ denied: true }).service.createDraft({

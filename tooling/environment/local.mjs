@@ -143,32 +143,65 @@ async function start(config) {
   process.once("SIGHUP", () => void shutdown("SIGHUP"));
 
   try {
-    const api = spawnService("API", process.execPath, ["apps/api/dist/server.js"], {
-      PORT: String(config.ports.api),
-    });
-    const worker = spawnService("Worker", process.execPath, ["apps/worker/dist/index.js"]);
-    const merchantWeb = spawnService("Merchant Web", config.toolchain.executables.pnpm, [
-      "--filter",
-      "@bop-rms/merchant-web",
-      "exec",
-      "vite",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(config.ports.merchantWeb),
-      "--strictPort",
+    const api = spawnService(
+      "API",
+      process.execPath,
+      [
+        "--import",
+        "./tooling/environment/register-workspace-typescript.mjs",
+        "apps/api/dist/server.js",
+        ...(config.apiConfiguration === undefined
+          ? []
+          : ["--configuration", config.apiConfiguration]),
+      ],
+      {
+        PORT: String(config.ports.api),
+      },
+    );
+    const worker = spawnService("Worker", process.execPath, [
+      "--import",
+      "./tooling/environment/register-workspace-typescript.mjs",
+      "apps/worker/dist/index.js",
+      ...(config.workerConfiguration === undefined
+        ? []
+        : ["--configuration", config.workerConfiguration]),
     ]);
-    const customerPwa = spawnService("Customer PWA", config.toolchain.executables.pnpm, [
-      "--filter",
-      "@bop-rms/customer-pwa",
-      "exec",
-      "vite",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(config.ports.customerPwa),
-      "--strictPort",
-    ]);
+    const frontendEnvironment =
+      config.apiConfiguration === undefined
+        ? {}
+        : { BOP_LOCAL_API_ORIGIN: `http://127.0.0.1:${config.ports.api}` };
+    const merchantWeb = spawnService(
+      "Merchant Web",
+      config.toolchain.executables.pnpm,
+      [
+        "--filter",
+        "@bop-rms/merchant-web",
+        "exec",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(config.ports.merchantWeb),
+        "--strictPort",
+      ],
+      frontendEnvironment,
+    );
+    const customerPwa = spawnService(
+      "Customer PWA",
+      config.toolchain.executables.pnpm,
+      [
+        "--filter",
+        "@bop-rms/customer-pwa",
+        "exec",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(config.ports.customerPwa),
+        "--strictPort",
+      ],
+      frontendEnvironment,
+    );
     children.push(api, worker, merchantWeb, customerPwa);
     for (const child of children)
       child.once("exit", (code, signal) => {
@@ -204,10 +237,18 @@ async function start(config) {
         if (worker.exitCode !== null) throw new Error("Worker exited during startup");
       }),
     ]);
-    const ready = await waitForHttp(`http://127.0.0.1:${config.ports.api}/ready`, api, 503);
+    const ready = await waitForHttp(
+      `http://127.0.0.1:${config.ports.api}/ready`,
+      api,
+      config.apiConfiguration === undefined ? 503 : 200,
+    );
     const body = await ready.json();
-    if (body.status !== "not_ready" || body.dependencies?.database?.status !== "not_configured")
-      throw new Error("API readiness must remain not_ready with database not_configured");
+    if (
+      body.status !== (config.apiConfiguration === undefined ? "not_ready" : "ready") ||
+      body.dependencies?.database?.status !==
+        (config.apiConfiguration === undefined ? "not_configured" : "ready")
+    )
+      throw new Error("API readiness does not match the configured process mode");
     process.stdout.write(
       `${JSON.stringify({ ports: config.ports, projectName: config.projectName, status: "running" }, null, 2)}\n`,
     );

@@ -85,3 +85,24 @@ describe("WP-2214 Guest Session cryptographic credential provider", () => {
     }
   });
 });
+
+it("separates foreground CSRF from selectors, cookie and other sessions", () => {
+  const provider = createGuestSessionCredentialProvider(selectorKey());
+  const csrf = provider.deriveForegroundCsrf?.(credential);
+  const expected = createHmac("sha256", selectorKey())
+    .update("bop-rms:guest-session:v1:foreground-csrf")
+    .update(Buffer.from([0]))
+    .update(credential)
+    .digest("base64url");
+  expect(csrf).toBe(expected);
+  expect(csrf).not.toBe(credential);
+  expect(csrf).not.toBe(
+    Buffer.from(provider.hashCredential("Session", credential), "hex").toString("base64url"),
+  );
+  expect(csrf).not.toBe(provider.deriveForegroundCsrf?.(parseGuestRawCredential("B".repeat(43))));
+  expect(csrf).not.toBe(
+    createGuestSessionCredentialProvider(new Uint8Array(32).fill(9)).deriveForegroundCsrf?.(
+      credential,
+    ),
+  );
+});

@@ -43,8 +43,8 @@ function found() {
     },
     scope: {
       publicStoreReference: references.store,
-      channelCode: "DINE_IN",
-      orderTypeCode: "TABLE_SERVICE",
+      channelCode: "CUSTOMER_PWA",
+      orderTypeCode: "DINE_IN",
       effectiveAt: at,
     },
     menu: {
@@ -132,7 +132,7 @@ describe("Customer Menu client", () => {
   it("loads the exact QR-established scope with no-store controls", async () => {
     const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       expect(String(url)).toBe(
-        `/api/v1/public/stores/${references.store}/menu?channel=DINE_IN&orderType=TABLE_SERVICE&locale=en-CA&q=iced+latte`,
+        `/api/v1/public/stores/${references.store}/menu?channel=CUSTOMER_PWA&orderType=DINE_IN&locale=en-CA&q=iced+latte`,
       );
       expect(init).toMatchObject({
         method: "GET",
@@ -256,4 +256,31 @@ describe("Customer Menu client", () => {
     });
     expect(fetch).not.toHaveBeenCalled();
   });
+});
+
+it("retains explicit quantities and rejects a dangling activation reference", async () => {
+  const value = found();
+  const rule = value.menu.sections[0]?.sellables[0]?.optionRules[0];
+  const option = rule?.options[0];
+  if (!rule || !option) throw new Error("fixture");
+  Object.assign(rule, {
+    semanticsVersion: 2,
+    activationOptionReferences: [],
+    minimumSelections: 2,
+    maximumSelections: 3,
+    defaultOptionReferences: [option.optionReference],
+  });
+  Object.assign(option, { maximumQuantity: 3, selectedByDefault: true, defaultQuantity: 2 });
+  const client = createCustomerMenuClient(context, {
+    fetch: async () => response(200, value),
+    online: () => true,
+  });
+  const result = await client.load();
+  expect(result.kind).toBe("Found");
+  if (result.kind !== "Found") throw new Error("fixture");
+  expect(result.menu.sections[0]?.sellables[0]?.optionRules[0]?.options[0]?.defaultQuantity).toBe(
+    2,
+  );
+  Object.assign(rule, { activationOptionReferences: [references.allergen] });
+  expect((await client.load()).kind).not.toBe("Found");
 });

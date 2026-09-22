@@ -1432,7 +1432,11 @@ async function recordActionPhase(
   }
   const updated = verifyAction(raw, input.verification, ports);
   if (updated.phase !== input.nextPhase) return fail("PAYMENT_COMPENSATION_OPERATION_CONFLICT");
-  if (fingerprint({ ...updated, phase: input.action.phase }) !== fingerprint(input.action))
+  // Claim delivery metadata can differ on replay; every immutable action fact must match.
+  if (
+    fingerprint({ ...updated, phase: input.action.phase, claimDisposition: "Claimed" }) !==
+    fingerprint({ ...input.action, claimDisposition: "Claimed" })
+  )
     return fail("PAYMENT_COMPENSATION_OPERATION_CONFLICT");
   return updated;
 }

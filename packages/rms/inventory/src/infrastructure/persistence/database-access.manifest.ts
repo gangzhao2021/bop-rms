@@ -1,0 +1,91 @@
+const databaseAccessManifestInput = {
+  version: 1,
+  module: { moduleName: "inventory", packageName: "@rms/inventory", layer: "RMS" },
+  tables: [
+    {
+      table: "submission_final_validation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "stock_reservation_set",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "stock_lot_hold_version",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "stock_reservation_version",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "stock_movement",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+
+    {
+      table: "stock_balance",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+
+    {
+      table: "stock_account",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+
+    {
+      table: "inventory_item",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "inventory_item_version",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "inventory_item_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+  ],
+  accesses: [],
+} as const;
+export default databaseAccessManifestInput;

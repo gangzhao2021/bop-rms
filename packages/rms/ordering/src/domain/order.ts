@@ -8,6 +8,7 @@ import {
 } from "./cart.js";
 import {
   parseCheckoutValidationEvidence,
+  parseConfiguredCheckoutValidationEvidence,
   type CheckoutValidationEvidence,
 } from "./checkout-validation.js";
 
@@ -174,7 +175,7 @@ function inertArray(value: unknown, maximum: number): readonly unknown[] {
   return Object.freeze(values);
 }
 
-function parseBatch(value: unknown): OrderBatch {
+export function parseOrderBatch(value: unknown): OrderBatch {
   const raw = closed(value, [
     "orderBatchReference",
     "orderReference",
@@ -250,7 +251,7 @@ export function parseOrderAggregate(value: unknown): OrderAggregate {
       raw.diningSessionReference === null
         ? null
         : parseOrderingReference(raw.diningSessionReference);
-    const batch = parseBatch(inertArray(raw.batches, 1)[0]);
+    const batch = parseOrderBatch(inertArray(raw.batches, 1)[0]);
     if (
       (raw.orderType === "DineIn") !== (diningSessionReference !== null) ||
       batch.orderReference !== orderReference ||
@@ -286,15 +287,23 @@ export function parseOrderAggregate(value: unknown): OrderAggregate {
   }
 }
 
-function validationEvidence(value: unknown): CheckoutValidationEvidence {
+function validationEvidence(
+  value: unknown,
+  quoteVersion: 1 | 2,
+): CheckoutValidationEvidence<1 | 2> {
   try {
-    return parseCheckoutValidationEvidence(value);
+    return quoteVersion === 2
+      ? parseConfiguredCheckoutValidationEvidence(value)
+      : parseCheckoutValidationEvidence(value);
   } catch {
     return invalid();
   }
 }
 
-export function createOrderAggregate(input: CreateOrderAggregateInput): OrderAggregate {
+function createVersionedOrderAggregate(
+  input: CreateOrderAggregateInput,
+  quoteVersion: 1 | 2,
+): OrderAggregate {
   const raw = closed(input, [
     "orderReference",
     "orderBatchReference",
@@ -308,7 +317,7 @@ export function createOrderAggregate(input: CreateOrderAggregateInput): OrderAgg
   ]);
   if (!Array.isArray(raw.items) || raw.items.length < 1 || raw.items.length > 100) return invalid();
   try {
-    const evidence = validationEvidence(raw.checkoutValidationEvidence);
+    const evidence = validationEvidence(raw.checkoutValidationEvidence, quoteVersion);
     const submittedAt = parseOrderingInstant(raw.submittedAt);
     if (Date.parse(submittedAt) >= Date.parse(evidence.validUntil))
       throw new OrderError("ORDER_VALIDATION_EXPIRED");
@@ -368,4 +377,11 @@ export function createOrderAggregate(input: CreateOrderAggregateInput): OrderAgg
     if (error instanceof OrderError) throw error;
     return invalid();
   }
+}
+
+export function createOrderAggregate(input: CreateOrderAggregateInput): OrderAggregate {
+  return createVersionedOrderAggregate(input, 1);
+}
+export function createConfiguredOrderAggregate(input: CreateOrderAggregateInput): OrderAggregate {
+  return createVersionedOrderAggregate(input, 2);
 }

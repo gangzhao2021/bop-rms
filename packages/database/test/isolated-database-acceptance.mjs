@@ -7,6 +7,7 @@ import process from "node:process";
 import { clearTimeout, setTimeout } from "node:timers";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { readMigrationCatalog } from "../src/catalog.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const { Client } = pg;
@@ -33,14 +34,29 @@ async function proveDatabase(context) {
   const client = new Client(context.clientConfig);
   await client.connect();
   try {
-    const evidence = await client.query(`SELECT
-      current_database() AS database_name,
-      count(*)::integer AS migration_count
-      FROM platform_core.migration_history
-      GROUP BY current_database()`);
-    assert.deepEqual(evidence.rows, [
-      { database_name: context.databaseName, migration_count: 104 },
-    ]);
+    const catalog = await readMigrationCatalog(root);
+    assert.deepEqual(catalog.diagnostics, []);
+    assert(catalog.migrations.length > 0);
+    assert.equal(
+      (await client.query("SELECT current_database() AS name")).rows[0].name,
+      context.databaseName,
+    );
+    const evidence = await client.query(`SELECT migration_id, namespace, sequence,
+      relative_path, owner_id, schema_name, checksum_sha256, runner_contract_version
+      FROM platform_core.migration_history ORDER BY namespace, sequence`);
+    assert.deepEqual(
+      evidence.rows,
+      catalog.migrations.map((migration) => ({
+        migration_id: migration.id,
+        namespace: migration.namespace,
+        sequence: migration.sequence,
+        relative_path: migration.relativePath,
+        owner_id: migration.metadata.owner,
+        schema_name: migration.metadata.schema,
+        checksum_sha256: migration.checksumSha256,
+        runner_contract_version: 1,
+      })),
+    );
   } finally {
     await client.end();
   }

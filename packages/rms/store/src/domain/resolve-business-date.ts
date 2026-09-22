@@ -305,3 +305,71 @@ export function resolveStoreBusinessDate(
     businessDayStartLocalTime: configuration.businessDayStartLocalTime,
   });
 }
+
+export interface ClosedStoreBusinessDateWindow {
+  readonly brandReference: BrandReference;
+  readonly storeReference: StoreReference;
+  readonly businessDate: StoreBusinessDate;
+  readonly startsAt: CanonicalInstant;
+  readonly endsAt: CanonicalInstant;
+  readonly startDisambiguation: StoreBusinessDateResolution["boundaryDisambiguation"];
+  readonly endDisambiguation: StoreBusinessDateResolution["boundaryDisambiguation"];
+  readonly configurationReference: BusinessDateConfigurationReference;
+  readonly configurationVersion: number;
+  readonly contentDigest: BusinessDateContentDigest;
+  readonly timeZone: string;
+  readonly businessDayStartLocalTime: BusinessDayStartLocalTime;
+}
+
+/** Resolve both local boundaries, including DST, under one effective configuration.
+ * A configuration transition inside the requested day requires separate evidence. */
+export function resolveClosedStoreBusinessDateWindow(input: {
+  readonly businessDate: unknown;
+  readonly observedAt: unknown;
+  readonly configuration: unknown;
+}): ClosedStoreBusinessDateWindow {
+  const configuration = parseStoreBusinessDateConfiguration(input.configuration);
+  const observedAt = parseBusinessDateInstant(input.observedAt);
+  if (typeof input.businessDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate))
+    return fail();
+  const date = new Date(`${input.businessDate}T00:00:00.000Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== input.businessDate)
+    return fail();
+  const next = new Date(date.getTime() + 86_400_000);
+  const localDate = (value: Date): LocalFields => ({
+    year: value.getUTCFullYear(),
+    month: value.getUTCMonth() + 1,
+    day: value.getUTCDate(),
+    hour: 0,
+    minute: 0,
+    second: 0,
+  });
+  const format = formatter(configuration.timeZone);
+  const start = boundaryInstant(format, localDate(date), configuration.businessDayStartLocalTime);
+  const end = boundaryInstant(format, localDate(next), configuration.businessDayStartLocalTime);
+  if (
+    start.epochMilliseconds >= end.epochMilliseconds ||
+    end.epochMilliseconds > Date.parse(observedAt)
+  )
+    return fail();
+  if (
+    start.epochMilliseconds < Date.parse(configuration.effectiveFrom) ||
+    (configuration.effectiveUntil !== null &&
+      end.epochMilliseconds > Date.parse(configuration.effectiveUntil))
+  )
+    throw new BusinessDateError("STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE");
+  return Object.freeze({
+    brandReference: configuration.brandReference,
+    storeReference: configuration.storeReference,
+    businessDate: input.businessDate as StoreBusinessDate,
+    startsAt: new Date(start.epochMilliseconds).toISOString() as CanonicalInstant,
+    endsAt: new Date(end.epochMilliseconds).toISOString() as CanonicalInstant,
+    startDisambiguation: start.kind,
+    endDisambiguation: end.kind,
+    configurationReference: configuration.configurationReference,
+    configurationVersion: configuration.configurationVersion,
+    contentDigest: configuration.contentDigest,
+    timeZone: configuration.timeZone,
+    businessDayStartLocalTime: configuration.businessDayStartLocalTime,
+  });
+}

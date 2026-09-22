@@ -121,6 +121,8 @@ function transaction() {
         completed.add(`${values[0]}:${values[1]}`);
         return { rowCount: 1, rows: [] as Row[] };
       }
+      if (/^(SAVEPOINT |RELEASE SAVEPOINT |ROLLBACK TO SAVEPOINT )/.test(text))
+        return { rowCount: 0, rows: [] as Row[] };
       throw new Error("unexpected transaction query");
     },
   };
@@ -136,7 +138,9 @@ function fixture(
   let projection = options.current ?? null;
   let replacements = 0;
   const ports: OrderCreatedEventConsumerPorts = {
+    authorization: { authorize: async () => true },
     source: {
+      freshness: async () => "Fresh",
       async loadExact() {
         return options.source === undefined ? source() : options.source;
       },

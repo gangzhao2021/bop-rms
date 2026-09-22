@@ -9,7 +9,12 @@ import {
 import { parseCanonicalInstant } from "@bop/tenant";
 import {
   CartError,
+  createConfiguredCustomerQuoteService,
+  parseConfiguredCartQuoteAttachment,
   createPickupCartQuoteService,
+  createDiningCartQuoteService,
+  createDiningCartQuoteExpiryService,
+  type DiningCartQuoteOptions,
   createPickupCartQuoteExpiryService,
   createPostgresCartQuoteExpiryStore,
   parseCartQuoteExpiryRecord,
@@ -26,7 +31,11 @@ import {
 } from "@rms/ordering";
 import {
   createPostgresPriceQuoteRequestStore,
+  createPostgresCurrentQuoteService,
   decodePriceQuoteSnapshot,
+  decodeConfiguredPriceQuoteSnapshot,
+  encodeConfiguredPriceQuoteSnapshot,
+  type ConfiguredPriceQuoteSnapshot,
   encodePriceQuoteSnapshot,
   parsePriceQuoteRequestRecord,
   PriceQuoteRequestError,
@@ -69,10 +78,14 @@ function receipt(
   value: unknown,
   command: ReturnType<typeof copyCommand>,
   scope: { brandReference: string; storeReference: string },
+  version: 1 | 2 = 1,
 ) {
   const raw = closed(value, ["status", "attachment"]);
   if (raw.status !== "Attached" && raw.status !== "AlreadyAttached") throw new Error();
-  const result = parseCartQuoteAttachment(raw.attachment);
+  const result =
+    version === 2
+      ? parseConfiguredCartQuoteAttachment(raw.attachment)
+      : parseCartQuoteAttachment(raw.attachment);
   if (
     result.cartReference !== command.cartReference ||
     result.cartVersion !== command.expectedCartVersion ||
@@ -83,7 +96,10 @@ function receipt(
     throw new Error();
   return result;
 }
-function matchesQuote(quote: PriceQuoteSnapshot, attachment: CartQuoteAttachment) {
+function matchesQuote(
+  quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot,
+  attachment: CartQuoteAttachment<1 | 2>,
+) {
   if (
     quote.quoteReference !== String(attachment.quoteReference) ||
     quote.quoteVersion !== attachment.quoteVersion ||
@@ -151,9 +167,13 @@ function copyPricingInput(input: PricingCartInput): PricingCartInput {
 
 export function createCustomerQuotePort(options: {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
-  readonly attachment: AttachmentEntry;
+  readonly quoteVersion?: 1 | 2;
+  readonly attachment: AttachmentEntry | ReturnType<typeof createConfiguredCustomerQuoteService>;
   readonly expiry?: Pick<ReturnType<typeof createPickupCartQuoteExpiryService>, "reconcile">;
-  readonly requests: Pick<PriceQuoteRequestStore, "resolve">;
+  readonly requests: Pick<
+    PriceQuoteRequestStore<PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot>,
+    "resolve"
+  >;
   readonly now: () => string;
 }): CustomerQuotePort {
   const scope = Object.freeze({
@@ -208,7 +228,7 @@ export function createCustomerQuotePort(options: {
       }
       // Any failure after an attempted successful command preserves outcome uncertainty.
       try {
-        const first = receipt(saved, command, scope);
+        const first = receipt(saved, command, scope, options.quoteVersion);
         const observedAt = parseCanonicalInstant(options.now());
         if (
           String(observedAt) < first.attachedAt ||
@@ -224,9 +244,12 @@ export function createCustomerQuotePort(options: {
         });
         const raw = closed(result, ["record", "quote"]);
         const record = parsePriceQuoteRequestRecord(raw.record);
-        const quote = decodePriceQuoteSnapshot(
-          encodePriceQuoteSnapshot(raw.quote as PriceQuoteSnapshot),
-        );
+        const quote =
+          options.quoteVersion === 2
+            ? decodeConfiguredPriceQuoteSnapshot(
+                encodeConfiguredPriceQuoteSnapshot(raw.quote as ConfiguredPriceQuoteSnapshot),
+              )
+            : decodePriceQuoteSnapshot(encodePriceQuoteSnapshot(raw.quote as PriceQuoteSnapshot));
         if (
           String(record.operationReference) !== first.operationReference ||
           String(record.guestSessionReference) !== first.guestSessionReference ||
@@ -241,7 +264,12 @@ export function createCustomerQuotePort(options: {
           !matchesQuote(quote, first)
         )
           return unavailable;
-        const confirmed = receipt(await options.attachment.attach(command), command, scope);
+        const confirmed = receipt(
+          await options.attachment.attach(command),
+          command,
+          scope,
+          options.quoteVersion,
+        );
         const finalAt = parseCanonicalInstant(options.now());
         if (
           finalAt < observedAt ||
@@ -287,6 +315,74 @@ export interface CustomerQuoteCompositionOptions {
   readonly now: () => string;
 }
 
+function createRequestPricing(
+  options: Pick<CustomerQuoteCompositionOptions, "candidate">,
+  requests: PriceQuoteRequestStore,
+): PickupCartQuoteOptions["pricing"] {
+  return {
+    async quoteCart(source, sourceIdentity) {
+      try {
+        const input = copyPricingInput(source);
+        const identity = Object.freeze({
+          operationReference: parseOrderingReference(sourceIdentity.operationReference),
+          guestSessionReference: parseOrderingReference(sourceIdentity.guestSessionReference),
+        });
+        const lookup = {
+          ...identity,
+          cartReference: input.cartReference,
+          cartVersion: input.cartVersion,
+          observedAt: input.requestedAt,
+        };
+        const existing = await requests.resolve(lookup);
+        if (existing !== null) return existing.quote;
+        const candidate = closed(await options.candidate(input, identity), ["quote", "audit"]);
+        const quote = decodePriceQuoteSnapshot(
+          encodePriceQuoteSnapshot(candidate.quote as PriceQuoteSnapshot),
+        );
+        if (
+          String(quote.brandReference) !== input.brandReference ||
+          String(quote.storeReference) !== input.storeReference ||
+          String(quote.cartReference) !== input.cartReference ||
+          quote.cartVersion !== input.cartVersion ||
+          quote.lines.length !== input.lines.length ||
+          quote.lines.some(
+            (line) =>
+              line.resolvedPrice.orderType !== null &&
+              line.resolvedPrice.orderType !== input.orderType,
+          ) ||
+          input.lines.some(
+            (line) =>
+              line.optionSelections.length !== 0 ||
+              !quote.lines.some(
+                (q) =>
+                  String(q.lineReference) === line.lineReference &&
+                  String(q.sellableReference) === line.sellableReference &&
+                  q.quantity === line.quantity &&
+                  String(q.productVersionReference) ===
+                    line.catalogSelectionEvidence.productVersionReference &&
+                  String(q.menuVersionReference) ===
+                    line.catalogSelectionEvidence.menuVersionReference,
+              ),
+          )
+        )
+          throw new CartError("CART_QUOTE_INVALID");
+        const result = await requests.append({
+          ...identity,
+          observedAt: input.requestedAt,
+          quote,
+          audit: candidate.audit as Parameters<PriceQuoteRequestStore["append"]>[0]["audit"],
+        });
+        return result.quote;
+      } catch (error) {
+        if (error instanceof CartError) throw error;
+        if (error instanceof PriceQuoteRequestError && error.code === "QUOTE_REQUEST_CONFLICT")
+          throw new CartError("CART_IDEMPOTENCY_CONFLICT");
+        throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+      }
+    },
+  };
+}
+
 /** Public owner composition only. Callers own all bounded transaction runners and authoritative facts. */
 export function createCustomerQuoteComposition(
   options: CustomerQuoteCompositionOptions,
@@ -324,68 +420,7 @@ export function createCustomerQuoteComposition(
     references: options.references,
     audit: options.audit,
     now: options.now,
-    pricing: {
-      async quoteCart(source, sourceIdentity) {
-        try {
-          const input = copyPricingInput(source);
-          const identity = Object.freeze({
-            operationReference: parseOrderingReference(sourceIdentity.operationReference),
-            guestSessionReference: parseOrderingReference(sourceIdentity.guestSessionReference),
-          });
-          const lookup = {
-            ...identity,
-            cartReference: input.cartReference,
-            cartVersion: input.cartVersion,
-            observedAt: input.requestedAt,
-          };
-          const existing = await requests.resolve(lookup);
-          if (existing !== null) return existing.quote;
-          const candidate = closed(await options.candidate(input, identity), ["quote", "audit"]);
-          const quote = decodePriceQuoteSnapshot(
-            encodePriceQuoteSnapshot(candidate.quote as PriceQuoteSnapshot),
-          );
-          if (
-            String(quote.brandReference) !== input.brandReference ||
-            String(quote.storeReference) !== input.storeReference ||
-            String(quote.cartReference) !== input.cartReference ||
-            quote.cartVersion !== input.cartVersion ||
-            quote.lines.length !== input.lines.length ||
-            quote.lines.some(
-              (line) =>
-                line.resolvedPrice.orderType !== null &&
-                line.resolvedPrice.orderType !== input.orderType,
-            ) ||
-            input.lines.some(
-              (line) =>
-                line.optionSelections.length !== 0 ||
-                !quote.lines.some(
-                  (q) =>
-                    String(q.lineReference) === line.lineReference &&
-                    String(q.sellableReference) === line.sellableReference &&
-                    q.quantity === line.quantity &&
-                    String(q.productVersionReference) ===
-                      line.catalogSelectionEvidence.productVersionReference &&
-                    String(q.menuVersionReference) ===
-                      line.catalogSelectionEvidence.menuVersionReference,
-                ),
-            )
-          )
-            throw new CartError("CART_QUOTE_INVALID");
-          const result = await requests.append({
-            ...identity,
-            observedAt: input.requestedAt,
-            quote,
-            audit: candidate.audit as Parameters<PriceQuoteRequestStore["append"]>[0]["audit"],
-          });
-          return result.quote;
-        } catch (error) {
-          if (error instanceof CartError) throw error;
-          if (error instanceof PriceQuoteRequestError && error.code === "QUOTE_REQUEST_CONFLICT")
-            throw new CartError("CART_IDEMPOTENCY_CONFLICT");
-          throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
-        }
-      },
-    },
+    pricing: createRequestPricing(options, requests),
   });
   const expiry = createPickupCartQuoteExpiryService({
     scope,
@@ -397,4 +432,96 @@ export function createCustomerQuoteComposition(
     now: options.now,
   });
   return createCustomerQuotePort({ scope, attachment, requests, expiry, now: options.now });
+}
+
+/** Existing authorization/recovery with explicit request mapping and persisted Pricing policies. */
+export function createCustomerQuoteWithPoliciesComposition(
+  options: Omit<CustomerQuoteCompositionOptions, "candidate"> & {
+    readonly policyTransactions: Parameters<typeof createPostgresCurrentQuoteService>[0];
+    readonly policies: Omit<
+      Parameters<typeof createPostgresCurrentQuoteService>[1],
+      "scope" | "clock"
+    >;
+    readonly quoteRequest: (
+      input: PricingCartInput,
+      identity: Parameters<CustomerQuoteCompositionOptions["candidate"]>[1],
+    ) => Promise<Parameters<ReturnType<typeof createPostgresCurrentQuoteService>["create"]>[0]>;
+    readonly quoteAudit: (
+      quote: PriceQuoteSnapshot,
+      input: PricingCartInput,
+      identity: Parameters<CustomerQuoteCompositionOptions["candidate"]>[1],
+    ) => Promise<Parameters<PriceQuoteRequestStore["append"]>[0]["audit"]>;
+  },
+): CustomerQuotePort {
+  const pricing = createPostgresCurrentQuoteService(options.policyTransactions, {
+    ...options.policies,
+    scope: options.scope,
+    clock: { now: options.now },
+  });
+  return createCustomerQuoteComposition({
+    ...options,
+    candidate: async (input, identity) => {
+      const quote = await pricing.create(await options.quoteRequest(input, identity));
+      return { quote, audit: await options.quoteAudit(quote, input, identity) };
+    },
+  });
+}
+
+export interface CustomerDiningQuoteCompositionOptions extends Omit<
+  CustomerQuoteCompositionOptions,
+  "session" | "sessionTransactions"
+> {
+  readonly sessions: DiningCartQuoteOptions["sessions"];
+  readonly participation: DiningCartQuoteOptions["participation"];
+}
+
+/** Callers supply current Dining-bound Identity and public Cart participation, never Pickup binding. */
+export function createCustomerDiningQuoteComposition(
+  options: CustomerDiningQuoteCompositionOptions,
+): CustomerQuotePort {
+  const scope = Object.freeze({
+    brandReference: parseOrderingReference(options.scope.brandReference),
+    storeReference: parseOrderingReference(options.scope.storeReference),
+  });
+  const carts = createPostgresCartQueryStore(options.cartTransactions, scope);
+  const attachments = createPostgresCartQuoteStore(
+    options.attachmentTransactions,
+    scope,
+    options.references,
+  );
+  const requests = createPostgresPriceQuoteRequestStore(
+    options.pricingTransactions,
+    scope,
+    options.pricingReferences,
+  );
+  const attachment = createDiningCartQuoteService({
+    scope,
+    sessions: options.sessions,
+    participation: options.participation,
+    repository: {
+      loadCart: carts.load,
+      resolveOperation: attachments.resolveOperation,
+      attach: attachments.attach,
+    },
+    references: options.references,
+    audit: options.audit,
+    now: options.now,
+    pricing: createRequestPricing(options, requests),
+  });
+  return createCustomerQuotePort({
+    scope,
+    attachment,
+    requests,
+    now: options.now,
+    expiry: createDiningCartQuoteExpiryService({
+      scope,
+      sessions: options.sessions,
+      participation: options.participation,
+      carts: { loadCart: carts.load },
+      requests,
+      expiry: createPostgresCartQuoteExpiryStore(options.attachmentTransactions, scope),
+      audit: options.expiryAudit,
+      now: options.now,
+    }),
+  });
 }

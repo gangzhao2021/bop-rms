@@ -45,6 +45,16 @@ describe("WP-2207 runtime dependency wiring", () => {
   const guest = "g".repeat(43);
   const csrf = "c".repeat(43);
 
+  it("rejects ambiguous Merchant runtime inputs before constructing either dependency", () => {
+    expect(() =>
+      createApiServerRuntime({
+        port: 0,
+        merchantBff: {} as never,
+        merchantRuntime: {} as never,
+      }),
+    ).toThrow("MERCHANT_RUNTIME_CONFIGURATION_CONFLICT");
+  });
+
   it("dispatches injected dependencies, preserves guards and isolates unconfigured runtimes", async () => {
     const establish = vi.fn(async () => ({ status: "EntryUnavailable" as const }));
     const quoteCart = vi.fn(async () => ({ status: "VersionConflict" as const }));
@@ -70,6 +80,7 @@ describe("WP-2207 runtime dependency wiring", () => {
       port: 0,
       logger: output.logger,
       customerEntry: new CustomerEntryHandler({
+        requestAdmission: { consume: async () => ({ status: "Allowed" }) }, // Explicit synthetic policy.
         allowedOrigin: syntheticOrigin,
         now,
         port: { establish },

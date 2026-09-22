@@ -10,8 +10,16 @@ export interface KitchenBoardItem {
   readonly requiredQuantity: number;
   readonly completedQuantity: number;
   readonly createdAt: string;
-  readonly allergenCue: "None" | "ReviewRequired" | "Acknowledged";
-  readonly exceptionStatus: "None" | "Reported";
+  readonly allergenCue: "None" | "ReviewRequired" | "Acknowledged" | "Unavailable";
+  readonly exceptionStatus: "None" | "Reported" | "Unavailable";
+  readonly execution?: {
+    readonly orderItemReference: string;
+    readonly stationReference: string;
+    readonly ticketVersion: string;
+    readonly workItemVersion: string;
+    readonly acceptedAt: string | null;
+    readonly readyAt: string | null;
+  };
 }
 
 export interface KitchenBoardView {
@@ -21,7 +29,7 @@ export interface KitchenBoardView {
   readonly storeLabel: string;
   readonly projectedAt: string;
   readonly freshnessStatus: "Fresh" | "Stale";
-  readonly operatorStatus: "Named" | "Locked" | "HandoverRequired";
+  readonly operatorStatus: "Named" | "Locked" | "HandoverRequired" | "Unavailable";
   readonly items: readonly KitchenBoardItem[];
 }
 
@@ -80,6 +88,8 @@ function instant(value: unknown): string {
 }
 
 function item(value: unknown): KitchenBoardItem {
+  const hasExecution =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "execution");
   const input = closed(value, [
     "workItemReference",
     "ticketReference",
@@ -92,6 +102,7 @@ function item(value: unknown): KitchenBoardItem {
     "createdAt",
     "allergenCue",
     "exceptionStatus",
+    ...(hasExecution ? ["execution"] : []),
   ]);
   if (
     typeof input.stationLabel !== "string" ||
@@ -99,8 +110,10 @@ function item(value: unknown): KitchenBoardItem {
     typeof input.displayName !== "string" ||
     !SAFE_TEXT.test(input.displayName) ||
     !["Queued", "Held", "In Progress", "Completed", "Cancelled"].includes(String(input.status)) ||
-    !["None", "ReviewRequired", "Acknowledged"].includes(String(input.allergenCue)) ||
-    !["None", "Reported"].includes(String(input.exceptionStatus)) ||
+    !["None", "ReviewRequired", "Acknowledged", "Unavailable"].includes(
+      String(input.allergenCue),
+    ) ||
+    !["None", "Reported", "Unavailable"].includes(String(input.exceptionStatus)) ||
     !Number.isSafeInteger(input.requiredQuantity) ||
     Number(input.requiredQuantity) < 1 ||
     !Number.isSafeInteger(input.completedQuantity) ||
@@ -120,6 +133,35 @@ function item(value: unknown): KitchenBoardItem {
     createdAt: instant(input.createdAt),
     allergenCue: input.allergenCue as KitchenBoardItem["allergenCue"],
     exceptionStatus: input.exceptionStatus as KitchenBoardItem["exceptionStatus"],
+    ...(hasExecution ? { execution: execution(input.execution) } : {}),
+  });
+}
+
+function execution(value: unknown): NonNullable<KitchenBoardItem["execution"]> {
+  const raw = closed(value, [
+    "orderItemReference",
+    "stationReference",
+    "ticketVersion",
+    "workItemVersion",
+    "acceptedAt",
+    "readyAt",
+  ]);
+  const version = (value: unknown) => {
+    if (
+      typeof value !== "string" ||
+      !/^[1-9][0-9]{0,18}$/.test(value) ||
+      BigInt(value) > 9223372036854775807n
+    )
+      throw new Error("KITCHEN_BOARD_INVALID");
+    return value;
+  };
+  return Object.freeze({
+    orderItemReference: parseKitchenRouteReference(raw.orderItemReference),
+    stationReference: parseKitchenRouteReference(raw.stationReference),
+    ticketVersion: version(raw.ticketVersion),
+    workItemVersion: version(raw.workItemVersion),
+    acceptedAt: raw.acceptedAt === null ? null : instant(raw.acceptedAt),
+    readyAt: raw.readyAt === null ? null : instant(raw.readyAt),
   });
 }
 
@@ -141,7 +183,9 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     typeof input.storeLabel !== "string" ||
     !SAFE_TEXT.test(input.storeLabel) ||
     !["Fresh", "Stale"].includes(String(input.freshnessStatus)) ||
-    !["Named", "Locked", "HandoverRequired"].includes(String(input.operatorStatus)) ||
+    !["Named", "Locked", "HandoverRequired", "Unavailable"].includes(
+      String(input.operatorStatus),
+    ) ||
     !Array.isArray(input.items) ||
     input.items.length > 200
   )

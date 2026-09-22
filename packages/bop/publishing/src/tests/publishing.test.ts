@@ -1,4 +1,3 @@
-import type { AppendAuditRecordInput } from "@bop/audit";
 import {
   evaluatePermission,
   parseEvidenceReference,
@@ -26,6 +25,7 @@ import {
   PublishingServiceError,
   schedulePublishing,
   type ExecutePublishingMutationInput,
+  type CommitPublishingMutationInput,
   type PublishingApprovalEvidence,
   type PublishingAuthorizationRequest,
   type PublishingLifecycleRecord,
@@ -231,15 +231,7 @@ function ports(options?: {
   decision?: (request: PublishingAuthorizationRequest) => PermissionDecision;
   failCommit?: boolean;
 }) {
-  const commits: {
-    expectedVersion: number;
-    idempotencyKey: string;
-    next: PublishingLifecycleRecord;
-    release: PublishingReleaseRecord | null;
-    audit: AppendAuditRecordInput;
-    supersededReleaseId: string | null;
-    rollbackTargetReleaseId: string | null;
-  }[] = [];
+  const commits: CommitPublishingMutationInput[] = [];
   const value: PublishingPorts = {
     authorization: {
       authorize: vi.fn(async (request) => (options?.decision ?? allowDecision)(request)),
@@ -248,6 +240,7 @@ function ports(options?: {
       commit: vi.fn(async (input) => {
         if (options?.failCommit) throw new Error("synthetic atomic failure");
         commits.push(input);
+        return { auditReference: parsePublishingReference(input.audit.auditId) };
       }),
     },
   };
@@ -326,6 +319,56 @@ describe("Publishing contracts and transition policy", () => {
 });
 
 describe("Publishing application service", () => {
+  it("returns the original persisted Audit receipt on replay", async () => {
+    const harness = ports();
+    const original = parsePublishingReference(ids.otherActor);
+    harness.value.unitOfWork.commit = vi.fn(async () => ({ auditReference: original }));
+    const result = await executePublishingMutation(
+      mutation("CreateDraft", null, lifecycle("Draft", 1)),
+      harness.value,
+    );
+    expect(result.auditReference).toBe(original);
+  });
+
+  it("retains detached validated review and approval facts for the atomic store", async () => {
+    const draft = lifecycle("Draft", 1),
+      review = lifecycle("InReview", 2),
+      approved = lifecycle("Approved", 3),
+      published = lifecycle("Published", 4);
+    const harness = ports();
+    const rawValidation = { ...validation(), checkCodes: [...validation().checkCodes] };
+    const rawApproval = { ...approval() };
+    await executePublishingMutation(
+      mutation("SubmitReview", draft, review, { validationEvidence: rawValidation }),
+      harness.value,
+    );
+    await executePublishingMutation(
+      mutation("Approve", review, approved, { approvalEvidence: rawApproval }),
+      harness.value,
+    );
+    await executePublishingMutation(
+      mutation("Publish", approved, published, {
+        validationEvidence: rawValidation,
+        approvalEvidence: rawApproval,
+        release: release(published, 1, ids.release1),
+      }),
+      harness.value,
+    );
+    const [submitted, accepted, released] = harness.commits;
+    expect(submitted?.operation).toBe("SubmitReview");
+    expect(submitted?.validationEvidence).toEqual(rawValidation);
+    expect(submitted?.approvalEvidence).toBeNull();
+    expect(accepted?.approvalEvidence).toEqual(rawApproval);
+    expect(accepted?.validationEvidence).toBeNull();
+    expect(released?.validationEvidence).toEqual(rawValidation);
+    expect(released?.approvalEvidence).toEqual(rawApproval);
+    rawValidation.checkCodes.length = 0;
+    rawApproval.approvedActorReference = parsePublishingReference(ids.otherActor);
+    expect(released?.validationEvidence?.checkCodes).toHaveLength(2);
+    expect(released?.approvalEvidence?.approvedActorReference).toBe(ids.actor);
+    expect(Object.isFrozen(released?.validationEvidence?.checkCodes)).toBe(true);
+  });
+
   it("creates a Draft with exact Permission and one atomic Audit commit", async () => {
     const next = lifecycle("Draft", 1);
     const harness = ports();

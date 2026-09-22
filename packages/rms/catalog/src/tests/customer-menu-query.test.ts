@@ -156,7 +156,7 @@ function fixture(candidates: readonly PublishedMenuProjection[] = [projection()]
 
 describe("WP-1026 Customer Menu Query", () => {
   it("returns only the exact current Store, channel and order-type projection", async () => {
-    const { service } = fixture();
+    const { service, calls } = fixture();
     await expect(service.getPublishedMenu(input())).resolves.toMatchObject({
       status: "Found",
       schemaVersion: 1,
@@ -210,6 +210,13 @@ describe("WP-1026 Customer Menu Query", () => {
         ],
       },
     });
+    expect(calls[1]).toEqual({
+      brandReference: id(3),
+      storeReference: id(7),
+      channelCode: input().channelCode,
+      orderTypeCode: input().orderTypeCode,
+      requestedAt: input().requestedAt,
+    });
   });
 
   it("applies bounded localized search without exposing hidden or unavailable Sellables", async () => {
@@ -260,3 +267,52 @@ async function serviceCall(
 ) {
   return service.getPublishedMenu(value);
 }
+
+it("filters versioned option rules by channel and exposes quantity defaults", async () => {
+  const value = projection();
+  const item = value.snapshot.sections[0]?.sellables[0];
+  if (!item) throw new Error("fixture");
+  const option = {
+    optionReference: id(81),
+    localizedNames: { "en-CA": "Extra" },
+    maximumQuantity: 3,
+    conflictOptionReferences: [],
+    selectedByDefault: true,
+    defaultQuantity: 2,
+  };
+  Object.assign(item, {
+    optionRules: [
+      {
+        semanticsVersion: 2,
+        activationOptionReferences: [],
+        channelCodes: ["DINE_IN"],
+        bindingReference: id(80),
+        optionSetVersionReference: id(82),
+        minimumSelections: 2,
+        maximumSelections: 3,
+        enabledOptionReferences: [id(81)],
+        defaultOptionReferences: [id(81)],
+        options: [option],
+      },
+      {
+        semanticsVersion: 2,
+        activationOptionReferences: [],
+        channelCodes: ["OTHER_CHANNEL"],
+        bindingReference: id(83),
+        optionSetVersionReference: id(84),
+        minimumSelections: 0,
+        maximumSelections: 0,
+        enabledOptionReferences: [],
+        defaultOptionReferences: [],
+        options: [],
+      },
+    ],
+  });
+  Object.assign(value.snapshot, { channelCodes: ["DINE_IN", "OTHER_CHANNEL"] });
+  const { service } = fixture([value]);
+  const result = await service.getPublishedMenu(input());
+  if (result.status !== "Found") throw new Error("fixture query");
+  const rules = result.menu.sections[0]?.sellables[0]?.optionRules;
+  expect(rules).toHaveLength(1);
+  expect(rules?.[0]?.options[0]?.defaultQuantity).toBe(2);
+});

@@ -184,6 +184,27 @@ and compensation path; it cannot recreate capacity or release Kitchen from Payme
 
 ## H-ORDER-01: acceptance, cancellation and final closure
 
+### Existing source rules and remaining implementation decisions
+
+WP-2402 scoped comparison of the local Handoff Sections 24.2–24.9 confirms that the
+following rules already have source text. This comparison does not accept the local file
+as a replacement for the composite baseline. Apply accepted later Sections and existing
+scoped decisions first.
+
+| Source                                  | Existing rule                                                                                                                                                                                                                                                        | Required implementation evidence                                                                                                                                                                         |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Section 24, payment policy and Workflow | Order and Payment status are separate. Store policy by Order Type determines whether acceptance or Kitchen entry may precede payment. Brand controls permitted Workflow adjustments; Store overrides require Brand authority.                                        | Resolve the current published policy and authorized override for the exact Store/Order Type. Never hard-code automatic acceptance or universally require captured payment without the applicable policy. |
+| 24.8                                    | A Customer may directly cancel Submitted work before merchant acceptance; after Accepted, cancellation is a request for merchant confirmation. Started preparation requires authorized Staff decision and loss recording. Fulfilled/Closed work cannot be cancelled. | Exact current phase, actor capability, Kitchen start/finality receipt and a serialized cancellation decision.                                                                                            |
+| 24.8                                    | Rejected means never accepted; Cancelled is termination after creation. Both preserve reason, actor and time. Payment failure alone implies neither. Cancellation does not itself issue a refund.                                                                    | Append-only execution decision, independent Payment remediation and replay-safe event handling.                                                                                                          |
+| 24.9                                    | Close requires final Item/Batch outcomes, no pending amendment/cancellation, final fulfillment or rejection/cancellation, controlled financial finality and no blocking critical exception.                                                                          | Current public owner receipts and a fence against concurrent amendments/refunds.                                                                                                                         |
+| 24.9                                    | Reopen requires an authorized manager, reason and Audit, and is prohibited after the settlement/accounting period is locked. The earlier closure record remains.                                                                                                     | Current period-lock authority, permission binding and append-only correction.                                                                                                                            |
+
+DEC-H04/H05 remain proposals for the **source producer and concurrency design**, not evidence
+that all acceptance/cancellation/closure business rules are absent. Remaining source resolution
+must identify exact accepted Section 88 permissions and the published Workflow policy contract.
+Do not ask the Owner to reapprove the rules above merely because their adapters are unfinished;
+escalate only a concrete conflict or a genuinely unspecified business choice.
+
 ### Proposed source producer and transitions
 
 **Proposal DEC-H04.** Add an Ordering-owned decision producer over current Order/Batch source
@@ -201,8 +222,9 @@ applicable policy reference; actors, scope, clock and permissions are server-res
 | Close                  | Section 24.9 source invariants: final execution, controlled financial finality and no disqualifying pending work/exception | Append closed decision separately from Fulfilled; Dining close and Task completion supply no substitute authority.                         |
 | Reopen/correct closure | Explicit authoritative action, actor, reason and compensating-history policy                                               | Remains unavailable until source resolution; never edit an accepted closure record or implicitly resurrect work.                           |
 
-The specific permissions, acceptance automation, cancellation cutoff and close/reopen conditions
-must be reconciled with Handoff Sections 24 and 88. No threshold, new phase or permission identifier
+Exact permission identifiers and policy-source bindings must be reconciled with accepted
+Handoff Sections 24 and 88. The source-defined cancellation and close/reopen boundaries above
+remain requirements; only additional policy choices or conflicting later text require resolution. No threshold, new phase or permission identifier
 is accepted by this table. Existing Amendment rules remain authoritative: destructive changes
 after Kitchen start wait for Kitchen confirmation and completed work may reject the request
 ([WP-2110](../work-packages/WP-2110.md)). Whole-order cancellation must resolve its own source rules.
@@ -319,7 +341,7 @@ collaborating execution/finality owners; DEC-H06/H07 to Payment + Ordering/Prici
 DEC-H01/H02 product choices are **accepted in WP-2228**, with the implemented and remaining
 mechanics distinguished above. **DEC-H03 topology is accepted**, with its sole acceptance record
 in [capacity-source-decision.md](./capacity-source-decision.md); producer/composition evidence
-remains required. **DEC-H03-DINING is proposed, not accepted**, as recorded in the
+remains required. **DEC-H03-DINING is accepted (2026-09-10), with implementation outstanding**, as recorded in the
 [mode-specific handoff](./capacity-checkout-handoff.md). **DEC-H04/H05 remain proposed source
 decisions**. DEC-H06 still needs its ordinary-refund execution ownership/contract, and DEC-H07
 retains the scoped pending decisions in the [refund boundary record](./refund-approval-boundaries.md),
@@ -332,4 +354,4 @@ scenarios. Passing existing regression commands alone cannot accept these propos
 
 ## Checkout capacity follow-up
 
-[WP-2342 capacity handoff](./capacity-checkout-handoff.md) separates Scheduled, ASAP and Dine-in requirements and the remaining Payment clock producer. The Dine-in interpretation is proposed only; no new approval is recorded here.
+[WP-2342 capacity handoff](./capacity-checkout-handoff.md) separates Scheduled, ASAP and Dine-in requirements and the remaining Payment clock producer. The Dine-in interpretation is accepted in its linked authoritative disposition; implementation remains outstanding.

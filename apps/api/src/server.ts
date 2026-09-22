@@ -1,3 +1,34 @@
+import {
+  createCustomerSessionBootstrapHandler,
+  createCustomerSessionBootstrapRead,
+} from "./customer-session-bootstrap.js";
+import { createCustomerPickupCodeRead } from "./customer-pickup-code-read.js";
+import { CustomerPickupCodeHandler } from "./customer-pickup-code.js";
+import type { CustomerPaymentIntentHandler } from "./customer-payment-intent.js";
+import { loadApiProcessConfiguration } from "./process-configuration.js";
+import type { CustomerOrderSubmissionHandler } from "./customer-order-submission.js";
+import type { CustomerCheckoutDetailsHandler } from "./customer-checkout-details.js";
+import { createMerchantRuntime, type MerchantRuntimeOptions } from "./merchant-runtime.js";
+import { createCustomerReceiptRead } from "./customer-receipt-read.js";
+import { CustomerReceiptHandler } from "./customer-receipt.js";
+import { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
+import { CustomerOrderStatusHandler } from "./customer-order-status.js";
+import {
+  createCustomerPaymentResultHandler,
+  type CustomerPaymentResultRuntimeOptions,
+} from "./customer-payment-result-runtime.js";
+import {
+  createCustomerPaymentHandoffHandler,
+  type CustomerPaymentHandoffRuntimeOptions,
+} from "./customer-payment-handoff-runtime.js";
+import {
+  createCustomerPaymentIntentHandler,
+  type CustomerPaymentIntentRuntimeOptions,
+} from "./customer-payment-intent-runtime.js";
+import {
+  createCustomerCheckoutSessionHandlers,
+  type CustomerCheckoutSessionRuntimeOptions,
+} from "./customer-checkout-session-runtime.js";
 import type { CustomerDiningJoinHandler } from "./customer-dining-join.js";
 import type { CustomerDiningBindingHandler } from "./customer-dining-binding.js";
 import type { CustomerCartBindingHandler } from "./customer-cart-binding.js";
@@ -68,11 +99,29 @@ export interface ApiServerRuntimeOptions {
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
   customerQuote?: CustomerQuoteHandler;
+  customerCheckoutSessions?: CustomerCheckoutSessionRuntimeOptions;
+  customerOrderSubmission?: CustomerOrderSubmissionHandler;
+  customerCheckoutDetails?: CustomerCheckoutDetailsHandler;
+  customerPaymentIntent?: CustomerPaymentIntentRuntimeOptions;
+  customerPaymentIntentHandler?: CustomerPaymentIntentHandler;
+  customerPaymentHandoff?: CustomerPaymentHandoffRuntimeOptions;
+  customerPaymentResult?: CustomerPaymentResultRuntimeOptions;
+  customerReceipt?: Parameters<typeof createCustomerReceiptRead>[0] & { allowedOrigin: string };
+  customerSessionBootstrap?: Parameters<typeof createCustomerSessionBootstrapRead>[0] & {
+    allowedOrigin: string;
+  };
+  customerPickupCode?: Parameters<typeof createCustomerPickupCodeRead>[0] & {
+    allowedOrigin: string;
+  };
+  customerOrderStatus?: Parameters<typeof createCustomerOrderStatusRead>[0] & {
+    allowedOrigin: string;
+  };
   healthReadiness?: HealthReadinessController;
   host?: string;
   logger?: StructuredLogger;
   merchantCatalog?: MerchantCatalogRouterOptions;
   merchantBff?: MerchantBffRouterOptions;
+  merchantRuntime?: MerchantRuntimeOptions;
   nodeTelemetry?: NodeTelemetryRuntime;
   nowMilliseconds?: () => number;
   port?: number;
@@ -116,11 +165,23 @@ export function createApiServerRuntime({
   customerEntry,
   customerMenu,
   customerQuote,
+  customerCheckoutSessions,
+  customerOrderSubmission,
+  customerCheckoutDetails,
+  customerPaymentIntent,
+  customerPaymentIntentHandler,
+  customerPaymentHandoff,
+  customerPaymentResult,
+  customerOrderStatus,
+  customerSessionBootstrap,
+  customerPickupCode,
+  customerReceipt,
   healthReadiness = new HealthReadinessController(),
   host = "127.0.0.1",
   logger = createApiRuntimeLogger(),
   merchantCatalog,
   merchantBff,
+  merchantRuntime,
   nodeTelemetry = createNodeTelemetryRuntime({
     environment: runtimeEnvironment(),
     serviceName: "bop-rms-api",
@@ -131,8 +192,16 @@ export function createApiServerRuntime({
 }: ApiServerRuntimeOptions = {}): ApiServerRuntime {
   if (!Number.isInteger(port) || port < 0 || port > 65_535)
     throw new Error("port must be an integer from 0 to 65535");
+  if (merchantBff !== undefined && merchantRuntime !== undefined)
+    throw new Error("MERCHANT_RUNTIME_CONFIGURATION_CONFLICT");
+  if (customerPaymentIntent !== undefined && customerPaymentIntentHandler !== undefined)
+    throw new Error("CUSTOMER_PAYMENT_INTENT_CONFIGURATION_CONFLICT");
+  const configuredMerchant =
+    merchantRuntime === undefined ? merchantBff : createMerchantRuntime(merchantRuntime);
   const server = createServer(
     createApp({
+      ...(customerOrderSubmission === undefined ? {} : { customerOrderSubmission }),
+      ...(customerCheckoutDetails === undefined ? {} : { customerCheckoutDetails }),
       ...(customerCart === undefined ? {} : { customerCart }),
       ...(customerCartBinding === undefined ? {} : { customerCartBinding }),
       ...(customerDiningJoin === undefined ? {} : { customerDiningJoin }),
@@ -141,9 +210,55 @@ export function createApiServerRuntime({
       healthReadiness,
       ...(customerMenu === undefined ? {} : { customerMenu }),
       ...(customerQuote === undefined ? {} : { customerQuote }),
+      ...(customerCheckoutSessions === undefined
+        ? {}
+        : createCustomerCheckoutSessionHandlers(customerCheckoutSessions)),
+      ...(customerPaymentIntentHandler !== undefined
+        ? { customerPaymentIntent: customerPaymentIntentHandler }
+        : customerPaymentIntent === undefined
+          ? {}
+          : { customerPaymentIntent: createCustomerPaymentIntentHandler(customerPaymentIntent) }),
+      ...(customerPaymentHandoff === undefined
+        ? {}
+        : { customerPaymentHandoff: createCustomerPaymentHandoffHandler(customerPaymentHandoff) }),
+      ...(customerReceipt === undefined
+        ? {}
+        : {
+            customerReceipt: new CustomerReceiptHandler({
+              allowedOrigin: customerReceipt.allowedOrigin,
+              port: createCustomerReceiptRead(customerReceipt),
+            }),
+          }),
+      ...(customerSessionBootstrap === undefined
+        ? {}
+        : {
+            customerSessionBootstrap: createCustomerSessionBootstrapHandler({
+              allowedOrigin: customerSessionBootstrap.allowedOrigin,
+              port: createCustomerSessionBootstrapRead(customerSessionBootstrap),
+            }),
+          }),
+      ...(customerPickupCode === undefined
+        ? {}
+        : {
+            customerPickupCode: new CustomerPickupCodeHandler({
+              allowedOrigin: customerPickupCode.allowedOrigin,
+              port: createCustomerPickupCodeRead(customerPickupCode),
+            }),
+          }),
+      ...(customerOrderStatus === undefined
+        ? {}
+        : {
+            customerOrderStatus: new CustomerOrderStatusHandler({
+              allowedOrigin: customerOrderStatus.allowedOrigin,
+              port: createCustomerOrderStatusRead(customerOrderStatus),
+            }),
+          }),
+      ...(customerPaymentResult === undefined
+        ? {}
+        : { customerPaymentResult: createCustomerPaymentResultHandler(customerPaymentResult) }),
       deploymentEnvironment: runtimeEnvironment(),
       ...(merchantCatalog === undefined ? {} : { merchantCatalog }),
-      ...(merchantBff === undefined ? {} : { merchantBff }),
+      ...(configuredMerchant === undefined ? {} : { merchantBff: configuredMerchant }),
       errorLogger: logger,
       nowMilliseconds,
       ...(realtime === undefined ? {} : { realtime }),
@@ -266,17 +381,32 @@ export function createApiServerRuntime({
   return { healthReadiness, listen, server, shutdown };
 }
 
-export function startApiRuntime(): void {
+export function startApiRuntime(configured?: ApiServerRuntime): void {
   const port = Number.parseInt(process.env.PORT ?? "3000", 10);
   if (!Number.isInteger(port) || port < 1 || port > 65_535)
     throw new Error("PORT must be an integer from 1 to 65535");
-  const runtime = createApiServerRuntime({ port });
+  const runtime = configured ?? createApiServerRuntime({ port });
   process.once("SIGINT", () => void runtime.shutdown("SIGINT").catch(() => undefined));
   process.once("SIGTERM", () => void runtime.shutdown("SIGTERM").catch(() => undefined));
-  void runtime.listen();
+  void runtime.listen().catch(async () => {
+    process.exitCode = 1;
+    await runtime.shutdown("SIGTERM").catch(() => undefined);
+  });
 }
 
 const entryPath = process.argv[1];
 if (entryPath !== undefined && import.meta.url === pathToFileURL(entryPath).href) {
-  startApiRuntime();
+  try {
+    const port = Number(process.env.PORT ?? "3000");
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("API_PORT_INVALID");
+    void loadApiProcessConfiguration(process.argv.slice(2), port)
+      .then((runtime) => startApiRuntime(runtime))
+      .catch(() => {
+        createApiRuntimeLogger().error({ event: "startup_failed", resultCode: "API_START_FAILED" });
+        process.exitCode = 1;
+      });
+  } catch {
+    createApiRuntimeLogger().error({ event: "startup_failed", resultCode: "API_START_FAILED" });
+    process.exitCode = 1;
+  }
 }

@@ -19,6 +19,9 @@ export interface CustomerMenuQueryPorts {
     loadCandidates(input: {
       readonly brandReference: CatalogReference;
       readonly storeReference: CatalogReference;
+      readonly channelCode: CustomerMenuQueryInput["channelCode"];
+      readonly orderTypeCode: CustomerMenuQueryInput["orderTypeCode"];
+      readonly requestedAt: CustomerMenuQueryInput["requestedAt"];
     }): Promise<readonly PublishedMenuProjection[]>;
   };
 }

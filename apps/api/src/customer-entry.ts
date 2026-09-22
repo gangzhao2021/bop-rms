@@ -48,16 +48,36 @@ export interface CustomerEntryPort {
   establish(input: Readonly<CustomerEntryPortInput>): Promise<CustomerEntryPortResult>;
 }
 
+export interface CustomerEntryRequestAdmission {
+  consume(
+    input: Readonly<{ remoteAddress: string | null; requestedAt: string }>,
+  ): Promise<
+    | { readonly status: "Allowed" }
+    | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
+    | { readonly status: "Unavailable" }
+  >;
+}
+
 export interface CustomerEntryHandlerOptions {
+  readonly requestAdmission?: CustomerEntryRequestAdmission;
   readonly allowedOrigin: string;
   readonly now?: () => string;
   readonly port: CustomerEntryPort;
   readonly uuidV7Factory: () => string;
 }
 
-type ErrorCode = "entry_request_invalid" | "entry_unavailable" | "entry_service_unavailable";
+type ErrorCode =
+  | "entry_request_invalid"
+  | "entry_unavailable"
+  | "entry_service_unavailable"
+  | "entry_rate_limited";
 
 const errorContracts = Object.freeze({
+  entry_rate_limited: Object.freeze({
+    messageKey: "customer.entry.rate_limited",
+    recovery: Object.freeze({ action: "RetryOrAskStaff", storeSelection: "Hidden" }),
+    status: 429,
+  }),
   entry_request_invalid: Object.freeze({
     messageKey: "customer.entry.request_invalid",
     recovery: Object.freeze({ action: "Rescan", storeSelection: "Hidden" }),
@@ -329,17 +349,20 @@ export class CustomerEntryHandler {
   readonly #now: () => string;
   readonly #port: CustomerEntryPort;
   readonly #uuidV7Factory: () => string;
+  readonly #requestAdmission: CustomerEntryRequestAdmission | undefined;
 
   constructor({
     allowedOrigin,
     now = () => new Date().toISOString(),
     port,
     uuidV7Factory,
+    requestAdmission,
   }: CustomerEntryHandlerOptions) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
     this.#port = port;
     this.#uuidV7Factory = uuidV7Factory;
+    this.#requestAdmission = requestAdmission;
   }
 
   handler(): RequestHandler {
@@ -366,6 +389,29 @@ export class CustomerEntryHandler {
 
       try {
         const requestedAt = parseCanonicalInstant(this.#now());
+        const admission = await this.#requestAdmission?.consume(
+          Object.freeze({
+            remoteAddress: request.socket.remoteAddress ?? null,
+            requestedAt,
+          }),
+        );
+        if (admission?.status === "RateLimited") {
+          const decision = closedRecord(admission, ["status", "retryAfterSeconds"]);
+          if (
+            !Number.isSafeInteger(decision.retryAfterSeconds) ||
+            Number(decision.retryAfterSeconds) < 1 ||
+            Number(decision.retryAfterSeconds) > 86400
+          )
+            throw new TypeError("admission unavailable");
+          response.setHeader("Retry-After", String(decision.retryAfterSeconds));
+          sendError(response, "entry_rate_limited");
+          return;
+        }
+        if (admission?.status !== "Allowed") {
+          sendError(response, "entry_service_unavailable");
+          return;
+        }
+        closedRecord(admission, ["status"]);
         const entryRequestReference = parseUuidV7(this.#uuidV7Factory());
         const operationReference = parseUuidV7(this.#uuidV7Factory());
         if (entryRequestReference === operationReference) {

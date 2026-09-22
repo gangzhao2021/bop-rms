@@ -37,7 +37,15 @@ export interface OrderStatusQueryPorts {
       exactReferenceOrNumber: string | null;
       orderType: "DineIn" | "Pickup" | null;
       sourceChannel: "Api" | "Pos" | "Qr" | "Web" | null;
-      canonicalPhase: "Submitted" | "Fulfilled" | null;
+      canonicalPhase:
+        | "Submitted"
+        | "Accepted"
+        | "In Progress"
+        | "Ready"
+        | "Fulfilled"
+        | "Rejected"
+        | "Cancelled"
+        | null;
       closureStatus: "Open" | null;
       paymentStatus: "NotReported" | null;
       limit: number;

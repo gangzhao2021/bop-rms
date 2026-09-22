@@ -70,7 +70,16 @@ export function createPostgresDiningClosingStore(
   runner: DiningTableTransactionRunner,
   scopeInput: DiningTableStoreScope,
   hashes: DiningClosingHashPort,
-): DiningClosingStorePort {
+): DiningClosingStorePort & {
+  readReceipt(
+    operationReference: string,
+    authorize: (tx: DiningTableTransaction) => Promise<boolean>,
+  ): Promise<Readonly<{
+    record: ReturnType<typeof parseDiningClosingOperationRecord>;
+    expectedVersion: number;
+    occurredAt: ReturnType<typeof parseDiningInstant>;
+  }> | null>;
+} {
   let scope;
   try {
     scope = closed(scopeInput, ["tenantReference", "brandReference", "storeReference"]);
@@ -148,6 +157,20 @@ export function createPostgresDiningClosingStore(
           return selected.length === 0
             ? null
             : session(closed(selected[0], ["session"]).session, requested);
+        });
+      } catch {
+        return unavailable();
+      }
+    },
+    async readReceipt(value: string, authorize: (tx: DiningTableTransaction) => Promise<boolean>) {
+      const operation = reference(value);
+      try {
+        return await runner.run(async (tx) => {
+          if ((await authorize(tx)) !== true) return unavailable();
+          await context(tx);
+          const receipt = await original(tx, operation);
+          if ((await authorize(tx)) !== true) return unavailable();
+          return receipt;
         });
       } catch {
         return unavailable();

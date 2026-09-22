@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createGuestSessionCredentialProvider,
   assertGuestSessionUsable,
   createGuestSession,
   createGuestSessionRecord,
@@ -736,4 +737,70 @@ describe("Guest Session contract", () => {
       }
     }
   });
+});
+
+async function recoveryFixture(
+  overrides: Record<string, unknown> = {},
+  binding = "Current",
+  observedAt = now,
+) {
+  const store = new MemoryStore();
+  const credentials = createGuestSessionCredentialProvider(new Uint8Array(32).fill(17));
+  await store.create({
+    record: createGuestSessionRecord({
+      session: session(overrides),
+      sessionSelectorHash: credentials.hashCredential("Session", sessionCredential),
+      csrfSelectorHash: credentials.hashCredential("Csrf", csrfCredential),
+      operationReference: ids.operation,
+      operationIntentHash: credentials.hashOperationIntent("test"),
+    }),
+  });
+  const service = new GuestSessionService({
+    store,
+    credentials,
+    admission: { consume: async () => null },
+    binding: { validate: async () => (binding === "Current" ? "Current" : "Unavailable") },
+    now: () => observedAt,
+  });
+  return { service, store, credentials };
+}
+it("recovers foreground CSRF without touching lifetime or persisting credentials", async () => {
+  const f = await recoveryFixture();
+  const before = JSON.stringify([...f.store.records.values()]);
+  const recovered = await f.service.recoverForegroundCsrf({ sessionCredential });
+  expect(recovered).not.toBe(csrfCredential);
+  expect(await f.service.recoverForegroundCsrf({ sessionCredential })).toBe(recovered);
+  expect(
+    (await f.service.authorize({ sessionCredential, csrfCredential: recovered })).sessionReference,
+  ).toBe(ids.session);
+  expect((await f.service.authorize({ sessionCredential, csrfCredential })).sessionReference).toBe(
+    ids.session,
+  );
+  expect(f.store.touches).toBe(0);
+  expect(JSON.stringify([...f.store.records.values()])).toBe(before);
+  expect(before).not.toContain(recovered);
+  await expect(
+    f.service.authorize({
+      sessionCredential,
+      csrfCredential: f.credentials.deriveForegroundCsrf?.(nextSessionCredential),
+    }),
+  ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+});
+it("rejects recovery and derived authorization for expired, revoked or unavailable binding", async () => {
+  for (const [changes, binding, at] of [
+    [{}, "Current", "2026-07-29T16:00:00.000Z"],
+    [{ status: "Revoked", revocationReason: "Logout", revokedAt: now, version: 2 }, "Current", now],
+    [{}, "Unavailable", now],
+  ] as const) {
+    const f = await recoveryFixture(changes, binding, at);
+    await expect(f.service.recoverForegroundCsrf({ sessionCredential })).rejects.toThrow(
+      new GuestSessionError("GUEST_SESSION_UNAVAILABLE"),
+    );
+    await expect(
+      f.service.authorize({
+        sessionCredential,
+        csrfCredential: f.credentials.deriveForegroundCsrf?.(sessionCredential),
+      }),
+    ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  }
 });

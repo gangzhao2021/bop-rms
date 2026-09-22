@@ -9,6 +9,8 @@ function setup(result: unknown) {
   const fixture = orderQueryFixture();
   const query = vi.fn(async (sql: string, values: readonly unknown[]): Promise<unknown> => {
     void values;
+    if (sql.startsWith("SELECT h.order_id"))
+      return { rows: [{ reference: fixture.record.order.orderReference }] };
     return sql.startsWith("SELECT jsonb_build_object") ? result : { rows: [] };
   });
   const run = vi.fn();
@@ -158,5 +160,53 @@ describe("WP-2350 original Order history query", () => {
     const x = setup({ rows: [] });
     await expect(x.store.resolveSubmission("bad")).rejects.toBeDefined();
     expect(x.run).not.toHaveBeenCalled();
+  });
+});
+
+describe("current Order fence", () => {
+  it("reads the current initial Order under a scoped header lock on the caller transaction", async () => {
+    const f = orderQueryFixture();
+    const x = setup({ rows: [{ history: f.history }] });
+    const callback = vi.fn(async (tx, record) => {
+      expect(tx.query).toBe(x.query);
+      expect(record).toEqual(f.record);
+      return { validUntil: "2026-09-11T10:00:00.000Z" };
+    });
+    expect(await x.store.withCurrentSubmission(f.record.submissionReference, callback)).toEqual({
+      validUntil: "2026-09-11T10:00:00.000Z",
+    });
+    expect(x.query.mock.calls.some(([sql]) => sql === "SET TRANSACTION READ ONLY")).toBe(false);
+    expect(x.query.mock.calls[1]?.[0]).toContain("FOR UPDATE OF h");
+    expect(x.query.mock.calls[1]?.[1]).toEqual([
+      f.scope.brandReference,
+      f.scope.storeReference,
+      f.record.submissionReference,
+    ]);
+  });
+  it.each([
+    ["canonicalPhase", "Cancelled"],
+    ["closureStatus", "Closed"],
+    ["paymentStatus", "Paid"],
+  ])("rejects changed current %s before the Payment callback", async (field, value) => {
+    const f = orderQueryFixture();
+    const history = structuredClone(f.history);
+    Object.assign(history.record.order, { [field]: value });
+    const x = setup({ rows: [{ history }] });
+    const work = vi.fn();
+    await expect(
+      x.store.withCurrentSubmission(f.record.submissionReference, work),
+    ).rejects.toMatchObject({
+      code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(work).not.toHaveBeenCalled();
+  });
+  it("does not call Payment when the scoped header is missing", async () => {
+    const x = setup({ rows: [] });
+    x.query.mockResolvedValue({ rows: [] });
+    const work = vi.fn();
+    expect(
+      await x.store.withCurrentSubmission(x.fixture.record.submissionReference, work),
+    ).toBeNull();
+    expect(work).not.toHaveBeenCalled();
   });
 });

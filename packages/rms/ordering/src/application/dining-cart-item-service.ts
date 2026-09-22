@@ -318,7 +318,10 @@ export function createDiningCartItemService(options: DiningCartItemOptions) {
         );
         let loaded: ReturnType<typeof owned> | null = null;
         const service = createCartItemCommandService({
-          catalog: options.catalog,
+          catalog: {
+            validateSelection: (selection, context) =>
+              guarded(() => options.catalog.validateSelection(selection, context)),
+          },
           references: options.references,
           authorization: { authorize: async () => ({ guestSession: first.session, audit }) },
           repository: {

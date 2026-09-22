@@ -12,6 +12,7 @@ export interface MenuAllergenItem {
 }
 
 export interface MenuOptionRule {
+  readonly activationOptionReferences?: readonly string[];
   readonly minimumSelections: number;
   readonly maximumSelections: number;
   readonly options: readonly {
@@ -20,6 +21,7 @@ export interface MenuOptionRule {
     readonly maximumQuantity: number;
     readonly conflictOptionReferences: readonly string[];
     readonly selectedByDefault: boolean;
+    readonly defaultQuantity?: number;
   }[];
 }
 

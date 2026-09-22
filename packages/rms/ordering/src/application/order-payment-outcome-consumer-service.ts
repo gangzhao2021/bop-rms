@@ -1,3 +1,4 @@
+import { parseOrderPaymentAcceptanceWait } from "./order-payment-acceptance-wait.js";
 import {
   consumeEventInTransaction,
   ConsumerTransactionRollback,
@@ -262,8 +263,7 @@ function registration(
     ownerModule: "@rms/ordering",
     tenantScope: "store",
     ordering: "aggregate",
-    sideEffect:
-      "record the Ordering payment disposition and append OrderConfirmed only for Confirmed",
+    sideEffect: "ordering-payment-outcome",
     replaySafe: true,
     handler,
   });
@@ -382,6 +382,7 @@ export function createOrderPaymentOutcomeConsumerService(ports: OrderPaymentOutc
     let sourceValue;
     try {
       sourceValue = await ports.source.loadExact({
+        transaction,
         brandReference: parseOrderingReference(event.tenantId),
         storeReference: parseOrderingReference(event.storeId),
         orderReference: parseOrderingReference(event.payload.orderReference),
@@ -409,11 +410,16 @@ export function createOrderPaymentOutcomeConsumerService(ports: OrderPaymentOutc
     }
     if (!dispositionMatchesEvent(ports, event, disposition))
       return failure("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
-    if (disposition.disposition === "AwaitingAcceptance")
-      return {
-        status: "retry_required" as const,
-        errorCode: "CONSUMER_TEMPORARY_FAILURE" as const,
-      };
+    if (disposition.disposition === "AwaitingAcceptance") {
+      if (!ports.waiting)
+        return {
+          status: "retry_required" as const,
+          errorCode: "CONSUMER_TEMPORARY_FAILURE" as const,
+        };
+      const stored = await ports.waiting.record({ transaction, event, disposition });
+      const verified = parseOrderPaymentAcceptanceWait(event, stored, ports.digests.sha256);
+      return { status: "completed" as const, resultHash: verified.record.sourceDigest.slice(7) };
+    }
 
     let orderConfirmedEvent: OrderConfirmedEnvelope | null = null;
     if (disposition.disposition === "Confirmed") {
@@ -469,6 +475,17 @@ export function createOrderPaymentOutcomeConsumerService(ports: OrderPaymentOutc
     };
   }
 
+  async function waitingResult(event: PaymentSucceededEnvelope, transaction: ConsumerTransaction) {
+    if (!ports.waiting) return dependency();
+    const value = await ports.waiting.load({ transaction, event });
+    if (value === null) return dependency();
+    const verified = parseOrderPaymentAcceptanceWait(event, value, ports.digests.sha256);
+    return Object.freeze({
+      status: "AwaitingOrderAcceptance" as const,
+      disposition: verified.record,
+    });
+  }
+
   const registrations = Object.freeze([
     registration("PaymentSucceeded", async ({ envelope, transaction }) => {
       const event = parsePaymentSucceededEnvelope(envelope);
@@ -484,6 +501,21 @@ export function createOrderPaymentOutcomeConsumerService(ports: OrderPaymentOutc
 
   return Object.freeze({
     registrations,
+    async resumePending(
+      transaction: ConsumerTransaction,
+      value: unknown,
+    ): Promise<OrderPaymentOutcomeResult> {
+      const event = parsePaymentSucceededEnvelope(value);
+      await authorize(event);
+      await waitingResult(event, transaction);
+      const processed = await processAuthorized(event, transaction);
+      if (processed.status !== "completed") throw new ConsumerTransactionRollback(processed);
+      const stored = await loadEffect(event, transaction);
+      await authorize(event);
+      return stored === null
+        ? waitingResult(event, transaction)
+        : resultFromEffect(ports, event, stored, "ORDER_PAYMENT_OUTCOME_DEPENDENCY_UNAVAILABLE");
+    },
     async consume(
       transaction: ConsumerTransaction,
       value: unknown,
@@ -527,7 +559,10 @@ export function createOrderPaymentOutcomeConsumerService(ports: OrderPaymentOutc
       if (consumerOutcome.status === "retry_required")
         throw new ConsumerTransactionRollback(consumerOutcome);
       const stored = await loadEffect(event, transaction);
-      if (stored === null) return dependency();
+      if (stored === null) {
+        if (event.eventType !== "PaymentSucceeded") return dependency();
+        return Object.freeze({ consumerOutcome, result: await waitingResult(event, transaction) });
+      }
       return Object.freeze({
         consumerOutcome,
         result: resultFromEffect(

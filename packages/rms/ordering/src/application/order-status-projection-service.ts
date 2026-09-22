@@ -237,7 +237,12 @@ export function createOrderStatusQueryService(ports: OrderStatusQueryPorts) {
       const sourceChannel = optionalChoice(raw.sourceChannel, ["Api", "Pos", "Qr", "Web"] as const);
       const canonicalPhase = optionalChoice(raw.canonicalPhase, [
         "Submitted",
+        "Accepted",
+        "In Progress",
+        "Ready",
         "Fulfilled",
+        "Rejected",
+        "Cancelled",
       ] as const);
       const closureStatus = optionalChoice(raw.closureStatus, ["Open"] as const);
       const paymentStatus = optionalChoice(raw.paymentStatus, ["NotReported"] as const);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   authorizeOrderExceptionAction,
   buildOrderExceptionProjection,
+  readOrderExceptionProjection,
   OrderExceptionProjectionError,
   type OrderExceptionSource,
 } from "../order-exception.js";
@@ -114,4 +115,78 @@ describe("WP-1809 order exception projection", () => {
       }),
     ).toThrowError(new OrderExceptionProjectionError("PERMISSION_DENIED"));
   });
+});
+
+it("keeps overdue exceptions visible only as stale without relaxing activation or scope", () => {
+  const input = {
+    tenantReference: refs[1],
+    brandReference: refs[2],
+    storeReference: refs[3],
+    businessDate: "2026-08-12",
+    checkpointReference: refs[6],
+    projectedAt: "2026-08-12T16:30:00.000Z",
+    freshnessStatus: "Fresh" as const,
+    sources: [source()],
+    deriveProjectionReference: () => refs[7],
+  };
+  expect(() => buildOrderExceptionProjection(input)).toThrow();
+  const view = readOrderExceptionProjection(input);
+  expect(view.freshnessStatus).toBe("Stale");
+  expect(view.rows[0]).toMatchObject({ status: "Open", dueAt: "2026-08-12T16:15:00.000Z" });
+  expect(() => readOrderExceptionProjection({ ...input, storeReference: refs[8] })).toThrow();
+});
+
+it("preserves unassociated reconciliation exceptions without weakening other source identities", () => {
+  const base = {
+    ...source(),
+    kind: "PaymentReconciliationDifference" as const,
+    orderReference: null,
+    paymentReference: null,
+  };
+  expect(projection(base).rows[0]).toMatchObject({
+    kind: "PaymentReconciliationDifference",
+    orderReference: null,
+    paymentReference: null,
+  });
+  for (const kind of ["PaidWithoutFulfillableOrder", "CaptureDeadlineExceeded"] as const)
+    expect(() => projection({ ...base, kind })).toThrow();
+  expect(() => projection({ ...source(), orderReference: null })).toThrow();
+});
+
+it("recovers a current source-checked read without certifying initial activation SLA", () => {
+  const input = {
+    tenantReference: refs[1],
+    brandReference: refs[2],
+    storeReference: refs[3],
+    businessDate: "2026-08-12",
+    checkpointReference: refs[6],
+    projectedAt: "2026-08-12T17:00:00.000Z",
+    freshnessStatus: "Fresh" as const,
+    currentSourceCheck: "Complete" as const,
+    sources: [source()],
+    deriveProjectionReference: () => refs[7],
+  };
+  expect(readOrderExceptionProjection(input)).toMatchObject({
+    freshnessStatus: "Fresh",
+    rows: [{ status: "Open", dueAt: "2026-08-12T16:15:00.000Z" }],
+  });
+  expect(() => buildOrderExceptionProjection(input)).toThrowError(
+    new OrderExceptionProjectionError("SLA_MISSED"),
+  );
+  expect(readOrderExceptionProjection({ ...input, freshnessStatus: "Stale" }).freshnessStatus).toBe(
+    "Stale",
+  );
+  const legacy = { ...input };
+  Reflect.deleteProperty(legacy, "currentSourceCheck");
+  expect(readOrderExceptionProjection(legacy).freshnessStatus).toBe("Stale");
+  expect(() => readOrderExceptionProjection({ ...input, storeReference: refs[8] })).toThrowError(
+    new OrderExceptionProjectionError("SCOPE_MISMATCH"),
+  );
+  for (const changes of [
+    { updatedAt: "2026-08-12T18:00:00.000Z" },
+    { createdAt: "2026-08-12T16:02:00.000Z" },
+  ])
+    expect(() =>
+      readOrderExceptionProjection({ ...input, sources: [{ ...source(), ...changes }] }),
+    ).toThrowError(new OrderExceptionProjectionError("INPUT_INVALID"));
 });

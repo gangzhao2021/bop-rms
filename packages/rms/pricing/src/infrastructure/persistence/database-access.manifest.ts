@@ -3,6 +3,22 @@ const databaseAccessManifestInput = {
   module: { moduleName: "pricing", packageName: "@rms/pricing", layer: "RMS" },
   tables: [
     {
+      table: "option_price_rule",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "option_price_rule_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "tax_configuration",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@rms/pricing" },

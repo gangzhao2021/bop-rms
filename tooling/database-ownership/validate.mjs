@@ -167,12 +167,17 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/guest-binding-store.ts";
+        const acceptedGuestEntryAdmissionAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          module.manifest.ownedDatabase?.tables?.includes("guest_entry_admission") &&
+          moduleRelative === "src/infrastructure/persistence/guest-entry-admission-store.ts";
         const acceptedGuestEntryAsset =
           module.packageName === "@bop/identity" &&
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
           module.manifest.ownedDatabase?.tables?.includes("guest_session") &&
           moduleRelative === "src/infrastructure/persistence/guest-session-entry-store.ts";
-        // WP-2219 accepts only the Catalog candidate reader over its complete owned projection set.
+        // WP-2219/WP-2402 admit the Catalog projection reader and registered builder over this exact owned set.
         const acceptedPublishedMenuAsset =
           module.packageName === "@rms/catalog" &&
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
@@ -185,6 +190,82 @@ async function scanUnsupported(root, module, diagnostics) {
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/published-menu-query-store.ts";
         // WP-2334 admits only the Catalog-owned SKU availability rule reader.
+        const acceptedCurrentOptionBindingsAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "sku",
+            "product_version",
+            "option_set",
+            "option_set_version",
+            "option",
+            "option_conflict",
+            "product_option_binding",
+            "product_option_binding_option",
+            "product_option_binding_sku_scope",
+            "product_option_binding_channel",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/current-option-bindings-store.ts";
+        const acceptedCurrentMenuPlacementAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          ["menu", "menu_version", "menu_section", "sellable_placement", "sku"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/current-menu-placement-store.ts";
+        const acceptedCurrentSelectionFactsAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "availability_rule",
+            "menu_publication_revision",
+            "menu_publication_release",
+            "menu_release_effective_period",
+            "menu_version_store",
+            "menu_version_channel",
+            "menu_version_order_type",
+            "published_menu_projection_generation",
+            "published_menu_projection",
+            "published_menu_projection_section",
+            "published_menu_projection_sellable",
+            "published_menu_projection_checkpoint",
+            "product",
+            "product_version",
+            "sku",
+            "option_set",
+            "option_set_version",
+            "option",
+            "option_conflict",
+            "product_option_binding",
+            "product_option_binding_option",
+            "product_option_binding_sku_scope",
+            "product_option_binding_channel",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/current-selection-facts-store.ts";
+        const acceptedKillSwitchQueryAsset =
+          module.packageName === "@bop/feature-control" &&
+          module.manifest.ownedDatabase?.schema === "bop_feature_control" &&
+          module.manifest.ownedDatabase?.tables?.includes("kill_switch_version") &&
+          moduleRelative === "src/infrastructure/persistence/kill-switch-query-store.ts";
+        const acceptedCurrentSkuAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          ["product", "product_version", "sku"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/current-sku-store.ts";
+        const acceptedCurrentMenuReleaseAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "menu_publication_revision",
+            "menu_publication_release",
+            "menu_release_effective_period",
+            "menu_version_store",
+            "menu_version_channel",
+            "menu_version_order_type",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/current-menu-release-store.ts";
         const acceptedAvailabilityQueryAsset =
           module.packageName === "@rms/catalog" &&
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
@@ -209,6 +290,298 @@ async function scanUnsupported(root, module, diagnostics) {
             (table) => module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/capacity-hold-transition-store.ts";
+        // WP-2402 current Pickup occupancy remains a read-only owner repository.
+        const acceptedCurrentPickupCapacityAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          [
+            "capacity_slot",
+            "capacity_slot_configuration",
+            "capacity_hold",
+            "capacity_hold_terminal",
+            "capacity_allocation",
+            "capacity_allocation_terminal",
+            "capacity_asap_commitment",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/current-pickup-capacity-store.ts";
+        // WP-2402 admits the exact Fulfillment owner ASAP history/Audit adapter.
+        const acceptedRecipePreparationContentAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe",
+            "recipe_version",
+            "recipe_operation_record",
+            "recipe_modifier_version",
+            "recipe_preparation_content",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-preparation-content-store.ts";
+        const acceptedRecipeStoreAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe",
+            "recipe_version",
+            "recipe_ingredient_requirement",
+            "recipe_allergen_evidence",
+            "recipe_preparation_step",
+            "recipe_operation_record",
+            "recipe_review_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-store.ts";
+        const acceptedRecipeVersionAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe_version",
+            "recipe_ingredient_requirement",
+            "recipe_allergen_evidence",
+            "recipe_preparation_step",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-version-write.ts";
+        const acceptedRecipeModifierAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          module.manifest.ownedDatabase?.tables?.includes("recipe_modifier_version") &&
+          (moduleRelative === "src/infrastructure/persistence/recipe-modifier-store.ts" ||
+            (moduleRelative === "src/infrastructure/persistence/recipe-modifier-write-store.ts" &&
+              ["recipe", "recipe_version"].every((table) =>
+                module.manifest.ownedDatabase?.tables?.includes(table),
+              )));
+        const acceptedRecipeDemandAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          ["recipe", "recipe_version", "recipe_scope_binding", "recipe_modifier_version"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-demand-store.ts";
+        const acceptedRecipeBindingAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          ["recipe", "recipe_version", "recipe_scope_binding"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-binding-store.ts";
+        const acceptedRecipeQueryAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          ["recipe", "recipe_version", "recipe_operation_record"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-query-store.ts";
+        const acceptedLotHoldAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          ["inventory_item", "stock_account", "stock_balance", "stock_lot_hold_version"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/lot-hold-store.ts";
+        const acceptedBrowserSessionSelectionAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          ["authentication_session", "browser_session_selection"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/browser-session-selection-store.ts";
+        const acceptedBrandLifecycleAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          ["brand", "brand_admin_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/brand-lifecycle-store.ts";
+        const acceptedMerchantOrganizationAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          ["brand", "store"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/merchant-organization-source.ts";
+        const acceptedBrowserSessionStoreAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          ["authentication_session", "oidc_authorization_transaction"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/browser-session-store.ts";
+        const acceptedOidcAuthorizationAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          module.manifest.ownedDatabase?.tables?.includes("oidc_authorization_transaction") &&
+          moduleRelative === "src/infrastructure/persistence/oidc-authorization-store.ts";
+        const acceptedCurrentBrowserSessionAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          module.manifest.ownedDatabase?.tables?.includes("authentication_session") &&
+          moduleRelative === "src/infrastructure/persistence/current-browser-session-source.ts";
+        const acceptedCurrentWorkforceMfaAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          module.manifest.ownedDatabase?.tables?.includes("workforce_mfa_status") &&
+          moduleRelative === "src/infrastructure/persistence/current-workforce-mfa-source.ts";
+        const acceptedStoreExceptionContentAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          [
+            "store_configuration_version",
+            "store_service_exception",
+            "store_service_exception_content",
+            "store_service_exception_interval",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/exception-content-source.ts";
+        const acceptedStorePauseHistoryAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          [
+            "store_configuration_operation",
+            "store_service_pause_content",
+            "store_service_resume_content",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/pause-history-source.ts";
+        const acceptedStorePublicationContentAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          ["store_configuration_version", "store_configuration_publication_content"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/publication-content-source.ts";
+        const acceptedStorePublicationMaterializerAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          [
+            "store_configuration_version",
+            "store_weekly_service_period",
+            "store_service_exception",
+            "store_service_exception_content",
+            "store_service_exception_interval",
+            "store_configuration_publication_content",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/publication-materializer.ts";
+        const acceptedPublicStoreProfileTimingAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          module.manifest.ownedDatabase?.tables?.includes("public_store_profile_timing") &&
+          moduleRelative === "src/infrastructure/persistence/public-store-profile-timing-store.ts";
+        const acceptedPublicStoreProfileAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          module.manifest.ownedDatabase?.tables?.includes("public_store_profile_version") &&
+          moduleRelative === "src/infrastructure/persistence/public-store-profile-store.ts";
+        const acceptedStoreReviewSnapshotAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          module.manifest.ownedDatabase?.tables?.includes("store_configuration_review_snapshot") &&
+          moduleRelative === "src/infrastructure/persistence/review-snapshot-store.ts";
+        const acceptedStoreAuthoringAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          module.manifest.ownedDatabase?.tables?.includes(
+            "store_configuration_authoring_operation",
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/configuration-authoring-store.ts";
+        const acceptedStoreServiceControlAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          [
+            "store_configuration_operation",
+            "store_service_pause_content",
+            "store_service_resume_content",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/service-control-store.ts";
+        const acceptedStoreWeeklyScheduleAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          ["store_configuration_version", "store_weekly_service_period"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/weekly-schedule-source.ts";
+        const acceptedStoreBusinessDateAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          ["store_configuration_version", "store_configuration_authoring_operation"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/business-date-source.ts";
+        const acceptedCurrentMembershipAsset =
+          module.packageName === "@bop/membership" &&
+          module.manifest.ownedDatabase?.schema === "bop_membership" &&
+          ["membership", "store_assignment"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/current-membership-store.ts";
+        const acceptedCurrentPermissionAsset =
+          module.packageName === "@bop/permission" &&
+          module.manifest.ownedDatabase?.schema === "bop_permission" &&
+          [
+            "policy_state",
+            "permission_definition",
+            "role",
+            "role_assignment",
+            "permission_grant",
+            "permission_override",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/current-policy-store.ts";
+        const acceptedWorkflowDefinitionAsset =
+          module.packageName === "@bop/workflow" &&
+          module.manifest.ownedDatabase?.schema === "bop_workflow" &&
+          module.manifest.ownedDatabase?.tables?.includes("workflow_definition_version") &&
+          moduleRelative === "src/infrastructure/persistence/workflow-definition-store.ts";
+        const acceptedCurrentLiveGateAsset =
+          module.packageName === "@bop/publishing" &&
+          module.manifest.ownedDatabase?.schema === "bop_publishing" &&
+          ["live_gate_version", "live_gate_requirement"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/current-live-gate-source.ts";
+        const acceptedPublishingMutationAsset =
+          module.packageName === "@bop/publishing" &&
+          module.manifest.ownedDatabase?.schema === "bop_publishing" &&
+          module.manifest.ownedDatabase?.tables?.includes("publishing_mutation_record") &&
+          moduleRelative === "src/infrastructure/persistence/publishing-mutation-store.ts";
+        const acceptedInventoryFinalValidationAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          module.manifest.ownedDatabase?.tables?.includes("submission_final_validation") &&
+          moduleRelative === "src/infrastructure/persistence/submission-final-validation-store.ts";
+        const acceptedStockReservationAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          [
+            "inventory_item",
+            "inventory_item_version",
+            "stock_account",
+            "stock_balance",
+            "stock_movement",
+            "stock_reservation_version",
+            "stock_reservation_set",
+            "stock_lot_hold_version",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/stock-reservation-store.ts";
+        const acceptedStockCandidateAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          [
+            "inventory_item_version",
+            "stock_account",
+            "stock_balance",
+            "stock_movement",
+            "stock_lot_hold_version",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/stock-candidate-source.ts";
+        const acceptedInventoryItemAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          ["inventory_item", "inventory_item_version", "inventory_item_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/inventory-item-store.ts";
+        const acceptedAsapCapacityAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          ["capacity_slot", "capacity_asap_commitment"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/asap-capacity-store.ts";
         // WP-2343 admits only the scoped Fulfillment Hold append adapter.
         const acceptedCapacityHoldWriterAsset =
           module.packageName === "@rms/fulfillment" &&
@@ -230,6 +603,193 @@ async function scanUnsupported(root, module, diagnostics) {
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/capacity-query-store.ts";
         // WP-2256 admits only the Pricing owner reader of complete Quote history.
+        const acceptedCurrentQuoteServiceAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          [
+            "price_book",
+            "price_book_version",
+            "price_entry",
+            "tax_configuration",
+            "tax_configuration_version",
+            "tax_configuration_rule",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/current-quote-service.ts";
+        const acceptedCurrentConfiguredQuoteServiceAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          [
+            "price_book",
+            "price_book_version",
+            "price_entry",
+            "tax_configuration",
+            "tax_configuration_version",
+            "tax_configuration_rule",
+            "option_price_rule",
+            "option_price_rule_version",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/current-configured-quote-service.ts";
+        const acceptedCurrentTaxConfigurationAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          ["tax_configuration", "tax_configuration_version", "tax_configuration_rule"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/current-tax-configuration-store.ts";
+        const acceptedCurrentOptionPriceAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          ["option_price_rule", "option_price_rule_version"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/current-option-price-store.ts";
+        const pilotPublicationAsset = {
+          "src/infrastructure/persistence/menu-review-option-source.ts": {
+            owner: "catalog",
+            tables: [
+              "sku",
+              "product_version",
+              "option_set",
+              "option_set_version",
+              "option",
+              "option_conflict",
+              "product_option_binding",
+              "product_option_binding_option",
+              "product_option_binding_sku_scope",
+              "product_option_binding_channel",
+            ],
+          },
+          "src/infrastructure/persistence/menu-review-product-source.ts": {
+            owner: "catalog",
+            tables: ["sku", "product", "product_version"],
+          },
+          "src/infrastructure/persistence/allergen-review-facts-store.ts": {
+            owner: "catalog",
+            tables: [
+              "allergen_registry_version",
+              "allergen_registry_entry",
+              "allergen_source_evidence",
+              "allergen_source_assertion",
+            ],
+          },
+          "src/infrastructure/persistence/product-lifecycle-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_version",
+              "sku",
+              "product_operation_record",
+              "product_operation_snapshot",
+              "product_option_binding",
+              "product_option_binding_option",
+              "product_option_binding_sku_scope",
+              "product_option_binding_channel",
+            ],
+          },
+          // Public Publishing owner composition; this facade contains no direct SQL.
+          "src/infrastructure/persistence/menu-publication-evidence-source.ts": {
+            owner: "catalog",
+            tables: [],
+          },
+          "src/infrastructure/persistence/menu-review-content-store.ts": {
+            owner: "catalog",
+            tables: [
+              "menu_review_content",
+              "menu_publication_release",
+              "menu_publication_operation_snapshot",
+            ],
+          },
+          "src/infrastructure/persistence/menu-publication-repository.ts": {
+            owner: "catalog",
+            tables: [
+              "menu_publication_revision",
+              "menu_publication_release",
+              "menu_release_effective_period",
+              "menu_publication_operation_record",
+              "menu_publication_operation_snapshot",
+            ],
+          },
+          "src/infrastructure/persistence/menu-draft-source.ts": {
+            owner: "catalog",
+            tables: [
+              "menu",
+              "menu_version",
+              "menu_version_store",
+              "menu_version_channel",
+              "menu_version_order_type",
+              "menu_section",
+              "menu_section_category",
+              "sellable_placement",
+            ],
+          },
+          "src/infrastructure/persistence/menu-pricing-facts-source.ts": {
+            owner: "catalog",
+            tables: [
+              "menu",
+              "menu_version",
+              "menu_version_store",
+              "menu_version_channel",
+              "menu_version_order_type",
+              "menu_section",
+              "sellable_placement",
+              "sku",
+              "product",
+              "product_version",
+            ],
+          },
+          "src/infrastructure/persistence/price-book-repository.ts": {
+            owner: "pricing",
+            tables: [
+              "price_book",
+              "price_book_version",
+              "price_entry",
+              "price_book_operation_record",
+            ],
+          },
+          "src/infrastructure/persistence/merchant-order-item-labels.ts": {
+            owner: "ordering",
+            tables: [
+              "order_item",
+              "order_batch",
+              "order_submission_record",
+              "additional_dining_batch_record",
+            ],
+          },
+          "src/infrastructure/persistence/merchant-order-index.ts": {
+            owner: "ordering",
+            tables: ["order_header", "order_submission_record", "order_batch"],
+          },
+          "src/infrastructure/persistence/order-batch-identity-source.ts": {
+            owner: "ordering",
+            tables: ["order_header", "order_submission_record", "order_batch"],
+          },
+          "src/infrastructure/persistence/order-payment-attempt-position.ts": {
+            owner: "payment",
+            tables: ["payment_intent", "payment_attempt", "payment_terminal_fact"],
+          },
+          "src/infrastructure/persistence/payment-intent-binding-source.ts": {
+            owner: "payment",
+            tables: ["payment_intent"],
+          },
+          "src/infrastructure/persistence/captured-batch-payment-source.ts": {
+            owner: "payment",
+            tables: ["payment_intent", "payment_terminal_fact"],
+          },
+        }[moduleRelative];
+        const acceptedPilotPublicationAsset =
+          pilotPublicationAsset !== undefined &&
+          module.packageName === "@rms/" + pilotPublicationAsset.owner &&
+          module.manifest.ownedDatabase?.schema === "rms_" + pilotPublicationAsset.owner &&
+          pilotPublicationAsset.tables.every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          );
+        const acceptedCurrentPriceBookAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          ["price_book", "price_book_version", "price_entry"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/current-price-book-store.ts";
         const acceptedPriceQuoteQueryAsset =
           module.packageName === "@rms/pricing" &&
           module.manifest.ownedDatabase?.schema === "rms_pricing" &&
@@ -295,6 +855,251 @@ async function scanUnsupported(root, module, diagnostics) {
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-session-join-store.ts";
         // WP-2290 admits only the scoped admission-consumption owner transaction.
+        const acceptedPaymentIntentCreationAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "payment_intent",
+            "payment_attempt",
+            "payment_intent_operation_record",
+            "payment_provider_observation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/payment-intent-creation-store.ts";
+        const acceptedPaymentTerminalSourceAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "payment_intent",
+            "payment_attempt",
+            "provider_webhook_record",
+            "payment_provider_observation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/payment-terminal-source.ts";
+        const acceptedPaymentProviderObservationAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "payment_intent",
+            "payment_attempt",
+            "payment_intent_operation_record",
+            "payment_provider_observation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/payment-provider-observation-store.ts";
+        const acceptedPaymentStatusStoreAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          module.manifest.ownedDatabase?.tables?.includes("payment_status_projection") &&
+          moduleRelative === "src/infrastructure/persistence/payment-status-store.ts";
+        const acceptedPaymentTerminalStoreAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "payment_intent",
+            "payment_attempt",
+            "provider_webhook_record",
+            "payment_terminal_fact",
+            "payment_provider_observation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/payment-terminal-store.ts";
+        const acceptedOrderExceptionSourceAsset =
+          module.packageName === "@bop/projection" &&
+          module.manifest.ownedDatabase?.schema === null &&
+          module.manifest.ownedDatabase?.tables?.length === 0 &&
+          moduleRelative === "src/infrastructure/persistence/order-exception-source-store.ts";
+        const acceptedOrderCancelledAmountAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_batch_checkout_cancellation",
+            "order_batch",
+            "order_revision",
+            "order_item",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-cancelled-amount-source.ts";
+        const acceptedPaymentReconciliationCandidatesAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "payment_intent",
+            "payment_attempt",
+            "payment_reconciliation_record",
+            "payment_terminal_fact",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/payment-reconciliation-candidates.ts";
+        const acceptedPaymentReconciliationRunAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "payment_reconciliation_run",
+            "payment_reconciliation_exception",
+            "payment_reconciliation_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/payment-reconciliation-run-source.ts";
+        const acceptedReconciliationFollowUpAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["reconciliation_follow_up_history", "payment_reconciliation_exception"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/reconciliation-follow-up-store.ts";
+        const acceptedProviderCaptureExceptionAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["provider_capture_exception_evidence", "payment_reconciliation_exception"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/provider-capture-exception-store.ts";
+        const acceptedPaymentReconciliationExceptionAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["payment_reconciliation_exception", "payment_reconciliation_record"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/payment-reconciliation-exception-source.ts";
+        const acceptedPaymentCompensationExceptionAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          module.manifest.ownedDatabase?.tables?.includes("payment_compensation_case_history") &&
+          moduleRelative ===
+            "src/infrastructure/persistence/payment-compensation-exception-source.ts";
+        const acceptedOrdinaryRefundCaptureAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["payment_intent", "payment_provider_observation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/ordinary-refund-capture-source.ts";
+        const acceptedOrdinaryRefundRequestAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          module.manifest.ownedDatabase?.tables?.includes("ordinary_refund_request") &&
+          moduleRelative === "src/infrastructure/persistence/ordinary-refund-request-store.ts";
+        const acceptedOrdinaryRefundOperationAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          module.manifest.ownedDatabase?.tables?.includes("ordinary_refund_operation") &&
+          moduleRelative === "src/infrastructure/persistence/ordinary-refund-operation-store.ts";
+        const acceptedOrdinaryRefundApprovalAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          module.manifest.ownedDatabase?.tables?.includes("ordinary_refund_approval") &&
+          moduleRelative === "src/infrastructure/persistence/ordinary-refund-approval-store.ts";
+        const acceptedPaymentRefundStatusAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["payment_refund_status_projection", "payment_compensation_refund"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/payment-refund-status-store.ts";
+        const acceptedPaymentCompensationOperationsAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "payment_compensation_operations",
+            "payment_compensation_refund",
+            "payment_compensation_case_history",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/payment-compensation-operations-store.ts";
+        const acceptedPaymentCompensationProviderEvidenceAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "payment_provider_observation",
+            "payment_intent",
+            "payment_attempt",
+            "payment_terminal_fact",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/payment-compensation-provider-evidence.ts";
+        const acceptedPaymentCompensationEvidenceAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["payment_compensation_refund", "payment_compensation_operations"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/payment-compensation-evidence-source.ts";
+        const acceptedConfirmedCompensationRefundAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "payment_compensation_refund",
+            "payment_compensation_action_history",
+            "payment_terminal_fact",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/payment-compensation-refund-source.ts";
+        const acceptedPaymentCompensationPositionAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["payment_compensation_refund", "payment_compensation_action_history"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/payment-compensation-refund-position-source.ts";
+        const acceptedPaymentCompensationSourceAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["payment_intent", "payment_provider_observation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/payment-compensation-source.ts";
+        const acceptedPaymentCompensationRefundAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["payment_compensation_refund", "payment_compensation_case_history"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/payment-compensation-refund-store.ts";
+        const acceptedPaymentCompensationActionAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["payment_compensation_action_history", "payment_compensation_case_history"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/payment-compensation-action-store.ts";
+        const acceptedPaymentCompensationCaseAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          module.manifest.ownedDatabase?.tables?.includes("payment_compensation_case_history") &&
+          moduleRelative === "src/infrastructure/persistence/payment-compensation-case-store.ts";
+        const acceptedPaymentCompensationOperationAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          module.manifest.ownedDatabase?.tables?.includes(
+            "payment_compensation_operation_history",
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/payment-compensation-operation-store.ts";
+        const acceptedPaymentCompensationLeaseAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          module.manifest.ownedDatabase?.tables?.includes("payment_compensation_lease_history") &&
+          moduleRelative === "src/infrastructure/persistence/payment-compensation-lease-store.ts";
+        const acceptedPaymentTipSelectionAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          module.manifest.ownedDatabase?.tables?.includes("payment_tip_selection") &&
+          moduleRelative === "src/infrastructure/persistence/payment-tip-selection-store.ts";
+        const acceptedDiningCheckoutCommitmentAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          [
+            "dining_table",
+            "dining_session",
+            "dining_participant",
+            "dining_checkout_commitment",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/dining-checkout-commitment-store.ts";
+        const acceptedDiningItemServiceAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          module.manifest.ownedDatabase?.tables?.includes("dining_item_service_record") &&
+          [
+            "src/infrastructure/persistence/dining-item-service-store.ts",
+            "src/infrastructure/persistence/dining-item-service-reader.ts",
+          ].includes(moduleRelative);
         const acceptedDiningAdmissionConsumptionAsset =
           module.packageName === "@rms/dining" &&
           module.manifest.ownedDatabase?.schema === "rms_dining" &&
@@ -328,13 +1133,34 @@ async function scanUnsupported(root, module, diagnostics) {
           ) &&
           moduleRelative === "src/infrastructure/persistence/dining-move-store.ts";
         // WP-2282 admits only the scoped Closing owner transaction.
+        const acceptedDiningExceptionTaskAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          module.manifest.ownedDatabase?.tables?.includes("dining_exception_task") &&
+          moduleRelative === "src/infrastructure/persistence/dining-exception-task-store.ts";
+        // WP-2402: exact scoped Host-transfer store; normal SQL/driver checks still apply.
+        const acceptedDiningHostTransferAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          [
+            "dining_table",
+            "dining_session",
+            "dining_participant",
+            "dining_host_transfer_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/dining-host-transfer-store.ts";
         const acceptedDiningClosingAsset =
           module.packageName === "@rms/dining" &&
           module.manifest.ownedDatabase?.schema === "rms_dining" &&
           ["dining_session", "dining_closing_operation"].every((table) =>
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
-          moduleRelative === "src/infrastructure/persistence/dining-closing-store.ts";
+          (moduleRelative === "src/infrastructure/persistence/dining-closing-store.ts" ||
+            (moduleRelative === "src/infrastructure/persistence/dining-table-release-store.ts" &&
+              module.manifest.ownedDatabase?.tables?.includes("dining_table_release_operation") &&
+              module.manifest.ownedDatabase?.tables?.includes("dining_table")) ||
+            (moduleRelative === "src/infrastructure/persistence/dining-closing-fence.ts" &&
+              module.manifest.ownedDatabase?.tables?.includes("dining_table")));
         // WP-2280 admits only the coherent owner participation reader.
         const acceptedDiningParticipationAsset =
           module.packageName === "@rms/dining" &&
@@ -355,6 +1181,355 @@ async function scanUnsupported(root, module, diagnostics) {
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-guest-binding-store.ts";
         // WP-2352 admits only the owner atomic Order writer with its current Cart dependencies.
+        const acceptedOrderAcceptanceAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_acceptance_record",
+            "order_batch",
+            "order_termination_record",
+            "order_revision",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-acceptance-store.ts";
+        const acceptedFulfillmentReadinessStoreAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          [
+            "fulfillment",
+            "fulfillment_item",
+            "fulfillment_creation_operation",
+            "fulfillment_item_ready_result",
+            "fulfillment_ready_operation",
+            "pickup_handoff_record",
+            "pickup_handoff_item",
+            "pickup_handoff_operation",
+            "pickup_proof_generation",
+            "pickup_proof_invalidation",
+            "pickup_proof_operation",
+            "pickup_proof_verification",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/fulfillment-readiness-store.ts";
+        const acceptedPickupHandoffStoreAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          [
+            "fulfillment",
+            "pickup_handoff_record",
+            "pickup_handoff_item",
+            "pickup_handoff_operation",
+            "fulfillment_completion_publication",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          [
+            "src/infrastructure/persistence/pickup-handoff-store.ts",
+            "src/infrastructure/persistence/pickup-handoff-history.ts",
+          ].includes(moduleRelative);
+        const acceptedFulfillmentCompletionStoreAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          module.manifest.ownedDatabase?.tables?.includes("fulfillment_completion_publication") &&
+          moduleRelative === "src/infrastructure/persistence/fulfillment-completion-store.ts";
+        const acceptedPickupProofStoreAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          [
+            "fulfillment",
+            "pickup_proof_generation",
+            "pickup_proof_invalidation",
+            "pickup_proof_operation",
+            "pickup_proof_verification",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          [
+            "src/infrastructure/persistence/pickup-proof-store.ts",
+            "src/infrastructure/persistence/pickup-proof-history.ts",
+            "src/infrastructure/persistence/pickup-proof-issuer.ts",
+          ].includes(moduleRelative);
+        const acceptedPickupFulfillmentStoreAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          ["fulfillment", "fulfillment_item", "fulfillment_creation_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/pickup-fulfillment-store.ts";
+        const acceptedKitchenLifecycleRowsAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          [
+            "kitchen_work_lifecycle_operation",
+            "kitchen_order_item_ready_result",
+            "kitchen_ready_publication",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/kitchen-work-lifecycle-rows.ts";
+        const acceptedKitchenLifecycleStoreAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          [
+            "kitchen_ticket",
+            "kitchen_work_item",
+            "kitchen_work_lifecycle_operation",
+            "kitchen_order_item_ready_result",
+            "kitchen_ready_publication",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/kitchen-work-lifecycle-store.ts";
+        const acceptedKitchenQueueSourceAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          [
+            "kitchen_ticket",
+            "kitchen_work_item",
+            "kitchen_creation_record",
+            "kitchen_work_lifecycle_operation",
+            "kitchen_order_item_ready_result",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/kitchen-queue-source-reader.ts";
+        const acceptedKitchenQueueQueriesAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          ["kitchen_work_queue_projection", "kitchen_work_queue_projection_generation"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          [
+            "src/infrastructure/persistence/kitchen-queue-queries.ts",
+            "src/infrastructure/persistence/kitchen-queue-projection-store.ts",
+          ].includes(moduleRelative);
+        const acceptedKitchenCustomerStatusAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          ["kitchen_ticket", "kitchen_work_item", "kitchen_order_item_ready_result"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/kitchen-customer-status-reader.ts";
+        const acceptedKitchenRoutingConfigurationAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          module.manifest.ownedDatabase?.tables?.includes("kitchen_routing_configuration") &&
+          moduleRelative ===
+            "src/infrastructure/persistence/kitchen-routing-configuration-store.ts";
+        const acceptedKitchenTicketAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          [
+            "kitchen_ticket",
+            "kitchen_work_item",
+            "kitchen_action_record",
+            "kitchen_creation_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/kitchen-ticket-store.ts";
+        const acceptedOrderFulfillmentSourceAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_payment_disposition_record",
+            "order_header",
+            "order_batch",
+            "order_item",
+            "order_submission_record",
+            "order_acceptance_record",
+            "order_termination_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-fulfillment-source-store.ts";
+        const acceptedOrderKitchenSourceAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_payment_disposition_record",
+            "order_header",
+            "order_batch",
+            "order_item",
+            "order_submission_record",
+            "order_acceptance_record",
+            "order_termination_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-kitchen-source-store.ts";
+        const acceptedPaymentReceiptCoverageAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["payment_intent", "payment_provider_observation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/payment-receipt-coverage-source.ts";
+        const acceptedReceiptStoreIdentityAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          module.manifest.ownedDatabase?.tables?.includes("store") &&
+          moduleRelative === "src/infrastructure/persistence/receipt-store-identity-source.ts";
+        const acceptedReceiptIssuerAsset =
+          module.packageName === "@bop/operating-entity" &&
+          module.manifest.ownedDatabase?.schema === "bop_operating_entity" &&
+          ["store_operating_entity_assignment", "operating_entity"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/receipt-issuer-source.ts";
+        const acceptedReceiptTemplateAsset =
+          module.packageName === "@rms/printing-device" &&
+          module.manifest.ownedDatabase?.schema === "rms_device" &&
+          module.manifest.ownedDatabase?.tables?.includes("digital_receipt_template_version") &&
+          moduleRelative === "src/infrastructure/persistence/digital-receipt-template-store.ts";
+        const acceptedReceiptOrderAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["order_header", "order_submission_record", "order_batch", "order_item"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          [
+            "src/infrastructure/persistence/receipt-order-source.ts",
+            "src/infrastructure/persistence/submitted-order-amount-source.ts",
+          ].includes(moduleRelative);
+        const acceptedDigitalReceiptAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["digital_receipt_record", "order_header", "order_submission_record"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/digital-receipt-store.ts";
+        const submittedTables = {
+          "src/infrastructure/persistence/order-submitted-consumer.ts": [
+            "order_status_projection",
+            "order_status_projection_generation",
+          ],
+          "src/infrastructure/persistence/order-submitted-history-source.ts": [
+            "order_revision",
+            "order_acceptance_record",
+            "additional_dining_batch_record",
+            "order_header",
+            "order_submission_record",
+            "order_batch",
+            "order_item",
+          ],
+        }[moduleRelative];
+        const acceptedSubmittedOwnerAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          submittedTables !== undefined &&
+          submittedTables.every((table) => module.manifest.ownedDatabase?.tables?.includes(table));
+        const acceptedOrderRefundBasisAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["order_batch", "order_item", "order_submission_record"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/order-refund-basis-reader.ts";
+        const acceptedAdditionalDiningBatchAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "additional_dining_batch_record",
+            "order_header",
+            "order_revision",
+            "order_batch",
+            "order_item",
+            "order_submission_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          [
+            "src/infrastructure/persistence/additional-dining-batch-store.ts",
+            "src/infrastructure/persistence/additional-dining-execution-reader.ts",
+            "src/infrastructure/persistence/dining-order-item-state-reader.ts",
+          ].includes(moduleRelative);
+        const acceptedOrderFulfillmentCompletionAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["order_fulfillment_completion_record", "order_header", "order_revision"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/order-fulfillment-completion-store.ts";
+        const acceptedOrderStatusProjectionAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["order_status_projection", "order_status_projection_generation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/order-status-projection-store.ts";
+        const acceptedOrderTerminationAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_termination_record",
+            "order_revision",
+            "order_fulfillment_completion_record",
+            "order_acceptance_record",
+            "order_header",
+            "order_batch",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-termination-store.ts";
+        const acceptedOrderPaymentDispositionAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["order_payment_disposition_record", "order_batch"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/order-payment-disposition-store.ts";
+        const acceptedTaskStoreAsset =
+          module.packageName === "@bop/task" &&
+          module.manifest.ownedDatabase?.schema === "bop_task" &&
+          module.manifest.ownedDatabase?.tables?.includes("task_version") &&
+          moduleRelative === "src/infrastructure/persistence/task-store.ts";
+        const acceptedOrderSettledFinalityAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          module.manifest.ownedDatabase?.tables?.includes("order_settled_finality") &&
+          moduleRelative === "src/infrastructure/persistence/order-settled-finality-store.ts";
+        const acceptedBatchCheckoutExpiryAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          module.manifest.ownedDatabase?.tables?.includes("order_batch_checkout_expiry") &&
+          moduleRelative === "src/infrastructure/persistence/order-batch-checkout-expiry-store.ts";
+        const acceptedOrderClosurePositionAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          module.manifest.ownedDatabase?.tables?.includes("order_closure_version") &&
+          [
+            "src/infrastructure/persistence/order-closure-position.ts",
+            "src/infrastructure/persistence/order-closure-store.ts",
+          ].includes(moduleRelative);
+        const acceptedOrderRevisionPositionAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_header",
+            "order_batch",
+            "order_revision",
+            "order_submission_record",
+            "additional_dining_batch_record",
+            "order_acceptance_record",
+            "order_termination_record",
+            "order_fulfillment_completion_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-revision-position.ts";
+        const acceptedOrderCancellationRequestAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["order_header", "order_cancellation_request_version"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/order-cancellation-request-store.ts";
+        const acceptedDiningSessionOrderInventoryAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_header",
+            "order_batch",
+            "order_submission_record",
+            "order_amendment",
+            "order_amendment_state_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/dining-session-order-inventory.ts";
+        const acceptedDiningSessionOrderLookupAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          module.manifest.ownedDatabase?.tables?.includes("order_header") &&
+          moduleRelative === "src/infrastructure/persistence/dining-session-order-lookup.ts";
+        const acceptedOrderPaymentWaitAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["order_payment_acceptance_wait", "order_payment_disposition_record"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/order-payment-acceptance-wait-store.ts";
+        const acceptedOrderPaymentFailureAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          module.manifest.ownedDatabase?.tables?.includes("order_payment_failure_record") &&
+          moduleRelative === "src/infrastructure/persistence/order-payment-failure-store.ts";
         const acceptedOrderCreationWriterAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -365,8 +1540,10 @@ async function scanUnsupported(root, module, diagnostics) {
             "order_number_allocation",
             "order_header",
             "order_submission_record",
+            "order_revision",
             "order_batch",
             "order_item",
+            "order_capacity_link",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/order-creation-store.ts";
         // WP-2350 admits only the scoped immutable Order submission reader.
@@ -393,7 +1570,7 @@ async function scanUnsupported(root, module, diagnostics) {
         const acceptedDiningCartQueryAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
-          ["cart", "cart_line"].every((table) =>
+          ["cart", "cart_line", "dining_cart_replacement"].every((table) =>
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/dining-cart-read-store.ts";
@@ -401,10 +1578,18 @@ async function scanUnsupported(root, module, diagnostics) {
         const acceptedDiningCartSelectionAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
-          ["cart", "cart_line", "dining_cart_operation"].every((table) =>
+          ["cart", "cart_line", "dining_cart_operation", "dining_cart_replacement"].every((table) =>
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/dining-cart-selection-store.ts";
+        // WP-2402 accepts only the scoped replacement writer with its owned association.
+        const acceptedDiningCartReplacementAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "cart_line", "dining_cart_replacement"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/dining-cart-replacement-store.ts";
         // WP-2230 accepts only the reader of existing Ordering operation history.
         const acceptedCartOperationAsset =
           module.packageName === "@rms/ordering" &&
@@ -433,6 +1618,30 @@ async function scanUnsupported(root, module, diagnostics) {
             "src/infrastructure/persistence/cart-quote-store.ts",
             "src/infrastructure/persistence/cart-quote-expiry-store.ts",
           ].includes(moduleRelative);
+        const acceptedCheckoutSessionAllocationAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "checkout_session_allocation", "order_submission_record", "order_batch"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/checkout-session-allocation-store.ts";
+        const acceptedCheckoutSessionAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "cart",
+            "cart_quote_attachment",
+            "checkout_session_record",
+            "checkout_session_allocation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/checkout-session-store.ts";
+        const acceptedCheckoutDetailsAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["cart", "checkout_details_record"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/checkout-details-store.ts";
         const acceptedCartLifecycleAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -452,15 +1661,65 @@ async function scanUnsupported(root, module, diagnostics) {
             moduleRelative.startsWith("migrations/") ||
             extname(path).toLowerCase() === ".sql") &&
           ![...sharedAuthorityModules.values()].includes(module.packageName) &&
+          !acceptedGuestEntryAdmissionAsset &&
           !acceptedGuestEntryAsset &&
           !acceptedGuestBindingAsset &&
           !acceptedGuestDiningBindingAsset &&
           !acceptedPublishedMenuAsset &&
           !acceptedAvailabilityQueryAsset &&
+          !acceptedCurrentMenuReleaseAsset &&
+          !acceptedCurrentMenuPlacementAsset &&
+          !acceptedCurrentSelectionFactsAsset &&
+          !acceptedKillSwitchQueryAsset &&
+          !acceptedCurrentSkuAsset &&
+          !acceptedCurrentOptionBindingsAsset &&
           !acceptedCapacityQueryAsset &&
           !acceptedCapacityHoldWriterAsset &&
+          !acceptedAsapCapacityAsset &&
+          !acceptedInventoryItemAsset &&
+          !acceptedStockCandidateAsset &&
+          !acceptedInventoryFinalValidationAsset &&
+          !acceptedStockReservationAsset &&
+          !acceptedBrowserSessionSelectionAsset &&
+          !acceptedMerchantOrganizationAsset &&
+          !acceptedBrandLifecycleAsset &&
+          !acceptedBrowserSessionStoreAsset &&
+          !acceptedOidcAuthorizationAsset &&
+          !acceptedCurrentBrowserSessionAsset &&
+          !acceptedCurrentWorkforceMfaAsset &&
+          !acceptedStoreExceptionContentAsset &&
+          !acceptedStorePauseHistoryAsset &&
+          !acceptedStorePublicationContentAsset &&
+          !acceptedStorePublicationMaterializerAsset &&
+          !acceptedStoreAuthoringAsset &&
+          !acceptedStoreReviewSnapshotAsset &&
+          !acceptedPublicStoreProfileTimingAsset &&
+          !acceptedPublicStoreProfileAsset &&
+          !acceptedStoreServiceControlAsset &&
+          !acceptedStoreWeeklyScheduleAsset &&
+          !acceptedStoreBusinessDateAsset &&
+          !acceptedCurrentMembershipAsset &&
+          !acceptedCurrentPermissionAsset &&
+          !acceptedWorkflowDefinitionAsset &&
+          !acceptedCurrentLiveGateAsset &&
+          !acceptedPublishingMutationAsset &&
+          !acceptedRecipeStoreAsset &&
+          !acceptedRecipePreparationContentAsset &&
+          !acceptedRecipeVersionAsset &&
+          !acceptedRecipeModifierAsset &&
+          !acceptedRecipeDemandAsset &&
+          !acceptedRecipeBindingAsset &&
+          !acceptedRecipeQueryAsset &&
+          !acceptedLotHoldAsset &&
+          !acceptedCurrentPickupCapacityAsset &&
           !acceptedCapacityHoldTransitionAsset &&
           !acceptedCapacityAllocationTerminalAsset &&
+          !acceptedCurrentQuoteServiceAsset &&
+          !acceptedCurrentConfiguredQuoteServiceAsset &&
+          !acceptedCurrentTaxConfigurationAsset &&
+          !acceptedCurrentPriceBookAsset &&
+          !acceptedPilotPublicationAsset &&
+          !acceptedCurrentOptionPriceAsset &&
           !acceptedPriceQuoteQueryAsset &&
           !acceptedPriceQuoteWriterAsset &&
           !acceptedPriceQuoteRequestAsset &&
@@ -470,20 +1729,96 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningSessionJoinAsset &&
           !acceptedDiningParticipationAsset &&
           !acceptedDiningGuestBindingAsset &&
+          !acceptedDiningExceptionTaskAsset &&
           !acceptedDiningClosingAsset &&
+          !acceptedDiningHostTransferAsset &&
           !acceptedDiningMoveAsset &&
           !acceptedDiningMovedJoinAsset &&
           !acceptedDiningAdmissionConsumptionAsset &&
+          !acceptedDiningCheckoutCommitmentAsset &&
+          !acceptedDiningItemServiceAsset &&
+          !acceptedPaymentTipSelectionAsset &&
+          !acceptedPaymentCompensationLeaseAsset &&
+          !acceptedPaymentCompensationOperationAsset &&
+          !acceptedPaymentCompensationCaseAsset &&
+          !acceptedOrderExceptionSourceAsset &&
+          !acceptedPaymentCompensationExceptionAsset &&
+          !acceptedOrderCancelledAmountAsset &&
+          !acceptedPaymentReconciliationCandidatesAsset &&
+          !acceptedPaymentReconciliationRunAsset &&
+          !acceptedReconciliationFollowUpAsset &&
+          !acceptedProviderCaptureExceptionAsset &&
+          !acceptedPaymentReconciliationExceptionAsset &&
+          !acceptedOrdinaryRefundCaptureAsset &&
+          !acceptedOrdinaryRefundRequestAsset &&
+          !acceptedOrdinaryRefundOperationAsset &&
+          !acceptedOrdinaryRefundApprovalAsset &&
+          !acceptedPaymentRefundStatusAsset &&
+          !acceptedPaymentCompensationOperationsAsset &&
+          !acceptedPaymentCompensationProviderEvidenceAsset &&
+          !acceptedPaymentCompensationEvidenceAsset &&
+          !acceptedPaymentCompensationPositionAsset &&
+          !acceptedConfirmedCompensationRefundAsset &&
+          !acceptedPaymentCompensationSourceAsset &&
+          !acceptedPaymentCompensationRefundAsset &&
+          !acceptedPaymentCompensationActionAsset &&
+          !acceptedPaymentIntentCreationAsset &&
+          !acceptedPaymentTerminalSourceAsset &&
+          !acceptedPaymentProviderObservationAsset &&
+          !acceptedPaymentStatusStoreAsset &&
+          !acceptedPaymentTerminalStoreAsset &&
           !acceptedCartQueryAsset &&
           !acceptedOrderCreationQueryAsset &&
           !acceptedOrderCreationWriterAsset &&
+          !acceptedOrderPaymentFailureAsset &&
+          !acceptedOrderAcceptanceAsset &&
+          !acceptedOrderTerminationAsset &&
+          !acceptedOrderStatusProjectionAsset &&
+          !acceptedPaymentReceiptCoverageAsset &&
+          !acceptedReceiptStoreIdentityAsset &&
+          !acceptedReceiptIssuerAsset &&
+          !acceptedDigitalReceiptAsset &&
+          !acceptedReceiptTemplateAsset &&
+          !acceptedReceiptOrderAsset &&
+          !acceptedOrderFulfillmentCompletionAsset &&
+          !acceptedSubmittedOwnerAsset &&
+          !acceptedOrderRefundBasisAsset &&
+          !acceptedAdditionalDiningBatchAsset &&
+          !acceptedOrderKitchenSourceAsset &&
+          !acceptedOrderFulfillmentSourceAsset &&
+          !acceptedKitchenTicketAsset &&
+          !acceptedKitchenLifecycleRowsAsset &&
+          !acceptedPickupFulfillmentStoreAsset &&
+          !acceptedFulfillmentReadinessStoreAsset &&
+          !acceptedPickupProofStoreAsset &&
+          !acceptedPickupHandoffStoreAsset &&
+          !acceptedFulfillmentCompletionStoreAsset &&
+          !acceptedKitchenLifecycleStoreAsset &&
+          !acceptedKitchenQueueQueriesAsset &&
+          !acceptedKitchenQueueSourceAsset &&
+          !acceptedKitchenCustomerStatusAsset &&
+          !acceptedKitchenRoutingConfigurationAsset &&
+          !acceptedOrderPaymentDispositionAsset &&
+          !acceptedOrderPaymentWaitAsset &&
+          !acceptedTaskStoreAsset &&
+          !acceptedOrderSettledFinalityAsset &&
+          !acceptedBatchCheckoutExpiryAsset &&
+          !acceptedOrderClosurePositionAsset &&
+          !acceptedOrderRevisionPositionAsset &&
+          !acceptedOrderCancellationRequestAsset &&
+          !acceptedDiningSessionOrderInventoryAsset &&
+          !acceptedDiningSessionOrderLookupAsset &&
           !acceptedDiningCartQueryAsset &&
           !acceptedDiningCartSelectionAsset &&
+          !acceptedDiningCartReplacementAsset &&
           !acceptedCartOperationAsset &&
           !acceptedCartItemWriterAsset &&
           !acceptedPickupBindingAsset &&
           !acceptedCartLifecycleAsset &&
-          !acceptedCartQuoteAsset
+          !acceptedCartQuoteAsset &&
+          !acceptedCheckoutSessionAllocationAsset &&
+          !acceptedCheckoutSessionAsset &&
+          !acceptedCheckoutDetailsAsset
         )
           diagnostics.push(
             diag(
@@ -769,6 +2104,16 @@ function accessRules(access, module, owners, platforms, file, diagnostics) {
       access.readPattern === "event-projection" &&
       access.principal.kind === "projection-builder"
     ) &&
+    !(
+      shared &&
+      access.target.schema === "platform_projection" &&
+      access.target.table === "order_exception_source" &&
+      access.principal.kind === "projection-builder" &&
+      access.principal.id === "@bop/projection.order-exception.v1" &&
+      access.source ===
+        "packages/bop/projection/src/infrastructure/persistence/order-exception-source-store.ts" &&
+      access.readPattern === "public-query-contract"
+    ) &&
     !(shared && access.principal.kind === "shared-infrastructure")
   )
     diagnostics.push(
@@ -894,7 +2239,20 @@ export async function validateDatabaseOwnership({ root = process.cwd() } = {}) {
     }
     if (
       module.manifest.ownedDatabase?.schema === null &&
-      (!["@bop/audit", "@bop/eventing"].includes(module.packageName) ||
+      ((!["@bop/audit", "@bop/eventing"].includes(module.packageName) &&
+        !(
+          module.packageName === "@bop/projection" &&
+          Array.isArray(evidence.accesses) &&
+          evidence.accesses.every(
+            (access) =>
+              access.target?.schema === "platform_projection" &&
+              access.target?.table === "order_exception_source" &&
+              access.principal?.kind === "projection-builder" &&
+              access.principal?.id === "@bop/projection.order-exception.v1" &&
+              access.source ===
+                "packages/bop/projection/src/infrastructure/persistence/order-exception-source-store.ts",
+          )
+        )) ||
         (Array.isArray(evidence.tables) && evidence.tables.length > 0))
     ) {
       diagnostics.push(

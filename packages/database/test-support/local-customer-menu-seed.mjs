@@ -39,8 +39,8 @@ export async function seedMenu(admin, mode = "DineIn") {
       digest,
       at,
       JSON.stringify([scope.storeReference]),
+      JSON.stringify(["CUSTOMER_PWA"]),
       JSON.stringify([mode === "Pickup" ? "PICKUP" : "DINE_IN"]),
-      JSON.stringify([mode === "Pickup" ? "PICKUP" : "TABLE_SERVICE"]),
     ],
   );
   await admin.query(
@@ -63,5 +63,21 @@ export async function seedMenu(admin, mode = "DineIn") {
   await admin.query(
     `INSERT INTO rms_catalog.published_menu_projection_checkpoint (consumer_name,brand_id,menu_id,active_generation_id,source_event_id,source_aggregate_version,projected_at) VALUES ('catalog.published-menu-projection',$1,$2,$3,$4,4,$5)`,
     [scope.brandReference, id(1), id(9), id(10), at],
+  );
+  await admin.query(
+    "INSERT INTO rms_catalog.menu_release_effective_period(timing_version_id,release_id,menu_id,brand_id,time_zone,effective_from,effective_until,period_digest,approval_evidence_id,created_at) VALUES($1,$2,$3,$4,'UTC',$5,NULL,$6,$7,$5)",
+    [id(50), id(8), id(1), scope.brandReference, at, digest, id(7)],
+  );
+  await admin.query(
+    "INSERT INTO rms_catalog.menu_version_store(menu_version_id,menu_id,brand_id,store_id) VALUES($1,$2,$3,$4)",
+    [id(4), id(1), scope.brandReference, scope.storeReference],
+  );
+  await admin.query(
+    "INSERT INTO rms_catalog.menu_version_channel(menu_version_id,menu_id,brand_id,channel_code) VALUES($1,$2,$3,'CUSTOMER_PWA')",
+    [id(4), id(1), scope.brandReference],
+  );
+  await admin.query(
+    "INSERT INTO rms_catalog.menu_version_order_type(menu_version_id,menu_id,brand_id,order_type_code) VALUES($1,$2,$3,$4)",
+    [id(4), id(1), scope.brandReference, mode === "Pickup" ? "PICKUP" : "DINE_IN"],
   );
 }

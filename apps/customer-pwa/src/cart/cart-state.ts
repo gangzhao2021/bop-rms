@@ -8,6 +8,7 @@ export type CartState =
   | { readonly status: "offline-readonly"; readonly cart: CartView | null }
   | {
       readonly status:
+        | "replacement-forbidden"
         | "session-expired"
         | "not-found"
         | "conflict"
@@ -25,6 +26,7 @@ export type CartState =
   | { readonly status: "command-pending"; readonly cart: CartView };
 
 type PendingOperation =
+  | { readonly kind: "replace"; readonly cart: CartView; readonly operationReference: string }
   | {
       readonly kind: "update";
       readonly cart: CartView;
@@ -43,6 +45,7 @@ export interface CartStateController {
   getState(): CartState;
   load(): Promise<void>;
   removeItem(cartItemReference: string): Promise<void>;
+  replaceExpiredCart?(): Promise<void>;
   retry(): Promise<void>;
   setOnline(online: boolean): void;
   subscribe(listener: () => void): () => void;
@@ -111,23 +114,25 @@ export function createCartStateController({
     const parsed =
       error instanceof CartClientError ? error : new CartClientError("cart_service_unavailable");
     const status =
-      parsed.code === "cart_session_expired"
-        ? "session-expired"
-        : parsed.code === "cart_not_found"
-          ? "not-found"
-          : parsed.code === "cart_version_conflict" || parsed.code === "cart_idempotency_conflict"
-            ? "conflict"
-            : parsed.code === "cart_selection_invalid" || parsed.code === "cart_request_invalid"
-              ? "validation"
-              : parsed.code === "cart_rate_limited"
-                ? "rate-limited"
-                : parsed.code === "cart_expired"
-                  ? "expired"
-                  : parsed.code === "cart_abandoned"
-                    ? "abandoned"
-                    : parsed.code === "network_unknown"
-                      ? "command-failed"
-                      : "unavailable";
+      parsed.code === "cart_replacement_forbidden"
+        ? "replacement-forbidden"
+        : parsed.code === "cart_session_expired"
+          ? "session-expired"
+          : parsed.code === "cart_not_found"
+            ? "not-found"
+            : parsed.code === "cart_version_conflict" || parsed.code === "cart_idempotency_conflict"
+              ? "conflict"
+              : parsed.code === "cart_selection_invalid" || parsed.code === "cart_request_invalid"
+                ? "validation"
+                : parsed.code === "cart_rate_limited"
+                  ? "rate-limited"
+                  : parsed.code === "cart_expired"
+                    ? "expired"
+                    : parsed.code === "cart_abandoned"
+                      ? "abandoned"
+                      : parsed.code === "network_unknown"
+                        ? "command-failed"
+                        : "unavailable";
     publish({
       status,
       cart,
@@ -148,9 +153,13 @@ export function createCartStateController({
     publish({ status: "command-pending", cart });
     try {
       const result =
-        operation.kind === "update"
-          ? await client.updateItem(operation)
-          : await client.removeItem(operation);
+        operation.kind === "replace"
+          ? await (client.replaceExpiredCart === undefined
+              ? Promise.reject(new CartClientError("cart_service_unavailable"))
+              : client.replaceExpiredCart(operation))
+          : operation.kind === "update"
+            ? await client.updateItem(operation)
+            : await client.removeItem(operation);
       pending = null;
       publish({ status: online ? "ready" : "offline-readonly", cart: result });
     } catch (error) {
@@ -215,6 +224,23 @@ export function createCartStateController({
   return Object.freeze({
     getState: () => state,
     load,
+    ...(client.replaceExpiredCart === undefined
+      ? {}
+      : {
+          replaceExpiredCart: () => {
+            const cart = currentCart();
+            if (
+              state.status === "replacement-forbidden" ||
+              cart === null ||
+              cart.cart.orderType !== "DineIn" ||
+              cart.cart.lifecycle.status === "Active" ||
+              cart.cart.warnings.includes("FEATURE_DISABLED") ||
+              cart.cart.warnings.includes("PROJECTION_STALE")
+            )
+              return Promise.resolve();
+            return begin((cart) => ({ kind: "replace", cart, operationReference: keyFactory() }));
+          },
+        }),
     removeItem: (cartItemReference: string) =>
       begin(
         (cart) => ({

@@ -19,6 +19,7 @@ export interface ReceiptSnapshotView {
     readonly quantity: number;
     readonly lineTotal: ReceiptMoneyView;
   }[];
+  readonly adjustments?: { readonly discount: ReceiptMoneyView; readonly fee: ReceiptMoneyView };
   readonly subtotal: ReceiptMoneyView;
   readonly tax: ReceiptMoneyView;
   readonly tip: ReceiptMoneyView;
@@ -36,7 +37,16 @@ export interface ReceiptRecordView {
   readonly snapshot: ReceiptSnapshotView;
 }
 
+export interface ReceiptFinancialView {
+  readonly observedAt: string;
+  readonly currencyCode: string;
+  readonly capturedMinor: bigint;
+  readonly confirmedRefundMinor: bigint;
+  readonly pendingRefundMinor: bigint;
+  readonly unresolvedAttemptCount: number;
+}
 export interface ReceiptView {
+  readonly financial?: ReceiptFinancialView | null;
   readonly orderReference: string;
   readonly freshnessStatus: "Fresh" | "Stale";
   readonly deliveryStatus:

@@ -8,24 +8,25 @@ import {
 } from "./cart.js";
 import {
   parseOrderItemTransactionSnapshot,
+  parseConfiguredOrderItemTransactionSnapshot,
   type OrderItemTransactionSnapshot,
 } from "./order-item-snapshot.js";
 import { createOrderNumberAllocation, type OrderNumberAllocation } from "./order-number.js";
 import { parseOrderAggregate, type OrderAggregate } from "./order.js";
 
-export interface OrderCreationRecord {
+export interface OrderCreationRecord<V extends 1 | 2 = 1> {
   readonly submissionReference: OrderingReference;
   readonly submissionIntentHash: OrderingHash;
   readonly guestSessionReference: OrderingReference;
   readonly order: OrderAggregate;
-  readonly items: readonly OrderItemTransactionSnapshot[];
+  readonly items: readonly OrderItemTransactionSnapshot<V>[];
   readonly orderNumberAllocation: OrderNumberAllocation;
   readonly createdAt: OrderingInstant;
 }
 
-export type CreateOrderResult =
-  | { readonly status: "Created"; readonly record: OrderCreationRecord }
-  | { readonly status: "AlreadyCreated"; readonly record: OrderCreationRecord };
+export type CreateOrderResult<V extends 1 | 2 = 1> =
+  | { readonly status: "Created"; readonly record: OrderCreationRecord<V> }
+  | { readonly status: "AlreadyCreated"; readonly record: OrderCreationRecord<V> };
 
 export const orderCreationErrorCodes = [
   "ORDER_CREATE_INPUT_INVALID",
@@ -87,7 +88,7 @@ function exact(value: unknown, fields: readonly string[]): Readonly<Record<strin
   }
 }
 
-export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
+function parseRecord<V extends 1 | 2>(value: unknown, quoteVersion: V): OrderCreationRecord<V> {
   const raw = exact(value, [
     "submissionReference",
     "submissionIntentHash",
@@ -116,7 +117,13 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
     const guestSessionReference = parseOrderingReference(raw.guestSessionReference);
     const createdAt = parseOrderingInstant(raw.createdAt);
     const order = parseOrderAggregate(raw.order);
-    const items = Object.freeze(captured.map(parseOrderItemTransactionSnapshot));
+    const items = Object.freeze(
+      captured.map((value) =>
+        quoteVersion === 2
+          ? parseConfiguredOrderItemTransactionSnapshot(value)
+          : parseOrderItemTransactionSnapshot(value),
+      ),
+    ) as readonly OrderItemTransactionSnapshot<V>[];
     const allocationRaw = exact(raw.orderNumberAllocation, [
       "orderReference",
       "brandReference",
@@ -157,6 +164,11 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
           identity.orderItemReference !== item.orderItemReference ||
           item.catalog.brandReference !== order.brandReference ||
           item.catalog.storeReference !== order.storeReference ||
+          (quoteVersion === 2 &&
+            "optionPrices" in item.pricing &&
+            (item.pricing.optionPrices as readonly { orderType: string }[]).some(
+              (option) => option.orderType !== order.orderType,
+            )) ||
           item.pricing.quoteReference !== batch.quoteReference ||
           item.pricing.quoteInputDigest !== quoteInputDigest ||
           identity.orderBatchReference !== item.orderBatchReference ||
@@ -180,4 +192,11 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
     if (error instanceof OrderCreationError) throw error;
     return invalid();
   }
+}
+
+export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
+  return parseRecord(value, 1);
+}
+export function parseConfiguredOrderCreationRecord(value: unknown): OrderCreationRecord<2> {
+  return parseRecord(value, 2);
 }

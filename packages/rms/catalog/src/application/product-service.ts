@@ -390,6 +390,8 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
         if (
           existing !== undefined &&
           (existing.skuCode !== sku.skuCode ||
+            existing.unitOfSale !== sku.unitOfSale ||
+            existing.unitQuantity !== sku.unitQuantity ||
             existing.createdAt !== sku.createdAt ||
             existing.createdByActorReference !== sku.createdByActorReference)
         )

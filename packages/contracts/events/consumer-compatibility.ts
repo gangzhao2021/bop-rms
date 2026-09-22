@@ -536,6 +536,13 @@ export const eventConsumerContracts = defineEventConsumerContracts([
   contract(
     "ordering.order-status-projection",
     "@rms/ordering",
+    "OrderSubmitted",
+    "store",
+    "replace_order_status_projection",
+  ),
+  contract(
+    "ordering.order-status-projection",
+    "@rms/ordering",
     "OrderCreated",
     "store",
     "replace_order_status_projection",

@@ -1,4 +1,57 @@
 import {
+  createCustomerSessionBootstrapHandler,
+  customerSessionBootstrapRoute,
+} from "./customer-session-bootstrap.js";
+import {
+  customerPickupCodeRoute,
+  type CustomerPickupCodeHandler,
+  unavailableCustomerPickupCodeHandler,
+} from "./customer-pickup-code.js";
+import {
+  customerReceiptRoute,
+  CustomerReceiptHandler,
+  unavailableCustomerReceiptHandler,
+} from "./customer-receipt.js";
+import {
+  customerOrderStatusRoute,
+  type CustomerOrderStatusHandler,
+  unavailableCustomerOrderStatusHandler,
+} from "./customer-order-status.js";
+import {
+  CustomerPaymentResultHandler,
+  customerPaymentResultRoute,
+  unavailableCustomerPaymentResultHandler,
+} from "./customer-payment-result.js";
+import {
+  CustomerPaymentHandoffHandler,
+  customerPaymentHandoffRoute,
+  unavailableCustomerPaymentHandoffHandler,
+} from "./customer-payment-handoff.js";
+import {
+  CustomerPaymentIntentHandler,
+  customerPaymentIntentRoute,
+  unavailableCustomerPaymentIntentHandler,
+} from "./customer-payment-intent.js";
+import {
+  CustomerCheckoutSessionHandler,
+  CustomerCheckoutSessionReadHandler,
+  customerCheckoutSessionReadRoute,
+  customerCheckoutSessionRoute,
+  unavailableCustomerCheckoutSessionHandler,
+} from "./customer-checkout-session.js";
+import {
+  customerCheckoutDetailsRoute,
+  customerCheckoutDetailsCurrentRoute,
+  customerCheckoutPolicyRoute,
+  type CustomerCheckoutDetailsHandler,
+  unavailableCustomerCheckoutDetailsHandler,
+} from "./customer-checkout-details.js";
+import {
+  customerOrderSubmissionRoute,
+  type CustomerOrderSubmissionHandler,
+  unavailableCustomerOrderSubmissionHandler,
+} from "./customer-order-submission.js";
+import {
   CustomerDiningJoinHandler,
   customerDiningJoinRoute,
   unavailableCustomerDiningJoinHandler,
@@ -65,7 +118,18 @@ export interface AppOptions {
   customerDiningBinding?: CustomerDiningBindingHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
+  customerPaymentIntent?: CustomerPaymentIntentHandler;
+  customerPaymentHandoff?: CustomerPaymentHandoffHandler;
+  customerPaymentResult?: CustomerPaymentResultHandler;
   customerQuote?: CustomerQuoteHandler;
+  customerCheckoutSessionRead?: CustomerCheckoutSessionReadHandler;
+  customerCheckoutSession?: CustomerCheckoutSessionHandler;
+  customerOrderSubmission?: CustomerOrderSubmissionHandler;
+  customerOrderStatus?: CustomerOrderStatusHandler;
+  customerSessionBootstrap?: ReturnType<typeof createCustomerSessionBootstrapHandler>;
+  customerPickupCode?: CustomerPickupCodeHandler;
+  customerReceipt?: CustomerReceiptHandler;
+  customerCheckoutDetails?: CustomerCheckoutDetailsHandler;
   deploymentEnvironment?: DeploymentEnvironment;
   errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
@@ -124,7 +188,18 @@ export function createApp({
   customerDiningBinding,
   customerEntry,
   customerMenu,
+  customerPaymentIntent,
+  customerPaymentHandoff,
+  customerPaymentResult,
   customerQuote,
+  customerCheckoutSessionRead,
+  customerCheckoutSession,
+  customerOrderSubmission,
+  customerOrderStatus,
+  customerSessionBootstrap,
+  customerPickupCode,
+  customerReceipt,
+  customerCheckoutDetails,
   deploymentEnvironment = "development",
   errorLogger,
   healthReadiness,
@@ -199,6 +274,10 @@ export function createApp({
     customerMenu?.handler() ?? unavailableCustomerMenuHandler,
   );
   app.post(customerCartRoutes.create, customerCart?.create() ?? unavailableCustomerCartHandler);
+  app.post(
+    customerCartRoutes.replacement,
+    customerCart?.replace() ?? unavailableCustomerCartHandler,
+  );
   app.get(customerCartRoutes.read, customerCart?.read() ?? unavailableCustomerCartHandler);
   app.post(customerCartRoutes.addItem, customerCart?.addItem() ?? unavailableCustomerCartHandler);
   app.patch(
@@ -208,6 +287,55 @@ export function createApp({
   app.delete(
     customerCartRoutes.removeItem,
     customerCart?.removeItem() ?? unavailableCustomerCartHandler,
+  );
+  app.post(
+    customerCheckoutPolicyRoute,
+    customerCheckoutDetails?.policy() ?? unavailableCustomerCheckoutDetailsHandler,
+  );
+  app.post(
+    customerCheckoutDetailsCurrentRoute,
+    customerCheckoutDetails?.current() ?? unavailableCustomerCheckoutDetailsHandler,
+  );
+  app.post(
+    customerCheckoutDetailsRoute,
+    customerCheckoutDetails?.handler() ?? unavailableCustomerCheckoutDetailsHandler,
+  );
+  app.get(
+    customerPaymentResultRoute,
+    customerPaymentResult?.handler() ?? unavailableCustomerPaymentResultHandler,
+  );
+  app.post(
+    customerPaymentHandoffRoute,
+    customerPaymentHandoff?.handler() ?? unavailableCustomerPaymentHandoffHandler,
+  );
+  app.post(
+    customerPaymentIntentRoute,
+    customerPaymentIntent?.handler() ?? unavailableCustomerPaymentIntentHandler,
+  );
+  app.get(
+    customerCheckoutSessionReadRoute,
+    customerCheckoutSessionRead?.handler() ?? unavailableCustomerCheckoutSessionHandler,
+  );
+  app.post(
+    customerCheckoutSessionRoute,
+    customerCheckoutSession?.handler() ?? unavailableCustomerCheckoutSessionHandler,
+  );
+  app.get(
+    customerSessionBootstrapRoute,
+    customerSessionBootstrap ?? createCustomerSessionBootstrapHandler(),
+  );
+  app.get(
+    customerPickupCodeRoute,
+    customerPickupCode?.handler() ?? unavailableCustomerPickupCodeHandler,
+  );
+  app.get(customerReceiptRoute, customerReceipt?.handler() ?? unavailableCustomerReceiptHandler);
+  app.get(
+    customerOrderStatusRoute,
+    customerOrderStatus?.handler() ?? unavailableCustomerOrderStatusHandler,
+  );
+  app.post(
+    customerOrderSubmissionRoute,
+    customerOrderSubmission?.handler() ?? unavailableCustomerOrderSubmissionHandler,
   );
   app.post(
     "/api/v1/carts/:cart_id/quote",

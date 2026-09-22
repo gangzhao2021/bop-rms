@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGuestSessionRecord,
   createPostgresGuestSessionEntryStore,
+  createPostgresFencedGuestSessionEntryStore,
   createPostgresGuestSessionLegacyInspector,
   type GuestSessionEntryTransactionRunner,
 } from "../index.js";
@@ -393,4 +394,23 @@ describe("WP-2211 lifecycle persistence", () => {
       }),
     ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
   });
+});
+
+it("explicit fenced resolve borrows transaction and locks the scoped Guest without mutation", async () => {
+  const h = harness(),
+    record = fixture();
+  const store = createPostgresFencedGuestSessionEntryStore(h.runner, scope);
+  expect(await store.resolve(record.sessionSelectorHash)).toEqual(record);
+  expect(h.query.mock.calls[1]?.[0]).toContain("FOR UPDATE");
+  expect(h.query.mock.calls[1]?.[1]).toEqual([
+    scope.brandReference,
+    scope.storeReference,
+    record.sessionSelectorHash,
+  ]);
+  expect(h.query.mock.calls.every(([sql]) => sql.startsWith("SELECT"))).toBe(true);
+});
+it("ordinary Guest resolve remains an unlocked observation", async () => {
+  const h = harness();
+  await h.store.resolve(fixture().sessionSelectorHash);
+  expect(h.query.mock.calls[1]?.[0]).not.toContain("FOR UPDATE");
 });

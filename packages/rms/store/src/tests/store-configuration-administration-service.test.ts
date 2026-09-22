@@ -135,6 +135,43 @@ describe("WP-2192 Store configuration administration service", () => {
     });
   });
 
+  it("does not commit a publication whose holiday enables an unsupported service mode", async () => {
+    const exceptions = [
+      {
+        localDate: "2026-12-25",
+        kind: "Holiday",
+        intervals: [
+          {
+            startLocalTime: "09:00:00",
+            endLocalTime: "17:00:00",
+            endsNextDay: false,
+            serviceModes: ["Delivery"],
+            orderCutoffSeconds: 0,
+            leadTimeSeconds: 600,
+          },
+        ],
+      },
+    ];
+    const approved = createStoreConfigurationVersion({
+      ...configuration("Approved"),
+      exceptions,
+    });
+    const harness = ports(approved);
+    const service = createStoreConfigurationAdministrationService(harness.value);
+    const next = {
+      ...configuration("Published"),
+      exceptions,
+      updatedAt: "2026-08-15T15:00:00.000Z",
+    };
+    await expect(
+      service.publish({
+        ...command(next, id(24), id(11)),
+        expectedVersion: 1,
+      }),
+    ).rejects.toThrow();
+    expect(harness.operations.size).toBe(0);
+  });
+
   it("requires exact version and fail-closed Publishing and Live Gate validation", async () => {
     const approved = createStoreConfigurationVersion(configuration("Approved"));
     const harness = ports(approved),

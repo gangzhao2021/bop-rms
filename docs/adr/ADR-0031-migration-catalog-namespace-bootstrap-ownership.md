@@ -44,3 +44,12 @@ An unintegrated implementation is removed by a normal reviewed Git revert。An a
 ## Revisit trigger
 
 Revisit only when a real authorized migration cannot fit an accepted namespace or one-schema ownership rule，or when evidence proves the minimal history control plane is insufficient。Implementation convenience、legacy unmanaged state or a desire for down migrations is not a trigger。
+
+## Accepted Inventory namespace addendum — 2026-09-11
+
+Owner accepted [DEC-PILOT-INV-01](../spec/design/inventory-pilot-persistence-decision.md) in this task.
+Append 1900-rms-inventory for rms_inventory, exclusively owned by @rms/inventory, for the scoped
+single-Store ledger/reservation/final-validation persistence described there. This supersedes the
+original Section 50 namespace omission for this owner only. Registry membership still grants no
+table or write authority; exact manifests, forward migrations and runtime evidence remain required.
+No applied migration, other owner or actual Store/Provider evidence is changed.

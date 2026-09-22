@@ -63,11 +63,97 @@ describe("WP-2000 OpenAPI contract", () => {
       expect(operation.operationId).toBe(operationId);
       const names = (operation.parameters ?? []).map((item) => item.name);
       if (mutation) expect(names).toContain("idempotency-key");
-      if (mutation && !["createCart", "quoteCart"].includes(operationId))
+      if (
+        mutation &&
+        ![
+          "createCart",
+          "quoteCart",
+          "submitCustomerOrder",
+          "createCustomerPaymentIntent",
+          "createCheckoutSession",
+        ].includes(operationId)
+      )
         expect(names).toContain("if-match");
+      if (operationId === "createCheckoutSession") {
+        expect(names).not.toContain("if-match");
+        expect(operation).toMatchObject({
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  additionalProperties: false,
+                  required: ["cartVersion", "quoteReference"],
+                  properties: { cartVersion: { type: "integer", minimum: 1 } },
+                },
+              },
+            },
+          },
+        });
+      }
+      if (operationId === "createCustomerPaymentIntent") {
+        expect(names).toContain("checkout_session_id");
+        expect(names).not.toContain("if-match");
+      }
+      if (operationId === "getCustomerPaymentResult") {
+        expect(operation.responses["500"]).toBeUndefined();
+        expect(operation.responses["503"]?.content["application/json"]?.schema).toMatchObject({
+          type: "object",
+          additionalProperties: false,
+          required: ["schemaVersion", "error"],
+          properties: {
+            error: {
+              type: "object",
+              additionalProperties: false,
+              required: ["code", "messageKey"],
+              properties: {
+                code: {
+                  enum: [
+                    "payment_result_request_invalid",
+                    "payment_result_not_found",
+                    "payment_result_service_unavailable",
+                  ],
+                },
+              },
+            },
+          },
+        });
+        continue;
+      }
       expect(operation.responses["500"]?.content["application/json"]?.schema.$ref).toContain(
         "ErrorResponse",
       );
     }
   });
+});
+
+it("binds customer submission to a closed request and unpaid minimal result", () => {
+  const document = JSON.parse(renderOpenApi());
+  const operation = document.paths["/api/v1/orders"].post;
+  expect(operation.parameters.map((p: { name: string }) => p.name)).not.toContain("if-match");
+  expect(operation.parameters.map((p: { name: string }) => p.name)).toEqual(
+    expect.arrayContaining([
+      "idempotency-key",
+      "x-csrf-token",
+      "__Host-bop-guest",
+      "origin",
+      "sec-fetch-site",
+    ]),
+  );
+  const request = document.components.schemas.OrderSubmissionRequest;
+  expect(request.required).toEqual(["cartReference", "cartVersion", "quoteReference"]);
+  expect(request.additionalProperties).toBe(false);
+  const order = document.components.schemas.OrderSubmissionResponse.properties.order;
+  expect(order.additionalProperties).toBe(false);
+  expect(order.properties.paymentStatus.enum).toEqual(["NotReported"]);
+  expect(Object.keys(operation.responses).sort()).toEqual([
+    "200",
+    "201",
+    "400",
+    "404",
+    "409",
+    "422",
+    "500",
+    "503",
+  ]);
 });

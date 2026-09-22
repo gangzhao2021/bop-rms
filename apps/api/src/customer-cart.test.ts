@@ -1,9 +1,11 @@
+import { CartError } from "@rms/ordering";
 import { createServer, type Server } from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import {
   CustomerCartHandler,
   type CustomerCartPort,
+  type CustomerCartReplacementPort,
   type CustomerCartPortResult,
   type CustomerCartView,
 } from "./customer-cart.js";
@@ -93,6 +95,7 @@ class FakePort implements CustomerCartPort {
 }
 
 let port: FakePort;
+let replacement: CustomerCartReplacementPort | undefined;
 
 function headers(extra: Record<string, string> = {}) {
   return {
@@ -108,7 +111,12 @@ function headers(extra: Record<string, string> = {}) {
 }
 
 async function request(path: string, init?: RequestInit) {
-  const handler = new CustomerCartHandler({ allowedOrigin: origin, now: () => at, port });
+  const handler = new CustomerCartHandler({
+    allowedOrigin: origin,
+    now: () => at,
+    port,
+    ...(replacement === undefined ? {} : { replacement }),
+  });
   const server = createServer(createApp({ customerCart: handler }));
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -119,6 +127,7 @@ async function request(path: string, init?: RequestInit) {
 
 beforeEach(() => {
   port = new FakePort();
+  replacement = undefined;
 });
 
 afterEach(async () => {
@@ -301,5 +310,102 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     const thrown = await request("/bff/customer/cart", { headers: headers() });
     expect(thrown.status).toBe(503);
     expect(JSON.stringify(await thrown.json())).not.toContain("private dependency detail");
+  });
+});
+
+describe("WP-2402 explicit Dining Cart replacement transport", () => {
+  const path = `/api/v1/carts/${id(1)}/replacement`;
+  const receipt = {
+    operationReference: id(20),
+    previousCartReference: id(1),
+    cartReference: id(30),
+    occurredAt: at,
+    expiresAt: "2026-08-03T20:00:00.000Z",
+  };
+  const mutation = (extra: Record<string, string> = {}, body = "{}") => ({
+    method: "POST",
+    headers: headers({ "if-match": '"3"', ...extra }),
+    body,
+  });
+  it("projects a stable historical receipt and preserves retry identity", async () => {
+    const calls: unknown[] = [];
+    replacement = {
+      replace: async (input) => {
+        calls.push(input);
+        return receipt;
+      },
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await request(path, mutation());
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ schemaVersion: 1, ...receipt });
+      expect(response.headers.get("location")).toBe(`/api/v1/carts/${id(30)}`);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("etag")).toBeNull();
+    }
+    expect(calls).toEqual(
+      Array.from({ length: 2 }, () => ({
+        sessionCredential: guest,
+        csrfCredential: csrf,
+        operationReference: id(20),
+        previousCartReference: id(1),
+        expectedCartVersion: 3,
+      })),
+    );
+    expect(port.calls).toEqual([]);
+  });
+  it.each([
+    [{ origin: "https://foreign.example.test" }, "{}", 400],
+    [{ "x-csrf-token": "bad" }, "{}", 400],
+    [{ cookie: "" }, "{}", 401],
+    [{ "if-match": 'W/"3"' }, "{}", 400],
+    [{ "idempotency-key": "bad" }, "{}", 400],
+    [{}, '{"participantReference":"injected"}', 400],
+  ] as const)(
+    "rejects invalid admission before invoking replacement %j",
+    async (extra, body, status) => {
+      let called = false;
+      replacement = {
+        replace: async () => {
+          called = true;
+          return receipt;
+        },
+      };
+      const response = await request(path, mutation(extra, body));
+      expect(response.status).toBe(status);
+      expect(called).toBe(false);
+    },
+  );
+  it("keeps unconfigured replacement unavailable", async () => {
+    expect((await request(path, mutation())).status).toBe(503);
+  });
+  it.each([
+    ["CART_REPLACEMENT_FORBIDDEN", 403],
+    ["CART_PERMISSION_DENIED", 401],
+    ["CART_VERSION_CONFLICT", 409],
+    ["CART_IDEMPOTENCY_CONFLICT", 409],
+    ["CART_LIFECYCLE_UNAVAILABLE", 409],
+    ["CART_DEPENDENCY_UNAVAILABLE", 503],
+  ] as const)("bounds owner error %s", async (code, status) => {
+    replacement = {
+      replace: async () => {
+        throw new CartError(code);
+      },
+    };
+    const response = await request(path, mutation());
+    expect(response.status).toBe(status);
+    expect(JSON.stringify(await response.json())).not.toContain(guest);
+  });
+  it.each([
+    { ...receipt, guestSessionReference: id(40) },
+    { ...receipt, operationReference: id(99) },
+    { ...receipt, previousCartReference: id(99) },
+    { ...receipt, cartReference: id(1) },
+    { ...receipt, expiresAt: at },
+  ])("rejects malformed receipt without leaking it", async (result) => {
+    replacement = { replace: async () => result };
+    const response = await request(path, mutation());
+    expect(response.status).toBe(503);
+    expect(JSON.stringify(await response.json())).not.toContain(id(40));
   });
 });

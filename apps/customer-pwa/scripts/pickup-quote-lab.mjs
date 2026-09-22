@@ -64,6 +64,7 @@ export async function verifyPickupQuoteLab(origin, pickup) {
                 stage: "add-to-cart",
                 responses,
                 owner: pickup.diagnostics,
+                persisted: await pickup.inspect(),
                 alerts: await page.getByRole("alert").allTextContents(),
               }),
             );
@@ -83,6 +84,7 @@ export async function verifyPickupQuoteLab(origin, pickup) {
                 stage: "quote",
                 responses,
                 owner: pickup.diagnostics,
+                persisted: await pickup.inspect(),
                 alerts: await page.getByRole("alert").allTextContents(),
               }),
             );
@@ -94,7 +96,7 @@ export async function verifyPickupQuoteLab(origin, pickup) {
         await page.getByRole("button", { name: "Increase Latte quantity", exact: true }).click();
         await expect(page.getByLabel("Latte quantity", { exact: true })).toHaveText("2");
         await expect(
-          page.getByText("No current quote is attached. Requote is required before checkout.", {
+          page.getByText("Review checkout to request a current quote before payment.", {
             exact: true,
           }),
         ).toBeVisible();

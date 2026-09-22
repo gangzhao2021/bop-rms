@@ -3927,6 +3927,63 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "store"
       },
+      "OrderSubmittedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OrderSubmittedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "batchSequence": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "itemCount": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "orderBatchReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "orderReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "sourceSnapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "submissionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "orderReference",
+            "orderBatchReference",
+            "submissionReference",
+            "sourceSnapshotDigest",
+            "itemCount",
+            "batchSequence"
+          ],
+          "type": "object"
+        },
+        "title": "OrderSubmitted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["ordering.order-status-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OrderSubmitted",
+        "x-bop-owner-module": "@rms/ordering",
+        "x-bop-producer-module": "@rms/ordering",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
       "PaymentFailedV1": {
         "contentType": "application/json",
         "deprecated": false,

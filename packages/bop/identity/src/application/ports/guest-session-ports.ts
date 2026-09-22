@@ -37,6 +37,8 @@ export interface GuestSessionBindingPort {
 
 export interface GuestSessionCredentialPort {
   generateCredential(purpose: "Session" | "Csrf"): GuestRawCredential;
+  /** Server-only, purpose-separated CSRF recovery; never derived from stored selectors. */
+  deriveForegroundCsrf?(sessionCredential: GuestRawCredential): GuestRawCredential;
   generateSessionReference(): string;
   hashCredential(purpose: "Session" | "Csrf", credential: GuestRawCredential): GuestSelectorHash;
   hashOperationIntent(intent: string): GuestSelectorHash;

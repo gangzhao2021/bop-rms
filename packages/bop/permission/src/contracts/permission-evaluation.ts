@@ -99,7 +99,7 @@ export interface PermissionDecision {
 }
 
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const actionPattern = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*){1,7}$/u;
+const actionPattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*){1,7}$/u;
 
 function uuid(value: unknown): string {
   if (typeof value !== "string" || !uuidV7Pattern.test(value))

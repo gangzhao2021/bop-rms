@@ -23,6 +23,7 @@ catalogs:
     - customer.public
     - customer.authenticated
     - organization.manage
+    - store.service.read
     - identity.manage
     - workflow.operate
     - media.manage
@@ -9623,13 +9624,13 @@ screens:
     route_mode: standalone
     family: transaction_explorer
     capability: organization.store_hours_service
-    owning_domain: organization
+    owning_domain: store
     object_or_workflow: store_hours_service
     phase: phase_1
     feature_gate: phase_capability
     roles:
       - Store Manager / store.service.*
-    permission_ref: organization.manage
+    permission_ref: store.service.read
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - weekly / exception hours、order-type availability、cutoffs、lead time、Business Day Start、holiday / temporary closure

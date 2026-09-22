@@ -1,10 +1,11 @@
+import { validateOrderFulfillmentCompletionRecord } from "./order-fulfillment-completion-record.js";
 import {
   consumeEventInTransaction,
   type ConsumerRegistration,
   type ConsumerTransaction,
 } from "@bop/eventing";
 import type { FulfillmentCompletedEnvelope } from "../contracts/fulfillment-completed-event.js";
-import { parseOrderingHash, parseOrderingReference } from "../domain/cart.js";
+import { parseOrderingReference } from "../domain/cart.js";
 import {
   OrderStatusProjectionError,
   parseOrderStatusProjection,
@@ -24,39 +25,25 @@ function parseProjection(value: unknown) {
     return fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
   }
 }
-function binding(event: FulfillmentCompletedEnvelope): string {
-  return [
-    "FulfillmentCompleted:v1",
-    event.eventId,
-    event.tenantId,
-    event.storeId,
-    event.aggregateId,
-    event.aggregateVersion.toString(),
-    event.payload.orderReference,
-    event.payload.handoffRecordReference,
-    event.payload.verificationMethod,
-    event.payload.completedAt,
-  ].join("|");
-}
 
 export function createFulfillmentCompletedEventConsumerService(
   ports: FulfillmentCompletedEventConsumerPorts,
 ) {
   const registration: ConsumerRegistration = {
-    consumerName: "ordering.fulfillment-completed:v1",
-    consumerVersion: 1,
+    consumerName: "ordering.fulfillment-completed:v2",
+    consumerVersion: 2,
     eventType: "FulfillmentCompleted",
     schemaVersions: [1],
     ownerModule: "@rms/ordering",
     tenantScope: "store",
     ordering: "aggregate",
-    sideEffect: "advance Ordering Order Status projection to Fulfilled",
+    sideEffect: "commit-fulfillment-and-status-projection",
     replaySafe: true,
     async handler({ envelope, transaction }) {
       const event = parseFulfillmentCompletedEnvelope(envelope);
       const orderReference = parseOrderingReference(event.payload.orderReference);
       const currentValue = await ports.projections
-        .load(orderReference)
+        .load({ orderReference, transaction })
         .catch(() => fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE"));
       if (currentValue === null)
         return {
@@ -72,9 +59,30 @@ export function createFulfillmentCompletedEventConsumerService(
         snapshot.orderType !== "Pickup"
       )
         return fail("ORDER_STATUS_VERSION_CONFLICT");
+      let completion;
+      try {
+        const committed = await ports.completions.commit(transaction, event);
+        completion = validateOrderFulfillmentCompletionRecord(committed, ports.digests.sha256);
+        // Replacing only the event must preserve its digest; no aliased or changed event is accepted.
+        validateOrderFulfillmentCompletionRecord(
+          { ...completion, sourceEvent: event },
+          ports.digests.sha256,
+        );
+      } catch {
+        return fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
+      }
+      if (
+        !snapshot.batches.some(
+          (batch) => batch.orderBatchReference === completion.orderBatchReference,
+        )
+      )
+        return fail("ORDER_STATUS_VERSION_CONFLICT");
       if (snapshot.fulfillmentStatus === "Completed") {
         if (
           snapshot.canonicalPhase !== "Fulfilled" ||
+          snapshot.sourceVersion !== completion.fulfilledOrderVersion ||
+          snapshot.sourceCheckpoint !== completion.completionReference ||
+          snapshot.sourceDigest !== completion.sourceDigest ||
           snapshot.fulfillmentReference !== event.aggregateId ||
           snapshot.fulfillmentCompletionEventReference !== event.eventId ||
           snapshot.fulfillmentCompletedAt !== event.payload.completedAt
@@ -83,17 +91,13 @@ export function createFulfillmentCompletedEventConsumerService(
         return { status: "completed", resultHash: snapshot.sourceDigest.slice(7) };
       }
       if (
+        snapshot.sourceVersion > completion.expectedOrderVersion ||
         snapshot.fulfillmentReference !== null ||
         snapshot.fulfillmentCompletionEventReference !== null ||
         snapshot.fulfillmentCompletedAt !== null
       )
         return fail("ORDER_STATUS_VERSION_CONFLICT");
-      let sourceDigest: string;
-      try {
-        sourceDigest = parseOrderingHash(ports.digests.sha256(binding(event)));
-      } catch {
-        return fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
-      }
+      const sourceDigest = completion.sourceDigest;
       let next;
       try {
         next = parseOrderStatusProjection({
@@ -103,8 +107,8 @@ export function createFulfillmentCompletedEventConsumerService(
           freshnessStatus: "Fresh",
           snapshot: {
             ...snapshot,
-            sourceVersion: snapshot.sourceVersion + 1,
-            sourceCheckpoint: event.eventId,
+            sourceVersion: completion.fulfilledOrderVersion,
+            sourceCheckpoint: completion.completionReference,
             sourceDigest,
             canonicalPhase: "Fulfilled",
             fulfillmentStatus: "Completed",
@@ -116,28 +120,37 @@ export function createFulfillmentCompletedEventConsumerService(
       } catch {
         return fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
       }
+      if (next.projectedAt < completion.recordedAt)
+        return fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
       const saved = parseProjection(
         await ports.projections
           .replace({ projection: next, envelope: event, transaction })
           .catch(() => fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE")),
       );
-      if (
-        saved.snapshot.sourceCheckpoint !== event.eventId ||
-        saved.snapshot.fulfillmentReference !== event.aggregateId ||
-        saved.snapshot.canonicalPhase !== "Fulfilled"
-      )
-        return fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
+      const json = (value: unknown) =>
+        JSON.stringify(value, (_key, entry) =>
+          typeof entry === "bigint" ? entry.toString() : entry,
+        );
+      if (json(saved) !== json(next)) return fail("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
       return { status: "completed", resultHash: sourceDigest.slice(7) };
     },
   };
   return Object.freeze({
     registration: Object.freeze(registration),
     async consume(transaction: ConsumerTransaction, envelope: FulfillmentCompletedEnvelope) {
-      return await consumeEventInTransaction(
-        transaction,
-        registration,
-        parseFulfillmentCompletedEnvelope(envelope),
-      );
+      const event = parseFulfillmentCompletedEnvelope(envelope);
+      if ((await ports.authorization.authorize(transaction, event)) !== true)
+        throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
+      await transaction.query("SAVEPOINT ordering_fulfillment_consumer", []);
+      try {
+        const result = await consumeEventInTransaction(transaction, registration, event);
+        await transaction.query("RELEASE SAVEPOINT ordering_fulfillment_consumer", []);
+        return result;
+      } catch (error) {
+        await transaction.query("ROLLBACK TO SAVEPOINT ordering_fulfillment_consumer", []);
+        await transaction.query("RELEASE SAVEPOINT ordering_fulfillment_consumer", []);
+        throw error;
+      }
     },
   });
 }

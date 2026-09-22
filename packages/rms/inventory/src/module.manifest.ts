@@ -10,7 +10,7 @@ const moduleManifestInput: ModuleManifest =
     moduleName: "inventory",
     packageName: "@rms/inventory",
     layer: "RMS",
-    lifecycle: "Later",
+    lifecycle: "Phase 1",
     publicExports: ["."],
     allowedSynchronousDependencies: [
       {
@@ -22,14 +22,25 @@ const moduleManifestInput: ModuleManifest =
     consumedEvents: [],
     publishedEvents: [],
     ownedDatabase: {
-      schema: null,
-      tables: [],
+      schema: "rms_inventory",
+      tables: [
+        "inventory_item",
+        "inventory_item_version",
+        "inventory_item_operation",
+        "stock_account",
+        "stock_balance",
+        "stock_movement",
+        "stock_reservation_version",
+        "stock_lot_hold_version",
+        "stock_reservation_set",
+        "submission_final_validation",
+      ],
     },
     ownedJobs: [],
     featureFlags: [],
     killSwitches: [],
     piiClassification: {
-      classes: ["none"],
+      classes: ["indirect_identifier"],
       handling: {
         logs: "prohibited",
         urls: "prohibited",

@@ -256,6 +256,21 @@ describe("Product / SKU minimum aggregate", () => {
     await state.service.create(createInput());
     const current = state.current();
     if (current === null) throw new Error("fixture did not persist the Product");
+    for (const change of [{ unitOfSale: "KG" }, { unitQuantity: "2" }]) {
+      await expect(
+        state.service.replaceDraft({
+          productReference: ids.product,
+          expectedAggregateVersion: 1,
+          draft: {
+            ...current.draft,
+            skus: current.draft.skus.map((sku) => ({ ...sku, ...change })),
+          },
+          operationReference: id(40),
+          requestedAt: at,
+        }),
+      ).rejects.toMatchObject({ code: "CATALOG_INPUT_INVALID" });
+      expect(state.current()).toEqual(current);
+    }
     const replaced = await state.service.replaceDraft({
       productReference: ids.product,
       expectedAggregateVersion: 1,

@@ -1,3 +1,4 @@
+import { createConfiguredDiningQrContext } from "../../../apps/api/src/configured-dining-qr-context.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { setTimeout, clearTimeout } from "node:timers";
@@ -7,6 +8,7 @@ import {
   createDiningTable,
   createDiningTableService,
   createPostgresDiningTableStore,
+  createPostgresDiningPublicTableReader,
   replaceDiningTableDraft,
   transitionDiningTable,
 } from "../../rms/dining/src/index.ts";
@@ -84,8 +86,65 @@ it("persists Dining Table commands, immutable history and Audit atomically", asy
           },
         };
       }
+      // Synthetic approved organization bootstrap; all subsequent reads are real owner queries.
+      await admin.query(
+        "INSERT INTO bop_tenant.brand VALUES($1,'DINING_DEMO','Dining demonstration','en-CA','CAD','Active',1,$2,$2)",
+        [scope.brandReference, at(0)],
+      );
+      await admin.query(
+        "INSERT INTO bop_tenant.store VALUES($1,$2,'DINING_DEMO','Dining demonstration','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+        [scope.storeReference, scope.brandReference, at(0)],
+      );
+      await admin.query("GRANT USAGE ON SCHEMA bop_tenant TO " + role);
+      await admin.query("GRANT SELECT ON bop_tenant.brand,bop_tenant.store TO " + role);
+      await admin.query("GRANT UPDATE(lifecycle) ON bop_tenant.brand,bop_tenant.store TO " + role);
+      const signedPayload = {
+        schemaVersion: 1,
+        qrReference: id(5000),
+        publicStoreReference: id(5001),
+        publicTableReference: id(5002),
+        channel: "DineIn",
+        locale: "en-CA",
+        issuedAt: at(0),
+        expiresAt: "2026-09-09T10:00:00.000Z",
+        revocationVersion: 1,
+      };
+      let mappingAllowed = true;
+      const resolvePublicTable = (observedAt, payload = signedPayload) =>
+        runner().run((transaction) =>
+          createConfiguredDiningQrContext({
+            transaction,
+            evaluatedAt: observedAt,
+            binding: {
+              ...scope,
+              publicStoreReference: signedPayload.publicStoreReference,
+              lookupEvidenceReference: id(5003),
+              validFrom: at(0),
+              validUntil: signedPayload.expiresAt,
+            },
+            authorize: async () => true, // Synthetic current public-purpose/Tenant-association approval.
+            registration: {
+              payload: signedPayload,
+              tableReference: id(4),
+              state: "Enabled",
+              contextEvidenceReference: id(5004),
+              validFrom: at(0),
+              validUntil: signedPayload.expiresAt,
+            },
+            authorizeRegistration: async () => mappingAllowed,
+          }).resolve(payload),
+        );
       const reader = createPostgresDiningTableStore(runner({ readOnly: true }), scope, references);
       const writer = createPostgresDiningTableStore(runner(), scope, references);
+      const readPublicTable = (observedAt, authorize = async () => true, selectedScope = scope) =>
+        runner().run((transaction) =>
+          createPostgresDiningPublicTableReader({
+            transaction,
+            scope: selectedScope,
+            authorize,
+          }).read({ tableReference: id(4), purpose: "CustomerEntry", observedAt }),
+        );
+
       function service(selectedWriter = writer) {
         return createDiningTableService({
           references,
@@ -160,6 +219,7 @@ it("persists Dining Table commands, immutable history and Audit atomically", asy
       });
       const create = command("CreateDraft", 20, initial, null);
       await service().executeTable(create);
+      assert.equal(await readPublicTable(at(0)), null);
       const original = await reader.resolveTableOperation(id(20));
       assert.deepEqual(original.table, initial);
       let current = replaceDiningTableDraft(initial, {
@@ -187,6 +247,51 @@ it("persists Dining Table commands, immutable history and Audit atomically", asy
         await service().executeTable(command(action, 20 + minute, next, current.aggregateVersion));
         current = next;
         assert.deepEqual(await reader.loadTable(id(4)), current);
+        const publicTable = await readPublicTable(at(minute));
+        const publicContext = await resolvePublicTable(at(minute));
+        if (action === "IssueQr") {
+          assert.equal(publicContext.tableReference, id(4));
+          assert.equal(publicContext.publicTableReference, signedPayload.publicTableReference);
+          assert.equal(publicContext.channel, "DineIn");
+          assert.equal(publicContext.brandLifecycle, "Active");
+          assert.equal(publicContext.storeLifecycle, "Active");
+          assert.equal(publicContext.revocationVersion, current.qrVersion);
+          assert.equal(
+            await resolvePublicTable(at(minute), {
+              ...signedPayload,
+              publicTableReference: id(5999),
+            }),
+            null,
+          );
+          mappingAllowed = false;
+          assert.equal(await resolvePublicTable(at(minute)), null);
+          mappingAllowed = true;
+
+          assert.deepEqual(publicTable, {
+            ...scope,
+            tableReference: id(4),
+            qrVersion: current.qrVersion,
+            aggregateVersion: current.aggregateVersion,
+            operationalState: "Available",
+            activeDiningSessionReference: null,
+            observedAt: at(minute),
+          });
+          assert.equal(await readPublicTable(at(minute), async () => false), null);
+          let checks = 0;
+          assert.equal(await readPublicTable(at(minute), async () => ++checks === 1), null);
+          assert.equal(checks, 2);
+          assert.equal(
+            await readPublicTable(at(minute), async () => true, {
+              ...scope,
+              storeReference: id(99),
+            }),
+            null,
+          );
+          assert.equal(await readPublicTable(at(minute - 1)), null);
+        } else {
+          assert.equal(publicTable, null);
+          assert.equal(publicContext, null);
+        }
       }
       assert.equal(current.aggregateVersion, 7);
       assert.deepEqual(await counts(), { operations: 7, audits: 7 });

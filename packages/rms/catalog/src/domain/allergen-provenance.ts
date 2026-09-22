@@ -84,7 +84,10 @@ function unique<T>(values: readonly T[]): boolean {
   return new Set(values).size === values.length;
 }
 
-function registryEntry(value: AllergenRegistryEntry, defaultLocale: string): AllergenRegistryEntry {
+export function parseAllergenRegistryEntry(
+  value: AllergenRegistryEntry,
+  defaultLocale: string,
+): AllergenRegistryEntry {
   return Object.freeze({
     allergenReference: parseCatalogReference(value.allergenReference),
     code: parseCatalogCode(value.code),
@@ -92,7 +95,10 @@ function registryEntry(value: AllergenRegistryEntry, defaultLocale: string): All
   });
 }
 
-function sourceEvidence(value: AllergenSourceEvidence, at: string): AllergenSourceEvidence {
+export function parseAllergenSourceEvidence(
+  value: AllergenSourceEvidence,
+  at: string,
+): AllergenSourceEvidence {
   if (
     !["Ingredient", "Recipe", "Product", "Option"].includes(value.subjectKind) ||
     !["Approved", "Invalidated", "Conflicting"].includes(value.status) ||
@@ -205,7 +211,7 @@ export function validateMenuAllergenProvenance(input: {
   )
     blocked();
   const registry = Object.freeze(
-    snapshot.registry.map((entry) => registryEntry(entry, defaultLocale)),
+    snapshot.registry.map((entry) => parseAllergenRegistryEntry(entry, defaultLocale)),
   );
   if (
     registry.length < 1 ||
@@ -215,7 +221,7 @@ export function validateMenuAllergenProvenance(input: {
     blocked();
   const registryByReference = new Map(registry.map((entry) => [entry.allergenReference, entry]));
   const evidence = Object.freeze(
-    snapshot.evidence.map((entry) => sourceEvidence(entry, checkedAt)),
+    snapshot.evidence.map((entry) => parseAllergenSourceEvidence(entry, checkedAt)),
   );
   if (!unique(evidence.map((entry) => entry.evidenceReference))) blocked();
   const evidenceByReference = new Map(evidence.map((entry) => [entry.evidenceReference, entry]));
@@ -232,13 +238,13 @@ export function validateMenuAllergenProvenance(input: {
       Array.isArray(path.optionEvidenceReferences)
     )
       blocked();
-    const allReferences = [...path.evidenceReferences];
+    if (!unique(path.evidenceReferences)) blocked();
+    const allReferences = new Set(path.evidenceReferences);
     for (const [optionReference, references] of Object.entries(path.optionEvidenceReferences)) {
       parseCatalogReference(optionReference);
-      if (!Array.isArray(references) || references.length < 1) blocked();
-      allReferences.push(...references);
+      if (!Array.isArray(references) || references.length < 1 || !unique(references)) blocked();
+      for (const reference of references) allReferences.add(reference);
     }
-    if (!unique(allReferences)) blocked();
     const union = new Map<
       ReturnType<typeof parseCatalogReference>,
       Exclude<AllergenClassification, "Unverified">

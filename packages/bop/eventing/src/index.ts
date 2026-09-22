@@ -35,6 +35,7 @@ export {
 } from "./contracts/outbox-dispatch.js";
 export {
   claimOutboxBatch,
+  loadOutboxEnvelope,
   markOutboxFailed,
   markOutboxPublished,
   type ClaimOutboxBatchInput,
@@ -84,3 +85,12 @@ export {
   type RetryDeadLetterTransaction,
 } from "./infrastructure/messaging/retry-dead-letter.js";
 export { moduleManifest } from "./module.manifest.js";
+
+export {
+  createManualOutboxRecoveryStore,
+  ManualOutboxRecoveryError,
+  type ManualOutboxRecoveryStoreOptions,
+} from "./infrastructure/messaging/manual-outbox-recovery-store.js";
+
+export { createManualOutboxRecoveryRegistry } from "./infrastructure/messaging/manual-outbox-recovery-registry.js";
+export { createManualOutboxRecoveryExecution } from "./infrastructure/messaging/manual-outbox-recovery-execution.js";

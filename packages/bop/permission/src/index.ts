@@ -7,3 +7,5 @@ export * from "./application/materialize-policy-evidence.js";
 export * from "./application/role-administration-service.js";
 export * from "./application/ports/role-administration-ports.js";
 export * from "./application/ports/permission-policy-port.js";
+
+export * from "./infrastructure/persistence/current-policy-store.js";

@@ -5,6 +5,7 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   {
     ignores: [
+      ".local/**",
       "**/build/**",
       "**/coverage/**",
       "**/dist/**",

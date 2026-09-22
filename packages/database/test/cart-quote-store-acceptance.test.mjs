@@ -5,6 +5,8 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresCartQuoteStore,
+  createPostgresConfiguredCartQuoteStore,
+  createPostgresConfiguredCartQuoteReader,
   createPostgresCartQuoteReader,
   createPostgresCartQueryStore,
   createCartQuoteAttachmentService,
@@ -419,6 +421,105 @@ it("atomically attaches Quotes with exact bigint roundtrip, concurrent replay an
       );
       await assert.rejects(service().attach(input(604, 3600, 2)), { code: "CART_EXPIRED" });
       assert.deepEqual(await counts(), { attachments: 3, lines: 3, audits: 3 });
+      // Explicit synthetic owner mutation for v2 attachment infrastructure acceptance.
+      await admin.query("BEGIN");
+      await admin.query(
+        "UPDATE rms_ordering.cart_line SET option_selections_json=$1::jsonb,catalog_selection_evidence_json=$2::jsonb WHERE cart_id=$3",
+        [
+          JSON.stringify([{ optionReference: id(710), quantity: 3 }]),
+          JSON.stringify({
+            ...original.items[0].catalogSelectionEvidence,
+            ruleEvidence: [{ bindingReference: id(711), optionSetVersionReference: id(712) }],
+            validatedAt: at(26),
+          }),
+          id(100),
+        ],
+      );
+      await admin.query(
+        "UPDATE rms_ordering.cart SET aggregate_version=3,updated_at=$1 WHERE cart_id=$2",
+        [at(26), id(100)],
+      );
+      await admin.query("COMMIT");
+      const configuredRequest = (operation) => ({
+        ...captured,
+        expectedCartVersion: 3,
+        attachment: {
+          ...captured.attachment,
+          quoteVersion: 2,
+          cartVersion: 3,
+          operationReference: id(operation),
+          quoteReference: id(30000 + operation),
+          operationIntentHash: references.hashIntent(
+            "AttachQuote:" +
+              JSON.stringify({
+                cartReference: id(100),
+                expectedCartVersion: 3,
+                operationReference: id(operation),
+                requestedAt: captured.attachment.attachedAt,
+              }),
+          ),
+        },
+        audit: {
+          ...captured.audit,
+          auditId: id(20000 + operation),
+          correlationId: id(21000 + operation),
+        },
+      });
+      const configuredStore = createPostgresConfiguredCartQuoteStore(runner(), scope, references);
+      const configuredReader = createPostgresConfiguredCartQuoteReader(runner(), scope);
+      const configured = configuredRequest(700);
+      const concurrentConfigured = await Promise.all([
+        configuredStore.attach(configured),
+        configuredStore.attach(configured),
+      ]);
+      assert.deepEqual(concurrentConfigured[0], configured.attachment);
+      assert.deepEqual(concurrentConfigured[1], configured.attachment);
+      assert.deepEqual(await counts(), { attachments: 4, lines: 4, audits: 4 });
+      const configuredRead = { cartReference: id(100), cartVersion: 3, observedAt: at(30) };
+      assert.deepEqual(await configuredReader.loadLatest(configuredRead), configured.attachment);
+      await assert.rejects(store.resolveOperation(id(700)), {
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      await assert.rejects(quoteReader.loadLatest(configuredRead), {
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      assert.equal(
+        await createPostgresConfiguredCartQuoteStore(
+          runner(),
+          {
+            ...scope,
+            storeReference: id(99),
+          },
+          references,
+        ).resolveOperation(id(700)),
+        null,
+      );
+      const configuredLost = configuredRequest(701);
+      await assert.rejects(
+        createPostgresConfiguredCartQuoteStore(runner({ loseAck: true }), scope, references).attach(
+          configuredLost,
+        ),
+        { code: "CART_DEPENDENCY_UNAVAILABLE" },
+      );
+      assert.deepEqual(await configuredStore.attach(configuredLost), configuredLost.attachment);
+      assert.deepEqual(await counts(), { attachments: 5, lines: 5, audits: 5 });
+      await assert.rejects(
+        createPostgresConfiguredCartQuoteStore(
+          runner({ failAudit: true }),
+          scope,
+          references,
+        ).attach(configuredRequest(702)),
+        { code: "CART_DEPENDENCY_UNAVAILABLE" },
+      );
+      assert.equal(await configuredStore.resolveOperation(id(702)), null);
+      await admin.query(
+        "UPDATE rms_ordering.cart SET aggregate_version=4,updated_at=$1 WHERE cart_id=$2",
+        [at(31), id(100)],
+      );
+      await assert.rejects(configuredStore.attach(configuredRequest(703)), {
+        code: "CART_VERSION_CONFLICT",
+      });
+      assert.deepEqual(await counts(), { attachments: 5, lines: 5, audits: 5 });
       assert.equal(active, 0);
     } finally {
       await admin.query(`DROP OWNED BY ${role}`);

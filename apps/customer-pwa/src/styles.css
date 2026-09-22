@@ -957,3 +957,36 @@
 .dining-admission p {
   margin: 0.5rem 0 0.75rem;
 }
+
+.checkout-details-form,
+.checkout-details-form fieldset,
+.checkout-details-form label {
+  display: grid;
+  gap: var(--bop-space-3);
+  min-width: 0;
+}
+.checkout-details-form fieldset {
+  margin: 0;
+  padding: var(--bop-space-3);
+}
+.checkout-details-form input:not([type="checkbox"]),
+.checkout-details-form select,
+.checkout-details-form summary {
+  min-height: 44px;
+  max-width: 100%;
+  min-width: 0;
+  font: inherit;
+}
+.checkout-details-form label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+.checkout-details-form p,
+.checkout-details-form summary {
+  overflow-wrap: anywhere;
+}
+.checkout-details-form :focus-visible {
+  outline: 3px solid var(--bop-color-brand-primary);
+  outline-offset: 3px;
+}

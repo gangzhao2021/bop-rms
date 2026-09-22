@@ -1,3 +1,4 @@
+import { createMerchantOrderExceptionAuthorization } from "./merchant-order-exception-authorization.js";
 import {
   createAuthenticationSession,
   type AuthenticationSession,
@@ -31,6 +32,7 @@ import {
 } from "@bop/permission";
 import {
   createBrand,
+  createTenantContext,
   createStore,
   type Brand,
   type OrganizationVersion,
@@ -592,5 +594,112 @@ describe("Merchant authentication integration scenario", () => {
     ]);
     expect(fixture.handled()).toBe(4);
     expect(fixture.identityPort.resolved).toBe(8);
+  });
+});
+
+describe("merchant exception current authorization", () => {
+  it("evaluates the current exception permission and denies a later explicit override", async () => {
+    const session = createAuthenticationSession(sessionInput());
+    const memberships = new FakeMembershipPort();
+    const exceptionPermission = createPermissionDefinition({
+      ...permission,
+      action: "operations.order-exception.manage",
+    });
+    const policies = new FakePermissionPolicyPort(
+      Object.freeze({
+        ...policySnapshot(),
+        permissionDefinitions: Object.freeze([exceptionPermission]),
+        permissionGrants: Object.freeze([
+          Object.freeze({ ...grant, action: exceptionPermission.action }),
+        ]),
+      }),
+    );
+    const authorize = createMerchantOrderExceptionAuthorization({
+      now: () => AT,
+      session: async () => session,
+      context: async () => ({
+        tenantReference: uuid("99"),
+        context: createTenantContext(session.actor, brand, allowedStore, AT),
+      }),
+      membership: () => memberships,
+    });
+    const calls: string[] = [];
+    function databaseRow(value: object) {
+      const keys: Record<string, string> = {
+        brandReference: "brand_id",
+        storeReference: "store_id",
+        actorReference: "actor_id",
+        snapshotReference: "snapshot_id",
+        permissionReference: "permission_id",
+        roleReference: "role_id",
+        membershipReference: "membership_id",
+        storeAssignmentReference: "store_assignment_id",
+        assignmentReference: "assignment_id",
+        grantReference: "grant_id",
+        overrideReference: "override_id",
+        action: "action_code",
+        code: "role_code",
+        effectiveFrom: "effective_from",
+        effectiveUntil: "effective_until",
+        createdAt: "created_at",
+        updatedAt: "updated_at",
+        reasonReference: "reason_reference",
+        correlationReference: "correlation_reference",
+      };
+      return Object.fromEntries(
+        Object.entries(value).map(([key, field]) => [
+          keys[key] ?? key,
+          key === "version"
+            ? String(field)
+            : ["createdAt", "updatedAt", "effectiveFrom", "effectiveUntil"].includes(key) &&
+                field !== null
+              ? new Date(String(field))
+              : field,
+        ]),
+      );
+    }
+    const tx = {
+      async query<Row>(sql: string) {
+        calls.push(sql);
+        const snapshot = policies.snapshot;
+        const tables: Record<string, readonly object[]> = snapshot
+          ? {
+              policy_state: [snapshot.state],
+              permission_definition: snapshot.permissionDefinitions,
+              role: snapshot.roles,
+              role_assignment: snapshot.roleAssignments,
+              permission_grant: snapshot.permissionGrants,
+              permission_override: snapshot.permissionOverrides,
+            }
+          : {};
+        const table = /^SELECT [*] FROM bop_permission[.]([a-z_]+) /u.exec(sql)?.[1];
+        const rows = table ? (tables[table] ?? []).map(databaseRow) : [];
+        return { rows: rows as unknown as readonly Row[], rowCount: rows.length };
+      },
+    };
+    const input = {
+      sessionCookie: "synthetic-cookie",
+      permission: "operations.order-exception.manage" as const,
+    };
+    expect(await authorize(tx, input)).toMatchObject({
+      storeReference: ids.storeAllowed,
+      sessionReference: ids.session,
+    });
+    expect(calls.some((sql) => sql.startsWith("LOCK TABLE bop_permission.policy_state"))).toBe(
+      true,
+    );
+    policies.snapshot = Object.freeze({
+      ...policySnapshot(true),
+      permissionOverrides: Object.freeze([
+        Object.freeze({ ...explicitDeny, action: exceptionPermission.action }),
+      ]),
+      permissionDefinitions: Object.freeze([exceptionPermission]),
+      permissionGrants: Object.freeze([
+        Object.freeze({ ...grant, action: exceptionPermission.action }),
+      ]),
+    });
+    expect(await authorize(tx, input)).toBeNull();
+    policies.snapshot = null;
+    expect(await authorize(tx, input)).toBeNull();
   });
 });

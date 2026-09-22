@@ -13,6 +13,8 @@ export interface CustomerMenuQueryInput {
 }
 
 export interface CustomerMenuOptionRuleDto {
+  readonly semanticsVersion?: 2;
+  readonly activationOptionReferences?: readonly CatalogReference[];
   readonly bindingReference: CatalogReference;
   readonly optionSetVersionReference: CatalogReference;
   readonly minimumSelections: number;
@@ -25,6 +27,7 @@ export interface CustomerMenuOptionRuleDto {
     readonly maximumQuantity: number;
     readonly conflictOptionReferences: readonly CatalogReference[];
     readonly selectedByDefault: boolean;
+    readonly defaultQuantity?: number;
     readonly incrementalPrice: {
       readonly status: "Unavailable";
       readonly amount: null;

@@ -387,3 +387,98 @@ describe("entry response ownership and bounded delivery", () => {
     },
   );
 });
+
+describe("entry rate limiting", () => {
+  const body = {
+    schemaVersion: 1,
+    code: "entry_rate_limited",
+    messageKey: "customer.entry.rate_limited",
+    recovery: { action: "RetryOrAskStaff", storeSelection: "Hidden" },
+  };
+  function limited(header: string | null) {
+    const result = response(429, body);
+    if (header !== null) result.headers.set("retry-after", header);
+    return result;
+  }
+  it("blocks early manual retries in memory and requires explicit retry after expiry", async () => {
+    let clock = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(limited("5"))
+      .mockResolvedValueOnce(response(201, established));
+    const client = createCustomerEntryClient({
+      hash: "#qr=aaa.bbb.ccc",
+      pathname: "/",
+      search: "",
+      replaceState: vi.fn(),
+      online: () => true,
+      fetch,
+    });
+    expect(await client.start()).toEqual({ kind: "RateLimited", retryAfterSeconds: 5 });
+    clock = 4000;
+    expect(await client.retry()).toEqual({ kind: "RateLimited", retryAfterSeconds: 2 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(getCustomerCsrfCredential()).toBeNull();
+    clock = 6000;
+    expect(await client.start()).toEqual({ kind: "RateLimited", retryAfterSeconds: 0 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect((await client.retry()).kind).toBe("Established");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it.each([null, "0", "-1", "1.5", "86401", "Wed, 21 Oct 2026 07:28:00 GMT"])(
+    "rejects unbounded or unsupported retry timing %s",
+    async (header) => {
+      const client = createCustomerEntryClient({
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+        fetch: vi.fn(async () => limited(header)),
+      });
+      expect(await client.start()).toEqual({ kind: "ServiceUnavailable" });
+    },
+  );
+});
+
+it("accepts a validated in-memory entry token without putting it into history", async () => {
+  const fetcher = vi.fn(async () => response(201, established));
+  const replaceState = vi.fn();
+  const client = createCustomerEntryClient(
+    {
+      fetch: fetcher,
+      hash: "#internal-dining=table-2",
+      pathname: "/",
+      search: "",
+      replaceState,
+      online: () => true,
+    },
+    "synthetic.qr.token",
+  );
+  expect((await client.start()).kind).toBe("Established");
+  expect(replaceState).toHaveBeenCalledExactlyOnceWith(null, "", "/");
+  expect(fetcher).toHaveBeenCalledWith(
+    "/bff/customer/entry",
+    expect.objectContaining({ body: JSON.stringify({ qrToken: "synthetic.qr.token" }) }),
+  );
+});
+it.each(["", "invalid", "a.b.c".repeat(500)])(
+  "invalid in-memory token never sends an entry request",
+  async (token) => {
+    const fetcher = vi.fn<typeof fetch>();
+    const client = createCustomerEntryClient(
+      {
+        fetch: fetcher,
+        hash: "",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      },
+      token,
+    );
+    expect((await client.start()).kind).toBe("Missing");
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);

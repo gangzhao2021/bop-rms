@@ -209,3 +209,40 @@ describe("Pickup configuration client selection", () => {
     },
   );
 });
+
+it("renders the published default quantity and hides inactive conditional groups", () => {
+  const option = sellable.optionRules[0]?.options[0];
+  if (!option) throw new Error("fixture");
+  const configured: MenuSellable = {
+    ...sellable,
+    optionRules: [
+      {
+        minimumSelections: 2,
+        maximumSelections: 3,
+        activationOptionReferences: [],
+        options: [{ ...option, selectedByDefault: true, defaultQuantity: 2, maximumQuantity: 3 }],
+      },
+      {
+        minimumSelections: 1,
+        maximumSelections: 1,
+        activationOptionReferences: ["not-selected"],
+        options: [
+          {
+            ...option,
+            optionReference: "conditional",
+            name: "Conditional extra",
+            selectedByDefault: true,
+            defaultQuantity: 1,
+          },
+        ],
+      },
+    ],
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <SellableConfigurator sellable={configured} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain('value="2"');
+  expect(html).not.toContain("Conditional extra");
+});

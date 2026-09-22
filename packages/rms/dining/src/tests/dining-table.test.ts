@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createDiningTable,
   assignStartedDiningSession,
+  releaseClosedDiningSession,
   moveActiveDiningSession,
   parseDiningInstant,
   parseDiningReference,
@@ -169,4 +170,75 @@ describe("WP-2275 atomic Table start assignment", () => {
     ])
       expect(() => assignStartedDiningSession(session(), candidate as never, 1)).toThrow();
   });
+});
+
+function closedOccupancy() {
+  const session = parseDiningSession({
+    diningSessionReference: id(9),
+    brandReference: id(3),
+    storeReference: id(4),
+    tableReference: id(1),
+    tableAssignmentVersion: 1,
+    phase: "Closed",
+    version: 3,
+    startedByActorReference: id(8),
+    startedAt: at,
+    hostParticipantReference: null,
+  });
+  const occupied = createDiningTable({
+    ...table(id(1), "Published"),
+    activeDiningSessionReference: id(9),
+    aggregateVersion: 2,
+  });
+  return { session, occupied };
+}
+it("releases exact closed occupant while preserving QR, configuration and operational block", () => {
+  const { session, occupied } = closedOccupancy();
+  const blocked = transitionDiningTable(
+    occupied,
+    "SetBlock",
+    at,
+    parseDiningTableCode("MAINTENANCE"),
+  );
+  const next = releaseClosedDiningSession(session, blocked, at);
+  expect(next).toEqual({
+    ...blocked,
+    activeDiningSessionReference: null,
+    aggregateVersion: blocked.aggregateVersion + 1,
+  });
+  expect(occupied.activeDiningSessionReference).toBe(id(9));
+});
+it.each(["Active", "Closing", "Cancelled"] as const)("does not release %s session", (phase) => {
+  const { session, occupied } = closedOccupancy();
+  expect(() => releaseClosedDiningSession({ ...session, phase }, occupied, at)).toThrow();
+});
+it.each([null, id(99)])("does not release empty table or another occupant %s", (reference) => {
+  const { session, occupied } = closedOccupancy();
+  expect(() =>
+    releaseClosedDiningSession(
+      session,
+      { ...occupied, activeDiningSessionReference: reference },
+      at,
+    ),
+  ).toThrow();
+});
+it.each(["brandReference", "storeReference", "tableReference"] as const)(
+  "rejects foreign session %s",
+  (key) => {
+    const { session, occupied } = closedOccupancy();
+    expect(() => releaseClosedDiningSession({ ...session, [key]: id(99) }, occupied, at)).toThrow();
+  },
+);
+it("rejects stale assignment chronology and backdated release", () => {
+  const { session, occupied } = closedOccupancy();
+  expect(() =>
+    releaseClosedDiningSession(
+      { ...session, tableAssignmentVersion: occupied.aggregateVersion },
+      occupied,
+      at,
+    ),
+  ).toThrow();
+  expect(() =>
+    releaseClosedDiningSession(session, occupied, parseDiningInstant("2026-08-14T03:59:59.000Z")),
+  ).toThrow();
 });

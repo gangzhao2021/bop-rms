@@ -350,6 +350,21 @@ describe("WP-0109 merchant Store switch", () => {
     expect(sessions.rotations).toBe(1);
   });
 
+  it("denies authority removed while the session is rotating", async () => {
+    const sessions = new SyntheticSessionPort();
+    const memberships = membershipPort();
+    const rotate = sessions.rotate.bind(sessions);
+    sessions.rotate = async (...args) => {
+      const result = await rotate(...args);
+      memberships.findStoreAssignments = async () => Object.freeze([]);
+      return result;
+    };
+    await expect(service(sessions, memberships).switchStore(input())).rejects.toThrow(
+      "STORE_SWITCH_DENIED",
+    );
+    expect(sessions.rotations).toBe(1);
+  });
+
   it("allows only one concurrent expected-version rotation winner", async () => {
     const sessions = new SyntheticSessionPort();
     const results = await Promise.allSettled([

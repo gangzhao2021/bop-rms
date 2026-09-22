@@ -475,6 +475,28 @@ describe("Role, Permission Grant and Explicit Deny / Allow policy", () => {
     ).toThrowError("permission policy materialization is invalid");
   });
 
+  it("reports only current roles independently of grants or explicit action denial", () => {
+    const active = materializePermissionEvidence(
+      materialization({
+        permissionGrants: Object.freeze([]),
+      }) as never,
+    );
+    expect(active.activeRoleCodes).toEqual([brandRole.code, storeRole.code].sort());
+    expect(Object.isFrozen(active.activeRoleCodes)).toBe(true);
+    const suspended = materializePermissionEvidence(
+      materialization({
+        roles: Object.freeze([Object.freeze({ ...brandRole, lifecycle: "Suspended" }), storeRole]),
+      }) as never,
+    );
+    expect(suspended.activeRoleCodes).toEqual([storeRole.code]);
+    const unassigned = materializePermissionEvidence(
+      materialization({
+        roleAssignments: Object.freeze([]),
+      }) as never,
+    );
+    expect(unassigned.activeRoleCodes).toEqual([]);
+  });
+
   it("returns only bounded policy evidence and audit metadata", () => {
     const result = materializePermissionEvidence(
       materialization({
@@ -482,6 +504,7 @@ describe("Role, Permission Grant and Explicit Deny / Allow policy", () => {
       }) as never,
     );
     expect(Object.keys(result).sort()).toEqual([
+      "activeRoleCodes",
       "audit",
       "evidence",
       "policySnapshotReference",

@@ -1,4 +1,4 @@
-import { MessageChannel } from "node:worker_threads";
+import { loadWorkerProcessConfiguration } from "./process-configuration.js";
 import { pathToFileURL } from "node:url";
 import {
   createCoreTelemetry,
@@ -8,6 +8,7 @@ import {
   type LoggerEnvironment,
   type StructuredLogDestination,
 } from "@bop-rms/observability";
+import { createCompositeWorkerWorkload } from "./composite-workload.js";
 import { WorkerLifecycle } from "./lifecycle.js";
 import { installSignalHandlers } from "./signals.js";
 
@@ -17,6 +18,7 @@ const workerLogEvents = [
   "shutdown_started",
   "worker_start_failed",
   "worker_started",
+  "worker_failed",
   "telemetry_shutdown_failed",
 ] as const;
 
@@ -47,21 +49,39 @@ export function createWorkerCoreTelemetry(): CoreTelemetry {
   });
 }
 
-export async function startWorkerRuntime(): Promise<void> {
+export interface WorkerWorkload {
+  readonly completion?: Promise<"stopped" | "failed">;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+export async function startWorkerRuntime(
+  options: {
+    readonly workload?: WorkerWorkload;
+    readonly workloads?: readonly WorkerWorkload[];
+  } = {},
+): Promise<void> {
+  if (options.workload && options.workloads)
+    throw new Error("WORKER_WORKLOAD_CONFIGURATION_CONFLICT");
+  const workload = options.workloads
+    ? createCompositeWorkerWorkload(options.workloads)
+    : options.workload;
   const logger = createWorkerRuntimeLogger();
   const coreTelemetry = createWorkerCoreTelemetry();
   const nodeTelemetry = createNodeTelemetryRuntime({
     environment: runtimeEnvironment(),
     serviceName: "bop-rms-worker",
   });
-  const lifecycle = new WorkerLifecycle({ telemetry: coreTelemetry });
-  const runtimeLatch = new MessageChannel();
-  runtimeLatch.port1.on("message", () => undefined);
-  runtimeLatch.port1.ref();
-  const closeRuntimeLatch = () => {
-    runtimeLatch.port1.close();
-    runtimeLatch.port2.close();
-  };
+  const lifecycle = new WorkerLifecycle({
+    telemetry: coreTelemetry,
+    onStart: async () => {
+      if (!workload) throw new Error("WORKER_WORKLOAD_UNCONFIGURED");
+      await workload.start();
+    },
+    onStop: async () => {
+      await workload?.stop();
+    },
+  });
   let removeHandlers: () => void = () => undefined;
   const shutdownTelemetry = async () => {
     const result = await nodeTelemetry.shutdown();
@@ -71,9 +91,27 @@ export async function startWorkerRuntime(): Promise<void> {
         resultCode: "TELEMETRY_SHUTDOWN_FAILED",
       });
   };
-  async function shutdown(signal: "SIGINT" | "SIGTERM") {
-    logger.info({ event: "shutdown_started", signal });
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanup = () => {
+    cleanupPromise ??= (async () => {
+      try {
+        await shutdownTelemetry();
+      } finally {
+        removeHandlers();
+      }
+    })();
+    return cleanupPromise;
+  };
+  let startup: Promise<void> | undefined;
+  let shutdownPromise: Promise<void> | undefined;
+  function shutdown(signal?: "SIGINT" | "SIGTERM"): Promise<void> {
+    shutdownPromise ??= performShutdown(signal);
+    return shutdownPromise;
+  }
+  async function performShutdown(signal?: "SIGINT" | "SIGTERM") {
+    logger.info({ event: "shutdown_started", ...(signal ? { signal } : {}) });
     try {
+      await startup?.catch(() => undefined);
       await lifecycle.stop();
       logger.info({ event: "shutdown_complete", resultCode: "SUCCESS" });
     } catch (error) {
@@ -84,16 +122,30 @@ export async function startWorkerRuntime(): Promise<void> {
       });
       process.exitCode = 1;
     } finally {
-      await shutdownTelemetry();
-      closeRuntimeLatch();
-      removeHandlers();
+      await cleanup();
     }
   }
+  const workloadCompletion = workload?.completion?.catch(() => "failed" as const);
   removeHandlers = installSignalHandlers(process, shutdown);
   try {
     nodeTelemetry.start();
-    await lifecycle.start();
-    logger.info({ event: "worker_started", resultCode: "SUCCESS" });
+    startup = lifecycle.start();
+    await startup;
+    if (shutdownPromise) await shutdownPromise;
+    else {
+      logger.info({ event: "worker_started", resultCode: "SUCCESS" });
+      void workloadCompletion
+        ?.then(async (result) => {
+          if (result === "failed") {
+            process.exitCode = 1;
+            logger.error({ event: "worker_failed", resultCode: "WORKER_EXECUTION_FAILED" });
+          }
+          await shutdown();
+        })
+        .catch(() => {
+          process.exitCode = 1;
+        });
+    }
   } catch (error) {
     logger.error({
       error: { code: "WORKER_START_FAILED", value: error },
@@ -101,13 +153,28 @@ export async function startWorkerRuntime(): Promise<void> {
       resultCode: "WORKER_START_FAILED",
     });
     process.exitCode = 1;
-    await shutdownTelemetry();
-    closeRuntimeLatch();
-    removeHandlers();
+    try {
+      await lifecycle.stop();
+    } catch (cleanupError) {
+      logger.error({
+        error: { code: "WORKER_SHUTDOWN_FAILED", value: cleanupError },
+        event: "shutdown_failed",
+        resultCode: "WORKER_SHUTDOWN_FAILED",
+      });
+    }
+    await cleanup();
   }
 }
 
 const entryPath = process.argv[1];
 if (entryPath !== undefined && import.meta.url === pathToFileURL(entryPath).href) {
-  await startWorkerRuntime();
+  void loadWorkerProcessConfiguration(process.argv.slice(2))
+    .then((options) => startWorkerRuntime(options))
+    .catch(() => {
+      createWorkerRuntimeLogger().error({
+        event: "worker_start_failed",
+        resultCode: "WORKER_START_FAILED",
+      });
+      process.exitCode = 1;
+    });
 }

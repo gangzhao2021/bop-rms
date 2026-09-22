@@ -1,3 +1,5 @@
+import { createHttpReceiptClient } from "./receipt/receipt-client.js";
+import { createReceiptController } from "./receipt/receipt-controller.js";
 import type { DiningAdmissionUi } from "./dining/DiningAdmissionPanel.js";
 import { Route, Routes, useParams } from "react-router";
 import { useCallback, useState } from "react";
@@ -10,6 +12,8 @@ import { MenuBrowsePage, MenuSearchPage, SellableDetailPage } from "./menu/MenuP
 import type { MenuJourneyContext } from "./menu/types.js";
 import { PaymentPage } from "./payment/PaymentPage.js";
 import { OrderStatusPage } from "./order-status/OrderStatusPage.js";
+import { createOrderStatusController } from "./order-status/order-status-controller.js";
+import { createHttpOrderStatusClient } from "./order-status/order-status-client.js";
 import { ConnectivityBanner } from "./connectivity/ConnectivityBanner.js";
 import { PwaUpdateBanner } from "./pwa/PwaUpdateBanner.js";
 import { ReceiptPage } from "./receipt/ReceiptPage.js";
@@ -23,14 +27,24 @@ function useDemoForOrderRoute(
   return demo?.orderReference === orderReference ? demo : undefined;
 }
 
+function HttpOrderStatusRoute({ orderReference }: { readonly orderReference: string }) {
+  const [controller] = useState(() =>
+    createOrderStatusController(orderReference, createHttpOrderStatusClient()),
+  );
+  return <OrderStatusPage controller={controller} />;
+}
+
 function CustomerOrderStatusRoute({
   demo,
 }: {
   readonly demo: CustomerDemoDependencies | undefined;
 }) {
+  const { orderReference = "" } = useParams();
   const matchedDemo = useDemoForOrderRoute(demo);
-  return (
-    <OrderStatusPage {...(matchedDemo ? { controller: matchedDemo.orderStatusController } : {})} />
+  return matchedDemo ? (
+    <OrderStatusPage key={orderReference} controller={matchedDemo.orderStatusController} />
+  ) : (
+    <HttpOrderStatusRoute key={orderReference} orderReference={orderReference} />
   );
 }
 
@@ -43,9 +57,20 @@ function CustomerDeliveryStatusRoute({
   return <DeliveryStatusPage {...(matchedDemo ? { client: matchedDemo.deliveryClient } : {})} />;
 }
 
+function HttpReceiptRoute({ orderReference }: { readonly orderReference: string }) {
+  const [controller] = useState(() =>
+    createReceiptController(orderReference, createHttpReceiptClient()),
+  );
+  return <ReceiptPage controller={controller} />;
+}
 function CustomerReceiptRoute({ demo }: { readonly demo: CustomerDemoDependencies | undefined }) {
+  const { orderReference = "" } = useParams();
   const matchedDemo = useDemoForOrderRoute(demo);
-  return <ReceiptPage {...(matchedDemo ? { controller: matchedDemo.receiptController } : {})} />;
+  return matchedDemo ? (
+    <ReceiptPage key={orderReference} controller={matchedDemo.receiptController} />
+  ) : (
+    <HttpReceiptRoute key={orderReference} orderReference={orderReference} />
+  );
 }
 
 export function App({

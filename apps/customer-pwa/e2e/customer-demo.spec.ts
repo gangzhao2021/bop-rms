@@ -15,7 +15,7 @@ const routes = [
   },
   { path: "/cart", heading: "Your cart" },
   { path: "/checkout", heading: "Review your order" },
-  { path: "/checkout/payment", heading: "Continue to payment" },
+  { path: "/checkout/payment", heading: "Secure payment" },
   { path: "/checkout/result", heading: "Verify your payment" },
   { path: `/orders/${ORDER_REFERENCE}`, heading: "Track your order" },
   { path: `/orders/${ORDER_REFERENCE}/delivery`, heading: "Track your delivery" },

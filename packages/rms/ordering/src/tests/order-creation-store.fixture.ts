@@ -6,11 +6,14 @@ import {
   parseCheckoutValidationEvidence,
   parseCartAggregate,
   createOrderCreatedEnvelope,
+  parseOrderCapacityLink,
 } from "../index.js";
 import { orderCreatedSourceInput } from "../application/order-created-source.js";
 import type { OrderCreationPorts } from "../application/ports/order-creation-ports.js";
 import { orderSnapshotInput } from "./order-item-snapshot.fixture.js";
-export function orderWriteFixture(options: { at?: string; namespace?: string } = {}) {
+export function orderWriteFixture(
+  options: { at?: string; namespace?: string; dineIn?: boolean } = {},
+) {
   const original = orderSnapshotInput();
   const at = options.at ?? new Date(Date.now() - 1000).toISOString();
   const namespace = options.namespace ?? "018f7700";
@@ -28,8 +31,34 @@ export function orderWriteFixture(options: { at?: string; namespace?: string } =
       return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, shift(v)]));
     return value;
   }
-  const input = shift(original) as typeof original;
+  const shifted = shift(original) as typeof original;
   const id = (n: number) => namespace + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const input = options.dineIn
+    ? {
+        ...shifted,
+        lines: shifted.lines.map((line) => ({
+          ...line,
+          pricing: {
+            ...line.pricing,
+            priceResolution: { ...line.pricing.priceResolution, orderType: "DineIn" },
+          },
+        })),
+        cart: {
+          ...shifted.cart,
+          orderType: "DineIn",
+          diningSessionReference: id(600),
+          items: shifted.cart.items.map((item) => ({
+            ...item,
+            addedByParticipantReference: id(601),
+          })),
+        },
+        checkoutValidationEvidence: {
+          ...shifted.checkoutValidationEvidence,
+          orderType: "DineIn",
+          fulfillment: { ...shifted.checkoutValidationEvidence.fulfillment, orderType: "DineIn" },
+        },
+      }
+    : shifted;
   const hash = (value: string) => "sha256:" + createHash("sha256").update(value).digest("hex");
   const evidence = parseCheckoutValidationEvidence(input.checkoutValidationEvidence);
   const cart = parseCartAggregate(input.cart);
@@ -38,7 +67,7 @@ export function orderWriteFixture(options: { at?: string; namespace?: string } =
     orderReference: input.orderReference,
     orderBatchReference: input.orderBatchReference,
     submissionReference: id(503),
-    diningSessionReference: null,
+    diningSessionReference: cart.diningSessionReference,
     createdByActorReference: cart.createdByActorReference,
     submittedByActorReference: evidence.guestSessionReference,
     submittedAt: at,
@@ -108,8 +137,35 @@ export function orderWriteFixture(options: { at?: string; namespace?: string } =
     }),
   };
   return {
+    snapshotInput: input,
     request,
     cart,
     scope: { brandReference: order.brandReference, storeReference: order.storeReference },
   };
+}
+
+export function orderCapacityLinkFixture(f: ReturnType<typeof orderWriteFixture>) {
+  const { record, checkoutValidationEvidence: evidence } = f.request;
+  const b = record.order.batches[0];
+  return parseOrderCapacityLink({
+    owner: record.order.orderType === "DineIn" ? "Dining" : "Fulfillment",
+    commitmentReference: evidence.fulfillment.evidenceReference,
+    commitmentVersion: 1,
+    ownerContextReference:
+      record.order.diningSessionReference ?? "01902402-0000-7000-8000-000000009999",
+    ownerIntentDigest: "sha256:" + "a".repeat(64),
+    ownerSnapshotDigest: evidence.fulfillment.evidenceDigest,
+    brandReference: record.order.brandReference,
+    storeReference: record.order.storeReference,
+    orderReference: record.order.orderReference,
+    orderBatchReference: b.orderBatchReference,
+    submissionReference: record.submissionReference,
+    cartReference: b.sourceCartReference,
+    cartVersion: b.sourceCartVersion,
+    quoteReference: b.quoteReference,
+    guestSessionReference: record.guestSessionReference,
+    paymentOperationReference: record.order.orderReference.slice(0, -12) + "000000000700",
+    preparedAt: evidence.fulfillment.checkedAt,
+    validUntil: evidence.fulfillment.validUntil,
+  });
 }

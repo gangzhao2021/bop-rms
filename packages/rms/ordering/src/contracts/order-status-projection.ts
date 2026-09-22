@@ -16,7 +16,8 @@ export interface CustomerOrderStatusView {
     readonly orderReference: OrderingReference;
     readonly orderNumber: string;
     readonly orderType: "DineIn" | "Pickup";
-    readonly canonicalPhase: "Submitted" | "Fulfilled";
+    readonly canonicalPhase:
+      "Submitted" | "Accepted" | "In Progress" | "Ready" | "Fulfilled" | "Rejected" | "Cancelled";
     readonly paymentStatus: "NotReported";
     readonly kitchenStatus: "Unavailable";
     readonly fulfillmentStatus: "Unavailable" | "Completed";
@@ -43,7 +44,15 @@ export interface MerchantOrderStatusQuery {
   readonly exactReferenceOrNumber: OrderingReference | string | null;
   readonly orderType: "DineIn" | "Pickup" | null;
   readonly sourceChannel: "Api" | "Pos" | "Qr" | "Web" | null;
-  readonly canonicalPhase: "Submitted" | "Fulfilled" | null;
+  readonly canonicalPhase:
+    | "Submitted"
+    | "Accepted"
+    | "In Progress"
+    | "Ready"
+    | "Fulfilled"
+    | "Rejected"
+    | "Cancelled"
+    | null;
   readonly closureStatus: "Open" | null;
   readonly paymentStatus: "NotReported" | null;
   readonly limit: number;

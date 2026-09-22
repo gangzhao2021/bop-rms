@@ -271,7 +271,8 @@ export function parseSettlementReconciliationCandidate(
   if (
     typeof raw.businessDate !== "string" ||
     !/^\d{4}-\d{2}-\d{2}$/u.test(raw.businessDate) ||
-    Number.isNaN(Date.parse(`${raw.businessDate}T00:00:00.000Z`))
+    Number.isNaN(Date.parse(`${raw.businessDate}T00:00:00.000Z`)) ||
+    new Date(`${raw.businessDate}T00:00:00.000Z`).toISOString().slice(0, 10) !== raw.businessDate
   )
     return invalid();
   try {
@@ -279,11 +280,7 @@ export function parseSettlementReconciliationCandidate(
     const providerCapturedAmount = money(raw.providerCapturedAmount);
     const internalRefundedAmount = money(raw.internalRefundedAmount);
     const providerRefundedAmount = money(raw.providerRefundedAmount);
-    if (
-      internalRefundedAmount.amountMinor > internalCapturedAmount.amountMinor ||
-      providerRefundedAmount.amountMinor > providerCapturedAmount.amountMinor
-    )
-      return invalid();
+    // Daily refunds can belong to captures from earlier business dates.
     return Object.freeze({
       candidateReference: parsePaymentReference(raw.candidateReference),
       brandReference: parsePaymentReference(raw.brandReference),
@@ -379,10 +376,11 @@ export function parsePaymentReconciliationCheck(value: unknown): PaymentReconcil
     const providerRefundedAmount =
       raw.providerRefundedAmount === null ? null : money(raw.providerRefundedAmount);
     if (
-      internalRefundedAmount.amountMinor > internalCapturedAmount.amountMinor ||
-      (providerCapturedAmount !== null &&
-        providerRefundedAmount !== null &&
-        providerRefundedAmount.amountMinor > providerCapturedAmount.amountMinor)
+      mode === "Operational" &&
+      (internalRefundedAmount.amountMinor > internalCapturedAmount.amountMinor ||
+        (providerCapturedAmount !== null &&
+          providerRefundedAmount !== null &&
+          providerRefundedAmount.amountMinor > providerCapturedAmount.amountMinor))
     )
       return invalid();
     return Object.freeze({
@@ -436,4 +434,140 @@ export interface PaymentReconciliationRunResult {
   readonly checks: readonly PaymentReconciliationCheck[];
   readonly exceptions: readonly PaymentReconciliationException[];
   readonly counts: Readonly<Record<PaymentReconciliationOutcome, number>>;
+}
+
+/** Validated complete persistence/replay unit. Open exceptions may originate in
+ * earlier runs; their identity/reason must still match this run's exact check. */
+export function parsePaymentReconciliationRunResult(
+  value: unknown,
+): PaymentReconciliationRunResult {
+  try {
+    const raw = exact(value, ["run", "status", "completedAt", "checks", "exceptions", "counts"]);
+    const run = parsePaymentReconciliationRunInput(raw.run);
+    const completedAt = parsePaymentInstant(raw.completedAt);
+    if (
+      raw.status !== "Completed" ||
+      completedAt < run.scheduledAt ||
+      !Array.isArray(raw.checks) ||
+      !Array.isArray(raw.exceptions) ||
+      raw.checks.length > run.maxCandidates ||
+      raw.exceptions.length > raw.checks.length
+    )
+      return invalid();
+    const checks = raw.checks.map(parsePaymentReconciliationCheck);
+    const checkIds = new Set<string>(),
+      candidates = new Set<string>();
+    const counts: Record<PaymentReconciliationOutcome, number> = {
+      Matched: 0,
+      Healed: 0,
+      Unresolved: 0,
+      Unavailable: 0,
+      Difference: 0,
+    };
+    for (const check of checks) {
+      if (
+        check.runReference !== run.runReference ||
+        check.brandReference !== run.brandReference ||
+        check.storeReference !== run.storeReference ||
+        check.mode !== run.mode ||
+        check.checkedAt < run.scheduledAt ||
+        check.checkedAt > completedAt ||
+        checkIds.has(check.checkReference) ||
+        candidates.has(check.candidateReference)
+      )
+        return invalid();
+      checkIds.add(check.checkReference);
+      candidates.add(check.candidateReference);
+      counts[check.outcome]++;
+    }
+    const suppliedCounts = exact(raw.counts, paymentReconciliationOutcomes);
+    if (paymentReconciliationOutcomes.some((key) => suppliedCounts[key] !== counts[key]))
+      return invalid();
+    const exceptionIds = new Set<string>();
+    const exceptions = raw.exceptions.map((value) => {
+      const item = exact(value, [
+        "exceptionReference",
+        "brandReference",
+        "storeReference",
+        "candidateReference",
+        "reason",
+        "severity",
+        "status",
+        "openedAt",
+      ]);
+      const exception: PaymentReconciliationException = Object.freeze({
+        exceptionReference: parsePaymentReference(item.exceptionReference),
+        brandReference: parsePaymentReference(item.brandReference),
+        storeReference: parsePaymentReference(item.storeReference),
+        candidateReference: parsePaymentReference(item.candidateReference),
+        reason: oneOf(item.reason, paymentReconciliationDifferenceReasons),
+        severity: oneOf(item.severity, ["Error", "Critical"] as const),
+        status: oneOf(item.status, ["Open"] as const),
+        openedAt: parsePaymentInstant(item.openedAt),
+      });
+      const check = checks.find(
+        (check) => check.exceptionReference === exception.exceptionReference,
+      );
+      if (
+        exceptionIds.has(exception.exceptionReference) ||
+        !check ||
+        check.outcome !== "Difference" ||
+        exception.brandReference !== run.brandReference ||
+        exception.storeReference !== run.storeReference ||
+        exception.candidateReference !== check.candidateReference ||
+        exception.reason !== check.differenceReason ||
+        exception.openedAt > check.checkedAt ||
+        exception.severity !== (exception.reason === "TerminalConflict" ? "Critical" : "Error")
+      )
+        return invalid();
+      exceptionIds.add(exception.exceptionReference);
+      return exception;
+    });
+    if (
+      exceptions.length !== counts.Difference ||
+      checks.some(
+        (check) => check.exceptionReference !== null && !exceptionIds.has(check.exceptionReference),
+      )
+    )
+      return invalid();
+    return Object.freeze({
+      run,
+      status: "Completed",
+      completedAt,
+      checks: Object.freeze(checks),
+      exceptions: Object.freeze(exceptions),
+      counts: Object.freeze(counts),
+    });
+  } catch {
+    return invalid();
+  }
+}
+
+/** Persistence may retain an exception's first opening and reorder immutable rows. */
+export function equivalentPaymentReconciliationResult(
+  expectedValue: unknown,
+  actualValue: unknown,
+): boolean {
+  try {
+    const expected = parsePaymentReconciliationRunResult(expectedValue),
+      actual = parsePaymentReconciliationRunResult(actualValue);
+    const normalize = (value: PaymentReconciliationRunResult) => ({
+      ...value,
+      checks: [...value.checks].sort((a, b) => a.checkReference.localeCompare(b.checkReference)),
+      exceptions: [...value.exceptions]
+        .sort((a, b) => a.exceptionReference.localeCompare(b.exceptionReference))
+        .map((e) => ({ ...e, openedAt: null })),
+    });
+    const encode = (value: unknown) =>
+      JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item));
+    return (
+      encode(normalize(expected)) === encode(normalize(actual)) &&
+      expected.exceptions.every((e) => {
+        const saved = actual.exceptions.find((a) => a.exceptionReference === e.exceptionReference);
+        return saved !== undefined && saved.openedAt <= e.openedAt;
+      })
+    );
+  } catch {
+    return false;
+  }
 }

@@ -1,6 +1,11 @@
+import { createOrderExceptionClient } from "./order-exception-client.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { OrderExceptionScreen, parseOrderExceptionView } from "./OrderExceptionPage.js";
+import {
+  OrderExceptionPage,
+  OrderExceptionScreen,
+  parseOrderExceptionView,
+} from "./OrderExceptionPage.js";
 const fixture = () => ({
   screenId: "OPS-ORDER-EXCEPTION",
   projectionName: "merchant_order_exception_v1",
@@ -46,4 +51,111 @@ describe("WP-1809 Order Exception Workbench", () => {
       parseOrderExceptionView({ ...input, items: [{ ...input.items[0], status: "Resolved" }] }),
     ).toThrow("ORDER_EXCEPTION_INVALID");
   });
+});
+
+describe("WP-2402 workbench recovery states", () => {
+  it("starts with a loading status instead of an error", () => {
+    const html = renderToStaticMarkup(<OrderExceptionPage />);
+    expect(html).toContain("Loading Order Exception Workbench");
+    expect(html).not.toContain("Workbench unavailable");
+  });
+  it("keeps overdue stale facts visible with all mutation buttons disabled", () => {
+    const html = renderToStaticMarkup(
+      <OrderExceptionScreen
+        view={parseOrderExceptionView({
+          ...fixture(),
+          projectedAt: "2026-08-12T16:30:00.000Z",
+          freshnessStatus: "Stale",
+        })}
+        onRefresh={() => undefined}
+      />,
+    );
+    expect(html).toContain("Stale workbench");
+    expect(html).toContain("2026-08-12T16:15:00.000Z");
+    expect(html).toContain("PaidWithoutFulfillableOrder");
+    const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)];
+    expect(buttons).toHaveLength(5);
+    expect(buttons[0]?.[1]).not.toContain("disabled");
+    for (const button of buttons.slice(1)) expect(button[1]).toContain("disabled");
+  });
+  it("distinguishes an empty read from unavailable data without implying freshness", () => {
+    const html = renderToStaticMarkup(
+      <OrderExceptionScreen
+        view={parseOrderExceptionView({
+          ...fixture(),
+          freshnessStatus: "Stale",
+          items: [],
+        })}
+      />,
+    );
+    expect(html).toContain("No exceptions in this view");
+    expect(html).toContain("Stale workbench");
+    expect(html).not.toContain("Acknowledge");
+  });
+});
+
+it("accepts the full 500-row server bound through the HTTP client and rejects 501", async () => {
+  const rows = Array.from({ length: 501 }, (_, index) => ({
+    ...fixture().items[0],
+    exceptionReference: "018f0f58-767a-7f3b-a1d0-" + index.toString(16).padStart(12, "0"),
+    kind: "PaymentReconciliationDifference",
+    status: "Acknowledged",
+    providerState: "NotApplicable",
+    compensationStatus: "NotRequested",
+  }));
+  const input = { ...fixture(), storeLabel: "S".repeat(100), items: rows.slice(0, 500) };
+  const body = JSON.stringify(input);
+  // Longest enum spellings, full-length label, fixed-width references and instants.
+  expect(body.length).toBeLessThanOrEqual(262144);
+  const result = await createOrderExceptionClient(
+    async () =>
+      new Response(body, {
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      }),
+  ).load();
+  expect(parseOrderExceptionView(result).items).toHaveLength(500);
+  expect(() => parseOrderExceptionView({ ...input, items: rows })).toThrow(
+    "ORDER_EXCEPTION_INVALID",
+  );
+});
+
+it("renders an unassociated reconciliation record without enabling order-specific compensation", () => {
+  const input = fixture();
+  const view = parseOrderExceptionView({
+    ...input,
+    items: [{ ...input.items[0], kind: "PaymentReconciliationDifference", orderReference: null }],
+  });
+  const html = renderToStaticMarkup(<OrderExceptionScreen view={view} csrf={"a".repeat(43)} />);
+  expect(html).toContain("Order reference unavailable");
+  expect(html).not.toContain("Review confirmed refund");
+  expect(() =>
+    parseOrderExceptionView({ ...input, items: [{ ...input.items[0], orderReference: null }] }),
+  ).toThrow();
+});
+
+it("does not advertise executable generic commands for a fresh unlinked payment difference", () => {
+  const input = fixture();
+  const html = renderToStaticMarkup(
+    <OrderExceptionScreen
+      view={parseOrderExceptionView({
+        ...input,
+        items: [
+          {
+            ...input.items[0],
+            kind: "PaymentReconciliationDifference",
+            orderReference: null,
+            compensationStatus: "NotRequested",
+          },
+        ],
+      })}
+      onRefresh={() => undefined}
+    />,
+  );
+  expect(html).toContain("No linked order is available");
+  expect(html).toContain("requires reconciliation review");
+  expect(html).toContain("not available");
+  const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)];
+  expect(buttons).toHaveLength(5);
+  expect(buttons[0]?.[1]).not.toContain("disabled");
+  for (const button of buttons.slice(1)) expect(button[1]).toContain("disabled");
 });

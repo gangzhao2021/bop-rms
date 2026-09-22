@@ -116,7 +116,8 @@ function exact(value: unknown, fields: readonly string[]): Readonly<Record<strin
 
 /**
  * Pure owner decision, not an authorization or commit boundary. History is the bounded complete
- * Customer Cart history for this Session, including expired/terminal/legacy rows, never current-only.
+ * unreplaced Customer Cart candidate set for this Session, including terminal/legacy rows.
+ * Only an explicit owner replacement association excludes a historical predecessor.
  * Call only behind live Identity/Dining authority and serialize/recheck inside the owning writer.
  */
 export function decideInitialDiningCartSelection(value: unknown): DiningCartSelectionDecision {

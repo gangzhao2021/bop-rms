@@ -72,9 +72,15 @@ const selectOperation = `SELECT jsonb_build_object(
  'expiresAt',to_char(expires_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) AS receipt
  FROM rms_ordering.dining_cart_operation WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3`;
 const selectHistory = `SELECT cart_id AS "cartReference",aggregate_version AS "cartVersion"
- FROM rms_ordering.cart WHERE brand_id=$1 AND store_id=$2 AND dining_session_id=$3
+ FROM rms_ordering.cart AS candidate WHERE brand_id=$1 AND store_id=$2 AND dining_session_id=$3
  AND order_type='DineIn' AND source_channel IN ('Qr','Web')
- ORDER BY cart_id LIMIT 2 FOR SHARE`;
+ AND NOT EXISTS (
+   SELECT 1 FROM rms_ordering.dining_cart_replacement AS replacement
+   WHERE replacement.brand_id=candidate.brand_id AND replacement.store_id=candidate.store_id
+     AND replacement.dining_session_id=candidate.dining_session_id
+     AND replacement.previous_cart_id=candidate.cart_id
+ )
+ ORDER BY cart_id LIMIT 2 FOR SHARE OF candidate`;
 
 /** Owner-local transaction only; a stored receipt is historical, never a current membership lease. */
 export function createPostgresDiningCartSelectionStore(

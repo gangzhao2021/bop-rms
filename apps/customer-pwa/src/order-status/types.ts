@@ -1,6 +1,33 @@
 export type OrderStatusFreshness = "Fresh" | "Stale" | "Rebuilding" | "Failed";
 
+export interface OrderStatusSources {
+  readonly dining?: {
+    readonly items: readonly {
+      readonly orderItemReference: string;
+      readonly orderBatchReference: string;
+      readonly servedQuantity: number;
+    }[];
+  };
+  readonly checkedAt: string;
+  readonly kitchen: null | {
+    readonly batches: readonly {
+      readonly orderBatchReference: string;
+      readonly status: "Queued" | "InProgress" | "Ready";
+      readonly updatedAt: string;
+    }[];
+  };
+  readonly payments:
+    | null
+    | readonly {
+        readonly status: "Succeeded" | "Failed";
+        readonly occurredAt: string;
+        readonly amount: null | { readonly amountMinor: bigint; readonly currencyCode: string };
+        readonly freshnessStatus: OrderStatusFreshness;
+      }[];
+}
+
 export interface OrderStatusView {
+  readonly sources?: OrderStatusSources;
   readonly projectionName: "ordering_order_status_v1";
   readonly projectionVersion: 1;
   readonly sourceCheckpoint: string;
@@ -10,7 +37,8 @@ export interface OrderStatusView {
     readonly orderReference: string;
     readonly orderNumber: string;
     readonly orderType: "DineIn" | "Pickup";
-    readonly canonicalPhase: "Submitted" | "Fulfilled";
+    readonly canonicalPhase:
+      "Submitted" | "Accepted" | "In Progress" | "Ready" | "Fulfilled" | "Rejected" | "Cancelled";
     readonly paymentStatus: "NotReported";
     readonly kitchenStatus: "Unavailable";
     readonly fulfillmentStatus: "Unavailable" | "Completed";

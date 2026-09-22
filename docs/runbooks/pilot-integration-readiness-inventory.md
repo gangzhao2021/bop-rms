@@ -86,7 +86,14 @@ real-data row below.
 
 ## Current software evidence — not external readiness
 
-The following repository evidence is valid for local software quality only:
+Current local implementation and acceptance are maintained in the
+[single-store pilot acceptance table](./single-store-pilot.md#current-acceptance-and-remaining-work),
+with the [operator handover procedure](./single-store-pilot.md#operator-handover-acceptance)
+explicitly separate from completed software tests. These local results do not update
+any external readiness row automatically.
+
+The following older repository results are retained as historical evidence only;
+their exact revisions are not the current uncommitted WP-2402 candidate:
 
 - WP-2203 Merchant local demo browser acceptance: `42/42` deterministic Chromium tests.
 - WP-2205 Customer local demo browser acceptance: `36/36` deterministic Chromium tests.

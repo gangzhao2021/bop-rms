@@ -420,3 +420,99 @@ it("does not treat a later rejection as proof an earlier Cart command failed", a
   await state.controller.retry();
   expect(state.calls.filter((call) => call.name === "remove")).toHaveLength(3);
 });
+
+it("retries terminal Dining replacement with one original operation and no automatic reconnect mutation", async () => {
+  const old: CartView = {
+    ...cart(),
+    cart: {
+      ...cart().cart,
+      orderType: "DineIn",
+      lifecycle: { ...cart().cart.lifecycle, status: "Expired" },
+    },
+  };
+  const successor: CartView = {
+    ...old,
+    cart: {
+      ...old.cart,
+      cartReference: id(30),
+      version: 1,
+      items: [],
+      lifecycle: { ...old.cart.lifecycle, status: "Active" },
+    },
+  };
+  const calls: string[] = [];
+  let fail = true;
+  let keys = 0;
+  const client: CustomerCartClient = {
+    loadCurrent: async () => old,
+    createCart: async () => old,
+    addItem: async () => old,
+    updateItem: async () => old,
+    removeItem: async () => old,
+    replaceExpiredCart: async (input) => {
+      calls.push(input.operationReference);
+      if (fail) throw new CartClientError("network_unknown");
+      return successor;
+    },
+  };
+  const state = createCartStateController({ client, keyFactory: () => id(20 + keys++) });
+  await state.load();
+  if (state.replaceExpiredCart === undefined) throw new Error("replacement missing");
+  await state.replaceExpiredCart();
+  expect(state.getState()).toMatchObject({ status: "command-failed", canRetrySameOperation: true });
+  if (state.replaceExpiredCart === undefined) throw new Error("replacement missing");
+  await state.replaceExpiredCart();
+  expect(keys).toBe(1);
+  state.setOnline(false);
+  await state.retry();
+  state.setOnline(true);
+  expect(calls).toHaveLength(1);
+  fail = false;
+  await state.retry();
+  expect(calls).toEqual([id(20), id(20)]);
+  expect(state.getState()).toEqual({ status: "ready", cart: successor });
+  if (state.replaceExpiredCart === undefined) throw new Error("replacement missing");
+  await state.replaceExpiredCart();
+  expect(calls).toHaveLength(2);
+});
+
+it.each([false, true])(
+  "preserves unknown history=%s when replacement later receives permission refusal",
+  async (unknownFirst) => {
+    const old: CartView = {
+      ...cart(),
+      cart: {
+        ...cart().cart,
+        orderType: "DineIn",
+        lifecycle: { ...cart().cart.lifecycle, status: "Expired" },
+      },
+    };
+    let count = 0;
+    const calls: string[] = [];
+    const client: CustomerCartClient = {
+      loadCurrent: async () => old,
+      createCart: async () => old,
+      addItem: async () => old,
+      updateItem: async () => old,
+      removeItem: async () => old,
+      replaceExpiredCart: async (input) => {
+        calls.push(input.operationReference);
+        if (unknownFirst && count++ === 0) throw new CartClientError("network_unknown");
+        throw new CartClientError("cart_replacement_forbidden");
+      },
+    };
+    const state = createCartStateController({ client, keyFactory: () => id(20) });
+    await state.load();
+    await state.replaceExpiredCart?.();
+    if (unknownFirst) await state.retry();
+    expect(state.getState()).toMatchObject({
+      status: unknownFirst ? "command-failed" : "replacement-forbidden",
+      canRetrySameOperation: unknownFirst,
+    });
+    if (!unknownFirst) {
+      await state.retry();
+      await state.replaceExpiredCart?.();
+      expect(calls).toEqual([id(20)]);
+    } else expect(calls).toEqual([id(20), id(20)]);
+  },
+);

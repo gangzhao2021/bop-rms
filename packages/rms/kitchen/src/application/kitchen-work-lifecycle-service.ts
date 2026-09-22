@@ -289,7 +289,7 @@ function reasonFor(action: KitchenWorkLifecycleAction): KitchenWorkLifecycleReas
   return "EXPO_MARKED_READY";
 }
 
-function digest(ports: KitchenWorkLifecyclePorts, binding: string): string {
+function digest(ports: KitchenWorkLifecycleEffectValidationPorts, binding: string): string {
   try {
     return parseKitchenTicketDigest(ports.digests.sha256(binding));
   } catch {
@@ -298,7 +298,7 @@ function digest(ports: KitchenWorkLifecyclePorts, binding: string): string {
 }
 
 function nextReference(
-  ports: KitchenWorkLifecyclePorts,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
   purpose: KitchenWorkLifecycleReferencePurpose,
 ): string {
   try {
@@ -309,7 +309,7 @@ function nextReference(
 }
 
 function stableReference(
-  ports: KitchenWorkLifecyclePorts,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
   purpose: KitchenWorkLifecycleStableReferencePurpose,
   identity: unknown,
 ): string {
@@ -347,7 +347,7 @@ function parseCommit(value: KitchenWorkLifecycleCommit): KitchenWorkLifecycleCom
 }
 
 function sameCommandIntent(
-  ports: KitchenWorkLifecyclePorts,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
   command: KitchenWorkLifecycleCommand,
   storedIntentDigest: string,
 ): boolean {
@@ -731,7 +731,7 @@ function parseReadyResult(value: unknown): KitchenOrderItemReadyResult {
 
 function parseReadyPublication(
   value: unknown,
-  ports: KitchenWorkLifecyclePorts,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
 ): KitchenReadyPublication {
   const raw = exact(value, [
     "publicationReference",
@@ -924,7 +924,7 @@ function sameCanonical(left: unknown, right: unknown): boolean {
 
 function effectSemantics(
   effect: Omit<KitchenWorkLifecycleEffect, "effectDigest">,
-  ports: KitchenWorkLifecyclePorts,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
 ): boolean {
   try {
     const {
@@ -1350,7 +1350,10 @@ function effectSemantics(
   }
 }
 
-function parseEffect(value: unknown, ports: KitchenWorkLifecyclePorts): KitchenWorkLifecycleEffect {
+export function parseKitchenWorkLifecycleEffect(
+  value: unknown,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
+): KitchenWorkLifecycleEffect {
   const raw = exact(value, [
     "command",
     "intentDigest",
@@ -2361,7 +2364,7 @@ async function buildEffect(
     ...withoutDigest,
     effectDigest: digest(ports, effectBinding(withoutDigest)),
   });
-  return parseEffect(effect, ports);
+  return parseKitchenWorkLifecycleEffect(effect, ports);
 }
 
 async function authorize(
@@ -2441,7 +2444,7 @@ export function createKitchenWorkLifecycleService(ports: KitchenWorkLifecyclePor
             return dependency();
           }
           if (resolution.status === "Found") {
-            const stored = parseEffect(resolution.effect, ports);
+            const stored = parseKitchenWorkLifecycleEffect(resolution.effect, ports);
             if (
               stored.operation.idempotencyKey !== command.idempotencyKey ||
               stored.operation.brandReference !== command.brandReference ||
@@ -2504,7 +2507,7 @@ export function createKitchenWorkLifecycleService(ports: KitchenWorkLifecyclePor
             throw error;
           }
           if (commit.status === "Conflict") return conflict();
-          const committed = parseEffect(commit.effect, ports);
+          const committed = parseKitchenWorkLifecycleEffect(commit.effect, ports);
           if (committed.effectDigest !== effect.effectDigest) return dependency();
           return committed.result;
         });
@@ -2522,3 +2525,8 @@ export function createKitchenWorkLifecycleService(ports: KitchenWorkLifecyclePor
     },
   });
 }
+
+export type KitchenWorkLifecycleEffectValidationPorts = Pick<
+  KitchenWorkLifecyclePorts,
+  "references" | "digests"
+>;

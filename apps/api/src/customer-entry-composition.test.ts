@@ -258,6 +258,7 @@ describe("WP-2208 Customer Entry domain composition", () => {
       port: 0,
       logger: createApiRuntimeLogger({ write: (line) => logs.push(String(line)) }),
       customerEntry: new CustomerEntryHandler({
+        requestAdmission: { consume: async () => ({ status: "Allowed" }) }, // Explicit synthetic policy.
         allowedOrigin,
         now: () => now,
         uuidV7Factory: () => id(++sequence),
@@ -331,3 +332,62 @@ describe("WP-2208 Customer Entry domain composition", () => {
     }
   });
 });
+
+it("uses current evaluated operating state without reconstructing publication candidates", async () => {
+  const f = fixture();
+  const input = f.input();
+  const readCurrent = vi.fn(async () => ({
+    brandReference: id(1),
+    storeReference: id(2),
+    evaluatedAt: now,
+    state: "Open" as const,
+    availableServiceModes: ["DineIn", "Pickup"] as const,
+  }));
+  const result = await createCustomerEntryComposition({
+    qr: f.options.qr,
+    profile: f.options.profile,
+    admission: f.options.admission,
+    session: f.options.session,
+    operatingReader: { readCurrent },
+  }).establish(input);
+  expect(result.status).toBe("Established");
+  expect(readCurrent).toHaveBeenCalledExactlyOnceWith({
+    brandReference: id(1),
+    storeReference: id(2),
+    publicStoreReference: id(4),
+    evaluatedAt: now,
+  });
+  expect(f.options.operating.configurations.loadCandidates).not.toHaveBeenCalled();
+});
+it.each(["closed", "paused", "mode", "scope", "time", "missing"])(
+  "denies current operating %s before admission",
+  async (kind) => {
+    const f = fixture();
+    const current = {
+      brandReference: id(1),
+      storeReference: id(2),
+      evaluatedAt: now,
+      state: "Open",
+      availableServiceModes: ["DineIn", "Pickup"],
+    };
+    if (kind === "closed") current.state = "Closed";
+    if (kind === "paused") current.state = "TemporarilyClosed";
+    if (kind === "mode") current.availableServiceModes = ["Pickup"];
+    if (kind === "scope") current.storeReference = id(99);
+    if (kind === "time") current.evaluatedAt = "2026-01-15T11:59:59.000Z";
+    const operatingReader = {
+      readCurrent: async () => (kind === "missing" ? null : current),
+    } as import("./customer-entry-composition.js").CustomerEntryOperatingReader;
+    expect(
+      await createCustomerEntryComposition({
+        qr: f.options.qr,
+        profile: f.options.profile,
+        admission: f.options.admission,
+        session: f.options.session,
+        operatingReader,
+      }).establish(f.input()),
+    ).toEqual({ status: "EntryUnavailable" });
+    expect(f.admission).not.toHaveBeenCalled();
+    expect(f.create).not.toHaveBeenCalled();
+  },
+);

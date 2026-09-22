@@ -39,7 +39,7 @@ test("@demo Dining admission supports keyboard validation and explicit recovery"
   expect(page.url()).not.toContain("123456");
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
   await page.screenshot({
-    path: `/private/tmp/bop-wp2308-${info.project.name}-unknown.png`,
+    path: info.outputPath("dining-unknown.png"),
     fullPage: true,
   });
   await page.keyboard.press("Tab");
@@ -51,7 +51,7 @@ test("@demo Dining admission supports keyboard validation and explicit recovery"
     true,
   );
   await page.screenshot({
-    path: `/private/tmp/bop-wp2308-${info.project.name}-bound.png`,
+    path: info.outputPath("dining-bound.png"),
     fullPage: true,
   });
   await page.getByRole("button", { name: "Continue to menu" }).click();

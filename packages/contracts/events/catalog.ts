@@ -495,6 +495,15 @@ const orderCreatedPayload = z.strictObject({
   itemCount: z.int().min(1).max(100),
 });
 
+const orderSubmittedPayload = z.strictObject({
+  orderReference: z.string().regex(canonicalUuidV7),
+  orderBatchReference: z.string().regex(canonicalUuidV7),
+  submissionReference: z.string().regex(canonicalUuidV7),
+  sourceSnapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  itemCount: z.int().min(1).max(100),
+  batchSequence: z.int().min(1).max(2147483647),
+});
+
 const orderConfirmedPayload = z.strictObject({
   confirmationReference: z.uuid(),
   orderReference: z.uuid(),
@@ -1235,6 +1244,22 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: orderConfirmedPayload,
+  },
+  {
+    eventType: "OrderSubmitted",
+    schemaVersion: 1,
+    ownerModule: "@rms/ordering",
+    producerModule: "@rms/ordering",
+    stability: "experimental",
+    consumers: ["ordering.order-status-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: orderSubmittedPayload,
   },
   {
     eventType: "OrderCreated",

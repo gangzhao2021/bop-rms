@@ -1,3 +1,4 @@
+import { createDiningCartQuoteService } from "../application/dining-cart-quote-service.js";
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { GuestSession } from "@bop/identity";
 import type { PriceQuoteSnapshot } from "@rms/pricing";
@@ -995,5 +996,161 @@ describe("WP-2239 scoped and concurrent Quote persistence", () => {
     await expect(state.service.attach(input())).rejects.toMatchObject({
       code: "CART_DEPENDENCY_UNAVAILABLE",
     });
+  });
+});
+
+function diningQuoteFixture() {
+  const diningSession = id(80),
+    participant = id(81);
+  const currentCart = cart({
+    orderType: "DineIn",
+    diningSessionReference: diningSession as never,
+    createdByActorReference: id(82) as never,
+    items: cart().items.map((item) => ({
+      ...item,
+      addedByParticipantReference: participant as never,
+    })),
+  });
+  const state = fixture({ cart: currentCart });
+  const sessions = {
+    authorize: vi.fn(async (value: { sessionCredential: unknown; csrfCredential: unknown }) => {
+      if (value.sessionCredential !== "a".repeat(43) || value.csrfCredential !== "b".repeat(43))
+        throw new Error("synthetic denial");
+      return guest({
+        channel: "DineIn",
+        diningState: "DiningBound",
+        publicTableReference: id(83),
+        diningSessionReference: diningSession,
+        diningParticipantReference: participant,
+      } as Partial<GuestSession>);
+    }),
+  };
+  const now = vi.fn(() => requestedAt);
+  const participation = {
+    resolve: vi.fn(
+      async () =>
+        ({
+          schemaVersion: 1,
+          brandReference: ids.brand,
+          storeReference: ids.store,
+          diningSessionReference: diningSession,
+          participantReference: participant,
+          tableReference: id(84),
+          tableAssignmentVersion: 1,
+          diningSessionVersion: 1,
+          participantVersion: 1,
+          observedAt: now(),
+        }) as unknown,
+    ),
+  };
+  const pricing = { quoteCart: vi.fn(state.ports.pricing.quoteCart) };
+  const write = vi.spyOn(state.ports.repository, "attach");
+  const load = vi.spyOn(state.ports.repository, "loadCart");
+  const history = vi.spyOn(state.ports.repository, "resolveOperation");
+  const service = createDiningCartQuoteService({
+    scope: { brandReference: ids.brand, storeReference: ids.store },
+    sessions,
+    participation,
+    now,
+    repository: state.ports.repository,
+    pricing,
+    references: state.ports.references,
+    audit: (descriptor) => audit({ occurredAt: descriptor.observedAt }),
+  });
+  return { service, sessions, participation, pricing, write, load, history, now, currentCart };
+}
+describe("current-authorized Dining Quote", () => {
+  it("quotes a shared Cart and replays its original attachment without repricing", async () => {
+    const f = diningQuoteFixture();
+    const first = await f.service.attach(pickupInput());
+    expect(first.status).toBe("Attached");
+    expect(first.attachment.guestSessionReference).toBe(ids.session);
+    expect(f.currentCart.createdByActorReference).not.toBe(ids.session);
+    f.now.mockReturnValue("2026-08-02T15:00:01.000Z");
+    expect((await f.service.attach(pickupInput())).status).toBe("AlreadyAttached");
+    expect(f.pricing.quoteCart).toHaveBeenCalledTimes(1);
+    expect(f.write).toHaveBeenCalledTimes(1);
+  });
+  it("rejects invalid CSRF before touching Cart or Pricing", async () => {
+    const f = diningQuoteFixture();
+    await expect(
+      f.service.attach(pickupInput({ csrfCredential: "c".repeat(43) })),
+    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    expect(f.load).not.toHaveBeenCalled();
+    expect(f.pricing.quoteCart).not.toHaveBeenCalled();
+  });
+  it("rejects Cart from a different DiningSession", async () => {
+    const f = diningQuoteFixture();
+    f.load.mockResolvedValue({ ...f.currentCart, diningSessionReference: id(90) as never });
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.pricing.quoteCart).not.toHaveBeenCalled();
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it("requires current participation even for an original replay", async () => {
+    const f = diningQuoteFixture();
+    await f.service.attach(pickupInput());
+    f.participation.resolve.mockResolvedValue(null);
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.write).toHaveBeenCalledTimes(1);
+    expect(f.pricing.quoteCart).toHaveBeenCalledTimes(1);
+  });
+  it("rejects participant loss during Pricing before attachment write", async () => {
+    const f = diningQuoteFixture();
+    f.pricing.quoteCart.mockImplementation(async () => {
+      f.participation.resolve.mockResolvedValue(null);
+      return quote();
+    });
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it("rejects a table assignment version change during Pricing", async () => {
+    const f = diningQuoteFixture();
+    const original = await f.participation.resolve();
+    f.pricing.quoteCart.mockImplementation(async () => {
+      f.participation.resolve.mockResolvedValue({
+        ...(original as object),
+        tableAssignmentVersion: 2,
+      });
+      return quote();
+    });
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it("rechecks Quote expiry after slow Pricing", async () => {
+    const f = diningQuoteFixture();
+    f.pricing.quoteCart.mockImplementation(async () => {
+      f.now.mockReturnValue("2026-08-02T15:05:00.000Z");
+      return quote();
+    });
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_QUOTE_EXPIRED",
+    });
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it("rejects the wrong Cart version before Pricing", async () => {
+    const f = diningQuoteFixture();
+    await expect(f.service.attach(pickupInput({ expectedCartVersion: 5 }))).rejects.toMatchObject({
+      code: "CART_VERSION_CONFLICT",
+    });
+    expect(f.pricing.quoteCart).not.toHaveBeenCalled();
+  });
+  it("rejects clock regression after Pricing", async () => {
+    const f = diningQuoteFixture();
+    f.pricing.quoteCart.mockImplementation(async () => {
+      f.now.mockReturnValue("2026-08-02T14:59:59.999Z");
+      return quote();
+    });
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.write).not.toHaveBeenCalled();
   });
 });

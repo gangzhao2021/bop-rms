@@ -65,6 +65,7 @@ const permissions = [
   "customer.public",
   "customer.authenticated",
   "organization.manage",
+  "store.service.read",
   "identity.manage",
   "workflow.operate",
   "media.manage",
@@ -314,14 +315,19 @@ for (const row of rows) {
       route_mode: routeMode,
       family,
       capability: `${domain}.${id.toLowerCase().replaceAll("-", "_")}`,
-      owning_domain: domain,
+      owning_domain: id === "STORE-HOURS-SERVICE" ? "store" : domain,
       object_or_workflow: id.toLowerCase().replaceAll("-", "_"),
       phase,
       feature_gate: featureGate,
       roles: id.startsWith("CUST-")
         ? ["Guest / Customer according to Section 88"]
         : roleList(access),
-      permission_ref: id.startsWith("CUST-") ? customerPermission(id) : permissionByDomain[domain],
+      permission_ref:
+        id === "STORE-HOURS-SERVICE"
+          ? "store.service.read"
+          : id.startsWith("CUST-")
+            ? customerPermission(id)
+            : permissionByDomain[domain],
       scope: id.startsWith("CUST-")
         ? "Guest Session and exact Store / journey scope"
         : "Tenant, Brand, Store, Actor, purpose and field permission",

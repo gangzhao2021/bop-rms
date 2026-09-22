@@ -131,6 +131,38 @@ describe("WP-2192 Store configuration administration", () => {
     );
   });
 
+  it.each(["Holiday", "TemporaryClosure", "Override"])(
+    "rejects disabled service modes in a %s exception before publication",
+    (kind) => {
+      const value = published();
+      value.exceptions = [
+        {
+          localDate: "2026-12-31",
+          kind,
+          intervals: [
+            {
+              startLocalTime: "10:00:00",
+              endLocalTime: "18:00:00",
+              endsNextDay: false,
+              serviceModes: ["Delivery"],
+              orderCutoffSeconds: 600,
+              leadTimeSeconds: 900,
+            },
+          ],
+        },
+      ];
+      // Draft construction preserves valid content; publication owns the gate.
+      const configuration = createStoreConfigurationVersion(value);
+      expect(() => validateStoreConfigurationForPublication(configuration)).toThrow(
+        StoreConfigurationAdministrationError,
+      );
+      value.enabledServiceModes.push("Delivery");
+      expect(() =>
+        validateStoreConfigurationForPublication(createStoreConfigurationVersion(value)),
+      ).not.toThrow();
+    },
+  );
+
   it("requires independent approval plus Publishing and Live Gate evidence", () => {
     expect(() =>
       createStoreConfigurationVersion({ ...published(), approvedByReference: id(10) }),

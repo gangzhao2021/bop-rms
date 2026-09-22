@@ -187,7 +187,7 @@ function parseAction(value: unknown): PolicyBusinessAction {
   if (
     typeof value !== "string" ||
     value.length > 128 ||
-    !/^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*){1,7}$/u.test(value)
+    !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*){1,7}$/u.test(value)
   )
     throw new PermissionPolicyContractError("PERMISSION_POLICY_INPUT_INVALID");
   return value;
