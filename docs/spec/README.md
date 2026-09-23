@@ -5,7 +5,7 @@
 - Source document ID: `BOP-RMS-HANDOFF`.
 - Accepted composite baseline: the Owner-confirmed Handoff `0.5.3` Sections `0–91`
   plus repository-accepted Sections `92–97`.
-- Locally readable source: an untracked `BOP-RMS Complete Handoff Package.md` identifying
+- Repository source reference: `BOP-RMS Complete Handoff Package.md` identifying
   itself as `0.5.9`, used for the scoped reconciliation recorded in
   [WP-2336](./work-packages/WP-2336.md) and [WP-2400](./work-packages/WP-2400.md).
 - Current discussion node: `WP-2402 - Pilot submission preparation`.
@@ -14,8 +14,11 @@ The 2026-07-23 Owner decision established the composite baseline because no newe
 then confirmed available. Current local availability and formal acceptance are separate facts:
 a file's self-reported version does not accept a replacement complete baseline. The local file
 supplies source text for bounded comparison; later accepted ADR/WP records and scoped addenda
-supply the acceptance evidence. Keep the complete Handoff untracked and outside Git. Never commit
-Library credentials, signed URLs, account identities or private access metadata.
+supply the acceptance evidence. On 2026-09-22 the Owner explicitly authorized tracking and
+syncing the complete Handoff source to the existing public GitHub repository for development
+on another computer, superseding the earlier instruction to keep this document outside Git.
+This changes source availability only, not acceptance of its entire self-reported baseline.
+Never commit Library credentials, signed URLs, account identities or private access metadata.
 
 Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 

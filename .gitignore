@@ -24,6 +24,5 @@ Thumbs.db
 # Local browser sessions can contain private transaction references.
 output/playwright/
 
-# Private source reference: docs/spec/README.md requires it outside Git.
-/BOP-RMS Complete Handoff Package.md
+# Windows download metadata is not part of the shared source document.
 /BOP-RMS Complete Handoff Package.md:Zone.Identifier

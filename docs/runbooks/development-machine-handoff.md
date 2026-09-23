@@ -40,8 +40,16 @@ Test terminal and browser connectivity on the receiving computer before claiming
 
 - `.env`, `.local/`, database volumes/backups, installation keys and certificates.
 - Browser cookies, login sessions, local browser captures and dependency/build output.
-- The private complete Handoff source document, which the spec index requires outside Git.
 
 The receiving computer has source code and migration definitions, not the old host's
 running `.local/pilot-v14` installation or historical database. Do not infer that cloning
 restores the pilot or authorizes production activation. Retain the original host's local data.
+
+## Complete Handoff source
+
+The Owner subsequently explicitly authorized syncing
+[BOP-RMS Complete Handoff Package.md](../../BOP-RMS%20Complete%20Handoff%20Package.md)
+to this public repository for development on another computer. The original document is
+tracked without content changes. Windows download metadata remains excluded. Read the
+[spec index](../spec/README.md) for the distinction between source availability and the
+accepted composite baseline; uploading the document does not change accepted decisions.
