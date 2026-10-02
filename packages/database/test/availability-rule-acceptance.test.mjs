@@ -5,6 +5,8 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresAvailabilityQueryStore,
+  createPostgresProductAvailabilitySourceStore,
+  productAvailabilitySourceFields,
   createCurrentAvailabilityQueryService,
   resolveStoreAvailability,
 } from "../../rms/catalog/src/index.ts";
@@ -251,6 +253,158 @@ async function prove(context) {
       ).rows[0].allowed,
       false,
     );
+    // WP-2409: actual owner Product/SKU reference source across all Stores/states/time.
+    // Authorization callback is synthetic; SQL/reference facts are actual persisted data.
+    const impactReader = `${role}_impact`;
+    await admin.query(
+      `CREATE ROLE ${impactReader} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`,
+    );
+    await admin.query(`GRANT USAGE ON SCHEMA rms_catalog, platform_helpers TO ${impactReader}`);
+    await admin.query(
+      `GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(), platform_helpers.current_store_id() TO ${impactReader}`,
+    );
+    await admin.query(
+      `GRANT SELECT ON rms_catalog.product, rms_catalog.sku, rms_catalog.availability_rule TO ${impactReader}`,
+    );
+    await admin.query(
+      `INSERT INTO rms_catalog.availability_rule
+      (availability_rule_id,brand_id,internal_code,aggregate_version,lifecycle,product_id,sellable_type,
+       channel_codes_json,order_type_codes_json,effective_from,decision,priority,reason_code,created_at,created_by_actor_id,updated_at)
+      VALUES($1,$2,'PRODUCT_IMPACT',1,'Draft',$3,'Product','[]'::jsonb,'[]'::jsonb,$4,'Unavailable',1,'SYNTHETIC_TEST',$5,$6,$5)`,
+      [id(100), id(2), id(1), "2026-12-01T00:00:00.000Z", at, id(3)],
+    );
+    await admin.query(
+      `INSERT INTO rms_catalog.sku
+      (sku_id,product_id,brand_id,product_version_id,sku_code,lifecycle,localized_names_json,variant_selections_json,variant_digest,unit_of_sale,unit_quantity,created_at,created_by_actor_id)
+      VALUES($1,$2,$3,$4,'LATTE-OTHER','Draft',$5::jsonb,'[]'::jsonb,$6,'EACH',1,$7,$8)`,
+      [id(110), id(1), id(2), id(4), names, `sha256:${"c".repeat(64)}`, at, id(3)],
+    );
+    await admin.query(
+      `INSERT INTO rms_catalog.availability_rule
+      (availability_rule_id,brand_id,internal_code,aggregate_version,lifecycle,sku_id,
+       channel_codes_json,order_type_codes_json,effective_from,decision,priority,reason_code,created_at,created_by_actor_id,updated_at)
+      VALUES($1,$2,'OTHER_SKU_IMPACT',1,'Draft',$3,'[]'::jsonb,'[]'::jsonb,$4,'Unavailable',1,'SYNTHETIC_TEST',$4,$5,$4)`,
+      [id(111), id(2), id(110), at, id(3)],
+    );
+    let authorityCalls = 0,
+      deniedAt = 0,
+      impactReads = 0;
+    const impactRequest = {
+      purposeCode: "CATALOG_LIFECYCLE_REVIEW",
+      brandReference: id(2),
+      actorReference: id(3),
+      productReference: id(1),
+      skuReference: null,
+      operationReference: id(101),
+      expectedAggregateVersion: 1,
+      originalProductVersionReference: id(4),
+      beforeLifecycle: "Active",
+      targetLifecycle: "Suspended",
+      reasonCode: "SYNTHETIC_TEST",
+      activeSkuCount: 1,
+    };
+    const impactOptions = {
+      tenantReference: id(102),
+      brandReference: id(2),
+      actorReference: id(3),
+      clock: { now: () => new Date().toISOString() },
+      transactions: {
+        async run(action) {
+          await admin.query("BEGIN READ ONLY");
+          try {
+            await admin.query(`SET LOCAL ROLE ${impactReader}`);
+            const result = await action({
+              async query(sql, values) {
+                if (sql.includes("targetExists")) impactReads++;
+                return admin.query(sql, [...values]);
+              },
+            });
+            await admin.query("COMMIT");
+            return result;
+          } catch (error) {
+            await admin.query("ROLLBACK");
+            throw error;
+          }
+        },
+      },
+      authority: {
+        async holdUntilTransactionCompletes(tx, input) {
+          void tx;
+          authorityCalls++;
+          assert.equal(input.tenantReference, id(102));
+          assert.equal(input.actorReference, id(3));
+          assert.equal(input.request.brandReference, id(2));
+          assert.equal(input.purposeCode, "CATALOG_LIFECYCLE_AVAILABILITY_SOURCE_READ");
+          assert.equal(input.permission, "catalog.manage");
+          assert.deepEqual(input.requiredFields, productAvailabilitySourceFields);
+          if (authorityCalls === deniedAt)
+            throw Object.assign(new Error("synthetic field denied"), { code: "SYNTHETIC_DENIED" });
+        },
+      },
+    };
+    const impact = createPostgresProductAvailabilitySourceStore(impactOptions);
+    const all = await impact.loadSnapshot(impactRequest);
+    assert.equal(all.coverage, "Complete");
+    assert.equal(all.consistency, "StatementSnapshot");
+    assert.deepEqual(
+      all.references.map((r) => r.ruleReference),
+      [id(6), ...variants.map(([n]) => id(n)), id(100), id(111)],
+    );
+    assert.deepEqual(all.skuReferences, [id(5), id(110)]);
+    assert.equal(authorityCalls, 2);
+    assert.equal(all.references.find((r) => r.ruleReference === id(21)).storeReference, id(70));
+    assert.equal(all.references.find((r) => r.ruleReference === id(22)).lifecycle, "Inactive");
+    assert.equal(all.references.find((r) => r.ruleReference === id(100)).sellableType, "Product");
+    const skuImpact = await impact.loadSnapshot({ ...impactRequest, skuReference: id(5) });
+    assert.equal(skuImpact.references.length, all.references.length - 1);
+    assert.deepEqual(skuImpact.skuReferences, [id(5)]);
+    assert.equal(
+      skuImpact.references.some((r) => r.ruleReference === id(111)),
+      false,
+    );
+    await assert.rejects(impact.loadSnapshot({ ...impactRequest, productReference: id(999) }), {
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+    });
+    await assert.rejects(impact.loadSnapshot({ ...impactRequest, skuReference: id(999) }), {
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+    });
+    const beforeRead = impactReads;
+    deniedAt = authorityCalls + 1;
+    await assert.rejects(impact.loadSnapshot(impactRequest), {
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+    });
+    assert.equal(impactReads, beforeRead);
+    deniedAt = authorityCalls + 2;
+    await assert.rejects(impact.loadSnapshot(impactRequest), {
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+    });
+    assert.equal(impactReads, beforeRead + 1);
+    deniedAt = 0;
+    const changedBefore = all.digest;
+    await admin.query(
+      "UPDATE rms_catalog.availability_rule SET aggregate_version=2 WHERE availability_rule_id=$1",
+      [id(100)],
+    );
+    assert.notEqual((await impact.loadSnapshot(impactRequest)).digest, changedBefore);
+    assert.equal(
+      (
+        await admin.query(
+          "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store",
+        )
+      ).rows[0].brand,
+      "",
+    );
+    assert.equal(
+      (
+        await admin.query(
+          "SELECT has_table_privilege($1,'rms_catalog.availability_rule','UPDATE') allowed",
+          [impactReader],
+        )
+      ).rows[0].allowed,
+      false,
+    );
+    await admin.query(`DROP OWNED BY ${impactReader}`);
+    await admin.query(`DROP ROLE ${impactReader}`);
     await admin.query(`DROP OWNED BY ${reader}`);
     await admin.query(`DROP ROLE ${reader}`);
   } finally {

@@ -38,6 +38,66 @@ const databaseAccessManifestInput = {
   ],
   accesses: [
     {
+      id: "administration.write.control_version",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_feature_control", table: "control_version" },
+      principal: { kind: "module", id: "@bop/feature-control" },
+      readPattern: null,
+      source:
+        "packages/bop/feature-control/src/infrastructure/persistence/administration-query-store.ts",
+    },
+    {
+      id: "administration.write.control_dependency",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_feature_control", table: "control_dependency" },
+      principal: { kind: "module", id: "@bop/feature-control" },
+      readPattern: null,
+      source:
+        "packages/bop/feature-control/src/infrastructure/persistence/administration-query-store.ts",
+    },
+    {
+      id: "administration.read.control_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_feature_control", table: "control_operation" },
+      principal: { kind: "module", id: "@bop/feature-control" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/feature-control/src/infrastructure/persistence/administration-query-store.ts",
+    },
+    {
+      id: "administration.write.control_operation",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_feature_control", table: "control_operation" },
+      principal: { kind: "module", id: "@bop/feature-control" },
+      readPattern: null,
+      source:
+        "packages/bop/feature-control/src/infrastructure/persistence/administration-query-store.ts",
+    },
+    {
+      id: "administration.read.control_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_feature_control", table: "control_version" },
+      principal: { kind: "module", id: "@bop/feature-control" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/feature-control/src/infrastructure/persistence/administration-query-store.ts",
+    },
+    {
+      id: "administration.read.control_dependency",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_feature_control", table: "control_dependency" },
+      principal: { kind: "module", id: "@bop/feature-control" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/feature-control/src/infrastructure/persistence/administration-query-store.ts",
+    },
+    {
       id: "kill-switch.write.version",
       operation: "write",
       readPattern: null,

@@ -42,6 +42,7 @@ test("@production staff confirms Host transfer and retains unknown operation acr
     route.fulfill({
       headers,
       json: {
+        canOperateTables: false,
         items: [
           {
             tableReference: id(1),
@@ -52,6 +53,7 @@ test("@production staff confirms Host transfer and retains unknown operation acr
             operationalState: "Available",
             aggregateVersion: 2,
             currentDiningSessionReference: id(3),
+            elapsedMinutes: 8,
           },
         ],
         nextAfterTableReference: null,

@@ -1,7 +1,17 @@
+import { exerciseProductReferenceHistorySource } from "./product-reference-history-source.mjs";
+import { exerciseProductPricingReferenceMatches } from "./product-pricing-reference-matches.mjs";
+import { exerciseProductPricingBindingSource } from "./product-pricing-binding-source.mjs";
+import { createProductCommandClient } from "../../../apps/merchant-web/src/catalog-product-command-client.ts";
 import { withProductCreationHttp } from "../../../apps/api/test-support/product-creation-http.mjs";
 import assert from "node:assert/strict";
 import { sha256Hex } from "../../bop/audit/src/index.ts";
-import { createPostgresProductDraftStore } from "../../rms/catalog/src/index.ts";
+import {
+  createPostgresProductDraftStore,
+  createPostgresProductDraftBaselineStore,
+  CatalogError,
+  productDraftBaselineFields,
+  productDraftBaselineReferencedFields,
+} from "../../rms/catalog/src/index.ts";
 
 export async function exerciseProductDraftReplacement({
   admin,
@@ -114,6 +124,24 @@ export async function exerciseProductDraftReplacement({
     700,
   );
   const before = await snapshotCounts();
+  for (const lifecycle of ["Active", "Suspended", "Discontinued", "Archived"]) {
+    const malformed = {
+      ...first,
+      record: {
+        ...first.record,
+        aggregate: {
+          ...first.record.aggregate,
+          draft: {
+            ...first.record.aggregate.draft,
+            skus: first.record.aggregate.draft.skus.map((sku) => ({ ...sku, lifecycle })),
+          },
+        },
+      },
+    };
+    await assert.rejects(store.commit(malformed), { code: "CATALOG_INPUT_INVALID" });
+    assert.deepEqual(await store.load(productReference), original);
+    assert.deepEqual(await snapshotCounts(), before);
+  }
   const failuresBefore = auditFailureCount();
   setAuditFailure(true);
   await assert.rejects(store.commit(first), /synthetic failure after actual Audit insert/);
@@ -126,11 +154,99 @@ export async function exerciseProductDraftReplacement({
   const loaded = await store.load(productReference);
   assert.equal(loaded.draft.taxClassificationReference, id(804));
   assert.deepEqual(loaded.draft.optionBindings, [binding]);
+  const catalogPricingBindings = await exerciseProductPricingBindingSource({
+    transactions,
+    aggregate: loaded,
+    tenantReference: id(904),
+  });
+  const history = await exerciseProductReferenceHistorySource({
+    transactions,
+    aggregate: loaded,
+    tenantReference: id(904),
+    expectedAggregates: [original, loaded],
+  });
+  assert.equal(history.configurations.length, 2);
+  assert.ok(
+    history.recordedAggregateVersion > history.configurations.length,
+    "lifecycle-only history is deduplicated",
+  );
+  const pricingSources = await exerciseProductPricingReferenceMatches({
+    admin,
+    role,
+    transactions,
+    catalog: catalogPricingBindings,
+    tenantReference: id(904),
+    id,
+  });
   assert.equal(
     loaded.draft.skus.find((s) => s.skuReference === original.draft.skus[0].skuReference)
       .unitQuantity,
     original.draft.skus[0].unitQuantity,
   );
+  // Actual current reader, restricted role/forced RLS and complete nonempty Draft.
+  // Parent/field authority is a synthetic lease; no production entitlement evidence.
+  let baselineAllowed = true,
+    denyBaselineAtCommit = false,
+    baselineChecks = 0;
+  const baselineClock = { now: () => loaded.updatedAt };
+  const baselineAuthority = {
+    async holdUntilTransactionCompletes(_tx, input) {
+      baselineChecks++;
+      assert.equal(input.tenantReference, id(9000));
+      assert.equal(input.brandReference, id(1));
+      assert.equal(input.actorReference, id(2));
+      assert.equal(input.purposeCode, "CATALOG_PRODUCT_DRAFT_BASELINE_READ");
+      assert.equal(input.permission, "catalog.manage");
+      assert.equal(input.action, "catalog.product.manage");
+      assert.equal(input.capability, "catalog.cat_product_edit");
+      assert.deepEqual(input.requiredFields, productDraftBaselineFields);
+      assert.deepEqual(input.referencedFields, productDraftBaselineReferencedFields);
+      if (!baselineAllowed) throw new CatalogError("CATALOG_PERMISSION_DENIED");
+    },
+  };
+  const baselineOptions = {
+    tenantReference: id(9000),
+    brandReference: id(1),
+    actorReference: id(2),
+    transactions: {
+      run: (work) =>
+        transactions.run(async (tx) => {
+          const value = await work(tx);
+          if (denyBaselineAtCommit) throw new CatalogError("CATALOG_PERMISSION_DENIED");
+          return value;
+        }),
+    },
+    authority: baselineAuthority,
+    clock: baselineClock,
+    maximumSkus: 100,
+    maximumOptionBindings: 100,
+  };
+  const baselineStore = createPostgresProductDraftBaselineStore(baselineOptions);
+  const currentBaseline = await baselineStore.loadBaseline(productReference);
+  assert.equal(baselineChecks, 3);
+  assert.equal(currentBaseline.aggregateVersion, loaded.aggregateVersion);
+  assert.equal(currentBaseline.classificationCoverage, "Unavailable");
+  assert.deepEqual(currentBaseline.draft, loaded.draft);
+  assert.equal(currentBaseline.draft.skus.length, 2);
+  assert.deepEqual(currentBaseline.draft.optionBindings, [binding]);
+  assert.ok(Object.isFrozen(currentBaseline.draft.optionBindings[0].defaultSelections));
+  assert.equal(await baselineStore.loadBaseline(id(9999)), null);
+  await assert.rejects(
+    createPostgresProductDraftBaselineStore({ ...baselineOptions, maximumSkus: 1 }).loadBaseline(
+      productReference,
+    ),
+    { code: "CATALOG_DEPENDENCY_UNAVAILABLE" },
+  );
+  baselineAllowed = false;
+  await assert.rejects(baselineStore.loadBaseline(productReference), {
+    code: "CATALOG_PERMISSION_DENIED",
+  });
+  baselineAllowed = true;
+  denyBaselineAtCommit = true;
+  await assert.rejects(baselineStore.loadBaseline(productReference), {
+    code: "CATALOG_PERMISSION_DENIED",
+  });
+  denyBaselineAtCommit = false;
   assert.deepEqual(await store.commit(first), result);
   assert.deepEqual(await snapshotCounts(), {
     snapshots: before.snapshots + 1,
@@ -161,13 +277,54 @@ export async function exerciseProductDraftReplacement({
     701,
   );
   await store.commit(second);
+  await pricingSources.recheckRecordedHistory(3);
+  await pricingSources.recheckHeldCurrentReferences(await store.load(productReference));
   assert.equal(
     (await store.load(productReference)).draft.skus.some((s) => s.skuReference === id(810)),
     true,
   );
   assert.deepEqual(await store.resolveOperation(id(700)), result);
   assert.deepEqual(await store.commit(first), result);
+  const beforeHistoryRead = await snapshotCounts();
+  assert.deepEqual(
+    await store.loadAggregateVersion(productReference, original.aggregateVersion),
+    original,
+  );
+  assert.deepEqual(
+    await store.loadAggregateVersion(productReference, loaded.aggregateVersion),
+    loaded,
+  );
+  const nowStored = await store.load(productReference);
+  assert.deepEqual(
+    await store.loadAggregateVersion(productReference, nowStored.aggregateVersion),
+    second.record.aggregate,
+  );
+  assert.equal(await store.loadAggregateVersion(productReference, 999), null);
+  assert.equal(await store.loadAggregateVersion(id(9999), 1), null);
+  allowed = false;
+  await assert.rejects(store.loadAggregateVersion(productReference, 1), {
+    code: "CATALOG_PERMISSION_DENIED",
+  });
+  allowed = true;
+  let historyChecks = 0;
+  const lateDeniedReader = createPostgresProductDraftStore({
+    brandReference: id(1),
+    transactions,
+    authorize: async () => ++historyChecks !== 3,
+  });
+  await assert.rejects(lateDeniedReader.loadAggregateVersion(productReference, 1), {
+    code: "CATALOG_PERMISSION_DENIED",
+  });
+  assert.equal(historyChecks, 3);
+  assert.deepEqual(await snapshotCounts(), beforeHistoryRead);
+  assert.deepEqual(await store.load(productReference), nowStored);
   const latest = await store.load(productReference);
+  baselineClock.now = () => latest.updatedAt;
+  const newerBaseline = await baselineStore.loadBaseline(productReference);
+  assert.equal(newerBaseline.aggregateVersion, latest.aggregateVersion);
+  assert.deepEqual(newerBaseline.draft, latest.draft);
+  assert.notEqual(newerBaseline.aggregateVersion, currentBaseline.aggregateVersion);
+  assert.deepEqual(currentBaseline.draft.optionBindings, [binding]);
   const change = (n, name) =>
     prepare(
       {
@@ -195,7 +352,7 @@ export async function exerciseProductDraftReplacement({
   setNow(instant(10));
   await withProductCreationHttp(
     undefined,
-    async (post) => {
+    async (post, fetcher, csrf) => {
       const command = {
         productReference,
         expectedAggregateVersion: httpBase.aggregateVersion,
@@ -211,7 +368,18 @@ export async function exerciseProductDraftReplacement({
         },
       };
       const route = "/merchant/catalog/products/draft";
-      const saved = await post(command, route);
+      const client = createProductCommandClient(fetcher);
+      const prepared = client.prepareDraft(command, {
+        brandReference: id(1),
+        storeReference: id(5),
+      });
+      const saved = { status: 200, body: await prepared.execute(csrf) };
+      assert.deepEqual(
+        saved.body.draft.skus.map((sku) => sku.variantSelections),
+        command.draft.skus.map((sku) => sku.variantSelections),
+      );
+      assert.deepEqual(saved.body.draft.optionBindings, command.draft.optionBindings);
+      assert.ok(Object.isFrozen(saved.body.draft.optionBindings[0].defaultSelections));
       assert.equal(saved.status, 200, JSON.stringify(saved.body));
       assert.equal(saved.body.status, "Applied");
       assert.equal(saved.body.draft.optionBindings[0].defaultSelections[0].quantity, 2);
@@ -220,6 +388,8 @@ export async function exerciseProductDraftReplacement({
         "HTTP saved draft",
       );
       const counts = await snapshotCounts();
+      assert.deepEqual(await prepared.execute(csrf), { ...saved.body, status: "AlreadyApplied" });
+      assert.deepEqual(await snapshotCounts(), counts);
       setNow(instant(20));
       assert.deepEqual(await post(command, route), {
         status: 200,
@@ -273,7 +443,11 @@ export async function exerciseProductDraftReplacement({
           ],
         },
       };
-      const nextSaved = await post(nextCommand, route);
+      const nextPrepared = client.prepareDraft(nextCommand, {
+        brandReference: id(1),
+        storeReference: id(5),
+      });
+      const nextSaved = { status: 200, body: await nextPrepared.execute(csrf) };
       assert.equal(nextSaved.status, 200, JSON.stringify(nextSaved.body));
       const newSku = nextSaved.body.draft.skus.find((sku) => sku.skuReference === id(822));
       assert.equal(newSku.createdAt, instant(20));
@@ -294,6 +468,7 @@ export async function exerciseProductDraftReplacement({
       setPermission(true);
     },
     draftCommand,
+    { brandReference: id(1), storeReference: id(5) },
   );
   allowed = false;
   await assert.rejects(store.commit(first), { code: "CATALOG_PERMISSION_DENIED" });

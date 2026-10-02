@@ -1,5 +1,5 @@
 import { expect, it, afterEach, beforeEach, vi } from "vitest";
-import { mkdtemp, writeFile, chmod, rm, symlink, rename } from "node:fs/promises";
+import { mkdtemp, writeFile, chmod, rm, symlink, rename, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
@@ -15,7 +15,7 @@ const save = (name, value) =>
   writeFile(join(directory, name), JSON.stringify(value), { mode: 0o600 });
 beforeEach(async () => {
   vi.stubEnv("NODE_ENV", "development");
-  directory = await mkdtemp(join(tmpdir(), "bop-installation-"));
+  directory = await realpath(await mkdtemp(join(tmpdir(), "bop-installation-")));
   await chmod(directory, 0o700);
   await save("installation.json", config());
   await save("internal-test-profile.json", {

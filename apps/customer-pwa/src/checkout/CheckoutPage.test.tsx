@@ -84,6 +84,10 @@ describe("CUST-CHECKOUT page contract", () => {
     expect(html).toContain("SYNTHETIC_BLOCK");
     expect(html).toContain("Price changed");
     expect(html).toContain("I confirm the changed price");
+    expect(html).toContain("Capacity Hold status · unavailable from current Checkout source");
+    expect(html).toContain('aria-label="Checkout progress"');
+    expect(html).toContain('aria-current="step"');
+    expect(html).toContain('aria-label="Customer journey"');
     expect(html).toContain("Save your checkout details before continuing to secure payment.");
     expect(html).toContain("disabled");
   });

@@ -1,6 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import { CurrentOrderDetails, CurrentOrderQueueRows } from "./CurrentOrderQueuePage.js";
+import {
+  CurrentOrderDetails,
+  CurrentOrderQueueRows,
+  filterCurrentOrderItems,
+} from "./CurrentOrderQueuePage.js";
 import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
 it("renders actual Accepted version and visibly unresolved state without fabricated summaries", () => {
   const item = {
@@ -31,6 +35,9 @@ it("renders actual Accepted version and visibly unresolved state without fabrica
     );
   expect(render(item)).toContain("Accepted");
   expect(render(item)).toContain("Current version");
+  expect(render(item)).toContain('class="order-workbench-entry" open=""');
+  expect(render(item)).toContain("1 accepted");
+  expect(render(item)).toContain("00:00 UTC");
   expect(render(item)).not.toContain("guestSession");
   expect(render({ ...item, currentPhase: null, currentVersion: null })).toContain(
     "Status unavailable",
@@ -42,6 +49,47 @@ it("renders an empty page explicitly", () => {
       <CurrentOrderQueueRows view={{ items: [], nextAfterOrderReference: null }} />,
     ),
   ).toContain("No orders on this page");
+});
+
+it("filters only by exact public order number and fields present on the current queue item", () => {
+  const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+  const item = (
+    n: number,
+    orderNumber: string,
+    orderType: "Pickup" | "DineIn",
+    phase: string | null,
+  ) => ({
+    orderReference: id(n),
+    orderNumber,
+    orderType,
+    sourceChannel: "Web",
+    submittedAt: "2026-09-14T00:00:00.000Z",
+    observedAt: "2026-09-14T00:01:00.000Z",
+    initialBatchReference: id(90),
+    batches: [
+      {
+        orderBatchReference: id(90),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    currentPhase: phase,
+    currentVersion: phase === null ? null : 2,
+  });
+  const view = parseCurrentOrderQueue({
+    items: [item(1, "ORD-1001", "Pickup", "Accepted"), item(2, "ORD-10010", "DineIn", null)],
+    nextAfterOrderReference: null,
+  });
+  const all = { orderNumber: "", type: "All", channel: "All", phase: "All" };
+  expect(filterCurrentOrderItems(view.items, { ...all, orderNumber: " ord-1001 " })).toHaveLength(
+    1,
+  );
+  expect(filterCurrentOrderItems(view.items, { ...all, type: "DineIn" })).toHaveLength(1);
+  expect(
+    filterCurrentOrderItems(view.items, { ...all, channel: "Web", phase: "Unavailable" }),
+  ).toHaveLength(1);
 });
 
 it("labels a cancelled additional Batch distinctly from unaccepted work", () => {

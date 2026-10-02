@@ -25,7 +25,7 @@ export function createMerchantDiningJoinState(options: {
       const current = await resolve(
           tx,
           input.sessionCookie,
-          "dining.session.manage",
+          "dining.operate",
           authenticated.sessionReference,
         ),
         authorize = () => current.allowed();

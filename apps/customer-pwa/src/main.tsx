@@ -10,6 +10,7 @@ import {
   setCustomerCsrfCredential,
 } from "./session/customer-transaction-context.js";
 import { restoreCustomerSession } from "./session/session-bootstrap.js";
+import { protectCustomerHistoryRestore } from "./session/history-recovery.js";
 import "@fontsource-variable/inter/index.css";
 import "@fontsource-variable/jetbrains-mono/index.css";
 import { StrictMode } from "react";
@@ -21,6 +22,19 @@ import "./styles.css";
 import { startCustomerServiceWorker } from "./pwa/register-service-worker.js";
 const root = document.getElementById("root");
 if (!root) throw new Error("Application root is missing");
+const recoveryStatus = document.createElement("p");
+recoveryStatus.setAttribute("role", "status");
+recoveryStatus.textContent = "Checking your session. Please wait.";
+recoveryStatus.hidden = true;
+root.before(recoveryStatus);
+protectCustomerHistoryRestore({
+  events: window,
+  cover: () => {
+    root.hidden = true;
+    recoveryStatus.hidden = false;
+  },
+  reload: () => window.location.reload(),
+});
 async function start() {
   let initialMenuContext: MenuJourneyContext | undefined;
   if (window.location.pathname !== "/")

@@ -39,7 +39,7 @@ export function createMerchantDiningJoinRegenerate(options: {
       const current = await resolve(
         tx,
         input.sessionCookie,
-        "dining.session.manage",
+        "dining.operate",
         authenticated.sessionReference,
       );
       if (!(await current.allowed())) return unavailable();
@@ -74,7 +74,7 @@ export function createMerchantDiningJoinRegenerate(options: {
         staff: {
           authorize: async (request) => {
             if (request.operation !== "RegenerateJoinCredential") return null;
-            const permission = await current.authorizeAction("dining.session.manage");
+            const permission = await current.authorizeAction("dining.operate");
             if (permission?.effect !== "Allow") return null;
             const table = await tables.loadTable(request.tableReference);
             if (!table) return null;

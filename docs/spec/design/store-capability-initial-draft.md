@@ -1,0 +1,23 @@
+# Initial Store capability Draft persistence
+
+Implemented under [WP-2421](../work-packages/WP-2421.md#overnight-initial-capability-draft-creation--2026-09-30-continuation), following existing [WP-2193](../work-packages/WP-2193.md) Handoff48.3.15–18/56.23 and current Feature Control ownership. This is a bounded repository software decision within the accepted administration contract, not a new phase/default policy or external grant.
+
+## Creation and original recovery
+
+The existing owning [administration asset](../../../packages/bop/feature-control/src/infrastructure/persistence/administration-query-store.ts) now exposes createPostgresFeatureControlInitialDraftStore through its existing public export. It accepts only definition, UUID idempotencyKey and validated Audit; ordinary HTTP mapping and server allocation are still required. The configured server Brand/optional exact Store/User determines scope and author. A mandatory transaction-held current authority receives CreateDraft/feature.control.change and the full restricted definition. No permissive default is installed. A scope string or client DTO is not actual Tenant/session/Store/field authority.
+
+Creation requires version1/Draft/defaultDisabled, null approval and publication references, and Unsatisfied dependency entries without evidence. Configured Enabled is a proposed configuration only. Dependency identity is canonicalized in persisted UUID order; this unordered set cannot cause original recovery to fail because the initial request listed dependencies in another order. Effective/review/expiry rules use the existing closed contract. Real dependency or Future Trigger evidence is acquired separately at later impact/publish/execution boundaries.
+
+No version0 definition is invented. The existing journal schema already supports SaveDraft with expectedVersion0/resultingVersion1; the new factory uses that tuple for initial creation and binds CreateDraft plus the entire canonical definition/Audit to its immutable digest. Existing administration service SaveDraft transitions still require a current positive version. No migration or old history rewrite is needed.
+
+Read committed, exact Brand/Store RLS and the existing exclusive Brand source barrier serialize creation against current readers and participating writers. Any visible prior control identity or exact scope/key refuses; database immutable identity/scope uniqueness also refuses an RLS-hidden identity conflict. Definition, dependency children, Audit/chain and operation append in one caller transaction. The trusted clock must stay within the exclusive5second creation lease and current authority must remain held through COMMIT. The transaction runner must await its one callback and propagate failures before COMMIT.
+
+Original retry still requires current authority and reads actual original version1, matching its canonical intent. A later Draft does not change the result; changed content/Audit/idempotent intent cannot overwrite history. No new dependency/Audit/operation is appended on replay. A caller cannot extend stored approval or mint trigger evidence through creation or recovery.
+
+## Observed evidence and remaining work
+
+[Actual isolated PostgreSQL acceptance](../../../packages/database/test/feature-control-administration-acceptance.test.mjs) and its [helper](../../../packages/database/test-support/feature-control-administration-query.mjs) observe a complete tentative operation before final current denial, exact expiry and a repeated awaited transaction callback; all restore definition/dependency/operation/Audit/chain observations by rollback. Original retry60seconds later after actual version2 returns1 without new writes. Changed intent, duplicate creation/current denial and other Store RLS refuse. The authority, Store and trigger facts used here are controlled synthetic inputs; SQL/transactions/RLS/Audit are actual local implementations.
+
+[Capability behavior tests](../../../packages/bop/feature-control/src/tests/current-store-capability.test.ts) separately prove Enabled Draft remains Deny/Hide and an unpublished Store proposal leaves an existing published Brand source in force. These tests do not configure a real Store or validate live dependencies.
+
+Initial creation software and local owning persistence are implemented. Ordinary permission/field/session composition, capability impact/dependency validation, independently authorized approval, publishing/scheduling, management projection and ordinary pages remain unfinished. UI/browser acceptance and real Store/Provider/trigger/UAT/release evidence are not supplied by this milestone. Product and the whole project remain in progress.

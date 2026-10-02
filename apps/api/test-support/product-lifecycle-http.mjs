@@ -1,9 +1,10 @@
+import { Buffer } from "node:buffer";
 import express from "express";
 import { request as httpRequest } from "node:http";
 import { createMerchantBffRouter } from "../src/merchant-bff.ts";
 
 // Real HTTP/BFF/controller; authentication authority remains the caller's test adapter.
-export async function withProductLifecycleHttp(command, work) {
+export async function withProductLifecycleHttp(command, work, expectedScope) {
   const app = express();
   app.use(
     "/merchant",
@@ -19,7 +20,7 @@ export async function withProductLifecycleHttp(command, work) {
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("synthetic HTTP startup");
-    const post = (body) =>
+    const post = (body, scope = expectedScope) =>
       new Promise((resolve, reject) => {
         const request = httpRequest(
           {
@@ -34,6 +35,7 @@ export async function withProductLifecycleHttp(command, work) {
               "Content-Type": "application/json",
               Cookie: "__Host-bop-merchant=synthetic-cookie",
               "X-BOP-CSRF": "synthetic-csrf",
+              "X-BOP-Catalog-Scope": Buffer.from(JSON.stringify(scope)).toString("base64url"),
             },
           },
           (response) => {

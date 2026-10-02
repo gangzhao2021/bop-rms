@@ -1,4 +1,5 @@
-import { StatePanel } from "@bop-rms/ui";
+import { AppFrame, StatePanel } from "@bop-rms/ui";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import {
@@ -55,74 +56,271 @@ export function ReportPageState({
 
 export function ReportCatalog({ view }: { readonly view: ReportCatalogView }) {
   return (
-    <main className="page-shell">
-      <header className="screen-heading">
+    <ReportCatalogShell>
+      <header className="report-catalog-heading">
         <div>
-          <p className="bop-eyebrow">RPT-REPORT-CATALOG · Business intelligence</p>
-          <h1>Report catalog</h1>
-          <p>
+          <h2>Reports</h2>
+          <p className="bop-eyebrow">RPT-REPORT-CATALOG · PHASE 2</p>
+          <p className="bop-muted">
             {view.scopeLabel} · generated {view.generatedAt}
           </p>
         </div>
-        {view.permissions.mayCreate ? <button>Create report draft</button> : null}
+        {view.permissions.mayCreate ? (
+          <button
+            disabled
+            aria-describedby="report-actions-unavailable"
+            className="report-disabled-action"
+          >
+            Create report
+          </button>
+        ) : null}
       </header>
-      <form className="list-filters" aria-label="Report catalog filters">
-        <label>
-          Name
-          <input value={view.filters.nameCode ?? ""} readOnly />
-        </label>
-        <label>
-          Domain
-          <input value={view.filters.domain ?? ""} readOnly />
-        </label>
-        <label>
-          <input type="checkbox" checked={view.filters.certifiedOnly} readOnly /> Certified only
-        </label>
-        <label>
-          <input type="checkbox" checked={view.filters.scheduledOnly} readOnly /> Scheduled only
-        </label>
-      </form>
+      <ReportCatalogFilters
+        name={view.filters.nameCode}
+        domain={view.filters.domain}
+        certified={view.filters.certifiedOnly}
+        owner={view.filters.ownerReference}
+        scheduled={view.filters.scheduledOnly}
+      />
+      <p id="report-actions-unavailable" className="report-catalog-command-note" role="note">
+        Reporting commands are not connected. This page is read-only; no report, certification,
+        schedule, run, or artifact will be changed here.
+      </p>
       {view.reports.length === 0 ? (
-        <StatePanel heading="No reports" tone="neutral" status>
+        <ReportCatalogResults>
+          <h3>No reports</h3>
           <p>No report definitions match this authorized filter snapshot.</p>
-        </StatePanel>
+        </ReportCatalogResults>
       ) : (
-        <section className="card-list" aria-label="Report definitions">
-          {view.reports.map((report) => (
-            <article className="summary-card" key={report.reportReference}>
-              <p className="bop-eyebrow">
-                {report.domain} · {report.scope}
-              </p>
-              <h2>{report.nameCode}</h2>
-              <p>
-                {report.certificationStatus} · {report.scheduleStatus}
-              </p>
-              <p>
-                Owner {report.ownerReference} · last run {report.lastRunAt ?? "Never"}
-              </p>
-              <div className="card-actions">
-                {view.permissions.mayEdit ? (
-                  <a className="shell-action" href={report.editTarget}>
-                    Open builder
-                  </a>
-                ) : null}
-                {view.permissions.mayCertify && report.certificationStatus === "InReview" ? (
-                  <button>Certify</button>
-                ) : null}
-                {view.permissions.maySchedule && report.certificationStatus === "Certified" ? (
-                  <button>Schedule</button>
-                ) : null}
-              </div>
-            </article>
-          ))}
-        </section>
+        <ReportCatalogResults>
+          <table className="report-catalog-table">
+            <caption className="visually-hidden">Authorized report definitions</caption>
+            <thead>
+              <tr>
+                {[
+                  "Report",
+                  "Domain",
+                  "Certification",
+                  "Owner",
+                  "Scope",
+                  "Last run",
+                  "Schedule",
+                ].map((label) => (
+                  <th key={label} scope="col">
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {view.reports.map((report) => (
+                <tr key={report.reportReference}>
+                  <td data-label="Report">
+                    <strong>{report.nameCode}</strong>
+                    {view.permissions.mayEdit ? <a href={report.editTarget}>Open builder</a> : null}
+                    {view.permissions.mayCertify && report.certificationStatus === "InReview" ? (
+                      <button
+                        disabled
+                        aria-describedby="report-actions-unavailable"
+                        className="report-disabled-action"
+                      >
+                        Certify
+                      </button>
+                    ) : null}
+                    {view.permissions.maySchedule && report.certificationStatus === "Certified" ? (
+                      <button
+                        disabled
+                        aria-describedby="report-actions-unavailable"
+                        className="report-disabled-action"
+                      >
+                        Schedule
+                      </button>
+                    ) : null}
+                  </td>
+                  <td data-label="Domain">{report.domain}</td>
+                  <td data-label="Certification">{report.certificationStatus}</td>
+                  <td data-label="Owner">Unavailable</td>
+                  <td data-label="Scope">{report.scope}</td>
+                  <td data-label="Last run">{report.lastRunAt ?? "Never"}</td>
+                  <td data-label="Schedule">{report.scheduleStatus}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ReportCatalogResults>
       )}
-    </main>
+      <p className="report-catalog-boundary" role="note">
+        Owner display names require an authorized label; opaque owner references are not shown.
+      </p>
+    </ReportCatalogShell>
+  );
+}
+
+function ReportCatalogShell({ children }: { readonly children: ReactNode }) {
+  return (
+    <AppFrame title="OPERATIONS" description="" className="report-catalog-shell">
+      <div className="report-catalog-page">{children}</div>
+    </AppFrame>
+  );
+}
+
+function ReportCatalogFilters({
+  name,
+  domain,
+  certified,
+  owner,
+  scheduled,
+}: {
+  readonly name: string | null;
+  readonly domain: string | null;
+  readonly certified: boolean;
+  readonly owner: string | null;
+  readonly scheduled: boolean;
+}) {
+  return (
+    <fieldset
+      className="report-catalog-filters"
+      disabled
+      aria-describedby="report-catalog-filter-note"
+    >
+      <legend className="visually-hidden">Report catalog filters</legend>
+      <label className="report-catalog-filter-name">
+        <span>Report name</span>
+        <input
+          value={name ?? ""}
+          placeholder="Name or description"
+          readOnly
+          aria-label="Report name"
+        />
+      </label>
+      <label>
+        <span>Domain</span>
+        <select defaultValue={domain ?? ""} aria-label="Domain">
+          <option value={domain ?? ""}>{domain ?? "All domains"}</option>
+        </select>
+      </label>
+      <label>
+        <span>Certified</span>
+        <select defaultValue={certified ? "yes" : "all"} aria-label="Certified">
+          <option value="all">All reports</option>
+          <option value="yes">Certified only</option>
+        </select>
+      </label>
+      <label>
+        <span>Owner</span>
+        <select defaultValue={owner === null ? "" : "selected"} aria-label="Owner">
+          <option value="">All owners</option>
+          {owner === null ? null : <option value="selected">Selected owner unavailable</option>}
+        </select>
+      </label>
+      <label>
+        <span>Scheduled</span>
+        <select defaultValue={scheduled ? "yes" : "all"} aria-label="Scheduled">
+          <option value="all">All</option>
+          <option value="yes">Scheduled only</option>
+        </select>
+      </label>
+      <p id="report-catalog-filter-note">
+        Filters are unavailable until the authorized catalog source is connected.
+      </p>
+    </fieldset>
+  );
+}
+
+function ReportCatalogResults({ children }: { readonly children: ReactNode }) {
+  return (
+    <section className="report-catalog-results" aria-label="Report catalog">
+      <header>
+        <h3>Report catalog</h3>
+        <p>Report data unavailable</p>
+      </header>
+      <div className="report-catalog-results__surface">{children}</div>
+    </section>
+  );
+}
+
+function ReportCatalogUnavailable() {
+  return (
+    <ReportCatalogShell>
+      <header className="report-catalog-heading">
+        <div>
+          <h2>Reports</h2>
+          <p className="bop-eyebrow">RPT-REPORT-CATALOG · PHASE 2 · DESIGN REVIEW</p>
+          <p className="bop-muted">Review layout · source values unavailable</p>
+        </div>
+        <button
+          disabled
+          className="report-disabled-action"
+          aria-describedby="report-actions-unavailable"
+        >
+          Create report
+        </button>
+      </header>
+      <ReportCatalogFilters
+        name={null}
+        domain={null}
+        certified={false}
+        owner={null}
+        scheduled={false}
+      />
+      <ReportCatalogResults>
+        <table className="report-catalog-table">
+          <caption className="visually-hidden">Authorized report catalog</caption>
+          <thead>
+            <tr>
+              {["Report", "Domain", "Certification", "Owner", "Scope", "Last run", "Schedule"].map(
+                (label) => (
+                  <th key={label} scope="col">
+                    {label}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colSpan={7}>
+                <div className="report-catalog-empty" role="status">
+                  <h4>Authorized report catalog unavailable</h4>
+                  <p>
+                    No reports are shown until a scoped Business Intelligence projection is
+                    connected to this route. Owner display values and scope labels must come from
+                    that source.
+                  </p>
+                  <div
+                    className="report-catalog-empty__actions"
+                    aria-label="Report actions unavailable"
+                  >
+                    {["View", "Run", "Duplicate", "Archive"].map((action) => (
+                      <button
+                        disabled
+                        key={action}
+                        aria-describedby="report-actions-unavailable"
+                        className="report-disabled-action"
+                      >
+                        {action}
+                      </button>
+                    ))}
+                  </div>
+                  <p id="report-actions-unavailable">
+                    View, Run, Duplicate and Archive remain disabled until authorized reads and
+                    commands are composed.
+                  </p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </ReportCatalogResults>
+      <p className="report-catalog-boundary">
+        Names, owners, certification, scope, last-run time and schedules remain unavailable; no
+        report results or sample business records are shown.
+      </p>
+    </ReportCatalogShell>
   );
 }
 
 export function ReportBuilder({ view }: { readonly view: ReportBuilderView }) {
-  const readOnly = view.lifecycle === "Archived" || !view.permissions.mayEdit;
   return (
     <main className="page-shell">
       <header className="screen-heading">
@@ -135,16 +333,26 @@ export function ReportBuilder({ view }: { readonly view: ReportBuilderView }) {
         </div>
         <div className="card-actions">
           {view.permissions.maySubmitReview ? (
-            <button disabled={readOnly}>Submit review</button>
+            <button disabled aria-describedby="report-actions-unavailable">
+              Submit review
+            </button>
           ) : null}
           {view.permissions.mayCertify ? (
-            <button disabled={view.lifecycle !== "InReview"}>Certify</button>
+            <button disabled aria-describedby="report-actions-unavailable">
+              Certify
+            </button>
           ) : null}
           {view.permissions.maySchedule ? (
-            <button disabled={view.certificationStatus !== "Certified"}>Schedule</button>
+            <button disabled aria-describedby="report-actions-unavailable">
+              Schedule
+            </button>
           ) : null}
         </div>
       </header>
+      <p id="report-actions-unavailable" role="note">
+        Reporting commands are not connected. This page is read-only; no report, certification,
+        schedule, run, or artifact will be changed here.
+      </p>
       <section className="overview-grid" aria-label="Report builder contract">
         <article className="summary-card">
           <h2>Approved sources</h2>
@@ -186,6 +394,115 @@ export function ReportBuilder({ view }: { readonly view: ReportBuilderView }) {
   );
 }
 
+const reportBuilderDefinitionFields = [
+  "Report name",
+  "Purpose",
+  "Default time range",
+  "Dimensions",
+  "Filters",
+  "Sort",
+  "Visualization / table",
+  "Row limit",
+  "Scope policy",
+  "Freshness requirement",
+  "Access / export policy",
+  "Effective period",
+] as const;
+const reportBuilderSourceFields = ["Approved datasets", "Metric versions"] as const;
+const reportBuilderScheduleFields = [
+  "Cadence",
+  "Time zone",
+  "Delivery channel",
+  "Format",
+  "Recipient scope",
+] as const;
+const reportBuilderValidationFields = ["Lineage validation", "Permission validation"] as const;
+
+function ReportBuilderUnavailableField({ label }: { readonly label: string }) {
+  return (
+    <label className="report-builder-review__field">
+      {label}
+      <input aria-label={label} disabled placeholder="Unavailable" />
+    </label>
+  );
+}
+
+function ReportBuilderUnavailableCard({
+  title,
+  fields,
+  className,
+}: {
+  readonly title: string;
+  readonly fields: readonly string[];
+  readonly className?: string;
+}) {
+  return (
+    <section className={`report-builder-review__card ${className ?? ""}`}>
+      <h2>{title}</h2>
+      <div className="report-builder-review__fields">
+        {fields.map((label) => (
+          <ReportBuilderUnavailableField key={label} label={label} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function ReportBuilderUnavailable() {
+  return (
+    <main className="report-builder-review">
+      <div className="report-builder-review__brand" aria-label="BOP Operations">
+        <strong>BOP</strong>
+        <span>OPERATIONS</span>
+      </div>
+      <div className="report-builder-review__content">
+        <header className="report-builder-review__heading">
+          <h1>Report Builder</h1>
+          <p className="bop-eyebrow">RPT-REPORT-BUILDER · PHASE 3 · DESIGN REVIEW</p>
+          <p>Review layout · authorized report source unavailable</p>
+        </header>
+        <section className="report-builder-review__notice" role="status">
+          <h2>Authorized report definition is unavailable</h2>
+          <p>
+            Dataset and metric versions, report configuration, preview results and delivery settings
+            remain hidden until the authorized projection is connected.
+          </p>
+        </section>
+        <div className="report-builder-review__layout">
+          <ReportBuilderUnavailableCard
+            title="Report definition"
+            fields={reportBuilderDefinitionFields}
+            className="report-builder-review__definition"
+          />
+          <div className="report-builder-review__side">
+            <ReportBuilderUnavailableCard
+              title="Approved sources"
+              fields={reportBuilderSourceFields}
+            />
+            <ReportBuilderUnavailableCard
+              title="Schedule and delivery"
+              fields={reportBuilderScheduleFields}
+            />
+            <section className="report-builder-review__card report-builder-review__validation">
+              <h2>Validation and preview</h2>
+              <div className="report-builder-review__fields">
+                {reportBuilderValidationFields.map((label) => (
+                  <ReportBuilderUnavailableField key={label} label={label} />
+                ))}
+              </div>
+              <p>Sample preview and row count · Unavailable</p>
+            </section>
+          </div>
+        </div>
+        <p className="report-builder-review__boundary">
+          Phase 3 authoring is not enabled in this Review. No report values, permission, preview,
+          certification or schedule is inferred.
+        </p>
+      </div>
+    </main>
+  );
+}
+
 export function ReportCatalogPage({
   client = unavailableReportCatalogClient,
 }: {
@@ -209,8 +526,12 @@ export function ReportCatalogPage({
   }, [client]);
   return state.kind === "Found" ? (
     <ReportCatalog view={state.view} />
+  ) : state.kind === "Unavailable" ? (
+    <ReportCatalogUnavailable />
   ) : (
-    <ReportPageState state={state.kind} />
+    <ReportCatalogShell>
+      <ReportPageState state={state.kind} />
+    </ReportCatalogShell>
   );
 }
 
@@ -238,6 +559,8 @@ export function ReportBuilderPage({
   }, [client, id]);
   return state.kind === "Found" ? (
     <ReportBuilder view={state.view} />
+  ) : state.kind === "Unavailable" ? (
+    <ReportBuilderUnavailable />
   ) : (
     <ReportPageState state={state.kind} />
   );

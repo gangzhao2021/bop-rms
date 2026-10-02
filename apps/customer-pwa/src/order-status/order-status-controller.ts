@@ -28,6 +28,7 @@ export interface OrderStatusSubscriptionCallbacks {
 }
 
 export interface CustomerOrderStatusClient {
+  subscribeContextChange?(listener: () => void): () => void;
   load(orderReference: string): Promise<unknown>;
   subscribe(orderReference: string, callbacks: OrderStatusSubscriptionCallbacks): () => void;
 }
@@ -380,6 +381,7 @@ export function createOrderStatusController(
   let request = 0;
   let realtime: RealtimeAvailability = "connecting";
   let unsubscribeRealtime: (() => void) | null = null;
+  let unsubscribeContext: (() => void) | null = null;
   const listeners = new Set<() => void>();
   const publish = (next: OrderStatusState) => {
     state = next;
@@ -389,6 +391,23 @@ export function createOrderStatusController(
     state.status === "ready" || state.status === "offline" ? state.view : null;
   const loadCanonical = async () => {
     if (stopped || !reference.test(orderReference)) return;
+    if (!unsubscribeContext && client.subscribeContextChange) {
+      let active = true;
+      const release = client.subscribeContextChange(() => {
+        if (!active || stopped) return;
+        lifecycle += 1;
+        request += 1;
+        realtime = "unavailable";
+        const releaseRealtime = unsubscribeRealtime;
+        unsubscribeRealtime = null;
+        publish({ status: "permission-denied" });
+        releaseRealtime?.();
+      });
+      unsubscribeContext = () => {
+        active = false;
+        release();
+      };
+    }
     const retained = currentView();
     if (!online) {
       publish({ status: "offline", view: retained });
@@ -460,7 +479,9 @@ export function createOrderStatusController(
     setOnline(value: boolean) {
       online = value;
       if (!value) {
+        lifecycle += 1;
         request += 1;
+        realtime = "unavailable";
         unsubscribeRealtime?.();
         unsubscribeRealtime = null;
         publish({ status: "offline", view: currentView() });
@@ -472,7 +493,12 @@ export function createOrderStatusController(
       request += 1;
       unsubscribeRealtime?.();
       unsubscribeRealtime = null;
+      unsubscribeContext?.();
+      unsubscribeContext = null;
       listeners.clear();
+      state = reference.test(orderReference)
+        ? { status: "loading" }
+        : { status: "invalid-reference" };
     },
     subscribe(listener: () => void) {
       listeners.add(listener);

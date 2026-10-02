@@ -11,6 +11,7 @@ import {
   BrowserSessionService,
   createIdentityActor,
   createPostgresBrowserSessionStore,
+  sessionPolicies,
 } from "../../bop/identity/src/index.ts";
 
 /** Actual encrypted session/selection/CSRF. Synthetic OIDC actor and Tenant
@@ -22,6 +23,7 @@ export async function seedOrdinaryRefundSession({
   requester,
   at,
   referencePrefix = "01909971",
+  policyCode = "WorkforceStandard",
 }) {
   const record = { actorReference: requester };
   const id = (n) => referencePrefix + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -38,6 +40,7 @@ export async function seedOrdinaryRefundSession({
   });
   const cookie = randomBytes(32).toString("base64url"),
     csrf = randomBytes(32).toString("base64url");
+  const policy = sessionPolicies[policyCode];
   const key = randomBytes(32),
     pepper = randomBytes(32);
   const hasher = {
@@ -54,7 +57,7 @@ export async function seedOrdinaryRefundSession({
   ]);
   const secret = Buffer.concat([nonce, cipher.getAuthTag(), encrypted]);
   await client.query(
-    "INSERT INTO bop_identity.authentication_session (session_id,actor_id,session_selector_hash,csrf_selector_hash,policy_code,status,encrypted_secret,cipher_algorithm,key_reference,encryption_context,authenticated_at,created_at,last_seen_at,idle_expires_at,absolute_expires_at,version) VALUES ($1,$2,decode($3,'hex'),decode($4,'hex'),'WorkforceStandard','Active',$5,'SYNTHETIC_AES_256_GCM','ephemeral-serving-key',$6,$7,$7,$8,$9,$10,1)",
+    "INSERT INTO bop_identity.authentication_session (session_id,actor_id,session_selector_hash,csrf_selector_hash,policy_code,status,encrypted_secret,cipher_algorithm,key_reference,encryption_context,authenticated_at,created_at,last_seen_at,idle_expires_at,absolute_expires_at,version) VALUES ($1,$2,decode($3,'hex'),decode($4,'hex'),$11,'Active',$5,'SYNTHETIC_AES_256_GCM','ephemeral-serving-key',$6,$7,$7,$8,$9,$10,1)",
     [
       id(1),
       record.actorReference,
@@ -64,8 +67,9 @@ export async function seedOrdinaryRefundSession({
       context,
       from,
       at,
-      new Date(Date.parse(at) + 30 * 60000).toISOString(),
-      new Date(Date.parse(from) + 12 * 60 * 60000).toISOString(),
+      new Date(Date.parse(at) + policy.idleTimeoutMinutes * 60000).toISOString(),
+      new Date(Date.parse(from) + policy.absoluteTimeoutMinutes * 60000).toISOString(),
+      policyCode,
     ],
   );
   await client.query(

@@ -1,10 +1,95 @@
 # BOP-RMS · Figma Make 首轮设计简报
 
-状态：Draft，供 Figma Make 生成和评审；尚未生成、发布或接入真实业务。
+状态：私有 Draft，Make 当前 Version29；已有局部原型旅程，完整 Screen / 响应式 / 键盘验收仍未完成；未发布、未接入真实业务。
+项目：[High-Fidelity Restaurant Order Prototype](https://www.figma.com/make/u5gjkcwfARvEqaiUKnCJnp/High-Fidelity-Restaurant-Order-Prototype)。
 准备日期：2026-09-22。基于 WP-2402 v14 当前本地实现、Screen Registry 和已接受 Section 88 约束。
 目标：先完成订单工作台的视觉与关键交互，再扩展同一设计语言到厨房、堂食、取餐和异常。此文件不代表完整试点改版完成。
 
 ## 复制以下内容到 Figma Make
+
+2026-09-22 顾客端补充范围：Owner 明确指出扫码点餐主界面缺失。
+在同一私有草稿增加独立顾客 shell：入口 `/`、菜单 `/menu`、搜索
+`/menu/search`、详情 `/menu/items/:sellableId`（内嵌规格和过敏原协助）、
+购物车 `/cart`。首屏是实际菜单体验，不是营销页；展示虚构门店与已确认的
+桌号、营业状态、菜品图片、分类、价格及可用性。Guest/Store 上下文过期、
+离线或无权限时禁止写入。金额用整数最小单位，购物车金额仅为估算，不能
+伪装最终 Quote。结账、支付和订单状态下一步单独对齐并验收，不用假成功替代。
+保留全部商家工作区及其恢复守卫。以 WP-2402 的逐项证据为准。
+
+顾客后续结账契约（尚未制作，不表示已通过）：
+
+- `CUST-CHECKOUT /checkout`：当前 Cart 版本和模拟 Quote 绑定，分项显示
+  subtotal/discount/tax/fee/total、有效期和阻断理由；示例金额不是实际税务配置。
+  购物车变更使旧 Quote 失效；涨价必须确认该次新 Quote；过期重新报价。
+  堂食只展示该 Guest 当前授权的 Table/Session，不创建 Pickup slot。
+- `CUST-PAYMENT /checkout/payment`：小费以整数分在创建时固定，保留同一操作
+  的身份、原始时钟和金额；显示纯模拟支付，不收集卡号、凭据或个人资料。
+  重复点击、离线、失效权限不得创建新意图；Pending/Unknown 不推断成功。
+- `CUST-CHECKOUT-RESULT /checkout/result`：查询/恢复原操作，明确区分 Pending、
+  Unknown、Succeeded、Failed；只有对应确认结果才能显示付款成功和订单链接。
+  恢复上下文缺失时指引向门店核对，不诱导再次付款。
+- `CUST-ORDER-STATUS /orders/:orderReference`：订单/批次、付款、厨房及服务状态
+  分别展示，缺少来源显示不可用而不是推断；不编造 ETA。堂食追加批次需要
+  当前 Session 和权限，不重写已付批次。30 分钟期限从原 Payment 操作时刻
+  起算，限未付批次/付款承诺；不能关台或清除先前已付批次。
+- 此段只定义后续私有草稿的模拟边界；不构成真实支付或上线授权。验收需覆盖
+  正常链路、涨价/过期、Unknown 恢复不重复、离线/会话变化及旧响应丢弃。
+
+核对来源：Screen Registry 的上述 Screen 条目；customer-pwa 的 CheckoutPage、
+SessionPaymentPage、SessionPaymentResultPage 和 order-status/types；
+[DEC-H03-DINING](./capacity-checkout-handoff.md#proposed-dine-in-interpretation-dec-h03-dining)。
+
+后续范围与状态说明（2026-09-23）：Owner 要求核对实际 Make 项目中的 TBD。
+本文件保留首轮 Orders 简报，不能把原型页面缺失等同于业务代码缺失。首次读取真实草稿时，
+Kitchen、Dining、Pickup、Exceptions 导航均为 TBD；后续 Version29 预览已能打开这四个工作区，
+因此原型已生成工作区的事实取代了“尚未生成”的旧状态，但不代表逐屏契约、响应式、键盘或业务状态验收完成。
+后续逐项的原型观察、本地实现差异和未关闭条件统一记录在
+[项目完成度核对](../../runbooks/project-completion-review.md#figma-make-reconciliation)
+及 [Make 与仓库逐屏验收对照](../../runbooks/project-completion-review.md#make-to-repository-acceptance-crosswalk-2026-09-23)。
+
+Make 访问状态与代码证据（2026-09-23）：早期访问曾显示注册门槛；之后一度可用
+Code view 编辑私有 Version29 草稿。随后导出的最新已检查源码包 (4) SHA256 为
+`233128ee046f10ab5ae655ba218ecdb28b61f451c7eafbda7e4523fed9deacc7`。在该隔离导出副本中，
+客户转换使用显式 `nowMs`，支付提交的资格检查与不可变 intent 共用同一时钟，Dining 命名类型也存在；
+`tsc --noEmit`、189 个逻辑测试和 Vite build 通过，build 仍有 525.97 kB chunk 警告；
+`oxfmt --check` 仅对 `src/logic.test.mjs` 报格式问题。这些结果只适用于该 hash 的导出副本，
+不证明 Make 当前线上源码与导出一致，也不证明完整原型验收。
+
+最新重新打开的 Chrome 会话可读 Preview，但编辑面显示 “Sign up to use Figma Make”，
+提示词、上下文、模式、模型、Send 与 Code 编辑不可用；没有提交注册信息、触发模拟业务动作、
+发布或更改共享设置。因此以上导出检查是历史上的精确工件证据，不代表当前可编辑权限。
+此前显示团队 AI credits 于 2026-09-30 重置的提示已被本次注册门槛观察取代，恢复编辑权限时需重新核验。
+后续源码、测试来源和逐工作区观察见 WP-2402。原型行程的数据仍是虚构内存数据，不能证明服务端授权、
+持久化或真实业务结果。
+当前私有 Make 访问复核（2026-09-23）：该项目已重新可打开；Preview 和 Code view 可用，
+Operations `/operations/dining` 路由可查看。Code 文件树显示 `src/components/DiningWorkspace.tsx`，
+并能打开带 `settable` 的源码文本编辑器。没有修改源码，因此未验证手工编辑的持久化权限；
+AI 提示框仍因团队额度耗尽禁用，界面显示 2026-09-30 刷新。与较早的注册门槛记录相比，当前访问已恢复，
+但 AI 生成仍受额度阻挡。没有发布或改变分享状态。
+已记录的局部原型旅程包括 Orders Unknown/冲突/只读拒绝、Kitchen 单个虚构票据处理、Pickup 模拟验货分支，
+以及 Exceptions 的模拟确认/指派。它们只证明预览内存状态的可见行为，不证明服务端授权、持久化或真实业务结果。
+以 [WP-2402 当前记录](../work-packages/WP-2402.md#full-project-continuation-review---2026-09-22)
+区分原型观察、本地浏览器证据、待办和外部门槛；不得把本地实现测试写成 Make 验收，也不代表全项目完成。
+
+当前会话复核（2026-09-26）：Chrome 重新打开该私有 Make 项目成功，Preview 可见虚构 The Elm / T-07 内容，
+Code 视图可展开 `src` 文件树并打开 `src/App.tsx` 文本编辑区域；可访问性树将编辑区域标为 `settable`。
+Figma 账户复核返回目标团队为 Full seat / admin。AI 提示、模型选择和 Send 按钮仍禁用，界面显示团队额度至
+2026-09-30 刷新。此轮只读，没有修改源码、尝试保存、发布、共享或操作原型业务。手工编辑持久化仍未验证；
+Review/Make 内容仍是虚构演示数据，完整 Screen、响应式及键盘验收仍未完成。
+
+当前路由补查（2026-09-23）：通过 Preview route field 打开 `/operations/pickup` 与
+`/operations/order-exceptions`。Pickup 显示六条活动记录和含一条 Completed 历史的七张卡片；本轮已在
+Make 源码加入本地 Order number 搜索、结果计数和空状态。Exceptions 本轮已在 Make 源码加入 demo
+type/severity/status/owner 筛选、计数和空状态。顶部明确标为 The Elm、Demo 和 fictional data。
+只调用本地过滤/搜索控件，没有触发业务演示命令。改动和局部验证范围见 WP-2402；它们只覆盖虚构前端数据，
+不证明业务权限、Provider 状态、持久化或完整 Registry/Make 验收。
+
+Make 源码更新（2026-09-23）：Pickup 与 Exceptions 已直接编辑并在 Preview 验证本地过滤/搜索行为；
+改动保留在私有 Version29 草稿。AI 生成仍受团队额度限制。之后通过 Preview options → Viewport → Custom
+检查两页的 390×844 与 320×720 布局。Pickup 的 Prototype spec 悬浮入口已在不超过 640px 时隐藏，
+320px 的 PU-007 Ready 状态和 390px 的七张卡片均不再被遮挡；1440px 桌面入口保留，说明文字已标明
+确认/分配为模拟动作、来源解析受限。键盘验收目前只覆盖 Pickup 搜索/清除与 Exceptions 类型筛选/清除，
+不代表完整页面验收。
 
 请直接构建一个高保真、可操作、响应式的 BOP-RMS 单店餐饮订单工作台原型。使用下面的确切业务约束和全新虚构数据，不需要访问我的 localhost，也不要连接真实后端。
 
@@ -171,7 +256,9 @@ F. Fulfilled 订单保留历史查看。
 
 差异与限制：
 
-- 这是源代码和契约核对，没有成功取得当前网页截图或运行浏览器验收。
+- 原始简报来自源代码和契约核对。后续任务“拉取最新代码覆盖本地项目”记录了
+  1440/1024/390/320px、正常接单、Unknown 恢复、Conflict 刷新与部分键盘验收；
+  这些是该任务的历史验收，完整无障碍验收仍未完成。本次仅重新读取草稿，未重跑这些检查。
 - 完整搜索/筛选、全量汇总和实时订阅不能从当前队列代码推定已实现。
 - 现有基线是 en-CA；中文是可选评审样例，不是已接受的生产语言切换。
 - 设计方向是用户授权的草稿探索，不是 Accepted Figma 节点或实现许可完成凭据。

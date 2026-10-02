@@ -71,6 +71,9 @@ function render(state: ReceiptState) {
 describe("CUST-RECEIPT-SUPPORT screen contract", () => {
   it("renders the immutable snapshot, accessible totals, print and gated email intent", () => {
     const html = render(ready());
+    expect(html).toContain('class="receipt-page__content"');
+    expect(html).toContain('class="receipt-page__history"');
+    expect(html).toContain('class="receipt-page__action-card"');
     expect(html).toContain("Immutable receipt history");
     expect(html).toContain("Synthetic Operating Entity");
     expect(html).toContain("CAD 11.30");

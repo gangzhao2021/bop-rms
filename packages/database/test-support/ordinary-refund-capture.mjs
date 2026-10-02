@@ -356,14 +356,17 @@ export async function exerciseOrdinaryRefundCapture({
       authorize: async () => true,
       authority: workforce.authority,
     };
-    const prepared = await runner().run((tx) =>
-      createPostgresOrdinaryRefundApprovalSource(approvalOptions)(tx, {
+    const prepared = await runner().run(async (tx) => {
+      const observedAt = (
+        await tx.query("SELECT date_trunc('milliseconds',clock_timestamp()) AS observed_at", [])
+      ).rows[0].observed_at.toISOString();
+      return createPostgresOrdinaryRefundApprovalSource(approvalOptions)(tx, {
         ...subjectQuery,
         approvalReference: id(100),
         approverReference: id(101),
-        observedAt: requestWasCommitted ? new Date().toISOString() : subjectQuery.observedAt,
-      }),
-    );
+        observedAt,
+      });
+    });
     const approvalInput = {
       ...prepared,
       operationReference: id(102),

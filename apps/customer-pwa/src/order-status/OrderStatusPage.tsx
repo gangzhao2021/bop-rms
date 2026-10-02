@@ -71,7 +71,10 @@ function StatusContent({
   const payments = view.sources?.payments;
   return (
     <>
-      <section className="order-status__summary" aria-labelledby="order-progress-heading">
+      <section
+        className="order-status__card order-status__summary"
+        aria-labelledby="order-progress-heading"
+      >
         <p className="cart-page__eyebrow">Order {view.order.orderNumber}</p>
         <h2 id="order-progress-heading">{progressHeading}</h2>
         <dl>
@@ -102,7 +105,10 @@ function StatusContent({
       </section>
 
       {payments && payments.length > 0 ? (
-        <section aria-labelledby="order-payment-updates-heading">
+        <section
+          className="order-status__card order-status__payments"
+          aria-labelledby="order-payment-updates-heading"
+        >
           <h2 id="order-payment-updates-heading">Payment updates</h2>
           <ul>
             {payments.map((payment, index) => (
@@ -140,10 +146,13 @@ function StatusContent({
         </section>
       ) : null}
 
-      <section aria-labelledby="order-items-heading">
+      <section className="order-status__batches" aria-labelledby="order-items-heading">
         <h2 id="order-items-heading">Order batches</h2>
         {view.order.batches.map((batch, index) => (
-          <article key={batch.orderBatchReference} className="order-status__batch">
+          <article
+            key={batch.orderBatchReference}
+            className="order-status__card order-status__batch"
+          >
             <h3>Batch {index + 1}</h3>
             {kitchen ? (
               <p>
@@ -234,7 +243,7 @@ export function OrderStatusPage({
       <header>
         <p className="cart-page__eyebrow">Order status</p>
         <h1>Track your order</h1>
-        <p>Check your order progress and pickup details.</p>
+        <p>Check your order progress and available next steps.</p>
       </header>
 
       {state.status === "loading" ? (
@@ -269,9 +278,19 @@ export function OrderStatusPage({
         </section>
       ) : null}
       {state.status === "unavailable" ? (
-        <section role="alert">
+        <section className="order-status__unavailable" role="alert">
+          <span className="order-status__unavailable-icon" aria-hidden="true">
+            !
+          </span>
           <h2>Order status is not available</h2>
           <p>We could not load your order status. Please try again.</p>
+          <button
+            className="order-status__retry"
+            type="button"
+            onClick={() => void controller.refresh()}
+          >
+            Try loading status
+          </button>
         </section>
       ) : null}
       {state.status === "offline" ? (
@@ -285,8 +304,12 @@ export function OrderStatusPage({
           </p>
         </section>
       ) : null}
-      {state.status === "unavailable" || state.status === "offline" ? (
-        <button type="button" onClick={() => void controller.refresh()}>
+      {state.status === "offline" ? (
+        <button
+          className="order-status__retry"
+          type="button"
+          onClick={() => void controller.refresh()}
+        >
           Try loading status
         </button>
       ) : null}
@@ -311,9 +334,13 @@ export function OrderStatusPage({
         </section>
       ) : null}
       {view ? (
-        <Link to={`/orders/${view.order.orderReference}/receipt`}>View receipt and support</Link>
+        <Link className="order-status__receipt" to={`/orders/${view.order.orderReference}/receipt`}>
+          View receipt and support
+        </Link>
       ) : null}
-      <Link to="/menu">Back to menu</Link>
+      <Link className="order-status__back" to="/menu">
+        Back to menu
+      </Link>
     </main>
   );
 }

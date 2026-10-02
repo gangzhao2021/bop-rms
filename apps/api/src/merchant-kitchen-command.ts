@@ -26,6 +26,8 @@ export function createMerchantKitchenCommand(options: {
   const resolveScope = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const session = await options.authentication.authorize(input);
+    if (session?.policy?.code !== "NamedKdsOperator")
+      throw new KitchenWorkLifecycleError("KITCHEN_WORK_PERMISSION_DENIED");
     return options.persistence.transactions.run(async (transaction) => {
       const scope = await resolveScope(
         transaction,

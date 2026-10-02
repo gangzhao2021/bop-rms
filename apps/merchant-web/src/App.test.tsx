@@ -34,6 +34,12 @@ const workspace: MerchantWorkspaceSnapshot = Object.freeze({
       href: "/app",
       permission: "merchant.access",
     }),
+    Object.freeze({
+      screenId: "OPS-ORDER-QUEUE",
+      label: "Orders",
+      href: "/operations/orders",
+      permission: "ordering.operate",
+    }),
   ]),
 });
 
@@ -62,6 +68,10 @@ describe("HOME-OVERVIEW Merchant shell", () => {
     );
     expect(html).toContain("HOME-OVERVIEW");
     expect(html).toContain("Training Store");
+    expect(html).toContain(
+      '<div class="bop-shell__header-status"><span data-freshness="Stale">Stale</span></div>',
+    );
+    expect(html).not.toContain("Training Store · Stale");
     expect(html).toContain("Second Store");
     expect(html).toContain("Live Store status");
     expect(html).toContain("Today summary");
@@ -70,8 +80,11 @@ describe("HOME-OVERVIEW Merchant shell", () => {
     expect(html.match(/Unavailable until the WP-1905/g)).toHaveLength(3);
     expect(html).toContain("Stale data");
     expect(html).toContain('aria-label="Primary"');
-    expect(html).toContain('aria-label="Authorized Merchant navigation"');
+    expect(html.match(/<nav\b/g)).toHaveLength(1);
+    expect(html).not.toContain('aria-label="Authorized Merchant navigation"');
     expect(html).toContain('href="/app"');
+    expect(html).toContain('href="/app" aria-current="page">Overview');
+    expect(html).toContain('href="/operations/orders">Orders');
     expect(html).not.toContain('href="/operations/kitchen"');
   });
 

@@ -368,3 +368,9 @@ export function validateRecipeGraph(
   visit(root, 0);
   return true as const;
 }
+
+/** Public owning positive yield bound; existing snapshot parsing is unchanged. */
+export function parseRecipeYieldQuantityMicrounits(value: unknown): string {
+  if (typeof value !== "string" || value.length > 31) return fail("RECIPE_INPUT_INVALID");
+  return natural(value, true).toString();
+}

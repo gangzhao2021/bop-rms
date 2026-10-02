@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, writeFile, rm, chmod, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, chmod, symlink, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 vi.mock("./pilot-installation.mjs", () => ({
@@ -20,8 +20,9 @@ afterEach(async () => {
 });
 async function fixture() {
   vi.stubEnv("NODE_ENV", "test");
-  const root = await mkdtemp(path.join(tmpdir(), "pilot-backup-"));
-  roots.push(root);
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pilot-backup-"));
+  roots.push(temporaryRoot);
+  const root = await realpath(temporaryRoot);
   const directory = path.join(root, ".local/pilot");
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);

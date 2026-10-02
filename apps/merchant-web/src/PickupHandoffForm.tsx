@@ -18,6 +18,7 @@ export function PickupHandoffForm({
   readonly storeReference: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null),
+    resultAnnouncement = useRef<HTMLParagraphElement>(null),
     controller = useRef<AbortController | null>(null);
   const intent = useRef<ReturnType<typeof client.prepare> | null>(null);
   const [status, setStatus] = useState<
@@ -91,11 +92,21 @@ export function PickupHandoffForm({
         Review pickup handoff
       </button>
       {status === "Completed" || status === "InProgress" ? (
-        <p role="status">Handoff recorded. Refresh the queue to see current status.</p>
+        <p ref={resultAnnouncement} role="status" tabIndex={-1}>
+          Handoff recorded. Refresh the queue to see current status.
+        </p>
+      ) : status === "Rejected" ? (
+        <p ref={resultAnnouncement} role="status" tabIndex={-1}>
+          Handoff was not confirmed. Refresh the queue before another attempt.
+        </p>
       ) : null}
       <dialog
         ref={dialog}
         aria-labelledby={"handoff-" + item.fulfillmentReference}
+        onClose={() => {
+          if (status === "Rejected" || status === "Completed" || status === "InProgress")
+            resultAnnouncement.current?.focus();
+        }}
         onCancel={(event) => {
           if (locked) event.preventDefault();
         }}

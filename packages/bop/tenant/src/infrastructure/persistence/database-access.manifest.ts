@@ -3,6 +3,23 @@ const databaseAccessManifestInput = {
   module: { moduleName: "tenant", packageName: "@bop/tenant", layer: "BOP" },
   tables: [
     {
+      table: "store_reference_generation",
+      classification: "projection-read-model",
+      writeOwner: { kind: "projection-builder", id: "@bop/tenant.store-reference.v1" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "store_reference_projection",
+      classification: "projection-read-model",
+      writeOwner: { kind: "projection-builder", id: "@bop/tenant.store-reference.v1" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+
+    {
       table: "tenant_administration_operation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@bop/tenant" },
@@ -68,6 +85,52 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "brand-configuration-content-source.read.brand",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_tenant", table: "brand" },
+      principal: { kind: "module", id: "@bop/tenant" },
+      readPattern: "owner-repository",
+      source: "packages/bop/tenant/src/infrastructure/persistence/brand-lifecycle-store.ts",
+    },
+    {
+      id: "brand-configuration-content-source.read.configuration",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_tenant", table: "brand_configuration_version" },
+      principal: { kind: "module", id: "@bop/tenant" },
+      readPattern: "owner-repository",
+      source: "packages/bop/tenant/src/infrastructure/persistence/brand-lifecycle-store.ts",
+    },
+    {
+      id: "store-reference-source.read.brand",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_tenant", table: "brand" },
+      principal: { kind: "module", id: "@bop/tenant" },
+      readPattern: "owner-repository",
+      source: "packages/bop/tenant/src/infrastructure/persistence/store-reference-source.ts",
+    },
+    {
+      id: "store-reference-source.read.store_reference_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_tenant", table: "store_reference_generation" },
+      principal: { kind: "module", id: "@bop/tenant" },
+      readPattern: "owner-repository",
+      source: "packages/bop/tenant/src/infrastructure/persistence/store-reference-source.ts",
+    },
+    {
+      id: "store-reference-source.read.store_reference_projection",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_tenant", table: "store_reference_projection" },
+      principal: { kind: "module", id: "@bop/tenant" },
+      readPattern: "owner-repository",
+      source: "packages/bop/tenant/src/infrastructure/persistence/store-reference-source.ts",
+    },
+
     {
       id: "brand-lifecycle.read.brand",
       operation: "read",

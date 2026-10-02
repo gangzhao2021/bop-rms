@@ -1,0 +1,37 @@
+# Current Product content policy assessment
+
+WP-2421 adds a bounded Catalog-owned assessment from accepted Sections68.3/68.4/68.9 and existing Tenant/Publishing public current sources. Rules and software source composition are our responsibility. This implementation does not change Domain ownership, lifecycle, ordinary DTOs or accepted publication checks.
+
+## Assessed rules and identity
+
+`CatalogProductContentPolicyAssessmentV1` binds the exact parsed Product candidate, root/version, complete content/configuration fingerprints, Tenant/Brand, original intent and bounded observation lease. Its source identity includes the exact Brand configuration version/digest/current publication and Product policy reference/version/canonical body digest. The typed policy provides required Product name locales, media requirement, approval requirement and warning-override flag. The flag describes current policy; it supplies no warning acknowledgement, Actor permission or override receipt.
+
+Catalog checks that the Product default locale and every supplied Product/SKU name, description, preparation note, Variant dimension/value name and Media alternative-text locale belong to current Brand-supported locales. Every explicitly required Product name translation must exist and its locale must be enabled. Optional text does not gain an invented translation requirement. Required media must have a declared reference in complete content. Pinned references or declared media presence do not imply Ready renditions, shared authorization, valid alt-text policy or absence of quarantine/rejection.
+
+A candidate lacking complete editor content remains `CompleteContent` HardError for this complete-content assessment; no legacy record is backfilled or silently converted into empty optional fields. Existing legacy Draft/publication paths retain their original compatibility behavior. This assessment is an additional component, not a new mandatory gate on those paths.
+
+Output contains minimal identities, four assessed check outcomes and `PassForAssessedRules` or `HardError`. It retains `publishValidation: Incomplete`, source authority, Media readiness, reference eligibility, Brand field requirements and sale eligibility NotEvaluated. It emits no content prose, Media IDs, reference graph or author/approver identity. A partial policy Pass cannot be substituted for the accepted twelve-check validation receipt or grant an Actor action.
+
+## Actual current composition
+
+The API composes public contracts only. Its closed input copies descriptors; accessors and unknown fields cannot supply authority or execute while acquiring sources. Brand acquisition uses the exact owning Tenant configuration and its actual current Publishing head. The Product policy source now exposes a held full-body query; its existing scope-journal adapter delegates to that query with the same publication/scope checks. Current server Tenant/Brand/Actor must agree across both sources. Caller candidate authority and the Catalog root/source barrier remain the owning writer's responsibility; the composition does not fetch a current Product root itself.
+
+Both sources must use the exact same outer transaction object. A separately committed read cannot replace a held source lease. Tenant's current Brand fence and Publishing's current history fence persist through outer COMMIT, with actual current field/purpose authority. Assessment expiry narrows to the earliest Brand, Product-policy or requested expiration, never more than30 seconds. Clock, expiry and owner authority are checked around caller work; late failure prevents the outer transaction commit. Brand and policy configuration governance are separate from required Product approval.
+
+## Evidence and remaining work
+
+Fresh Catalog19 assessment cases, API9 refusal cases, affected Catalog compile/API types/lint and import/Domain gates pass. Existing102 content/publication cases and2 Brand API cases retain their passing unchanged evidence. Source doubles remain synthetic.
+
+Actual isolated SQL composes the owning Tenant configuration, actual Generic Publishing Brand head and actual typed Product-policy head in one outer UoW. It proves both held fences, missing required translation/media-presence errors, unsupported optional locales, partial-result boundaries, source-context binding, earliest effective expiration and rollback on late authority/expiry. Catalog candidates, current Actor holders and Tenant final Published metadata authoring seeds are explicitly synthetic. The existing actual Product-policy SQL and Catalog System activation/journal consumer retain compatibility with the common source adapter. Exact commands, failures/repairs and final inputs remain in [WP-2421](../work-packages/WP-2421.md#overnight-current-content-policy-assessment--2026-09-30-continuation).
+
+This assessment milestone added no DDL, ACL, Module dependency, business mutation, ordinary HTTP/page or external service. No fresh full pnpm verify, full Product validation, eligibility, ordinary browser journey, UAT or project completion is claimed. The subsequent [Catalog registry milestone](./product-content-registry.md) implements actual Tag/Attribute persistence/current acquisition and a full-content SQL consumer; normal full authority composition still needs it joined with Media/Option/Safety/Nutrition producers, current field policy, all twelve publish checks, Product approval and Tenant topology. Existing Brand hard-field requirements remain unassessed rather than ignored as satisfied. Normal full Draft/editor/review/publishing integration follows actual complete authority assembly.
+
+## Subsequent owning candidate acquisition
+
+The [current candidate source](./product-validation-candidate-source.md) now reads the actual complete Catalog Draft, binds the original User Validate command and holds full current fields/source barrier. Its API consumer joins the existing Brand/Product-policy sources in the exact same outer transaction without accepting an aggregate input. The original supplied-candidate method remains compatible and its historical synthetic-candidate evidence remains unchanged. The newer actual three-owner case is separately named in WP-2421; current permission/reference holders and Tenant final Published authoring seeds remain synthetic, and full twelve-check validation stays incomplete.
+
+## Final joined expiry and single callback
+
+Milestone18 requires the intersection lease again after the actual Brand and policy wrappers return, in addition to before/after work. A shorter requested binding or policy deadline cannot survive a longer Brand-source final permission check. Brand, policy and consumer callbacks each execute once; a wrapper catching a rejected second callback cannot turn the first result into success. The completed result identity must survive every wrapper. These checks preserve all owning current locks/permissions and strict exclusive deadlines.
+
+Actual SQL now includes a shorter10-second binding that expires during the final Brand authority wrapper, after a real owning Draft/root2 write. A repeated Brand wrapper deliberately catches the second-callback refusal after that first write; the composition still rejects. Root, operations, snapshots, source commits/head, Audit/chain and Outbox remain unchanged after rollback. The raw supplied-candidate case retains its explicitly partial internal-source boundary; no actual current Product acquisition is inferred for that raw method.

@@ -63,6 +63,46 @@ describe("Merchant workspace client boundary", () => {
     ).toThrow("MERCHANT_WORKSPACE_INVALID");
   });
 
+  it("accepts only the canonical permission-bound Task Inbox navigation entry", () => {
+    const taskNavigation = {
+      screenId: "TASK-INBOX",
+      label: "Tasks",
+      href: "/app/tasks",
+      permission: "workflow.operate",
+    } as const;
+    expect(
+      parseMerchantWorkspace({
+        ...workspace,
+        navigation: [...workspace.navigation, taskNavigation],
+      }).navigation,
+    ).toContainEqual(taskNavigation);
+    expect(() =>
+      parseMerchantWorkspace({
+        ...workspace,
+        navigation: [...workspace.navigation, { ...taskNavigation, href: "/app" }],
+      }),
+    ).toThrow("MERCHANT_WORKSPACE_INVALID");
+  });
+
+  it("admits only canonical Product navigation and rejects route/permission substitution", () => {
+    const item = {
+      screenId: "CAT-PRODUCT-LIST",
+      label: "Products",
+      href: "/app/commerce/products",
+      permission: "catalog.manage",
+    };
+    expect(parseMerchantWorkspace({ ...workspace, navigation: [item] }).navigation).toEqual([item]);
+    for (const change of [
+      { href: "/operations/products" },
+      { permission: "catalog.read" },
+      { permission: "catalog.product.manage" },
+      { extra: true },
+      { screenId: "constructor", href: undefined, permission: undefined },
+    ])
+      expect(() =>
+        parseMerchantWorkspace({ ...workspace, navigation: [{ ...item, ...change }] }),
+      ).toThrow("MERCHANT_WORKSPACE_INVALID");
+  });
   it("treats closed authentication denial as signed out and leaks no error body", async () => {
     const request = vi.fn(async () => new Response('{"error":"provider-detail"}', { status: 403 }));
     await expect(createMerchantWorkspaceClient(request).bootstrap()).resolves.toBeNull();

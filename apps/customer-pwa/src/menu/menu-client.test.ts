@@ -184,6 +184,21 @@ describe("Customer Menu client", () => {
     });
   });
 
+  it("passes a selected section through the authorized menu query", async () => {
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe(
+        `/api/v1/public/stores/${references.store}/menu?channel=CUSTOMER_PWA&orderType=DINE_IN&locale=en-CA&section=${references.section}`,
+      );
+      return response(200, found());
+    });
+    const client = createCustomerMenuClient(context, { fetch, online: () => true });
+    await expect(client.load({ sectionReference: references.section })).resolves.toMatchObject({
+      kind: "Found",
+      menu: { sections: [{ sectionReference: references.section }] },
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("does not request or expose a cached menu while offline", async () => {
     const fetch = vi.fn();
     const client = createCustomerMenuClient(context, { fetch, online: () => false });
@@ -211,6 +226,18 @@ describe("Customer Menu client", () => {
       online: () => true,
     });
     await expect(client.load()).resolves.toEqual({ kind });
+  });
+
+  it("maps an explicit HTTP 403 to permission denied without parsing its body", async () => {
+    const json = vi.fn(async () => {
+      throw new Error("proxy response must not be exposed");
+    });
+    const client = createCustomerMenuClient(context, {
+      fetch: async () => ({ status: 403, json }) as unknown as Response,
+      online: () => true,
+    });
+    await expect(client.load()).resolves.toEqual({ kind: "PermissionDenied" });
+    expect(json).not.toHaveBeenCalled();
   });
 
   it.each([

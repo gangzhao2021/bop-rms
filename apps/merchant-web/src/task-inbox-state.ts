@@ -1,3 +1,9 @@
+import { TaskInboxClientError } from "./task-inbox-client.js";
+import {
+  parseTaskInboxFilters,
+  matchesTaskInboxFilters,
+  type TaskInboxFilters,
+} from "./task-inbox-filters.js";
 export interface TaskInboxItem {
   readonly taskReference: string;
   readonly version: number;
@@ -8,7 +14,6 @@ export interface TaskInboxItem {
   readonly ownerStatus: "Unclaimed" | "ClaimedByYou" | "ClaimedByStaff";
   readonly dueAt: string;
   readonly sourceType: string;
-  readonly sourceReference: string;
   readonly canClaim: boolean;
 }
 export interface TaskInboxView {
@@ -93,7 +98,6 @@ export function parseTaskInboxView(value: unknown): TaskInboxView {
         "ownerStatus",
         "dueAt",
         "sourceType",
-        "sourceReference",
         "canClaim",
       ]),
       taskReference = reference(item.taskReference);
@@ -120,7 +124,6 @@ export function parseTaskInboxView(value: unknown): TaskInboxView {
       ownerStatus: item.ownerStatus as TaskInboxItem["ownerStatus"],
       dueAt: instant(item.dueAt),
       sourceType: code(item.sourceType),
-      sourceReference: reference(item.sourceReference),
       canClaim: item.canClaim,
     });
   });
@@ -142,10 +145,25 @@ export function parseTaskInboxView(value: unknown): TaskInboxView {
   });
 }
 export interface TaskInboxClient {
-  load(afterTaskReference?: string | null, signal?: AbortSignal): Promise<unknown>;
+  load(
+    afterTaskReference?: string | null,
+    signal?: AbortSignal,
+    filters?: TaskInboxFilters,
+  ): Promise<unknown>;
 }
 export type TaskInboxState =
-  | Readonly<{ kind: "Idle" | "Loading" | "Unavailable" | "Disposed"; view: null; readOnly: true }>
+  | Readonly<{
+      kind:
+        | "Idle"
+        | "Loading"
+        | "PermissionDenied"
+        | "NotFound"
+        | "FeatureDisabled"
+        | "Unavailable"
+        | "Disposed";
+      view: null;
+      readOnly: true;
+    }>
   | Readonly<{ kind: "Ready"; view: TaskInboxView; readOnly: false }>
   | Readonly<{ kind: "Offline"; view: TaskInboxView | null; readOnly: true }>;
 /** One selected Store/session context only, in memory. Every mutation must still
@@ -153,6 +171,7 @@ export type TaskInboxState =
 export function createTaskInboxController(initialClient: TaskInboxClient, initialContext: string) {
   let client = initialClient,
     context = initialContext,
+    filters = parseTaskInboxFilters(),
     online = true,
     disposed = false,
     generation = 0,
@@ -182,9 +201,11 @@ export function createTaskInboxController(initialClient: TaskInboxClient, initia
     // Hide prior page during refresh; failures cannot leave actionable stale data.
     publish({ kind: "Loading", view: null, readOnly: true });
     try {
-      const result = await client.load(afterTaskReference, abort.signal);
+      const result = await client.load(afterTaskReference, abort.signal, filters);
       if (disposed || current !== generation || abort.signal.aborted) return;
       const view = parseTaskInboxView(result);
+      if (view.items.some((item) => !matchesTaskInboxFilters(item, filters, view.observedAt)))
+        return fail();
       if (
         afterTaskReference !== null &&
         ((view.nextAfterTaskReference !== null &&
@@ -194,15 +215,29 @@ export function createTaskInboxController(initialClient: TaskInboxClient, initia
         return fail();
       last = view;
       publish({ kind: "Ready", view, readOnly: false });
-    } catch {
+    } catch (error) {
       if (!disposed && current === generation) {
         last = null;
-        publish({ kind: "Unavailable", view: null, readOnly: true });
+        publish({
+          kind: error instanceof TaskInboxClientError ? error.code : "Unavailable",
+          view: null,
+          readOnly: true,
+        });
       }
     }
   };
   return Object.freeze({
     getSnapshot: () => state,
+    getFilters: () => filters,
+    setFilters(value: unknown) {
+      if (disposed) return;
+      const next = parseTaskInboxFilters(value);
+      if (JSON.stringify(next) === JSON.stringify(filters)) return;
+      cancel();
+      filters = next;
+      last = null;
+      publish({ kind: online ? "Idle" : "Offline", view: null, readOnly: true });
+    },
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => {
@@ -219,6 +254,7 @@ export function createTaskInboxController(initialClient: TaskInboxClient, initia
       cancel();
       context = nextContext;
       client = nextClient;
+      filters = parseTaskInboxFilters();
       last = null;
       publish({ kind: online ? "Idle" : "Offline", view: null, readOnly: true });
     },

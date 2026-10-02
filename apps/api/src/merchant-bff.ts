@@ -1,3 +1,35 @@
+import type { createMerchantProductPublicationManagementQuery } from "./merchant-product-publication-management-query.js";
+import type { createMerchantProductEditorQuery } from "./merchant-product-editor-query.js";
+import type { createMerchantProductScopeJournalQuery } from "./merchant-product-scope-journal-query.js";
+import type { createMerchantProductPublicationQuery } from "./merchant-product-publication-query.js";
+import type { createMerchantStoreCapability } from "./merchant-store-capability.js";
+import type { createMerchantProductPublicationCommand } from "./merchant-product-publication-command.js";
+import { parseMerchantTaskInboxFilters } from "./merchant-task-inbox-filters.js";
+import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
+import {
+  MerchantProductDraftBaselineError,
+  parseProductDraftBaselineRequest,
+  parseMerchantProductDraftBaselineResult,
+  type createMerchantProductDraftBaselineQuery,
+} from "./merchant-product-draft-baseline-query.js";
+import {
+  MerchantProductCategoryLookupError,
+  parseProductCategoryLookupRequest,
+  parseMerchantProductCategoryLookupResult,
+  type createMerchantProductCategoryLookupQuery,
+} from "./merchant-product-category-lookup-query.js";
+import { decodeMerchantProductCommandScopeHeader } from "./merchant-product-command-scope.js";
+import {
+  MerchantCategoryTreeError,
+  parseMerchantCategoryTreeResult,
+  type createMerchantCategoryTreeQuery,
+} from "./merchant-category-tree-query.js";
+import {
+  parseCatalogCategoryTreeFilters,
+  parseCatalogProductEditorSnapshot,
+  parseProductPublicationSourceRequest,
+} from "@rms/catalog";
+import type { createMerchantProductListQuery } from "./merchant-product-list-query.js";
 import type { createMerchantReconciliationAssigneeQuery } from "./merchant-reconciliation-assignee-query.js";
 import { parseOpaqueUuidV7 } from "@bop/identity";
 import type { createMerchantReconciliationEvidenceQuery } from "./merchant-reconciliation-evidence-query.js";
@@ -23,6 +55,7 @@ import type { createMerchantDiningClosingCommand } from "./merchant-dining-closi
 import type { createMerchantDiningOrderCloseCommand } from "./merchant-dining-order-close-command.js";
 import type { createMerchantTaskInboxRead } from "./merchant-task-inbox-read.js";
 import type { createMerchantDiningServeCommand } from "./merchant-dining-serve-command.js";
+import type { createMerchantDiningTableCommand } from "./merchant-dining-table-command.js";
 import type { createMerchantDiningOrderProgress } from "./merchant-dining-order-progress.js";
 import type { createMerchantPickupQuery } from "./merchant-pickup-query.js";
 import { FulfillmentReadinessError } from "@rms/fulfillment";
@@ -39,7 +72,7 @@ import type { createMerchantOrdinaryRefundCommand } from "./merchant-ordinary-re
 import type { createMerchantMenuPublicationCommand } from "./merchant-menu-publication-command.js";
 import type { createMerchantMenuDraftQuery } from "./merchant-menu-draft-query.js";
 import type { createMerchantProductCreationCommand } from "./merchant-product-creation-command.js";
-import { CatalogError } from "@rms/catalog";
+import { CatalogError, CatalogProductListError, parseCatalogProductListView } from "@rms/catalog";
 import type { createMerchantProductLifecycleCommand } from "./merchant-product-lifecycle-command.js";
 import { PriceBookWorkflowError } from "@rms/pricing";
 import type { createMerchantPriceBookHttpCommand } from "./merchant-price-book-http-command.js";
@@ -55,6 +88,7 @@ import type {
   RawBrowserCredential,
 } from "@bop/identity";
 import express, { type Request, type RequestHandler, type Router } from "express";
+import { httpRequestLimits } from "./http-security.js";
 
 export interface MerchantWorkspaceSnapshot {
   readonly screenId: "HOME-OVERVIEW";
@@ -77,7 +111,9 @@ export interface MerchantWorkspaceSnapshot {
 
 const merchantNavigation = Object.freeze({
   "HOME-OVERVIEW": ["/app", "merchant.access"],
+  "TASK-INBOX": ["/app/tasks", "workflow.operate"],
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
+  "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
   "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.read"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
@@ -126,6 +162,10 @@ export interface MerchantBffService {
 }
 
 export interface MerchantBffRouterOptions {
+  readonly productDraftBaseline?: ReturnType<typeof createMerchantProductDraftBaselineQuery>;
+  readonly productCategoryLookup?: ReturnType<typeof createMerchantProductCategoryLookupQuery>;
+  readonly categoryTree?: ReturnType<typeof createMerchantCategoryTreeQuery>;
+  readonly productList?: ReturnType<typeof createMerchantProductListQuery>;
   readonly reconciliationAssigneeQuery?: ReturnType<
     typeof createMerchantReconciliationAssigneeQuery
   >;
@@ -167,6 +207,14 @@ export interface MerchantBffRouterOptions {
   readonly productDraft?: ReturnType<typeof createMerchantProductDraftCommand>;
   readonly productCreation?: ReturnType<typeof createMerchantProductCreationCommand>;
   readonly productLifecycle?: ReturnType<typeof createMerchantProductLifecycleCommand>;
+  readonly storeCapability?: ReturnType<typeof createMerchantStoreCapability>["observe"];
+  readonly productEditor?: ReturnType<typeof createMerchantProductEditorQuery>;
+  readonly productPublicationManagement?: ReturnType<
+    typeof createMerchantProductPublicationManagementQuery
+  >;
+  readonly productScopeJournals?: ReturnType<typeof createMerchantProductScopeJournalQuery>;
+  readonly productPublicationQuery?: ReturnType<typeof createMerchantProductPublicationQuery>;
+  readonly productPublication?: ReturnType<typeof createMerchantProductPublicationCommand>;
   readonly priceBooks?: ReturnType<typeof createMerchantPriceBookHttpCommand>;
   readonly diningJoinState?: ReturnType<typeof createMerchantDiningJoinState>;
   readonly diningJoinRegenerate?: ReturnType<typeof createMerchantDiningJoinRegenerate>;
@@ -178,6 +226,7 @@ export interface MerchantBffRouterOptions {
   readonly orderAcceptance?: ReturnType<typeof createMerchantOrderAcceptanceCommand>;
   readonly diningServe?: ReturnType<typeof createMerchantDiningServeCommand>;
   readonly diningTables?: ReturnType<typeof createMerchantDiningTables>;
+  readonly diningTableCommand?: ReturnType<typeof createMerchantDiningTableCommand>;
   readonly diningOrderProgress?: ReturnType<typeof createMerchantDiningOrderProgress>;
   readonly diningItemService?: ReturnType<typeof createMerchantDiningItemService>;
   readonly serviceControl?: (
@@ -421,11 +470,332 @@ function denied(response: express.Response): void {
 
 export function createMerchantBffRouter(options: MerchantBffRouterOptions): Router {
   const router = express.Router();
-  router.use(express.json({ limit: "8kb", strict: true }));
+  const ordinaryJson = express.json({ limit: "8kb", strict: true });
+  const draftBytes = new WeakMap<object, number>();
+  const completeDraftJson = express.json({
+    limit: httpRequestLimits.jsonBodyBytesMaximum,
+    strict: true,
+    verify(request, _response, bytes) {
+      draftBytes.set(request, bytes.byteLength);
+    },
+  });
+  router.use((request, response, next) => {
+    if (request.method !== "POST" || request.path !== "/catalog/products/draft") {
+      ordinaryJson(request, response, next);
+      return;
+    }
+    completeDraftJson(request, response, (error?: unknown) => {
+      const size = draftBytes.get(request) ?? 0;
+      draftBytes.delete(request);
+      if (error) {
+        const tooLarge =
+          typeof error === "object" &&
+          error !== null &&
+          "type" in error &&
+          error.type === "entity.too.large";
+        response
+          .status(tooLarge ? 413 : 400)
+          .set("Cache-Control", NO_STORE)
+          .json({
+            error: "product_draft_invalid",
+          });
+        return;
+      }
+      const body: unknown = request.body;
+      const draft = body && typeof body === "object" && "draft" in body ? body.draft : undefined;
+      // Larger transport is only a complete-content candidate. The command still
+      // performs closed structural parsing and current permission/reference checks.
+      if (
+        size > 8192 &&
+        !(draft && typeof draft === "object" && Object.hasOwn(draft, "editorContent"))
+      ) {
+        response
+          .status(413)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: "product_draft_invalid" });
+        return;
+      }
+      next();
+    });
+  });
   router.use(trustedHost(options));
   router.use((_request, response, next) => {
     response.set("Cache-Control", NO_STORE);
     next();
+  });
+
+  router.get("/catalog/products/draft-baseline", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const headers = rawHeaderValues(request, "x-bop-product-draft-baseline");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1 ||
+      headers.length !== 1 ||
+      !headers[0] ||
+      !/^[A-Za-z0-9_-]{1,342}$/u.test(headers[0])
+    ) {
+      denied(response);
+      return;
+    }
+    let query: ReturnType<typeof parseProductDraftBaselineRequest>;
+    try {
+      const bytes = Buffer.from(headers[0], "base64url"),
+        decoded = bytes.toString("utf8");
+      if (
+        bytes.length > 256 ||
+        bytes.toString("base64url") !== headers[0] ||
+        !Buffer.from(decoded, "utf8").equals(bytes)
+      )
+        throw new Error("invalid");
+      query = parseProductDraftBaselineRequest(JSON.parse(decoded));
+    } catch {
+      response.status(400).json({ error: "product_draft_baseline_invalid" });
+      return;
+    }
+    if (!options.productDraftBaseline) {
+      response.status(503).json({ error: "product_draft_baseline_unavailable" });
+      return;
+    }
+    void options
+      .productDraftBaseline({ sessionCookie, query })
+      .then((view) => {
+        const safe = parseMerchantProductDraftBaselineResult(view);
+        if (safe.baseline !== null && safe.baseline.productReference !== query.productReference)
+          throw new MerchantProductDraftBaselineError("Unavailable");
+        response.json(safe);
+      })
+      .catch((error: unknown) => {
+        const code =
+          error instanceof MerchantProductDraftBaselineError ? error.code : "Unavailable";
+        const status =
+          code === "Invalid"
+            ? 400
+            : code === "Denied"
+              ? 403
+              : code === "FeatureDisabled" || code === "Stale"
+                ? 409
+                : 503;
+        const suffix =
+          code === "Invalid"
+            ? "invalid"
+            : code === "Denied"
+              ? "denied"
+              : code === "FeatureDisabled"
+                ? "feature_disabled"
+                : code === "Stale"
+                  ? "stale"
+                  : "unavailable";
+        response.status(status).json({ error: "product_draft_baseline_" + suffix });
+      });
+  });
+  router.get("/catalog/products/category-lookup", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const headers = rawHeaderValues(request, "x-bop-product-category-lookup");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1 ||
+      headers.length !== 1 ||
+      !headers[0] ||
+      !/^[A-Za-z0-9_-]{1,342}$/u.test(headers[0])
+    ) {
+      denied(response);
+      return;
+    }
+    let query: { readonly parentScreenId: ReturnType<typeof parseProductCategoryLookupRequest> };
+    try {
+      const bytes = Buffer.from(headers[0], "base64url"),
+        decoded = bytes.toString("utf8");
+      if (
+        bytes.length > 256 ||
+        bytes.toString("base64url") !== headers[0] ||
+        !Buffer.from(decoded, "utf8").equals(bytes)
+      )
+        throw new Error("invalid");
+      query = { parentScreenId: parseProductCategoryLookupRequest(JSON.parse(decoded)) };
+    } catch {
+      response.status(400).json({ error: "product_category_lookup_invalid" });
+      return;
+    }
+    if (!options.productCategoryLookup) {
+      response.status(503).json({ error: "product_category_lookup_unavailable" });
+      return;
+    }
+    void options
+      .productCategoryLookup({ sessionCookie, query })
+      .then((view) => {
+        const safe = parseMerchantProductCategoryLookupResult(view);
+        if (safe.lookup.parentScreenId !== query.parentScreenId)
+          throw new MerchantProductCategoryLookupError("Unavailable");
+        response.json(safe);
+      })
+      .catch((error: unknown) => {
+        const code =
+          error instanceof MerchantProductCategoryLookupError ? error.code : "Unavailable";
+        const status =
+          code === "Invalid"
+            ? 400
+            : code === "Denied"
+              ? 403
+              : code === "FeatureDisabled" || code === "Stale"
+                ? 409
+                : 503;
+        const suffix =
+          code === "Invalid"
+            ? "invalid"
+            : code === "Denied"
+              ? "denied"
+              : code === "FeatureDisabled"
+                ? "feature_disabled"
+                : code === "Stale"
+                  ? "stale"
+                  : "unavailable";
+        response.status(status).json({ error: "product_category_lookup_" + suffix });
+      });
+  });
+
+  router.get("/catalog/categories", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const headers = rawHeaderValues(request, "x-bop-category-tree");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1 ||
+      headers.length !== 1 ||
+      !headers[0] ||
+      !/^[A-Za-z0-9_-]{1,5462}$/u.test(headers[0])
+    ) {
+      denied(response);
+      return;
+    }
+    let filters: unknown;
+    try {
+      const bytes = Buffer.from(headers[0], "base64url"),
+        decoded = bytes.toString("utf8");
+      if (
+        bytes.length > 4096 ||
+        bytes.toString("base64url") !== headers[0] ||
+        !Buffer.from(decoded, "utf8").equals(bytes)
+      )
+        throw new Error("invalid");
+      filters = parseCatalogCategoryTreeFilters(JSON.parse(decoded));
+    } catch {
+      response.status(400).json({ error: "category_tree_invalid" });
+      return;
+    }
+    if (!options.categoryTree) {
+      response.status(503).json({ error: "category_tree_unavailable" });
+      return;
+    }
+    void options
+      .categoryTree({ sessionCookie, filters })
+      .then((view) => {
+        response.json(parseMerchantCategoryTreeResult(view));
+      })
+      .catch((error: unknown) => {
+        const code = error instanceof MerchantCategoryTreeError ? error.code : "Unavailable";
+        const status =
+          code === "Invalid"
+            ? 400
+            : code === "Denied"
+              ? 403
+              : code === "FeatureDisabled" || code === "Stale"
+                ? 409
+                : 503;
+        const suffix =
+          code === "Invalid"
+            ? "invalid"
+            : code === "Denied"
+              ? "denied"
+              : code === "FeatureDisabled"
+                ? "feature_disabled"
+                : code === "Stale"
+                  ? "stale"
+                  : "unavailable";
+        response.status(status).json({ error: "category_tree_" + suffix });
+      });
+  });
+
+  router.get("/catalog/products", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const headers = rawHeaderValues(request, "x-bop-product-list");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1 ||
+      headers.length !== 1 ||
+      !headers[0] ||
+      !/^[A-Za-z0-9_-]{1,5462}$/u.test(headers[0])
+    ) {
+      denied(response);
+      return;
+    }
+    let filters: unknown;
+    try {
+      const bytes = Buffer.from(headers[0], "base64url");
+      const decoded = bytes.toString("utf8");
+      if (
+        bytes.length > 4096 ||
+        bytes.toString("base64url") !== headers[0] ||
+        !Buffer.from(decoded, "utf8").equals(bytes)
+      )
+        throw new Error("invalid");
+      filters = JSON.parse(decoded);
+    } catch {
+      response.status(400).json({ error: "product_list_invalid" });
+      return;
+    }
+    if (!options.productList) {
+      response.status(503).json({ error: "product_list_unavailable" });
+      return;
+    }
+    void options
+      .productList({ sessionCookie, filters })
+      .then((view) => {
+        try {
+          response.json(parseCatalogProductListView(view));
+        } catch {
+          throw new CatalogProductListError("Unavailable");
+        }
+      })
+      .catch((error: unknown) => {
+        const code = error instanceof CatalogProductListError ? error.code : "Unavailable";
+        const status =
+          code === "Invalid"
+            ? 400
+            : code === "Denied"
+              ? 403
+              : code === "FeatureDisabled"
+                ? 409
+                : code === "Stale"
+                  ? 409
+                  : 503;
+        response.status(status).json({
+          error:
+            code === "Invalid"
+              ? "product_list_invalid"
+              : code === "Denied"
+                ? "product_list_denied"
+                : code === "FeatureDisabled"
+                  ? "product_list_feature_disabled"
+                  : code === "Stale"
+                    ? "product_list_stale"
+                    : "product_list_unavailable",
+        });
+      });
   });
 
   router.get("/orders", safeRead(options), (request, response) => {
@@ -495,12 +865,27 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       denied(response);
       return;
     }
+    const filterHeaders = rawHeaderValues(request, "x-bop-task-filters");
+    let filters: ReturnType<typeof parseMerchantTaskInboxFilters> | undefined;
+    try {
+      if (filterHeaders.length > 1) throw new Error("invalid");
+      if (filterHeaders[0] !== undefined) {
+        if (Buffer.byteLength(filterHeaders[0], "utf8") > 512) throw new Error("invalid");
+        filters = parseMerchantTaskInboxFilters(JSON.parse(filterHeaders[0]));
+      }
+    } catch {
+      denied(response);
+      return;
+    }
     if (!options.taskInbox) {
       response.status(503).json({ error: "task_inbox_unavailable" });
       return;
     }
     void options
-      .taskInbox(sessionCookie, { afterTaskReference: after ?? null })
+      .taskInbox(sessionCookie, {
+        afterTaskReference: after ?? null,
+        ...(filters === undefined ? {} : { filters }),
+      })
       .then((view) => {
         response.json({
           screenId: view.screenId,
@@ -517,7 +902,6 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             ownerStatus: item.ownerStatus,
             dueAt: item.dueAt,
             sourceType: item.sourceType,
-            sourceReference: item.sourceReference,
             canClaim: item.canClaim,
           })),
         });
@@ -1696,6 +2080,47 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .catch(() => denied(response));
   });
 
+  router.post("/dining/tables/availability", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningTableCommand) {
+      response.status(503).json({ error: "dining_table_command_unavailable" });
+      return;
+    }
+    void options
+      .diningTableCommand({ sessionCookie, csrf, command: request.body })
+      .then((result) => {
+        const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+        if (
+          !result ||
+          !["Applied", "AlreadyApplied"].includes(result.status) ||
+          !reference.test(result.tableReference) ||
+          !["Available", "TemporarilyBlocked"].includes(result.operationalState) ||
+          !Number.isSafeInteger(result.aggregateVersion) ||
+          result.aggregateVersion < 1
+        ) {
+          denied(response);
+          return;
+        }
+        response.json({
+          status: result.status,
+          tableReference: result.tableReference,
+          operationalState: result.operationalState,
+          aggregateVersion: result.aggregateVersion,
+        });
+      })
+      .catch(() => denied(response));
+  });
+
   router.post("/dining/order-progress", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     const csrf = exactHeader(request, "x-bop-csrf");
@@ -1968,14 +2393,27 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       denied(response);
       return;
     }
+    const scopeHeaders = rawHeaderValues(request, "x-bop-catalog-scope");
+    let expectedScope;
+    try {
+      if (scopeHeaders.length !== 1) throw new Error("invalid");
+      expectedScope = decodeMerchantProductCommandScopeHeader(scopeHeaders[0]);
+    } catch {
+      denied(response);
+      return;
+    }
     if (!options.productCreation) {
       response.status(503).json({ error: "product_creation_unavailable" });
       return;
     }
     void options
-      .productCreation({ sessionCookie, csrf, command: request.body })
+      .productCreation({ sessionCookie, csrf, command: request.body, expectedScope })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        if (error instanceof MerchantProductWriteFeatureDisabled) {
+          response.status(409).json({ error: "product_creation_feature_disabled" });
+          return;
+        }
         if (!(error instanceof CatalogError)) {
           denied(response);
           return;
@@ -2018,14 +2456,27 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       denied(response);
       return;
     }
+    const scopeHeaders = rawHeaderValues(request, "x-bop-catalog-scope");
+    let expectedScope;
+    try {
+      if (scopeHeaders.length !== 1) throw new Error("invalid");
+      expectedScope = decodeMerchantProductCommandScopeHeader(scopeHeaders[0]);
+    } catch {
+      denied(response);
+      return;
+    }
     if (!options.productDraft) {
       response.status(503).json({ error: "product_draft_unavailable" });
       return;
     }
     void options
-      .productDraft({ sessionCookie, csrf, command: request.body })
+      .productDraft({ sessionCookie, csrf, command: request.body, expectedScope })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        if (error instanceof MerchantProductWriteFeatureDisabled) {
+          response.status(409).json({ error: "product_draft_feature_disabled" });
+          return;
+        }
         if (!(error instanceof CatalogError)) {
           denied(response);
           return;
@@ -2068,14 +2519,27 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       denied(response);
       return;
     }
+    const scopeHeaders = rawHeaderValues(request, "x-bop-catalog-scope");
+    let expectedScope;
+    try {
+      if (scopeHeaders.length !== 1) throw new Error("invalid");
+      expectedScope = decodeMerchantProductCommandScopeHeader(scopeHeaders[0]);
+    } catch {
+      denied(response);
+      return;
+    }
     if (!options.productLifecycle) {
       response.status(503).json({ error: "product_lifecycle_unavailable" });
       return;
     }
     void options
-      .productLifecycle({ sessionCookie, csrf, command: request.body })
+      .productLifecycle({ sessionCookie, csrf, command: request.body, expectedScope })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        if (error instanceof MerchantProductWriteFeatureDisabled) {
+          response.status(409).json({ error: "product_lifecycle_feature_disabled" });
+          return;
+        }
         if (!(error instanceof CatalogError)) {
           denied(response);
           return;
@@ -2100,6 +2564,296 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
                 ? "product_lifecycle_conflict"
                 : status === 503
                   ? "product_lifecycle_unavailable"
+                  : "request_denied",
+        });
+      });
+  });
+
+  router.post("/store-capability", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeCapability) {
+      response.status(503).json({ error: "store_capability_unavailable" });
+      return;
+    }
+    void options
+      .storeCapability({ sessionCookie, csrf, query: request.body })
+      .then((decision) => response.json(decision))
+      .catch(() => {
+        response.status(503).json({ error: "store_capability_unavailable" });
+      });
+  });
+
+  router.post("/catalog/products/editor", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    let expectedScope;
+    try {
+      const headers = rawHeaderValues(request, "x-bop-catalog-scope");
+      if (headers.length !== 1) throw Error();
+      expectedScope = decodeMerchantProductCommandScopeHeader(headers[0]);
+    } catch {
+      denied(response);
+      return;
+    }
+    if (!options.productEditor) {
+      response.status(503).json({ error: "product_editor_unavailable" });
+      return;
+    }
+    let query;
+    try {
+      query = parseProductPublicationSourceRequest(request.body);
+    } catch {
+      response.status(400).json({ error: "product_editor_invalid" });
+      return;
+    }
+    void options
+      .productEditor({ sessionCookie, csrf, query, expectedScope })
+      .then((value) => {
+        let view;
+        try {
+          view = parseCatalogProductEditorSnapshot(value);
+        } catch {
+          throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        }
+        if (
+          view.productReference !== query.productReference ||
+          view.aggregateVersion !== query.expectedAggregateVersion ||
+          view.brandReference !== expectedScope.brandReference
+        )
+          throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        response.json(view);
+      })
+      .catch((error: unknown) => {
+        const status =
+          error instanceof CatalogError && error.code === "CATALOG_INPUT_INVALID"
+            ? 400
+            : error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED"
+              ? 403
+              : 503;
+        response.status(status).json({
+          error:
+            status === 400
+              ? "product_editor_invalid"
+              : status === 403
+                ? "request_denied"
+                : "product_editor_unavailable",
+        });
+      });
+  });
+
+  router.post(
+    "/catalog/products/publication/management",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant"),
+        csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        !/^[A-Za-z0-9_-]{43}$/u.test(csrf) ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      let expectedScope;
+      try {
+        const headers = rawHeaderValues(request, "x-bop-catalog-scope");
+        if (headers.length !== 1) throw Error();
+        expectedScope = decodeMerchantProductCommandScopeHeader(headers[0]);
+      } catch {
+        denied(response);
+        return;
+      }
+      if (!options.productPublicationManagement) {
+        response.status(503).json({ error: "product_publication_management_unavailable" });
+        return;
+      }
+      void options
+        .productPublicationManagement({ sessionCookie, csrf, query: request.body, expectedScope })
+        .then((view) => response.json(view))
+        .catch((error: unknown) => {
+          const status =
+            error instanceof CatalogError && error.code === "CATALOG_INPUT_INVALID"
+              ? 400
+              : error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED"
+                ? 403
+                : 503;
+          response.status(status).json({
+            error:
+              status === 400
+                ? "product_publication_management_invalid"
+                : status === 403
+                  ? "request_denied"
+                  : "product_publication_management_unavailable",
+          });
+        });
+    },
+  );
+
+  router.post(
+    "/catalog/products/publication/scope-journals",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant"),
+        csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      let expectedScope;
+      try {
+        const headers = rawHeaderValues(request, "x-bop-catalog-scope");
+        if (headers.length !== 1) throw Error();
+        expectedScope = decodeMerchantProductCommandScopeHeader(headers[0]);
+      } catch {
+        denied(response);
+        return;
+      }
+      if (!options.productScopeJournals) {
+        response.status(503).json({ error: "product_scope_journals_unavailable" });
+        return;
+      }
+      void options
+        .productScopeJournals({ sessionCookie, csrf, query: request.body, expectedScope })
+        .then((view) => response.json(view))
+        .catch((error: unknown) => {
+          const status =
+            error instanceof CatalogError && error.code === "CATALOG_INPUT_INVALID"
+              ? 400
+              : error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED"
+                ? 403
+                : 503;
+          response.status(status).json({
+            error:
+              status === 400
+                ? "product_scope_journals_invalid"
+                : status === 403
+                  ? "request_denied"
+                  : "product_scope_journals_unavailable",
+          });
+        });
+    },
+  );
+
+  router.post(
+    "/catalog/products/publication/query",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant"),
+        csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      let expectedScope;
+      try {
+        const headers = rawHeaderValues(request, "x-bop-catalog-scope");
+        if (headers.length !== 1) throw Error();
+        expectedScope = decodeMerchantProductCommandScopeHeader(headers[0]);
+      } catch {
+        denied(response);
+        return;
+      }
+      if (!options.productPublicationQuery) {
+        response.status(503).json({ error: "product_publication_unavailable" });
+        return;
+      }
+      void options
+        .productPublicationQuery({ sessionCookie, csrf, query: request.body, expectedScope })
+        .then((view) => response.json(view))
+        .catch(() => {
+          response.status(503).json({ error: "product_publication_unavailable" });
+        });
+    },
+  );
+
+  router.post("/catalog/products/publication", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const scopeHeaders = rawHeaderValues(request, "x-bop-catalog-scope");
+    let expectedScope;
+    try {
+      if (scopeHeaders.length !== 1) throw new Error("invalid");
+      expectedScope = decodeMerchantProductCommandScopeHeader(scopeHeaders[0]);
+    } catch {
+      denied(response);
+      return;
+    }
+    if (!options.productPublication) {
+      response.status(503).json({ error: "product_publication_unavailable" });
+      return;
+    }
+    void options
+      .productPublication({ sessionCookie, csrf, command: request.body, expectedScope })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => {
+        if (error instanceof MerchantProductWriteFeatureDisabled) {
+          response.status(409).json({ error: "product_publication_feature_disabled" });
+          return;
+        }
+        if (!(error instanceof CatalogError)) {
+          denied(response);
+          return;
+        }
+        const status =
+          error.code === "CATALOG_INPUT_INVALID"
+            ? 400
+            : [
+                  "CATALOG_VERSION_CONFLICT",
+                  "CATALOG_IDEMPOTENCY_CONFLICT",
+                  "CATALOG_LIFECYCLE_CONFLICT",
+                ].includes(error.code)
+              ? 409
+              : error.code === "CATALOG_DEPENDENCY_UNAVAILABLE"
+                ? 503
+                : 403;
+        response.status(status).json({
+          error:
+            status === 400
+              ? "product_publication_invalid"
+              : status === 409
+                ? "product_publication_conflict"
+                : status === 503
+                  ? "product_publication_unavailable"
                   : "request_denied",
         });
       });

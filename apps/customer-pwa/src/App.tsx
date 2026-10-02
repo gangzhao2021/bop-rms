@@ -18,6 +18,7 @@ import { ConnectivityBanner } from "./connectivity/ConnectivityBanner.js";
 import { PwaUpdateBanner } from "./pwa/PwaUpdateBanner.js";
 import { ReceiptPage } from "./receipt/ReceiptPage.js";
 import { DeliveryStatusPage } from "./delivery-status/DeliveryStatusPage.js";
+import { DiningSessionPage } from "./dining/DiningSessionPage.js";
 import type { CustomerDemoDependencies } from "./customer-demo.js";
 
 function useDemoForOrderRoute(
@@ -146,6 +147,7 @@ export function App({
             />
           }
         />
+        <Route path="/dine-in/session" element={<DiningSessionPage />} />
         <Route
           path="/cart"
           element={<CartPage {...(demo ? { controller: demo.cartController } : {})} />}

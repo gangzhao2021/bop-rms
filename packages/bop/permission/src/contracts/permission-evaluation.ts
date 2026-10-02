@@ -108,7 +108,11 @@ function uuid(value: unknown): string {
 }
 
 export function parseBusinessAction(value: unknown): BusinessAction {
-  if (typeof value !== "string" || value.length > 128 || !actionPattern.test(value))
+  if (
+    typeof value !== "string" ||
+    value.length > 128 ||
+    (value !== "catalog.option_set.read" && !actionPattern.test(value))
+  )
     throw new PermissionEvaluationContractError("PERMISSION_REQUEST_INVALID");
   return value as BusinessAction;
 }

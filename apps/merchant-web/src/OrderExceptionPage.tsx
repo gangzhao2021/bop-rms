@@ -66,6 +66,14 @@ function instant(value: unknown) {
     throw new Error("ORDER_EXCEPTION_INVALID");
   return value;
 }
+function businessDate(value: unknown) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value))
+    throw new Error("ORDER_EXCEPTION_INVALID");
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== value)
+    throw new Error("ORDER_EXCEPTION_INVALID");
+  return value;
+}
 export function parseOrderExceptionView(value: unknown): OrderExceptionView {
   const input = exact(value, [
     "screenId",
@@ -76,13 +84,12 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
     "freshnessStatus",
     "items",
   ]);
+  const parsedBusinessDate = businessDate(input.businessDate);
   if (
     input.screenId !== "OPS-ORDER-EXCEPTION" ||
     input.projectionName !== "merchant_order_exception_v1" ||
     typeof input.storeLabel !== "string" ||
     !SAFE.test(input.storeLabel) ||
-    typeof input.businessDate !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate) ||
     !["Fresh", "Stale"].includes(String(input.freshnessStatus)) ||
     !Array.isArray(input.items) ||
     input.items.length > 500
@@ -141,7 +148,7 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
     screenId: "OPS-ORDER-EXCEPTION",
     projectionName: "merchant_order_exception_v1",
     storeLabel: input.storeLabel,
-    businessDate: input.businessDate,
+    businessDate: parsedBusinessDate,
     projectedAt: instant(input.projectedAt),
     freshnessStatus: input.freshnessStatus as "Fresh" | "Stale",
     items,
@@ -158,9 +165,34 @@ export function OrderExceptionScreen({
   readonly refreshButtonRef?: Ref<HTMLButtonElement>;
   readonly csrf?: string | undefined;
 }) {
+  const [kindFilter, setKindFilter] = useState("All");
+  const [severityFilter, setSeverityFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [ownerFilter, setOwnerFilter] = useState("All");
+  const [providerFilter, setProviderFilter] = useState("All");
+  const [overdueOnly, setOverdueOnly] = useState(false);
   const readOnly = view.freshnessStatus !== "Fresh";
+  const items = view.items.filter(
+    (item) =>
+      (kindFilter === "All" || item.kind === kindFilter) &&
+      (severityFilter === "All" || item.severity === severityFilter) &&
+      (statusFilter === "All" || item.status === statusFilter) &&
+      (ownerFilter === "All" || item.ownerStatus === ownerFilter) &&
+      (providerFilter === "All" || item.providerState === providerFilter) &&
+      (!overdueOnly ||
+        (item.status !== "Resolved" && Date.parse(view.projectedAt) > Date.parse(item.dueAt))),
+  );
+  const hasFilters =
+    kindFilter !== "All" ||
+    severityFilter !== "All" ||
+    statusFilter !== "All" ||
+    ownerFilter !== "All" ||
+    providerFilter !== "All" ||
+    overdueOnly;
+  const visibleReferences = new Set(items.map((item) => item.exceptionReference));
   return (
     <AppFrame
+      className="bop-shell--order-exception"
       title="Order Exception Workbench"
       description={`OPS-ORDER-EXCEPTION · ${view.storeLabel} · ${view.businessDate}`}
     >
@@ -184,29 +216,140 @@ export function OrderExceptionScreen({
           <p>Refresh every owning source before an action.</p>
         </StatePanel>
       ) : null}
-      {view.items.length === 0 ? (
-        <StatePanel heading="No exceptions in this view" tone="neutral" status>
+      <div className="list-filters order-exception-filters">
+        <label>
+          Type
+          <select value={kindFilter} onChange={(event) => setKindFilter(event.currentTarget.value)}>
+            <option>All</option>
+            <option>DiningUnpaidBatch</option>
+            <option>PaymentReconciliationDifference</option>
+            <option>CaptureDeadlineExceeded</option>
+            <option>PaidWithoutFulfillableOrder</option>
+          </select>
+        </label>
+        <label>
+          Severity
+          <select
+            value={severityFilter}
+            onChange={(event) => setSeverityFilter(event.currentTarget.value)}
+          >
+            <option>All</option>
+            <option>High</option>
+            <option>Critical</option>
+          </select>
+        </label>
+        <label>
+          Status
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.currentTarget.value)}
+          >
+            <option>All</option>
+            <option>Open</option>
+            <option>Acknowledged</option>
+            <option>Assigned</option>
+            <option>Resolved</option>
+          </select>
+        </label>
+        <label>
+          Owner
+          <select
+            value={ownerFilter}
+            onChange={(event) => setOwnerFilter(event.currentTarget.value)}
+          >
+            <option>All</option>
+            <option>Unassigned</option>
+            <option>Assigned</option>
+          </select>
+        </label>
+        <label>
+          Provider state
+          <select
+            value={providerFilter}
+            onChange={(event) => setProviderFilter(event.currentTarget.value)}
+          >
+            <option>All</option>
+            <option>NotApplicable</option>
+            <option>Pending</option>
+            <option>Unknown</option>
+            <option>Confirmed</option>
+          </select>
+        </label>
+        <label className="order-exception-overdue-filter">
+          <input
+            type="checkbox"
+            checked={overdueOnly}
+            onChange={(event) => setOverdueOnly(event.currentTarget.checked)}
+          />
+          Overdue only
+        </label>
+        <button
+          type="button"
+          disabled={!hasFilters}
+          onClick={() => {
+            setKindFilter("All");
+            setSeverityFilter("All");
+            setStatusFilter("All");
+            setOwnerFilter("All");
+            setProviderFilter("All");
+            setOverdueOnly(false);
+          }}
+        >
+          Clear filters
+        </button>
+      </div>
+      <p id="exception-actions-unavailable" className="muted">
+        General acknowledgment, assignment, compensation requests and closure are not available in
+        this workbench yet. Any available source-specific action is shown separately on its
+        exception.
+      </p>
+      {items.length === 0 ? (
+        <StatePanel
+          heading={
+            view.items.length === 0
+              ? "No exceptions in this view"
+              : "No exceptions match these filters"
+          }
+          tone="neutral"
+          status
+        >
           <p>
-            No exceptions were returned for the selected Store. Source freshness is shown above.
+            {view.items.length === 0
+              ? "No exceptions were returned for the selected Store. Source freshness is shown above."
+              : "No loaded exception matches these filters. Clear filters to restore the workbench."}
           </p>
         </StatePanel>
       ) : null}
       <div className="store-card-grid">
         {view.items.map((item) => (
-          <article className="store-card" key={item.exceptionReference}>
+          <article
+            className="store-card order-exception__card"
+            hidden={!visibleReferences.has(item.exceptionReference)}
+            key={item.exceptionReference}
+          >
             <header>
               <div>
-                <p className="bop-eyebrow">
+                <p className="bop-eyebrow order-exception__severity" data-severity={item.severity}>
                   {item.severity} · due {item.dueAt}
                 </p>
                 <h3>{item.kind}</h3>
               </div>
-              <strong>{item.status}</strong>
+              <strong className="order-exception__status" data-status={item.status}>
+                {item.status}
+              </strong>
             </header>
             <dl>
               <div>
+                <dt>Created</dt>
+                <dd>{item.createdAt}</dd>
+              </div>
+              <div>
                 <dt>Order</dt>
-                <dd>{item.orderReference ?? "Order reference unavailable"}</dd>
+                <dd>
+                  {item.orderReference === null
+                    ? "Order reference unavailable"
+                    : "Linked order · public reference unavailable"}
+                </dd>
               </div>
               <div>
                 <dt>Provider state</dt>
@@ -248,16 +391,19 @@ export function OrderExceptionScreen({
                 review.
               </p>
             ) : null}
-            <p className="muted">
-              General acknowledgment, assignment, compensation requests and closure are not
-              available in this workbench yet. Any available source-specific action is shown
-              separately above.
-            </p>
             <div className="card-actions">
-              <button disabled>Acknowledge</button>
-              <button disabled>Assign</button>
-              <button disabled>Request owning-domain compensation / retry</button>
-              <button disabled>Resolve from final source evidence</button>
+              <button disabled aria-describedby="exception-actions-unavailable">
+                Acknowledge
+              </button>
+              <button disabled aria-describedby="exception-actions-unavailable">
+                Assign
+              </button>
+              <button disabled aria-describedby="exception-actions-unavailable">
+                Request owning-domain compensation / retry
+              </button>
+              <button disabled aria-describedby="exception-actions-unavailable">
+                Resolve from final source evidence
+              </button>
             </div>
           </article>
         ))}

@@ -24,6 +24,43 @@ afterEach(async () => {
 });
 
 describe("migration catalog", () => {
+  it("registers immutable own-source Product search generations and scoped activation", async () => {
+    const catalog = await readMigrationCatalog(repositoryRoot);
+    const migration = catalog.migrations.find(
+      (value) => value.id === "1100_004_create_product_search_generation",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/catalog", schema: "rms_catalog" });
+    for (const fact of [
+      "product_search_generation_no_update",
+      "product_search_row_no_delete",
+      "list_json jsonb NOT NULL",
+      "list_digest text NOT NULL",
+      "CatalogProductDraftV1",
+      "is_partial IS TRUE",
+      "FOREIGN KEY(generation_id,brand_id,source_revision,source_digest)",
+      "FORCE ROW LEVEL SECURITY",
+      "REVOKE ALL",
+    ])
+      expect(migration?.sql).toContain(fact);
+    expect(migration?.sql).not.toContain("INSERT INTO");
+  });
+  it("registers new Product source commit sequencing without historical backfill", async () => {
+    const catalog = await readMigrationCatalog(repositoryRoot);
+    const migration = catalog.migrations.find(
+      (value) => value.id === "1100_003_create_product_source_commit",
+    );
+    expect(migration?.metadata).toMatchObject({ owner: "@rms/catalog", schema: "rms_catalog" });
+    for (const fact of [
+      "product_source_head_guard",
+      "product_source_commit_no_update",
+      "product_source_commit_no_delete",
+      "FORCE ROW LEVEL SECURITY",
+      "REVOKE ALL",
+      "UNIQUE(brand_id,source_revision)",
+    ])
+      expect(migration?.sql).toContain(fact);
+    expect(migration?.sql).not.toContain("INSERT INTO");
+  });
   it("admits only the canonical Workflow owner for the new version table", async () => {
     const root = await fixture();
     const file = path.join(
@@ -165,10 +202,12 @@ describe("migration catalog", () => {
       "0200_017_alter_browser_session_selection_isolation",
       "0200_018_create_guest_entry_admission",
       "0200_019_alter_brand_admin_artifact_snapshot",
+      "0200_020_create_store_reference_projection",
       "0300_001_create_permission",
       "0300_002_create_role_administration",
       "0300_003_create_workflow_definition",
       "0300_004_alter_permission_action_identifiers",
+      "0300_005_alter_option_read_action_identifier",
       "0400_001_create_feature_control_administration",
       "0400_002_create_live_gate_workflow",
       "0400_003_create_support_case",
@@ -177,6 +216,7 @@ describe("migration catalog", () => {
       "0400_006_create_publishing_mutation",
       "0400_007_alter_publishing_history_guard",
       "0400_008_create_task_version",
+      "0400_009_alter_feature_control_dependency_scope",
       "1000_001_create_store_configuration",
       "1000_002_create_store_exception_content",
       "1000_003_create_store_service_pause_content",
@@ -200,17 +240,33 @@ describe("migration catalog", () => {
       "1001_013_create_dining_host_transfer_operation",
       "1100_001_create_product_aggregate",
       "1100_002_create_product_operation_snapshot",
+      "1100_003_create_product_source_commit",
+      "1100_004_create_product_search_generation",
+      "1100_005_create_product_publication",
+      "1100_006_alter_product_editor_content",
+      "1100_007_create_product_scope_journal",
+      "1100_008_create_product_content_registry",
+      "1100_009_create_product_approval_receipt",
       "1101_001_create_category_menu_structure",
+      "1101_002_create_category_source_commit",
+      "1101_003_create_product_category_classification",
       "1102_001_create_option_set_binding",
+      "1102_002_create_product_binding_successor_guard",
+      "1102_003_create_option_set_draft_content",
+      "1102_004_create_option_set_publication_content",
       "1103_001_create_availability_rule",
+      "1103_002_create_availability_reference_generation",
       "1104_001_create_menu_publication",
       "1104_002_create_menu_publication_snapshot",
       "1104_003_create_menu_review_content",
+      "1104_004_create_menu_reference_generation",
       "1105_001_create_published_menu_projection",
       "1106_001_create_allergen_provenance",
       "1106_002_alter_catalog_function_permissions",
+      "1106_003_create_recipe_allergen_source",
       "1107_001_create_bundle_aggregate",
       "1107_002_alter_availability_workbench",
+      "1107_003_create_bundle_reference_generation",
       "1200_001_create_tax_configuration",
       "1200_002_create_price_book",
       "1200_003_create_price_quote",
@@ -222,11 +278,18 @@ describe("migration catalog", () => {
       "1200_009_create_price_quote_request",
       "1200_010_alter_price_quote_configured",
       "1200_011_create_option_price_rule",
+      "1200_012_create_tax_reference_scope",
+      "1200_013_create_configuration_reference_generation",
       "1250_001_create_recipe_management",
       "1250_002_alter_recipe_snapshot",
       "1250_003_alter_recipe_child_identity",
       "1250_004_create_recipe_modifier",
       "1250_005_create_recipe_preparation_content",
+      "1250_006_create_recipe_source_coverage",
+      "1250_007_create_recipe_core_projection",
+      "1250_008_create_recipe_reference_projection",
+      "1250_009_alter_recipe_inventory_reference_fence",
+      "1250_010_create_recipe_measurement_content",
       "1300_001_create_cart_aggregate",
       "1300_002_alter_cart_item_commands",
       "1300_003_alter_cart_selection_evidence",
@@ -326,6 +389,9 @@ describe("migration catalog", () => {
       "1900_007_create_reservation_set",
       "1900_008_create_submission_final_validation",
       "1900_009_alter_submission_validation_cardinality",
+      "1900_010_create_recipe_configuration_source",
+      "1900_012_create_configuration_reference_generation",
+      "1900_013_create_item_sku_mapping",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -573,6 +639,47 @@ describe("migration catalog", () => {
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
+  it("registers append-only Inventory direct SKU mapping ownership and static enforcement", async () => {
+    const m = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (c) => c.id === "1900_013_create_item_sku_mapping",
+    );
+    expect(m?.metadata).toMatchObject({ owner: "@rms/inventory", schema: "rms_inventory" });
+    expect(m?.sql).toContain("CREATE TABLE rms_inventory.item_sku_mapping_version");
+    expect(m?.sql).toContain("SELECT DISTINCT ON (item_id)");
+    expect(m?.sql).toContain(
+      "CREATE OR REPLACE FUNCTION rms_inventory.advance_configuration_reference_generation()",
+    );
+    expect(m?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(m?.sql).toContain("item_sku_mapping_version_immutable");
+    expect(m?.sql).toContain("REVOKE ALL ON FUNCTION");
+    expect(m?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b|rms_catalog\./iu);
+  });
+  it("registers the owning Inventory configuration reference source fence", async () => {
+    const m = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (c) => c.id === "1900_012_create_configuration_reference_generation",
+    );
+    expect(m?.metadata).toMatchObject({ owner: "@rms/inventory", schema: "rms_inventory" });
+    expect(m?.sql).toContain("CREATE TABLE rms_inventory.configuration_reference_generation");
+    for (const t of ["inventory_item", "inventory_item_version", "inventory_item_operation"])
+      expect(m?.sql).toContain(`AFTER INSERT ON rms_inventory.${t}`);
+    expect(m?.sql).toContain("FORCE ROW LEVEL SECURITY");
+    expect(m?.sql).toContain("SECURITY DEFINER");
+    expect(m?.sql).toContain("REVOKE ALL ON FUNCTION");
+    expect(m?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+  it("registers the owning Recipe Ingredient reference fence addendum", async () => {
+    const m = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (c) => c.id === "1250_009_alter_recipe_inventory_reference_fence",
+    );
+    expect(m?.metadata).toMatchObject({ owner: "@rms/recipe", schema: "rms_recipe" });
+    expect(m?.sql).toContain(
+      "CREATE OR REPLACE FUNCTION rms_recipe.maintain_recipe_reference_projection()",
+    );
+    expect(m?.sql).toContain("ON rms_recipe.recipe_ingredient_requirement");
+    expect(m?.sql).toContain("SECURITY DEFINER");
+    expect(m?.sql).toContain("REVOKE ALL ON FUNCTION");
+    expect(m?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
   it("registers the exact WP-2105 Recipe management migration", async () => {
     const migration = (await readMigrationCatalog(repositoryRoot)).migrations.find(
       (candidate) => candidate.id === "1250_001_create_recipe_management",
@@ -1168,6 +1275,24 @@ describe("migration catalog", () => {
     expect(migration?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
   });
 
+  it("registers exact WP-2408 Category original-result/source tables and forced RLS", async () => {
+    const entry = (await readMigrationCatalog(repositoryRoot)).migrations.find(
+      (row) => row.id === "1101_002_create_category_source_commit",
+    );
+    expect(entry?.metadata.owner).toBe("@rms/catalog");
+    expect(entry?.metadata.schema).toBe("rms_catalog");
+    for (const name of [
+      "category_operation_snapshot",
+      "category_source_head",
+      "category_source_commit",
+    ]) {
+      expect(entry?.sql).toContain(`CREATE TABLE rms_catalog.${name}`);
+      expect(entry?.sql).toContain(`ALTER TABLE rms_catalog.${name} FORCE ROW LEVEL SECURITY`);
+    }
+    expect(entry?.sql).toContain("category_source_head_guard");
+    expect(entry?.sql).not.toMatch(/\b(?:GRANT|CREATE\s+(?:ROLE|USER))\b/iu);
+  });
+
   it("keeps WP-0021 schema-only with the exact owner and schema sequence", async () => {
     const catalog = await readMigrationCatalog(repositoryRoot);
     expect(
@@ -1330,10 +1455,12 @@ describe("migration catalog", () => {
       ["0200_017_alter_browser_session_selection_isolation", "@bop/identity", "bop_identity"],
       ["0200_018_create_guest_entry_admission", "@bop/identity", "bop_identity"],
       ["0200_019_alter_brand_admin_artifact_snapshot", "@bop/tenant", "bop_tenant"],
+      ["0200_020_create_store_reference_projection", "@bop/tenant", "bop_tenant"],
       ["0300_001_create_permission", "@bop/permission", "bop_permission"],
       ["0300_002_create_role_administration", "@bop/permission", "bop_permission"],
       ["0300_003_create_workflow_definition", "@bop/workflow", "bop_workflow"],
       ["0300_004_alter_permission_action_identifiers", "@bop/permission", "bop_permission"],
+      ["0300_005_alter_option_read_action_identifier", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",
@@ -1635,4 +1762,56 @@ $unsafe$;
       new Map([["0000-Platform", "0000-platform"]]),
     );
   });
+});
+
+it("registers version-local immutable Recipe V2 measurement content", async () => {
+  const catalog = await readMigrationCatalog(repositoryRoot);
+  const migration = catalog.migrations.find(
+    (value) => value.id === "1250_010_create_recipe_measurement_content",
+  );
+  expect(migration?.metadata).toMatchObject({
+    owner: "@rms/recipe",
+    schema: "rms_recipe",
+    phase: "expand",
+  });
+  const sql = await readFile(
+    path.join(
+      repositoryRoot,
+      "migrations/1250-rms-recipe/1250_010_create_recipe_measurement_content.sql",
+    ),
+    "utf8",
+  );
+  for (const clause of [
+    "-- transaction: required",
+    "FORCE ROW LEVEL SECURITY",
+    "recipe_measurement_version_fk",
+    "RecipeCatalogReferenceV1:",
+    "actual_snapshot IS DISTINCT FROM NEW.content_json->'snapshot'",
+    "DO INSTEAD NOTHING",
+    "recipe_measurement_no_truncate",
+    "REVOKE ALL ON TABLE",
+  ])
+    expect(sql).toContain(clause);
+  expect(sql).not.toMatch(
+    /ALTER TABLE rms_recipe.recipe_version|UPDATE rms_recipe.recipe_version|INSERT INTO rms_recipe.recipe_measurement_content/,
+  );
+});
+
+it("registers a forward Permission fix for only the accepted Section88 Option read action", async () => {
+  const result = await readMigrationCatalog(repositoryRoot);
+  const migration = result.migrations.find(
+    (m) => m.id === "0300_005_alter_option_read_action_identifier",
+  );
+  expect(result.diagnostics).toEqual([]);
+  expect(migration?.metadata).toMatchObject({
+    owner: "@bop/permission",
+    schema: "bop_permission",
+    phase: "expand",
+    recovery: "forward-fix",
+    lockTimeoutMs: 5000,
+    statementTimeoutMs: 60000,
+  });
+  expect(migration?.sql).toContain("-- transaction: required");
+  expect(migration?.sql.match(/action_code = 'catalog\.option_set\.read'/gu)).toHaveLength(2);
+  expect(migration?.sql).not.toMatch(/\b(?:GRANT|INSERT|CREATE\s+(?:ROLE|USER))\b/iu);
 });

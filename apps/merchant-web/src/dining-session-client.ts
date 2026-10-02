@@ -22,6 +22,11 @@ const num = (v: unknown): number => {
   if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v >= 2147483647) return fail();
   return v;
 };
+const elapsed = (v: unknown): number | null => {
+  if (v === null) return null;
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0 || v >= 2147483647) return fail();
+  return v;
+};
 const label = (v: unknown): string => {
   if (
     typeof v !== "string" ||
@@ -45,6 +50,7 @@ export interface StaffDiningTable {
   operationalState: "Available" | "TemporarilyBlocked";
   aggregateVersion: number;
   currentDiningSessionReference: string | null;
+  elapsedMinutes: number | null;
 }
 export interface StaffDiningJoinState {
   diningSessionReference: string;
@@ -123,7 +129,12 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         csrf,
         signal,
       );
-      if (!Array.isArray(data.items) || data.items.length > 50) return fail();
+      if (
+        !Array.isArray(data.items) ||
+        data.items.length > 50 ||
+        typeof data.canOperateTables !== "boolean"
+      )
+        return fail();
       let previous = after;
       const items = data.items.map((v) => {
         const r = obj(v),
@@ -135,6 +146,10 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           !["Available", "TemporarilyBlocked"].includes(String(r.operationalState))
         )
           return fail();
+        const currentDiningSessionReference =
+          r.currentDiningSessionReference === null ? null : ref(r.currentDiningSessionReference);
+        const elapsedMinutes = elapsed(r.elapsedMinutes);
+        if ((currentDiningSessionReference === null) !== (elapsedMinutes === null)) return fail();
         return {
           tableReference: reference,
           stableLabel: label(r.stableLabel),
@@ -143,13 +158,60 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           lifecycle: r.lifecycle,
           operationalState: r.operationalState,
           aggregateVersion: num(r.aggregateVersion),
-          currentDiningSessionReference:
-            r.currentDiningSessionReference === null ? null : ref(r.currentDiningSessionReference),
+          currentDiningSessionReference,
+          elapsedMinutes,
         } as StaffDiningTable;
       });
       const next = data.nextAfterTableReference === null ? null : ref(data.nextAfterTableReference);
       if (next !== null && (items.length !== 50 || next !== previous)) return fail();
-      return { items, next };
+      return { items, next, canOperateTables: data.canOperateTables };
+    },
+    prepareAvailability(
+      table: StaffDiningTable,
+      action: "SetBlock" | "ClearBlock",
+      reasonCode: string | null,
+      operation: string,
+    ) {
+      const command = {
+          action,
+          tableReference: ref(table.tableReference),
+          expectedAggregateVersion: num(table.aggregateVersion),
+          operationReference: ref(operation),
+          reasonCode,
+        },
+        expectedState: "TemporarilyBlocked" | "Available" =
+          action === "SetBlock" ? "TemporarilyBlocked" : "Available";
+      if (
+        (action === "SetBlock" &&
+          (table.operationalState !== "Available" ||
+            typeof reasonCode !== "string" ||
+            !/^[A-Z][A-Z0-9_-]{0,63}$/.test(reasonCode))) ||
+        (action === "ClearBlock" &&
+          (table.operationalState !== "TemporarilyBlocked" || reasonCode !== null))
+      )
+        return fail();
+      const body = JSON.stringify(command);
+      return {
+        execute: async (csrf: string, signal?: AbortSignal) => {
+          const r = await send("/merchant/dining/tables/availability", body, csrf, signal, true);
+          try {
+            if (
+              !["Applied", "AlreadyApplied"].includes(String(r.status)) ||
+              ref(r.tableReference) !== command.tableReference ||
+              r.operationalState !== expectedState ||
+              num(r.aggregateVersion) !== command.expectedAggregateVersion + 1
+            )
+              return fail();
+            return {
+              status: r.status as "Applied" | "AlreadyApplied",
+              operationalState: expectedState,
+              aggregateVersion: command.expectedAggregateVersion + 1,
+            };
+          } catch {
+            throw new DiningSessionClientError("Unknown");
+          }
+        },
+      };
     },
     async joinState(
       session: string,

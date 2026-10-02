@@ -12,6 +12,7 @@ import {
   createMediaAssetVersion,
   createMediaReference,
   createUploadSession,
+  mediaUseKinds,
   parseAssetReference,
   parseAssetVersionReference,
   parseMediaChecksum,
@@ -357,41 +358,75 @@ export interface AuthorizeMediaAccessInput {
   readonly use: MediaUseKind;
 }
 
+// Read ports are typed contracts, but runtime source bodies still need owning parsing.
+function accessVersions(value: unknown): readonly MediaAssetVersion[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype)
+    throw new Error("invalid media versions");
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1) throw new Error("invalid media versions");
+  const versions: MediaAssetVersion[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor?.enumerable || !("value" in descriptor))
+      throw new Error("invalid media versions");
+    versions.push(createMediaAssetVersion(descriptor.value as MediaAssetVersion));
+  }
+  return Object.freeze(versions);
+}
+
 export async function authorizeMediaAccess(
   input: AuthorizeMediaAccessInput,
   ports: MediaPorts,
 ): Promise<MediaReferenceEvaluation> {
-  let context: TenantContext;
-  let reference: MediaReference;
-  try {
-    context = revalidateTenantContext(input.tenantContext);
-    reference = createMediaReference(input.reference);
-  } catch {
-    return Object.freeze({ allowed: false, reason: "MEDIA_UNAVAILABLE", assetVersionId: null });
-  }
-  const asset = await ports.read.loadAsset(reference.assetId);
-  if (asset === null)
-    return Object.freeze({ allowed: false, reason: "MEDIA_UNAVAILABLE", assetVersionId: null });
-  try {
-    await authorize(ports, context, asset.scope, actions.authorizeAccess);
-  } catch {
-    return Object.freeze({ allowed: false, reason: "MEDIA_UNAVAILABLE", assetVersionId: null });
-  }
-  const versions =
-    reference.assetVersionId === null
-      ? await ports.read.loadVersions(reference.assetId)
-      : [await ports.read.loadVersion(reference.assetVersionId)].filter(
-          (value): value is MediaAssetVersion => value !== null,
-        );
-  return evaluateMediaReference({
-    reference,
-    asset,
-    versions,
-    context: {
-      kind: context.scopeKind,
-      brandReference: context.brand.brandReference,
-      storeReference: context.store?.storeReference ?? null,
-    },
-    use: input.use,
+  const unavailable = Object.freeze({
+    allowed: false,
+    reason: "MEDIA_UNAVAILABLE" as const,
+    assetVersionId: null,
   });
+  try {
+    const fields = ["tenantContext", "reference", "use"] as const;
+    if (
+      Object.getPrototypeOf(input) !== Object.prototype ||
+      Reflect.ownKeys(input).length !== fields.length ||
+      Reflect.ownKeys(input).some((key) => !fields.some((field) => field === key))
+    )
+      return unavailable;
+    const descriptors = fields.map((field) => Object.getOwnPropertyDescriptor(input, field));
+    if (descriptors.some((descriptor) => !descriptor?.enumerable || !("value" in descriptor)))
+      return unavailable;
+    const context = revalidateTenantContext(descriptors[0]?.value as TenantContext);
+    const reference = createMediaReference(descriptors[1]?.value as MediaReference);
+    const use = descriptors[2]?.value as unknown;
+    if (typeof use !== "string" || !mediaUseKinds.some((kind) => kind === use)) return unavailable;
+
+    const sourceAsset = await ports.read.loadAsset(reference.assetId);
+    if (sourceAsset === null) return unavailable;
+    const asset = createMediaAsset(sourceAsset);
+    if (asset.assetId !== reference.assetId || !exactScope(context, asset.scope))
+      return unavailable;
+    await authorize(ports, context, asset.scope, actions.authorizeAccess);
+    const versions =
+      reference.assetVersionId === null
+        ? accessVersions(await ports.read.loadVersions(reference.assetId))
+        : null;
+    const pinned =
+      reference.assetVersionId === null
+        ? null
+        : await ports.read.loadVersion(reference.assetVersionId);
+    const evaluation = evaluateMediaReference({
+      reference,
+      asset,
+      versions: versions ?? (pinned === null ? [] : [createMediaAssetVersion(pinned)]),
+      context: {
+        kind: context.scopeKind,
+        brandReference: context.brand.brandReference,
+        storeReference: context.store?.storeReference ?? null,
+      },
+      use: use as MediaUseKind,
+    });
+    if (evaluation.allowed) await authorize(ports, context, asset.scope, actions.authorizeAccess);
+    return evaluation;
+  } catch {
+    return unavailable;
+  }
 }

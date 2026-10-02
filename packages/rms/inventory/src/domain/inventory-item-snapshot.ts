@@ -236,3 +236,5 @@ export function parseInventoryItemSnapshot(value: unknown): InventoryItemAggrega
     reorderPolicies,
   });
 }
+
+export { conversion as parseInventoryUnitConversion };

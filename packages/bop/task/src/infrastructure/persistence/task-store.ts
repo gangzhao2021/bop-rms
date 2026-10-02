@@ -17,6 +17,11 @@ import {
   type TaskScope,
   type TaskRecord,
 } from "../../contracts/task.js";
+import {
+  parseTaskQueueFilters,
+  matchesTaskQueueFilters,
+  type TaskQueueFilters,
+} from "../../contracts/task-queue.js";
 import { evaluateTaskTransition, taskOperations } from "../../domain/task-lifecycle.js";
 import type { CommitTaskMutationInput } from "../../application/ports/task-ports.js";
 const fail = (): never => {
@@ -302,6 +307,7 @@ export function createPostgresTaskQueueReader(options: {
       afterTaskReference: string | null;
       limit: number;
       observedAt: string;
+      filters: TaskQueueFilters;
     },
   ): Promise<boolean>;
 }) {
@@ -314,6 +320,7 @@ export function createPostgresTaskQueueReader(options: {
         afterTaskReference: string | null;
         limit: number;
         observedAt: string;
+        filters?: unknown;
       },
     ) {
       try {
@@ -323,6 +330,7 @@ export function createPostgresTaskQueueReader(options: {
             input.afterTaskReference === null ? null : parseTaskReference(input.afterTaskReference),
           limit: input.limit,
           observedAt: parseTaskInstant(input.observedAt),
+          filters: parseTaskQueueFilters(input.filters),
         });
         if (!Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 100)
           return fail();
@@ -345,6 +353,15 @@ export function createPostgresTaskQueueReader(options: {
       ) SELECT task_id::text,version,record_json,version_count,minimum_version FROM latest
       WHERE status IN ('Assigned','Claimed') AND record_json#>>'{currentAssignment,target,kind}'='Queue'
         AND record_json#>>'{currentAssignment,target,reference}'=$4
+        AND ($6::text IS NULL OR status=$6)
+        AND ($7::text IS NULL OR record_json->>'taskType'=$7)
+        AND ($8::text IS NULL OR record_json->>'severityCode'=$8)
+        AND ($9::text IS NULL OR task_id::text=$9 OR record_json#>>'{source,sourceReference}'=$9)
+        AND ($10::text IS NULL OR
+          ($10='Unclaimed' AND record_json->'currentClaim'='null'::jsonb) OR
+          ($10='ByActor' AND record_json#>>'{currentClaim,actorReference}'=$11) OR
+          ($10='ByOtherActor' AND record_json#>>'{currentClaim,actorReference}'<>$11))
+        AND ($12::boolean IS NULL OR ((record_json->>'dueAt')::timestamptz<$13::timestamptz)=$12)
       ORDER BY task_id LIMIT $5`,
           [
             scope.brandReference,
@@ -352,6 +369,16 @@ export function createPostgresTaskQueueReader(options: {
             query.afterTaskReference,
             query.queueReference,
             query.limit + 1,
+            query.filters.status,
+            query.filters.taskType,
+            query.filters.severityCode,
+            query.filters.exactReference,
+            query.filters.owner?.kind ?? null,
+            query.filters.owner !== null && query.filters.owner.kind !== "Unclaimed"
+              ? query.filters.owner.actorReference
+              : null,
+            query.filters.overdue,
+            query.observedAt,
           ],
         );
         if (!result || typeof result !== "object") return fail();
@@ -370,6 +397,7 @@ export function createPostgresTaskQueueReader(options: {
             task.currentAssignment?.target.kind !== "Queue" ||
             task.currentAssignment.target.reference !== query.queueReference ||
             task.updatedAt > query.observedAt ||
+            !matchesTaskQueueFilters(task, query.filters, query.observedAt) ||
             (previous !== null && task.taskReference <= previous)
           )
             return fail();

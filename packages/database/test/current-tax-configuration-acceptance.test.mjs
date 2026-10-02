@@ -4,6 +4,8 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresCurrentTaxConfigurationStore,
+  createPostgresTaxConfigurationReferenceSourceStore,
+  parseTaxConfigurationReferenceSourceSnapshot,
   createPostgresCurrentQuoteService,
   createPriceQuote,
 } from "../../rms/pricing/src/index.ts";
@@ -215,6 +217,108 @@ it("reads scoped persisted tax rules only with complete matching current evidenc
           .rows[0].n,
         2,
       );
+      // Actual selected-Store reference history, synthetic authority; no legal/tax applicability evidence claim.
+      const refAt = new Date().toISOString(),
+        future = new Date(Date.now() + 86400000).toISOString();
+      await admin.query(
+        "INSERT INTO rms_pricing.tax_configuration_version(tax_configuration_version_id,tax_configuration_id,brand_id,store_id,version_number,snapshot_digest,lifecycle,jurisdiction_code,currency_code,currency_metadata_version,currency_metadata_version_id,currency_metadata_digest,effective_from,effective_time_zone,created_at) SELECT $1,tax_configuration_id,brand_id,store_id,3,snapshot_digest,'Draft',jurisdiction_code,currency_code,currency_metadata_version,currency_metadata_version_id,currency_metadata_digest,$2,effective_time_zone,$3 FROM rms_pricing.tax_configuration_version WHERE tax_configuration_version_id=$4",
+        [id(7001), future, refAt, tax.versionReference],
+      );
+      await admin.query(
+        "UPDATE rms_pricing.tax_configuration SET aggregate_version=3,updated_at=$1 WHERE tax_configuration_id=$2",
+        [refAt, tax.configurationReference],
+      );
+      for (const [ref, store, code] of [
+        [id(7002), tax.storeReference, "SYNTHETIC_PENDING"],
+        [id(7003), id(7099), "SYNTHETIC_FOREIGN_STORE"],
+      ])
+        await admin.query(
+          "INSERT INTO rms_pricing.tax_configuration(tax_configuration_id,brand_id,store_id,stable_code,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES($1,$2,$3,$4,1,$5,$6,$5)",
+          [ref, tax.brandReference, store, code, refAt, id(900)],
+        );
+      const referenceRequest = {
+        purposeCode: "CATALOG_LIFECYCLE_PRICING_SOURCE_READ",
+        brandReference: tax.brandReference,
+        storeReference: tax.storeReference,
+        actorReference: id(900),
+        operationReference: id(7090),
+        catalogIntentDigest: "sha256:" + "a".repeat(64),
+      };
+      let holds = 0,
+        denyAt = 0;
+      const source = createPostgresTaxConfigurationReferenceSourceStore({
+        tenantReference: id(7091),
+        brandReference: tax.brandReference,
+        storeReference: tax.storeReference,
+        actorReference: id(900),
+        transactions: runner,
+        clock: { now: () => new Date().toISOString() },
+        authority: {
+          async holdUntilTransactionCompletes(tx, input) {
+            void tx;
+            assert.deepEqual(input.request, referenceRequest);
+            assert.equal(input.permission, "pricing.tax-config.manage");
+            if (++holds === denyAt) throw new Error("synthetic authority denied");
+          },
+        },
+      });
+      const references = await source.loadSnapshot(referenceRequest);
+      assert.equal(holds, 2);
+      assert.equal(references.roots.length, 2);
+      assert.equal(references.versions.length, 3);
+      assert.equal(references.crossStoreCoverage, "Unavailable");
+      assert.ok(references.roots.every((r) => r.storeReference === tax.storeReference));
+      assert.deepEqual(
+        references.versions
+          .find((v) => v.versionReference === tax.versionReference)
+          .rules.map((r) => r.ruleReference)
+          .sort(),
+        tax.rules.map((r) => r.ruleReference).sort(),
+      );
+      assert.equal(
+        references.versions.find((v) => v.versionReference === id(904)).isCurrentVersion,
+        true,
+      );
+      assert.equal(
+        references.versions.find((v) => v.versionReference === id(7001)).temporalStatus,
+        "Future",
+      );
+      assert.equal(
+        references.versions.find((v) => v.versionReference === id(7001)).rules.length,
+        0,
+      );
+      assert.equal(
+        references.roots.find((r) => r.configurationReference === id(7002)).currentVersionReference,
+        null,
+      );
+      assert.deepEqual(
+        parseTaxConfigurationReferenceSourceSnapshot(
+          references,
+          referenceRequest,
+          new Date().toISOString(),
+        ),
+        references,
+      );
+      assert.equal(
+        /professional|registration|tax_rate|receiptPresentation/.test(JSON.stringify(references)),
+        false,
+      );
+      const unavailable = { code: "TAX_CONFIGURATION_REFERENCE_SOURCE_UNAVAILABLE" };
+      await assert.rejects(
+        source.loadSnapshot({ ...referenceRequest, storeReference: id(7099) }),
+        unavailable,
+      );
+      denyAt = holds + 1;
+      await assert.rejects(source.loadSnapshot(referenceRequest), unavailable);
+      denyAt = holds + 2;
+      await assert.rejects(source.loadSnapshot(referenceRequest), unavailable);
+      denyAt = 0;
+      assert.equal((await source.loadSnapshot(referenceRequest)).digest, references.digest);
+      await admin.query(
+        "INSERT INTO rms_pricing.tax_configuration(tax_configuration_id,brand_id,store_id,stable_code,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES($1,$2,$3,'SYNTHETIC_SUBMS',1,$4::timestamptz+interval '1 microsecond',$5,$4::timestamptz+interval '1 microsecond')",
+        [id(7004), tax.brandReference, tax.storeReference, refAt, id(900)],
+      );
+      await assert.rejects(source.loadSnapshot(referenceRequest), unavailable);
     } finally {
       await admin.query("DROP OWNED BY " + role).catch(() => undefined);
       await admin.query("DROP ROLE IF EXISTS " + role);

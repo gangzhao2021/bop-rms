@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { InventoryCountScreen, InventoryCountState } from "./InventoryCountPages.js";
+import {
+  InventoryCountListUnavailable,
+  InventoryCountScreen,
+  InventoryCountState,
+  InventoryCountWorkbenchUnavailable,
+} from "./InventoryCountPages.js";
 import { InventoryCountClientError, parseInventoryCountView } from "./inventory-count-pages.js";
 
 const id = (n: number) => `018fa700-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -68,6 +73,39 @@ function projection(
 }
 
 describe("Inventory Count screens", () => {
+  it("shows registered Count fields as unavailable without sample facts or active controls", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <InventoryCountListUnavailable />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("INV-COUNT-LIST · PHASE 2");
+    expect(html).toContain("frozen snapshot, progress, variance and due facts are unavailable");
+    expect(html).toContain("Reference / scope");
+    expect(html).toContain("Status / assignee");
+    expect(html).toContain("Snapshot / progress");
+    expect(html).toContain('disabled=""');
+    expect(html).not.toContain("018fa700");
+    expect(html).not.toContain("Authorized count assignee");
+  });
+
+  it("shows the blind-count workbench boundary without count-line facts or active commands", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <InventoryCountWorkbenchUnavailable />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("INV-COUNT-WORKBENCH · PHASE 2");
+    expect(html).toContain("Blind expected quantities stay hidden until authorized submission.");
+    expect(html).toContain("Item / lot / location");
+    expect(html).toContain("variance / reason");
+    expect(html).toContain("Count actions unavailable");
+    expect(html).toContain("Post Movements");
+    expect(html).not.toContain("018fa700");
+    expect(html).not.toContain("Synthetic ingredient");
+    expect((html.match(/disabled=""/gu) ?? []).length).toBe(3);
+  });
+
   it("strictly parses one scoped Count projection", () => {
     expect(parseInventoryCountView(projection())).toMatchObject({
       stockScope: { scopeType: "Location" },

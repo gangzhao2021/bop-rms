@@ -18,8 +18,10 @@ export interface MerchantWorkspaceSnapshot {
 export interface MerchantNavigationItem {
   readonly screenId:
     | "HOME-OVERVIEW"
+    | "TASK-INBOX"
     | "ORG-STORE-LIST"
     | "CAT-MENU-LIST"
+    | "CAT-PRODUCT-LIST"
     | "OPS-ORDER-QUEUE"
     | "OPS-ORDER-EXCEPTION"
     | "KIT-KITCHEN-QUEUE"
@@ -42,7 +44,9 @@ const SAFE_LABEL = /^[^\p{Cc}\p{Cf}]{1,100}$/u;
 const REQUEST_TIMEOUT_MS = 15_000;
 const NAVIGATION = Object.freeze({
   "HOME-OVERVIEW": ["/app", "merchant.access"],
+  "TASK-INBOX": ["/app/tasks", "workflow.operate"],
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
+  "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
   "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.read"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
@@ -93,7 +97,7 @@ function storeOption(value: unknown): MerchantStoreOption {
 
 function navigationItem(value: unknown): MerchantNavigationItem {
   const input = record(value, ["screenId", "label", "href", "permission"]);
-  if (typeof input.screenId !== "string" || !(input.screenId in NAVIGATION))
+  if (typeof input.screenId !== "string" || !Object.hasOwn(NAVIGATION, input.screenId))
     throw new Error("MERCHANT_WORKSPACE_INVALID");
   const screenId = input.screenId as MerchantNavigationItem["screenId"];
   const expected = NAVIGATION[screenId];

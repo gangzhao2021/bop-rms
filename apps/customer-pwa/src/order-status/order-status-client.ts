@@ -2,6 +2,7 @@ import { boundedFetch } from "../network/bounded-fetch.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
+  subscribeCustomerCsrfContext,
 } from "../session/customer-transaction-context.js";
 import {
   OrderStatusClientError,
@@ -94,6 +95,7 @@ export function createHttpOrderStatusClient(
   request: typeof globalThis.fetch = globalThis.fetch,
 ): CustomerOrderStatusClient {
   return Object.freeze({
+    subscribeContextChange: subscribeCustomerCsrfContext,
     async load(orderReference: string): Promise<OrderStatusView> {
       if (!reference.test(orderReference)) throw new OrderStatusClientError("service_unavailable");
       const csrf = getCustomerCsrfCredential();

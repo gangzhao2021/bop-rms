@@ -56,7 +56,9 @@ function fixture() {
   };
   const authorize = vi.fn(async () => scope),
     authorizeSource = vi.fn(async () => true),
-    list = vi.fn(async () => page);
+    list = vi.fn<ReturnType<Parameters<typeof createMerchantTaskInboxRead>[0]["queue"]>["list"]>(
+      async () => page,
+    );
   const read = createMerchantTaskInboxRead({
     now: () => at,
     transactions: { run: async (work) => work(tx) },
@@ -79,6 +81,8 @@ it("returns only authorized presentation fields without Task history or actor id
   });
   expect(view.items[0]).not.toHaveProperty("assignmentHistory");
   expect(view.items[0]).not.toHaveProperty("actorReference");
+  expect(view.items[0]).not.toHaveProperty("sourceReference");
+  expect(JSON.stringify(view)).not.toContain(task.source.sourceReference);
   expect(Object.isFrozen(view.items)).toBe(true);
   expect(f.authorize).toHaveBeenCalledTimes(2);
 });
@@ -119,4 +123,119 @@ it("suppresses claim affordance when permission is absent", async () => {
   expect((await f.read("synthetic-cookie", { afterTaskReference: null })).items[0]?.canClaim).toBe(
     false,
   );
+});
+
+it("passes exact filters to the owner query before permission-trimmed pagination", async () => {
+  const f = fixture();
+  f.authorizeSource.mockResolvedValue(false);
+  f.page.nextAfterTaskReference = task.taskReference;
+  const view = await f.read("synthetic-cookie", {
+    afterTaskReference: null,
+    filters: {
+      status: "Assigned",
+      taskType: task.taskType,
+      severityCode: "CRITICAL",
+      exactReference: task.source.sourceReference,
+      overdue: false,
+      ownerStatus: "Unclaimed",
+    },
+  });
+  expect(f.list).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({
+      filters: {
+        status: "Assigned",
+        taskType: task.taskType,
+        severityCode: "CRITICAL",
+        exactReference: task.source.sourceReference,
+        overdue: false,
+        owner: { kind: "Unclaimed" },
+      },
+    }),
+  );
+  expect(view.items).toEqual([]);
+  expect(view.nextAfterTaskReference).toBe(task.taskReference);
+});
+it.each(["ClaimedByYou", "ClaimedByStaff"] as const)(
+  "derives %s from the current authorized Actor",
+  async (ownerStatus) => {
+    const f = fixture();
+    const actor = ownerStatus === "ClaimedByYou" ? id(8) : id(9);
+    f.scope.actorReference = actor;
+    const claim = {
+      claimReference: id(40),
+      actorReference: id(8),
+      eligibilityEvidenceReference: id(41),
+      membershipReference: id(42),
+      storeAssignmentReference: id(43),
+      claimedAt: at,
+    };
+    f.page.items = [
+      createTaskRecord({
+        ...task,
+        status: "Claimed",
+        version: 3,
+        currentClaim: claim,
+        claimHistory: [claim],
+      }),
+    ];
+    const view = await f.read("synthetic-cookie", {
+      afterTaskReference: null,
+      filters: { ownerStatus },
+    });
+    expect(view.items[0]?.ownerStatus).toBe(ownerStatus);
+    expect(f.list).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        filters: expect.objectContaining({
+          owner: {
+            kind: ownerStatus === "ClaimedByYou" ? "ByActor" : "ByOtherActor",
+            actorReference: actor,
+          },
+        }),
+      }),
+    );
+    expect(JSON.stringify(view)).not.toContain(actor);
+  },
+);
+it.each([
+  { actorReference: id(99) },
+  { storeReference: id(99) },
+  { queueReference: id(99) },
+  { owner: { kind: "ByActor", actorReference: id(99) } },
+  { ownerStatus: "Staff Name" },
+  { status: "Completed" },
+  { taskType: "search name" },
+  { overdue: "true" },
+])("denies hostile public filters before authorization %#", async (filters) => {
+  const f = fixture();
+  await expect(f.read("synthetic-cookie", { afterTaskReference: null, filters })).rejects.toThrow(
+    "MERCHANT_TASK_INBOX_UNAVAILABLE",
+  );
+  expect(f.authorize).not.toHaveBeenCalled();
+  expect(f.list).not.toHaveBeenCalled();
+});
+it("does not execute filter accessors or return mismatched query-port rows", async () => {
+  const getter = vi.fn(() => "Assigned");
+  const f = fixture();
+  await expect(
+    f.read("synthetic-cookie", {
+      afterTaskReference: null,
+      filters: Object.defineProperty({}, "status", { enumerable: true, get: getter }),
+    }),
+  ).rejects.toThrow();
+  expect(getter).not.toHaveBeenCalled();
+  await expect(
+    f.read("synthetic-cookie", { afterTaskReference: null, filters: { severityCode: "LOW" } }),
+  ).rejects.toThrow();
+  expect(f.authorizeSource).not.toHaveBeenCalled();
+});
+it("rejects an Actor change before returning claimed-by-you results", async () => {
+  const f = fixture();
+  f.authorize
+    .mockResolvedValueOnce(f.scope)
+    .mockResolvedValue({ ...f.scope, actorReference: id(99) });
+  await expect(
+    f.read("synthetic-cookie", { afterTaskReference: null, filters: { ownerStatus: "Unclaimed" } }),
+  ).rejects.toThrow();
 });

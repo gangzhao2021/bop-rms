@@ -8,8 +8,15 @@ import {
   startCustomerLab,
   verifyCustomerLab,
 } from "../../../apps/customer-pwa/scripts/local-customer-lab.mjs";
-import { createGuestSessionCredentialProvider } from "../../bop/identity/src/index.ts";
+import {
+  createGuestSessionCredentialProvider,
+  createPostgresGuestSessionEntryStore,
+} from "../../bop/identity/src/index.ts";
 import { createLocalCustomerRuntime } from "../../../apps/api/src/local-customer-runtime.ts";
+import { createCustomerPickupCheckoutDetailsComposition } from "../../../apps/api/src/customer-checkout-details-composition.ts";
+import { createCustomerCheckoutSessionAuthorization } from "../../../apps/api/src/customer-checkout-session-authorization.ts";
+import { createCustomerPickupSessionValidation } from "../../../apps/api/src/customer-pickup-session-validation.ts";
+import { createCustomerCartSelectionInventory } from "../../../apps/api/src/customer-cart-selection-inventory.ts";
 import { createApiRuntimeLogger } from "../../../apps/api/src/server.ts";
 import {
   fixture,
@@ -22,6 +29,12 @@ const { Client, Pool } = pg;
 const scope = { brandReference: id(1), storeReference: id(2) };
 import { seedDining } from "../test-support/local-customer-dining-seed.mjs";
 import { seedMenu } from "../test-support/local-customer-menu-seed.mjs";
+import { prepareEntryPickupCheckout } from "../test-support/entry-pickup-checkout.mjs";
+import {
+  createPostgresCartQueryStore,
+  createPostgresCartQuoteStore,
+} from "../../rms/ordering/src/index.ts";
+import { createHash } from "node:crypto";
 import { verifyPickupQuoteLab } from "../../../apps/customer-pwa/scripts/pickup-quote-lab.mjs";
 import { seedPickup } from "../test-support/local-customer-pickup-seed.mjs";
 import { seedCart } from "../test-support/local-customer-cart-seed.mjs";
@@ -37,7 +50,7 @@ for (const mode of modes)
     "runs isolated browser " +
       mode +
       " entry, persisted Cart and " +
-      (mode === "Pickup" ? "Quote repricing" : "Dining admission"),
+      (mode === "Pickup" ? "CheckoutSession with payment gated" : "Dining admission"),
     async () => {
       await withIsolatedDatabase(
         { caseId: mode === "Pickup" ? "wp2401_pickup" : "wp2222_runtime" },
@@ -51,7 +64,9 @@ for (const mode of modes)
           });
           const sessionRole = `wp2222_s_${context.runId}`;
           const menuRole = `wp2222_m_${context.runId}`;
-          const f = fixture();
+          const observedAt = mode === "Pickup" ? new Date(Date.now() - 1000).toISOString() : at;
+          const runtimeNow = () => (mode === "Pickup" ? new Date().toISOString() : observedAt);
+          const f = fixture(observedAt);
           if (mode === "Pickup") {
             f.payload.channel = f.context.channel = "Pickup";
             f.context.tableLifecycle = f.context.assignmentState = null;
@@ -92,7 +107,7 @@ for (const mode of modes)
             await admin.query(
               `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint, rms_catalog.menu_release_effective_period, rms_catalog.menu_publication_release, rms_catalog.menu_publication_revision, rms_catalog.menu_version_store, rms_catalog.menu_version_channel, rms_catalog.menu_version_order_type TO ${menuRole}`,
             );
-            await seedMenu(admin, mode);
+            if (mode === "DineIn") await seedMenu(admin, mode);
             const sessionRunner = createTenantTransactionRunner(
               {
                 options: pool.options,
@@ -150,7 +165,182 @@ for (const mode of modes)
                 : undefined;
             const cart = dining ? await seedCart({ admin, context, dining }) : undefined;
             pickup =
-              mode === "Pickup" ? await seedPickup({ admin, context, sessionRole }) : undefined;
+              mode === "Pickup"
+                ? await seedPickup({ admin, context, sessionRole, observedAt })
+                : undefined;
+            let detailsSequence = 9000;
+            const checkoutDetails =
+              pickup === undefined
+                ? undefined
+                : {
+                    quoteVersion: 1,
+                    ...createCustomerPickupCheckoutDetailsComposition({
+                      scope,
+                      quoteVersion: 1,
+                      cartTransactions: pickup.options.cartTransactions,
+                      detailsTransactions: pickup.checkoutDetailsTransactions,
+                      policies: {
+                        current: async (input) => ({
+                          brandReference: input.brandReference,
+                          storeReference: input.storeReference,
+                          orderType: input.orderType,
+                          checkedAt: input.observedAt,
+                          validUntil: new Date(
+                            Date.parse(input.observedAt) + 120_000,
+                          ).toISOString(),
+                          required: [],
+                        }),
+                      },
+                      audit: async (input) => ({
+                        auditId: id(++detailsSequence),
+                        brandId: scope.brandReference,
+                        storeId: scope.storeReference,
+                        actor: { type: "System" },
+                        actionCode: "ORDERING_CHECKOUT_DETAILS_SAVE",
+                        targetType: "CheckoutDetails",
+                        targetId: input.detailsReference,
+                        reasonCode: "AUTHORIZED_CHECKOUT_UPDATE",
+                        correlationId: input.operationReference,
+                        occurredAt: input.observedAt,
+                        sourceChannel: "CUSTOMER_PWA",
+                        dataClassification: "Restricted",
+                        retentionPolicyCode: "AUDIT_DEFAULT",
+                        retentionPolicyVersion: 1,
+                      }),
+                      now: runtimeNow,
+                      session: {
+                        ...f.options.session,
+                        credentials,
+                        store: createPostgresGuestSessionEntryStore(sessionTransactions, scope),
+                      },
+                    }),
+                  };
+            const checkoutSession =
+              pickup === undefined
+                ? undefined
+                : await prepareEntryPickupCheckout({
+                    admin,
+                    role: pickup.orderingRole,
+                    run: pickup.orderingTransactions.run,
+                    scope,
+                    at: observedAt,
+                    now: runtimeNow,
+                    capacityLimit: 2,
+                    session: { credentials, binding: f.options.session.binding },
+                    binding: () => f.options.session.binding,
+                  });
+            if (checkoutSession !== undefined) {
+              pickup.checkoutSessionFailures = checkoutSession.failures;
+              pickup.checkoutStages = [];
+              const track = async (stage, work) => {
+                pickup.checkoutStages.push({ stage, result: "started" });
+                try {
+                  const result = await work();
+                  pickup.checkoutStages.push({ stage, result: "completed" });
+                  return result;
+                } catch (error) {
+                  pickup.checkoutStages.push({
+                    stage,
+                    result: "failed",
+                    errorType:
+                      typeof error?.name === "string" &&
+                      /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(error.name)
+                        ? error.name
+                        : "Error",
+                    code: /^[A-Z0-9_]{1,64}$/.test(error?.code) ? error.code : "UNKNOWN",
+                  });
+                  throw error;
+                }
+              };
+              const hashIntent = (value) =>
+                "sha256:" + createHash("sha256").update(value).digest("hex");
+              const carts = createPostgresCartQueryStore(
+                { run: pickup.orderingTransactions.run },
+                scope,
+              );
+              const quotes = createPostgresCartQuoteStore(
+                { run: pickup.orderingTransactions.run },
+                scope,
+                { hashIntent, equals: (left, right) => left === right },
+              );
+              checkoutSession.attach(async (input) => {
+                const access = createCustomerCheckoutSessionAuthorization(checkoutSession.options, {
+                  sessionCredential: input.sessionCredential,
+                  csrfCredential: input.csrfCredential,
+                  cartReference: input.request.cartReference,
+                });
+                const catalogOptions = pickup.options.catalogCartItems;
+                let selectionObservedAt;
+                const catalogOwner = createCustomerCartSelectionInventory(
+                  catalogOptions.catalogTransactions,
+                  { ...scope, ...catalogOptions.catalogScope, orderType: "Pickup" },
+                  {
+                    ...catalogOptions.catalogSafety,
+                    clock: { now: () => selectionObservedAt ?? runtimeNow() },
+                  },
+                  {
+                    ...catalogOptions.selectedInventory,
+                    authorize: async (_inventoryTransaction, selection) => {
+                      const authority = await access.authorize(input.request, selection.observedAt);
+                      return authority
+                        ? checkoutSession.options.transactions.run((tx) =>
+                            access.authorizeInTransaction(tx, authority, selection.observedAt),
+                          )
+                        : false;
+                    },
+                  },
+                );
+                const catalog = {
+                  async validateSelection(selection) {
+                    selectionObservedAt = selection.observedAt;
+                    try {
+                      return await track("catalog", async () => {
+                        const cart = await carts.load(input.request.cartReference);
+                        assert(cart);
+                        assert.equal(cart.aggregateVersion, input.request.cartVersion);
+                        const quantity = cart.items
+                          .filter((item) => item.sellableReference === selection.sellableReference)
+                          .reduce((sum, item) => sum + item.quantity, 0);
+                        return catalogOwner.validateSelection(selection, {
+                          diningSessionReference: cart.diningSessionReference,
+                          cartReference: cart.cartReference,
+                          cartVersion: cart.aggregateVersion,
+                          guestSessionReference: input.allocation.guestSessionReference,
+                          quantity,
+                        });
+                      });
+                    } finally {
+                      selectionObservedAt = undefined;
+                    }
+                  },
+                };
+                const preparation = {
+                  ...checkoutSession.preparation,
+                  prepare: (value) =>
+                    track("capacity-prepare", () => checkoutSession.preparation.prepare(value)),
+                  prepareForOrdering: (value) =>
+                    track("capacity-ordering", () =>
+                      checkoutSession.preparation.prepareForOrdering(value),
+                    ),
+                };
+                return createCustomerPickupSessionValidation({
+                  preparation,
+                  checkout: {
+                    catalog,
+                    repository: {
+                      loadCart: (reference) => carts.load(reference),
+                      loadQuote: (reference) =>
+                        quotes.loadLatest({
+                          cartReference: reference,
+                          cartVersion: input.request.cartVersion,
+                          observedAt: checkoutSession.options.now(),
+                        }),
+                    },
+                    references: { hashIntent },
+                  },
+                })(input);
+              });
+            }
             const options = {
               ...(cart
                 ? {
@@ -169,8 +359,12 @@ for (const mode of modes)
               },
               sessionTransactions,
               menuTransactions,
+              ...(checkoutDetails === undefined ? {} : { checkoutDetails }),
+              ...(checkoutSession === undefined
+                ? {}
+                : { checkoutSessions: checkoutSession.options }),
               allowedOrigin: "https://127.0.0.1:5184",
-              now: () => at,
+              now: runtimeNow,
               uuidV7Factory: () => id(++sequence),
               runtime: {
                 logger: createApiRuntimeLogger({ write: (line) => logs.push(String(line)) }),
@@ -189,7 +383,6 @@ for (const mode of modes)
               token: f.token,
               diningAdmissionEnabled: mode === "DineIn",
               quoteEnabled: mode === "Pickup",
-              observedAt: at,
               cartEnabled: true,
               stop: () => stop(),
             });

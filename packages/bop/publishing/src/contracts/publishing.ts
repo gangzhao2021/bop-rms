@@ -171,7 +171,9 @@ export function parsePublishingInstant(value: unknown): CanonicalInstant {
   return instant(value, "PUBLISHING_INPUT_INVALID");
 }
 
-export function createPublishingScope(input: PublishingScope): PublishingScope {
+export function createPublishingScope(
+  input: Readonly<{ kind: TenantScopeKind; brandReference: string; storeReference: string | null }>,
+): PublishingScope {
   exact(input, ["kind", "brandReference", "storeReference"], "PUBLISHING_SCOPE_INVALID");
   const brandReference = parsePublishingReference(
     input.brandReference,

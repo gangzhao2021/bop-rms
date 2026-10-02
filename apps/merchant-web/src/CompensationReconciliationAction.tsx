@@ -25,6 +25,9 @@ export function CompensationReconciliationAction({
     [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine);
   const pending = useRef<AbortController | null>(null),
     intent = useRef<ReturnType<typeof client.prepare> | null>(null);
+  const actionButton = useRef<HTMLButtonElement | null>(null),
+    completionAnnouncement = useRef<HTMLParagraphElement | null>(null),
+    restoreRetryFocus = useRef(false);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
     window.addEventListener("online", update);
@@ -35,6 +38,16 @@ export function CompensationReconciliationAction({
       pending.current?.abort();
     };
   }, []);
+  useEffect(() => {
+    if (!unknown || busy || !restoreRetryFocus.current) return;
+    restoreRetryFocus.current = false;
+    if (document.activeElement === document.body) actionButton.current?.focus();
+  }, [busy, unknown]);
+  useEffect(() => {
+    if (!recorded || busy || !restoreRetryFocus.current) return;
+    restoreRetryFocus.current = false;
+    if (document.activeElement === document.body) completionAnnouncement.current?.focus();
+  }, [busy, recorded]);
   async function load() {
     if (pending.current || unknown || !online) return;
     const controller = new AbortController();
@@ -62,6 +75,7 @@ export function CompensationReconciliationAction({
   }
   async function submit() {
     if (pending.current || !view || !confirmed || readOnly || !online || recorded) return;
+    restoreRetryFocus.current = document.activeElement === actionButton.current;
     const controller = new AbortController();
     pending.current = controller;
     setBusy(true);
@@ -127,6 +141,7 @@ export function CompensationReconciliationAction({
                 I have reviewed this confirmed refund and reconciled this case
               </label>
               <button
+                ref={actionButton}
                 disabled={busy || !confirmed || readOnly || !online}
                 onClick={() => void submit()}
               >
@@ -137,7 +152,11 @@ export function CompensationReconciliationAction({
         </>
       ) : null}
       {busy ? <p role="status">Reading or recording current reconciliation…</p> : null}
-      {message ? <p role="status">{message}</p> : null}
+      {message ? (
+        <p ref={completionAnnouncement} role="status" tabIndex={-1}>
+          {message}
+        </p>
+      ) : null}
     </section>
   );
 }

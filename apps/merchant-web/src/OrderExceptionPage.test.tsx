@@ -42,14 +42,32 @@ describe("WP-1809 Order Exception Workbench", () => {
       "Unknown",
       "Request owning-domain compensation / retry",
       "Resolve from final source evidence",
+      "Clear filters",
     ])
       expect(html).toContain(value);
+    expect(html).toContain("Linked order · public reference unavailable");
+    expect(html).toContain('id="exception-actions-unavailable"');
+    expect(html.match(/aria-describedby="exception-actions-unavailable"/gu)).toHaveLength(4);
+    expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000902");
   });
   it("rejects client-resolved rows without source finality", () => {
     const input = fixture();
     expect(() =>
       parseOrderExceptionView({ ...input, items: [{ ...input.items[0], status: "Resolved" }] }),
     ).toThrow("ORDER_EXCEPTION_INVALID");
+  });
+  it.each(["2026-02-30", "2026-04-31", "2026-13-01", "2026-00-10"])(
+    "rejects impossible Business Date %s",
+    (businessDate) => {
+      expect(() => parseOrderExceptionView({ ...fixture(), businessDate })).toThrow(
+        "ORDER_EXCEPTION_INVALID",
+      );
+    },
+  );
+  it("accepts a real leap-day Business Date", () => {
+    expect(parseOrderExceptionView({ ...fixture(), businessDate: "2024-02-29" }).businessDate).toBe(
+      "2024-02-29",
+    );
   });
 });
 
@@ -74,7 +92,7 @@ describe("WP-2402 workbench recovery states", () => {
     expect(html).toContain("2026-08-12T16:15:00.000Z");
     expect(html).toContain("PaidWithoutFulfillableOrder");
     const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)];
-    expect(buttons).toHaveLength(5);
+    expect(buttons).toHaveLength(6);
     expect(buttons[0]?.[1]).not.toContain("disabled");
     for (const button of buttons.slice(1)) expect(button[1]).toContain("disabled");
   });
@@ -90,7 +108,7 @@ describe("WP-2402 workbench recovery states", () => {
     );
     expect(html).toContain("No exceptions in this view");
     expect(html).toContain("Stale workbench");
-    expect(html).not.toContain("Acknowledge");
+    expect(html).not.toContain("<article");
   });
 });
 
@@ -155,7 +173,7 @@ it("does not advertise executable generic commands for a fresh unlinked payment 
   expect(html).toContain("requires reconciliation review");
   expect(html).toContain("not available");
   const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)];
-  expect(buttons).toHaveLength(5);
+  expect(buttons).toHaveLength(6);
   expect(buttons[0]?.[1]).not.toContain("disabled");
   for (const button of buttons.slice(1)) expect(button[1]).toContain("disabled");
 });

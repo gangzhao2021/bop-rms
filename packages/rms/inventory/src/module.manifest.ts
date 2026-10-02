@@ -24,6 +24,10 @@ const moduleManifestInput: ModuleManifest =
     ownedDatabase: {
       schema: "rms_inventory",
       tables: [
+        "item_sku_mapping_version",
+        "configuration_reference_generation",
+        "recipe_configuration_source_version",
+        "recipe_configuration_source_capture",
         "inventory_item",
         "inventory_item_version",
         "inventory_item_operation",

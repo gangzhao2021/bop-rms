@@ -363,6 +363,16 @@ export function createReceiptController(
       online = next;
       if (!online) {
         requestVersion += 1;
+        // Reconnection alone cannot revalidate live facts or action eligibility.
+        if (accepted)
+          accepted = Object.freeze({
+            ...accepted,
+            freshnessStatus: "Stale",
+            financial: null,
+            deliveryStatus: "Unavailable",
+            supportEligible: false,
+            cancellationEligible: false,
+          });
         publish({ status: "offline", view: accepted });
       } else if (state.status === "offline")
         publish(accepted ? { status: "ready", view: accepted } : { status: "unavailable" });

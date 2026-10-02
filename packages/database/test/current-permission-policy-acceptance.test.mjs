@@ -64,7 +64,19 @@ it("evaluates actual workforce policy, deny precedence, revocation and lock rete
       );
       await verifyOidcAuthorizationStore({ admin, client, role });
       await verifyBrowserSessionStore({ admin, client, role });
-      await verifyMerchantAuthorizationRead({ admin, client, role });
+      await verifyMerchantAuthorizationRead({
+        admin,
+        client,
+        role,
+        fixtureClock: {
+          from: f.FROM,
+          at: f.AT,
+          until: f.UNTIL,
+          businessWeekday: 2,
+          businessDate: "2026-07-28",
+          targetBusinessDate: "2026-07-27",
+        },
+      });
       await verifyWorkforceAuthorityComposition({ admin, client, role });
       const request = {
         tenantContext: f.tenantContext,

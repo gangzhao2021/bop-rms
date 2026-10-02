@@ -10,3 +10,9 @@ export * from "./application/ports/live-gate-ports.js";
 export * from "./infrastructure/persistence/publishing-mutation-store.js";
 
 export * from "./infrastructure/persistence/current-live-gate-source.js";
+
+export * from "./contracts/product-publication-policy.js";
+
+export * from "./contracts/option-set-publication-policy.js";
+
+export * from "./contracts/independent-approval-source.js";

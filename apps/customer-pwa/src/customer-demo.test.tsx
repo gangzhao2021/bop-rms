@@ -134,6 +134,30 @@ describe("WP-2204 local Customer preview", () => {
     fetch.mockRestore();
   });
 
+  it("filters the read-only menu preview by exact section reference", async () => {
+    const all = await enabledCustomerDemo.menuClient.load();
+    if (all.kind !== "Found") throw new Error("synthetic menu missing");
+    const selectedSection = all.menu.sections[0];
+    if (!selectedSection) throw new Error("synthetic menu section missing");
+    await expect(
+      enabledCustomerDemo.menuClient.load({
+        sectionReference: selectedSection.sectionReference,
+      }),
+    ).resolves.toMatchObject({
+      kind: "Found",
+      menu: { sections: [{ sectionReference: selectedSection.sectionReference }] },
+    });
+    await expect(
+      enabledCustomerDemo.menuClient.load({
+        searchTerm: "iced",
+        sectionReference: selectedSection.sectionReference,
+      }),
+    ).resolves.toMatchObject({
+      kind: "Found",
+      menu: { sections: [{ sellables: [{ name: "Synthetic iced tea" }] }] },
+    });
+  });
+
   it("renders the visible notice independently of route content", () => {
     const html = renderToStaticMarkup(<LocalCustomerDemoNotice />);
     expect(html).toContain('aria-label="Local synthetic preview"');

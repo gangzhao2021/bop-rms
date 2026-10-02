@@ -59,14 +59,48 @@ async function serve(taskInbox?: MerchantBffRouterOptions["taskInbox"]) {
   return `http://127.0.0.1:${address.port}`;
 }
 it("passes only credentials and header cursor, whitelists output and disables caching", async () => {
-  const read = vi.fn(async () => ({ ...view(), privateData: "synthetic" })),
-    root = await serve(read);
+  const sourceReference = "0190fad5-0000-7000-8000-000000000099",
+    read = vi.fn(async () => ({
+      ...view(),
+      items: [
+        {
+          taskReference: id,
+          version: 2,
+          taskType: "DINING_UNPAID_BATCH_EXCEPTION",
+          severity: "CRITICAL",
+          priority: "CRITICAL",
+          status: "Assigned",
+          ownerStatus: "Unclaimed",
+          dueAt: at,
+          sourceType: "DINING_SESSION",
+          sourceReference,
+          canClaim: false,
+        },
+      ],
+    })),
+    root = await serve(read as unknown as NonNullable<MerchantBffRouterOptions["taskInbox"]>);
   const response = await request(root, "/merchant/tasks", {
     headers: { ...headers, "x-bop-task-after": id },
   });
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(await response.json()).toEqual(view());
+  const body = (await response.json()) as { readonly items: readonly Record<string, unknown>[] };
+  expect(body.items).toEqual([
+    {
+      taskReference: id,
+      version: 2,
+      taskType: "DINING_UNPAID_BATCH_EXCEPTION",
+      severity: "CRITICAL",
+      priority: "CRITICAL",
+      status: "Assigned",
+      ownerStatus: "Unclaimed",
+      dueAt: at,
+      sourceType: "DINING_SESSION",
+      canClaim: false,
+    },
+  ]);
+  expect(JSON.stringify(body)).not.toContain(sourceReference);
+  expect(JSON.stringify(body)).not.toContain("privateData");
   expect(read).toHaveBeenCalledExactlyOnceWith(cookie, { afterTaskReference: id });
 });
 it.each([
@@ -139,3 +173,48 @@ async function request(
     outgoing.end(options.body);
   });
 }
+
+it("passes bounded relationship filters without accepting caller Actor or Store authority", async () => {
+  const read = vi.fn(async () => view());
+  const root = await serve(read);
+  const response = await request(root, "/merchant/tasks", {
+    headers: {
+      ...headers,
+      "x-bop-task-filters": JSON.stringify({
+        status: "Assigned",
+        ownerStatus: "ClaimedByYou",
+        overdue: true,
+      }),
+    },
+  });
+  expect(response.status).toBe(200);
+  expect(read).toHaveBeenCalledExactlyOnceWith(cookie, {
+    afterTaskReference: null,
+    filters: {
+      status: "Assigned",
+      ownerStatus: "ClaimedByYou",
+      overdue: true,
+      taskType: null,
+      severityCode: null,
+      exactReference: null,
+    },
+  });
+});
+
+it.each([
+  JSON.stringify({ actorReference: id }),
+  JSON.stringify({ storeReference: id }),
+  JSON.stringify({ owner: { kind: "ByActor", actorReference: id } }),
+  JSON.stringify({ unsupported: true }),
+  "{",
+  "x".repeat(513),
+])("denies malformed or caller-authority filter headers before querying", async (filters) => {
+  const read = vi.fn(async () => view());
+  const root = await serve(read);
+  const response = await request(root, "/merchant/tasks", {
+    headers: { ...headers, "x-bop-task-filters": filters },
+  });
+  expect(response.status).toBe(403);
+  expect(read).not.toHaveBeenCalled();
+  expect(await response.json()).toEqual({ error: "request_denied" });
+});

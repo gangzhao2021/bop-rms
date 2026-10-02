@@ -10,6 +10,7 @@ export async function seedMerchantAcceptanceSession({
   at,
   kitchenPermission = false,
   pickupPermission = false,
+  authenticationPolicyCode = "WorkforceStandard",
   referencePrefix = "01909968",
   sessionReferencePrefix = "01909967",
 }) {
@@ -104,6 +105,7 @@ export async function seedMerchantAcceptanceSession({
     scope,
     requester: actor,
     at,
+    policyCode: authenticationPolicyCode,
     referencePrefix: sessionReferencePrefix,
   });
   return {

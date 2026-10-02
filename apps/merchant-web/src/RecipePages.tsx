@@ -2,23 +2,32 @@ import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
+  assertRecipeViewScope,
   parseRecipeEditorView,
   parseRecipeListView,
   parseRecipeRouteReference,
   RecipeClientError,
+  recipeSummaryText,
   unavailableRecipeClient,
   type RecipeClient,
   type RecipeClientErrorCode,
   type RecipeEditorView,
   type RecipeListView,
+  type RecipeSummary,
+  type RecipeViewMetadata,
 } from "./recipe-pages.js";
 type LoadState<T> =
   | { readonly kind: "Loading" | RecipeClientErrorCode }
   | { readonly kind: "Found"; readonly view: T };
 function useLoad<T>(load: () => Promise<T>, key: string): LoadState<T> {
-  const [state, setState] = useState<LoadState<T>>({ kind: "Loading" });
+  const [result, setResult] = useState<{ load: typeof load; key: string; state: LoadState<T> }>({
+    load,
+    key,
+    state: { kind: "Loading" },
+  });
   useEffect(() => {
     let active = true;
+    const setState = (state: LoadState<T>) => setResult({ load, key, state });
     setState({ kind: "Loading" });
     void load()
       .then((view) => active && setState({ kind: "Found", view }))
@@ -31,7 +40,7 @@ function useLoad<T>(load: () => Promise<T>, key: string): LoadState<T> {
       active = false;
     };
   }, [key, load]);
-  return state;
+  return result.load === load && result.key === key ? result.state : { kind: "Loading" };
 }
 export function RecipeState({
   state,
@@ -69,9 +78,9 @@ export function RecipeState({
         "offline",
       ],
       Unavailable: [
-        "Recipe service unavailable",
-        "The Recipe BFF is unavailable. No fact changed.",
-        "error",
+        "Recipe data unavailable",
+        "The authorized Recipe source is unavailable. No Recipe fact changed.",
+        "offline",
       ],
     };
   const selected = content[state];
@@ -95,14 +104,17 @@ export function RecipeListScreen({ view }: { readonly view: RecipeListView }) {
         (issue === "Missing mapping" && item.mappingMissing) ||
         (issue === "Cost changed" && item.costChanged)) &&
       (needle === "" ||
-        [item.name, item.stableCode, item.ingredientSummary].some((value) =>
-          value.toLocaleLowerCase("en-CA").includes(needle),
-        )),
+        [
+          item.name,
+          item.stableCode,
+          item.ingredientSummary.status === "Available" ? item.ingredientSummary.value : "",
+        ].some((value) => value.toLocaleLowerCase("en-CA").includes(needle))),
   );
   return (
-    <AppFrame title="Recipes" description="RECIPE-LIST · query.recipe_list · recipe_admin_v1">
+    <AppFrame title="COMMERCE" description="REVIEW" className="recipe-screen">
       <header className="screen-heading">
         <div>
+          <p className="bop-eyebrow">RECIPE-LIST · PHASE 2</p>
           <h2>Recipe management</h2>
           <p className="bop-muted">As of {view.asOfUtc}</p>
         </div>
@@ -110,6 +122,7 @@ export function RecipeListScreen({ view }: { readonly view: RecipeListView }) {
           Create
         </button>
       </header>
+      <ProjectionStatus view={view} />
       <div className="list-filters" role="search">
         <label>
           Name / code / Ingredient
@@ -153,7 +166,12 @@ export function RecipeListScreen({ view }: { readonly view: RecipeListView }) {
                 <div>
                   <dt>Yield / cost</dt>
                   <dd>
-                    {item.yieldSummary} · {item.costMinor} CAD minor units
+                    {item.yieldSummary} ·{" "}
+                    {item.cost.status === "Available"
+                      ? `${item.cost.value.amountMinor} ${item.cost.value.currencyCode} minor units`
+                      : item.cost.status === "PermissionHidden"
+                        ? "Restricted"
+                        : "Unavailable"}
                   </dd>
                 </div>
                 <div>
@@ -162,13 +180,24 @@ export function RecipeListScreen({ view }: { readonly view: RecipeListView }) {
                 </div>
                 <div>
                   <dt>Product / SKU usage</dt>
-                  <dd>{item.usageSummary}</dd>
+                  <dd>
+                    <SummaryValue value={item.usageSummary} view={view} />
+                  </dd>
                 </div>
                 <div>
                   <dt>Mapping / change</dt>
                   <dd>
-                    {item.mappingMissing ? "Missing mapping" : "Mapped"} ·{" "}
-                    {item.costChanged ? "Cost changed" : "Cost stable"}
+                    {item.mappingMissing === null
+                      ? "Mapping unavailable"
+                      : item.mappingMissing
+                        ? "Missing mapping"
+                        : "Mapped"}{" "}
+                    ·{" "}
+                    {item.costChanged === null
+                      ? "Cost change unavailable"
+                      : item.costChanged
+                        ? "Cost changed"
+                        : "Cost stable"}
                   </dd>
                 </div>
               </dl>
@@ -191,24 +220,65 @@ export function RecipeListScreen({ view }: { readonly view: RecipeListView }) {
     </AppFrame>
   );
 }
+function ProjectionStatus({ view }: { readonly view: RecipeViewMetadata }) {
+  return (
+    <section aria-label="Recipe data status">
+      <p role="status">
+        {view.freshness === "Stale" ? "Stale · read-only" : "Fresh"}
+        {view.partial ? " · Partial data" : ""}
+      </p>
+      <ul>
+        {Object.entries(view.sources).map(([kind, source]) => (
+          <li key={kind}>
+            {kind}: {source.status === "PermissionHidden" ? "Restricted" : source.status}
+            {source.status === "Current" || source.status === "Stale" ? ` · ${source.asOfUtc}` : ""}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+function SummaryValue({
+  value,
+  view,
+  safety = false,
+}: {
+  readonly value: RecipeSummary;
+  readonly view: RecipeViewMetadata;
+  readonly safety?: boolean;
+}) {
+  if (
+    safety &&
+    (view.freshness === "Stale" ||
+      Object.entries(view.sources).some(
+        ([kind, source]) => kind !== "Usage" && source.status !== "Current",
+      ))
+  )
+    return <>Verification unavailable</>;
+  return (
+    <>
+      {value.status === "Available" && view.freshness === "Stale" ? "Stale · " : ""}
+      {recipeSummaryText(value)}
+    </>
+  );
+}
 export function RecipeEditorScreen({ view }: { readonly view: RecipeEditorView }) {
   return (
-    <AppFrame
-      title={view.name}
-      description={`RECIPE-EDITOR · ${view.lifecycle} · Expected Version ${view.aggregateVersion}`}
-    >
+    <AppFrame title="COMMERCE" description="REVIEW" className="recipe-screen">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">
-            {view.stableCode} · {view.effectiveVersion}
-          </p>
+          <p className="bop-eyebrow">RECIPE-EDITOR · PHASE 2</p>
           <h2>Recipe editor</h2>
-          <p>{view.yieldSummary}</p>
+          <p className="bop-muted">
+            {view.name} · {view.stableCode} · {view.effectiveVersion}
+          </p>
         </div>
         <Link className="shell-action" to="/app/commerce/recipes">
           All Recipes
         </Link>
       </header>
+      <p className="bop-muted">As of {view.asOfUtc}</p>
+      <ProjectionStatus view={view} />
       <div className="store-card-grid">
         {(
           [
@@ -222,7 +292,13 @@ export function RecipeEditorScreen({ view }: { readonly view: RecipeEditorView }
           ] as const
         ).map(([label, value]) => (
           <StatePanel heading={label} key={label}>
-            <p>{value}</p>
+            <p>
+              <SummaryValue
+                value={value}
+                view={view}
+                safety={label === "Allergen union / evidence" || label === "Dual review"}
+              />
+            </p>
           </StatePanel>
         ))}
       </div>
@@ -231,14 +307,17 @@ export function RecipeEditorScreen({ view }: { readonly view: RecipeEditorView }
         {view.ingredients.map((item) => (
           <article className="store-card" key={item.sourceReference}>
             <header>
-              <h3>{item.sourceName}</h3>
+              <h3>
+                <SummaryValue value={item.sourceName} view={view} />
+              </h3>
               <strong>{item.sourceKind}</strong>
             </header>
             <p>
               {item.quantitySummary} · {item.lossSummary}
             </p>
             <p>
-              {item.allergenSummary} · {item.evidenceSummary}
+              <SummaryValue value={item.allergenSummary} view={view} /> ·{" "}
+              <SummaryValue value={item.evidenceSummary} view={view} safety />
             </p>
             <p>{item.mappingStatus}</p>
           </article>
@@ -266,13 +345,38 @@ export function RecipeListPage({
 }: {
   readonly client?: RecipeClient;
 }) {
-  const load = useCallback(() => client.list().then(parseRecipeListView), [client]);
+  const load = useCallback(
+    () =>
+      client.list().then((value) => {
+        const view = parseRecipeListView(value);
+        assertRecipeViewScope(view, client.scope);
+        return view;
+      }),
+    [client],
+  );
   const state = useLoad(load, "recipes");
   return state.kind === "Found" ? (
     <RecipeListScreen view={state.view} />
   ) : (
-    <AppFrame title="Recipes" description="RECIPE-LIST">
-      <RecipeState state={state.kind} />
+    <AppFrame
+      title="COMMERCE"
+      description="REVIEW"
+      className={`recipe-screen${state.kind === "Unavailable" ? " recipe-screen--unavailable" : ""}`}
+    >
+      <header className="screen-heading">
+        <div>
+          <p className="bop-eyebrow">RECIPE-LIST · PHASE 2</p>
+          <h2>Recipe management</h2>
+        </div>
+      </header>
+      {state.kind === "Unavailable" ? (
+        <>
+          <RecipeSourceNotice editor={false} />
+          <RecipeListUnavailable />
+        </>
+      ) : (
+        <RecipeState state={state.kind} />
+      )}
     </AppFrame>
   );
 }
@@ -293,6 +397,7 @@ export function RecipeEditorPage({
         ? Promise.reject(new RecipeClientError("NotFound"))
         : client.load(reference).then((value) => {
             const view = parseRecipeEditorView(value);
+            assertRecipeViewScope(view, client.scope);
             if (view.recipeReference !== reference) throw new RecipeClientError("NotFound");
             return view;
           }),
@@ -302,8 +407,111 @@ export function RecipeEditorPage({
   return state.kind === "Found" ? (
     <RecipeEditorScreen view={state.view} />
   ) : (
-    <AppFrame title="Recipe" description="RECIPE-EDITOR">
-      <RecipeState state={state.kind} />
+    <AppFrame
+      title="COMMERCE"
+      description="REVIEW"
+      className={`recipe-screen${state.kind === "Unavailable" ? " recipe-screen--unavailable" : ""}`}
+    >
+      <header className="screen-heading">
+        <div>
+          <p className="bop-eyebrow">RECIPE-EDITOR · PHASE 2</p>
+          <h2>Recipe editor</h2>
+        </div>
+        <Link className="shell-action" to="/app/commerce/recipes">
+          All Recipes
+        </Link>
+      </header>
+      {state.kind === "Unavailable" ? (
+        <>
+          <RecipeSourceNotice editor />
+          <RecipeEditorUnavailable />
+        </>
+      ) : (
+        <RecipeState state={state.kind} />
+      )}
     </AppFrame>
+  );
+}
+
+function RecipeListUnavailable() {
+  return (
+    <section className="recipe-list-unavailable" aria-labelledby="recipe-list-unavailable-title">
+      <h3 id="recipe-list-unavailable-title">Recipes</h3>
+      <div className="recipe-list-unavailable__controls" role="search">
+        <label>
+          Name / code / ingredient
+          <input disabled placeholder="Search name, code or ingredient" />
+        </label>
+        <label>
+          Status
+          <select disabled defaultValue="Unavailable">
+            <option>Unavailable</option>
+          </select>
+        </label>
+        <label>
+          Review issue
+          <select disabled defaultValue="Unavailable">
+            <option>Unavailable</option>
+          </select>
+        </label>
+        <button disabled title="Recipe commands are unavailable without an authorized projection">
+          Create · unavailable
+        </button>
+      </div>
+      <p className="recipe-list-unavailable__empty" role="status">
+        Recipe records are unavailable from the current authorized source.
+      </p>
+      <p className="recipe-list-unavailable__note">
+        Registry fields remain unavailable until their owning projections are connected. Actions
+        stay disabled.
+      </p>
+    </section>
+  );
+}
+
+function RecipeEditorUnavailable() {
+  const fields = [
+    ["Identity and yield", "Recipe name, code, status, yield and unit are unavailable."],
+    ["Ingredients", "Ingredient references, quantities and loss summaries are unavailable."],
+    ["Preparation and substitution", "Preparation steps and substitution policy are unavailable."],
+    [
+      "Allergen and cost review",
+      "Allergen evidence and cost derivation require owner projections.",
+    ],
+    [
+      "Product usage and version",
+      "Usage and effective version require authorized source coverage.",
+    ],
+  ] as const;
+  return (
+    <section className="recipe-editor-unavailable" aria-label="Recipe fields unavailable">
+      <div className="recipe-editor-unavailable__groups">
+        {fields.map(([heading, description]) => (
+          <section className="recipe-editor-unavailable__group" key={heading}>
+            <h3>{heading}</h3>
+            <p>{description}</p>
+          </section>
+        ))}
+      </div>
+      <p className="recipe-list-unavailable__note">
+        Registry fields remain unavailable until their owning projections are connected. Editing and
+        publish actions stay disabled.
+      </p>
+    </section>
+  );
+}
+
+function RecipeSourceNotice({ editor }: { readonly editor: boolean }) {
+  return (
+    <aside className="recipe-source-notice" role="status">
+      <strong>
+        {editor ? "Editing and publish commands unavailable" : "Source-backed values unavailable"}
+      </strong>
+      <p>
+        {editor
+          ? "Source versions and authorized multi-domain inputs are not composed for this route."
+          : "Cost, allergen verification, Product / SKU usage and effective version require their owning projections."}
+      </p>
+    </aside>
   );
 }

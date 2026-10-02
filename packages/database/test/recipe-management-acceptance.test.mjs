@@ -1,3 +1,13 @@
+import { exerciseCurrentProductRecipeMeasurements } from "../test-support/current-product-recipe-measurements.mjs";
+import { exerciseRecipeMeasurementSubrecipePublication } from "../test-support/recipe-measurement-subrecipe-publication.mjs";
+import { exerciseCurrentPublishedRecipeMeasurementGraph } from "../test-support/current-published-recipe-measurement-graph.mjs";
+import { exerciseRecipeMeasurementPublication } from "../test-support/recipe-measurement-publication.mjs";
+import { exerciseRecipeIngredientUnitSource } from "../test-support/recipe-ingredient-unit-source.mjs";
+import { exerciseRecipeMeasurementDrafts } from "../test-support/recipe-measurement-drafts.mjs";
+import { exerciseCurrentPublishedRecipeDependencyGraph } from "../test-support/current-published-recipe-dependency-graph.mjs";
+import { exerciseCurrentProductRecipeIngredientReferences } from "../test-support/current-product-recipe-ingredient-references.mjs";
+import { exerciseCurrentPublishedRecipeContent } from "../test-support/current-published-recipe-content.mjs";
+import { exerciseRecipeAdminQuery } from "../test-support/recipe-admin-query.mjs";
 import { exerciseRecipeInventoryObservation } from "../test-support/recipe-inventory-observation.mjs";
 import { createPostgresSaleRecipeDemandSource } from "../../rms/recipe/src/index.ts";
 import { createMerchantMenuPublicationCommand } from "../../../apps/api/src/merchant-menu-publication-command.ts";
@@ -485,6 +495,23 @@ async function prove(context) {
     assert.equal((await service.execute(serviceInput)).status, "AlreadyApplied");
     revoked = true;
     await assert.rejects(service.execute(serviceInput), { code: "RECIPE_PERMISSION_DENIED" });
+    await exerciseCurrentPublishedRecipeContent({
+      admin,
+      context,
+      role,
+      published,
+      publicationEvidence,
+      id,
+      at,
+    });
+    await exerciseCurrentProductRecipeIngredientReferences({
+      admin,
+      context,
+      role,
+      published,
+      id,
+      at,
+    });
 
     assert.deepEqual(
       (await writer().resolveOperation(id(93))).publicationEvidence,
@@ -1890,6 +1917,7 @@ async function prove(context) {
       0,
     );
     await admin.query(`RESET ROLE`);
+    await exerciseRecipeAdminQuery({ admin, role, id });
     await exerciseRecipePreparationContent({
       admin,
       context,
@@ -1898,6 +1926,53 @@ async function prove(context) {
       rule: publishRule,
       id,
     });
+    await exerciseCurrentPublishedRecipeDependencyGraph({
+      admin,
+      context,
+      role,
+      published,
+      writer,
+      tenantContext,
+      permission,
+      audit,
+      id,
+      at,
+    });
+    await exerciseRecipeMeasurementDrafts({
+      admin,
+      context,
+      role,
+      published,
+      tenantContext,
+      permission,
+      audit,
+      id,
+      at,
+    });
+    await exerciseRecipeIngredientUnitSource({ admin, context, role, published, id, at });
+    await exerciseRecipeMeasurementPublication({
+      admin,
+      context,
+      role,
+      published,
+      tenantContext,
+      permission,
+      audit,
+      id,
+      at,
+    });
+    await exerciseCurrentPublishedRecipeMeasurementGraph({ admin, context, role, id });
+    await exerciseRecipeMeasurementSubrecipePublication({
+      admin,
+      context,
+      role,
+      tenantContext,
+      permission,
+      audit,
+      id,
+      at,
+    });
+    await exerciseCurrentProductRecipeMeasurements({ admin, context, role, id, at });
   } finally {
     await admin.query("RESET ROLE").catch(() => undefined);
     await admin.query("DROP OWNED BY " + role);

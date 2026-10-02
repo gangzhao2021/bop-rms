@@ -1,4 +1,5 @@
 import process from "node:process";
+import { randomBytes } from "node:crypto";
 import { verifyEntryDiningBrowser } from "./entry-dining-browser.mjs";
 import { exerciseEntryDiningReceipt } from "./entry-dining-receipt.mjs";
 import { exerciseEntryPickupCompletion } from "./entry-pickup-completion.mjs";
@@ -39,6 +40,7 @@ import { prepareEntryPickupCart, exerciseEntryPickupCart } from "./entry-pickup-
 import {
   createPostgresGuestEntryAdmissionStore,
   createPostgresGuestSessionEntryStore,
+  createGuestSessionCredentialProvider,
   GuestSessionService,
 } from "../../bop/identity/src/index.ts";
 import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
@@ -62,9 +64,21 @@ export async function exercisePersistentProfileEntry({
   at,
   currentClock = false,
   pickupOnly = false,
+  onPickupReady,
   acquire,
 }) {
   const f = fixture(at);
+  if (pickupOnly) {
+    // The legacy fixture port has no foreground-CSRF derivation. Use the same
+    // production credential provider for Entry, Cart rotation and reload recovery.
+    const selectorKey = randomBytes(32);
+    const credentials = createGuestSessionCredentialProvider(selectorKey);
+    selectorKey.fill(0);
+    f.options.session.credentials = {
+      ...credentials,
+      generateSessionReference: f.options.session.credentials.generateSessionReference,
+    };
+  }
   const operating = await prepareEntryOperatingPublication({
     admin,
     role,
@@ -264,7 +278,18 @@ export async function exercisePersistentProfileEntry({
     ...(pickupCheckout ? { checkoutSessions: pickupCheckout.options } : {}),
     ...(pickupDetails ? { checkoutDetails: pickupDetails.port } : {}),
     ...(pickupOrder ? { orderSubmission: pickupOrder.port } : {}),
-    ...(pickupOnly ? { receipt: pickupCheckout.options } : {}),
+    ...(pickupOnly
+      ? {
+          receipt: {
+            ...pickupCheckout.options,
+            financial: {
+              scope: { ...scope, tenantReference: publicOptions.binding.tenantReference },
+              providerAccountReference: id(97000),
+              environment: "Test",
+            },
+          },
+        }
+      : {}),
     ...(pickupOnly
       ? {
           orderStatus: {
@@ -607,6 +632,7 @@ export async function exercisePersistentProfileEntry({
         scope: { ...scope, tenantReference: publicOptions.binding.tenantReference },
         ready: pickupReady,
         reference,
+        onReadyForMerchantBff: onPickupReady,
       });
       await exerciseEntryPickupCompletion({
         admin,

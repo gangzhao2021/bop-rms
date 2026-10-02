@@ -5,6 +5,14 @@ import { createMerchantTaskInboxRead } from "./merchant-task-inbox-read.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
 type ReadOptions = Parameters<typeof createMerchantTaskInboxRead>[0];
+export interface PersistentMerchantTaskInboxQueueConfiguration {
+  tenantReference: string;
+  brandReference: string;
+  storeReference: string;
+  queueReference: string;
+  effectiveFrom: string;
+  effectiveUntil: string;
+}
 const fail = (): never => {
   throw new Error("MERCHANT_TASK_INBOX_UNAVAILABLE");
 };
@@ -13,46 +21,58 @@ const fail = (): never => {
  * task.claim here is an affordance, never Queue eligibility or write authorization. */
 export function createPersistentMerchantTaskInbox(options: {
   persistence: PersistentMerchantBffOptions;
-  queue: {
-    tenantReference: string;
-    brandReference: string;
-    storeReference: string;
-    queueReference: string;
-    effectiveFrom: string;
-    effectiveUntil: string;
-  };
+  queues: readonly PersistentMerchantTaskInboxQueueConfiguration[];
   authorizeSource(
     ...args: [...Parameters<ReadOptions["authorizeSource"]>, cookie: unknown]
   ): Promise<boolean>;
 }) {
-  const q = options.queue;
-  const queue = Object.freeze({
-    tenantReference: parseTaskReference(q.tenantReference),
-    brandReference: parseTaskReference(q.brandReference),
-    storeReference: parseTaskReference(q.storeReference),
-    queueReference: parseTaskReference(q.queueReference),
-    effectiveFrom: parseTaskInstant(q.effectiveFrom),
-    effectiveUntil: parseTaskInstant(q.effectiveUntil),
-  });
-  if (queue.effectiveFrom >= queue.effectiveUntil || typeof options.authorizeSource !== "function")
+  const queues = options.queues.map((q) =>
+    Object.freeze({
+      tenantReference: parseTaskReference(q.tenantReference),
+      brandReference: parseTaskReference(q.brandReference),
+      storeReference: parseTaskReference(q.storeReference),
+      queueReference: parseTaskReference(q.queueReference),
+      effectiveFrom: parseTaskInstant(q.effectiveFrom),
+      effectiveUntil: parseTaskInstant(q.effectiveUntil),
+    }),
+  );
+  const queueByScope = new Map(
+    queues.map((queue) => [
+      `${queue.tenantReference}:${queue.brandReference}:${queue.storeReference}`,
+      queue,
+    ]),
+  );
+  if (
+    queues.length === 0 ||
+    queueByScope.size !== queues.length ||
+    queues.some((queue) => queue.effectiveFrom >= queue.effectiveUntil) ||
+    typeof options.authorizeSource !== "function"
+  )
     return fail();
   const source = options.persistence,
     resolve = createMerchantStoreScope(source),
     authorizeSource = options.authorizeSource;
-  return async (cookie: unknown, input: { afterTaskReference: string | null }) => {
+  return async (
+    cookie: unknown,
+    input: Parameters<ReturnType<typeof createMerchantTaskInboxRead>>[1],
+  ) => {
     // Request-local authority cannot be replaced by another concurrent request.
     let current: Awaited<ReturnType<typeof resolve>> | null = null;
+    let selectedQueue: (typeof queues)[number] | null = null;
     const authorize: ReadOptions["authorize"] = async (tx) => {
       const at = parseTaskInstant(source.now());
-      if (at < queue.effectiveFrom || at >= queue.effectiveUntil) return fail();
       current ??= await resolve(tx, cookie, "workflow.operate");
+      const queue = queueByScope.get(
+        `${current.selected.tenantReference}:${current.context.brand.brandReference}:${current.store.storeReference}`,
+      );
       if (
-        current.selected.tenantReference !== queue.tenantReference ||
-        String(current.context.brand.brandReference) !== String(queue.brandReference) ||
-        String(current.store.storeReference) !== String(queue.storeReference) ||
+        !queue ||
+        at < queue.effectiveFrom ||
+        at >= queue.effectiveUntil ||
         (await current.allowed()) !== true
       )
         return fail();
+      selectedQueue = queue;
       const claim = await current.authorizeAction("task.claim");
       return Object.freeze({
         tenantReference: queue.tenantReference,
@@ -94,8 +114,10 @@ export function createPersistentMerchantTaskInbox(options: {
           }),
       },
       authorize,
-      queue: (tx, authority) =>
-        createPostgresTaskQueueReader({
+      queue: (tx, authority) => {
+        const queue = selectedQueue;
+        if (!queue || queue.queueReference !== authority.queueReference) return fail();
+        return createPostgresTaskQueueReader({
           scope: {
             kind: "Store",
             brandReference: queue.brandReference,
@@ -106,7 +128,8 @@ export function createPersistentMerchantTaskInbox(options: {
             const fresh = await authorize(tx, cookie);
             return JSON.stringify(fresh) === JSON.stringify(authority);
           },
-        }),
+        });
+      },
       authorizeSource: (tx, scope, task) => authorizeSource(tx, scope, task, cookie),
     })(cookie, input);
   };

@@ -320,13 +320,19 @@ export const enabledCustomerDemo: CustomerDemoDependencies = Object.freeze({
       input?: Readonly<{ searchTerm?: string; sectionReference?: string }>,
     ): Promise<MenuLoadResult> {
       const term = input?.searchTerm?.toLocaleLowerCase("en-CA");
-      if (!term) return { kind: "Found", menu };
       const sections = menu.sections
+        .filter(
+          (section) =>
+            input?.sectionReference === undefined ||
+            section.sectionReference === input.sectionReference,
+        )
         .map((section) => ({
           ...section,
-          sellables: section.sellables.filter((item) =>
-            item.name.toLocaleLowerCase("en-CA").includes(term),
-          ),
+          sellables: term
+            ? section.sellables.filter((item) =>
+                item.name.toLocaleLowerCase("en-CA").includes(term),
+              )
+            : section.sellables,
         }))
         .filter((section) => section.sellables.length > 0);
       return sections.length === 0

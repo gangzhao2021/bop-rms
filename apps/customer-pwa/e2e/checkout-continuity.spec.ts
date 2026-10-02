@@ -573,7 +573,9 @@ for (const screen of [
             await pay.click();
             await expect(page).toHaveURL(/\/checkout\/result$/u);
             await expect(
-              page.getByText("Payment confirmation is pending.", { exact: true }),
+              page.getByText("Payment confirmation is pending. Do not submit another payment.", {
+                exact: true,
+              }),
             ).toBeVisible();
             expect(resultCalls).toBe(1);
             await expect(

@@ -74,6 +74,69 @@ describe("receipt response parser", () => {
 });
 
 describe("receipt request lifetime", () => {
+  it("retains history but requires a fresh read for live fields after reconnecting", async () => {
+    let calls = 0;
+    const financial = {
+      observedAt: "2026-08-12T14:00:00.000Z",
+      currencyCode: "CAD",
+      capturedMinor: "1130",
+      confirmedRefundMinor: "0",
+      pendingRefundMinor: "600",
+      unresolvedAttemptCount: 1,
+    };
+    const controller = createReceiptController(id(1), {
+      async load() {
+        calls += 1;
+        return {
+          ...payload(),
+          financial,
+          deliveryStatus: "Pending",
+          cancellationEligible: true,
+        };
+      },
+    });
+    await controller.load();
+    const original = controller.getState();
+    expect(original.status).toBe("ready");
+    if (original.status !== "ready") throw new Error("receipt was not loaded");
+
+    controller.setOnline(false);
+    expect(controller.getState()).toMatchObject({
+      status: "offline",
+      view: {
+        freshnessStatus: "Stale",
+        financial: null,
+        deliveryStatus: "Unavailable",
+        supportEligible: false,
+        cancellationEligible: false,
+      },
+    });
+    controller.setOnline(true);
+    const reconnected = controller.getState();
+    expect(reconnected.status).toBe("ready");
+    if (reconnected.status !== "ready") throw new Error("history was not retained");
+    expect(reconnected.view.records).toBe(original.view.records);
+    expect(reconnected.view.freshnessStatus).toBe("Stale");
+    expect(reconnected.view.financial).toBeNull();
+    expect(reconnected.view.supportEligible).toBe(false);
+    expect(calls).toBe(1);
+    expect(original.view.freshnessStatus).toBe("Fresh");
+    expect(original.view.financial?.pendingRefundMinor).toBe(600n);
+
+    await controller.load();
+    expect(calls).toBe(2);
+    expect(controller.getState()).toMatchObject({
+      status: "ready",
+      view: {
+        freshnessStatus: "Fresh",
+        financial: { pendingRefundMinor: 600n },
+        deliveryStatus: "Pending",
+        supportEligible: true,
+        cancellationEligible: true,
+      },
+    });
+  });
+
   it("does not restore an old receipt after current access is denied", async () => {
     let permitted = true;
     const controller = createReceiptController(id(1), {

@@ -85,7 +85,7 @@ it("derives current authority, preserves integer strings, and rechecks permissio
   const f = setup();
   const result = await f.operation(f.input);
   expect(result).toEqual({
-    operatorStatus: "Named",
+    operatorStatus: "Unverified",
     storeReference: id(4),
     items: [
       {
@@ -113,7 +113,7 @@ it("returns detail with exact version strings", async () => {
   expect(
     await f.operation({ ...f.input, query: { kind: "Get", workItemReference: id(5) } }),
   ).toEqual({
-    operatorStatus: "Named",
+    operatorStatus: "Unverified",
     storeReference: id(4),
     item: {
       workItemReference: id(5),
@@ -121,4 +121,41 @@ it("returns detail with exact version strings", async () => {
       workItemVersion: "2",
     },
   });
+});
+it("preserves projection-owned selected modifiers through List and Get", async () => {
+  const f = setup();
+  const selectedOptions = [
+    {
+      optionReference: id(6),
+      quantity: 2,
+      localizedNames: { "en-CA": "Extra mushrooms" },
+    },
+  ];
+  doubles.list.mockResolvedValue({
+    items: [
+      {
+        workItemReference: id(5),
+        ticketAggregateVersion: 3n,
+        workItemVersion: 2n,
+        selectedOptions,
+      },
+    ],
+  });
+  doubles.get.mockResolvedValue({
+    item: {
+      workItemReference: id(5),
+      ticketAggregateVersion: 3n,
+      workItemVersion: 2n,
+      selectedOptions,
+    },
+  });
+
+  const list = await f.operation(f.input);
+  const detail = await f.operation({
+    ...f.input,
+    query: { kind: "Get", workItemReference: id(5) },
+  });
+
+  expect(list).toMatchObject({ items: [{ selectedOptions }] });
+  expect(detail).toMatchObject({ item: { selectedOptions } });
 });

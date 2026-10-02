@@ -183,13 +183,50 @@ function PreparedSessionPaymentPage() {
   };
   return (
     <main id="main-content" className="payment-page">
+      <header className="payment-page__header">
+        <span>BOP</span>
+        <strong>{config?.mode === "simulation" ? "DEMO payment" : "Payment"}</strong>
+        <span>Guest session · exact Store scope required</span>
+      </header>
+      <nav className="payment-page__journey" aria-label="Customer checkout journey">
+        <Link to="/">Entry</Link>
+        <Link to="/menu">Menu</Link>
+        <Link to="/cart">Cart</Link>
+        <Link to="/checkout">Checkout</Link>
+        <span aria-current="page">Payment</span>
+      </nav>
       <h1>{config?.mode === "simulation" ? "DEMO payment" : "Secure payment"}</h1>
       {config?.mode === "simulation" ? (
         <p>Internal testing only. No real money is charged.</p>
       ) : null}
       {status === "loading" ? <p role="status">Loading checkout…</p> : null}
       {status === "unavailable" ? (
-        <p role="alert">Online payment is currently unavailable.</p>
+        <section className="payment-page__unavailable" role="alert">
+          <h2>Online payment is unavailable</h2>
+          <p>No authorized payment details are available.</p>
+          <dl aria-label="Payment details unavailable">
+            <div>
+              <dt>Payment amount</dt>
+              <dd>Unavailable</dd>
+            </div>
+            <div>
+              <dt>Selected tip</dt>
+              <dd>Unavailable</dd>
+            </div>
+            <div>
+              <dt>Allowed method</dt>
+              <dd>Unavailable</dd>
+            </div>
+            <div>
+              <dt>Secure card field</dt>
+              <dd>Unavailable</dd>
+            </div>
+            <div>
+              <dt>Processing notice</dt>
+              <dd>Unavailable</dd>
+            </div>
+          </dl>
+        </section>
       ) : null}
       {status === "denied" ? (
         <p role="alert">This checkout is unavailable. Return to checkout to continue.</p>

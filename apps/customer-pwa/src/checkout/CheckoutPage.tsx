@@ -132,11 +132,32 @@ export function CheckoutPage({
   }, [now, quote, quoteExpired]);
   return (
     <main id="main-content" className="checkout-page">
-      <header>
+      <header className="cart-page__header checkout-page__header">
         <p className="cart-page__eyebrow">Checkout review</p>
         <h1>Review your order</h1>
         <p>Server Quote and current Cart only</p>
       </header>
+      <nav
+        className="cart-page__navigation checkout-page__navigation"
+        aria-label="Customer journey"
+      >
+        <Link to="/menu">Menu</Link>
+        <Link to="/cart">Cart</Link>
+        <span aria-current="page">Checkout</span>
+      </nav>
+      <ol className="checkout-progress" aria-label="Checkout progress">
+        <li aria-current="step">1 Details</li>
+        <li>2 Review</li>
+        <li>3 Pay</li>
+        <li>4 Result</li>
+      </ol>
+      <section className="checkout-capacity-boundary" aria-label="Capacity Hold source status">
+        <h2>Capacity Hold status · unavailable from current Checkout source</h2>
+        <p>
+          No hold status is inferred from the Cart or Quote. The current capacity result is not
+          available here.
+        </p>
+      </section>
       {state.status === "loading" ? (
         <section role="status">
           <h2>Loading checkout</h2>
@@ -151,7 +172,7 @@ export function CheckoutPage({
         </section>
       ) : null}
       {cart ? (
-        <section aria-labelledby="checkout-items">
+        <section className="checkout-summary" aria-labelledby="checkout-items">
           <h2 id="checkout-items">Items</h2>
           {cart.cart.items.map((item) => (
             <article key={item.cartItemReference}>
@@ -175,7 +196,7 @@ export function CheckoutPage({
       ) : null}
       {state.status === "pending" ? <p role="status">Requesting the server Quote…</p> : null}
       {quote ? (
-        <section aria-labelledby="quote-heading">
+        <section className="checkout-summary" aria-labelledby="quote-heading">
           <h2 id="quote-heading">Quote summary</h2>
           <dl>
             {(

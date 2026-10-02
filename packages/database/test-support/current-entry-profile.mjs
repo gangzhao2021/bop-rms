@@ -15,10 +15,19 @@ import { preparePublicStoreProfilePublication } from "./public-store-profile-pub
 import { entryTorontoBoundary } from "./entry-toronto-boundary.mjs";
 
 /** Synthetic approval/organization configuration; actual Publishing, Store timing and profile owners. */
-export async function prepareCurrentEntryProfile({ admin, role, run, at }) {
+export async function prepareCurrentEntryProfile({
+  admin,
+  role,
+  run,
+  at,
+  tenantReference,
+  brandReference = ids.brand,
+  storeReference = ids.store,
+  existingOrganizationFacts = false,
+}) {
   const hash = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
   const until = new Date(Date.parse(at) + 86400000).toISOString();
-  const profile = candidate();
+  const profile = candidate({ brandReference, storeReference });
   profile.logo = null;
   profile.timeZone = "America/Toronto";
   profile.effectiveVersion.createdAt = at;
@@ -31,10 +40,26 @@ export async function prepareCurrentEntryProfile({ admin, role, run, at }) {
   const publication = await preparePublicStoreProfilePublication({
     admin,
     role,
-    scope: { brandReference: ids.brand, storeReference: ids.store },
+    scope: { brandReference, storeReference },
     version: { publishedAt: at, versionReference: ids.profile, publicationReference: ids.release },
     digest: profile.contentDigest,
+    ...(tenantReference ? { tenantReference } : {}),
   });
+  await admin.query(
+    "GRANT USAGE ON SCHEMA bop_tenant,rms_store,platform_helpers,platform_audit TO " + role,
+  );
+  await admin.query("GRANT SELECT ON bop_tenant.brand,bop_tenant.store TO " + role);
+  await admin.query("GRANT UPDATE(lifecycle) ON bop_tenant.brand,bop_tenant.store TO " + role);
+  await admin.query(
+    "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_store.public_store_profile_version TO " + role,
+  );
+  await admin.query(
+    "GRANT SELECT,INSERT,UPDATE ON rms_store.public_store_profile_timing TO " + role,
+  );
+  await admin.query(
+    "GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_record,platform_audit.audit_chain_head TO " +
+      role,
+  );
   profile.publishingLifecycle = publication.lifecycle;
   profile.publishingRelease = publication.release;
   profile.effectiveVersion.snapshotDigest = profile.contentDigest;
@@ -43,8 +68,8 @@ export async function prepareCurrentEntryProfile({ admin, role, run, at }) {
   const appendAudit = (tx, auditReference, actionCode, targetType, targetId, occurredAt) =>
     appendAuditRecordInTransaction(tx, {
       auditId: auditReference,
-      brandId: ids.brand,
-      storeId: ids.store,
+      brandId: brandReference,
+      storeId: storeReference,
       actor: { type: "System" },
       actionCode,
       targetType,
@@ -58,8 +83,8 @@ export async function prepareCurrentEntryProfile({ admin, role, run, at }) {
       retentionPolicyVersion: 1,
     });
   const timingStore = createPostgresPublicStoreProfileTimingStore({
-    brandReference: ids.brand,
-    storeReference: ids.store,
+    brandReference,
+    storeReference,
     authorize: async () => true,
     authorizeApproval: async () => true,
     hashPeriod: hash,
@@ -96,8 +121,8 @@ export async function prepareCurrentEntryProfile({ admin, role, run, at }) {
   await publication.publish();
   const authority = createPostgresPublicStoreProfileAuthority({
     tenantReference: publication.tenantReference,
-    brandReference: ids.brand,
-    storeReference: ids.store,
+    brandReference,
+    storeReference,
     authorize: async () => true,
     hashContent: hash,
     verifyEffective: (tx, value, observedAt) =>
@@ -107,8 +132,8 @@ export async function prepareCurrentEntryProfile({ admin, role, run, at }) {
     },
   });
   const profiles = createPostgresPublicStoreProfileStore({
-    brandReference: ids.brand,
-    storeReference: ids.store,
+    brandReference,
+    storeReference,
     authorize: async () => true,
     verifyCurrent: authority,
     hashSnapshot: hash,
@@ -133,24 +158,23 @@ export async function prepareCurrentEntryProfile({ admin, role, run, at }) {
     ),
     "Created",
   );
-  await admin.query(
-    "INSERT INTO bop_tenant.brand VALUES($1,'PROFILE_CURRENT','Current synthetic profile','en-CA','CAD','Active',1,$2,$2)",
-    [ids.brand, at],
-  );
-  await admin.query(
-    "INSERT INTO bop_tenant.store VALUES($1,$2,'PROFILE_CURRENT','Current synthetic store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
-    [ids.store, ids.brand, at],
-  );
-  await admin.query("GRANT USAGE ON SCHEMA bop_tenant TO " + role);
-  await admin.query("GRANT SELECT ON bop_tenant.brand,bop_tenant.store TO " + role);
-  await admin.query("GRANT UPDATE(lifecycle) ON bop_tenant.brand,bop_tenant.store TO " + role);
+  if (!existingOrganizationFacts) {
+    await admin.query(
+      "INSERT INTO bop_tenant.brand VALUES($1,'PROFILE_CURRENT','Current synthetic profile','en-CA','CAD','Active',1,$2,$2)",
+      [brandReference, at],
+    );
+    await admin.query(
+      "INSERT INTO bop_tenant.store VALUES($1,$2,'PROFILE_CURRENT','Current synthetic store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+      [storeReference, brandReference, at],
+    );
+  }
   return {
     transactions: { run },
     binding: {
       tenantReference: publication.tenantReference,
       publicStoreReference: ids.publicStore,
-      brandReference: ids.brand,
-      storeReference: ids.store,
+      brandReference,
+      storeReference,
       lookupEvidenceReference: ids.lookup,
       validFrom: at,
       validUntil: until,

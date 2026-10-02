@@ -152,6 +152,7 @@ it.each(["synthetic", "crypto"])("HTTP Guest lifecycle with %s", async (mode) =>
         port: 0,
         logger: createApiRuntimeLogger({ write: (line) => logs.push(String(line)) }),
         customerEntry: new CustomerEntryHandler({
+          requestAdmission: { consume: async () => ({ status: "Allowed" }) },
           port,
           allowedOrigin: "https://customer.invalid",
           now: () => now,

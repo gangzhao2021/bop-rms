@@ -48,6 +48,7 @@ export interface MenuView {
 
 export type MenuLoadResult =
   | Readonly<{ kind: "Found"; menu: MenuView }>
+  | Readonly<{ kind: "PermissionDenied" }>
   | Readonly<{ kind: "NotFound" }>
   | Readonly<{ kind: "Stale" }>
   | Readonly<{ kind: "Unavailable" }>

@@ -29,8 +29,10 @@ async function prove(context) {
       { table_name: "api_client_credential_metadata" },
       { table_name: "api_client_operation" },
       { table_name: "authentication_session" },
+      { table_name: "browser_session_selection" },
       { table_name: "guest_binding_preparation" },
       { table_name: "guest_dining_binding_preparation" },
+      { table_name: "guest_entry_admission" },
       { table_name: "guest_session" },
       { table_name: "guest_session_operation" },
       { table_name: "oidc_authorization_transaction" },
@@ -309,7 +311,7 @@ async function prove(context) {
        FROM pg_class
        WHERE relnamespace = 'bop_identity'::regnamespace AND relrowsecurity`,
     );
-    assert.deepEqual(rls.rows, [{ count: 8 }]);
+    assert.deepEqual(rls.rows, [{ count: 10 }]);
     const dynamicObjects = await client.query(
       `SELECT
          (SELECT count(*)::int FROM pg_proc

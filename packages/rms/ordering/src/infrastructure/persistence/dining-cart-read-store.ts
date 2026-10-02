@@ -17,6 +17,8 @@ WHERE brand_id = $1 AND store_id = $2 AND dining_session_id = $3
       AND replacement.dining_session_id = candidate.dining_session_id
       AND replacement.previous_cart_id = candidate.cart_id
   )
+  AND candidate.lifecycle_status = 'Active'
+  AND candidate.idle_expires_at > $4 AND candidate.absolute_expires_at > $4
 ORDER BY cart_id LIMIT 2`;
 function unavailable(): never {
   throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
@@ -42,9 +44,9 @@ function header(result: unknown) {
     return unavailable();
   return Object.freeze({ cartReference, aggregateVersion: raw.aggregateVersion });
 }
-/** Observe the unreplaced Session cart, including its terminal state. The read service derives
- * effective lifecycle; absence must not imply an expired cart may be replaced.
- * Callers must use current Identity/Dining authorization. */
+/** Observe only one currently selectable, unreplaced Session Cart. Historical Cart recovery uses
+ * the separate command query; absence here does not authorize replacement. Callers must use
+ * current Identity/Dining authorization. */
 export function createPostgresDiningCartReadStore(
   runner: CartQueryTransactionRunner,
   scope: { readonly brandReference: string; readonly storeReference: string },
@@ -85,7 +87,7 @@ export function createPostgresDiningCartReadStore(
             "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
             [brand, store],
           );
-          const parameters = Object.freeze([brand, store, diningSessionReference]);
+          const parameters = Object.freeze([brand, store, diningSessionReference, observedAt]);
           const first = header(await transaction.query(selectCurrent, parameters));
           if (first === null) return null;
           const reader = createPostgresCartQueryStore(

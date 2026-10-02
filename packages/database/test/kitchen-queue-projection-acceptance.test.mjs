@@ -218,18 +218,25 @@ async function prove(context) {
   await client.connect();
   await contender.connect();
   try {
-    const migrationCount = await client.query(
-      "SELECT count(*)::integer AS count FROM platform_core.migration_history",
+    const queueProjectionMigration = await client.query(
+      "SELECT migration_id,relative_path FROM platform_core.migration_history WHERE migration_id=$1",
+      ["1500_002_create_kitchen_work_queue_projection"],
     );
-    assert.equal(migrationCount.rows[0].count, 49);
+    assert.deepEqual(queueProjectionMigration.rows, [
+      {
+        migration_id: "1500_002_create_kitchen_work_queue_projection",
+        relative_path:
+          "migrations/1500-rms-kitchen/1500_002_create_kitchen_work_queue_projection.sql",
+      },
+    ]);
 
     const inventory = await client.query(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema='rms_kitchen' AND table_type='BASE TABLE'
        ORDER BY table_name`,
     );
+    const tableNames = new Set(inventory.rows.map((row) => row.table_name));
     assert.deepEqual(
-      inventory.rows.map((row) => row.table_name),
       [
         "kitchen_action_record",
         "kitchen_order_item_ready_result",
@@ -238,7 +245,8 @@ async function prove(context) {
         "kitchen_work_lifecycle_operation",
         "kitchen_work_queue_projection",
         "kitchen_work_queue_projection_generation",
-      ],
+      ].filter((tableName) => !tableNames.has(tableName)),
+      [],
     );
 
     const generationColumns = await client.query(
@@ -1127,6 +1135,36 @@ it("reads current-schema Kitchen queue through the owner adapter", async () => {
         }),
       );
       assert.equal(filtered.returnedCount, 0);
+      const byOrder = await read((transaction) =>
+        queries.list({
+          transaction,
+          query: { ...query, filters: { ...query.filters, orderReference: source.orderId } },
+        }),
+      );
+      assert.equal(byOrder.status, "Found");
+      assert.equal(byOrder.returnedCount, 1);
+      assert.equal(byOrder.rows[0].orderReference, source.orderId);
+      const byTicket = await read((transaction) =>
+        queries.list({
+          transaction,
+          query: {
+            ...query,
+            filters: { ...query.filters, ticketReference: source.kitchenTicketId },
+          },
+        }),
+      );
+      assert.equal(byTicket.status, "Found");
+      assert.equal(byTicket.returnedCount, 1);
+      assert.equal(byTicket.rows[0].ticketReference, source.kitchenTicketId);
+      const missingReference = await read((transaction) =>
+        queries.list({
+          transaction,
+          query: { ...query, filters: { ...query.filters, ticketReference: id(999) } },
+        }),
+      );
+      assert.equal(missingReference.status, "Found");
+      assert.equal(missingReference.returnedCount, 0);
+      assert.deepEqual(missingReference.rows, []);
       const hidden = await read((transaction) => queries.list({ transaction, query }), id(3));
       assert.deepEqual(hidden, { status: "NoActive" });
       allowed = false;

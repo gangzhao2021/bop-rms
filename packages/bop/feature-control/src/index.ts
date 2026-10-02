@@ -9,3 +9,7 @@ export * from "./application/ports/feature-control-administration-ports.js";
 export * from "./infrastructure/persistence/kill-switch-query-store.js";
 
 export * from "./application/current-kill-switch-evaluation.js";
+
+export * from "./infrastructure/persistence/administration-query-store.js";
+export * from "./application/current-store-capability.js";
+export * from "./application/store-capability-bindings.js";

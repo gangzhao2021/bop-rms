@@ -181,4 +181,150 @@ test.describe("@production order status HTTP continuity", () => {
     await expect(page.getByText("Payment received: CAD 12.99", { exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
   });
+
+  test("renders the unavailable state cleanly at desktop and compact widths", async ({ page }) => {
+    const csrf = "d".repeat(43);
+    await page.route("**/bff/customer/entry", (route) =>
+      route.fulfill({
+        status: 201,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 2,
+          status: "Established",
+          brandDisplayName: "Synthetic Brand",
+          storeDisplayName: "Synthetic Status Store",
+          publicStoreReference: id(6),
+          publicTableReference: null,
+          channel: "Pickup",
+          operatingState: "Open",
+          availableServiceModes: ["Pickup"],
+          locale: "en-CA",
+          contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+          csrfToken: csrf,
+        },
+      }),
+    );
+    await page.route("**/api/v1/orders/*/status", async (route) => {
+      expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
+      expect(route.request().method()).toBe("GET");
+      await route.fulfill({ status: 503, json: { schemaVersion: 1 } });
+    });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { name: "Synthetic Status Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate((reference) => {
+      history.pushState(null, "", "/orders/" + reference);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, id(99));
+    const main = page.getByRole("main");
+    await expect(
+      main.getByRole("heading", { name: "Order status is not available" }),
+    ).toBeVisible();
+    await expect(main.getByRole("button", { name: "Try loading status" })).toBeVisible();
+    await expect(main.getByRole("link", { name: "Back to menu" })).toBeVisible();
+    await expect(main).not.toContainText("Synthetic tea");
+    const card = main.locator(".order-status__unavailable");
+    await expect(card).toHaveCSS("background-color", "rgb(255, 255, 255)");
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+      { width: 320, height: 800 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const button = await main.getByRole("button", { name: "Try loading status" }).boundingBox();
+      const cardBox = await card.boundingBox();
+      const backBox = await main.getByRole("link", { name: "Back to menu" }).boundingBox();
+      expect(button?.height).toBeGreaterThanOrEqual(44);
+      expect(cardBox).not.toBeNull();
+      expect(backBox?.y).toBeGreaterThanOrEqual((cardBox?.y ?? 0) + (cardBox?.height ?? 0));
+      if (viewport.width <= 390 && button && cardBox) {
+        expect(button.width).toBeGreaterThanOrEqual(cardBox.width - 64);
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/order-status-unavailable-${viewport.width}.png`,
+        fullPage: true,
+      });
+    }
+  });
+
+  test("renders the source-supported loaded view at desktop and compact widths", async ({
+    page,
+  }) => {
+    const csrf = "f".repeat(43);
+    await page.route("**/bff/customer/entry", (route) =>
+      route.fulfill({
+        status: 201,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 2,
+          status: "Established",
+          brandDisplayName: "Synthetic Brand",
+          storeDisplayName: "Synthetic Status Store",
+          publicStoreReference: id(6),
+          publicTableReference: null,
+          channel: "Pickup",
+          operatingState: "Open",
+          availableServiceModes: ["Pickup"],
+          locale: "en-CA",
+          contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+          csrfToken: csrf,
+        },
+      }),
+    );
+    await page.route("**/api/v1/orders/*/status", async (route) => {
+      expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
+      expect(route.request().method()).toBe("GET");
+      await route.fulfill({ json: status(id(1), "1001", "2598") });
+    });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { name: "Synthetic Status Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate((reference) => {
+      history.pushState(null, "", "/orders/" + reference);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, id(1));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Preparing your order" })).toBeVisible();
+    await expect(main.getByText("Payment received: CAD 25.98", { exact: true })).toBeVisible();
+    await expect(
+      main.getByText(/individual payment results.*do not confirm that the order is fully paid/i),
+    ).toBeVisible();
+    await expect(main.getByText("Synthetic tea", { exact: false })).toBeVisible();
+    await expect(main.getByText("Not available yet", { exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: "View receipt and support" })).toBeVisible();
+    await expect(main.getByRole("button", { name: "Refresh status" })).toBeVisible();
+    await expect(main).not.toContainText(/paid in full|\bETA\s*\d/i);
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+      { width: 320, height: 800 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const summary = main.locator(".order-status__summary");
+      const payment = main.locator(".order-status__payments");
+      const batch = main.locator(".order-status__batch").first();
+      const summaryBox = await summary.boundingBox();
+      const paymentBox = await payment.boundingBox();
+      const batchBox = await batch.boundingBox();
+      expect(summaryBox).not.toBeNull();
+      expect(paymentBox?.y).toBeGreaterThanOrEqual(
+        (summaryBox?.y ?? 0) + (summaryBox?.height ?? 0),
+      );
+      expect(batchBox?.y).toBeGreaterThanOrEqual((paymentBox?.y ?? 0) + (paymentBox?.height ?? 0));
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/order-status-ready-${viewport.width}.png`,
+        fullPage: true,
+      });
+    }
+  });
 });

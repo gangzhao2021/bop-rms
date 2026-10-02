@@ -263,6 +263,7 @@ it("reads only one eligible shared Dining Cart under scoped read-only transactio
       );
       await admin.query(`GRANT USAGE ON SCHEMA platform_helpers,rms_ordering TO ${role}`);
       await admin.query(`GRANT SELECT ON rms_ordering.cart,rms_ordering.cart_line TO ${role}`);
+      await admin.query(`GRANT SELECT ON rms_ordering.dining_cart_replacement TO ${role}`);
       await admin.query(
         `GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
       );

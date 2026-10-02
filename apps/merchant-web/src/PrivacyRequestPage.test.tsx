@@ -39,6 +39,16 @@ describe("PRIVACY-REQUEST", () => {
     expect(html).toContain("Fulfill / deny with approved reason");
     expect(html).toContain("preserve required financial");
   });
+  it("keeps permissioned actions disabled until authenticated command composition exists", () => {
+    const html = renderToStaticMarkup(
+      <PrivacyRequestList view={parsePrivacyRequestView(view())} />,
+    );
+    const disabledButtons = html.match(/<button[^>]*disabled=""/gu) ?? [];
+    expect(disabledButtons).toHaveLength(4);
+    expect(html).toContain('aria-describedby="privacy-actions-unavailable"');
+    expect(html).toContain("Authenticated privacy commands are not connected.");
+    expect(html).toContain("no request or owner data will be changed here.");
+  });
   it("rejects verification evidence disclosed without permission", () => {
     const value = view(false);
     const first = value.rows[0];
@@ -53,9 +63,23 @@ describe("PRIVACY-REQUEST", () => {
     expect(html).toContain("Projection stale");
     expect(html).toContain("disabled");
   });
-  it("fails closed without legal inference", () => {
-    expect(renderToStaticMarkup(<PrivacyRequestState state="Unavailable" />)).toContain(
-      "No legal or fulfillment result is inferred",
-    );
+  it("keeps the Phase 3 feature gate explicit without showing case data", () => {
+    const html = renderToStaticMarkup(<PrivacyRequestState state="FeatureDisabled" />);
+    expect(html).toContain("PRIVACY-REQUEST · PHASE 3");
+    expect(html).toContain("Privacy Request disabled");
+    expect(html).toContain("Filters stay disabled while the Phase 3 capability is disabled.");
+    for (const label of [
+      "Case ref / verified contact",
+      "Rights type",
+      "Status",
+      "Owner",
+      "Due / overdue",
+      "Brand",
+    ])
+      expect(html).toContain(label);
+    expect(html).toContain("Requests are not available");
+    expect(html).toContain("Owner actions disabled");
+    expect(html).not.toContain("00000000-0000-7000");
+    expect(html).not.toContain("Encrypted single-use export");
   });
 });

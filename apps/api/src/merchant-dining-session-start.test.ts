@@ -76,6 +76,7 @@ beforeEach(() => vi.clearAllMocks());
 it("uses server time and emits credential only on first issue", async () => {
   const f = setup(),
     result = await f.read(f.input);
+  expect(mock.resolve.mock.calls[0]?.slice(1)).toEqual(["synthetic", "dining.operate", id(8)]);
   expect(mock.start).toHaveBeenCalledWith({ ...f.input.command, requestedAt: at });
   expect(result).toMatchObject({ status: "Issued", joinCredential: "123456" });
   expect(result).not.toHaveProperty("capability");
@@ -101,6 +102,21 @@ it("denies before work and rechecks before returning", async () => {
   f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   await expect(f.read(f.input)).rejects.toThrow();
 });
+it("does not load the table when dining.operate is denied", async () => {
+  const f = setup();
+  await f.read(f.input);
+  f.authorizeAction.mockResolvedValue({ effect: "Deny" });
+  const ports = mock.service.mock.calls[0]?.[0];
+  expect(
+    await ports.staff.authorize({
+      operation: "StartSession",
+      tableReference: id(4),
+      operationReference: id(6),
+      observedAt: at,
+    }),
+  ).toBeNull();
+  expect(mock.table).not.toHaveBeenCalled();
+});
 it("builds scoped staff evidence and does not treat missing occupant as empty", async () => {
   const f = setup();
   await f.read(f.input);
@@ -120,6 +136,7 @@ it("builds scoped staff evidence and does not treat missing occupant as empty", 
       correlationId: id(6),
     },
   });
+  expect(f.authorizeAction).toHaveBeenCalledWith("dining.operate");
   mock.table.mockResolvedValue({
     ...(await mock.table.mock.results[0]?.value),
     activeDiningSessionReference: id(10),

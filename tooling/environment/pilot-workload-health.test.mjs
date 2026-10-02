@@ -53,7 +53,7 @@ it.each([
   ).toThrow();
 });
 it("publishes only bounded owned private diagnostics atomically", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pilot-health-"));
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pilot-health-")));
   fs.chmodSync(directory, 0o700);
   try {
     const observer = createPilotKitchenHealthObserver(directory);
@@ -78,7 +78,9 @@ it("publishes only bounded owned private diagnostics atomically", () => {
 });
 
 it("keeps business loop reports separate and refuses arbitrary file targets", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pilot-business-health-"));
+  const directory = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "pilot-business-health-")),
+  );
   fs.chmodSync(directory, 0o700);
   try {
     const events = createPilotWorkloadHealthObserver(directory, "business-events"),

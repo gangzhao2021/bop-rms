@@ -452,6 +452,7 @@ export function createCustomerMenuClient(
               referrerPolicy: "no-referrer",
             },
           );
+          if (response.status === 403) return Object.freeze({ kind: "PermissionDenied" });
           const payload: unknown = await response.json();
           if (response.status === 200)
             return Object.freeze({ kind: "Found", menu: parseFound(payload, context) });

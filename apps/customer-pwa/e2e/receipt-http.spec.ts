@@ -43,7 +43,9 @@ function payload() {
   };
 }
 
-test("@production receipt navigation removes inaccessible history", async ({ page }) => {
+test("@production receipt navigation removes inaccessible history and fits common widths", async ({
+  page,
+}) => {
   const csrf = "c".repeat(43);
   await page.route("**/bff/customer/entry", (route) =>
     route.fulfill({
@@ -88,6 +90,59 @@ test("@production receipt navigation removes inaccessible history", async ({ pag
     page.getByRole("heading", { name: "Live receipt status is unavailable" }),
   ).toBeVisible();
   await expect(page.getByText("CAD 11.30", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Request email receipt" })).toHaveAttribute(
+    "aria-describedby",
+    "receipt-email-unavailable",
+  );
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+    { width: 320, height: 800 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expect(page.getByRole("heading", { name: "Immutable receipt history" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Receipt actions" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Back to order status" })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    const headerColor = await page
+      .locator(".receipt-page__header")
+      .evaluate((element) => getComputedStyle(element).backgroundColor);
+    const canvasColor = await page
+      .locator(".receipt-page")
+      .evaluate((element) => getComputedStyle(element).backgroundColor);
+    expect(headerColor).toBe("rgb(11, 93, 75)");
+    expect(canvasColor).toBe("rgb(247, 249, 247)");
+    const history = await page.locator(".receipt-page__history").boundingBox();
+    const financial = await page.locator(".receipt-page__financial").boundingBox();
+    expect(history).not.toBeNull();
+    expect(financial).not.toBeNull();
+    if (history && financial && viewport.width >= 768) {
+      expect(financial.x).toBeGreaterThan(history.x);
+      expect(Math.abs(financial.y - history.y)).toBeLessThan(1);
+      expect(history.width).toBeGreaterThan(financial.width);
+    }
+    if (history && financial && viewport.width < 768) {
+      expect(financial.y).toBeLessThan(history.y);
+      expect(financial.x).toBe(history.x);
+      expect(financial.width).toBe(history.width);
+    }
+    const actions = page.locator(".receipt-page__actions");
+    await expect(actions).toHaveCSS("flex-direction", viewport.width <= 511 ? "column" : "row");
+    const print = await page.getByRole("button", { name: "Print receipt" }).boundingBox();
+    const email = await page.getByRole("button", { name: "Request email receipt" }).boundingBox();
+    expect(print).not.toBeNull();
+    expect(email).not.toBeNull();
+    expect(print?.height).toBeGreaterThanOrEqual(44);
+    expect(email?.height).toBeGreaterThanOrEqual(44);
+    if (viewport.width <= 511 && print && email) {
+      expect(email.y).toBeGreaterThanOrEqual(print.y + print.height);
+      expect(email.x).toBe(print.x);
+      expect(email.width).toBe(print.width);
+    }
+    await page.screenshot({ path: `test-results/receipt-${viewport.width}.png`, fullPage: true });
+  }
   await navigate(id(99));
   await expect(page.getByRole("heading", { name: "Receipt not found", exact: true })).toBeVisible();
   await expect(page.getByText("Synthetic Operating Entity", { exact: true })).toHaveCount(0);

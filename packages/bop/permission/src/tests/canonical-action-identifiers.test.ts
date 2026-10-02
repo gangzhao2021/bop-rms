@@ -27,3 +27,20 @@ it.each([
   expect(() => parseBusinessAction(action)).toThrow();
   expect(() => definition(action)).toThrow();
 });
+
+it("retains the exact accepted Section88 Option read identity in both owning parsers", () => {
+  const action = "catalog.option_set.read";
+  expect(parseBusinessAction(action)).toBe(action);
+  expect(definition(action).action).toBe(action);
+});
+it.each([
+  "catalog.option_set.write",
+  "catalog.option__set.read",
+  "catalog.option_set.read.other",
+  "catalog.other_set.read",
+  "catalog.option_set.read\n",
+  "catalog.option_set.read.*",
+])("does not accept arbitrary underscore actions %s", (action) => {
+  expect(() => parseBusinessAction(action)).toThrow();
+  expect(() => definition(action)).toThrow();
+});

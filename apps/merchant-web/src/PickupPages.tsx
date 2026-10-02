@@ -53,12 +53,14 @@ function PickupCard({
   readOnly,
   proofContext,
   workstation,
+  hidden,
 }: {
   readonly workstation?: PickupWorkstation | null | undefined;
   readonly item: PickupQueueItem;
   readonly observedAt: string;
   readonly readOnly: boolean;
   readonly proofContext?: { csrf: string; storeReference: string } | undefined;
+  readonly hidden: boolean;
 }) {
   const completed = item.phase === "Completed";
   const wait = Math.max(
@@ -67,10 +69,10 @@ function PickupCard({
   );
   const canComplete = !readOnly && item.phase !== "Completed" && item.proofReadiness === "Ready";
   return (
-    <article className="store-card">
+    <article className="store-card pickup-queue__card" hidden={hidden}>
       <header>
         <div>
-          <p className="bop-eyebrow">
+          <p className="bop-eyebrow pickup-queue__phase">
             {completed ? "Completed" : `Ready ${wait} minutes · ${item.phase}`}
           </p>
           <h3>
@@ -79,7 +81,9 @@ function PickupCard({
               "Order reference unavailable"}
           </h3>
         </div>
-        <strong>{completed ? "Handed over" : wait >= 15 ? "Overdue" : "Waiting"}</strong>
+        <strong className="pickup-queue__status" data-completed={completed}>
+          {completed ? "Handed over" : "Waiting"}
+        </strong>
       </header>
       <dl>
         <div>
@@ -109,7 +113,9 @@ function PickupCard({
       </dl>
       {!completed ? (
         <div className="card-actions">
-          <button disabled>Claim</button>
+          <button disabled aria-describedby="pickup-command-availability">
+            Claim
+          </button>
           {canComplete && item.execution && proofContext ? (
             <PickupProofForm
               key={item.execution.aggregateVersion + ":" + item.execution.proof?.generation}
@@ -121,7 +127,9 @@ function PickupCard({
           ) : (
             <button disabled>Open proof verification</button>
           )}
-          <button disabled>Report exception</button>
+          <button disabled aria-describedby="pickup-command-availability">
+            Report exception
+          </button>
         </div>
       ) : null}
       {canComplete ? (
@@ -156,80 +164,159 @@ export function PickupQueueScreen({
   readonly refreshButtonRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const [filter, setFilter] = useState("All");
+  const [claimFilter, setClaimFilter] = useState("All");
+  const [exceptionFilter, setExceptionFilter] = useState("All");
+  const [orderQuery, setOrderQuery] = useState("");
   const readOnly = view.freshnessStatus !== "Fresh";
+  const query = orderQuery.trim().toLocaleLowerCase();
   const items = view.items.filter(
     (item) =>
-      filter === "All" ||
-      (filter === "Overdue"
-        ? item.phase !== "Completed" &&
-          Date.parse(view.projectedAt) - Date.parse(item.readyAt) >= 900_000
-        : item.phase === filter),
+      (!query ||
+        (item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "")
+          .toLocaleLowerCase()
+          .includes(query)) &&
+      (filter === "All" ||
+        (filter === "Waiting" ? item.phase !== "Completed" : item.phase === filter)) &&
+      (claimFilter === "All" || item.claimStatus === claimFilter) &&
+      (exceptionFilter === "All" || item.exceptionStatus === exceptionFilter),
   );
+  const hasLocalFilters =
+    Boolean(query) || filter !== "All" || claimFilter !== "All" || exceptionFilter !== "All";
+  const visibleReferences = new Set(items.map((item) => item.fulfillmentReference));
   return (
-    <AppFrame title="Pickup Queue" description={`FUL-PICKUP-QUEUE · ${view.storeLabel}`}>
-      <header className="screen-heading">
-        <div>
-          <h2>Ready for pickup</h2>
-          <p>
-            {view.freshnessStatus} · {view.projectedAt}
-          </p>
-        </div>
-        <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
-          Refresh from source
-        </button>
-      </header>
-      {readOnly ? (
-        <StatePanel heading="Queue stale — read-only" tone="offline" status>
-          <p>A fresh Fulfillment source is required before claim, proof verification or handoff.</p>
-        </StatePanel>
-      ) : null}
-      <div className="list-filters">
-        <label>
-          <input
-            type="checkbox"
-            checked={includeCompleted}
-            disabled={!onCompletedChange}
-            onChange={(event) => onCompletedChange?.(event.currentTarget.checked)}
-          />
-          Include completed pickups
-        </label>
-        <label>
-          Current page filter
-          <select value={filter} onChange={(event) => setFilter(event.currentTarget.value)}>
-            <option>All</option>
-            <option>Ready</option>
-            <option>InProgress</option>
-            <option>Completed</option>
-            <option>Overdue</option>
-          </select>
-        </label>
-      </div>
-      <nav aria-label="Pickup pages">
-        <button disabled={!onPrevious} onClick={onPrevious}>
-          Previous page
-        </button>
-        <button disabled={!onNext} onClick={onNext}>
-          Next page
-        </button>
-      </nav>
-      {items.length ? (
-        <div className="store-card-grid">
-          {items.map((item) => (
-            <PickupCard
-              key={item.fulfillmentReference}
-              item={item}
-              observedAt={view.projectedAt}
-              readOnly={readOnly}
-              proofContext={proofContext}
-              workstation={view.workstation}
+    <AppFrame
+      className="bop-shell--pickup"
+      title="Pickup Queue"
+      description={`FUL-PICKUP-QUEUE · ${view.storeLabel}`}
+    >
+      <div className="pickup-queue">
+        <header className="screen-heading">
+          <div>
+            <h2>Ready for pickup</h2>
+            <p>
+              {view.freshnessStatus} · {view.projectedAt}
+            </p>
+          </div>
+          <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
+            Refresh from source
+          </button>
+        </header>
+        {readOnly ? (
+          <StatePanel heading="Queue stale — read-only" tone="offline" status>
+            <p>
+              A fresh Fulfillment source is required before claim, proof verification or handoff.
+            </p>
+          </StatePanel>
+        ) : null}
+        <div className="list-filters pickup-queue__filters">
+          <label>
+            Search Order reference
+            <input
+              type="search"
+              value={orderQuery}
+              onChange={(event) => setOrderQuery(event.currentTarget.value)}
+              placeholder="Public Order reference"
             />
-          ))}
+          </label>
+          <label className="pickup-completed-filter">
+            <input
+              className="pickup-completed-filter__checkbox"
+              type="checkbox"
+              checked={includeCompleted}
+              disabled={!onCompletedChange}
+              onChange={(event) => onCompletedChange?.(event.currentTarget.checked)}
+            />
+            Include completed pickups
+          </label>
+          <label>
+            Current page filter
+            <select
+              aria-describedby="pickup-overdue-availability"
+              value={filter}
+              onChange={(event) => setFilter(event.currentTarget.value)}
+            >
+              <option>All</option>
+              <option>Ready</option>
+              <option>Waiting</option>
+              <option>InProgress</option>
+              <option>Completed</option>
+              <option disabled>Overdue</option>
+            </select>
+          </label>
+          <label>
+            Claim
+            <select
+              value={claimFilter}
+              onChange={(event) => setClaimFilter(event.currentTarget.value)}
+            >
+              <option>All</option>
+              <option>Unclaimed</option>
+              <option>Claimed</option>
+              <option>Unavailable</option>
+            </select>
+          </label>
+          <label>
+            Exception
+            <select
+              value={exceptionFilter}
+              onChange={(event) => setExceptionFilter(event.currentTarget.value)}
+            >
+              <option>All</option>
+              <option>None</option>
+              <option>Reported</option>
+              <option>Unavailable</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={!hasLocalFilters}
+            onClick={() => {
+              setOrderQuery("");
+              setFilter("All");
+              setClaimFilter("All");
+              setExceptionFilter("All");
+            }}
+          >
+            Clear page filters
+          </button>
         </div>
-      ) : (
-        <StatePanel heading="No matching pickups" status>
-          <p>No authorized pickup matches this page and filter.</p>
-        </StatePanel>
-      )}
+        <p id="pickup-command-availability" className="muted">
+          Claim and Report exception are unavailable until an authorized source-bound Task or
+          Fulfillment command is defined for this Pickup.
+        </p>
+        <p id="pickup-overdue-availability" className="muted">
+          Waiting time shows elapsed minutes since the Order became ready. Overdue classification is
+          unavailable because this view has no authorized due time.
+        </p>
+        <nav className="pickup-pagination" aria-label="Pickup pages">
+          <button disabled={!onPrevious} onClick={onPrevious}>
+            Previous page
+          </button>
+          <button disabled={!onNext} onClick={onNext}>
+            Next page
+          </button>
+        </nav>
+        {view.items.length ? (
+          <div className="store-card-grid pickup-queue__cards">
+            {view.items.map((item) => (
+              <PickupCard
+                key={item.fulfillmentReference}
+                item={item}
+                observedAt={view.projectedAt}
+                readOnly={readOnly}
+                proofContext={proofContext}
+                workstation={view.workstation}
+                hidden={!visibleReferences.has(item.fulfillmentReference)}
+              />
+            ))}
+          </div>
+        ) : null}
+        {items.length === 0 ? (
+          <StatePanel heading="No matching pickups" status>
+            <p>No authorized pickup matches this page and filter.</p>
+          </StatePanel>
+        ) : null}
+      </div>
     </AppFrame>
   );
 }

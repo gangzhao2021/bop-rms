@@ -1,0 +1,31 @@
+# Fixed frozen full Option content source
+
+WP-2421 adds `createPostgresFrozenFullOptionSetContentStore` and its held User authority interface to the existing owning full Draft Infrastructure. The existing public Catalog barrel exposes both without another export. This is an exact historical full-content read prerequisite for Handoff71.4/71.5 immutable versions and the accepted fine `catalog.option_set.read` action. It does not implement CurrentPublished, approval, publishing or sale eligibility.
+
+## Request, result and provenance
+
+The descriptor-safe closed request contains `optionSetReference`, `versionReference` and `expectedRecordDigest` (a full record digest or explicit null). Tenant/Brand/User Actor and trusted clock come from server configuration. Unsupported references, extra readiness flags, getters and malformed digests refuse before authority or SQL. A supplied different digest conflicts; an absent exact committed source is unavailable. No fallback to a different pin, today's Draft or an inferred current version exists.
+
+The read consumes four Catalog-owned tables: immutable full publication content, Frozen version, original operation and full original Draft result. It verifies actual Tenant/Brand/Set/version, exact Publish operation/action/intent/result root/time, original full source and its exact operation tuple, and actual Frozen core/additional fields. Body and all source/content/configuration/record fingerprints pass the existing complete V2 parser and match actual stored metadata. The selected full body is bounded to one MiB; precise UTC milliseconds, original source chronology and seal no later than observation are required.
+
+Today's root, mutable Options and successor Draft are never read. Stable Option IDs and conflicts come from the immutable full body. Later authoring or an unavailable current Draft does not alter historical content. [Immutable storage guards](./option-set-publication-storage.md), including Frozen/content update/delete refusal, are the historical source barrier; this reader does not take mutable row locks or require UPDATE privileges. Unkeyed digests still do not authenticate a caller or qualify reference readiness.
+
+The detached result contains the parsed full V2 original, observedAt, validUntil and `eligibility: NotEvaluated`. The original supported-content source describes its pre-seal Draft; it is not rewritten into a fictional Published aggregate. Internal Frozen means stored immutable history only. Observing it later neither extends approval nor evaluates effective scope, policy, defaults, dependencies or reference eligibility.
+
+## Authority and transaction
+
+Require READ COMMITTED and server transaction-local Tenant/Brand/no-Store scope. Existing Merchant coarse `catalog.manage` remains necessary alongside fine `catalog.option_set.read`; coarse management alone is not field/object authorization. Purpose is `CATALOG_OPTION_SET_FROZEN_CONTENT`. Initial, parsed-content and final authority observations cover the complete content fields, historical creator/time and publication identity/digests, and must remain held through outer COMMIT.
+
+Every lease is nonrenewable within the operation, with earliest authority deadline and original observation plus30seconds as an absolute cap. A later first authority observation cannot extend that cap. Expiry, time reversal, current permission withdrawal, different second read or failed outer COMMIT never releases the result. No business write, allocation, Audit/Outbox or new historical record occurs. SELECT-only access works in BEGIN READ ONLY; no production ACL changes are supplied.
+
+Authority receives a detached mutable copy for its own examination, as existing persistence helpers do. Mutating that copy cannot change the parsed frozen return value or stored history. Public read results remain frozen. Server failures expose bounded Catalog errors, not raw database errors or source bodies.
+
+## Local evidence and remaining composition
+
+The selected sixth current-option SQL case passes1/1 (7.94seconds bodies/8.59seconds total; old five filtered). After two actual direct-SQL seals and later unlogged/NULL successor Draft editing, the actual new reader returns the first complete original with NotEvaluated, original identity/digests and unchanged seven-table state. A separate narrow role has only four SELECT grants and runs BEGIN READ ONLY; actual ACL confirms no publication-content UPDATE grant. Earlier storage assertions in this same case also pass, including deferred rollback, exact Option parent movement, immutability and scope isolation.
+
+Controlled User/field authority and clock exercise initial/final/outer-COMMIT denial, earliest5second lease, observation+30second cap, expiry and reversal. Actual wrong Tenant/Brand, unknown/current Draft version and expected-record mismatch refuse. Missing/changed/recomputed/microsecond/drifting transport sources are clearly injected response copies; actual immutable history is never changed. There are no reads of today's root/Options and no business mutations. Type/lint, ownership1350 and actual scanner, module manifest, actual import/Domain scans pass. Existing mechanical123, editor44/publication34, earlier Create/Replace/current Draft SQL and unchanged migration/permission inputs retain their recorded evidence.
+
+The initial new fixture incorrectly assumed the authority's isolated copy was frozen; bounded diagnostics reached parsed-content authority without SQL failure, and the fixture now proves copy mutation isolation. The negative getter lacked an explicit return for lint; fixed without production changes. Temporary diagnosis was removed. Failure history remains in WP-2421.
+
+Current owning graph/reference/field-purpose sources, scope/topology/effective period, policy and independent approval must still be assembled and held in the publishing transaction. This standalone User historical source is not a System activation or current eligibility source. The [mechanical rule evaluator](./option-set-rule-satisfiability.md) remains a candidate check, and no assembled qualified rule-source consumer is claimed here. Application immutable publishing/CAS/Audit/Outbox/original recovery, ordinary HTTP/IAM/Option management, complete Product pages, Store management, real UAT and launch evidence remain open.

@@ -34,6 +34,7 @@ export async function prepareEntryDiningCart({
     storeReference: scope.storeReference,
   };
   await admin.query("GRANT SELECT,INSERT ON rms_ordering.dining_cart_operation TO " + role);
+  await admin.query("GRANT SELECT ON rms_ordering.dining_cart_replacement TO " + role);
   let sequence = 50000;
   const reference = () => id(++sequence);
   const catalogId = (n) =>

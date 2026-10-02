@@ -10,6 +10,10 @@ import {
 } from "../../bop/publishing/src/index.ts";
 import {
   createPostgresMenuDraftSource,
+  createPostgresMenuCategorySourceStore,
+  createPostgresProductMenuSourceStore,
+  productMenuSourceFields,
+  CatalogError,
   createPostgresMenuReviewProductSource,
   createPostgresAllergenReviewFactsStore,
   validateMenuAllergenProvenance,
@@ -35,11 +39,11 @@ vi.mock("../../../apps/api/src/merchant-brand-scope.ts", () => ({
 const { Client } = pg;
 const id = (n) => "01902405-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 it("persists Menu review approval publication and archive with exact replay and atomic Audit Outbox", async () => {
-  await withIsolatedDatabase({ caseId: "wp2402_menu_pub" }, async (context) => {
+  await withIsolatedDatabase({ caseId: "wp2409_menu_source" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
-    const role = "wp2402_menu_pub_" + context.runId;
-    assert.match(role, /^wp2402_menu_pub_[a-f0-9]+$/);
+    const role = "wp2409_menu_source_" + context.runId;
+    assert.match(role, /^wp2409_menu_source_[a-f0-9]+$/);
     const at = "2026-09-14T08:00:00.000Z";
     let allowed = true,
       fault = null,
@@ -62,6 +66,16 @@ it("persists Menu review approval publication and archive with exact replay and 
         at,
       );
       await admin.query("GRANT SELECT ON rms_catalog.menu_section_category TO " + role);
+      await admin.query(
+        "INSERT INTO rms_catalog.category VALUES($1,$2,'REVIEW_CATEGORY','Draft',1,'en-CA',$3,'{}',NULL,1,0,'[]',$4,$5,$4)",
+        [id(850), id(1), JSON.stringify({ "en-CA": "Synthetic review category" }), at, id(701)],
+      );
+      await admin.query("INSERT INTO rms_catalog.menu_section_category VALUES($1,$2,$3,$4)", [
+        id(804),
+        scope.menuReference,
+        id(1),
+        id(850),
+      ]);
       await admin.query("GRANT SELECT,INSERT ON rms_catalog.menu_review_content TO " + role);
       await admin.query(
         "GRANT SELECT,INSERT ON rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period,rms_catalog.menu_publication_operation_record,rms_catalog.menu_publication_operation_snapshot,platform_audit.audit_record,platform_eventing.outbox_event TO " +
@@ -114,6 +128,80 @@ it("persists Menu review approval publication and archive with exact replay and 
           }
         },
       };
+      const categorySource = createPostgresMenuCategorySourceStore({
+        tenantReference: id(1),
+        brandReference: id(1),
+        actorReference: id(701),
+        transactions: runner,
+        clock: { now: () => new Date().toISOString() },
+        authority: {
+          async holdUntilTransactionCompletes() {
+            // Synthetic source-field/Phase lease only; no production authorization claim.
+            if (!allowed) throw new CatalogError("CATALOG_PERMISSION_DENIED");
+          },
+        },
+      });
+      const menuImpactRequest = {
+        purposeCode: "CATALOG_LIFECYCLE_REVIEW",
+        brandReference: id(1),
+        actorReference: id(701),
+        productReference: id(802),
+        skuReference: null,
+        operationReference: id(12500),
+        expectedAggregateVersion: 1,
+        originalProductVersionReference: id(803),
+        beforeLifecycle: "Active",
+        targetLifecycle: "Suspended",
+        reasonCode: "SYNTHETIC_TEST",
+        activeSkuCount: 1,
+      };
+      let impactCalls = 0,
+        impactDeniedAt = 0,
+        impactReads = 0;
+      const impactOptions = {
+        tenantReference: id(900),
+        brandReference: id(1),
+        actorReference: id(701),
+        transactions: {
+          run(work) {
+            return runner.run((tx) =>
+              work({
+                async query(sql, values) {
+                  if (sql.includes("targetExists")) impactReads++;
+                  return tx.query(sql, values);
+                },
+              }),
+            );
+          },
+        },
+        clock: { now: () => new Date().toISOString() },
+        authority: {
+          async holdUntilTransactionCompletes(tx, input) {
+            void tx;
+            impactCalls++;
+            assert.equal(input.tenantReference, id(900));
+            assert.equal(input.actorReference, id(701));
+            assert.equal(input.request.brandReference, id(1));
+            assert.equal(input.request.productReference, id(802));
+            assert.equal(input.permission, "catalog.manage");
+            assert.equal(input.purposeCode, "CATALOG_LIFECYCLE_MENU_SOURCE_READ");
+            assert.deepEqual(input.requiredFields, productMenuSourceFields);
+            // Synthetic authority only; all source reads and publication rows are actual.
+            if (!allowed || impactCalls === impactDeniedAt)
+              throw new CatalogError("CATALOG_PERMISSION_DENIED");
+          },
+        },
+      };
+      const impactSource = createPostgresProductMenuSourceStore(impactOptions);
+      assert.deepEqual((await impactSource.loadSnapshot(menuImpactRequest)).reviews, []);
+      const initialCategorySource = await categorySource.loadSnapshot();
+      assert.equal(initialCategorySource.consistency, "StatementSnapshot");
+      assert.equal(initialCategorySource.menus.length, 1);
+      assert.deepEqual(initialCategorySource.menus[0].draftCategoryBindings, [
+        { sectionReference: id(804), categoryReferences: [id(850)] },
+      ]);
+      assert.deepEqual(initialCategorySource.menus[0].reviewedSnapshots, []);
+      assert.equal(initialCategorySource.reviewCategoryCoverage, "Known");
       await admin.query(
         "UPDATE rms_catalog.product_version SET localized_names_json=$2 WHERE product_version_id=$1",
         [id(803), JSON.stringify({ "en-CA": "Product fallback", "fr-CA": "Produit" })],
@@ -279,6 +367,16 @@ it("persists Menu review approval publication and archive with exact replay and 
         validationEvidenceReference: id(951),
       };
       const content = buildReviewedMenuContent(assembly);
+      assert.deepEqual(content.categoryBindings, [
+        { sectionReference: id(804), categoryReferences: [id(850)] },
+      ]);
+      const emptyMenu = globalThis.structuredClone(owner.aggregate);
+      emptyMenu.draft.sections[0].categoryReferences = [];
+      assert.deepEqual(
+        buildReviewedMenuContent({ ...assembly, menu: emptyMenu }).categoryBindings,
+        [{ sectionReference: id(804), categoryReferences: [] }],
+      );
+      assert.deepEqual(content.categoryBindings[0].categoryReferences, [id(850)]);
       assert.equal(content.sections[0].sellables[0].localizedNames["fr-CA"], "Produit");
       assert.deepEqual(content.storeReferences, owner.aggregate.draft.storeReferences);
       for (const sellables of [
@@ -362,9 +460,29 @@ it("persists Menu review approval publication and archive with exact replay and 
         (await admin.query("SELECT count(*)::int n FROM platform_audit.audit_record")).rows[0].n,
         1,
       );
+      const pendingImpact = await impactSource.loadSnapshot(menuImpactRequest);
+      assert.equal(pendingImpact.reviews.length, 1);
+      assert.equal(pendingImpact.reviews[0].lifecycle, null);
+      assert.deepEqual(pendingImpact.reviews[0].placements, [
+        {
+          sectionReference: id(804),
+          placementReference: owner.aggregate.draft.sections[0].placements[0].placementReference,
+          skuReference: id(20),
+          productVersionReference: id(803),
+        },
+      ]);
       assert.deepEqual(
         await runner.run((tx) => contentStore.read(tx, id(801), digest, at)),
         contentRecord,
+      );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT snapshot_json#>'{content,categoryBindings}' bindings FROM rms_catalog.menu_review_content WHERE lifecycle_id=$1",
+            [id(950)],
+          )
+        ).rows[0].bindings,
+        content.categoryBindings,
       );
       await assert.rejects(
         runner.run((tx) =>
@@ -759,6 +877,49 @@ it("persists Menu review approval publication and archive with exact replay and 
         events: 1,
         releases: 1,
       });
+      const publishedImpact = await impactSource.loadSnapshot(menuImpactRequest);
+      assert.equal(publishedImpact.reviews[0].lifecycle.state, "Published");
+      assert.equal(
+        publishedImpact.reviews[0].releases[0].releaseReference,
+        published.record.release.releaseId,
+      );
+      assert.equal(publishedImpact.reviews[0].releases[0].periods[0].temporalStatus, "Expired");
+      assert.notEqual(publishedImpact.digest, pendingImpact.digest);
+      assert.equal(JSON.stringify(publishedImpact).includes("allergen"), false);
+      assert.equal(JSON.stringify(publishedImpact).includes("localizedNames"), false);
+      assert.equal(
+        (await impactSource.loadSnapshot({ ...menuImpactRequest, skuReference: id(20) })).reviews
+          .length,
+        1,
+      );
+      await assert.rejects(
+        impactSource.loadSnapshot({ ...menuImpactRequest, productReference: id(999) }),
+        { code: "CATALOG_DEPENDENCY_UNAVAILABLE" },
+      );
+      await assert.rejects(
+        impactSource.loadSnapshot({ ...menuImpactRequest, skuReference: id(999) }),
+        { code: "CATALOG_DEPENDENCY_UNAVAILABLE" },
+      );
+      const readsBefore = impactReads;
+      impactDeniedAt = impactCalls + 1;
+      await assert.rejects(impactSource.loadSnapshot(menuImpactRequest), {
+        code: "CATALOG_PERMISSION_DENIED",
+      });
+      assert.equal(impactReads, readsBefore);
+      impactDeniedAt = impactCalls + 2;
+      await assert.rejects(impactSource.loadSnapshot(menuImpactRequest), {
+        code: "CATALOG_PERMISSION_DENIED",
+      });
+      assert.equal(impactReads, readsBefore + 1);
+      impactDeniedAt = 0;
+      const publishedCategorySource = await categorySource.loadSnapshot();
+      assert.equal(publishedCategorySource.reviewCategoryCoverage, "Known");
+      assert.equal(publishedCategorySource.menus[0].reviewedSnapshots[0].lifecycle, "Published");
+      assert.deepEqual(
+        publishedCategorySource.menus[0].reviewedSnapshots[0].categoryBindings,
+        content.categoryBindings,
+      );
+      assert.notEqual(publishedCategorySource.sourceDigest, initialCategorySource.sourceDigest);
       const repo = repository(runner);
       assert.equal(await repo.nextReleaseSequence(scope.menuReference), 2);
       assert.equal(
@@ -870,6 +1031,52 @@ it("persists Menu review approval publication and archive with exact replay and 
       });
       allowed = true;
       assert.equal((await repo.load(id(801))).lifecycle.state, "Archived");
+      const archivedImpact = await impactSource.loadSnapshot(menuImpactRequest);
+      assert.equal(archivedImpact.reviews[0].lifecycle.state, "Archived");
+      assert.equal(archivedImpact.reviews[0].releases.length, 1);
+      assert.notEqual(archivedImpact.digest, publishedImpact.digest);
+      assert.equal(
+        (await impactSource.loadSnapshot(menuImpactRequest)).digest,
+        archivedImpact.digest,
+      );
+      // Actual orphan coverage path within rolled-back synthetic fixture transaction.
+      await assert.rejects(
+        runner.run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+            [id(1)],
+          );
+          await tx.query(
+            "INSERT INTO rms_catalog.menu_publication_revision(lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,snapshot_digest,state,changed_at) VALUES($1,1,$2,$3,$4,$5,'Draft',$6)",
+            [id(12501), scope.menuReference, id(801), id(1), "sha256:" + "e".repeat(64), at],
+          );
+          const source = createPostgresProductMenuSourceStore({
+            ...impactOptions,
+            transactions: { run: (work) => work(tx) },
+          });
+          await assert.rejects(source.loadSnapshot(menuImpactRequest), {
+            code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+          });
+          throw new Error("synthetic orphan transaction rollback");
+        }),
+        /synthetic orphan transaction rollback/,
+      );
+      assert.equal(
+        (await impactSource.loadSnapshot(menuImpactRequest)).digest,
+        archivedImpact.digest,
+      );
+      const archivedCategorySource = await categorySource.loadSnapshot();
+      assert.equal(archivedCategorySource.menus[0].reviewedSnapshots[0].lifecycle, "Archived");
+      assert.notEqual(archivedCategorySource.sourceDigest, publishedCategorySource.sourceDigest);
+      assert.deepEqual(
+        (await categorySource.loadSnapshot()).sourceDigest,
+        archivedCategorySource.sourceDigest,
+      );
+      allowed = false;
+      await assert.rejects(categorySource.loadSnapshot(), {
+        code: "CATALOG_PERMISSION_DENIED",
+      });
+      allowed = true;
       assert.equal(
         (
           await admin.query(
@@ -923,6 +1130,103 @@ it("persists Menu review approval publication and archive with exact replay and 
         events: 1,
         releases: 1,
       });
+      // Legacy compatibility is explicit unknown, never backfilled from current Draft.
+      const legacyContent = globalThis.structuredClone(content);
+      delete legacyContent.categoryBindings;
+      const legacyReview = createMenuReviewContent({
+        ...contentRecord,
+        lifecycleReference: id(956),
+        content: legacyContent,
+      });
+      await runner.run((tx) =>
+        contentStore.save(tx, legacyReview, { ...contentAudit, auditId: id(12003) }),
+      );
+      const legacySource = await categorySource.loadSnapshot();
+      assert.equal(legacySource.reviewCategoryCoverage, "Unavailable");
+      assert.equal(legacySource.menus[0].reviewedSnapshots.length, 2);
+      const legacySnapshot = legacySource.menus[0].reviewedSnapshots.find(
+        (record) => record.lifecycleReference === id(956),
+      );
+      assert.equal(Object.hasOwn(legacySnapshot, "categoryBindings"), false);
+      assert.equal(legacySnapshot.lifecycle, null);
+      // Stored schedule fixture, not a new approval or production activation.
+      const scheduleAt = new Date().toISOString(),
+        currentFrom = new Date(Date.now() - 1000).toISOString(),
+        currentUntil = new Date(Date.now() + 60000).toISOString(),
+        futureFrom = new Date(Date.now() + 86400000).toISOString(),
+        futureUntil = new Date(Date.now() + 90000000).toISOString();
+      for (const [timing, from, until] of [
+        [12504, currentFrom, currentUntil],
+        [12505, futureFrom, futureUntil],
+      ]) {
+        await admin.query(
+          "INSERT INTO rms_catalog.menu_release_effective_period(timing_version_id,release_id,menu_id,brand_id,time_zone,effective_from,effective_until,period_digest,approval_evidence_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+          [
+            id(timing),
+            published.record.release.releaseId,
+            scope.menuReference,
+            id(1),
+            "UTC",
+            from,
+            until,
+            "sha256:" + "d".repeat(64),
+            id(952),
+            scheduleAt,
+          ],
+        );
+      }
+      const scheduledImpact = await impactSource.loadSnapshot(menuImpactRequest),
+        scheduledReview = scheduledImpact.reviews.find((r) => r.reviewReference === id(950));
+      assert.equal(scheduledReview.lifecycle.state, "Archived");
+      assert.deepEqual(scheduledReview.releases[0].periods.map((p) => p.temporalStatus).sort(), [
+        "Effective",
+        "Expired",
+        "Future",
+      ]);
+      assert.notEqual(scheduledImpact.digest, archivedImpact.digest);
+      const legacyImpact = await impactSource.loadSnapshot(menuImpactRequest);
+      assert.equal(legacyImpact.reviews.length, 2);
+      assert.equal(legacyImpact.reviews.find((r) => r.reviewReference === id(956)).lifecycle, null);
+      assert.equal(
+        legacyImpact.reviews.every((r) => r.placements.length === 1),
+        true,
+      );
+      // Malformed minimal immutable review is deliberately isolated negative data.
+      // Missing sections cannot be target-filtered into false empty impact.
+      const malformed = {
+        lifecycleReference: id(12502),
+        snapshotDigest: "sha256:" + "f".repeat(64),
+        createdAt: at,
+        content: {
+          brandReference: id(1),
+          menuReference: scope.menuReference,
+          menuVersionReference: id(801),
+        },
+      };
+      await admin.query(
+        "INSERT INTO rms_catalog.menu_review_content(lifecycle_id,brand_id,menu_id,menu_version_id,snapshot_digest,snapshot_json,audit_reference) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)",
+        [
+          id(12502),
+          id(1),
+          scope.menuReference,
+          id(801),
+          malformed.snapshotDigest,
+          JSON.stringify(malformed),
+          id(12503),
+        ],
+      );
+      await assert.rejects(impactSource.loadSnapshot(menuImpactRequest), {
+        code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+      });
+
+      assert.deepEqual(legacySource.menus[0].draftCategoryBindings[0].categoryReferences, [
+        id(850),
+      ]);
+      assert.deepEqual(
+        (await runner.run((tx) => contentStore.read(tx, id(801), digest, at))).content
+          .categoryBindings,
+        content.categoryBindings,
+      );
     } finally {
       await admin.query("DROP OWNED BY " + role).catch(() => undefined);
       await admin.query("DROP ROLE IF EXISTS " + role);

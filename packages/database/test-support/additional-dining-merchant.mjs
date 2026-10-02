@@ -190,18 +190,20 @@ export async function seedAdditionalDiningMerchant({
     },
   });
   const authentication = { authorize: (input) => browser.authorize(input) };
+  const validateAssociation = async (_tx, session, selected) =>
+    session.actor.actorReference === record.actorReference &&
+    selected.tenantReference === scope.tenantReference &&
+    selected.brandReference === scope.brandReference &&
+    selected.storeReference === scope.storeReference;
+  const persistence = {
+    transactions: runner(),
+    identity: { hasher },
+    currentActor: async () => actor,
+    now: () => at,
+    validateAssociation,
+  };
   const serving = createMerchantDiningItemService({
-    persistence: {
-      transactions: runner(),
-      identity: { hasher },
-      currentActor: async () => actor,
-      now: () => at,
-      validateAssociation: async (_tx, session, selected) =>
-        session.actor.actorReference === record.actorReference &&
-        selected.tenantReference === scope.tenantReference &&
-        selected.brandReference === scope.brandReference &&
-        selected.storeReference === scope.storeReference,
-    },
+    persistence,
     authentication,
     validateSource: async (_tx, fact) =>
       fact.sourceCheckpoint === snapshot.batch.submissionReference &&
@@ -291,13 +293,19 @@ export async function seedAdditionalDiningMerchant({
   };
   return {
     commit,
+    commandContext: Object.freeze({
+      persistence,
+      authentication,
+      sessionCookie: cookie,
+      csrf,
+    }),
     async denyCsrf() {
       await commit(record, randomBytes(32).toString("base64url"), 403);
     },
     async revokePermission() {
       await client.query(
-        "UPDATE bop_permission.permission_grant SET lifecycle='Revoked',version=2,updated_at=$1 WHERE grant_id=$2",
-        [at, id(11)],
+        "UPDATE bop_permission.permission_grant SET lifecycle='Revoked',version=2,updated_at=date_trunc('milliseconds',clock_timestamp()) WHERE grant_id=$1",
+        [id(11)],
       );
       await commit(record, csrf, 403);
     },

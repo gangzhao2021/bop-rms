@@ -1,3 +1,5 @@
+import type { PublishingOptionSetPublicationPolicy } from "../../contracts/option-set-publication-policy.js";
+import type { PublishingProductPublicationPolicy } from "../../contracts/product-publication-policy.js";
 import type { PublishingOperation } from "../../domain/evaluate-publishing-transition.js";
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { BusinessAction, PermissionDecision, PermissionResourceScope } from "@bop/permission";
@@ -26,6 +28,8 @@ export interface PublishingAuthorizationPort {
 }
 
 export interface CommitPublishingMutationInput {
+  readonly optionSetPolicyContent?: PublishingOptionSetPublicationPolicy;
+  readonly productPolicyContent?: PublishingProductPublicationPolicy;
   readonly operation: PublishingOperation;
   /** Validated detached evidence consumed by this mutation, never raw request payloads. */
   readonly validationEvidence: PublishingValidationEvidence | null;

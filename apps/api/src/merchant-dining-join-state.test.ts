@@ -60,6 +60,7 @@ it("returns exact versions without secret material", async () => {
     generation: 2,
     joinKind: "HumanCode",
   });
+  expect(m.resolve.mock.calls[0]?.slice(1)).toEqual(["synthetic", "dining.operate", id(9)]);
 });
 it.each(["Closing", "Closed"])("rejects %s session", async (phase) => {
   const f = setup();

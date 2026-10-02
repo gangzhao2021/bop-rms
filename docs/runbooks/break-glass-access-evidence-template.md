@@ -11,7 +11,8 @@ copy to Git and do not replace placeholders in this repository.
 - Environment and exact scope reviewed: `<pass/fail/blocked>`
 - Requester/operator role references: `<required external evidence>`
 - Approver 1 role reference: `<required external evidence>`
-- Approver 2 role reference: `<required external evidence>`
+- Approver 2 applicability and source-policy review: `<required external evidence>`
+- Approver 2 role reference: `<required external evidence when the accepted source policy requires it; otherwise reviewed not-applicable reference>`
 - Separation-of-duties review: `<pass/fail/blocked>`
 - Recent TOTP MFA review: `<pass/fail/blocked>`
 - Approved UTC start/expiry: `<required external evidence>`

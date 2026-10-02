@@ -18,6 +18,8 @@ import {
   sha256Hex,
   appendAuditRecordInTransaction,
 } from "../../bop/audit/src/index.ts";
+import { verifyMerchantAuthorizationRead } from "../test-support/merchant-authorization-read.mjs";
+import * as permissionFixture from "../../bop/permission/src/tests/current-policy.fixture.ts";
 it("persists immutable scoped public profiles without treating saved evidence as current authority", async () => {
   await withIsolatedDatabase({ caseId: "wp2402_profile" }, async (env) => {
     const client = new pg.Client(env.clientConfig);
@@ -623,7 +625,110 @@ it.each(["Dining", "Pickup"])(
           };
         };
         const at = new Date(Date.now() - 1000).toISOString();
-        const publicOptions = await prepareCurrentEntryProfile({ admin: client, role, run, at });
+        const pickupAuthorization = channel === "Pickup";
+        const clockFrom = new Date(Date.parse(at) - 60000).toISOString();
+        const clockUntil = new Date(Date.parse(at) + 86400000).toISOString();
+        const toronto = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Toronto",
+          weekday: "short",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).formatToParts(new Date(at));
+        const part = (type) => toronto.find((value) => value.type === type).value;
+        const weekdayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(
+          part("weekday"),
+        );
+        const businessDate = `${part("year")}-${part("month")}-${part("day")}`;
+        const fixtureClock = {
+          from: clockFrom,
+          at,
+          until: clockUntil,
+          businessWeekday: weekdayIndex === 0 ? 7 : weekdayIndex,
+          businessDate,
+          targetBusinessDate: businessDate,
+          initialServiceWindow: { start: "00:00:00", end: "23:59:59" },
+          targetServiceWindow: { start: "00:00:00", end: "00:01:00" },
+        };
+        if (pickupAuthorization) {
+          await client.query("INSERT INTO bop_permission.policy_state VALUES ($1,$2,1,$3)", [
+            permissionFixture.BRAND,
+            permissionFixture.SNAPSHOT,
+            clockFrom,
+          ]);
+          await client.query(
+            "INSERT INTO bop_permission.permission_definition VALUES ($1,$2,'Active',1,$3,$3)",
+            [permissionFixture.PERMISSION, permissionFixture.ACTION, clockFrom],
+          );
+          await client.query(
+            "INSERT INTO bop_permission.role VALUES ($1,$2,$3,'synthetic_operator','Active',$4,$5,1,$4,$4)",
+            [
+              permissionFixture.STORE_ROLE,
+              permissionFixture.BRAND,
+              permissionFixture.STORE,
+              clockFrom,
+              clockUntil,
+            ],
+          );
+          await client.query(
+            "INSERT INTO bop_permission.role_assignment VALUES ($1,$2,$3,$4,$5,$6,$7,'Active',$8,$9,1,$8,$8)",
+            [
+              permissionFixture.STORE_ROLE_ASSIGNMENT,
+              permissionFixture.STORE_ROLE,
+              permissionFixture.MEMBERSHIP,
+              permissionFixture.STORE_ASSIGNMENT,
+              permissionFixture.ACTOR,
+              permissionFixture.BRAND,
+              permissionFixture.STORE,
+              clockFrom,
+              clockUntil,
+            ],
+          );
+          await client.query(
+            "INSERT INTO bop_permission.permission_grant VALUES ($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6)",
+            [
+              permissionFixture.STORE_GRANT,
+              permissionFixture.STORE_ROLE,
+              permissionFixture.PERMISSION,
+              permissionFixture.BRAND,
+              permissionFixture.STORE,
+              clockFrom,
+              clockUntil,
+            ],
+          );
+          await client.query("GRANT USAGE ON SCHEMA bop_permission,platform_helpers TO " + role);
+          await client.query("GRANT SELECT ON ALL TABLES IN SCHEMA bop_permission TO " + role);
+          await client.query(
+            "GRANT UPDATE ON bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override TO " +
+              role,
+          );
+          await client.query(
+            "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+              role,
+          );
+          await client.query(
+            "INSERT INTO bop_tenant.brand VALUES ($1,'SYNTHETIC','Synthetic Brand','en-CA','CAD','Active',1,$2,$2)",
+            [permissionFixture.BRAND, clockFrom],
+          );
+          await client.query(
+            "INSERT INTO bop_tenant.store VALUES ($1,$2,'SYNTHETIC_1','Synthetic Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+            [permissionFixture.STORE, permissionFixture.BRAND, clockFrom],
+          );
+        }
+        const publicOptions = await prepareCurrentEntryProfile({
+          admin: client,
+          role,
+          run,
+          at,
+          ...(pickupAuthorization
+            ? {
+                tenantReference: permissionFixture.uuid("90"),
+                brandReference: permissionFixture.BRAND,
+                storeReference: permissionFixture.STORE,
+                existingOrganizationFacts: true,
+              }
+            : {}),
+        });
         const journey = await exercisePersistentProfileEntry({
           admin: client,
           role,
@@ -632,6 +737,19 @@ it.each(["Dining", "Pickup"])(
           at,
           currentClock: true,
           pickupOnly: channel === "Pickup",
+          ...(pickupAuthorization
+            ? {
+                onPickupReady: (pickupReady) =>
+                  verifyMerchantAuthorizationRead({
+                    admin: client,
+                    client,
+                    role,
+                    fixtureClock: { ...fixtureClock, at: new Date().toISOString() },
+                    pickupReady,
+                    existingOrganizationFacts: true,
+                  }),
+              }
+            : {}),
           acquire,
         });
         await journey.close();

@@ -59,6 +59,7 @@ export async function exerciseCapturedOrderKitchen({
     "GRANT SELECT,INSERT ON rms_ordering.order_acceptance_record,rms_ordering.order_payment_disposition_record,rms_ordering.order_payment_failure_record TO " +
       role,
   );
+  await admin.query("GRANT SELECT ON rms_ordering.order_batch_checkout_cancellation TO " + role);
   await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_eventing.consumer_inbox TO " + role);
   const record = {
     acceptanceReference: next(),
@@ -125,6 +126,7 @@ export async function exerciseCapturedOrderKitchen({
     actor,
     at,
     kitchenPermission: kitchenNow !== undefined,
+    authenticationPolicyCode: kitchenNow !== undefined ? "NamedKdsOperator" : "WorkforceStandard",
   });
   const queue = createPersistentMerchantOrderQueue({
     persistence: { ...session.persistence, now: () => new Date().toISOString() },
@@ -189,8 +191,6 @@ export async function exerciseCapturedOrderKitchen({
     status: "AlreadyCommitted",
     acceptedOrderVersion: 2,
   });
-  await session.revoke();
-  await assert.rejects(authenticatedAccept(commandInput));
   const accepted = await accept();
   assert.equal(accepted.status, "AlreadyCommitted");
   assert.notEqual(accepted.record.sourceDigest, hash("SYNTHETIC_MERCHANT_ELIGIBILITY"));
@@ -216,6 +216,8 @@ export async function exerciseCapturedOrderKitchen({
   assert.equal(currentOrder.currentPhase, "Accepted");
   assert.equal(Object.hasOwn(currentOrder, "guestSessionReference"), false);
   assert.equal(Object.hasOwn(currentOrder, "initialSubmissionReference"), false);
+  await session.revoke();
+  await assert.rejects(authenticatedAccept(commandInput));
   let observedAt = at;
   const source = createOrderPaidOutcomeSource({
     context,

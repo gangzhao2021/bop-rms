@@ -23,6 +23,8 @@ export async function prepareEntryPickupCheckout({
   at,
   session,
   binding,
+  now: suppliedNow,
+  capacityLimit = 1,
 }) {
   await admin.query("GRANT USAGE ON SCHEMA rms_fulfillment TO " + role);
   await admin.query("GRANT SELECT,UPDATE ON rms_fulfillment.capacity_slot TO " + role);
@@ -55,8 +57,8 @@ export async function prepareEntryPickupCheckout({
     ],
   );
   await admin.query(
-    "INSERT INTO rms_fulfillment.capacity_slot_configuration (brand_id,store_id,slot_id,config_version,capacity_limit,published_at) VALUES ($1,$2,$3,1,1,$4)",
-    [scope.brandReference, scope.storeReference, id(95000), shift(-120000)],
+    "INSERT INTO rms_fulfillment.capacity_slot_configuration (brand_id,store_id,slot_id,config_version,capacity_limit,published_at) VALUES ($1,$2,$3,1,$4,$5)",
+    [scope.brandReference, scope.storeReference, id(95000), capacityLimit, shift(-120000)],
   );
   const originalRun = run;
   const failures = [];
@@ -71,13 +73,15 @@ export async function prepareEntryPickupCheckout({
             failures.push({
               stage: "database",
               code: /^[A-Z0-9_]{1,64}$/.test(error?.code) ? error.code : "UNKNOWN",
+              relation:
+                /\b(?:FROM|INTO|UPDATE|JOIN)\s+([a-z_]+\.[a-z_]+)/iu.exec(sql)?.[1] ?? "unknown",
             });
             throw error;
           }
         },
       }),
     );
-  const now = () => new Date().toISOString();
+  const now = suppliedNow ?? (() => new Date().toISOString());
   let sequence = 95100;
   const reference = () => id(++sequence);
   const audit = (actionCode, targetType, targetId, occurredAt, correlationId) => ({

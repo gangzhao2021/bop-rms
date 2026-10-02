@@ -66,10 +66,10 @@ export async function createInternalDiningSession(resources, merchant, { loadCre
             const resolved = await resolveScope(
               tx,
               input.sessionCookie,
-              "dining.session.manage",
+              "dining.operate",
               authenticated.sessionReference,
             );
-            const permission = await resolved.authorizeAction("dining.session.manage");
+            const permission = await resolved.authorizeAction("dining.operate");
             if (
               permission?.effect !== "Allow" ||
               resolved.selected.tenantReference !== scope.tenantReference ||

@@ -55,17 +55,30 @@ export function MerchantShell({ state, onSwitchStore, overview = null }: Merchan
   const ready = state.kind === "Ready" ? state : null;
   return (
     <AppFrame
-      title="Merchant overview"
-      description="Permission-trimmed Store workspace"
+      className="bop-shell--home-overview"
+      title="OPERATIONS"
+      description={
+        ready ? ready.workspace.selectedScope.storeLabel : "Permission-trimmed Store workspace"
+      }
+      headerStatus={
+        ready ? (
+          <span data-freshness={ready.workspace.freshness}>{ready.workspace.freshness}</span>
+        ) : undefined
+      }
       navigation={
         ready ? (
-          <nav aria-label="Authorized Merchant navigation">
+          <>
+            <span className="home-overview-navigation-label">WORKSPACE</span>
             {ready.workspace.navigation.map((item) => (
-              <a key={item.screenId} href={item.href}>
+              <a
+                key={item.screenId}
+                href={item.href}
+                aria-current={item.screenId === "HOME-OVERVIEW" ? "page" : undefined}
+              >
                 {item.label}
               </a>
             ))}
-          </nav>
+          </>
         ) : undefined
       }
     >
@@ -119,19 +132,25 @@ export function MerchantShell({ state, onSwitchStore, overview = null }: Merchan
           ) : null}
           {overview ?? (
             <div className="overview-grid">
-              <StatePanel heading="Live Store status" status>
-                <strong>{ready.workspace.storeStatus}</strong>
+              <section className="overview-card" aria-labelledby="live-store-status-heading">
+                <h3 id="live-store-status-heading">Live Store status</h3>
+                <p className="overview-status-value">
+                  <span>{ready.workspace.storeStatus}</span>
+                </p>
                 <p>Business Date {ready.workspace.businessDate}</p>
-              </StatePanel>
-              <StatePanel heading="Today summary">
+              </section>
+              <section className="overview-card" aria-labelledby="today-summary-heading">
+                <h3 id="today-summary-heading">Today summary</h3>
                 <p>Unavailable until the WP-1905 dashboard projection is connected.</p>
-              </StatePanel>
-              <StatePanel heading="Open tasks and exceptions">
+              </section>
+              <section className="overview-card" aria-labelledby="tasks-summary-heading">
+                <h3 id="tasks-summary-heading">Open tasks and exceptions</h3>
                 <p>Unavailable until the WP-1905 dashboard projection is connected.</p>
-              </StatePanel>
-              <StatePanel heading="System and Provider health">
+              </section>
+              <section className="overview-card" aria-labelledby="health-summary-heading">
+                <h3 id="health-summary-heading">System and Provider health</h3>
                 <p>Unavailable until the WP-1905 dashboard projection is connected.</p>
-              </StatePanel>
+              </section>
             </div>
           )}
         </section>

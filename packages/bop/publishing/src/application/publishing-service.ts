@@ -1,3 +1,15 @@
+import {
+  parsePublishingOptionSetPublicationPolicy,
+  publishingOptionSetPublicationPolicyDigest,
+  optionSetPolicyConfigurationType,
+  type PublishingOptionSetPublicationPolicy,
+} from "../contracts/option-set-publication-policy.js";
+import {
+  parsePublishingProductPublicationPolicy,
+  publishingProductPublicationPolicyDigest,
+  productPolicyConfigurationType,
+  type PublishingProductPublicationPolicy,
+} from "../contracts/product-publication-policy.js";
 import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import {
   parseBusinessAction,
@@ -103,6 +115,8 @@ function validateMutationEnvelope(input: unknown): void {
     "release",
     "previousRelease",
     "rollbackTarget",
+    "productPolicyContent",
+    "optionSetPolicyContent",
   ]);
   const keys = Reflect.ownKeys(input);
   const descriptors = Object.getOwnPropertyDescriptors(input);
@@ -327,6 +341,8 @@ function createAudit(input: {
 }
 
 export interface ExecutePublishingMutationInput {
+  readonly optionSetPolicyContent?: unknown;
+  readonly productPolicyContent?: unknown;
   readonly tenantContext: TenantContext;
   readonly operation: PublishingOperation;
   readonly expectedVersion: PublishingVersion;
@@ -363,12 +379,47 @@ export async function executePublishingMutation(
   let correlationId: PublishingReference;
   let occurredAt: string;
   let sourceChannel: PublishingCode;
+  let optionSetPolicyContent: PublishingOptionSetPublicationPolicy | undefined;
+  let productPolicyContent: PublishingProductPublicationPolicy | undefined;
   try {
     validateMutationEnvelope(input);
+    if (Object.hasOwn(input, "productPolicyContent")) {
+      if (input.operation !== "CreateDraft") return fail("PUBLISHING_MUTATION_INVALID");
+      productPolicyContent = parsePublishingProductPublicationPolicy(input.productPolicyContent);
+    }
+    if (Object.hasOwn(input, "optionSetPolicyContent")) {
+      if (input.operation !== "CreateDraft" || productPolicyContent)
+        return fail("PUBLISHING_MUTATION_INVALID");
+      optionSetPolicyContent = parsePublishingOptionSetPublicationPolicy(
+        input.optionSetPolicyContent,
+      );
+    }
     if (!publishingOperations.includes(input.operation)) fail("PUBLISHING_MUTATION_INVALID");
     context = revalidateTenantContext(input.tenantContext);
     current = input.current === null ? null : createPublishingLifecycleRecord(input.current);
     next = createPublishingLifecycleRecord(input.next);
+    if (
+      productPolicyContent &&
+      (next.scope.kind !== "Brand" ||
+        next.configurationType !== productPolicyConfigurationType ||
+        next.purposeCode !== productPolicyConfigurationType ||
+        String(next.scope.brandReference) !== productPolicyContent.brandReference ||
+        next.familyReference !== productPolicyContent.familyReference ||
+        next.snapshotReference !== productPolicyContent.policyReference ||
+        next.snapshotDigest !== publishingProductPublicationPolicyDigest(productPolicyContent))
+    )
+      return fail("PUBLISHING_MUTATION_INVALID");
+    if (
+      optionSetPolicyContent &&
+      (next.scope.kind !== "Brand" ||
+        next.configurationType !== optionSetPolicyConfigurationType ||
+        next.purposeCode !== optionSetPolicyConfigurationType ||
+        String(next.scope.brandReference) !== optionSetPolicyContent.brandReference ||
+        next.familyReference !== optionSetPolicyContent.familyReference ||
+        next.snapshotReference !== optionSetPolicyContent.policyReference ||
+        next.snapshotDigest !== publishingOptionSetPublicationPolicyDigest(optionSetPolicyContent))
+    )
+      return fail("PUBLISHING_MUTATION_INVALID");
     expectedVersion = parsePublishingVersion(input.expectedVersion);
     idempotencyKey = parsePublishingReference(input.idempotencyKey);
     auditId = parsePublishingReference(input.auditId);
@@ -478,6 +529,8 @@ export async function executePublishingMutation(
   let originalAuditReference: PublishingReference;
   try {
     const committed = await ports.unitOfWork.commit({
+      ...(productPolicyContent === undefined ? {} : { productPolicyContent }),
+      ...(optionSetPolicyContent === undefined ? {} : { optionSetPolicyContent }),
       operation: input.operation,
       validationEvidence: retainedValidation,
       approvalEvidence: retainedApproval,

@@ -88,7 +88,7 @@ function ReceiptContent({
   const financial = online ? view.financial : null;
   return (
     <>
-      <section aria-labelledby="receipt-merchant-heading">
+      <section className="receipt-page__merchant" aria-labelledby="receipt-merchant-heading">
         <h2 id="receipt-merchant-heading">Merchant and order</h2>
         <p>{current.operatingEntityDisplayName}</p>
         <p>{current.storeDisplayName}</p>
@@ -96,7 +96,7 @@ function ReceiptContent({
         <p>Issued {new Date(current.issuedAt).toLocaleString(current.locale)}</p>
       </section>
       {view.freshnessStatus === "Stale" ? (
-        <section role="status">
+        <section className="receipt-page__stale" role="status">
           <h2>Live receipt status is unavailable</h2>
           <p>
             {financial
@@ -105,7 +105,7 @@ function ReceiptContent({
           </p>
         </section>
       ) : null}
-      <section aria-labelledby="receipt-financial-heading">
+      <section className="receipt-page__financial" aria-labelledby="receipt-financial-heading">
         <h2 id="receipt-financial-heading">Payment and refunds</h2>
         {financial ? (
           <>
@@ -153,13 +153,13 @@ function ReceiptContent({
           </p>
         )}
       </section>
-      <section aria-labelledby="receipt-history-heading">
+      <section className="receipt-page__history" aria-labelledby="receipt-history-heading">
         <h2 id="receipt-history-heading">Immutable receipt history</h2>
         {view.records.map((record) => (
           <ReceiptVersion key={record.recordReference} record={record} />
         ))}
       </section>
-      <section aria-labelledby="receipt-delivery-heading">
+      <section className="receipt-page__support" aria-labelledby="receipt-delivery-heading">
         <h2 id="receipt-delivery-heading">Delivery and support</h2>
         <p>Delivery status: {view.deliveryStatus}</p>
         <p>
@@ -172,12 +172,25 @@ function ReceiptContent({
             ? "Cancellation may be requested and remains subject to server validation."
             : "Cancellation is not available for this receipt."}
         </p>
-        <button type="button" onClick={() => window.print()}>
-          Print receipt
-        </button>
-        <button type="button" disabled title="Transactional email delivery is not active yet">
-          Request email receipt
-        </button>
+      </section>
+      <section className="receipt-page__action-card" aria-labelledby="receipt-actions-heading">
+        <h2 id="receipt-actions-heading">Receipt actions</h2>
+        <div className="receipt-page__actions">
+          <button type="button" onClick={() => window.print()}>
+            Print receipt
+          </button>
+          <div className="receipt-page__email-action">
+            <button
+              type="button"
+              disabled
+              aria-describedby="receipt-email-unavailable"
+              title="Transactional email delivery is not active yet"
+            >
+              Request email receipt
+            </button>
+            <p id="receipt-email-unavailable">Transactional email delivery is not active yet.</p>
+          </div>
+        </div>
       </section>
     </>
   );
@@ -219,37 +232,44 @@ export function ReceiptPage({ controller: provided }: { readonly controller?: Re
   const message = messages[state.status];
   return (
     <main id="main-content" className="receipt-page">
-      <header>
+      <header className="receipt-page__header">
         <p className="cart-page__eyebrow">Digital receipt</p>
         <h1>Your receipt</h1>
         <p>This versioned record preserves the transaction facts issued for your order.</p>
       </header>
-      <button
-        type="button"
-        disabled={state.status !== "ready" && state.status !== "unavailable"}
-        onClick={() => void controller.load()}
-      >
-        Refresh receipt
-      </button>
-      {message ? (
-        <section role={state.status === "loading" ? "status" : "alert"}>
-          <h2>{message[0]}</h2>
-          <p>{message[1]}</p>
-        </section>
-      ) : null}
-      {state.status === "offline" ? (
-        <section role="status">
-          <h2>Offline read-only</h2>
-          <p>
-            {view
-              ? "Showing the receipt already accepted on this page."
-              : "No accepted receipt is available on this page."}{" "}
-            Reconnecting does not submit an action.
-          </p>
-        </section>
-      ) : null}
-      {view ? <ReceiptContent view={view} online={state.status === "ready"} /> : null}
-      <Link to={`/orders/${orderReference}`}>Back to order status</Link>
+      <div className="receipt-page__toolbar">
+        <Link to={`/orders/${orderReference}`}>Back to order status</Link>
+        <button
+          type="button"
+          disabled={state.status !== "ready" && state.status !== "unavailable"}
+          onClick={() => void controller.load()}
+        >
+          Refresh receipt
+        </button>
+      </div>
+      <div className="receipt-page__content">
+        {message ? (
+          <section
+            className="receipt-page__state"
+            role={state.status === "loading" ? "status" : "alert"}
+          >
+            <h2>{message[0]}</h2>
+            <p>{message[1]}</p>
+          </section>
+        ) : null}
+        {state.status === "offline" ? (
+          <section className="receipt-page__state" role="status">
+            <h2>Offline read-only</h2>
+            <p>
+              {view
+                ? "Showing the receipt already accepted on this page."
+                : "No accepted receipt is available on this page."}{" "}
+              Reconnecting does not submit an action.
+            </p>
+          </section>
+        ) : null}
+        {view ? <ReceiptContent view={view} online={state.status === "ready"} /> : null}
+      </div>
     </main>
   );
 }

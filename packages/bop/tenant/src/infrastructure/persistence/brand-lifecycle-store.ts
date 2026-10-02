@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   createBrand,
   parseBrandReference,
@@ -14,12 +15,231 @@ import type {
   BrandAdministrationOperation,
   BrandAdministrationPorts,
 } from "../../application/ports/brand-administration-ports.js";
+import {
+  parseTenantBrandConfigurationContentRequest,
+  parseTenantRecordedBrandConfiguration,
+  tenantBrandConfigurationContent,
+  tenantBrandConfigurationFields,
+  type TenantBrandConfigurationContentRequest,
+} from "../../contracts/brand-configuration-content-source.js";
 
 export interface BrandLifecycleTransaction {
   query<Row = Record<string, unknown>>(
     sql: string,
     values: readonly unknown[],
   ): Promise<{ rows: readonly Row[]; rowCount: number | null }>;
+}
+export interface TenantBrandConfigurationTransaction {
+  query(sql: string, values: readonly unknown[]): Promise<unknown>;
+}
+export const tenantBrandConfigurationRequiredFields = Object.freeze([
+  ...tenantBrandConfigurationFields,
+  "brandLifecycle",
+  "brandVersion",
+  "brandUpdatedAt",
+]);
+/** Consistency of the owning closed V1 content, never authorization evidence. */
+export function tenantBrandConfigurationContentDigest(value: unknown): string {
+  return (
+    "sha256:" +
+    createHash("sha256")
+      .update(JSON.stringify(tenantBrandConfigurationContent(value)))
+      .digest("hex")
+  );
+}
+export interface TenantRecordedBrandConfiguration {
+  readonly profile: "TenantRecordedBrandConfigurationV1";
+  readonly configuration: ReturnType<typeof parseTenantRecordedBrandConfiguration>;
+  readonly brandVersion: number;
+  readonly contentDigest: string;
+  readonly observedAt: string;
+  readonly validUntil: string;
+  readonly currentPublication: "NotEvaluated";
+}
+export interface TenantBrandConfigurationContentSourceOptions {
+  readonly brandReference: string;
+  readonly clock: () => string;
+  readonly transactions: {
+    /** Actual READ COMMITTED outer UoW; retain Brand and Publishing fences through COMMIT. */
+    run<T>(work: (tx: TenantBrandConfigurationTransaction) => Promise<T>): Promise<T>;
+  };
+  readonly authority: {
+    /** Current session/Tenant/Brand/Actor/purpose and every unmasked required field through COMMIT. */
+    withCurrentContentRead<T>(
+      request: TenantBrandConfigurationContentRequest,
+      requiredFields: readonly string[],
+      work: () => Promise<T>,
+    ): Promise<T>;
+    isCurrent(
+      tx: TenantBrandConfigurationTransaction,
+      request: TenantBrandConfigurationContentRequest,
+      requiredFields: readonly string[],
+    ): Promise<boolean>;
+  };
+}
+/** Exact immutable metadata candidate. A Published row alone is never current release evidence. */
+export function createPostgresTenantBrandConfigurationContentSource(
+  options: TenantBrandConfigurationContentSourceOptions,
+) {
+  const brand = parseBrandReference(options.brandReference);
+  const unavailable = (): never => {
+    throw new Error("TENANT_BRAND_CONFIGURATION_UNAVAILABLE");
+  };
+  const rows = (value: unknown): readonly Record<string, unknown>[] => {
+    if (!value || typeof value !== "object") return unavailable();
+    const d = Object.getOwnPropertyDescriptor(value, "rows");
+    if (!d || !("value" in d) || !Array.isArray(d.value) || d.value.length !== 1)
+      return unavailable();
+    return d.value;
+  };
+  return Object.freeze({
+    async withRecordedConfiguration<T>(
+      input: TenantBrandConfigurationContentRequest,
+      work: (
+        source: TenantRecordedBrandConfiguration,
+        tx: TenantBrandConfigurationTransaction,
+      ) => Promise<T>,
+    ): Promise<T> {
+      try {
+        const request = parseTenantBrandConfigurationContentRequest(input);
+        if (request.brandReference !== brand) return unavailable();
+        return await options.authority.withCurrentContentRead(
+          request,
+          tenantBrandConfigurationRequiredFields,
+          () =>
+            options.transactions.run(async (tx) => {
+              let configuration: TenantRecordedBrandConfiguration["configuration"] | null = null;
+              const assertCurrent = async () => {
+                const now = parseCanonicalInstant(options.clock());
+                if (
+                  now < request.observedAt ||
+                  now >= request.validUntil ||
+                  (configuration !== null &&
+                    (now < configuration.effectiveFrom ||
+                      (configuration.effectiveUntil !== null &&
+                        now >= configuration.effectiveUntil))) ||
+                  (await options.authority.isCurrent(
+                    tx,
+                    request,
+                    tenantBrandConfigurationRequiredFields,
+                  )) !== true
+                )
+                  return unavailable();
+              };
+              await assertCurrent();
+              if (
+                rows(await tx.query("SHOW transaction_isolation", []))[0]?.transaction_isolation !==
+                "read committed"
+              )
+                return unavailable();
+              await tx.query(
+                "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+                [brand],
+              );
+              const root = rows(
+                await tx.query(
+                  `SELECT brand_id,lifecycle,version::text,
+              to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at,
+              updated_at=date_trunc('milliseconds',updated_at) AS precise
+              FROM bop_tenant.brand WHERE brand_id=$1 FOR SHARE`,
+                  [brand],
+                ),
+              )[0];
+              if (
+                !root ||
+                root.brand_id !== brand ||
+                root.lifecycle !== "Active" ||
+                root.precise !== true ||
+                typeof root.version !== "string" ||
+                !/^[1-9][0-9]{0,15}$/.test(root.version) ||
+                Number(root.version) !== request.expectedBrandVersion ||
+                typeof root.updated_at !== "string" ||
+                parseCanonicalInstant(root.updated_at) > request.observedAt
+              )
+                return unavailable();
+              const c = rows(
+                await tx.query(
+                  `SELECT configuration_version_id,brand_id,configuration_version::text,lifecycle,
+              default_locale,supported_locales,media_theme_reference,catalog_source_reference,platform_template_reference,
+              override_allowed_field_codes,hard_requirement_field_codes,
+              to_char(effective_from AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS effective_from,
+              CASE WHEN effective_until IS NULL THEN NULL ELSE to_char(effective_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS effective_until,
+              supersedes_version_reference,reason_code,authored_by_reference,approved_by_reference,approval_evidence_reference,publication_reference,
+              to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
+              to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at,data_classification,
+              effective_from=date_trunc('milliseconds',effective_from) AND
+              (effective_until IS NULL OR effective_until=date_trunc('milliseconds',effective_until)) AND
+              created_at=date_trunc('milliseconds',created_at) AND updated_at=date_trunc('milliseconds',updated_at) AS precise
+              FROM bop_tenant.brand_configuration_version WHERE brand_id=$1 AND configuration_version_id=$2`,
+                  [brand, request.configurationVersionReference],
+                ),
+              )[0];
+              if (
+                !c ||
+                c.precise !== true ||
+                typeof c.configuration_version !== "string" ||
+                !/^[1-9][0-9]{0,15}$/.test(c.configuration_version)
+              )
+                return unavailable();
+              configuration = parseTenantRecordedBrandConfiguration({
+                configurationVersionReference: c.configuration_version_id,
+                brandReference: c.brand_id,
+                configurationVersion: Number(c.configuration_version),
+                lifecycle: c.lifecycle,
+                defaultLocale: c.default_locale,
+                supportedLocales: c.supported_locales,
+                mediaThemeReference: c.media_theme_reference,
+                catalogSourceReference: c.catalog_source_reference,
+                platformTemplateReference: c.platform_template_reference,
+                overrideAllowedFieldCodes: c.override_allowed_field_codes,
+                hardRequirementFieldCodes: c.hard_requirement_field_codes,
+                effectiveFrom: c.effective_from,
+                effectiveUntil: c.effective_until,
+                supersedesVersionReference: c.supersedes_version_reference,
+                reasonCode: c.reason_code,
+                authoredByReference: c.authored_by_reference,
+                approvedByReference: c.approved_by_reference,
+                approvalEvidenceReference: c.approval_evidence_reference,
+                publicationReference: c.publication_reference,
+                createdAt: c.created_at,
+                updatedAt: c.updated_at,
+                dataClassification: c.data_classification,
+              });
+              if (
+                configuration.brandReference !== brand ||
+                configuration.configurationVersionReference !==
+                  request.configurationVersionReference ||
+                configuration.lifecycle !== "Published" ||
+                configuration.updatedAt > request.observedAt ||
+                configuration.effectiveFrom > request.observedAt ||
+                (configuration.effectiveUntil !== null &&
+                  configuration.effectiveUntil <= request.observedAt)
+              )
+                return unavailable();
+              await assertCurrent();
+              const source: TenantRecordedBrandConfiguration = Object.freeze({
+                profile: "TenantRecordedBrandConfigurationV1",
+                configuration,
+                brandVersion: request.expectedBrandVersion,
+                contentDigest: tenantBrandConfigurationContentDigest(configuration),
+                observedAt: request.observedAt,
+                validUntil:
+                  configuration.effectiveUntil !== null &&
+                  configuration.effectiveUntil < request.validUntil
+                    ? configuration.effectiveUntil
+                    : request.validUntil,
+                currentPublication: "NotEvaluated",
+              });
+              const result = await work(source, tx);
+              await assertCurrent();
+              return result;
+            }),
+        );
+      } catch {
+        return unavailable();
+      }
+    },
+  });
 }
 type Repository = BrandAdministrationPorts["repository"];
 type Commit = Parameters<Repository["commit"]>[0];

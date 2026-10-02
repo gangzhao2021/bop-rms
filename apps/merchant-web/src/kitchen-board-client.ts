@@ -4,6 +4,7 @@ import {
   parseKitchenRouteReference,
   parseKitchenWorkItemView,
   type KitchenBoardClient,
+  type KitchenQueueSearch,
 } from "./kitchen-board.js";
 const fail = (): never => {
   throw new KitchenBoardClientError("Unavailable");
@@ -18,6 +19,59 @@ function record(value: unknown): Record<string, unknown> {
     return fail();
   return value as Record<string, unknown>;
 }
+function closedRecord(value: unknown, fields: readonly string[]): Record<string, unknown> {
+  const raw = record(value),
+    keys = Reflect.ownKeys(raw);
+  if (
+    keys.length !== fields.length ||
+    keys.some((key) => typeof key !== "string" || !fields.includes(key))
+  )
+    return fail();
+  for (const field of fields) {
+    const descriptor = Object.getOwnPropertyDescriptor(raw, field);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return fail();
+  }
+  return raw;
+}
+const LOCALE = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|-[0-9]{3})?$/u;
+const SAFE_TEXT = /^[^\p{Cc}\p{Cf}]{1,100}$/u;
+function selectedOptions(value: unknown) {
+  if (!Array.isArray(value) || value.length > 100) return fail();
+  return value.map((candidate) => {
+    const option = closedRecord(candidate, ["optionReference", "quantity", "localizedNames"]);
+    parseKitchenRouteReference(option.optionReference);
+    if (
+      !Number.isSafeInteger(option.quantity) ||
+      Number(option.quantity) < 1 ||
+      Number(option.quantity) > 999
+    )
+      return fail();
+    const names = record(option.localizedNames),
+      keys = Reflect.ownKeys(names);
+    if (
+      keys.length < 1 ||
+      keys.length > 20 ||
+      keys.some((key) => typeof key !== "string" || !LOCALE.test(key))
+    )
+      return fail();
+    for (const key of keys as string[]) {
+      const descriptor = Object.getOwnPropertyDescriptor(names, key);
+      if (
+        !descriptor ||
+        !("value" in descriptor) ||
+        !descriptor.enumerable ||
+        typeof descriptor.value !== "string" ||
+        !SAFE_TEXT.test(descriptor.value)
+      )
+        return fail();
+    }
+    const fallbackLocale = (keys as string[]).sort()[0];
+    const displayName =
+      names["en-CA"] ?? names.en ?? (fallbackLocale ? names[fallbackLocale] : undefined);
+    if (typeof displayName !== "string" || !SAFE_TEXT.test(displayName)) return fail();
+    return Object.freeze({ displayName, quantity: Number(option.quantity) });
+  });
+}
 function item(value: unknown) {
   const raw = record(value),
     names = record(raw.localizedDisplayNames);
@@ -26,7 +80,7 @@ function item(value: unknown) {
     workItemReference: raw.workItemReference,
     ticketReference: raw.ticketReference,
     orderReference: raw.orderReference,
-    stationLabel: "Station name unavailable",
+    stationLabel: null,
     displayName,
     status: raw.status,
     requiredQuantity: raw.requiredQuantity,
@@ -34,6 +88,7 @@ function item(value: unknown) {
     createdAt: raw.workItemCreatedAt,
     allergenCue: "Unavailable",
     exceptionStatus: "Unavailable",
+    selectedOptions: selectedOptions(raw.selectedOptions),
     execution: {
       orderItemReference: raw.orderItemReference,
       stationReference: raw.stationReference,
@@ -93,7 +148,7 @@ export function createKitchenBoardClient(options: {
         return fail();
       if (
         result.storeReference !== options.storeReference ||
-        !["Named", "Locked", "HandoverRequired", "Unavailable"].includes(
+        !["Named", "Locked", "HandoverRequired", "Unavailable", "Unverified"].includes(
           String(result.operatorStatus),
         )
       )
@@ -111,7 +166,9 @@ export function createKitchenBoardClient(options: {
     }
   }
   return {
-    async loadQueue() {
+    async loadQueue(search?: KitchenQueueSearch) {
+      const reference = search ? parseKitchenRouteReference(search.reference) : null;
+      if (search && search.kind !== "Order" && search.kind !== "Ticket") return fail();
       const items = [],
         seen = new Set<string>();
       let cursor: unknown = null,
@@ -120,8 +177,8 @@ export function createKitchenBoardClient(options: {
         const result = await query({
           kind: "List",
           filters: {
-            orderReference: null,
-            ticketReference: null,
+            orderReference: search?.kind === "Order" ? reference : null,
+            ticketReference: search?.kind === "Ticket" ? reference : null,
             workItemReference: null,
             stationReference: null,
             status: null,
@@ -168,7 +225,16 @@ export function createKitchenBoardClient(options: {
       const result = await query({ kind: "Get", workItemReference: ref });
       const mapped = item(result.item);
       if (mapped.workItemReference !== ref) return fail();
-      return mapped;
+      return {
+        screenId: "KIT-WORK-ITEM",
+        projectionName: result.projectionName,
+        projectionVersion: result.projectionVersion,
+        storeLabel: options.storeLabel,
+        projectedAt: result.projectedAt,
+        freshnessStatus: result.stale ? "Stale" : result.freshnessStatus,
+        operatorStatus: result.operatorStatus,
+        item: mapped,
+      };
     },
   };
 }

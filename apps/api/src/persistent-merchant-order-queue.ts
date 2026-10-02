@@ -71,8 +71,12 @@ export function createPersistentMerchantOrderQueue(options: {
       return Object.freeze({
         ...result,
         items: Object.freeze(
-          result.items.map((item) =>
-            Object.freeze({
+          result.items.map((item) => {
+            const latestBatchSequence = item.batches.reduce(
+              (latest, batch) => Math.max(latest, batch.sequence),
+              0,
+            );
+            return Object.freeze({
               ...item,
               batches: Object.freeze(
                 item.batches.map((batch) =>
@@ -86,15 +90,15 @@ export function createPersistentMerchantOrderQueue(options: {
                         String(item.currentPhase),
                       ) &&
                       (batch.sequence > 1 ||
-                        item.orderType === "DineIn" ||
+                        (item.orderType === "DineIn" && batch.sequence === latestBatchSequence) ||
                         item.currentVersion === 1),
                   }),
                 ),
               ),
               canRequestAcceptance:
                 acceptanceAllowed && item.currentPhase === "Submitted" && item.currentVersion === 1,
-            }),
-          ),
+            });
+          }),
         ),
       });
     });

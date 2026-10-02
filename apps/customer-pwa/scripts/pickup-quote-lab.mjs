@@ -33,16 +33,27 @@ export async function verifyPickupQuoteLab(origin, pickup) {
         const page = await context.newPage();
         const errors = [];
         const responses = [];
-        page.on("response", (response) => {
+        page.on("response", async (response) => {
           const path = new URL(response.url()).pathname;
           if (path.startsWith("/api/") || path.startsWith("/bff/"))
             responses.push({
-              kind: path.includes("binding")
-                ? "binding"
-                : path.includes("cart")
-                  ? "cart"
-                  : "entry/menu",
+              kind:
+                path.includes("payment-intents") || path.includes("/orders")
+                  ? "payment-or-order-write"
+                  : path.includes("checkout-sessions")
+                    ? "checkout-session"
+                    : path.includes("checkout-details")
+                      ? "details"
+                      : path.includes("binding")
+                        ? "binding"
+                        : path.includes("cart")
+                          ? "cart"
+                          : "entry/menu",
               status: response.status(),
+              noStore: response.headers()["cache-control"] === "no-store",
+              ...(response.status() >= 400
+                ? { error: (await response.json().catch(() => null))?.error?.code ?? "unknown" }
+                : {}),
             });
         });
         page.on("pageerror", () => errors.push("page_error"));
@@ -105,12 +116,131 @@ export async function verifyPickupQuoteLab(origin, pickup) {
         await expect(
           page.getByRole("region", { name: "Quote summary", exact: true }),
         ).toContainText("11.30");
-        await page.getByRole("link", { name: "Back to cart", exact: true }).click();
-        await page.getByRole("button", { name: "Remove", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "Contact and receipt", exact: true }))
+          .toBeVisible()
+          .catch(async () => {
+            throw new Error(
+              JSON.stringify({
+                stage: "checkout-details-read",
+                responses,
+                owner: pickup.diagnostics,
+                checkoutFailures: pickup.checkoutSessionFailures,
+                checkoutStages: pickup.checkoutStages,
+                alerts: await page.getByRole("alert").allTextContents(),
+              }),
+            );
+          });
+        await page.getByRole("button", { name: "Reload checkout details", exact: true }).click();
+        await expect(page.getByLabel("Pickup name", { exact: true })).toHaveValue("");
+        await page.getByLabel("Pickup name", { exact: true }).fill("Synthetic Guest");
+        await page.getByLabel("Contact method").selectOption("Email");
+        await page.getByLabel("Pickup email", { exact: true }).fill("synthetic@example.invalid");
+        await page.getByRole("button", { name: "Save checkout details", exact: true }).click();
+        await expect(page.getByText("Checkout details saved.", { exact: true })).toBeVisible();
+        const detailsResponses = responses.filter((response) => response.kind === "details");
+        assert(detailsResponses.length >= 3);
+        assert(
+          detailsResponses.every(
+            (response) => [200, 201].includes(response.status) && response.noStore,
+          ),
+        );
+        await page.getByLabel("Tip (CAD)", { exact: true }).fill("0");
+        let droppedFirstSessionResponse = false;
+        await page.route("**/api/v1/carts/*/checkout-sessions", async (route) => {
+          const request = route.request();
+          const requestHeaders = await request.allHeaders();
+          // Chromium's intercepted Fetch omits this browser-controlled metadata in the local lab.
+          const headers = { ...requestHeaders, "sec-fetch-site": "same-origin" };
+          if (droppedFirstSessionResponse) return route.continue({ headers });
+          droppedFirstSessionResponse = true;
+          const response = await route.fetch({ headers });
+          responses.push({
+            kind: "checkout-session-first-response-dropped",
+            status: response.status(),
+            noStore: response.headers()["cache-control"] === "no-store",
+            request: {
+              method: request.method(),
+              contentType: requestHeaders["content-type"],
+              origin: requestHeaders.origin,
+              fetchSite: requestHeaders["sec-fetch-site"],
+              idempotencyKeyValid:
+                /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+                  requestHeaders["idempotency-key"] ?? "",
+                ),
+              csrfPresent: typeof requestHeaders["x-csrf-token"] === "string",
+              guestCookiePresent: (requestHeaders.cookie ?? "").includes("__Host-bop-guest="),
+              bodyKeys: Object.keys(request.postDataJSON() ?? {}).sort(),
+            },
+            ...(response.status() >= 400
+              ? { error: (await response.json().catch(() => null))?.error?.code ?? "unknown" }
+              : {}),
+          });
+          await route.abort();
+        });
+        const continueButton = page.getByRole("button", {
+          name: "Continue to payment",
+          exact: true,
+        });
+        await expect(continueButton)
+          .toBeEnabled({ timeout: 3_000 })
+          .catch(async () => {
+            throw new Error(
+              JSON.stringify({
+                stage: "checkout-session-not-ready",
+                disabled: await continueButton.isDisabled(),
+                alerts: await page.getByRole("alert").allTextContents(),
+                statuses: await page.getByRole("status").allTextContents(),
+                checkout: (await page.locator("main").innerText()).slice(-1600),
+              }),
+            );
+          });
+        await continueButton.click();
         await expect(
-          page.getByRole("heading", { name: "Your cart is empty", exact: true }),
+          page.getByText("We could not confirm checkout. Retry to recover the same checkout.", {
+            exact: true,
+          }),
         ).toBeVisible();
+        await page.getByRole("button", { name: "Retry checkout", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "Secure payment", exact: true }))
+          .toBeVisible()
+          .catch(async () => {
+            throw new Error(
+              JSON.stringify({
+                stage: "checkout-session",
+                responses,
+                owner: pickup.diagnostics,
+                checkoutFailures: pickup.checkoutSessionFailures,
+                checkoutStages: pickup.checkoutStages,
+                alerts: await page.getByRole("alert").allTextContents(),
+              }),
+            );
+          });
+        await page.unroute("**/api/v1/carts/*/checkout-sessions");
+        await expect(
+          page.getByRole("heading", { name: "Online payment is unavailable", exact: true }),
+        ).toBeVisible();
+        const sessionResponses = responses.filter(
+          (response) => response.kind === "checkout-session",
+        );
+        const droppedSessionResponse = responses.find(
+          (response) => response.kind === "checkout-session-first-response-dropped",
+        );
+        assert(droppedSessionResponse);
+        assert([200, 201].includes(droppedSessionResponse.status));
+        assert(droppedSessionResponse.noStore);
+        assert(sessionResponses.length >= 1);
+        assert(
+          sessionResponses.every(
+            (response) => [200, 201].includes(response.status) && response.noStore,
+          ),
+        );
+        assert.equal(
+          responses.filter((response) => response.kind === "payment-or-order-write").length,
+          0,
+        );
         await pickup.verify(++journeys);
+        await pickup.verifyCheckoutDetails(journeys);
+        await pickup.verifyCheckoutSessions(journeys);
         assert.equal((await context.request.get(origin + "/ready")).status(), 503);
         assert(new URL(page.url()).hash === "");
         assert(new URL(page.url()).search === "");

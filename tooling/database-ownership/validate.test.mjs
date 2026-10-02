@@ -112,6 +112,198 @@ afterEach(async () =>
 );
 
 describe("Database Schema Ownership Architecture Test", () => {
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "driver",
+    "path",
+    "option_set",
+    "option_set_version",
+    "option",
+    "option_conflict",
+    "option_set_operation_record",
+    "option_set_draft_content_snapshot",
+  ])("bounds full Option Draft asset: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      [
+        "option_set",
+        "option_set_version",
+        "option",
+        "option_conflict",
+        "option_set_operation_record",
+        "option_set_draft_content_snapshot",
+      ].filter((t) => t !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-option-store.ts" : "option-set-full-draft-store.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export {pg};\n'
+        : "export const synthetic=true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each(["valid", "owner", "schema", "path", "driver", "table"])(
+    "bounds WP-2421 content registry asset: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "catalog",
+        changed === "schema" ? "rms_other" : "rms_catalog",
+        changed === "table" ? [] : ["product_content_registry_record"],
+      );
+      const asset = join(
+        context.moduleRoot,
+        "src/infrastructure/persistence/",
+        changed === "path" ? "other-registry-store.ts" : "product-content-registry-store.ts",
+      );
+      await mkdir(dirname(asset), { recursive: true });
+      await writeFile(
+        asset,
+        changed === "driver"
+          ? 'import pg from "pg"; export {pg};\n'
+          : "export const synthetic=true;\n",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "menu_reference_generation",
+    "menu_review_content",
+    "menu_publication_revision",
+    "menu_publication_release",
+    "menu_release_effective_period",
+  ])("bounds WP-2415 Menu source asset: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      [
+        "menu_reference_generation",
+        "menu_review_content",
+        "menu_publication_revision",
+        "menu_publication_release",
+        "menu_release_effective_period",
+      ].filter((table) => table !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-store.ts" : "menu-reference-source-store.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export { pg };\n'
+        : "export const synthetic=true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "bundle_reference_generation",
+    "bundle",
+    "bundle_version",
+    "bundle_component_group",
+    "bundle_component_sellable",
+  ])("bounds WP-2414 Bundle source asset: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      [
+        "bundle_reference_generation",
+        "bundle",
+        "bundle_version",
+        "bundle_component_group",
+        "bundle_component_sellable",
+      ].filter((table) => table !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-store.ts" : "bundle-reference-source-store.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export { pg };\n'
+        : "export const synthetic=true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "availability_rule",
+    "availability_reference_generation",
+  ])("bounds WP-2413 Availability source asset: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      ["availability_rule", "availability_reference_generation"].filter(
+        (table) => table !== changed,
+      ),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-store.ts" : "availability-reference-source-store.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export { pg };\n'
+        : "export const synthetic = true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
   it("registers the default-denied platform helper schema under migration authority", () => {
     expect(platformSource).toContain('schema: "platform_helpers"');
     expect(platformSource).toContain('technicalOwner: "shared-infrastructure/helpers"');
@@ -843,6 +1035,34 @@ describe("Database Schema Ownership Architecture Test", () => {
       else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
     },
   );
+  it.each(["valid", "owner", "schema", "driver", "path", "control_version", "control_dependency"])(
+    "bounds WP-2406 administration reader admission: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "BOP",
+        changed === "owner" ? "other-owner" : "feature-control",
+        changed === "schema" ? "rms_other" : "bop_feature_control",
+        ["control_version", "control_dependency"].filter((table) => table !== changed),
+      );
+      const asset = join(
+        context.moduleRoot,
+        "src/infrastructure/persistence/",
+        changed === "path" ? "other-store.ts" : "administration-query-store.ts",
+      );
+      await mkdir(dirname(asset), { recursive: true });
+      await writeFile(
+        asset,
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };\n'
+          : "export const synthetic = true;\n",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
   it.each(["valid", "owner", "schema", "driver", "path", "product", "product_version", "sku"])(
     "bounds WP-2402 current SKU reader admission: %s",
     async (changed) => {
@@ -870,6 +1090,142 @@ describe("Database Schema Ownership Architecture Test", () => {
       else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
     },
   );
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "driver",
+    "path",
+    "product_search_generation",
+    "product_search_row",
+    "product_search_activation",
+    "product_source_head",
+  ])("bounds WP-2407 Product list reader admission: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      [
+        "product_search_generation",
+        "product_search_row",
+        "product_search_activation",
+        "product_source_head",
+      ].filter((table) => table !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-store.ts" : "product-list-query-store.ts",
+    );
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export { pg };\n'
+        : "export const synthetic = true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "driver",
+    "path",
+    "product_source_head",
+    "product_source_commit",
+    "product_operation_record",
+  ])("bounds WP-2407 Product source producer admission: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      ["product_source_head", "product_source_commit", "product_operation_record"].filter(
+        (table) => table !== changed,
+      ),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-store.ts" : "product-source-producer.ts",
+    );
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export { pg };\n'
+        : "export const synthetic = true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "driver",
+    "path",
+    "product",
+    "product_version",
+    "product_version_category_assignment",
+    "sku",
+    "product_source_head",
+    "product_source_commit",
+    "product_operation_snapshot",
+    "product_option_binding",
+    "product_option_binding_option",
+    "product_option_binding_sku_scope",
+    "product_option_binding_channel",
+    "product_search_generation",
+    "product_search_row",
+    "product_search_activation",
+  ])("bounds WP-2407 Product generation builder admission: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      [
+        "product",
+        "product_version",
+        "product_version_category_assignment",
+        "sku",
+        "product_source_head",
+        "product_source_commit",
+        "product_operation_snapshot",
+        "product_option_binding",
+        "product_option_binding_option",
+        "product_option_binding_sku_scope",
+        "product_option_binding_channel",
+        "product_search_generation",
+        "product_search_row",
+        "product_search_activation",
+      ].filter((table) => table !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-store.ts" : "product-search-generation-store.ts",
+    );
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export { pg };\n'
+        : "export const synthetic = true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
 
   it.each([
     "valid",
@@ -2276,6 +2632,177 @@ describe("Database Schema Ownership Architecture Test", () => {
     );
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "recipe",
+    "recipe_version",
+    "recipe_scope_binding",
+    "recipe_modifier_version",
+    "recipe_reference_generation",
+    "recipe_reference_binding",
+  ])("keeps Recipe Catalog reference admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other" : "recipe",
+      changed === "schema" ? "rms_other" : "rms_recipe",
+      [
+        "recipe",
+        "recipe_version",
+        "recipe_scope_binding",
+        "recipe_modifier_version",
+        "recipe_reference_generation",
+        "recipe_reference_binding",
+      ].filter((t) => t !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/" +
+        (changed === "path" ? "other.ts" : "recipe-reference-source-store.ts"),
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver" ? 'import pg from "pg"; export {pg};' : "export const synthetic = true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "recipe",
+    "recipe_version",
+    "recipe_ingredient_requirement",
+    "recipe_modifier_version",
+    "recipe_reference_generation",
+  ])("keeps Recipe Inventory reference admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other" : "recipe",
+      changed === "schema" ? "rms_other" : "rms_recipe",
+      [
+        "recipe",
+        "recipe_version",
+        "recipe_ingredient_requirement",
+        "recipe_modifier_version",
+        "recipe_reference_generation",
+      ].filter((t) => t !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/" +
+        (changed === "path" ? "other.ts" : "recipe-inventory-reference-source-store.ts"),
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver" ? 'import pg from "pg"; export {pg};' : "export const synthetic = true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "inventory_item",
+    "inventory_item_version",
+    "inventory_item_operation",
+    "configuration_reference_generation",
+  ])("keeps Inventory configuration reference admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other" : "inventory",
+      changed === "schema" ? "rms_other" : "rms_inventory",
+      [
+        "inventory_item",
+        "inventory_item_version",
+        "inventory_item_operation",
+        "configuration_reference_generation",
+      ].filter((t) => t !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/" +
+        (changed === "path" ? "other.ts" : "configuration-reference-source-store.ts"),
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver" ? 'import pg from "pg"; export {pg};' : "export const synthetic = true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  describe.each(["inventory-sku-mapping-store.ts", "sku-mapping-reference-source-store.ts"])(
+    "exact Inventory mapping asset %s",
+    (assetName) => {
+      it.each([
+        "valid",
+        "owner",
+        "schema",
+        "path",
+        "driver",
+        "inventory_item",
+        "inventory_item_version",
+        "inventory_item_operation",
+        "item_sku_mapping_version",
+        "configuration_reference_generation",
+      ])("keeps admission bounded: %s", async (changed) => {
+        const root = await fixture();
+        const context = await writeModule(
+          root,
+          "RMS",
+          changed === "owner" ? "other" : "inventory",
+          changed === "schema" ? "rms_other" : "rms_inventory",
+          [
+            "inventory_item",
+            "inventory_item_version",
+            "inventory_item_operation",
+            "item_sku_mapping_version",
+            "configuration_reference_generation",
+          ].filter((table) => table !== changed),
+        );
+        const asset = join(
+          context.moduleRoot,
+          "src/infrastructure/persistence/" + (changed === "path" ? "other.ts" : assetName),
+        );
+        await mkdir(dirname(asset), { recursive: true });
+        await writeFile(
+          asset,
+          changed === "driver"
+            ? 'import pg from "pg"; export {pg};'
+            : "export const synthetic = true;",
+        );
+        const codes = await resultCodes(root);
+        if (
+          changed === "valid" ||
+          (assetName === "inventory-sku-mapping-store.ts" &&
+            changed === "configuration_reference_generation")
+        )
+          expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+        else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+      });
+    },
+  );
   it("admits only the Recipe preparation content owner adapter without a driver", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "recipe", "rms_recipe", [
@@ -3415,6 +3942,104 @@ describe("Database Schema Ownership Architecture Test", () => {
       ],
     ],
     [
+      "product-reference-history-source-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_operation_record",
+        "product_operation_snapshot",
+        "product_publication_revision",
+        "product_source_commit",
+      ],
+    ],
+    [
+      "inventory-sku-reference-source-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_version",
+        "sku",
+        "product_version_category_assignment",
+        "product_option_binding",
+        "product_option_binding_option",
+        "product_option_binding_sku_scope",
+        "product_option_binding_channel",
+        "product_source_head",
+      ],
+    ],
+    [
+      "product-pricing-binding-source-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_version",
+        "sku",
+        "product_version_category_assignment",
+        "product_option_binding",
+        "product_option_binding_option",
+        "product_option_binding_sku_scope",
+        "product_option_binding_channel",
+      ],
+    ],
+    [
+      "promotion-reference-source-store.ts",
+      "pricing",
+      ["promotion", "promotion_version", "promotion_eligibility_reference"],
+    ],
+    [
+      "tax-configuration-reference-source-store.ts",
+      "pricing",
+      ["tax_configuration", "tax_configuration_version", "tax_configuration_rule"],
+    ],
+    [
+      "option-price-reference-source-store.ts",
+      "pricing",
+      ["option_price_rule", "option_price_rule_version"],
+    ],
+    [
+      "price-book-reference-source-store.ts",
+      "pricing",
+      ["price_book", "price_book_version", "price_entry"],
+    ],
+    [
+      "product-menu-source-store.ts",
+      "catalog",
+      [
+        "product",
+        "sku",
+        "product_version",
+        "menu_review_content",
+        "menu_publication_revision",
+        "menu_publication_release",
+        "menu_release_effective_period",
+      ],
+    ],
+    [
+      "product-bundle-source-store.ts",
+      "catalog",
+      [
+        "product",
+        "sku",
+        "bundle",
+        "bundle_version",
+        "bundle_component_group",
+        "bundle_component_sellable",
+      ],
+    ],
+    ["product-availability-source-store.ts", "catalog", ["product", "sku", "availability_rule"]],
+    [
+      "menu-category-source-store.ts",
+      "catalog",
+      [
+        "menu",
+        "menu_version",
+        "menu_section",
+        "menu_section_category",
+        "menu_review_content",
+        "menu_publication_revision",
+      ],
+    ],
+    [
       "menu-draft-source.ts",
       "catalog",
       [
@@ -3445,11 +4070,73 @@ describe("Database Schema Ownership Architecture Test", () => {
       ],
     ],
     [
+      "category-repository.ts",
+      "catalog",
+      [
+        "category",
+        "category_operation_record",
+        "category_operation_snapshot",
+        "category_source_head",
+        "category_source_commit",
+      ],
+    ],
+    [
+      "category-source-store.ts",
+      "catalog",
+      [
+        "category",
+        "category_operation_record",
+        "category_operation_snapshot",
+        "category_source_head",
+        "category_source_commit",
+      ],
+    ],
+    [
+      "category-source-consumer.ts",
+      "catalog",
+      [
+        "category",
+        "category_operation_record",
+        "category_operation_snapshot",
+        "category_source_head",
+        "category_source_commit",
+      ],
+    ],
+    [
+      "product-editor-source-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_version",
+        "sku",
+        "product_option_binding",
+        "product_option_binding_option",
+        "product_option_binding_sku_scope",
+        "product_option_binding_channel",
+        "product_version_category_assignment",
+        "product_source_head",
+      ],
+    ],
+    [
+      "product-whole-scope-replacement-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_publication_revision",
+        "product_scope_journal",
+        "product_source_head",
+        "product_source_commit",
+        "product_operation_record",
+        "product_operation_snapshot",
+      ],
+    ],
+    [
       "product-lifecycle-store.ts",
       "catalog",
       [
         "product",
         "product_version",
+        "product_version_category_assignment",
         "sku",
         "product_operation_record",
         "product_operation_snapshot",
@@ -3457,7 +4144,29 @@ describe("Database Schema Ownership Architecture Test", () => {
         "product_option_binding_option",
         "product_option_binding_sku_scope",
         "product_option_binding_channel",
+        "product_publication_revision",
+        "product_source_head",
+        "product_source_commit",
       ],
+    ],
+    [
+      "product-draft-baseline-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_version",
+        "sku",
+        "product_version_category_assignment",
+        "product_option_binding",
+        "product_option_binding_option",
+        "product_option_binding_sku_scope",
+        "product_option_binding_channel",
+      ],
+    ],
+    [
+      "product-category-assignment.ts",
+      "catalog",
+      ["category", "product_version", "product_version_category_assignment"],
     ],
   ])("checks pilot publication adapter %s", async (filename, owner, tables) => {
     for (const changed of ["valid", "owner", "schema", "path", ...tables]) {
@@ -4926,6 +5635,44 @@ describe("Database Schema Ownership Architecture Test", () => {
     "valid",
     "owner",
     "schema",
+    "allergen_registry_version",
+    "allergen_registry_entry",
+    "allergen_source_evidence",
+    "allergen_source_assertion",
+    "recipe_allergen_source_capture",
+    "driver",
+    "path",
+  ])("keeps Catalog Allergen source admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      [
+        "allergen_registry_version",
+        "allergen_registry_entry",
+        "allergen_source_evidence",
+        "allergen_source_assertion",
+        "recipe_allergen_source_capture",
+      ].filter((table) => table !== changed),
+    );
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-source.ts" : "recipe-allergen-coverage-source.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
     "inventory_item",
     "inventory_item_version",
     "inventory_item_operation",
@@ -5073,6 +5820,41 @@ describe("Database Schema Ownership Architecture Test", () => {
     "valid",
     "owner",
     "schema",
+    "recipe_admin_projection",
+    "recipe_admin_projection_generation",
+    "recipe_admin_projection_checkpoint",
+    "driver",
+    "path",
+  ])("keeps Recipe admin query SQL admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "recipe",
+      changed === "schema" ? "rms_other" : "rms_recipe",
+      [
+        "recipe_admin_projection",
+        "recipe_admin_projection_generation",
+        "recipe_admin_projection_checkpoint",
+      ].filter((table) => table !== changed),
+    );
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-writer.ts" : "recipe-admin-query-store.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
     "recipe",
     "recipe_version",
     "recipe_scope_binding",
@@ -5203,6 +5985,94 @@ describe("Database Schema Ownership Architecture Test", () => {
           context.moduleRoot,
           "src/infrastructure/persistence",
           changed === "path" ? "other-writer.ts" : "merchant-organization-source.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each(["valid", "owner", "schema", "table", "driver", "path"])(
+    "keeps Tenant complete Store reference source SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "BOP",
+        changed === "owner" ? "other-owner" : "tenant",
+        changed === "schema" ? "bop_other" : "bop_tenant",
+        changed === "table"
+          ? []
+          : ["brand", "store_reference_generation", "store_reference_projection"],
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "store-reference-source.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each(["valid", "owner", "schema", "table", "driver", "path"])(
+    "keeps selected Tax reference source SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "pricing",
+        changed === "schema" ? "rms_other" : "rms_pricing",
+        changed === "table"
+          ? []
+          : ["tax_configuration", "tax_configuration_version", "tax_configuration_rule"],
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "tax-configuration-reference-source-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each(["valid", "owner", "schema", "table", "driver", "path"])(
+    "keeps Brand Tax reference source SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "pricing",
+        changed === "schema" ? "rms_other" : "rms_pricing",
+        changed === "table" ? [] : ["tax_reference_generation", "tax_reference_scope"],
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "brand-tax-reference-source-store.ts",
         ),
         changed === "driver"
           ? 'import pg from "pg"; export { pg };'
@@ -5878,6 +6748,231 @@ describe("Database Schema Ownership Architecture Test", () => {
         context.moduleRoot,
         "src/infrastructure/persistence",
         changed === "path" ? "other-writer.ts" : "recipe-version-write.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "inventory_item",
+    "inventory_item_version",
+    "inventory_item_operation",
+    "recipe_configuration_source_version",
+    "recipe_configuration_source_capture",
+    "driver",
+    "path",
+  ])("keeps Inventory Recipe configuration source admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "inventory",
+      changed === "schema" ? "rms_other" : "rms_inventory",
+      [
+        "inventory_item",
+        "inventory_item_version",
+        "inventory_item_operation",
+        "recipe_configuration_source_version",
+        "recipe_configuration_source_capture",
+      ].filter((table) => table !== changed),
+    );
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-source.ts" : "recipe-configuration-coverage-source.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "recipe",
+    "recipe_version",
+    "recipe_preparation_content",
+    "recipe_modifier_version",
+    "recipe_scope_binding",
+    "recipe_admin_source_capture",
+    "driver",
+    "path",
+  ])("keeps Recipe owner source coverage admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "recipe",
+      changed === "schema" ? "rms_other" : "rms_recipe",
+      [
+        "recipe",
+        "recipe_version",
+        "recipe_preparation_content",
+        "recipe_modifier_version",
+        "recipe_scope_binding",
+        "recipe_admin_source_capture",
+      ].filter((table) => table !== changed),
+    );
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-source.ts" : "recipe-owner-coverage-source.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "recipe_admin_source_generation",
+    "recipe_admin_source_checkpoint",
+    "recipe_admin_source_binding",
+    "driver",
+    "path",
+  ])("keeps Recipe coverage publication SQL admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "recipe",
+      changed === "schema" ? "rms_other" : "rms_recipe",
+      [
+        "recipe_admin_source_generation",
+        "recipe_admin_source_checkpoint",
+        "recipe_admin_source_binding",
+      ].filter((table) => table !== changed),
+    );
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-writer.ts" : "recipe-coverage-publication-store.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "recipe_admin_core_generation",
+    "recipe_admin_core_row",
+    "recipe_admin_core_checkpoint",
+    "driver",
+    "path",
+  ])("keeps Recipe core publication SQL admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "recipe",
+      changed === "schema" ? "rms_other" : "rms_recipe",
+      [
+        "recipe_admin_core_generation",
+        "recipe_admin_core_row",
+        "recipe_admin_core_checkpoint",
+      ].filter((table) => table !== changed),
+    );
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-writer.ts" : "recipe-core-publication-store.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "recipe_admin_core_checkpoint",
+    "recipe_admin_core_generation",
+    "recipe_admin_core_row",
+    "recipe_admin_source_generation",
+    "driver",
+    "path",
+  ])("keeps Recipe core query admission exact: %s", async (changed) => {
+    const root = await fixture(),
+      context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "recipe",
+        changed === "schema" ? "rms_other" : "rms_recipe",
+        [
+          "recipe_admin_core_checkpoint",
+          "recipe_admin_core_generation",
+          "recipe_admin_core_row",
+          "recipe_admin_source_generation",
+        ].filter((table) => table !== changed),
+      );
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-reader.ts" : "recipe-core-query-store.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "recipe_admin_source_checkpoint",
+    "recipe_admin_source_generation",
+    "recipe_admin_core_checkpoint",
+    "recipe_admin_core_generation",
+    "recipe_admin_core_row",
+    "driver",
+    "path",
+  ])("keeps Recipe rebuild state SQL admission exact: %s", async (changed) => {
+    const root = await fixture(),
+      context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "recipe",
+        changed === "schema" ? "rms_other" : "rms_recipe",
+        [
+          "recipe_admin_source_checkpoint",
+          "recipe_admin_source_generation",
+          "recipe_admin_core_checkpoint",
+          "recipe_admin_core_generation",
+          "recipe_admin_core_row",
+        ].filter((table) => table !== changed),
+      );
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-reader.ts" : "recipe-core-rebuild-state-store.ts",
       ),
       changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
     );
@@ -6630,5 +7725,320 @@ it.each([
   );
   const codes = await resultCodes(root);
   if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+  else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+});
+
+it.each([
+  "isolation",
+  "scope",
+  "combined",
+  "wrong-binding",
+  "extra-binding",
+  "literal-binding",
+  "changed-timeout",
+  "changed-store",
+  "duplicate",
+  "aliased-receiver",
+  "driver",
+])("keeps WP2421 validation candidate setup SQL exact: %s", async (kind) => {
+  const root = await fixture(),
+    context = await writeModule(root, "RMS", "catalog", "rms_catalog", [
+      "product",
+      "product_version",
+      "sku",
+      "product_version_category_assignment",
+      "product_option_binding",
+      "product_option_binding_option",
+      "product_option_binding_sku_scope",
+      "product_option_binding_channel",
+    ]);
+  const isolation = "SELECT current_setting('transaction_isolation') AS isolation",
+    scope =
+      "SELECT set_config('lock_timeout','5000',true),set_config('statement_timeout','60000',true),set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
+    timeout =
+      "SELECT set_config('lock_timeout','5000',true),set_config('statement_timeout','5000',true)";
+  let source;
+  if (kind === "isolation")
+    source = `export const read=tx=>tx.query(${JSON.stringify(isolation)},[]);`;
+  else if (kind === "combined")
+    source = `export const read=(tx,tenant,brand)=>{tx.query(${JSON.stringify(timeout)},[]);tx.query(${JSON.stringify(isolation)},[]);return tx.query(${JSON.stringify(scope)},[tenant,brand]);};`;
+  else if (kind === "duplicate")
+    source = `export const read=tx=>{tx.query(${JSON.stringify(isolation)},[]);return tx.query(${JSON.stringify(isolation)},[]);};`;
+  else if (kind === "driver") source = 'import pg from "pg"; export {pg};';
+  else if (kind === "aliased-receiver")
+    source = `export const read=other=>other.query(${JSON.stringify(isolation)},[]);`;
+  else {
+    const sql =
+      kind === "changed-timeout"
+        ? scope.replace("60000", "0")
+        : kind === "changed-store"
+          ? scope.replace("bop.store_id", "bop.other_id")
+          : scope;
+    const args =
+      kind === "wrong-binding"
+        ? "[brand,tenant]"
+        : kind === "extra-binding"
+          ? "[tenant,brand,actor]"
+          : kind === "literal-binding"
+            ? '["tenant","brand"]'
+            : "[tenant,brand]";
+    source = `export const read=(tx,tenant,brand,actor)=>tx.query(${JSON.stringify(sql)},${args});`;
+  }
+  await writeFile(
+    join(context.moduleRoot, "src/infrastructure/persistence/product-draft-baseline-store.ts"),
+    source,
+  );
+  const codes = await resultCodes(root);
+  if (["isolation", "scope", "combined"].includes(kind))
+    expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+  else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+});
+
+it.each(["timeout", "owner-table", "foreign-table", "dynamic", "alias", "element"])(
+  "keeps WP2409 Draft baseline direct SQL empty: %s",
+  async (kind) => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "catalog", "rms_catalog", [
+      "product",
+      "product_version",
+      "sku",
+      "product_version_category_assignment",
+      "product_option_binding",
+      "product_option_binding_option",
+      "product_option_binding_sku_scope",
+      "product_option_binding_channel",
+    ]);
+    const sql =
+      "SELECT set_config('lock_timeout','5000',true),set_config('statement_timeout','5000',true)";
+    const source =
+      kind === "timeout"
+        ? `export const read=(tx)=>tx.query(${JSON.stringify(sql)},[]);`
+        : kind === "owner-table"
+          ? 'export const read=(tx)=>tx.query("SELECT * FROM rms_catalog.product",[]);'
+          : kind === "foreign-table"
+            ? 'export const read=(tx)=>tx.query("SELECT * FROM rms_inventory.item",[]);'
+            : kind === "dynamic"
+              ? "export const read=(tx,sql)=>tx.query(sql,[]);"
+              : kind === "alias"
+                ? 'export const read=(tx)=>{const q=tx.query;return q("SELECT 1",[]);};'
+                : 'export const read=(tx)=>tx["query"]("SELECT 1",[]);';
+    await writeFile(
+      join(context.moduleRoot, "src/infrastructure/persistence/product-draft-baseline-store.ts"),
+      source,
+    );
+    const codes = await resultCodes(root);
+    if (kind === "timeout") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  },
+);
+
+it.each([
+  "valid",
+  "owner",
+  "schema",
+  "path",
+  "driver",
+  "configuration_reference_generation",
+  "price_book",
+  "option_price_rule",
+  "promotion",
+])("integrated Pricing configuration reference adapter changed %s", async (changed) => {
+  const root = await fixture(),
+    tables = ["configuration_reference_generation", "price_book", "option_price_rule", "promotion"];
+  const context = await writeModule(
+    root,
+    "RMS",
+    changed === "owner" ? "other" : "pricing",
+    changed === "schema" ? "rms_other" : "rms_pricing",
+    tables.filter((t) => t !== changed),
+  );
+  await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+  await writeFile(
+    join(
+      context.moduleRoot,
+      "src/infrastructure/persistence",
+      changed === "path" ? "other.ts" : "configuration-reference-source-store.ts",
+    ),
+    changed === "driver" ? 'import pg from "pg"; export {pg};' : "export const synthetic=true;",
+  );
+  const codes = await resultCodes(root);
+  if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+  else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+});
+
+// WP-2421: finite Inventory-owned current unit source; preserve other rejections.
+it.each([
+  "valid",
+  "owner",
+  "schema",
+  "path",
+  "driver",
+  "inventory_item",
+  "inventory_item_version",
+  "inventory_item_operation",
+  "configuration_reference_generation",
+])("Inventory consumption unit adapter changed %s", async (changed) => {
+  const root = await fixture(),
+    tables = [
+      "inventory_item",
+      "inventory_item_version",
+      "inventory_item_operation",
+      "configuration_reference_generation",
+    ];
+  const context = await writeModule(
+    root,
+    "RMS",
+    changed === "owner" ? "other" : "inventory",
+    changed === "schema" ? "rms_other" : "rms_inventory",
+    tables.filter((t) => t !== changed),
+  );
+  await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+  await writeFile(
+    join(
+      context.moduleRoot,
+      "src/infrastructure/persistence",
+      changed === "path" ? "other.ts" : "option-consumption-unit-source-store.ts",
+    ),
+    changed === "driver" ? 'import pg from "pg"; export {pg};' : "export const synthetic=true;",
+  );
+  const codes = await resultCodes(root);
+  if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+  else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+});
+
+// WP-2421: finite Recipe-owned current yield source; preserve other rejections.
+it.each([
+  "valid",
+  "owner",
+  "schema",
+  "path",
+  "driver",
+  "recipe",
+  "recipe_version",
+  "recipe_scope_binding",
+  "recipe_modifier_version",
+  "recipe_reference_generation",
+  "recipe_reference_binding",
+])("Recipe consumption yield adapter changed %s", async (changed) => {
+  const root = await fixture(),
+    tables = [
+      "recipe",
+      "recipe_version",
+      "recipe_scope_binding",
+      "recipe_modifier_version",
+      "recipe_reference_generation",
+      "recipe_reference_binding",
+    ];
+  const context = await writeModule(
+    root,
+    "RMS",
+    changed === "owner" ? "other" : "recipe",
+    changed === "schema" ? "rms_other" : "rms_recipe",
+    tables.filter((t) => t !== changed),
+  );
+  await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+  await writeFile(
+    join(
+      context.moduleRoot,
+      "src/infrastructure/persistence",
+      changed === "path" ? "other.ts" : "option-consumption-yield-source-store.ts",
+    ),
+    changed === "driver" ? 'import pg from "pg"; export {pg};' : "export const synthetic=true;",
+  );
+  const codes = await resultCodes(root);
+  if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+  else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+});
+
+it.each([
+  "valid",
+  "owner",
+  "schema",
+  "recipe",
+  "recipe_version",
+  "recipe_operation_record",
+  "recipe_review_record",
+  "recipe_measurement_content",
+  "driver",
+  "path",
+])("keeps complete Published V2 graph owner admission exact: %s", async (changed) => {
+  const root = await fixture();
+  const context = await writeModule(
+    root,
+    "RMS",
+    changed === "owner" ? "other-owner" : "recipe",
+    changed === "schema" ? "rms_other" : "rms_recipe",
+    [
+      "recipe",
+      "recipe_version",
+      "recipe_operation_record",
+      "recipe_review_record",
+      "recipe_measurement_content",
+    ].filter((table) => table !== changed),
+  );
+  await writeFile(
+    join(
+      context.moduleRoot,
+      "src/infrastructure/persistence",
+      changed === "path"
+        ? "other-measurement-source.ts"
+        : "current-published-recipe-measurement-graph-source.ts",
+    ),
+    changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+  );
+  const codes = await resultCodes(root);
+  if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+  else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+});
+
+it.each([
+  "valid",
+  "foreign-table",
+  "unbounded",
+  "wrong-brand",
+  "wrong-code",
+  "extra",
+  "outside-candidate",
+  "dynamic",
+  "alias",
+  "duplicate",
+])("keeps WP2421 current candidate code SQL exact: %s", async (kind) => {
+  const root = await fixture(),
+    context = await writeModule(root, "RMS", "catalog", "rms_catalog", [
+      "product",
+      "product_version",
+      "sku",
+      "product_version_category_assignment",
+      "product_option_binding",
+      "product_option_binding_option",
+      "product_option_binding_sku_scope",
+      "product_option_binding_channel",
+    ]);
+  let sql =
+    "SELECT EXISTS(SELECT 1 FROM rms_catalog.product WHERE brand_id=$1 AND product_id=$3 AND internal_code=$2) AS candidate_matches,NOT EXISTS(SELECT 1 FROM rms_catalog.product WHERE brand_id=$1 AND internal_code=$2 AND product_id<>$3) AS internal_code_unique";
+  if (kind === "foreign-table") sql = sql.replaceAll("rms_catalog.product", "rms_inventory.item");
+  if (kind === "unbounded") sql = sql.replace("brand_id=$1 AND ", "");
+  const args =
+    kind === "wrong-brand"
+      ? "[tenant,aggregate.internalCode,aggregate.productReference]"
+      : kind === "wrong-code"
+        ? "[brand,aggregate.productReference,aggregate.internalCode]"
+        : kind === "extra"
+          ? "[brand,aggregate.internalCode,aggregate.productReference,actor]"
+          : "[brand,aggregate.internalCode,aggregate.productReference]";
+  const query = `tx.query(${kind === "dynamic" ? "sql" : JSON.stringify(sql)},${args})`;
+  const body =
+    kind === "alias"
+      ? `const q=tx.query;return q(${JSON.stringify(sql)},${args});`
+      : kind === "duplicate"
+        ? `${query};return ${query};`
+        : `return ${query};`;
+  const source = `export function ${kind === "outside-candidate" ? "createPostgresProductDraftBaselineStore" : "createPostgresProductValidationCandidateSource"}(tx,brand,aggregate,tenant,actor,sql){${body}}`;
+  await writeFile(
+    join(context.moduleRoot, "src/infrastructure/persistence/product-draft-baseline-store.ts"),
+    source,
+  );
+  const codes = await resultCodes(root);
+  if (kind === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
   else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
 });

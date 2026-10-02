@@ -1,4 +1,12 @@
 import {
+  holdProductEditorContent,
+  type ProductEditorContentAuthority,
+} from "../../application/product-editor-content-authority.js";
+import { parseProductPublicationVersion } from "../../contracts/product-publication.js";
+import { catalogProductPublicationEventTypes } from "../../contracts/product-publication-event.js";
+import type { ProductCategoryAssignmentAuthority } from "./product-category-assignment.js";
+import { holdProductSourceBarrier, appendProductSourceCommit } from "./product-source-producer.js";
+import {
   appendAuditRecordInTransaction,
   sha256Hex,
   validateAuditRecord,
@@ -24,14 +32,24 @@ export interface ProductLifecycleTransaction {
     values: readonly unknown[],
   ): Promise<{ rows: readonly Row[]; rowCount?: number | null }>;
 }
-type Store = Pick<CatalogProductRepositoryPort, "load" | "resolveOperation" | "commit">;
+export interface ProductAggregateVersionReader {
+  /** Exact append-only owning receipt, not the current mutable Draft. Null means
+   * no historical version evidence; consumers must not synthesize a baseline.
+   * Caller must hold required parent fields/Phase/purpose leases through COMMIT. */
+  loadAggregateVersion(
+    productReference: string,
+    aggregateVersion: number,
+  ): Promise<ProductAggregate | null>;
+}
+type Store = Pick<CatalogProductRepositoryPort, "load" | "resolveOperation" | "commit"> &
+  ProductAggregateVersionReader;
 const fail = (
   code: ConstructorParameters<typeof CatalogError>[0] = "CATALOG_DEPENDENCY_UNAVAILABLE",
 ): never => {
   throw new CatalogError(code);
 };
-const selectCurrent =
-  "SELECT jsonb_build_object(\n'productReference',p.product_id,'brandReference',p.brand_id,'internalCode',p.internal_code,\n'productType',p.product_type,'lifecycle',p.lifecycle,'aggregateVersion',p.aggregate_version,\n'createdAt',to_char(p.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),\n'createdByActorReference',p.created_by_actor_id,\n'updatedAt',to_char(p.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),\n'draft',jsonb_build_object(\n'versionReference',v.product_version_id,'baseVersionReference',v.base_product_version_id,\n'status',v.status,'defaultLocale',v.default_locale,'localizedNames',v.localized_names_json,\n'taxClassificationReference',v.tax_classification_id,\n'createdAt',to_char(v.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),\n'updatedAt',to_char(v.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),\n'skus',COALESCE((SELECT jsonb_agg(jsonb_build_object(\n'skuReference',s.sku_id,'productReference',s.product_id,'brandReference',s.brand_id,\n'skuCode',s.sku_code,'lifecycle',s.lifecycle,'localizedNames',s.localized_names_json,\n'variantSelections',s.variant_selections_json,'unitOfSale',s.unit_of_sale,'unitQuantity',s.unit_quantity::text,\n'createdAt',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),\n'createdByActorReference',s.created_by_actor_id) ORDER BY s.sku_id)\nFROM rms_catalog.sku s WHERE s.brand_id=p.brand_id AND s.product_id=p.product_id AND s.product_version_id=v.product_version_id),'[]'::jsonb),\n'optionBindings',COALESCE((SELECT jsonb_agg(jsonb_build_object(\n'bindingReference',b.binding_id,'optionSetReference',b.option_set_id,'optionSetVersionReference',b.option_set_version_id,\n'purpose',b.purpose,'sortOrder',b.sort_order,\n'minimumSelectionOverride',b.minimum_selection_override,'maximumSelectionOverride',b.maximum_selection_override,\n'storeOverrideAllowed',b.store_override_allowed,\n'enabledOptionReferences',COALESCE((SELECT jsonb_agg(o.option_id ORDER BY o.option_id) FROM rms_catalog.product_option_binding_option o WHERE o.binding_id=b.binding_id AND o.product_id=b.product_id AND o.brand_id=b.brand_id),'[]'::jsonb),\n'defaultSelections',COALESCE((SELECT jsonb_agg(jsonb_build_object('optionReference',o.option_id,'quantity',o.default_quantity) ORDER BY o.option_id) FROM rms_catalog.product_option_binding_option o WHERE o.binding_id=b.binding_id AND o.product_id=b.product_id AND o.brand_id=b.brand_id AND o.default_quantity IS NOT NULL),'[]'::jsonb),\n'includedSkuReferences',COALESCE((SELECT jsonb_agg(s.sku_id ORDER BY s.sku_id) FROM rms_catalog.product_option_binding_sku_scope s WHERE s.binding_id=b.binding_id AND s.product_id=b.product_id AND s.brand_id=b.brand_id AND s.scope_kind='Include'),'[]'::jsonb),\n'excludedSkuReferences',COALESCE((SELECT jsonb_agg(s.sku_id ORDER BY s.sku_id) FROM rms_catalog.product_option_binding_sku_scope s WHERE s.binding_id=b.binding_id AND s.product_id=b.product_id AND s.brand_id=b.brand_id AND s.scope_kind='Exclude'),'[]'::jsonb),\n'channelCodes',COALESCE((SELECT jsonb_agg(c.channel_code ORDER BY c.channel_code) FROM rms_catalog.product_option_binding_channel c WHERE c.binding_id=b.binding_id AND c.product_id=b.product_id AND c.brand_id=b.brand_id),'[]'::jsonb)\n) ORDER BY b.sort_order,b.binding_id) FROM rms_catalog.product_option_binding b WHERE b.product_id=p.product_id AND b.brand_id=p.brand_id AND b.product_version_id=v.product_version_id),'[]'::jsonb)\n)) snapshot,\n(date_trunc('milliseconds',p.created_at)=p.created_at AND date_trunc('milliseconds',p.updated_at)=p.updated_at\nAND date_trunc('milliseconds',v.created_at)=v.created_at AND date_trunc('milliseconds',v.updated_at)=v.updated_at\nAND NOT EXISTS(SELECT 1 FROM rms_catalog.sku s WHERE s.brand_id=p.brand_id AND s.product_id=p.product_id\nAND date_trunc('milliseconds',s.created_at)<>s.created_at)) precise\nFROM rms_catalog.product p JOIN rms_catalog.product_version v ON v.product_id=p.product_id AND v.brand_id=p.brand_id\nWHERE p.brand_id=$1 AND p.product_id=$2 AND v.status='Draft'";
+export const productSnapshotSelectSql =
+  "SELECT jsonb_build_object(\n'productReference',p.product_id,'brandReference',p.brand_id,'internalCode',p.internal_code,\n'productType',p.product_type,'lifecycle',p.lifecycle,'aggregateVersion',p.aggregate_version,\n'createdAt',to_char(p.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),\n'createdByActorReference',p.created_by_actor_id,\n'updatedAt',to_char(p.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),\n'draft',jsonb_build_object(\n'versionReference',v.product_version_id,'baseVersionReference',v.base_product_version_id,\n'status',v.status,'defaultLocale',v.default_locale,'localizedNames',v.localized_names_json,\n'taxClassificationReference',v.tax_classification_id,\n'createdAt',to_char(v.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),\n'updatedAt',to_char(v.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),\n'skus',COALESCE((SELECT jsonb_agg(jsonb_build_object(\n'skuReference',s.sku_id,'productReference',s.product_id,'brandReference',s.brand_id,\n'skuCode',s.sku_code,'lifecycle',s.lifecycle,'localizedNames',s.localized_names_json,\n'variantSelections',s.variant_selections_json,'unitOfSale',s.unit_of_sale,'unitQuantity',s.unit_quantity::text,\n'createdAt',to_char(s.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),\n'createdByActorReference',s.created_by_actor_id) ORDER BY s.sku_id)\nFROM rms_catalog.sku s WHERE s.brand_id=p.brand_id AND s.product_id=p.product_id AND s.product_version_id=v.product_version_id),'[]'::jsonb),\n'optionBindings',COALESCE((SELECT jsonb_agg(jsonb_build_object(\n'bindingReference',b.binding_id,'optionSetReference',b.option_set_id,'optionSetVersionReference',b.option_set_version_id,\n'purpose',b.purpose,'sortOrder',b.sort_order,\n'minimumSelectionOverride',b.minimum_selection_override,'maximumSelectionOverride',b.maximum_selection_override,\n'storeOverrideAllowed',b.store_override_allowed,\n'enabledOptionReferences',COALESCE((SELECT jsonb_agg(o.option_id ORDER BY o.option_id) FROM rms_catalog.product_option_binding_option o WHERE o.binding_id=b.binding_id AND o.product_id=b.product_id AND o.brand_id=b.brand_id),'[]'::jsonb),\n'defaultSelections',COALESCE((SELECT jsonb_agg(jsonb_build_object('optionReference',o.option_id,'quantity',o.default_quantity) ORDER BY o.option_id) FROM rms_catalog.product_option_binding_option o WHERE o.binding_id=b.binding_id AND o.product_id=b.product_id AND o.brand_id=b.brand_id AND o.default_quantity IS NOT NULL),'[]'::jsonb),\n'includedSkuReferences',COALESCE((SELECT jsonb_agg(s.sku_id ORDER BY s.sku_id) FROM rms_catalog.product_option_binding_sku_scope s WHERE s.binding_id=b.binding_id AND s.product_id=b.product_id AND s.brand_id=b.brand_id AND s.scope_kind='Include'),'[]'::jsonb),\n'excludedSkuReferences',COALESCE((SELECT jsonb_agg(s.sku_id ORDER BY s.sku_id) FROM rms_catalog.product_option_binding_sku_scope s WHERE s.binding_id=b.binding_id AND s.product_id=b.product_id AND s.brand_id=b.brand_id AND s.scope_kind='Exclude'),'[]'::jsonb),\n'channelCodes',COALESCE((SELECT jsonb_agg(c.channel_code ORDER BY c.channel_code) FROM rms_catalog.product_option_binding_channel c WHERE c.binding_id=b.binding_id AND c.product_id=b.product_id AND c.brand_id=b.brand_id),'[]'::jsonb)\n) ORDER BY b.sort_order,b.binding_id) FROM rms_catalog.product_option_binding b WHERE b.product_id=p.product_id AND b.brand_id=p.brand_id AND b.product_version_id=v.product_version_id),'[]'::jsonb)\n) || CASE WHEN v.category_classification_known THEN jsonb_build_object('categoryClassification',jsonb_build_object('categoryReferences',COALESCE((SELECT jsonb_agg(c.category_id ORDER BY c.category_id) FROM rms_catalog.product_version_category_assignment c WHERE c.brand_id=p.brand_id AND c.product_id=p.product_id AND c.product_version_id=v.product_version_id),'[]'::jsonb),'primaryCategoryReference',v.primary_category_id)) ELSE '{}'::jsonb END || CASE WHEN v.editor_content_json IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('editorContent',v.editor_content_json) END) snapshot,\n(date_trunc('milliseconds',p.created_at)=p.created_at AND date_trunc('milliseconds',p.updated_at)=p.updated_at\nAND date_trunc('milliseconds',v.created_at)=v.created_at AND date_trunc('milliseconds',v.updated_at)=v.updated_at\nAND NOT EXISTS(SELECT 1 FROM rms_catalog.sku s WHERE s.brand_id=p.brand_id AND s.product_id=p.product_id\nAND date_trunc('milliseconds',s.created_at)<>s.created_at)) precise\nFROM rms_catalog.product p JOIN rms_catalog.product_version v ON v.product_id=p.product_id AND v.brand_id=p.brand_id\nWHERE p.brand_id=$1 AND p.product_id=$2 AND v.status='Draft'";
 
 /** Lifecycle-only owner adapter: never edits names/units/options or fabricates
  * historical results from the current mutable Draft. Creation/editing use their
@@ -39,6 +57,8 @@ const selectCurrent =
  */
 export function createPostgresProductLifecycleStore(options: {
   brandReference: string;
+  categoryAssignments?: ProductCategoryAssignmentAuthority;
+  editorContentAuthority?: ProductEditorContentAuthority;
   transactions: { run<T>(work: (tx: ProductLifecycleTransaction) => Promise<T>): Promise<T> };
   authorize(
     tx: ProductLifecycleTransaction,
@@ -61,6 +81,8 @@ export function createPostgresProductLifecycleStore(options: {
     await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
       brand,
     ]);
+    await holdProductSourceBarrier(tx, brand);
+    if (record) await holdClassification(tx, options, record.aggregate, "Read");
   };
   const scoped = async <T>(
     product: string | null,
@@ -76,11 +98,12 @@ export function createPostgresProductLifecycleStore(options: {
     tx: ProductLifecycleTransaction,
     product: string,
   ): Promise<ProductAggregate | null> => {
-    const rows = (await tx.query(selectCurrent, [brand, product])).rows;
+    const rows = (await tx.query(productSnapshotSelectSql, [brand, product])).rows;
     if (rows.length === 0) return null;
     if (rows.length !== 1 || !rows[0] || rows[0].precise !== true) return fail();
     const result = parseProductAggregate(rows[0].snapshot);
     if (result.productReference !== product || result.brandReference !== brand) return fail();
+    await holdClassification(tx, options, result, "Read");
     return result;
   };
   const replay = async (
@@ -118,6 +141,7 @@ export function createPostgresProductLifecycleStore(options: {
       aggregate.updatedAt !== row.occurred_at.toISOString()
     )
       return fail();
+    await holdClassification(tx, options, aggregate, "Read");
     return {
       action: row.action_code as CatalogOperationRecord["action"],
       operationReference: parseCatalogReference(operation),
@@ -127,6 +151,98 @@ export function createPostgresProductLifecycleStore(options: {
   };
   return Object.freeze<Store>({
     load: (reference) => scoped(parseCatalogReference(reference), (tx) => load(tx, reference)),
+    loadAggregateVersion(reference, version) {
+      const product = parseCatalogReference(reference);
+      if (!Number.isSafeInteger(version) || version < 1 || version > 2147483647)
+        return fail("CATALOG_INPUT_INVALID");
+      return scoped(product, async (tx) => {
+        const rows = (
+          await tx.query(
+            "SELECT operation_id,action_code FROM rms_catalog.product_operation_record WHERE brand_id=$1 AND product_id=$2 AND result_aggregate_version=$3 ORDER BY operation_id LIMIT 2",
+            [brand, product, version],
+          )
+        ).rows;
+        if (!Array.isArray(rows)) return fail();
+        if (rows.length === 0) return null;
+        if (rows.length !== 1 || !rows[0]) return fail();
+        try {
+          // Original operations/snapshots cannot mutate. Read in this exact held
+          // transaction without taking an older operation lock after a Product lock.
+          const operation = parseCatalogReference(rows[0].operation_id);
+          if (rows[0].action_code === "ProductPublication") {
+            // Publication produces the successor Draft in this same owning
+            // namespace. Version reads admit its exact append-only receipt;
+            // legacy operation replay still refuses publication commands.
+            const receipts = (
+              await tx.query(
+                "SELECT CASE WHEN octet_length(s.snapshot_json::text)<=8388608 THEN s.snapshot_json END aggregate,p.snapshot_json publication,p.tenant_id,p.action_code,p.occurred_at publication_time,p.intent_digest publication_intent,c.event_type,c.snapshot_digest,(r.action_code='ProductPublication' AND r.intent_digest=p.intent_digest AND r.result_aggregate_version=s.result_aggregate_version AND r.occurred_at=s.occurred_at AND p.result_aggregate_version=s.result_aggregate_version AND p.source_aggregate_version=s.result_aggregate_version-1 AND p.occurred_at=s.occurred_at AND c.result_aggregate_version=s.result_aggregate_version AND c.occurred_at=s.occurred_at AND c.source_revision<=h.source_revision AND p.tenant_id::text=current_setting('bop.tenant_id',true) AND p.snapshot_json->>'versionReference'=p.product_version_id::text AND p.snapshot_json->'publicationVersion'=to_jsonb(p.publication_version) AND p.snapshot_json->>'state'=p.state AND p.snapshot_json->>'actorReference'=c.actor_id::text) coherent FROM rms_catalog.product_operation_record r JOIN rms_catalog.product_operation_snapshot s ON s.operation_id=r.operation_id AND s.brand_id=r.brand_id AND s.product_id=r.product_id JOIN rms_catalog.product_publication_revision p ON p.operation_id=r.operation_id AND p.brand_id=r.brand_id AND p.product_id=r.product_id JOIN rms_catalog.product_source_commit c ON c.operation_id=r.operation_id AND c.brand_id=r.brand_id AND c.product_id=r.product_id JOIN rms_catalog.product_source_head h ON h.brand_id=r.brand_id WHERE r.brand_id=$1 AND r.product_id=$2 AND r.operation_id=$3 AND r.result_aggregate_version=$4 LIMIT 2",
+                [brand, product, operation, version],
+              )
+            ).rows;
+            if (receipts.length !== 1 || receipts[0]?.coherent !== true) return fail();
+            const receipt = receipts[0];
+            const aggregate = parseProductAggregate(receipt.aggregate),
+              publication = parseProductPublicationVersion(receipt.publication),
+              action = receipt.action_code as keyof typeof catalogProductPublicationEventTypes;
+            if (
+              aggregate.brandReference !== brand ||
+              aggregate.productReference !== product ||
+              aggregate.aggregateVersion !== version ||
+              publication.tenantReference !== receipt.tenant_id ||
+              publication.brandReference !== brand ||
+              publication.productReference !== product ||
+              publication.operationReference !== operation ||
+              publication.productAggregateVersion + 1 !== version ||
+              publication.occurredAt !== aggregate.updatedAt ||
+              !(receipt.publication_time instanceof Date) ||
+              publication.occurredAt !== receipt.publication_time.toISOString() ||
+              publication.intentDigest !== receipt.publication_intent ||
+              receipt.snapshot_digest !== "sha256:" + sha256Hex(canonicalizeRfc8785(aggregate)) ||
+              !Object.hasOwn(catalogProductPublicationEventTypes, action) ||
+              receipt.event_type !== catalogProductPublicationEventTypes[action] ||
+              publication.state !==
+                (
+                  {
+                    Validate: "Draft",
+                    SubmitReview: "InReview",
+                    Approve: "Approved",
+                    Reject: "Draft",
+                    Publish: "Published",
+                    SchedulePublish: "Scheduled",
+                    ReschedulePublish: "Scheduled",
+                    CancelScheduledPublish: "Draft",
+                    ActivateScheduled: "Published",
+                    Supersede: "Superseded",
+                  } as const
+                )[action] ||
+              (publication.actorKind === "System") !==
+                (action === "ActivateScheduled" || action === "Supersede") ||
+              (publication.state === "Published"
+                ? aggregate.draft.versionReference !== publication.successorDraftVersionReference
+                : publication.state !== "Superseded" &&
+                  aggregate.draft.versionReference !== publication.versionReference)
+            )
+              return fail();
+            await allowed(tx, product);
+            await holdClassification(tx, options, aggregate, "Read");
+            return aggregate;
+          }
+          const record = await replay(tx, operation);
+          if (
+            !record ||
+            record.aggregate.productReference !== product ||
+            record.aggregate.brandReference !== brand ||
+            record.aggregate.aggregateVersion !== version
+          )
+            return fail();
+          return record.aggregate;
+        } catch (error) {
+          if (error instanceof CatalogError && error.code === "CATALOG_INPUT_INVALID")
+            return fail();
+          throw error;
+        }
+      });
+    },
     resolveOperation: (reference) =>
       scoped(null, async (tx) => {
         const operation = parseCatalogReference(reference);
@@ -267,6 +383,7 @@ export function createPostgresProductLifecycleStore(options: {
             ],
           );
           await appendAuditRecordInTransaction(tx, audit);
+          await appendProductSourceCommit(tx, record, audit, current);
           await allowed(tx, aggregate.productReference, record);
           const saved = await load(tx, aggregate.productReference);
           if (canonicalizeRfc8785(saved) !== canonicalizeRfc8785(aggregate)) return fail();
@@ -301,6 +418,8 @@ export function createPostgresProductCreationStore(
     await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
       brand,
     ]);
+    await holdProductSourceBarrier(tx, brand);
+    if (record) await holdClassification(tx, options, record.aggregate, "Read");
   };
   const codes = async (
     tx: ProductLifecycleTransaction,
@@ -411,6 +530,7 @@ export function createPostgresProductCreationStore(
         if (await reader.load(aggregate.productReference)) return fail("CATALOG_CODE_CONFLICT");
         await tx.query("SAVEPOINT catalog_product_create", []);
         try {
+          await holdClassification(tx, options, aggregate, "Write");
           await tx.query(
             "INSERT INTO rms_catalog.product(product_id,brand_id,internal_code,product_type,lifecycle,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES($1,$2,$3,$4,'Draft',1,$5,$6,$5)",
             [
@@ -424,7 +544,7 @@ export function createPostgresProductCreationStore(
           );
           const draft = aggregate.draft;
           await tx.query(
-            "INSERT INTO rms_catalog.product_version(product_version_id,product_id,brand_id,base_product_version_id,status,default_locale,localized_names_json,tax_classification_id,created_at,updated_at) VALUES($1,$2,$3,NULL,'Draft',$4,$5,$6,$7,$7)",
+            "INSERT INTO rms_catalog.product_version(product_version_id,product_id,brand_id,base_product_version_id,status,default_locale,localized_names_json,tax_classification_id,created_at,updated_at,category_classification_known,primary_category_id,editor_content_json) VALUES($1,$2,$3,NULL,'Draft',$4,$5,$6,$7,$7,$8,$9,$10)",
             [
               draft.versionReference,
               aggregate.productReference,
@@ -433,8 +553,16 @@ export function createPostgresProductCreationStore(
               JSON.stringify(draft.localizedNames),
               draft.taxClassificationReference,
               aggregate.createdAt,
+              draft.categoryClassification !== undefined,
+              draft.categoryClassification?.primaryCategoryReference ?? null,
+              draft.editorContent === undefined ? null : JSON.stringify(draft.editorContent),
             ],
           );
+          for (const category of draft.categoryClassification?.categoryReferences ?? [])
+            await tx.query(
+              "INSERT INTO rms_catalog.product_version_category_assignment(product_version_id,product_id,brand_id,category_id) VALUES($1,$2,$3,$4)",
+              [draft.versionReference, aggregate.productReference, brand, category],
+            );
           for (const sku of draft.skus) {
             await tx.query(
               "INSERT INTO rms_catalog.sku(sku_id,product_id,brand_id,product_version_id,sku_code,lifecycle,localized_names_json,variant_selections_json,variant_digest,unit_of_sale,unit_quantity,created_at,created_by_actor_id) VALUES($1,$2,$3,$4,$5,'Draft',$6,$7,$8,$9,$10,$11,$12)",
@@ -469,6 +597,7 @@ export function createPostgresProductCreationStore(
             ],
           );
           await appendAuditRecordInTransaction(tx, audit);
+          await appendProductSourceCommit(tx, record, audit, null);
           await allowed(tx, aggregate.productReference, record);
           const saved = await reader.load(aggregate.productReference);
           const ordered = (value: ProductAggregate | null) =>
@@ -513,6 +642,10 @@ export function createPostgresProductDraftStore(
     await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
       brand,
     ]);
+    await holdProductSourceBarrier(tx, brand);
+    // The incoming record can be a prospective candidate. Persisted reads are
+    // admitted by reader.load/resolveOperation; candidate content is held as
+    // DraftWrite below, after the actual current-root checks and before CAS.
   };
   const existing = createPostgresProductLifecycleStore(options);
   const variantKey = (sku: ProductAggregate["draft"]["skus"][number]) =>
@@ -532,8 +665,9 @@ export function createPostgresProductDraftStore(
   };
   return Object.freeze({
     load: existing.load,
+    loadAggregateVersion: existing.loadAggregateVersion,
     resolveOperation: existing.resolveOperation,
-    async commit(input) {
+    async commit(input: Parameters<CatalogProductRepositoryPort["commit"]>[0]) {
       const aggregate = parseProductAggregate(input.record.aggregate);
       const operation = parseCatalogReference(input.record.operationReference);
       const intent = parseCatalogHash(input.record.operationIntentHash);
@@ -580,6 +714,11 @@ export function createPostgresProductDraftStore(
         ]);
         const current = await reader.load(aggregate.productReference);
         if (
+          current?.draft.editorContent !== undefined &&
+          aggregate.draft.editorContent === undefined
+        )
+          return fail("CATALOG_INPUT_INVALID");
+        if (
           !current ||
           !Number.isSafeInteger(input.expectedAggregateVersion) ||
           current.aggregateVersion !== input.expectedAggregateVersion ||
@@ -620,8 +759,8 @@ export function createPostgresProductDraftStore(
               old.createdByActorReference !== sku.createdByActorReference
             )
               return fail("CATALOG_INPUT_INVALID");
-            if (old.lifecycle !== sku.lifecycle)
-              transitionCatalogLifecycle(old.lifecycle, sku.lifecycle);
+            // Draft configuration cannot perform an action-only SKU transition.
+            if (old.lifecycle !== sku.lifecycle) return fail("CATALOG_INPUT_INVALID");
           } else if (
             sku.lifecycle !== "Draft" ||
             sku.createdAt !== aggregate.updatedAt ||
@@ -637,6 +776,13 @@ export function createPostgresProductDraftStore(
         if (available.rows[0]?.available !== true) return fail("CATALOG_CODE_CONFLICT");
         await tx.query("SAVEPOINT catalog_product_draft", []);
         try {
+          if (
+            current.draft.categoryClassification !== undefined &&
+            draft.categoryClassification === undefined
+          )
+            return fail("CATALOG_INPUT_INVALID");
+          await holdClassification(tx, options, aggregate, "Write");
+
           const updated = await tx.query(
             "UPDATE rms_catalog.product SET aggregate_version=$3,updated_at=$4 WHERE brand_id=$1 AND product_id=$2 AND aggregate_version=$5",
             [
@@ -717,7 +863,7 @@ export function createPostgresProductDraftStore(
               );
           }
           const version = await tx.query(
-            "UPDATE rms_catalog.product_version SET base_product_version_id=$4,default_locale=$5,localized_names_json=$6,tax_classification_id=$7,updated_at=$8 WHERE brand_id=$1 AND product_id=$2 AND product_version_id=$3 AND status='Draft'",
+            "UPDATE rms_catalog.product_version SET base_product_version_id=$4,default_locale=$5,localized_names_json=$6,tax_classification_id=$7,updated_at=$8,category_classification_known=$9,primary_category_id=$10,editor_content_json=$11 WHERE brand_id=$1 AND product_id=$2 AND product_version_id=$3 AND status='Draft'",
             [
               brand,
               aggregate.productReference,
@@ -727,9 +873,22 @@ export function createPostgresProductDraftStore(
               JSON.stringify(draft.localizedNames),
               draft.taxClassificationReference,
               draft.updatedAt,
+              draft.categoryClassification !== undefined,
+              draft.categoryClassification?.primaryCategoryReference ?? null,
+              draft.editorContent === undefined ? null : JSON.stringify(draft.editorContent),
             ],
           );
           if (version.rowCount !== 1) return fail("CATALOG_VERSION_CONFLICT");
+          if (draft.categoryClassification !== undefined)
+            await tx.query(
+              "DELETE FROM rms_catalog.product_version_category_assignment WHERE brand_id=$1 AND product_id=$2 AND product_version_id=$3",
+              [brand, aggregate.productReference, draft.versionReference],
+            );
+          for (const category of draft.categoryClassification?.categoryReferences ?? [])
+            await tx.query(
+              "INSERT INTO rms_catalog.product_version_category_assignment(product_version_id,product_id,brand_id,category_id) VALUES($1,$2,$3,$4)",
+              [draft.versionReference, aggregate.productReference, brand, category],
+            );
           for (const binding of draft.optionBindings) {
             await tx.query(
               "INSERT INTO rms_catalog.product_option_binding(binding_id,product_version_id,product_id,brand_id,option_set_id,option_set_version_id,purpose,sort_order,minimum_selection_override,maximum_selection_override,store_override_allowed) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
@@ -799,6 +958,7 @@ export function createPostgresProductDraftStore(
             ],
           );
           await appendAuditRecordInTransaction(tx, audit);
+          await appendProductSourceCommit(tx, record, audit, current);
           await allowed(tx, record);
           const saved = await reader.load(aggregate.productReference);
           if (canonicalizeRfc8785(ordered(saved)) !== canonicalizeRfc8785(ordered(aggregate)))
@@ -813,4 +973,24 @@ export function createPostgresProductDraftStore(
       });
     },
   });
+}
+
+async function holdClassification(
+  tx: ProductLifecycleTransaction,
+  options: {
+    categoryAssignments?: ProductCategoryAssignmentAuthority;
+    editorContentAuthority?: ProductEditorContentAuthority;
+  },
+  aggregate: ProductAggregate,
+  mode: "Read" | "Write",
+) {
+  await holdProductEditorContent(
+    tx,
+    options.editorContentAuthority,
+    aggregate,
+    mode === "Write" ? "DraftWrite" : "Read",
+  );
+  if (aggregate.draft.categoryClassification === undefined) return;
+  if (!options.categoryAssignments) return fail();
+  await options.categoryAssignments.holdUntilTransactionCompletes(tx, { mode, aggregate });
 }

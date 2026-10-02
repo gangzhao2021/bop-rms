@@ -29,7 +29,10 @@ const command = {
 type Options = Parameters<typeof createMerchantKitchenCommand>[0];
 function setup() {
   const allowed = vi.fn(async () => true);
-  const authorize = vi.fn(async () => ({ sessionReference: id(9) }));
+  const authorize = vi.fn(async () => ({
+    sessionReference: id(9),
+    policy: { code: "NamedKdsOperator" },
+  }));
   const tx = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) };
   const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
   doubles.scope.mockResolvedValue({
@@ -61,6 +64,21 @@ it("authenticates before opening business transactions", async () => {
   expect(s.run).not.toHaveBeenCalled();
   expect(doubles.service).not.toHaveBeenCalled();
 });
+it.each(["WorkforceStandard", "Privileged", undefined])(
+  "rejects a %s session before opening business transactions",
+  async (policyCode) => {
+    const s = setup();
+    s.authorize.mockResolvedValue({
+      sessionReference: id(9),
+      policy: policyCode ? { code: policyCode } : undefined,
+    } as never);
+    await expect(s.operation(s.input)).rejects.toMatchObject({
+      code: "KITCHEN_WORK_PERMISSION_DENIED",
+    });
+    expect(s.run).not.toHaveBeenCalled();
+    expect(doubles.service).not.toHaveBeenCalled();
+  },
+);
 it.each(["actorReference", "brandReference", "storeReference"])(
   "rejects body %s outside current authority",
   async (field) => {

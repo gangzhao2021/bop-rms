@@ -1,3 +1,5 @@
+import { syntheticLifecycleReview } from "../test-support/product-lifecycle-review.mjs";
+import { assertProductSourceCommits } from "../test-support/product-source-commit.mjs";
 import { withProductLifecycleHttp } from "../../../apps/api/test-support/product-lifecycle-http.mjs";
 import { createMerchantProductLifecycleCommand } from "../../../apps/api/src/merchant-product-lifecycle-command.ts";
 import assert from "node:assert/strict";
@@ -34,7 +36,7 @@ it("persists Product and SKU lifecycle with exact immutable replay and atomic Au
         "GRANT USAGE ON SCHEMA rms_catalog,platform_audit,platform_helpers TO " + role,
       );
       await admin.query(
-        "GRANT SELECT ON rms_catalog.product,rms_catalog.product_version,rms_catalog.sku,rms_catalog.product_option_binding,rms_catalog.product_option_binding_option,rms_catalog.product_option_binding_sku_scope,rms_catalog.product_option_binding_channel TO " +
+        "GRANT SELECT ON rms_catalog.product_version_category_assignment,rms_catalog.product,rms_catalog.product_version,rms_catalog.sku,rms_catalog.product_option_binding,rms_catalog.product_option_binding_option,rms_catalog.product_option_binding_sku_scope,rms_catalog.product_option_binding_channel TO " +
           role,
       );
       await admin.query(
@@ -42,6 +44,10 @@ it("persists Product and SKU lifecycle with exact immutable replay and atomic Au
           role,
       );
       await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO " + role);
+      await admin.query("GRANT USAGE ON SCHEMA platform_eventing TO " + role);
+      await admin.query("GRANT INSERT ON platform_eventing.outbox_event TO " + role);
+      await admin.query("GRANT SELECT,INSERT,UPDATE ON rms_catalog.product_source_head TO " + role);
+      await admin.query("GRANT SELECT,INSERT ON rms_catalog.product_source_commit TO " + role);
       await admin.query(
         "GRANT UPDATE(lifecycle,aggregate_version,updated_at) ON rms_catalog.product TO " + role,
       );
@@ -172,6 +178,9 @@ it("persists Product and SKU lifecycle with exact immutable replay and atomic Au
         throw new Error("not a lifecycle port");
       };
       const service = createCatalogProductService({
+        lifecycleReview: {
+          withCurrentReview: async (request, mutate) => mutate(syntheticLifecycleReview(request)),
+        },
         authorization: {
           authorize: async (request) => ({
             tenantContext: tenant,
@@ -237,16 +246,30 @@ it("persists Product and SKU lifecycle with exact immutable replay and atomic Au
           ...activate,
           expectedAggregateVersion: 3,
           targetLifecycle: "Archived",
+          reasonCode: "SYNTHETIC_TEST",
           operationReference: id(32),
         }),
         { code: "CATALOG_LIFECYCLE_CONFLICT" },
       );
-      const counts = async () =>
-        (
+      const counts = async () => {
+        await assertProductSourceCommits(admin);
+        return (
           await admin.query(
             "SELECT (SELECT count(*)::int FROM rms_catalog.product_operation_snapshot) snapshots,(SELECT count(*)::int FROM platform_audit.audit_record) audits,(SELECT count(*)::int FROM rms_catalog.product_operation_record) operations",
           )
         ).rows[0];
+      };
+      assert.deepEqual(await counts(), { snapshots: 2, audits: 2, operations: 2 });
+      await assert.rejects(
+        service.changeLifecycle({
+          ...activate,
+          targetLifecycle: "Suspended",
+          expectedAggregateVersion: 3,
+          operationReference: id(32),
+          reasonCode: "SYNTHETIC_MISMATCH",
+        }),
+        { code: "CATALOG_PERMISSION_DENIED" },
+      );
       assert.deepEqual(await counts(), { snapshots: 2, audits: 2, operations: 2 });
       writeChecks = 0;
       rejectWriteAt = 2;
@@ -255,11 +278,12 @@ it("persists Product and SKU lifecycle with exact immutable replay and atomic Au
           ...activate,
           skuReference: id(5),
           targetLifecycle: "Suspended",
+          reasonCode: "SYNTHETIC_TEST",
           expectedAggregateVersion: 3,
           operationReference: id(32),
           requestedAt: "2026-09-14T08:03:00.000Z",
         }),
-        { code: "CATALOG_DEPENDENCY_UNAVAILABLE" },
+        { code: "CATALOG_PERMISSION_DENIED" },
       );
       assert.deepEqual(await counts(), { snapshots: 2, audits: 2, operations: 2 });
       assert.equal((await store.load(id(1))).aggregateVersion, 3);
@@ -302,6 +326,8 @@ it("persists Product and SKU lifecycle with exact immutable replay and atomic Au
           (await tx.query("SELECT * FROM rms_catalog.product_operation_snapshot", [])).rows.length,
           0,
         );
+        for (const table of ["product_source_head", "product_source_commit"])
+          assert.equal((await tx.query("SELECT * FROM rms_catalog." + table, [])).rows.length, 0);
         await tx.query(
           "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
           [id(2), id(99)],
@@ -320,6 +346,8 @@ it("persists Product and SKU lifecycle with exact immutable replay and atomic Au
         assert.equal(sessionReference, id(700));
         return {
           actorReference: id(3),
+          tenantReference: id(900),
+          selectedStoreReference: id(901),
           context: tenant,
           authorizeAction: async (action) => ({
             effect: httpAllowed ? "Allow" : "Deny",
@@ -337,7 +365,11 @@ it("persists Product and SKU lifecycle with exact immutable replay and atomic Au
           }),
         };
       };
-      const httpCommand = createMerchantProductLifecycleCommand({
+      let reviewCalls = 0,
+        reviewDecision = "Allowed",
+        reviewMissing = false,
+        reviewStaleCommit = false;
+      const httpOptions = {
         merchant: { transactions: runner, now: () => httpTime },
         authentication: {
           authorize: async (input) => {
@@ -347,67 +379,231 @@ it("persists Product and SKU lifecycle with exact immutable replay and atomic Au
           },
         },
         auditReference: (operation) => audit(operation, httpTime).auditId,
-      });
-      await withProductLifecycleHttp(httpCommand, async (post) => {
-        const change = {
-          productReference: id(1),
-          skuReference: id(5),
-          targetLifecycle: "Suspended",
-          expectedAggregateVersion: 3,
-          operationReference: id(40),
-        };
-        const changed = await post(change);
-        assert.equal(changed.status, 200);
-        assert.deepEqual(changed.body, {
-          status: "Applied",
-          productReference: id(1),
-          skuReference: id(5),
-          aggregateVersion: 4,
-          productLifecycle: "Active",
-          skuLifecycle: "Suspended",
+        lifecycleReview: async (_tx, input) => {
+          assert.equal(input.tenantReference, id(900));
+          assert.equal(input.storeReference, id(901));
+          assert.equal(input.sessionReference, id(700));
+          assert.equal(input.actionPermission, "catalog.sku.suspend");
+          reviewCalls++;
+          const evidence = syntheticLifecycleReview(input.request);
+          evidence.decision = reviewDecision;
+          if (reviewMissing) evidence.sources.pop();
+          if (reviewStaleCommit && reviewCalls === 3) evidence.policyVersion = 2;
+          return evidence;
+        },
+        writeAuthority: async (_tx, input) => {
+          assert.equal(input.tenantReference, id(900));
+          assert.equal(input.storeReference, id(901));
+          assert.equal(input.brandReference, tenant.brand.brandReference);
+          assert.equal(input.actorReference, id(3));
+          assert.equal(input.sessionReference, id(700));
+          assert.equal(input.phase, "phase_1");
+          assert.equal(input.screenId, "CAT-SKU-DETAIL");
+          return "Allowed";
+        },
+      };
+      const httpCommand = createMerchantProductLifecycleCommand(httpOptions);
+      await withProductLifecycleHttp(
+        httpCommand,
+        async (post) => {
+          const change = {
+            productReference: id(1),
+            skuReference: id(5),
+            targetLifecycle: "Suspended",
+            expectedAggregateVersion: 3,
+            operationReference: id(40),
+            reasonCode: "SYNTHETIC_LIFECYCLE_CHANGE",
+          };
+          const missingReason = { ...change };
+          delete missingReason.reasonCode;
+          assert.equal((await post(missingReason)).status, 400);
+          const beforeReason = await counts();
+          for (const scope of [
+            { brandReference: id(99), storeReference: id(901) },
+            { brandReference: tenant.brand.brandReference, storeReference: id(902) },
+          ]) {
+            assert.equal((await post(change, scope)).status, 403);
+            assert.deepEqual(await counts(), beforeReason);
+          }
+          await assert.rejects(
+            createMerchantProductLifecycleCommand({ ...httpOptions, lifecycleReview: undefined })({
+              sessionCookie: "synthetic-cookie",
+              csrf: "synthetic-csrf",
+              command: change,
+              expectedScope: {
+                brandReference: tenant.brand.brandReference,
+                storeReference: id(901),
+              },
+            }),
+            { code: "CATALOG_DEPENDENCY_UNAVAILABLE" },
+          );
+          assert.deepEqual(await counts(), beforeReason);
+          for (const decision of [
+            "Blocked",
+            "ApprovalRequired",
+            "WarningAcknowledgementRequired",
+          ]) {
+            reviewDecision = decision;
+            assert.equal((await post(change)).status, 409);
+            assert.deepEqual(await counts(), beforeReason);
+          }
+          reviewDecision = "Allowed";
+          reviewMissing = true;
+          assert.equal((await post(change)).status, 503);
+          assert.deepEqual(await counts(), beforeReason);
+          reviewMissing = false;
+          reviewCalls = 0;
+          reviewStaleCommit = true;
+          assert.equal((await post(change)).status, 409);
+          assert.equal(reviewCalls, 3);
+          assert.deepEqual(await counts(), beforeReason);
+          reviewStaleCommit = false;
+          reviewCalls = 0;
+          const changed = await post(change);
+          assert.equal(changed.status, 200);
+          assert.deepEqual(changed.body, {
+            status: "Applied",
+            productReference: id(1),
+            skuReference: id(5),
+            aggregateVersion: 4,
+            productLifecycle: "Active",
+            skuLifecycle: "Suspended",
+          });
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT reason_code FROM platform_audit.audit_record WHERE audit_id=$1",
+                [audit(change.operationReference, httpTime).auditId],
+              )
+            ).rows[0].reason_code,
+            change.reasonCode,
+          );
+          const impactAudit = (
+            await admin.query(
+              "SELECT after_summary_json FROM platform_audit.audit_record WHERE audit_id=$1",
+              [audit(change.operationReference, httpTime).auditId],
+            )
+          ).rows[0].after_summary_json;
+          assert.equal(
+            impactAudit.lifecycleReviewReference,
+            syntheticLifecycleReview({ activeSkuCount: 1 }).reviewReference,
+          );
+          assert.equal(impactAudit.lifecycleReviewPolicyVersion, 1);
+          const reasonCounts = await counts();
+          assert.equal(reasonCounts.audits, beforeReason.audits + 1);
+          assert.equal((await post({ ...change, reasonCode: "SYNTHETIC_DIFFERENT" })).status, 409);
+          assert.deepEqual(await counts(), reasonCounts);
+          httpTime = "2026-09-15T08:04:00.000Z";
+          reviewDecision = "Blocked";
+          assert.equal((await post(change)).status, 409);
+          assert.deepEqual(await counts(), reasonCounts);
+          reviewDecision = "Allowed";
+          const replay = await post(change);
+          assert.equal(replay.status, 200);
+          assert.deepEqual(replay.body, { ...changed.body, status: "AlreadyApplied" });
+          assert.equal((await post({ ...change, targetLifecycle: "Active" })).status, 409);
+          assert.equal((await post({ ...change, operationReference: id(41) })).status, 409);
+          for (const injected of [
+            { brandReference: id(99) },
+            { actorReference: id(99) },
+            { requestedAt: at },
+            { draft: {} },
+            { expectedAggregateVersion: "4" },
+            { targetLifecycle: "Unknown" },
+            { reasonCode: "" },
+            { reasonCode: "REASON\n" },
+            { reasonCode: "A".repeat(129) },
+            { skuReference: id(999), expectedAggregateVersion: 4, operationReference: id(41) },
+          ]) {
+            const response = await post({ ...change, ...injected });
+            assert.equal(response.status, Object.hasOwn(injected, "skuReference") ? 403 : 400);
+          }
+          httpAllowed = false;
+          assert.equal((await post(change)).status, 403);
+          httpAllowed = true;
+          httpScopeKind = "Store";
+          assert.equal((await post(change)).status, 403);
+          httpScopeKind = "Brand";
+          httpTime = "2026-09-14T08:05:00.000Z";
+          assert.equal(
+            (
+              await post({
+                ...change,
+                operationReference: id(41),
+                expectedAggregateVersion: 4,
+                targetLifecycle: "Active",
+              })
+            ).status,
+            200,
+          );
+          assert.deepEqual(await counts(), { snapshots: 4, audits: 4, operations: 4 });
+          const current = await store.load(id(1));
+          assert.equal(current.aggregateVersion, 5);
+          assert.equal(current.draft.skus[0].lifecycle, "Active");
+          assert.deepEqual(current.draft.optionBindings, original.draft.optionBindings);
+        },
+        { brandReference: tenant.brand.brandReference, storeReference: id(901) },
+      );
+
+      const rootTransitions = [
+        "Suspended",
+        "Active",
+        "Discontinued",
+        "Archived",
+        "Draft",
+        "Active",
+        "Discontinued",
+        "Archived",
+        "Discontinued",
+      ];
+      const rootEvents = [
+        "ProductSuspended",
+        "ProductResumed",
+        "ProductDiscontinued",
+        "ProductArchived",
+        "ProductRestored",
+        "ProductActivated",
+        "ProductDiscontinued",
+        "ProductArchived",
+        "ProductRestored",
+      ];
+      for (let index = 0; index < rootTransitions.length; index++) {
+        const result = await service.changeLifecycle({
+          ...activate,
+          skuReference: null,
+          targetLifecycle: rootTransitions[index],
+          reasonCode: "SYNTHETIC_TEST",
+          expectedAggregateVersion: 5 + index,
+          operationReference: id(50 + index),
+          requestedAt: new Date(Date.parse(at) + (6 + index) * 60000).toISOString(),
         });
-        httpTime = "2026-09-15T08:04:00.000Z";
-        const replay = await post(change);
-        assert.equal(replay.status, 200);
-        assert.deepEqual(replay.body, { ...changed.body, status: "AlreadyApplied" });
-        assert.equal((await post({ ...change, targetLifecycle: "Active" })).status, 409);
-        assert.equal((await post({ ...change, operationReference: id(41) })).status, 409);
-        for (const injected of [
-          { brandReference: id(99) },
-          { actorReference: id(99) },
-          { requestedAt: at },
-          { draft: {} },
-          { expectedAggregateVersion: "4" },
-          { targetLifecycle: "Unknown" },
-          { skuReference: id(999), expectedAggregateVersion: 4, operationReference: id(41) },
-        ]) {
-          const response = await post({ ...change, ...injected });
-          assert.equal(response.status, Object.hasOwn(injected, "skuReference") ? 403 : 400);
-        }
-        httpAllowed = false;
-        assert.equal((await post(change)).status, 403);
-        httpAllowed = true;
-        httpScopeKind = "Store";
-        assert.equal((await post(change)).status, 403);
-        httpScopeKind = "Brand";
-        httpTime = "2026-09-14T08:05:00.000Z";
-        assert.equal(
-          (
-            await post({
-              ...change,
-              operationReference: id(41),
-              expectedAggregateVersion: 4,
-              targetLifecycle: "Active",
-            })
-          ).status,
-          200,
+        assert.equal(result.status, "Applied");
+        const receipts = await assertProductSourceCommits(admin);
+        const receipt = receipts.find((row) => row.operation_id === id(50 + index));
+        assert.equal(receipt.event_type, rootEvents[index]);
+        assert.equal(receipt.payload_json.changedSkuReference, null);
+      }
+      await runner.run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [id(2), id(99)],
         );
-        assert.deepEqual(await counts(), { snapshots: 4, audits: 4, operations: 4 });
-        const current = await store.load(id(1));
-        assert.equal(current.aggregateVersion, 5);
-        assert.equal(current.draft.skus[0].lifecycle, "Active");
-        assert.deepEqual(current.draft.optionBindings, original.draft.optionBindings);
+        for (const table of ["product_source_head", "product_source_commit"])
+          assert.equal((await tx.query("SELECT * FROM rms_catalog." + table, [])).rows.length, 0);
       });
+      await assert.rejects(
+        runner.run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+            [id(99)],
+          );
+          await tx.query(
+            "INSERT INTO rms_catalog.product_source_head(brand_id,source_revision) VALUES($1,1)",
+            [id(2)],
+          );
+        }),
+        { code: "42501" },
+      );
 
       // Legacy metadata alone is not reconstructable history.
       await admin.query(

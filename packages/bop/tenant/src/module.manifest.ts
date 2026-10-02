@@ -23,6 +23,8 @@ const moduleManifestInput = {
       "brand_configuration_version",
       "brand_store_membership_record",
       "store",
+      "store_reference_generation",
+      "store_reference_projection",
       "tenant_administration_operation",
       "tenant_administration_version",
       "tenant_capability_metadata_reference",

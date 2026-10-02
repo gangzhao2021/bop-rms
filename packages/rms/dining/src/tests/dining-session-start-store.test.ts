@@ -73,6 +73,51 @@ describe("WP-2275 scoped Session start storage", () => {
     const { store } = fixture({ rows: [{ session: record().session }] });
     expect(Object.isFrozen(await store.loadSession(id(5)))).toBe(true);
   });
+  it("loads a bounded set of scoped Sessions in requested order", async () => {
+    const second = { ...record().session, diningSessionReference: id(8), tableReference: id(9) };
+    const { store, query } = fixture({
+      rows: [
+        { reference: id(8), session: second },
+        { reference: id(5), session: record().session },
+      ],
+    });
+    const sessions = await store.loadSessions([id(5), id(8), id(7)]);
+    expect(sessions.map((session) => session?.diningSessionReference ?? null)).toEqual([
+      id(5),
+      id(8),
+      null,
+    ]);
+    expect(Object.isFrozen(sessions)).toBe(true);
+    expect(query.mock.calls.at(-1)?.[1]).toEqual([id(1), id(2), id(3), [id(5), id(8), id(7)]]);
+  });
+  it.each([
+    { rows: [{ reference: id(8), session: record().session }] },
+    {
+      rows: [
+        { reference: id(5), session: record().session },
+        { reference: id(5), session: record().session },
+      ],
+    },
+  ])("fails closed on unexpected or duplicate Session batch rows", async ({ rows }) => {
+    const { store } = fixture({ rows });
+    await expect(store.loadSessions([id(5)])).rejects.toMatchObject({
+      code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it("rejects an oversized or duplicate Session batch before reading", async () => {
+    const { store, calls } = fixture({ rows: [] });
+    await expect(
+      store.loadSessions(Array.from({ length: 101 }, (_, index) => id(index + 1))),
+    ).rejects.toThrow();
+    await expect(store.loadSessions([id(5), id(5)])).rejects.toThrow();
+    expect(calls).not.toHaveBeenCalled();
+  });
+  it("does not open a transaction for an empty Session batch", async () => {
+    const { store, calls, query } = fixture({ rows: [] });
+    expect(await store.loadSessions([])).toEqual([]);
+    expect(calls).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+  });
   it("returns null for absence", async () => {
     const { store } = fixture({ rows: [] });
     expect(await store.loadSession(id(5))).toBeNull();

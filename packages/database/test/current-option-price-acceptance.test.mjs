@@ -4,6 +4,7 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresCurrentOptionPriceStore,
+  createPostgresOptionPriceReferenceSourceStore,
   createPostgresCurrentConfiguredQuoteService,
   resolveOptionPrice,
   createOptionPriceRuleSnapshot,
@@ -413,6 +414,148 @@ it("reads current scoped Option prices with exact money, precedence, history and
         ).rows;
       });
       assert.ok(!visible.some((row) => row.option_price_rule_id === foreign.ruleReference));
+      // Source profile reads actual complete owning bindings/history; authority is synthetic.
+      isolation = "READ COMMITTED";
+      let holds = 0,
+        deniedAt = 0,
+        queryCount = 0;
+      afterQuery = async () => {
+        queryCount++;
+      };
+      const impactRequest = {
+        purposeCode: "CATALOG_LIFECYCLE_PRICING_SOURCE_READ",
+        brandReference: scope.brandReference,
+        actorReference: id(9000),
+        operationReference: id(80000),
+        catalogIntentDigest: "sha256:" + "a".repeat(64),
+      };
+      const impact = createPostgresOptionPriceReferenceSourceStore({
+        tenantReference: id(80001),
+        brandReference: scope.brandReference,
+        actorReference: id(9000),
+        transactions: runner,
+        clock: { now: () => new Date().toISOString() },
+        authority: {
+          async holdUntilTransactionCompletes(tx, input) {
+            void tx;
+            assert.equal(input.permission, "pricing.price-book.manage");
+            assert.deepEqual(input.request, impactRequest);
+            if (++holds === deniedAt) throw new Error("synthetic authority denied");
+          },
+        },
+      });
+      const pendingId = id(80200);
+      await admin.query(
+        "INSERT INTO rms_pricing.option_price_rule(option_price_rule_id,brand_id,binding_id,option_id,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES($1,$2,$3,$4,1,$5,$6,$5)",
+        [pendingId, scope.brandReference, id(80201), id(80202), base.createdAt, id(9000)],
+      );
+      const futureFrom = new Date(Date.now() + 86400000).toISOString();
+      await version({
+        ...base,
+        ruleReference: id(80100),
+        versionReference: id(80101),
+        skuReference: id(80102),
+        scopeKind: "StoreGroup",
+        scopeReference: id(80103),
+        effectivePeriod: { timeZone: "UTC", effectiveFrom: utc(futureFrom), effectiveUntil: null },
+      });
+      const snapshot = await impact.loadSnapshot(impactRequest);
+      assert.equal(holds, 2);
+      assert.equal(snapshot.profile, "OptionPriceBindings");
+      assert.equal(snapshot.consistency, "StatementSnapshot");
+      assert.equal(
+        snapshot.roots.length,
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM rms_pricing.option_price_rule WHERE brand_id=$1",
+            [scope.brandReference],
+          )
+        ).rows[0].n,
+      );
+      assert.equal(
+        snapshot.versions.length,
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM rms_pricing.option_price_rule_version WHERE brand_id=$1",
+            [scope.brandReference],
+          )
+        ).rows[0].n,
+      );
+      assert.ok(
+        snapshot.roots.some(
+          (r) => r.ruleReference === pendingId && r.currentVersionReference === null,
+        ),
+      );
+      assert.ok(!snapshot.versions.some((v) => v.ruleReference === pendingId));
+      assert.ok(!snapshot.roots.some((r) => r.ruleReference === foreign.ruleReference));
+      assert.equal(
+        snapshot.versions.find((v) => v.versionReference === base.versionReference)
+          .isCurrentVersion,
+        false,
+      );
+      assert.equal(
+        snapshot.versions.find((v) => v.versionReference === id(62003)).lifecycle,
+        "Draft",
+      );
+      assert.equal(
+        snapshot.versions.find((v) => v.versionReference === id(62002)).temporalStatus,
+        "Expired",
+      );
+      assert.equal(
+        snapshot.versions.find((v) => v.versionReference === id(80101)).temporalStatus,
+        "Future",
+      );
+      assert.equal(
+        snapshot.versions.find((v) => v.versionReference === skuOnly.versionReference).skuReference,
+        id(152),
+      );
+      assert.ok(snapshot.versions.some((v) => v.scopeKind === "Region"));
+      assert.ok(snapshot.versions.some((v) => v.scopeKind === "StoreGroup"));
+      assert.equal(JSON.stringify(snapshot).includes("unitAmount"), false);
+      assert.equal(JSON.stringify(snapshot).includes("includedQuantity"), false);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT has_table_privilege($1,'rms_catalog.product','SELECT') allowed",
+            [role],
+          )
+        ).rows[0].allowed,
+        false,
+      );
+      assert.equal((await impact.loadSnapshot(impactRequest)).digest, snapshot.digest);
+      await version({
+        ...base,
+        ruleReference: id(80300),
+        versionReference: id(80301),
+        lifecycle: "Archived",
+      });
+      const changed = await impact.loadSnapshot(impactRequest);
+      assert.notEqual(changed.digest, snapshot.digest);
+      deniedAt = holds + 1;
+      queryCount = 0;
+      await assert.rejects(impact.loadSnapshot(impactRequest), {
+        code: "OPTION_PRICE_REFERENCE_SOURCE_UNAVAILABLE",
+      });
+      assert.equal(queryCount, 0);
+      deniedAt = holds + 2;
+      await assert.rejects(impact.loadSnapshot(impactRequest), {
+        code: "OPTION_PRICE_REFERENCE_SOURCE_UNAVAILABLE",
+      });
+      deniedAt = 0;
+      assert.equal((await impact.loadSnapshot(impactRequest)).digest, changed.digest);
+      await admin.query(
+        "UPDATE rms_pricing.option_price_rule SET updated_at=created_at+interval '1 microsecond' WHERE option_price_rule_id=$1",
+        [pendingId],
+      );
+      await assert.rejects(impact.loadSnapshot(impactRequest), {
+        code: "OPTION_PRICE_REFERENCE_SOURCE_UNAVAILABLE",
+      });
+      await admin.query(
+        "UPDATE rms_pricing.option_price_rule SET updated_at=created_at WHERE option_price_rule_id=$1",
+        [pendingId],
+      );
+      assert.equal((await impact.loadSnapshot(impactRequest)).digest, changed.digest);
+      afterQuery = async () => undefined;
       assert.equal(active, 0);
     } finally {
       if (created) {

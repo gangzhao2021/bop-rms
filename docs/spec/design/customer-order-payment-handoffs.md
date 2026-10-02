@@ -1,5 +1,9 @@
 # Customer, Order and Payment Handoff Proposals
 
+## Current disposition — 2026-09-29
+
+The sections below retain their original review/proposal scope. DEC-H01/H02, DEC-H03 and DEC-H03-DINING have accepted records; RF-D01–06 are accepted as [PILOT_ORDINARY_REFUND_V1](./pilot-ordinary-refund-policy-proposal.md#decision-record). Source-ready implementation and recorded local journeys are tracked in [the scenario evidence view](./business-scenario-coverage.md#current-scenario-evidence-view). Original AC-H examples are not retroactively executed by later component tests; production and unsupported finality policies still require their own evidence.
+
 ## Status and use
 
 This document belongs to [WP-2224](../work-packages/WP-2224.md). It closes the review artifact,
@@ -264,7 +268,7 @@ approval controls. Those source rules are not all absent or new proposals; the r
 them from unresolved day/window, cumulative-scope and concurrent-approval semantics. Its source
 provenance does not replace the accepted composite Handoff baseline.
 
-**Proposal DEC-H06.** Give the ordinary refund follow-up to Payment, with Ordering/Pricing source
+**Historical proposal DEC-H06; current scope follows accepted RF-D01–06.** Give the ordinary refund follow-up to Payment, with Ordering/Pricing source
 contracts and the [approval routing proposal](approval-and-operating-day.md). Payment owns request,
 claim, Provider observations and financial finality. Ordering owns cancellation/Amendment facts;
 Pricing owns any required allocation/tax calculation from immutable transaction snapshots.
@@ -291,8 +295,8 @@ employee price or browser total is accepted. Return request state and safe recov
    the same balance exclusion contract: confirmed refunds + outstanding claims cannot exceed
    captured money. Conflicting claims cannot independently consume the same refundable remainder.
    This financial balance guard does not define the cumulative approval threshold. The threshold
-   scope, included pending claims and concurrent approval fence remain explicit decisions in
-   [RF-D03/RF-D04](./refund-approval-boundaries.md).
+   scope, included pending claims and concurrent approval fence are resolved by accepted
+   [RF-D03/RF-D04](./pilot-ordinary-refund-policy-proposal.md); implementation must bind those rules to exact owner facts.
 5. Retrieve Provider truth, claim the exact permitted remaining mutation with a stable Provider
    key, then invoke only the original-method port. Reconcile after every possible mutation. Unknown
    retains the claim and operation; it never frees balance for a second refund or reports success.
@@ -301,10 +305,7 @@ employee price or browser total is accepted. Return request state and safe recov
    Event and receipt/Order projection consumers require their own exact follow-up contract.
    Financial confirmation, Operations reconciliation and business-request closure stay distinct.
 
-**Pending boundary decisions DEC-H07.** Use the [refund decision table](./refund-approval-boundaries.md)
-to retain the source-given modes, immutable allocation basis and approval controls, then resolve only
-the remaining precise policy inputs: day boundary, 24-hour anchor, cumulative scope, concurrent
-Pending/Unknown treatment, allocation details, action permissions and approval lifecycle.
+**Accepted refund boundary disposition.** RF-D01–06 resolve Business Date, first confirmed-capture anchor, Order-lifetime cumulative scope, Pending/Unknown inclusion, immutable allocation and independently authorized approval. Use [the accepted policy](./pilot-ordinary-refund-policy-proposal.md), rather than the historical pending table.
 The owning execution WP must bind accepted decisions to exact contracts and acceptance evidence;
 no new threshold, deadline, default approval or live action is authorized here. Terminal Interac
 retains the accepted in-person/reader/Provider-confirmation boundary. Receipt revisions append to
@@ -341,11 +342,9 @@ collaborating execution/finality owners; DEC-H06/H07 to Payment + Ordering/Prici
 DEC-H01/H02 product choices are **accepted in WP-2228**, with the implemented and remaining
 mechanics distinguished above. **DEC-H03 topology is accepted**, with its sole acceptance record
 in [capacity-source-decision.md](./capacity-source-decision.md); producer/composition evidence
-remains required. **DEC-H03-DINING is accepted (2026-09-10), with implementation outstanding**, as recorded in the
+remains required. **DEC-H03-DINING is accepted (2026-09-10), with scoped implementation and recorded local journey evidence in WP-2402**, as recorded in the
 [mode-specific handoff](./capacity-checkout-handoff.md). **DEC-H04/H05 remain proposed source
-decisions**. DEC-H06 still needs its ordinary-refund execution ownership/contract, and DEC-H07
-retains the scoped pending decisions in the [refund boundary record](./refund-approval-boundaries.md),
-not a claim that the available source omitted all refund rules.
+decisions**. DEC-H06/H07 policy boundaries now use accepted RF-D01–06; their historical review labels do not reopen that decision. Exact implementation and release applicability remain in the owning WP and [current scenario view](./business-scenario-coverage.md#current-scenario-evidence-view).
 No named person, additional policy approval, production evidence, new permission or readiness for
 the unresolved handoffs is claimed.
 The next allowed increment is reconciliation and a separately scoped owning implementation brief

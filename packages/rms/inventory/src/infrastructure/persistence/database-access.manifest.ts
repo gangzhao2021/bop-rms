@@ -3,6 +3,22 @@ const databaseAccessManifestInput = {
   module: { moduleName: "inventory", packageName: "@rms/inventory", layer: "RMS" },
   tables: [
     {
+      table: "item_sku_mapping_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "configuration_reference_generation",
+      classification: "projection-read-model",
+      writeOwner: { kind: "projection-builder", id: "@rms/inventory.configuration-reference.v1" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "submission_final_validation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/inventory" },
@@ -42,7 +58,6 @@ const databaseAccessManifestInput = {
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier"],
     },
-
     {
       table: "stock_balance",
       classification: "aggregate-root",
@@ -51,7 +66,6 @@ const databaseAccessManifestInput = {
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier"],
     },
-
     {
       table: "stock_account",
       classification: "aggregate-root",
@@ -60,7 +74,6 @@ const databaseAccessManifestInput = {
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier"],
     },
-
     {
       table: "inventory_item",
       classification: "aggregate-root",
@@ -85,7 +98,174 @@ const databaseAccessManifestInput = {
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
     },
+    {
+      table: "recipe_configuration_source_version",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "recipe_configuration_source_capture",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
   ],
-  accesses: [],
+  accesses: [
+    {
+      id: "inventory-recipe-ingredient-units.read.inventory_item_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item_version" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/recipe-ingredient-unit-source-store.ts",
+    },
+    {
+      id: "inventory-recipe-ingredient-units.read.inventory_item_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item_operation" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/recipe-ingredient-unit-source-store.ts",
+    },
+    {
+      id: "inventory-option-consumption-units.read.inventory_item_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item_version" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/option-consumption-unit-source-store.ts",
+    },
+    {
+      id: "inventory-option-consumption-units.read.inventory_item_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item_operation" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/option-consumption-unit-source-store.ts",
+    },
+    {
+      id: "inventory-sku-mapping-store.read.inventory_item",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/inventory-sku-mapping-store.ts",
+    },
+    {
+      id: "inventory-sku-mapping-store.read.inventory_item_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item_version" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/inventory-sku-mapping-store.ts",
+    },
+    {
+      id: "inventory-sku-mapping-store.read.inventory_item_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item_operation" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/inventory-sku-mapping-store.ts",
+    },
+    {
+      id: "inventory-sku-mapping-store.read.item_sku_mapping_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "item_sku_mapping_version" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/inventory-sku-mapping-store.ts",
+    },
+    {
+      id: "sku-mapping-reference-source-store.read.item_sku_mapping_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "item_sku_mapping_version" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/sku-mapping-reference-source-store.ts",
+    },
+    {
+      id: "sku-mapping-reference-source-store.read.configuration_reference_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "configuration_reference_generation" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/sku-mapping-reference-source-store.ts",
+    },
+    {
+      id: "inventory-sku-mapping.write.item_sku_mapping_version",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "item_sku_mapping_version" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/inventory-sku-mapping-store.ts",
+    },
+    {
+      id: "inventory-configuration-reference.read.inventory_item",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/configuration-reference-source-store.ts",
+    },
+    {
+      id: "inventory-configuration-reference.read.inventory_item_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item_version" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/configuration-reference-source-store.ts",
+    },
+    {
+      id: "inventory-configuration-reference.read.inventory_item_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item_operation" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/configuration-reference-source-store.ts",
+    },
+    {
+      id: "inventory-configuration-reference.read.configuration_reference_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "configuration_reference_generation" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/configuration-reference-source-store.ts",
+    },
+  ],
 } as const;
 export default databaseAccessManifestInput;

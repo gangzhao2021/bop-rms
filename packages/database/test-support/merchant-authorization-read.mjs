@@ -14,7 +14,15 @@ import { createMerchantOrderExceptionAuthorization } from "../../../apps/api/src
 import * as f from "../../bop/permission/src/tests/current-policy.fixture.ts";
 
 /** Isolated synthetic Actor/Tenant facts; session, membership and policy are real SQL. */
-export async function verifyMerchantAuthorizationRead({ admin, client, role }) {
+export async function verifyMerchantAuthorizationRead({
+  admin,
+  client,
+  role,
+  fixtureClock,
+  pickupReady,
+  existingOrganizationFacts = false,
+}) {
+  const clock = fixtureClock ?? { from: f.FROM, at: f.AT, until: f.UNTIL };
   const sessionId = f.uuid("91");
   const cookie = Buffer.alloc(32, 7).toString("base64url");
   const key = Buffer.alloc(32, 92);
@@ -24,11 +32,11 @@ export async function verifyMerchantAuthorizationRead({ admin, client, role }) {
   };
   await admin.query(
     "INSERT INTO bop_membership.membership VALUES ($1,$2,$3,$4,'Active',$5,$6,1,$5,$5)",
-    [f.MEMBERSHIP, f.ACTOR, f.BRAND, f.WORKFORCE, f.FROM, f.UNTIL],
+    [f.MEMBERSHIP, f.ACTOR, f.BRAND, f.WORKFORCE, clock.from, clock.until],
   );
   await admin.query(
     "INSERT INTO bop_membership.store_assignment VALUES ($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6)",
-    [f.STORE_ASSIGNMENT, f.MEMBERSHIP, f.ACTOR, f.BRAND, f.STORE, f.FROM, f.UNTIL],
+    [f.STORE_ASSIGNMENT, f.MEMBERSHIP, f.ACTOR, f.BRAND, f.STORE, clock.from, clock.until],
   );
   await admin.query(
     "INSERT INTO bop_identity.authentication_session (session_id,actor_id,session_selector_hash,csrf_selector_hash,policy_code,status,encrypted_secret,cipher_algorithm,key_reference,encryption_context,authenticated_at,created_at,last_seen_at,idle_expires_at,absolute_expires_at,version) VALUES ($1,$2,decode($3,'hex'),decode($4,'hex'),'WorkforceStandard','Active',$5,'SYNTHETIC_AES_256_GCM','synthetic-test-key','synthetic-test-context',$6,$6,$7,$8,$9,1)",
@@ -38,10 +46,10 @@ export async function verifyMerchantAuthorizationRead({ admin, client, role }) {
       hasher.hash(cookie),
       "b".repeat(64),
       Buffer.alloc(29, 1),
-      f.FROM,
-      f.AT,
-      f.UNTIL,
-      "2026-07-29T00:00:00.000Z",
+      clock.from,
+      clock.at,
+      new Date(Date.parse(clock.at) + 30 * 60 * 1000).toISOString(),
+      new Date(Date.parse(clock.from) + 12 * 60 * 60 * 1000).toISOString(),
     ],
   );
   await admin.query("GRANT USAGE ON SCHEMA bop_identity,bop_membership TO " + role);
@@ -67,29 +75,37 @@ export async function verifyMerchantAuthorizationRead({ admin, client, role }) {
       { code: "23514" },
     );
   }
-  await admin.query(
-    "INSERT INTO bop_tenant.brand VALUES ($1,'SYNTHETIC','Synthetic Brand','en-CA','CAD','Active',1,$2,$2)",
-    [f.BRAND, f.FROM],
-  );
-  await admin.query(
-    "INSERT INTO bop_tenant.store VALUES ($1,$2,'SYNTHETIC_1','Synthetic Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
-    [f.STORE, f.BRAND, f.FROM],
-  );
+  if (!existingOrganizationFacts) {
+    await admin.query(
+      "INSERT INTO bop_tenant.brand VALUES ($1,'SYNTHETIC','Synthetic Brand','en-CA','CAD','Active',1,$2,$2)",
+      [f.BRAND, clock.from],
+    );
+    await admin.query(
+      "INSERT INTO bop_tenant.store VALUES ($1,$2,'SYNTHETIC_1','Synthetic Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+      [f.STORE, f.BRAND, clock.from],
+    );
+  }
   await admin.query("GRANT USAGE ON SCHEMA bop_tenant TO " + role);
   await admin.query("GRANT SELECT,UPDATE ON bop_tenant.brand,bop_tenant.store TO " + role);
-  await verifyMerchantSessionSelection({ admin, client, role });
-  await verifyPersistentMerchantBff({ admin, client, role });
+  await admin.query("GRANT USAGE ON SCHEMA bop_identity TO " + role);
+  await admin.query(
+    "GRANT SELECT,INSERT,UPDATE ON bop_identity.oidc_authorization_transaction TO " + role,
+  );
+  await admin.query("GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid) TO " + role);
+  await verifyMerchantSessionSelection({ admin, client, role, fixtureClock: clock });
+  await verifyPersistentMerchantBff({ admin, client, role, fixtureClock, pickupReady });
+  if (pickupReady) return;
   const source = createPostgresCurrentBrowserSessionSource({
-    now: () => f.AT,
+    now: () => clock.at,
     hasher,
     currentActor: async () => f.actor,
   });
   let associationActive = true;
   const authorize = createMerchantOrderExceptionAuthorization({
-    now: () => f.AT,
+    now: () => clock.at,
     session: source,
     context: createMerchantSelectedContext({
-      now: () => f.AT,
+      now: () => clock.at,
       validateSelection: async (_tx, session, scope) =>
         associationActive &&
         session.actor.actorReference === f.ACTOR &&
@@ -120,7 +136,7 @@ export async function verifyMerchantAuthorizationRead({ admin, client, role }) {
   assert.equal(await evaluate(), null);
   await admin.query(
     "INSERT INTO bop_identity.browser_session_selection VALUES ($1,$2,$3,$4,$5,$6)",
-    [sessionId, f.ACTOR, f.uuid("90"), f.BRAND, f.STORE, f.AT],
+    [sessionId, f.ACTOR, f.uuid("90"), f.BRAND, f.STORE, clock.at],
   );
   const allowed = await evaluate(cookie, async (result) => {
     assert.equal(result?.sessionReference, sessionId);
@@ -211,8 +227,8 @@ export async function verifyMerchantAuthorizationRead({ admin, client, role }) {
       f.STORE,
       f.REASON,
       f.CORRELATION,
-      f.FROM,
-      f.UNTIL,
+      clock.from,
+      clock.until,
     ],
   );
   assert.equal(await evaluate(), null);
@@ -231,7 +247,7 @@ export async function verifyMerchantAuthorizationRead({ admin, client, role }) {
     revoke: async () => {
       await admin.query(
         "UPDATE bop_identity.authentication_session SET status='Revoked',revocation_reason='Logout',revoked_at=$1,version=2 WHERE session_id=$2",
-        [f.AT, sessionId],
+        [clock.at, sessionId],
       );
     },
   });

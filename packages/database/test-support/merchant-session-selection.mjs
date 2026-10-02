@@ -4,14 +4,15 @@ import { createPostgresBrowserSessionStore } from "../../bop/identity/src/index.
 import { createMerchantSessionSelection } from "../../../apps/api/src/merchant-session-selection.ts";
 import * as f from "../../bop/permission/src/tests/current-policy.fixture.ts";
 
-export async function verifyMerchantSessionSelection({ admin, client, role }) {
+export async function verifyMerchantSessionSelection({ admin, client, role, fixtureClock }) {
+  const clock = fixtureClock ?? { from: f.FROM, at: f.AT, until: f.UNTIL };
   await admin.query("GRANT SELECT,INSERT,UPDATE ON bop_identity.authentication_session TO " + role);
   await admin.query("GRANT SELECT,INSERT ON bop_identity.browser_session_selection TO " + role);
   const scope = { tenantReference: f.uuid("90"), brandReference: f.BRAND, storeReference: f.STORE };
   const target = { ...scope, storeReference: f.uuid("610") };
   await admin.query(
     "INSERT INTO bop_tenant.store VALUES ($1,$2,'SYNTHETIC_2','Synthetic Second Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
-    [target.storeReference, f.BRAND, f.FROM],
+    [target.storeReference, f.BRAND, clock.from],
   );
   let associationActive = true;
   function store(selected, previousSessionReference) {
@@ -19,13 +20,13 @@ export async function verifyMerchantSessionSelection({ admin, client, role }) {
       environment: "synthetic",
       redirectUri: "https://merchant.example.test/callback",
       allowedPostLoginPaths: ["/operations/order-exceptions"],
-      now: () => f.AT,
+      now: () => clock.at,
       currentActor: async () => f.actor,
       onSessionCreated: createMerchantSessionSelection({
         scope: selected,
         actorReference: f.ACTOR,
         previousSessionReference,
-        now: () => f.AT,
+        now: () => clock.at,
         // Explicit synthetic association only; owner organization/membership are real SQL.
         validateAssociation: async (_tx, session, choice) =>
           associationActive &&
@@ -65,7 +66,7 @@ export async function verifyMerchantSessionSelection({ admin, client, role }) {
     sessionSelectorHash: hash(600),
     csrfSelectorHash: hash(700),
     encryptedSecrets: envelope(600),
-    observedAt: f.AT,
+    observedAt: clock.at,
   });
   const rotation = (n) => ({
     currentSelectorHash: hash(600),
@@ -75,7 +76,7 @@ export async function verifyMerchantSessionSelection({ admin, client, role }) {
     nextCsrfSelectorHash: hash(n + 100),
     nextEncryptedSecrets: envelope(n),
     reason: "StoreContextElevation",
-    observedAt: f.AT,
+    observedAt: clock.at,
   });
   const targetStore = store(target, f.uuid("600"));
   // Target exists but has no active assignment: nothing from the failed rotation persists.
@@ -93,7 +94,7 @@ export async function verifyMerchantSessionSelection({ admin, client, role }) {
   );
   await admin.query(
     "INSERT INTO bop_membership.store_assignment VALUES ($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6)",
-    [f.uuid("611"), f.MEMBERSHIP, f.ACTOR, f.BRAND, target.storeReference, f.FROM, f.UNTIL],
+    [f.uuid("611"), f.MEMBERSHIP, f.ACTOR, f.BRAND, target.storeReference, clock.from, clock.until],
   );
   associationActive = false;
   await assert.rejects(targetStore.rotateSession(rotation(602)));

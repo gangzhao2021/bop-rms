@@ -1,3 +1,13 @@
+import { createMerchantProductPublicationManagementQuery } from "./merchant-product-publication-management-query.js";
+import { createMerchantProductEditorQuery } from "./merchant-product-editor-query.js";
+import { createMerchantProductScopeJournalQuery } from "./merchant-product-scope-journal-query.js";
+import { createMerchantProductPublicationQuery } from "./merchant-product-publication-query.js";
+import { createMerchantStoreCapability } from "./merchant-store-capability.js";
+import { createMerchantProductPublicationCommand } from "./merchant-product-publication-command.js";
+import { createMerchantProductDraftBaselineQuery } from "./merchant-product-draft-baseline-query.js";
+import { createMerchantProductCategoryLookupQuery } from "./merchant-product-category-lookup-query.js";
+import { createMerchantCategoryTreeQuery } from "./merchant-category-tree-query.js";
+import { createMerchantProductListQuery } from "./merchant-product-list-query.js";
 import { createMerchantPickupQuery } from "./merchant-pickup-query.js";
 import { createMerchantPickupProof } from "./merchant-pickup-proof.js";
 import { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
@@ -15,12 +25,18 @@ import { createSingleStorePriceBookFacts } from "./single-store-price-book-facts
 import { createPersistentMerchantOrderQueue } from "./persistent-merchant-order-queue.js";
 import { createMerchantOrderAcceptanceCommand } from "./merchant-order-acceptance-command.js";
 import { createMerchantDiningItemService } from "./merchant-dining-item-service.js";
+import { createMerchantDiningTables } from "./merchant-dining-tables.js";
+import { createMerchantDiningTableCommand } from "./merchant-dining-table-command.js";
+import { createMerchantDiningSessionStart } from "./merchant-dining-session-start.js";
 import {
   createPersistentMerchantBffService,
   type PersistentMerchantBffOptions,
 } from "./persistent-merchant-bff.js";
 import { createMerchantServiceControl } from "./merchant-service-control.js";
 import { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
+import { createMerchantDiningTaskSource } from "./merchant-dining-task-source.js";
+import { createPersistentMerchantTaskInbox } from "./persistent-merchant-task-inbox.js";
+import type { PersistentMerchantTaskInboxQueueConfiguration } from "./persistent-merchant-task-inbox.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff.js";
 
 type ConfigurationOptions = Parameters<typeof createMerchantStoreConfiguration>[0];
@@ -38,6 +54,10 @@ export interface MerchantRuntimeOptions {
     "persistence" | "authentication"
   >;
   readonly kitchenQuery?: Pick<Parameters<typeof createMerchantKitchenQuery>[0], "sha256">;
+  readonly taskInbox?: {
+    readonly queue: PersistentMerchantTaskInboxQueueConfiguration;
+    readonly additionalQueues?: readonly PersistentMerchantTaskInboxQueueConfiguration[];
+  };
   readonly kitchenCommand?: Omit<
     Parameters<typeof createMerchantKitchenCommand>[0],
     "persistence" | "authentication"
@@ -53,17 +73,58 @@ export interface MerchantRuntimeOptions {
     "binding" | "reference" | "reviewCreation" | "reviewApproval"
   >;
   readonly menuDraft?: boolean;
+  readonly productDraftBaseline?: Omit<
+    Parameters<typeof createMerchantProductDraftBaselineQuery>[0],
+    "merchant"
+  >;
+  readonly productCategoryLookup?: Omit<
+    Parameters<typeof createMerchantProductCategoryLookupQuery>[0],
+    "merchant"
+  >;
+  readonly categoryTree?: Omit<Parameters<typeof createMerchantCategoryTreeQuery>[0], "merchant">;
+  readonly productList?: Pick<
+    Parameters<typeof createMerchantProductListQuery>[0],
+    "authority" | "cursorKey" | "categorySource"
+  >;
   readonly productCreation?: Pick<
     Parameters<typeof createMerchantProductCreationCommand>[0],
-    "auditReference"
+    "auditReference" | "categoryPolicy" | "writeAuthority" | "editorContentAuthority"
   >;
   readonly productDraft?: Pick<
     Parameters<typeof createMerchantProductDraftCommand>[0],
-    "auditReference"
+    | "auditReference"
+    | "categoryPolicy"
+    | "writeAuthority"
+    | "editorContentAuthority"
+    | "registeredEditorContent"
+  >;
+  readonly storeCapability?: Omit<
+    Parameters<typeof createMerchantStoreCapability>[0],
+    "persistence" | "authentication"
+  >;
+  readonly productEditor?: Omit<
+    Parameters<typeof createMerchantProductEditorQuery>[0],
+    "merchant" | "authentication"
+  >;
+  readonly productPublicationManagement?: Omit<
+    Parameters<typeof createMerchantProductPublicationManagementQuery>[0],
+    "merchant" | "authentication"
+  >;
+  readonly productScopeJournals?: Omit<
+    Parameters<typeof createMerchantProductScopeJournalQuery>[0],
+    "merchant" | "authentication"
+  >;
+  readonly productPublicationQuery?: Omit<
+    Parameters<typeof createMerchantProductPublicationQuery>[0],
+    "merchant" | "authentication"
+  >;
+  readonly productPublication?: Omit<
+    Parameters<typeof createMerchantProductPublicationCommand>[0],
+    "merchant" | "authentication"
   >;
   readonly productLifecycle?: Pick<
     Parameters<typeof createMerchantProductLifecycleCommand>[0],
-    "auditReference"
+    "auditReference" | "categoryPolicy" | "writeAuthority" | "lifecycleReview"
   >;
   readonly priceBooks?: Pick<
     Parameters<typeof createMerchantPriceBookCommands>[0],
@@ -89,6 +150,18 @@ export interface MerchantRuntimeOptions {
   readonly diningItemService?: Omit<
     Parameters<typeof createMerchantDiningItemService>[0],
     "persistence" | "authentication"
+  >;
+  readonly diningTableCommand?: Pick<
+    Parameters<typeof createMerchantDiningTableCommand>[0],
+    "newReference" | "retentionPolicyCode" | "retentionPolicyVersion"
+  >;
+  readonly diningSessionStart?: Pick<
+    Parameters<typeof createMerchantDiningSessionStart>[0],
+    | "credentials"
+    | "pepperVersion"
+    | "newReference"
+    | "retentionPolicyCode"
+    | "retentionPolicyVersion"
   >;
 }
 
@@ -158,6 +231,15 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
             authentication: service,
           }),
         }),
+    ...(options.taskInbox === undefined
+      ? {}
+      : {
+          taskInbox: createPersistentMerchantTaskInbox({
+            persistence: options.persistence,
+            queues: [options.taskInbox.queue, ...(options.taskInbox.additionalQueues ?? [])],
+            authorizeSource: createMerchantDiningTaskSource(options.persistence),
+          }),
+        }),
     ...(options.kitchenCommand === undefined
       ? {}
       : {
@@ -185,6 +267,38 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
             authentication: service,
           }),
         }),
+    ...(options.productDraftBaseline === undefined
+      ? {}
+      : {
+          productDraftBaseline: createMerchantProductDraftBaselineQuery({
+            ...options.productDraftBaseline,
+            merchant: options.persistence,
+          }),
+        }),
+    ...(options.productCategoryLookup === undefined
+      ? {}
+      : {
+          productCategoryLookup: createMerchantProductCategoryLookupQuery({
+            ...options.productCategoryLookup,
+            merchant: options.persistence,
+          }),
+        }),
+    ...(options.categoryTree === undefined
+      ? {}
+      : {
+          categoryTree: createMerchantCategoryTreeQuery({
+            ...options.categoryTree,
+            merchant: options.persistence,
+          }),
+        }),
+    ...(options.productList === undefined
+      ? {}
+      : {
+          productList: createMerchantProductListQuery({
+            ...options.productList,
+            merchant: options.persistence,
+          }),
+        }),
     ...(options.menuDraft === true
       ? {
           menuDraft: createMerchantMenuDraftQuery({
@@ -208,6 +322,60 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
       : {
           productDraft: createMerchantProductDraftCommand({
             ...options.productDraft,
+            merchant: options.persistence,
+            authentication: service,
+          }),
+        }),
+    ...(options.storeCapability === undefined
+      ? {}
+      : {
+          storeCapability: createMerchantStoreCapability({
+            ...options.storeCapability,
+            persistence: options.persistence,
+            authentication: service,
+          }).observe,
+        }),
+    ...(options.productEditor === undefined
+      ? {}
+      : {
+          productEditor: createMerchantProductEditorQuery({
+            ...options.productEditor,
+            merchant: options.persistence,
+            authentication: service,
+          }),
+        }),
+    ...(options.productPublicationManagement === undefined
+      ? {}
+      : {
+          productPublicationManagement: createMerchantProductPublicationManagementQuery({
+            ...options.productPublicationManagement,
+            merchant: options.persistence,
+            authentication: service,
+          }),
+        }),
+    ...(options.productScopeJournals === undefined
+      ? {}
+      : {
+          productScopeJournals: createMerchantProductScopeJournalQuery({
+            ...options.productScopeJournals,
+            merchant: options.persistence,
+            authentication: service,
+          }),
+        }),
+    ...(options.productPublicationQuery === undefined
+      ? {}
+      : {
+          productPublicationQuery: createMerchantProductPublicationQuery({
+            ...options.productPublicationQuery,
+            merchant: options.persistence,
+            authentication: service,
+          }),
+        }),
+    ...(options.productPublication === undefined
+      ? {}
+      : {
+          productPublication: createMerchantProductPublicationCommand({
+            ...options.productPublication,
             merchant: options.persistence,
             authentication: service,
           }),
@@ -245,6 +413,29 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
       : {
           diningItemService: createMerchantDiningItemService({
             ...options.diningItemService,
+            persistence: options.persistence,
+            authentication: service,
+          }),
+        }),
+    diningTables: createMerchantDiningTables({
+      persistence: options.persistence,
+      authentication: service,
+      tableAvailabilityCommandEnabled: options.diningTableCommand !== undefined,
+    }),
+    ...(options.diningTableCommand === undefined
+      ? {}
+      : {
+          diningTableCommand: createMerchantDiningTableCommand({
+            ...options.diningTableCommand,
+            persistence: options.persistence,
+            authentication: service,
+          }),
+        }),
+    ...(options.diningSessionStart === undefined
+      ? {}
+      : {
+          diningSessionStart: createMerchantDiningSessionStart({
+            ...options.diningSessionStart,
             persistence: options.persistence,
             authentication: service,
           }),

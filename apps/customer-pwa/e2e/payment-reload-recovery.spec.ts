@@ -36,17 +36,29 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
       } else await route.fulfill({ status: 503, json: { unavailable: true } });
     });
     const assertView = async () => {
-      await expect(page.getByRole("heading", { name: "Verify your payment" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Check your payment" })).toBeVisible();
       const message = {
         Failed: "Payment failed",
         Succeeded: "Payment confirmed",
-        Pending: "Payment confirmation is pending.",
-        Unknown: "Your payment result is not yet known. Check again before paying again.",
+        Pending: "Payment confirmation is pending. Do not submit another payment.",
+        Unknown: "Neither success nor failure is confirmed.",
         Unprepared: "Payment has not been prepared for this checkout.",
       }[status];
       await expect(page.getByText(message, { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Confirm simulated payment" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Review payment total" })).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: /start secure payment|pay again|retry payment/i }),
+      ).toHaveCount(0);
+      const tone =
+        status === "Unknown"
+          ? "warning"
+          : status === "Failed"
+            ? "danger"
+            : status === "Succeeded"
+              ? "success"
+              : "pending";
+      await expect(page.locator(".payment-result-page__badge")).toHaveAttribute("data-tone", tone);
     };
     await page.goto("/checkout/payment");
     await assertView();
@@ -57,6 +69,112 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
     expect(
       await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
     ).toEqual({ local: 0, session: 0 });
+    if (status === "Unknown") {
+      await expect(page.getByText("Check the same payment; do not submit another.")).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Check payment status", exact: true }),
+      ).toBeVisible();
+      await expect(page.locator("body")).not.toContainText("0190fa21-0000-7000-8000-000000000002");
+      await expect(page.locator("body")).not.toContainText("0190fa21-0000-7000-8000-000000000003");
+      await expect(page.locator("body")).not.toContainText("CAD 11.30");
+    }
+    await expect(page.locator("body")).not.toContainText("0190fa21-0000-7000-8000-000000000002");
+    await expect(page.locator("body")).not.toContainText("0190fa21-0000-7000-8000-000000000003");
+    if (status === "Succeeded") {
+      await expect(page.getByText("Paid:", { exact: false })).toContainText("CAD 11.30");
+      await expect(
+        page.getByRole("link", { name: "View order status", exact: true }),
+      ).toHaveAttribute("href", "/orders/0190fa21-0000-7000-8000-000000000003");
+    } else {
+      await expect(page.locator("body")).not.toContainText("CAD 11.30");
+      await expect(page.getByRole("link", { name: "View order status", exact: true })).toHaveCount(
+        0,
+      );
+    }
+    if (status === "Pending") {
+      await expect(
+        page.getByRole("button", { name: "Check payment status", exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("Do not submit another payment.", { exact: false }),
+      ).toBeVisible();
+    } else if (status === "Failed" || status === "Succeeded") {
+      await expect(
+        page.getByRole("button", { name: "Check payment status", exact: true }),
+      ).toHaveCount(0);
+    }
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 1000 : 900 });
+      const geometry = await page.evaluate(() => {
+        const header = document.querySelector<HTMLElement>(".payment-result-page__header");
+        const nav = document.querySelector<HTMLElement>(".payment-result-page__journey");
+        const title = document.querySelector<HTMLElement>(".payment-result-page > h1");
+        const intro = document.querySelector<HTMLElement>(".payment-result-page__intro");
+        const card = document.querySelector<HTMLElement>(".payment-result-page__card");
+        const items = [...(nav?.querySelectorAll<HTMLElement>("a, span") ?? [])].map((item) =>
+          item.getBoundingClientRect(),
+        );
+        const labels = [...(nav?.querySelectorAll<HTMLElement>("a, span") ?? [])].map((item) => {
+          const text = document.createRange();
+          text.selectNodeContents(item);
+          const textBox = text.getBoundingClientRect();
+          const box = item.getBoundingClientRect();
+          return {
+            text: item.textContent,
+            clipped: textBox.left < box.left || textBox.right > box.right,
+          };
+        });
+        return {
+          headerWidth: header ? Math.round(header.getBoundingClientRect().width) : 0,
+          headerLeft: header ? Math.round(header.getBoundingClientRect().left) : -1,
+          headerHeight: header ? Math.round(header.getBoundingClientRect().height) : 0,
+          navHeight: nav ? Math.round(nav.getBoundingClientRect().height) : 0,
+          headerToNavGap:
+            header && nav
+              ? Math.round(nav.getBoundingClientRect().top - header.getBoundingClientRect().bottom)
+              : Infinity,
+          navToTitleGap:
+            nav && title
+              ? Math.round(title.getBoundingClientRect().top - nav.getBoundingClientRect().bottom)
+              : Infinity,
+          titleIntroGap:
+            title && intro
+              ? Math.round(intro.getBoundingClientRect().top - title.getBoundingClientRect().bottom)
+              : Infinity,
+          introCardGap:
+            intro && card
+              ? Math.round(card.getBoundingClientRect().top - intro.getBoundingClientRect().bottom)
+              : Infinity,
+          navRowSpread:
+            items.length > 0
+              ? Math.max(...items.map((item) => item.y)) - Math.min(...items.map((item) => item.y))
+              : Infinity,
+          largestNavigationControl: Math.max(...items.map((item) => item.height)),
+          clippedLabels: labels.filter((label) => label.clipped).map((label) => label.text),
+        };
+      });
+      expect(geometry).toMatchObject({ headerWidth: width, headerLeft: 0, navRowSpread: 0 });
+      expect(geometry.headerHeight).toBeLessThanOrEqual(width === 1440 ? 128 : 134);
+      expect(geometry.navHeight).toBeLessThanOrEqual(width === 320 ? 56 : 60);
+      expect(geometry.headerToNavGap, JSON.stringify(geometry)).toBe(0);
+      expect(geometry.navToTitleGap, JSON.stringify(geometry)).toBe(width === 1440 ? 28 : 36);
+      expect(geometry.titleIntroGap, JSON.stringify(geometry)).toBe(16);
+      expect(geometry.introCardGap, JSON.stringify(geometry)).toBe(width === 1440 ? 36 : 24);
+      expect(geometry.clippedLabels).toEqual([]);
+      expect(geometry.largestNavigationControl).toBeLessThanOrEqual(48);
+      const overflow = await page.evaluate(() => ({
+        viewport: window.innerWidth,
+        document: document.documentElement.scrollWidth,
+      }));
+      expect(
+        overflow.document,
+        `no horizontal overflow at ${width}px: ${JSON.stringify(overflow)}`,
+      ).toBeLessThanOrEqual(width);
+      await page.screenshot({
+        path: `test-results/customer-payment-result-${status.toLowerCase()}-${width}.png`,
+        fullPage: true,
+      });
+    }
   });
 }
 

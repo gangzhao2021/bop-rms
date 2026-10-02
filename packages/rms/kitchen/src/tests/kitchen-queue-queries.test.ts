@@ -122,6 +122,24 @@ it("retains exact bigint versions and generation identity", async () => {
   ]);
   expect(f.authorize).toHaveBeenCalledTimes(2);
 });
+it.each([
+  ["Order", "orderReference", id(20)],
+  ["Ticket", "ticketReference", id(21)],
+] as const)("binds an exact %s filter only to its scoped SQL parameter", async (_, field, ref) => {
+  const f = setup();
+  const result = await f.list({
+    ...f.query,
+    filters: { ...f.query.filters, [field]: ref },
+  });
+  expect(result.status).toBe("Found");
+  const statement = f.sql.mock.calls[1]?.[0];
+  const parameters = f.sql.mock.calls[1]?.[1];
+  expect(statement).toContain("AND ($4::uuid IS NULL OR order_id=$4)");
+  expect(statement).toContain("AND ($5::uuid IS NULL OR kitchen_ticket_id=$5)");
+  expect(statement).not.toContain(ref);
+  expect(parameters?.slice(3, 5)).toEqual(field === "orderReference" ? [ref, null] : [null, ref]);
+  expect(f.authorize).toHaveBeenCalledTimes(2);
+});
 it("uses a bounded keyset page and returns only requested count", async () => {
   const f = setup();
   f.sql.mockResolvedValue({

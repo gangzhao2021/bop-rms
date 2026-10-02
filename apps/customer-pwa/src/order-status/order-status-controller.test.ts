@@ -47,6 +47,94 @@ function view(orderReference = id(1)) {
 }
 
 describe("WP-1705 Order Status controller", () => {
+  it("discards an in-flight read and realtime hints when context changes", async () => {
+    let contextChanged: (() => void) | undefined;
+    let callbacks: OrderStatusSubscriptionCallbacks | undefined;
+    let finish!: (result: unknown) => void;
+    let calls = 0;
+    const controller = createOrderStatusController(id(1), {
+      subscribeContextChange: (listener) => {
+        contextChanged = listener;
+        return () => undefined;
+      },
+      load: async () => {
+        calls += 1;
+        return calls === 1
+          ? view()
+          : new Promise((resolve) => {
+              finish = resolve;
+            });
+      },
+      subscribe: (_reference, value) => {
+        callbacks = value;
+        return () => undefined;
+      },
+    });
+    await controller.load();
+    const pending = controller.refresh();
+    contextChanged?.();
+    callbacks?.onOpen();
+    callbacks?.onHint();
+    finish(view());
+    await pending;
+    expect(calls).toBe(2);
+    expect(controller.getState()).toEqual({ status: "permission-denied" });
+    controller.dispose();
+  });
+
+  it("releases context observers and ignores old callbacks after remount", async () => {
+    const callbacks: (() => void)[] = [];
+    let released = 0;
+    const controller = createOrderStatusController(id(1), {
+      subscribeContextChange: (listener) => {
+        callbacks.push(listener);
+        return () => {
+          released += 1;
+        };
+      },
+      load: async () => view(),
+      subscribe: () => () => undefined,
+    });
+    await controller.load();
+    controller.dispose();
+    expect(controller.getState()).toEqual({ status: "loading" });
+    expect(released).toBe(1);
+    await controller.load();
+    const remounted = controller.getState();
+    callbacks[0]?.();
+    expect(controller.getState()).toBe(remounted);
+    callbacks[1]?.();
+    expect(controller.getState()).toEqual({ status: "permission-denied" });
+    controller.dispose();
+    expect(released).toBe(2);
+  });
+
+  it("ignores queued realtime callbacks from before the offline lifecycle", async () => {
+    let calls = 0;
+    let callbacks: OrderStatusSubscriptionCallbacks | undefined;
+    const controller = createOrderStatusController(id(1), {
+      load: async () => {
+        calls += 1;
+        return view();
+      },
+      subscribe: (_reference, value) => {
+        callbacks = value;
+        return () => undefined;
+      },
+    });
+    await controller.load();
+    controller.setOnline(false);
+    controller.setOnline(true);
+    const retained = controller.getState();
+    callbacks?.onOpen();
+    callbacks?.onHint();
+    callbacks?.onError();
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    expect(controller.getState()).toBe(retained);
+    controller.dispose();
+  });
+
   it("keeps the default browser runtime unavailable without a public request", async () => {
     const controller = createOrderStatusController(id(1), createUnavailableOrderStatusClient());
     await controller.load();

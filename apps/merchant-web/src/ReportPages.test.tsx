@@ -1,6 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ReportBuilder, ReportCatalog, ReportPageState } from "./ReportPages.js";
+import {
+  ReportBuilder,
+  ReportBuilderUnavailable,
+  ReportCatalog,
+  ReportPageState,
+} from "./ReportPages.js";
 import { parseReportBuilderView, parseReportCatalogView } from "./report-pages.js";
 
 const ref = (suffix: string) => `018f9801-0000-7000-8000-${suffix.padStart(12, "0")}`;
@@ -56,17 +61,40 @@ const builder = () => ({
 });
 
 describe("WP-2161 report pages", () => {
+  it("renders unavailable Report Builder inputs without implying definition or permission data", () => {
+    const html = renderToStaticMarkup(<ReportBuilderUnavailable />);
+    expect(html).toContain("RPT-REPORT-BUILDER · PHASE 3 · DESIGN REVIEW");
+    expect(html).toContain("Authorized report definition is unavailable");
+    expect((html.match(/<input(?=[^>]* disabled)/gu) ?? []).length).toBe(21);
+    expect(html).toContain("Sample preview and row count · Unavailable");
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("DAILY_SALES");
+    expect(html).not.toContain("http");
+  });
   it("renders the catalog contract and constructs the only edit target", () => {
     const html = renderToStaticMarkup(<ReportCatalog view={parseReportCatalogView(catalog())} />);
+    expect(html).toContain("OPERATIONS");
+    expect(html).toContain("RPT-REPORT-CATALOG · PHASE 2");
     expect(html).toContain("Report catalog");
     expect(html).toContain(`/app/reports/${ref("1")}/edit`);
+    expect(html).toContain("Owner</span>");
+    expect(html).toContain(">Unavailable</td>");
+    expect(html).not.toContain(ref("2"));
     expect(html).toContain("Schedule");
+    expect(html).toContain("Owner display names require an authorized label");
+    expect((html.match(/<button(?=[^>]* disabled)(?=[^>]*aria-describedby)/gu) ?? []).length).toBe(
+      2,
+    );
   });
   it("renders pinned builder inputs, validation, preview, and schedule metadata", () => {
     const html = renderToStaticMarkup(<ReportBuilder view={parseReportBuilderView(builder())} />);
     expect(html).toContain("Approved sources");
     expect(html).toContain("Validation Passed");
     expect(html).toContain("Daily");
+    expect(html).toContain("Reporting commands are not connected");
+    expect((html.match(/<button(?=[^>]* disabled)(?=[^>]*aria-describedby)/gu) ?? []).length).toBe(
+      1,
+    );
   });
   it("rejects extra fields and injected or non-version references", () => {
     expect(() => parseReportCatalogView({ ...catalog(), rawSql: "select *" })).toThrow();

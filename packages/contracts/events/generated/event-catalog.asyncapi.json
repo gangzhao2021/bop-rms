@@ -613,6 +613,391 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "CategoryArchivedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "CategoryArchivedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,9}$",
+              "type": "string"
+            },
+            "categoryReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Inactive", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "categoryReference",
+            "aggregateVersion",
+            "lifecycle",
+            "operationReference",
+            "sourceRevision",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "CategoryArchived v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.category-source:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "CategoryArchived",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "CategoryCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "CategoryCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,9}$",
+              "type": "string"
+            },
+            "categoryReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Inactive", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "categoryReference",
+            "aggregateVersion",
+            "lifecycle",
+            "operationReference",
+            "sourceRevision",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "CategoryCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.category-source:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "CategoryCreated",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "CategoryDeactivatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "CategoryDeactivatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,9}$",
+              "type": "string"
+            },
+            "categoryReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Inactive", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "categoryReference",
+            "aggregateVersion",
+            "lifecycle",
+            "operationReference",
+            "sourceRevision",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "CategoryDeactivated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.category-source:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "CategoryDeactivated",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "CategoryMovedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "CategoryMovedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,9}$",
+              "type": "string"
+            },
+            "categoryReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Inactive", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "categoryReference",
+            "aggregateVersion",
+            "lifecycle",
+            "operationReference",
+            "sourceRevision",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "CategoryMoved v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.category-source:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "CategoryMoved",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "CategoryReorderedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "CategoryReorderedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,9}$",
+              "type": "string"
+            },
+            "categoryReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Inactive", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "categoryReference",
+            "aggregateVersion",
+            "lifecycle",
+            "operationReference",
+            "sourceRevision",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "CategoryReordered v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.category-source:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "CategoryReordered",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "CategoryRestoredV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "CategoryRestoredV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,9}$",
+              "type": "string"
+            },
+            "categoryReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Inactive", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "categoryReference",
+            "aggregateVersion",
+            "lifecycle",
+            "operationReference",
+            "sourceRevision",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "CategoryRestored v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.category-source:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "CategoryRestored",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "CategoryUpdatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "CategoryUpdatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,9}$",
+              "type": "string"
+            },
+            "categoryReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Inactive", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "categoryReference",
+            "aggregateVersion",
+            "lifecycle",
+            "operationReference",
+            "sourceRevision",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "CategoryUpdated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.category-source:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "CategoryUpdated",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "CleaningVerificationFailedV1": {
         "contentType": "application/json",
         "deprecated": false,
@@ -3737,6 +4122,199 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "OptionSetContentSealedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OptionSetContentSealedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "optionSetReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "recordDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "successorDraftVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tenantReference",
+            "optionSetReference",
+            "versionReference",
+            "aggregateVersion",
+            "operationReference",
+            "contentDigest",
+            "configurationDigest",
+            "successorDraftVersionReference",
+            "recordDigest"
+          ],
+          "type": "object"
+        },
+        "title": "OptionSetContentSealed v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.option-set-draft-current:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OptionSetContentSealed",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "OptionSetDraftCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OptionSetDraftCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "optionSetReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tenantReference",
+            "optionSetReference",
+            "versionReference",
+            "aggregateVersion",
+            "operationReference",
+            "contentDigest",
+            "configurationDigest"
+          ],
+          "type": "object"
+        },
+        "title": "OptionSetDraftCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.option-set-draft-current:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OptionSetDraftCreated",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "OptionSetDraftReplacedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OptionSetDraftReplacedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "optionSetReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tenantReference",
+            "optionSetReference",
+            "versionReference",
+            "aggregateVersion",
+            "operationReference",
+            "contentDigest",
+            "configurationDigest"
+          ],
+          "type": "object"
+        },
+        "title": "OptionSetDraftReplaced v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.option-set-draft-current:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OptionSetDraftReplaced",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "OrderAmendedV1": {
         "contentType": "application/json",
         "deprecated": false,
@@ -4445,6 +5023,422 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "ProductActivatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductActivatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "ProductActivated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductActivated",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductArchivedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductArchivedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "ProductArchived v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductArchived",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductContentRegistryVersionRecordedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductContentRegistryVersionRecordedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "registryReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "registryVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tenantReference",
+            "registryReference",
+            "versionReference",
+            "registryVersion",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "ProductContentRegistryVersionRecorded v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.content-registry-current:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductContentRegistryVersionRecorded",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "ProductCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductCreated",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductDiscontinuedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductDiscontinuedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "ProductDiscontinued v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductDiscontinued",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductDraftUpdatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductDraftUpdatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "ProductDraftUpdated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductDraftUpdated",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "ProductionBatchCompletedV1": {
         "contentType": "application/json",
         "deprecated": false,
@@ -4829,6 +5823,1761 @@
         "x-bop-retention-category": "business_record",
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "store"
+      },
+      "ProductRestoredV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductRestoredV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "ProductRestored v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductRestored",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductResumedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductResumedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "ProductResumed v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductResumed",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductReviewSubmittedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductReviewSubmittedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "Validate",
+                "SubmitReview",
+                "Approve",
+                "Reject",
+                "Publish",
+                "SchedulePublish",
+                "ReschedulePublish",
+                "CancelScheduledPublish",
+                "ActivateScheduled",
+                "Supersede"
+              ],
+              "type": "string"
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "periodDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "publicationState": {
+              "enum": ["Draft", "InReview", "Approved", "Scheduled", "Published", "Superseded"],
+              "type": "string"
+            },
+            "publicationVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "resultDraftVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scheduleVersion": {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scopeDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            },
+            "successorDraftVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "supersededByVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest",
+            "tenantReference",
+            "resultDraftVersionReference",
+            "publicationVersion",
+            "publicationState",
+            "action",
+            "scopeDigest",
+            "periodDigest",
+            "contentDigest",
+            "configurationDigest",
+            "scheduleReference",
+            "scheduleVersion",
+            "successorDraftVersionReference",
+            "supersededByVersionReference"
+          ],
+          "type": "object"
+        },
+        "title": "ProductReviewSubmitted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductReviewSubmitted",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductSuspendedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductSuspendedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "ProductSuspended v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductSuspended",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductValidationCompletedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductValidationCompletedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "Validate",
+                "SubmitReview",
+                "Approve",
+                "Reject",
+                "Publish",
+                "SchedulePublish",
+                "ReschedulePublish",
+                "CancelScheduledPublish",
+                "ActivateScheduled",
+                "Supersede"
+              ],
+              "type": "string"
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "periodDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "publicationState": {
+              "enum": ["Draft", "InReview", "Approved", "Scheduled", "Published", "Superseded"],
+              "type": "string"
+            },
+            "publicationVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "resultDraftVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scheduleVersion": {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scopeDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            },
+            "successorDraftVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "supersededByVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest",
+            "tenantReference",
+            "resultDraftVersionReference",
+            "publicationVersion",
+            "publicationState",
+            "action",
+            "scopeDigest",
+            "periodDigest",
+            "contentDigest",
+            "configurationDigest",
+            "scheduleReference",
+            "scheduleVersion",
+            "successorDraftVersionReference",
+            "supersededByVersionReference"
+          ],
+          "type": "object"
+        },
+        "title": "ProductValidationCompleted v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductValidationCompleted",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductVersionApprovedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductVersionApprovedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "Validate",
+                "SubmitReview",
+                "Approve",
+                "Reject",
+                "Publish",
+                "SchedulePublish",
+                "ReschedulePublish",
+                "CancelScheduledPublish",
+                "ActivateScheduled",
+                "Supersede"
+              ],
+              "type": "string"
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "periodDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "publicationState": {
+              "enum": ["Draft", "InReview", "Approved", "Scheduled", "Published", "Superseded"],
+              "type": "string"
+            },
+            "publicationVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "resultDraftVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scheduleVersion": {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scopeDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            },
+            "successorDraftVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "supersededByVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest",
+            "tenantReference",
+            "resultDraftVersionReference",
+            "publicationVersion",
+            "publicationState",
+            "action",
+            "scopeDigest",
+            "periodDigest",
+            "contentDigest",
+            "configurationDigest",
+            "scheduleReference",
+            "scheduleVersion",
+            "successorDraftVersionReference",
+            "supersededByVersionReference"
+          ],
+          "type": "object"
+        },
+        "title": "ProductVersionApproved v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductVersionApproved",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductVersionPublishedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductVersionPublishedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "Validate",
+                "SubmitReview",
+                "Approve",
+                "Reject",
+                "Publish",
+                "SchedulePublish",
+                "ReschedulePublish",
+                "CancelScheduledPublish",
+                "ActivateScheduled",
+                "Supersede"
+              ],
+              "type": "string"
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "periodDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "publicationState": {
+              "enum": ["Draft", "InReview", "Approved", "Scheduled", "Published", "Superseded"],
+              "type": "string"
+            },
+            "publicationVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "resultDraftVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scheduleVersion": {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scopeDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            },
+            "successorDraftVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "supersededByVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest",
+            "tenantReference",
+            "resultDraftVersionReference",
+            "publicationVersion",
+            "publicationState",
+            "action",
+            "scopeDigest",
+            "periodDigest",
+            "contentDigest",
+            "configurationDigest",
+            "scheduleReference",
+            "scheduleVersion",
+            "successorDraftVersionReference",
+            "supersededByVersionReference"
+          ],
+          "type": "object"
+        },
+        "title": "ProductVersionPublished v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductVersionPublished",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductVersionPublishRescheduledV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductVersionPublishRescheduledV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "Validate",
+                "SubmitReview",
+                "Approve",
+                "Reject",
+                "Publish",
+                "SchedulePublish",
+                "ReschedulePublish",
+                "CancelScheduledPublish",
+                "ActivateScheduled",
+                "Supersede"
+              ],
+              "type": "string"
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "periodDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "publicationState": {
+              "enum": ["Draft", "InReview", "Approved", "Scheduled", "Published", "Superseded"],
+              "type": "string"
+            },
+            "publicationVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "resultDraftVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scheduleVersion": {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scopeDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            },
+            "successorDraftVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "supersededByVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest",
+            "tenantReference",
+            "resultDraftVersionReference",
+            "publicationVersion",
+            "publicationState",
+            "action",
+            "scopeDigest",
+            "periodDigest",
+            "contentDigest",
+            "configurationDigest",
+            "scheduleReference",
+            "scheduleVersion",
+            "successorDraftVersionReference",
+            "supersededByVersionReference"
+          ],
+          "type": "object"
+        },
+        "title": "ProductVersionPublishRescheduled v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductVersionPublishRescheduled",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductVersionPublishScheduleCancelledV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductVersionPublishScheduleCancelledV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "Validate",
+                "SubmitReview",
+                "Approve",
+                "Reject",
+                "Publish",
+                "SchedulePublish",
+                "ReschedulePublish",
+                "CancelScheduledPublish",
+                "ActivateScheduled",
+                "Supersede"
+              ],
+              "type": "string"
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "periodDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "publicationState": {
+              "enum": ["Draft", "InReview", "Approved", "Scheduled", "Published", "Superseded"],
+              "type": "string"
+            },
+            "publicationVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "resultDraftVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scheduleVersion": {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scopeDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            },
+            "successorDraftVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "supersededByVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest",
+            "tenantReference",
+            "resultDraftVersionReference",
+            "publicationVersion",
+            "publicationState",
+            "action",
+            "scopeDigest",
+            "periodDigest",
+            "contentDigest",
+            "configurationDigest",
+            "scheduleReference",
+            "scheduleVersion",
+            "successorDraftVersionReference",
+            "supersededByVersionReference"
+          ],
+          "type": "object"
+        },
+        "title": "ProductVersionPublishScheduleCancelled v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductVersionPublishScheduleCancelled",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductVersionPublishScheduledV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductVersionPublishScheduledV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "Validate",
+                "SubmitReview",
+                "Approve",
+                "Reject",
+                "Publish",
+                "SchedulePublish",
+                "ReschedulePublish",
+                "CancelScheduledPublish",
+                "ActivateScheduled",
+                "Supersede"
+              ],
+              "type": "string"
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "periodDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "publicationState": {
+              "enum": ["Draft", "InReview", "Approved", "Scheduled", "Published", "Superseded"],
+              "type": "string"
+            },
+            "publicationVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "resultDraftVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scheduleVersion": {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scopeDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            },
+            "successorDraftVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "supersededByVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest",
+            "tenantReference",
+            "resultDraftVersionReference",
+            "publicationVersion",
+            "publicationState",
+            "action",
+            "scopeDigest",
+            "periodDigest",
+            "contentDigest",
+            "configurationDigest",
+            "scheduleReference",
+            "scheduleVersion",
+            "successorDraftVersionReference",
+            "supersededByVersionReference"
+          ],
+          "type": "object"
+        },
+        "title": "ProductVersionPublishScheduled v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductVersionPublishScheduled",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductVersionRejectedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductVersionRejectedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "Validate",
+                "SubmitReview",
+                "Approve",
+                "Reject",
+                "Publish",
+                "SchedulePublish",
+                "ReschedulePublish",
+                "CancelScheduledPublish",
+                "ActivateScheduled",
+                "Supersede"
+              ],
+              "type": "string"
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "periodDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "publicationState": {
+              "enum": ["Draft", "InReview", "Approved", "Scheduled", "Published", "Superseded"],
+              "type": "string"
+            },
+            "publicationVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "resultDraftVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scheduleVersion": {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scopeDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            },
+            "successorDraftVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "supersededByVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest",
+            "tenantReference",
+            "resultDraftVersionReference",
+            "publicationVersion",
+            "publicationState",
+            "action",
+            "scopeDigest",
+            "periodDigest",
+            "contentDigest",
+            "configurationDigest",
+            "scheduleReference",
+            "scheduleVersion",
+            "successorDraftVersionReference",
+            "supersededByVersionReference"
+          ],
+          "type": "object"
+        },
+        "title": "ProductVersionRejected v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductVersionRejected",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductVersionSupersededV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductVersionSupersededV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "Validate",
+                "SubmitReview",
+                "Approve",
+                "Reject",
+                "Publish",
+                "SchedulePublish",
+                "ReschedulePublish",
+                "CancelScheduledPublish",
+                "ActivateScheduled",
+                "Supersede"
+              ],
+              "type": "string"
+            },
+            "aggregateVersion": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "changedSkuReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "configurationDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "enum": ["Draft", "Active", "Suspended", "Discontinued", "Archived"],
+              "type": "string"
+            },
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "periodDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "publicationState": {
+              "enum": ["Draft", "InReview", "Approved", "Scheduled", "Published", "Superseded"],
+              "type": "string"
+            },
+            "publicationVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "resultDraftVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "scheduleReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scheduleVersion": {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scopeDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "sourceRevision": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            },
+            "successorDraftVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "supersededByVersionReference": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "productReference",
+            "productVersionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "changedSkuReference",
+            "sourceRevision",
+            "operationReference",
+            "snapshotDigest",
+            "tenantReference",
+            "resultDraftVersionReference",
+            "publicationVersion",
+            "publicationState",
+            "action",
+            "scopeDigest",
+            "periodDigest",
+            "contentDigest",
+            "configurationDigest",
+            "scheduleReference",
+            "scheduleVersion",
+            "successorDraftVersionReference",
+            "supersededByVersionReference"
+          ],
+          "type": "object"
+        },
+        "title": "ProductVersionSuperseded v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-search-projection:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductVersionSuperseded",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
       },
       "PromotionArchivedV1": {
         "contentType": "application/json",

@@ -57,7 +57,7 @@ test("@demo Dining admission supports keyboard validation and explicit recovery"
   await page.getByRole("button", { name: "Continue to menu" }).click();
   await expect(page).toHaveURL(/\/menu$/u);
   await expect(
-    page.getByRole("heading", { name: "Synthetic all-day menu", level: 1 }),
+    page.getByRole("main").getByRole("heading", { name: "Synthetic all-day menu", level: 2 }),
   ).toBeVisible();
   expect(errors).toEqual([]);
   expect(writes).toEqual([]);

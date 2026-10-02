@@ -35,7 +35,7 @@ export function createMerchantDiningSessionStart(options: {
       const current = await resolve(
         tx,
         input.sessionCookie,
-        "dining.session.manage",
+        "dining.operate",
         authenticated.sessionReference,
       );
       if (!(await current.allowed())) return unavailable();
@@ -67,7 +67,7 @@ export function createMerchantDiningSessionStart(options: {
         staff: {
           authorize: async (request) => {
             if (request.operation !== "StartSession") return null;
-            const permission = await current.authorizeAction("dining.session.manage");
+            const permission = await current.authorizeAction("dining.operate");
             if (permission?.effect !== "Allow") return null;
             const table = await tables.loadTable(request.tableReference);
             if (!table) return null;

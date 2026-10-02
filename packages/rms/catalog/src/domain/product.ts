@@ -1,3 +1,7 @@
+import {
+  parseProductEditorContentDetails,
+  type ProductEditorContentDetails,
+} from "./product-editor-content.js";
 export const catalogErrorCodes = [
   "CATALOG_INPUT_INVALID",
   "CATALOG_UNAVAILABLE",
@@ -45,7 +49,15 @@ export interface CatalogSku {
   readonly createdAt: CatalogInstant;
   readonly createdByActorReference: CatalogReference;
 }
+/** Product Version organization value. Omitted legacy data is not an empty set. */
+export interface ProductCategoryClassification {
+  readonly categoryReferences: readonly CatalogReference[];
+  readonly primaryCategoryReference: CatalogReference | null;
+}
+
 export interface ProductVersion {
+  readonly editorContent?: ProductEditorContentDetails;
+  readonly categoryClassification?: ProductCategoryClassification;
   readonly versionReference: CatalogReference;
   readonly baseVersionReference: CatalogReference | null;
   readonly status: "Draft";
@@ -112,7 +124,11 @@ const locale = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|\d{3})?$/u;
 function invalid(): never {
   throw new CatalogError("CATALOG_INPUT_INVALID");
 }
-function exact(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {
+function exact(
+  value: unknown,
+  keys: readonly string[],
+  optional: readonly string[] = [],
+): Readonly<Record<string, unknown>> {
   try {
     if (
       value === null ||
@@ -124,12 +140,13 @@ function exact(value: unknown, keys: readonly string[]): Readonly<Record<string,
     const own = Reflect.ownKeys(value);
     const descriptors = Object.getOwnPropertyDescriptors(value);
     if (
-      own.length !== keys.length ||
-      own.some((key) => typeof key !== "string" || !keys.includes(key))
+      own.length < keys.length ||
+      own.length > keys.length + optional.length ||
+      own.some((key) => typeof key !== "string" || ![...keys, ...optional].includes(key))
     )
       return invalid();
     const result: Record<string, unknown> = {};
-    for (const key of keys) {
+    for (const key of [...keys, ...optional.filter((key) => Object.hasOwn(value, key))]) {
       const descriptor = descriptors[key];
       if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable)
         return invalid();
@@ -141,6 +158,46 @@ function exact(value: unknown, keys: readonly string[]): Readonly<Record<string,
     return invalid();
   }
 }
+function items(value: unknown): readonly unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return invalid();
+  const length = Object.getOwnPropertyDescriptor(value, "length");
+  if (
+    !length ||
+    !("value" in length) ||
+    !Number.isSafeInteger(length.value) ||
+    length.value < 0 ||
+    length.value > 10000
+  )
+    return invalid();
+  const n: number = length.value;
+  if (Reflect.ownKeys(value).length !== n + 1) return invalid();
+  const result: unknown[] = [];
+  for (let i = 0; i < n; i++) {
+    const d = Object.getOwnPropertyDescriptor(value, String(i));
+    if (!d || !("value" in d) || !d.enumerable) return invalid();
+    result.push(d.value);
+  }
+  return result;
+}
+export function parseProductCategoryClassification(value: unknown): ProductCategoryClassification {
+  try {
+    const raw = exact(value, ["categoryReferences", "primaryCategoryReference"]);
+    const refs = items(raw.categoryReferences).map(parseCatalogReference);
+    if (new Set(refs).size !== refs.length) return invalid();
+    const primary =
+      raw.primaryCategoryReference === null
+        ? null
+        : parseCatalogReference(raw.primaryCategoryReference);
+    if (primary !== null && !refs.includes(primary)) return invalid();
+    return Object.freeze({
+      categoryReferences: Object.freeze(refs.sort()),
+      primaryCategoryReference: primary,
+    });
+  } catch {
+    return invalid();
+  }
+}
+
 function positive(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1) return invalid();
   return value as number;
@@ -230,6 +287,16 @@ function lifecycle(value: unknown): ProductLifecycle {
 }
 export function parseProductLifecycle(value: unknown): ProductLifecycle {
   return lifecycle(value);
+}
+/** Governance reason code obeys the existing append-only Audit stable-code constraint. */
+export function parseCatalogLifecycleReasonCode(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.trim() !== value ||
+    !/^[A-Z][A-Z0-9_]{0,127}$/u.test(value)
+  )
+    return invalid();
+  return value;
 }
 export function parseVariantSelection(value: unknown): VariantSelection {
   const raw = exact(value, ["dimensionReference", "valueReference"]);
@@ -346,18 +413,22 @@ export function parseCatalogSku(value: unknown): CatalogSku {
   });
 }
 export function parseProductVersion(value: unknown): ProductVersion {
-  const raw = exact(value, [
-    "versionReference",
-    "baseVersionReference",
-    "status",
-    "defaultLocale",
-    "localizedNames",
-    "taxClassificationReference",
-    "skus",
-    "optionBindings",
-    "createdAt",
-    "updatedAt",
-  ]);
+  const raw = exact(
+    value,
+    [
+      "versionReference",
+      "baseVersionReference",
+      "status",
+      "defaultLocale",
+      "localizedNames",
+      "taxClassificationReference",
+      "skus",
+      "optionBindings",
+      "createdAt",
+      "updatedAt",
+    ],
+    ["categoryClassification", "editorContent"],
+  );
   if (
     raw.status !== "Draft" ||
     typeof raw.defaultLocale !== "string" ||
@@ -387,7 +458,7 @@ export function parseProductVersion(value: unknown): ProductVersion {
   const createdAt = parseCatalogInstant(raw.createdAt);
   const updatedAt = parseCatalogInstant(raw.updatedAt);
   if (Date.parse(updatedAt) < Date.parse(createdAt)) return invalid();
-  return Object.freeze({
+  const base: ProductVersion = Object.freeze({
     versionReference: parseCatalogReference(raw.versionReference),
     baseVersionReference:
       raw.baseVersionReference === null ? null : parseCatalogReference(raw.baseVersionReference),
@@ -400,9 +471,18 @@ export function parseProductVersion(value: unknown): ProductVersion {
         : parseCatalogReference(raw.taxClassificationReference),
     skus,
     optionBindings,
+    ...(Object.hasOwn(raw, "categoryClassification")
+      ? { categoryClassification: parseProductCategoryClassification(raw.categoryClassification) }
+      : {}),
     createdAt,
     updatedAt,
   });
+  return raw.editorContent === undefined && !Object.hasOwn(raw, "editorContent")
+    ? base
+    : Object.freeze({
+        ...base,
+        editorContent: parseProductEditorContentDetails(raw.editorContent, base),
+      });
 }
 export function parseProductAggregate(value: unknown): ProductAggregate {
   const raw = exact(value, [

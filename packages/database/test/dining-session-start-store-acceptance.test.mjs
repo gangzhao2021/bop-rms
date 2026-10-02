@@ -335,6 +335,13 @@ it("starts Session, occupies Table and records capability/history/Audit atomical
         (await reader.loadSession(issued.session.diningSessionReference)).tableAssignmentVersion,
         2,
       );
+      const loadedSessions = await reader.loadSessions([
+        id(99),
+        issued.session.diningSessionReference,
+      ]);
+      assert.equal(loadedSessions[0], null);
+      assert.deepEqual(loadedSessions[1], issued.session);
+      assert(Object.isFrozen(loadedSessions));
       assert.deepEqual((await service().start(initial)).session, issued.session);
       await configure(21);
       const lost = command(21, 32);
@@ -414,6 +421,9 @@ it("starts Session, occupies Table and records capability/history/Audit atomical
           { ...scope, [field]: id(90) },
           credentials,
         );
+        assert.deepEqual(await foreign.loadSessions([issued.session.diningSessionReference]), [
+          null,
+        ]);
         assert.equal(await foreign.loadSession(issued.session.diningSessionReference), null);
         assert.equal(await foreign.resolveStartOperation(id(30)), null);
       }

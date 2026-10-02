@@ -385,7 +385,11 @@ function CartContent({
         <button type="button" disabled aria-describedby="clear-boundary">
           Clear cart
         </button>
-        {!terminal && !readOnly ? <Link to="/checkout">Review checkout</Link> : null}
+        {!terminal && !readOnly ? (
+          <Link className="cart-checkout-link" to="/checkout">
+            Review checkout
+          </Link>
+        ) : null}
       </section>
       <div className="cart-boundaries">
         <p id="clear-boundary">Clear cart requires an atomic server command and is unavailable.</p>
@@ -445,6 +449,14 @@ export function CartPage({ controller: provided }: { readonly controller?: CartS
           </div>
         ) : null}
       </header>
+      <nav className="cart-page__navigation" aria-label="Customer journey">
+        <Link to="/menu">
+          <span className="cart-page__navigation-wide-label">Browse menu</span>
+          <span className="cart-page__navigation-compact-label">Menu</span>
+        </Link>
+        <Link to="/menu/search">Search</Link>
+        <span aria-current="page">Cart</span>
+      </nav>
       <div id="cart-content">
         <CartContent state={state} controller={controller} />
       </div>

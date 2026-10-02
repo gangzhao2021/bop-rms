@@ -1,4 +1,4 @@
-import { StatePanel } from "@bop-rms/ui";
+import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import {
   DiscrepancyClientError,
@@ -160,6 +160,89 @@ export function DiscrepancyWorkbench({ view }: { readonly view: DiscrepancyView 
     </main>
   );
 }
+
+export function DiscrepancyUnavailable() {
+  return (
+    <AppFrame
+      className="purchase-order-unavailable-shell"
+      title="Receiving discrepancies"
+      description="Procurement · Brand / Stock Site scope unavailable"
+    >
+      <div className="purchase-order-unavailable discrepancy-unavailable">
+        <p className="bop-eyebrow">PROC-DISCREPANCY · PHASE 3</p>
+        <h2>Receiving discrepancy workspace</h2>
+        <section
+          className="purchase-order-source-boundary"
+          role="status"
+          aria-label="Discrepancy projection unavailable"
+        >
+          <h3>Phase 3 · Discrepancy projection unavailable</h3>
+          <p>
+            No authorized case source is connected. Case, PO / receipt, variance, owner, evidence,
+            cost and history values are not shown.
+          </p>
+        </section>
+        <h2>Case, variance and resolution status</h2>
+        <section
+          aria-label="Case, variance and resolution status"
+          className="purchase-order-status-grid"
+        >
+          {["Case state", "Receipt variance", "Resolution"].map((label) => (
+            <article className="purchase-order-status-card" key={label}>
+              <p>{label}</p>
+              <strong>Unavailable</strong>
+              <small>Authorized source not connected</small>
+            </article>
+          ))}
+        </section>
+        <h2>Search and filters</h2>
+        <fieldset className="purchase-order-filter-panel" aria-label="Search and filters" disabled>
+          <p>Filters disabled until source connects.</p>
+          <label>
+            PO / receipt / supplier ref
+            <input
+              aria-label="PO, receipt or supplier reference filter unavailable"
+              placeholder="Unavailable"
+            />
+          </label>
+          <label>
+            Type / status / Stock Site
+            <select
+              aria-label="Discrepancy type, status or Stock Site filter unavailable"
+              defaultValue=""
+            >
+              <option value="">Unavailable</option>
+            </select>
+          </label>
+          <label>
+            Owner / overdue
+            <select aria-label="Discrepancy owner or overdue filter unavailable" defaultValue="">
+              <option value="">Unavailable</option>
+            </select>
+          </label>
+        </fieldset>
+        <section className="purchase-order-empty-panel" aria-labelledby="discrepancy-empty-title">
+          <h3 id="discrepancy-empty-title">Discrepancies unavailable</h3>
+          <p>
+            No authorized case rows are available. Variance, supplier contact, evidence, cost and
+            resolution history remain unavailable.
+          </p>
+        </section>
+        <section className="purchase-order-fields-panel" aria-labelledby="discrepancy-fields-title">
+          <h3 id="discrepancy-fields-title">Fields when connected</h3>
+          <p>
+            Type/status/PO/receipt · variance/tolerance/owner/overdue ·
+            contact/evidence/cost/history by permission
+          </p>
+        </section>
+        <p className="purchase-order-ownership-note">
+          Resolution appends evidence; Goods Receipt and Stock Ledger facts cannot be edited here.
+        </p>
+      </div>
+    </AppFrame>
+  );
+}
+
 export function DiscrepancyPage({
   client = unavailableDiscrepancyClient,
 }: {
@@ -183,6 +266,8 @@ export function DiscrepancyPage({
   }, [client]);
   return state.kind === "Found" ? (
     <DiscrepancyWorkbench view={state.view} />
+  ) : state.kind === "Unavailable" ? (
+    <DiscrepancyUnavailable />
   ) : (
     <DiscrepancyState state={state.kind} />
   );

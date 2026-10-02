@@ -28,62 +28,135 @@ export function SessionPaymentResultPage() {
     state.status === "unknown" ||
     (result?.status === "Pending" && result.paymentIntentReference !== null) ||
     result?.status === "Unknown";
+  const unknown = state.status === "unknown" || result?.status === "Unknown";
+  const unprepared = result?.status === "Pending" && result.paymentIntentReference === null;
+  const heading =
+    state.status === "loading"
+      ? "Verifying payment"
+      : state.status === "missing" || state.status === "denied"
+        ? "Payment result unavailable"
+        : state.status === "offline"
+          ? "Connection required"
+          : unknown
+            ? "Payment result unknown"
+            : unprepared
+              ? "Payment not prepared"
+              : result?.status === "Pending"
+                ? "Payment confirmation pending"
+                : result?.status === "Succeeded"
+                  ? "Payment confirmed"
+                  : result?.status === "Failed"
+                    ? "Payment failed"
+                    : "Payment result unavailable";
+  const badge = unknown
+    ? "Status not confirmed"
+    : (result?.status ??
+      (state.status === "loading"
+        ? "Checking"
+        : state.status === "offline"
+          ? "Offline"
+          : "Unavailable"));
+  const badgeTone = unknown
+    ? "warning"
+    : result?.status === "Failed"
+      ? "danger"
+      : result?.status === "Succeeded"
+        ? "success"
+        : result?.status === "Pending"
+          ? "pending"
+          : "neutral";
+  const alert =
+    state.status === "missing" ||
+    state.status === "denied" ||
+    state.status === "offline" ||
+    unknown ||
+    result?.status === "Failed";
   return (
-    <main id="main-content" className="payment-page">
-      <h1>Verify your payment</h1>
-      {state.status === "loading" ? <p role="status">Verifying payment…</p> : null}
-      {state.status === "missing" ? (
-        <p role="alert">
-          This payment cannot be identified in this window. Contact the store to check your payment
-          before paying again.
-        </p>
-      ) : null}
-      {state.status === "denied" ? (
-        <p role="alert">
-          This payment is unavailable in your current session. Contact the store to check its
-          status.
-        </p>
-      ) : null}
-      {state.status === "offline" ? (
-        <p role="alert">Reconnect to check your payment. Nothing will restart automatically.</p>
-      ) : null}
-      {state.status === "unknown" || result?.status === "Unknown" ? (
-        <p role="alert">Your payment result is not yet known. Check again before paying again.</p>
-      ) : null}
-      {result?.status === "Pending" ? (
-        result.paymentIntentReference === null ? (
-          <section role="status">
-            <p>Payment has not been prepared for this checkout.</p>
-            <Link to="/checkout">Return to checkout</Link>
-          </section>
-        ) : (
-          <p role="status">Payment confirmation is pending.</p>
-        )
-      ) : null}
-      {result?.status === "Succeeded" ? (
-        <section role="status">
-          <h2>Payment confirmed</h2>
-          {result.total ? (
+    <main id="main-content" className="payment-page payment-result-page">
+      <header className="payment-page__header payment-result-page__header">
+        <span>BOP</span>
+        <strong>Payment result</strong>
+        <span>Guest session · exact Store scope required</span>
+      </header>
+      <nav
+        className="payment-page__journey payment-result-page__journey"
+        aria-label="Customer checkout journey"
+      >
+        <Link to="/">Entry</Link>
+        <Link to="/menu">Menu</Link>
+        <Link to="/cart">Cart</Link>
+        <Link to="/checkout">Checkout</Link>
+        <span aria-current="page">Payment</span>
+      </nav>
+      <h1>Check your payment</h1>
+      <p className="payment-result-page__intro">
+        {unknown
+          ? "The payment result is still being confirmed."
+          : result?.status === "Failed"
+            ? "This payment was not completed."
+            : "Payment details come from your current checkout session."}
+      </p>
+      <section className="payment-result-page__card" aria-labelledby="payment-result-heading">
+        <span className="payment-result-page__badge" data-tone={badgeTone}>
+          {badge}
+        </span>
+        <h2 id="payment-result-heading">{heading}</h2>
+        <div role={alert ? "alert" : "status"} className="payment-result-page__message">
+          {state.status === "loading" ? <p>Verifying payment…</p> : null}
+          {state.status === "missing" ? (
             <p>
-              Paid: <strong>{formatCartMoney(result.total)}</strong>
+              This payment cannot be identified in this window. Contact the store to check your
+              payment before paying again.
             </p>
           ) : null}
-          {result.orderReference ? (
-            <Link to={"/orders/" + result.orderReference}>View order status</Link>
+          {state.status === "denied" ? (
+            <p>
+              This payment is unavailable in your current session. Contact the store to check its
+              status.
+            </p>
           ) : null}
-        </section>
-      ) : null}
-      {result?.status === "Failed" ? (
-        <section role="alert">
-          <h2>Payment failed</h2>
-          <p>Contact the store if you need help with this payment.</p>
-        </section>
-      ) : null}
-      {refresh ? (
-        <button type="button" onClick={() => void controller.refresh()}>
-          Check payment status
-        </button>
-      ) : null}
+          {state.status === "offline" ? (
+            <p>Reconnect to check your payment. Nothing will restart automatically.</p>
+          ) : null}
+          {unknown ? (
+            <>
+              <p>Neither success nor failure is confirmed.</p>
+              <p>Check the same payment; do not submit another.</p>
+            </>
+          ) : null}
+          {unprepared ? <p>Payment has not been prepared for this checkout.</p> : null}
+          {result?.status === "Pending" && !unprepared ? (
+            <p>Payment confirmation is pending. Do not submit another payment.</p>
+          ) : null}
+          {result?.status === "Succeeded" ? (
+            <>
+              {result.total ? (
+                <p>
+                  Paid: <strong>{formatCartMoney(result.total)}</strong>
+                </p>
+              ) : null}
+              {result.orderReference ? (
+                <Link to={"/orders/" + result.orderReference}>View order status</Link>
+              ) : null}
+            </>
+          ) : null}
+          {result?.status === "Failed" ? (
+            <p>Contact the store if you need help with this payment.</p>
+          ) : null}
+        </div>
+        {refresh ? (
+          <button
+            type="button"
+            className="payment-result-page__refresh"
+            onClick={() => void controller.refresh()}
+          >
+            Check payment status
+          </button>
+        ) : null}
+      </section>
+      <Link className="payment-result-page__back" to="/checkout">
+        Back to checkout
+      </Link>
     </main>
   );
 }

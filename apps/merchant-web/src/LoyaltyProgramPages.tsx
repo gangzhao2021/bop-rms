@@ -1,4 +1,4 @@
-import { StatePanel } from "@bop-rms/ui";
+import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -46,6 +46,127 @@ export function LoyaltyProgramState({
     <StatePanel heading={item[0]} tone={item[2]} status>
       <p>{item[1]}</p>
     </StatePanel>
+  );
+}
+export function LoyaltyProgramListUnavailable({
+  state = "Unavailable",
+}: {
+  readonly state?: "Unavailable" | "FeatureDisabled";
+}) {
+  const featureDisabled = state === "FeatureDisabled";
+  return (
+    <AppFrame className="loyalty-list-shell" title="OPERATIONS" description="">
+      <div className="loyalty-list-unavailable">
+        <header className="loyalty-list-heading">
+          <div>
+            <p className="bop-eyebrow">LOY-PROGRAM-LIST · PHASE 3</p>
+            <h2>Loyalty Programs</h2>
+            <p>Brand scope unavailable · freshness unavailable</p>
+          </div>
+        </header>
+        <section
+          className="loyalty-list-source-boundary"
+          id="loyalty-list-source-boundary"
+          role="status"
+          aria-label={
+            featureDisabled
+              ? "Loyalty Programs Phase 3 capability disabled"
+              : "Loyalty Program source unavailable"
+          }
+        >
+          <h3>
+            {featureDisabled ? "Phase 3 capability disabled" : "Program projection unavailable"}
+          </h3>
+          <p>
+            {featureDisabled
+              ? "Loyalty Programs are not enabled for this workspace. Program rules, member counts and effective dates are not shown."
+              : "Program rules, member counts and effective dates are not inferred. Connect the authorized Loyalty projection before showing program records."}
+          </p>
+        </section>
+        <fieldset className="loyalty-list-filters" disabled>
+          <legend>Filters</legend>
+          <div>
+            <label>
+              Program name / code
+              <input aria-label="Name or code filter unavailable" placeholder="Unavailable" />
+            </label>
+            <label>
+              Status
+              <select aria-label="Status filter unavailable">
+                <option>Unavailable</option>
+              </select>
+            </label>
+            <label>
+              Store scope
+              <select aria-label="Store scope filter unavailable">
+                <option>Unavailable</option>
+              </select>
+            </label>
+            <label>
+              Scheduled
+              <select aria-label="Scheduled filter unavailable">
+                <option>Unavailable</option>
+              </select>
+            </label>
+          </div>
+          <p>
+            {featureDisabled
+              ? "Program filters are unavailable while the Phase 3 capability is disabled."
+              : "Program filters are unavailable until the authorized Loyalty projection is connected."}
+          </p>
+        </fieldset>
+        <section className="loyalty-list-catalog" aria-labelledby="loyalty-list-items-title">
+          <header>
+            <h3 id="loyalty-list-items-title">Program catalog</h3>
+            <span>Source unavailable</span>
+          </header>
+          <table className="loyalty-list-table" aria-label="Program catalog fields unavailable">
+            <thead className="loyalty-list-table-head">
+              <tr>
+                {[
+                  "Program / code",
+                  "Lifecycle",
+                  "Store scope",
+                  "Effective period",
+                  "Earn / redeem",
+                  "Members",
+                ].map((label) => (
+                  <th scope="col" key={label}>
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colSpan={6}>
+                  <div className="loyalty-list-empty">
+                    <strong>No program data available</strong>
+                    <span>
+                      {featureDisabled
+                        ? "No program records are shown while the Phase 3 capability is disabled."
+                        : "The authorized Loyalty Program projection is not connected to this route. No program names, point rules, Store scope or expiry terms are shown."}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section className="loyalty-list-actions">
+          <strong>Program actions unavailable</strong>
+          <p>
+            {featureDisabled
+              ? "Create, duplicate, edit, simulate, publish or suspend remain unavailable while the Phase 3 capability is disabled."
+              : "Create, duplicate, edit, simulate, publish or suspend require an authorized program version and command route. No commands are connected."}
+          </p>
+        </section>
+        <p className="loyalty-list-gate">
+          Program terms, point rules and expiry are never inferred from unavailable data. This view
+          contains no program records.
+        </p>
+      </div>
+    </AppFrame>
   );
 }
 export function LoyaltyProgramList({ view }: { readonly view: LoyaltyProgramView }) {
@@ -206,6 +327,8 @@ function Page({
     ) : (
       <LoyaltyProgramEditor view={state.view} />
     )
+  ) : screenId === "LOY-PROGRAM-LIST" && ["Unavailable", "FeatureDisabled"].includes(state.kind) ? (
+    <LoyaltyProgramListUnavailable state={state.kind as "Unavailable" | "FeatureDisabled"} />
   ) : (
     <LoyaltyProgramState state={state.kind} />
   );

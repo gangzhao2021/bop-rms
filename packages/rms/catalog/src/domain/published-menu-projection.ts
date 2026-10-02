@@ -6,6 +6,7 @@ import {
   parseCatalogReference,
   parseLocalizedNames,
 } from "./product.js";
+import { parseMenuCategoryBindings, type MenuCategoryBinding } from "./menu-category-bindings.js";
 import { parsePublishingDigest } from "@bop/publishing";
 import type { PublishingDigest } from "@bop/publishing";
 import type { CatalogCode, CatalogInstant, CatalogReference } from "./product.js";
@@ -293,7 +294,7 @@ function validateChannelRules(
 export type ReviewedMenuContent = Omit<
   PublishedMenuSnapshot,
   "releaseReference" | "snapshotDigest" | "timeZone" | "effectiveFrom" | "effectiveUntil"
->;
+> & { readonly categoryBindings?: readonly MenuCategoryBinding[] };
 
 export function parseReviewedMenuContent(value: ReviewedMenuContent): ReviewedMenuContent {
   const defaultLocale = parseCatalogLocale(value.defaultLocale);
@@ -334,6 +335,14 @@ export function parseReviewedMenuContent(value: ReviewedMenuContent): ReviewedMe
     channelCodes,
     orderTypeCodes: codes(value.orderTypeCodes),
     sections,
+    ...(Object.hasOwn(value, "categoryBindings")
+      ? {
+          categoryBindings: parseMenuCategoryBindings(
+            Object.getOwnPropertyDescriptor(value, "categoryBindings")?.value,
+            sections.map((section) => section.sectionReference),
+          ),
+        }
+      : {}),
   });
 }
 
@@ -345,7 +354,16 @@ export function parsePublishedMenuSnapshot(value: PublishedMenuSnapshot): Publis
   if (effectiveUntil !== null && Date.parse(effectiveUntil) <= Date.parse(effectiveFrom)) invalid();
   if (typeof value.timeZone !== "string") invalid();
   return Object.freeze({
-    ...content,
+    // Category bindings are internal review evidence, not Customer display fields.
+    brandReference: content.brandReference,
+    menuReference: content.menuReference,
+    menuVersionReference: content.menuVersionReference,
+    defaultLocale: content.defaultLocale,
+    localizedNames: content.localizedNames,
+    storeReferences: content.storeReferences,
+    channelCodes: content.channelCodes,
+    orderTypeCodes: content.orderTypeCodes,
+    sections: content.sections,
     releaseReference: parseCatalogReference(value.releaseReference),
     snapshotDigest: parsePublishingDigest(value.snapshotDigest),
     timeZone: value.timeZone,

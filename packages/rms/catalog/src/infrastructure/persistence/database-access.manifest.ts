@@ -1,11 +1,156 @@
 const databaseAccessManifestInput = {
   version: 1,
-  module: { moduleName: "catalog", packageName: "@rms/catalog", layer: "RMS" },
+  module: {
+    moduleName: "catalog",
+    packageName: "@rms/catalog",
+    layer: "RMS",
+  },
   tables: [
+    {
+      table: "option_set_publication_content",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "option_set_draft_content_snapshot",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_approval_receipt",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_content_registry_record",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_scope_journal",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_publication_revision",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_publication_content",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "menu_reference_generation",
+      classification: "projection-read-model",
+      writeOwner: { kind: "projection-builder", id: "@rms/catalog.menu-reference.v1" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "bundle_reference_generation",
+      classification: "projection-read-model",
+      writeOwner: { kind: "projection-builder", id: "@rms/catalog.bundle-reference.v1" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_version_category_assignment",
+      classification: "aggregate-child-entity",
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_search_generation",
+      classification: "projection-read-model",
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.product-search.v1",
+      },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_search_row",
+      classification: "projection-read-model",
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.product-search.v1",
+      },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_search_activation",
+      classification: "projection-read-model",
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.product-search.v1",
+      },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_source_head",
+      classification: "configuration-version",
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "product_source_commit",
+      classification: "append-only-record",
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
     {
       table: "product",
       classification: "aggregate-root",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -13,7 +158,10 @@ const databaseAccessManifestInput = {
     {
       table: "product_version",
       classification: "configuration-version",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -21,7 +169,10 @@ const databaseAccessManifestInput = {
     {
       table: "sku",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -29,7 +180,10 @@ const databaseAccessManifestInput = {
     {
       table: "product_operation_snapshot",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -37,7 +191,10 @@ const databaseAccessManifestInput = {
     {
       table: "product_operation_record",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -45,7 +202,10 @@ const databaseAccessManifestInput = {
     {
       table: "category",
       classification: "aggregate-root",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -53,7 +213,43 @@ const databaseAccessManifestInput = {
     {
       table: "category_operation_record",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "category_operation_snapshot",
+      classification: "append-only-record",
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "category_source_head",
+      classification: "configuration-version",
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "category_source_commit",
+      classification: "append-only-record",
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -61,7 +257,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu",
       classification: "aggregate-root",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -69,7 +268,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_version",
       classification: "configuration-version",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -77,7 +279,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_version_store",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -85,7 +290,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_version_channel",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -93,7 +301,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_version_order_type",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -101,7 +312,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_section",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -109,7 +323,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_section_category",
       classification: "relationship-assignment",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -117,7 +334,10 @@ const databaseAccessManifestInput = {
     {
       table: "sellable_placement",
       classification: "relationship-assignment",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -125,7 +345,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_operation_record",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -133,7 +356,10 @@ const databaseAccessManifestInput = {
     {
       table: "option_set",
       classification: "aggregate-root",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -141,7 +367,10 @@ const databaseAccessManifestInput = {
     {
       table: "option_set_version",
       classification: "configuration-version",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -149,7 +378,10 @@ const databaseAccessManifestInput = {
     {
       table: "option",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -157,7 +389,10 @@ const databaseAccessManifestInput = {
     {
       table: "option_conflict",
       classification: "relationship-assignment",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -165,7 +400,10 @@ const databaseAccessManifestInput = {
     {
       table: "product_option_binding",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -173,7 +411,10 @@ const databaseAccessManifestInput = {
     {
       table: "product_option_binding_option",
       classification: "relationship-assignment",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -181,7 +422,10 @@ const databaseAccessManifestInput = {
     {
       table: "product_option_binding_sku_scope",
       classification: "relationship-assignment",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -189,7 +433,10 @@ const databaseAccessManifestInput = {
     {
       table: "product_option_binding_channel",
       classification: "relationship-assignment",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -197,7 +444,10 @@ const databaseAccessManifestInput = {
     {
       table: "option_set_operation_record",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -205,7 +455,10 @@ const databaseAccessManifestInput = {
     {
       table: "availability_rule",
       classification: "aggregate-root",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -213,7 +466,10 @@ const databaseAccessManifestInput = {
     {
       table: "availability_rule_operation_record",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -221,7 +477,10 @@ const databaseAccessManifestInput = {
     {
       table: "availability_workbench_projection_generation",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/catalog.availability-workbench.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.availability-workbench.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -229,7 +488,10 @@ const databaseAccessManifestInput = {
     {
       table: "availability_workbench_projection",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/catalog.availability-workbench.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.availability-workbench.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -237,7 +499,10 @@ const databaseAccessManifestInput = {
     {
       table: "availability_workbench_projection_checkpoint",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/catalog.availability-workbench.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.availability-workbench.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -245,7 +510,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_publication_revision",
       classification: "configuration-version",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -253,7 +521,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_publication_release",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -261,7 +532,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_release_effective_period",
       classification: "configuration-version",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -269,7 +543,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_review_content",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -277,7 +554,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_publication_operation_snapshot",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -285,7 +565,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_publication_operation_record",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -293,7 +576,10 @@ const databaseAccessManifestInput = {
     {
       table: "published_menu_projection_generation",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/catalog.published-menu.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.published-menu.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -301,7 +587,10 @@ const databaseAccessManifestInput = {
     {
       table: "published_menu_projection",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/catalog.published-menu.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.published-menu.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -309,7 +598,10 @@ const databaseAccessManifestInput = {
     {
       table: "published_menu_projection_section",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/catalog.published-menu.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.published-menu.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -317,7 +609,10 @@ const databaseAccessManifestInput = {
     {
       table: "published_menu_projection_sellable",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/catalog.published-menu.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.published-menu.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -325,7 +620,10 @@ const databaseAccessManifestInput = {
     {
       table: "published_menu_projection_checkpoint",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/catalog.published-menu.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.published-menu.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -333,7 +631,10 @@ const databaseAccessManifestInput = {
     {
       table: "allergen_registry_version",
       classification: "configuration-version",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -341,7 +642,10 @@ const databaseAccessManifestInput = {
     {
       table: "allergen_registry_entry",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -349,7 +653,10 @@ const databaseAccessManifestInput = {
     {
       table: "allergen_source_evidence",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -357,7 +664,10 @@ const databaseAccessManifestInput = {
     {
       table: "allergen_source_assertion",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -365,7 +675,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_allergen_validation_evidence",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -373,7 +686,10 @@ const databaseAccessManifestInput = {
     {
       table: "menu_sellable_allergen_disclosure",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/catalog.allergen-validation.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.allergen-validation.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -381,7 +697,10 @@ const databaseAccessManifestInput = {
     {
       table: "bundle",
       classification: "aggregate-root",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -389,7 +708,10 @@ const databaseAccessManifestInput = {
     {
       table: "bundle_version",
       classification: "configuration-version",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -397,7 +719,10 @@ const databaseAccessManifestInput = {
     {
       table: "bundle_component_group",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -405,7 +730,10 @@ const databaseAccessManifestInput = {
     {
       table: "bundle_component_sellable",
       classification: "relationship-assignment",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -413,7 +741,10 @@ const databaseAccessManifestInput = {
     {
       table: "bundle_availability_rule",
       classification: "relationship-assignment",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -421,19 +752,2031 @@ const databaseAccessManifestInput = {
     {
       table: "bundle_operation_record",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/catalog" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "availability_reference_generation",
+      classification: "projection-read-model",
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/catalog.availability-reference.v1",
+      },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "recipe_allergen_source_capture",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
     },
   ],
   accesses: [
     {
+      id: "full-option-frozen.read.option_set_publication_content",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "option_set_publication_content" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-seal.write.option_set_publication_content",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "option_set_publication_content" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.read.option_set",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option_set",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.write.option_set",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option_set",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.read.option_set_version",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option_set_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.write.option_set_version",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option_set_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.read.option",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.write.option",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.read.option_conflict",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option_conflict",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.write.option_conflict",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option_conflict",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.read.option_set_operation_record",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option_set_operation_record",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.write.option_set_operation_record",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option_set_operation_record",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.read.option_set_draft_content_snapshot",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option_set_draft_content_snapshot",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "full-option-draft.write.option_set_draft_content_snapshot",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "option_set_draft_content_snapshot",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/option-set-full-draft-store.ts",
+    },
+    {
+      id: "product-publication.write.product_approval_receipt",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_approval_receipt" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "publication-source.read.product_approval_receipt",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_approval_receipt" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-publication-source-store.ts",
+    },
+    {
+      id: "content-registry.read.product_content_registry_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_content_registry_record" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-content-registry-store.ts",
+    },
+    {
+      id: "content-registry.write.product_content_registry_record",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_content_registry_record" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: null,
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-content-registry-store.ts",
+    },
+    {
+      id: "product-publication-source.read.product_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_version" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-publication-source-store.ts",
+    },
+    {
+      id: "publication-source.read.product",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-publication-source-store.ts",
+    },
+    {
+      id: "publication-source.read.product_publication_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_publication_revision" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-publication-source-store.ts",
+    },
+    {
+      id: "publication-source.read.product_publication_content",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_publication_content" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-publication-source-store.ts",
+    },
+    {
+      id: "publication-source.read.product_operation_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_operation_record" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-publication-source-store.ts",
+    },
+    {
+      id: "publication-source.read.product_operation_snapshot",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_operation_snapshot" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-publication-source-store.ts",
+    },
+    {
+      id: "publication-source.read.product_source_commit",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_source_commit" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-publication-source-store.ts",
+    },
+    {
+      id: "catalog-inventory-sku-source.read.product",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/inventory-sku-reference-source-store.ts",
+    },
+    {
+      id: "catalog-inventory-sku-source.read.product_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_version" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/inventory-sku-reference-source-store.ts",
+    },
+    {
+      id: "catalog-inventory-sku-source.read.sku",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "sku" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/inventory-sku-reference-source-store.ts",
+    },
+    {
+      id: "catalog-inventory-sku-source.read.product_version_category_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_version_category_assignment" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/inventory-sku-reference-source-store.ts",
+    },
+    {
+      id: "catalog-inventory-sku-source.read.product_option_binding",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_option_binding" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/inventory-sku-reference-source-store.ts",
+    },
+    {
+      id: "catalog-inventory-sku-source.read.product_option_binding_option",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_option_binding_option" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/inventory-sku-reference-source-store.ts",
+    },
+    {
+      id: "catalog-inventory-sku-source.read.product_option_binding_sku_scope",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_option_binding_sku_scope" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/inventory-sku-reference-source-store.ts",
+    },
+    {
+      id: "catalog-inventory-sku-source.read.product_option_binding_channel",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_option_binding_channel" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/inventory-sku-reference-source-store.ts",
+    },
+    {
+      id: "catalog-inventory-sku-source.read.product_source_head",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_source_head" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/inventory-sku-reference-source-store.ts",
+    },
+    {
+      id: "menu-reference-source.read.menu_reference_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "menu_reference_generation" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-reference-source-store.ts",
+    },
+    {
+      id: "menu-reference-source.read.menu_review_content",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "menu_review_content" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-reference-source-store.ts",
+    },
+    {
+      id: "menu-reference-source.read.menu_publication_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "menu_publication_revision" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-reference-source-store.ts",
+    },
+    {
+      id: "menu-reference-source.read.menu_publication_release",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "menu_publication_release" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-reference-source-store.ts",
+    },
+    {
+      id: "menu-reference-source.read.menu_release_effective_period",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "menu_release_effective_period" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-reference-source-store.ts",
+    },
+    {
+      id: "bundle-reference-source.read.bundle_reference_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "bundle_reference_generation" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/bundle-reference-source-store.ts",
+    },
+    {
+      id: "bundle-reference-source.read.bundle",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "bundle" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/bundle-reference-source-store.ts",
+    },
+    {
+      id: "bundle-reference-source.read.bundle_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "bundle_version" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/bundle-reference-source-store.ts",
+    },
+    {
+      id: "bundle-reference-source.read.bundle_component_group",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "bundle_component_group" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/bundle-reference-source-store.ts",
+    },
+    {
+      id: "bundle-reference-source.read.bundle_component_sellable",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "bundle_component_sellable" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/bundle-reference-source-store.ts",
+    },
+    {
+      id: "product-reference-history-source.read.product",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-reference-history-source-store.ts",
+    },
+    {
+      id: "product-reference-history-source.read.product_operation_record",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_operation_record",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-reference-history-source-store.ts",
+    },
+    {
+      id: "product-reference-history-source.read.product_operation_snapshot",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_operation_snapshot",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-reference-history-source-store.ts",
+    },
+    {
+      id: "product-reference-history-source.read.product_publication_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_publication_revision" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-reference-history-source-store.ts",
+    },
+    {
+      id: "product-reference-history-source.read.product_source_commit",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_source_commit" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-reference-history-source-store.ts",
+    },
+    {
+      id: "product-pricing-binding-source.read.product",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-pricing-binding-source-store.ts",
+    },
+    {
+      id: "product-pricing-binding-source.read.product_version",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-pricing-binding-source-store.ts",
+    },
+    {
+      id: "product-pricing-binding-source.read.sku",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "sku",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-pricing-binding-source-store.ts",
+    },
+    {
+      id: "product-pricing-binding-source.read.product_version_category_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_version_category_assignment",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-pricing-binding-source-store.ts",
+    },
+    {
+      id: "product-pricing-binding-source.read.product_option_binding",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-pricing-binding-source-store.ts",
+    },
+    {
+      id: "product-pricing-binding-source.read.product_option_binding_option",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding_option",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-pricing-binding-source-store.ts",
+    },
+    {
+      id: "product-pricing-binding-source.read.product_option_binding_sku_scope",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding_sku_scope",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-pricing-binding-source-store.ts",
+    },
+    {
+      id: "product-pricing-binding-source.read.product_option_binding_channel",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding_channel",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-pricing-binding-source-store.ts",
+    },
+    {
+      id: "product-menu-source.read.product",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-menu-source-store.ts",
+    },
+    {
+      id: "product-menu-source.read.sku",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "sku",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-menu-source-store.ts",
+    },
+    {
+      id: "product-menu-source.read.product_version",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-menu-source-store.ts",
+    },
+    {
+      id: "product-menu-source.read.menu_review_content",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "menu_review_content",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-menu-source-store.ts",
+    },
+    {
+      id: "product-menu-source.read.menu_publication_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "menu_publication_revision",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-menu-source-store.ts",
+    },
+    {
+      id: "product-menu-source.read.menu_publication_release",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "menu_publication_release",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-menu-source-store.ts",
+    },
+    {
+      id: "product-menu-source.read.menu_release_effective_period",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "menu_release_effective_period",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-menu-source-store.ts",
+    },
+    {
+      id: "product-bundle-source.read.product",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-bundle-source-store.ts",
+    },
+    {
+      id: "product-bundle-source.read.sku",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "sku",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-bundle-source-store.ts",
+    },
+    {
+      id: "product-bundle-source.read.bundle",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "bundle",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-bundle-source-store.ts",
+    },
+    {
+      id: "product-bundle-source.read.bundle_version",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "bundle_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-bundle-source-store.ts",
+    },
+    {
+      id: "product-bundle-source.read.bundle_component_group",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "bundle_component_group",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-bundle-source-store.ts",
+    },
+    {
+      id: "product-bundle-source.read.bundle_component_sellable",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "bundle_component_sellable",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-bundle-source-store.ts",
+    },
+    {
+      id: "product-availability-source.read.product",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-availability-source-store.ts",
+    },
+    {
+      id: "product-availability-source.read.sku",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "sku",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-availability-source-store.ts",
+    },
+    {
+      id: "product-availability-source.read.availability_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "availability_rule",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-availability-source-store.ts",
+    },
+    {
+      id: "menu-category-source.read.menu",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "menu",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-category-source-store.ts",
+    },
+    {
+      id: "menu-category-source.read.menu_version",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "menu_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-category-source-store.ts",
+    },
+    {
+      id: "menu-category-source.read.menu_section",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "menu_section",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-category-source-store.ts",
+    },
+    {
+      id: "menu-category-source.read.menu_section_category",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "menu_section_category",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-category-source-store.ts",
+    },
+    {
+      id: "menu-category-source.read.menu_review_content",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "menu_review_content",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-category-source-store.ts",
+    },
+    {
+      id: "menu-category-source.read.menu_publication_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "menu_publication_revision",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/menu-category-source-store.ts",
+    },
+    {
+      id: "wp2409.product-lifecycle-store.read.product_version_category_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_version_category_assignment",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-lifecycle-store.ts",
+    },
+    {
+      id: "wp2409.product-lifecycle-store.insert.product_version_category_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_version_category_assignment",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-lifecycle-store.ts",
+    },
+    {
+      id: "wp2409.product-lifecycle-store.delete.product_version_category_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_version_category_assignment",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-lifecycle-store.ts",
+    },
+    {
+      id: "wp2409.product-search-generation-store.read.product_version_category_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_version_category_assignment",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "wp2409.product-category-assignment.read.category",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-category-assignment.ts",
+    },
+    {
+      id: "product-search.read.product",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_version",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.sku",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "sku",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_source_head",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_source_head",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_source_commit",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_source_commit",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_operation_snapshot",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_operation_snapshot",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_option_binding",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_option_binding_option",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding_option",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_option_binding_sku_scope",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding_sku_scope",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_option_binding_channel",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding_channel",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_search_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_search_generation",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_search_row",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_search_row",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.read.product_search_activation",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_search_activation",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.write.product_search_generation",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_search_generation",
+      },
+      principal: {
+        kind: "projection-builder",
+        id: "@rms/catalog.product-search.v1",
+      },
+      readPattern: null,
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.write.product_search_row",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_search_row",
+      },
+      principal: {
+        kind: "projection-builder",
+        id: "@rms/catalog.product-search.v1",
+      },
+      readPattern: null,
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-search.write.product_search_activation",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_search_activation",
+      },
+      principal: {
+        kind: "projection-builder",
+        id: "@rms/catalog.product-search.v1",
+      },
+      readPattern: null,
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-search-generation-store.ts",
+    },
+    {
+      id: "product-publication-source.read.product_scope_journal",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_scope_journal" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/product-publication-source-store.ts",
+    },
+    {
+      id: "product-publication.read.product_scope_journal",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_scope_journal" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.write.product_scope_journal",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_scope_journal" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.read.product_source_head",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_source_head" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.read.product_source_commit",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_catalog", table: "product_source_commit" },
+      principal: { kind: "module", id: "@rms/catalog" },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.read.product_operation_record",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_operation_record",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.read.product_publication_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_publication_revision",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.read.product_operation_snapshot",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_operation_snapshot",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.read.product_publication_content",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_publication_content",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.read.product",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.write.product",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.write.product_operation_record",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_operation_record",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.write.product_version",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.write.product_version_category_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_version_category_assignment",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.write.product_publication_revision",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_publication_revision",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.write.product_publication_content",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_publication_content",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.write.sku",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "sku",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.write.product_option_binding",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-publication.write.product_operation_snapshot",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_operation_snapshot",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-publication-store.ts",
+    },
+    {
+      id: "product-source.read.product_source_head",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_source_head",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-source-producer.ts",
+    },
+    {
+      id: "product-source.insert.product_source_head",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_source_head",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-source-producer.ts",
+    },
+    {
+      id: "product-source.insert.product_source_commit",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_source_commit",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-source-producer.ts",
+    },
+    {
+      id: "product-source.read.product_operation_record",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_operation_record",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-source-producer.ts",
+    },
+    {
+      id: "product-list.read.product_search_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_search_generation",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-list-query-store.ts",
+    },
+    {
+      id: "product-list.read.product_search_row",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_search_row",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-list-query-store.ts",
+    },
+    {
+      id: "product-list.read.product_search_activation",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_search_activation",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-list-query-store.ts",
+    },
+    {
+      id: "product-list.read.product_source_head",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "product_source_head",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/product-list-query-store.ts",
+    },
+    {
+      id: "category-public-source.read.category",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-source-store.ts",
+    },
+    {
+      id: "category-public-source.read.category_operation_record",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_operation_record",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-source-store.ts",
+    },
+    {
+      id: "category-public-source.read.category_operation_snapshot",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_operation_snapshot",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-source-store.ts",
+    },
+    {
+      id: "category-public-source.read.category_source_head",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_source_head",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-source-store.ts",
+    },
+    {
+      id: "category-public-source.read.category_source_commit",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_source_commit",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-source-store.ts",
+    },
+    {
+      id: "category-source.read.category",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.insert.category",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.update.category",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.read.category_operation_record",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_operation_record",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.insert.category_operation_record",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_operation_record",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.read.category_operation_snapshot",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_operation_snapshot",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.insert.category_operation_snapshot",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_operation_snapshot",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.read.category_source_head",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_source_head",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.insert.category_source_head",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_source_head",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.update.category_source_head",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_source_head",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.read.category_source_commit",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_source_commit",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: "owner-repository",
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
+      id: "category-source.insert.category_source_commit",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "category_source_commit",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      readPattern: null,
+      source: "packages/rms/catalog/src/infrastructure/persistence/category-repository.ts",
+    },
+    {
       id: "current-menu-placement.read.menu",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "menu" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "menu",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-placement-store.ts",
     },
@@ -441,8 +2784,14 @@ const databaseAccessManifestInput = {
       id: "current-menu-placement.read.menu_version",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "menu_version" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "menu_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-placement-store.ts",
     },
@@ -450,8 +2799,14 @@ const databaseAccessManifestInput = {
       id: "current-menu-placement.read.menu_section",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "menu_section" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "menu_section",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-placement-store.ts",
     },
@@ -459,8 +2814,14 @@ const databaseAccessManifestInput = {
       id: "current-menu-placement.read.sellable_placement",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "sellable_placement" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "sellable_placement",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-placement-store.ts",
     },
@@ -468,18 +2829,29 @@ const databaseAccessManifestInput = {
       id: "current-menu-placement.read.sku",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "sku" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "sku",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-placement-store.ts",
     },
-
     {
       id: "current-option-bindings.read.sku",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "sku" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "sku",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source:
         "packages/rms/catalog/src/infrastructure/persistence/current-option-bindings-store.ts",
@@ -488,8 +2860,14 @@ const databaseAccessManifestInput = {
       id: "current-option-bindings.read.product_version",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "product_version" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "product_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source:
         "packages/rms/catalog/src/infrastructure/persistence/current-option-bindings-store.ts",
@@ -498,8 +2876,14 @@ const databaseAccessManifestInput = {
       id: "current-option-bindings.read.option_set",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "option_set" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "option_set",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source:
         "packages/rms/catalog/src/infrastructure/persistence/current-option-bindings-store.ts",
@@ -508,8 +2892,14 @@ const databaseAccessManifestInput = {
       id: "current-option-bindings.read.option_set_version",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "option_set_version" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "option_set_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source:
         "packages/rms/catalog/src/infrastructure/persistence/current-option-bindings-store.ts",
@@ -518,8 +2908,14 @@ const databaseAccessManifestInput = {
       id: "current-option-bindings.read.option",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "option" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "option",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source:
         "packages/rms/catalog/src/infrastructure/persistence/current-option-bindings-store.ts",
@@ -528,8 +2924,14 @@ const databaseAccessManifestInput = {
       id: "current-option-bindings.read.option_conflict",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "option_conflict" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "option_conflict",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source:
         "packages/rms/catalog/src/infrastructure/persistence/current-option-bindings-store.ts",
@@ -538,8 +2940,14 @@ const databaseAccessManifestInput = {
       id: "current-option-bindings.read.product_option_binding",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "product_option_binding" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source:
         "packages/rms/catalog/src/infrastructure/persistence/current-option-bindings-store.ts",
@@ -548,8 +2956,14 @@ const databaseAccessManifestInput = {
       id: "current-option-bindings.read.product_option_binding_option",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "product_option_binding_option" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding_option",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source:
         "packages/rms/catalog/src/infrastructure/persistence/current-option-bindings-store.ts",
@@ -558,8 +2972,14 @@ const databaseAccessManifestInput = {
       id: "current-option-bindings.read.product_option_binding_sku_scope",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "product_option_binding_sku_scope" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding_sku_scope",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source:
         "packages/rms/catalog/src/infrastructure/persistence/current-option-bindings-store.ts",
@@ -568,19 +2988,30 @@ const databaseAccessManifestInput = {
       id: "current-option-bindings.read.product_option_binding_channel",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "product_option_binding_channel" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "product_option_binding_channel",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source:
         "packages/rms/catalog/src/infrastructure/persistence/current-option-bindings-store.ts",
     },
-
     {
       id: "current-sku.read.product",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "product" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "product",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-sku-store.ts",
     },
@@ -588,8 +3019,14 @@ const databaseAccessManifestInput = {
       id: "current-sku.read.product_version",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "product_version" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "product_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-sku-store.ts",
     },
@@ -597,18 +3034,29 @@ const databaseAccessManifestInput = {
       id: "current-sku.read.sku",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "sku" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "sku",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-sku-store.ts",
     },
-
     {
       id: "current-menu-release.read.menu_publication_revision",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "menu_publication_revision" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "menu_publication_revision",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-release-store.ts",
     },
@@ -616,8 +3064,14 @@ const databaseAccessManifestInput = {
       id: "current-menu-release.read.menu_publication_release",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "menu_publication_release" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "menu_publication_release",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-release-store.ts",
     },
@@ -625,8 +3079,14 @@ const databaseAccessManifestInput = {
       id: "current-menu-release.read.menu_release_effective_period",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "menu_release_effective_period" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "menu_release_effective_period",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-release-store.ts",
     },
@@ -634,8 +3094,14 @@ const databaseAccessManifestInput = {
       id: "current-menu-release.read.menu_version_store",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "menu_version_store" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "menu_version_store",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-release-store.ts",
     },
@@ -643,8 +3109,14 @@ const databaseAccessManifestInput = {
       id: "current-menu-release.read.menu_version_channel",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "menu_version_channel" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "menu_version_channel",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-release-store.ts",
     },
@@ -652,18 +3124,29 @@ const databaseAccessManifestInput = {
       id: "current-menu-release.read.menu_version_order_type",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "menu_version_order_type" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "menu_version_order_type",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/current-menu-release-store.ts",
     },
-
     {
       id: "availability.read.availability_rule",
       operation: "read",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "availability_rule" },
-      principal: { kind: "module", id: "@rms/catalog" },
+      target: {
+        schema: "rms_catalog",
+        table: "availability_rule",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/availability-query-store.ts",
     },
@@ -671,8 +3154,14 @@ const databaseAccessManifestInput = {
       id: "published-menu.write.published_menu_projection_generation",
       operation: "write",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "published_menu_projection_generation" },
-      principal: { kind: "projection-builder", id: "@rms/catalog.published-menu.v1" },
+      target: {
+        schema: "rms_catalog",
+        table: "published_menu_projection_generation",
+      },
+      principal: {
+        kind: "projection-builder",
+        id: "@rms/catalog.published-menu.v1",
+      },
       readPattern: null,
       source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
     },
@@ -680,8 +3169,14 @@ const databaseAccessManifestInput = {
       id: "published-menu.write.published_menu_projection",
       operation: "write",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "published_menu_projection" },
-      principal: { kind: "projection-builder", id: "@rms/catalog.published-menu.v1" },
+      target: {
+        schema: "rms_catalog",
+        table: "published_menu_projection",
+      },
+      principal: {
+        kind: "projection-builder",
+        id: "@rms/catalog.published-menu.v1",
+      },
       readPattern: null,
       source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
     },
@@ -689,8 +3184,14 @@ const databaseAccessManifestInput = {
       id: "published-menu.write.published_menu_projection_section",
       operation: "write",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "published_menu_projection_section" },
-      principal: { kind: "projection-builder", id: "@rms/catalog.published-menu.v1" },
+      target: {
+        schema: "rms_catalog",
+        table: "published_menu_projection_section",
+      },
+      principal: {
+        kind: "projection-builder",
+        id: "@rms/catalog.published-menu.v1",
+      },
       readPattern: null,
       source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
     },
@@ -698,8 +3199,14 @@ const databaseAccessManifestInput = {
       id: "published-menu.write.published_menu_projection_sellable",
       operation: "write",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "published_menu_projection_sellable" },
-      principal: { kind: "projection-builder", id: "@rms/catalog.published-menu.v1" },
+      target: {
+        schema: "rms_catalog",
+        table: "published_menu_projection_sellable",
+      },
+      principal: {
+        kind: "projection-builder",
+        id: "@rms/catalog.published-menu.v1",
+      },
       readPattern: null,
       source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
     },
@@ -707,8 +3214,14 @@ const databaseAccessManifestInput = {
       id: "published-menu.write.published_menu_projection_checkpoint",
       operation: "write",
       mechanism: "repository",
-      target: { schema: "rms_catalog", table: "published_menu_projection_checkpoint" },
-      principal: { kind: "projection-builder", id: "@rms/catalog.published-menu.v1" },
+      target: {
+        schema: "rms_catalog",
+        table: "published_menu_projection_checkpoint",
+      },
+      principal: {
+        kind: "projection-builder",
+        id: "@rms/catalog.published-menu.v1",
+      },
       readPattern: null,
       source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
     },
@@ -786,6 +3299,38 @@ const databaseAccessManifestInput = {
       },
       readPattern: "owner-repository",
       source: "packages/rms/catalog/src/infrastructure/persistence/published-menu-query-store.ts",
+    },
+    {
+      id: "availability-reference-source.read.availability_reference_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "availability_reference_generation",
+      },
+      readPattern: "owner-repository",
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/availability-reference-source-store.ts",
+    },
+    {
+      id: "availability-reference-source.read.availability_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_catalog",
+        table: "availability_rule",
+      },
+      readPattern: "owner-repository",
+      principal: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      source:
+        "packages/rms/catalog/src/infrastructure/persistence/availability-reference-source-store.ts",
     },
   ],
 } as const;

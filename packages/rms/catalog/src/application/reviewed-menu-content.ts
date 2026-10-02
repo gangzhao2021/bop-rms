@@ -104,6 +104,10 @@ export function buildReviewedMenuContent(input: {
     storeReferences: menu.draft.storeReferences,
     channelCodes: menu.draft.channelCodes,
     orderTypeCodes: menu.draft.orderTypeCodes,
+    categoryBindings: menu.draft.sections.map((section) => ({
+      sectionReference: section.sectionReference,
+      categoryReferences: section.categoryReferences,
+    })),
     sections: menu.draft.sections.map((section) => ({
       sectionReference: section.sectionReference,
       internalCode: section.internalCode,

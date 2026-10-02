@@ -1,4 +1,4 @@
-import { StatePanel } from "@bop-rms/ui";
+import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import {
   PrivacyRequestClientError,
@@ -16,11 +16,14 @@ export function PrivacyRequestState({
 }: {
   readonly state: Exclude<State["kind"], "Ready">;
 }) {
-  const map: Record<typeof state, readonly [string, string, "neutral" | "error" | "offline"]> = {
+  if (state === "FeatureDisabled") return <PrivacyRequestFeatureDisabledReview />;
+  const map: Record<
+    Exclude<typeof state, "FeatureDisabled">,
+    readonly [string, string, "neutral" | "error" | "offline"]
+  > = {
     Loading: ["Loading", "Loading privacy cases…", "neutral"],
     PermissionDenied: ["Permission denied", "Privacy cases are unavailable.", "error"],
     NotFound: ["No request", "No matching Privacy Request is available.", "neutral"],
-    FeatureDisabled: ["Privacy Request disabled", "This capability is unavailable.", "neutral"],
     Stale: ["Projection stale", "Refresh before any case action.", "offline"],
     Conflict: ["Request changed", "Refresh Expected Version.", "offline"],
     Validation: [
@@ -39,6 +42,107 @@ export function PrivacyRequestState({
     </StatePanel>
   );
 }
+
+function PrivacyRequestFeatureDisabledReview() {
+  return (
+    <AppFrame className="privacy-request-review-shell" title="COMPLIANCE" description="">
+      <section className="privacy-request-review">
+        <header className="privacy-request-review__heading">
+          <div>
+            <p className="bop-eyebrow">PRIVACY-REQUEST · PHASE 3</p>
+            <h2>Privacy rights requests</h2>
+            <p>Requester verification, rights, scope and due-date evidence · source unavailable</p>
+          </div>
+          <span>Source values unavailable</span>
+        </header>
+        <aside className="privacy-request-review__notice" role="note">
+          <h2>Privacy Request disabled</h2>
+          <p>
+            This Phase 3 capability is not enabled for the current workspace. No cases or owner
+            results are shown.
+          </p>
+        </aside>
+        <fieldset
+          className="privacy-request-review__filters"
+          disabled
+          aria-labelledby="privacy-request-review-filters"
+        >
+          <legend id="privacy-request-review-filters">Filters</legend>
+          <label>
+            Case ref / verified contact
+            <input placeholder="Unavailable" />
+          </label>
+          <label>
+            Rights type
+            <select defaultValue="Unavailable">
+              <option>Unavailable</option>
+            </select>
+          </label>
+          <label>
+            Status
+            <select defaultValue="Unavailable">
+              <option>Unavailable</option>
+            </select>
+          </label>
+          <label>
+            Owner
+            <select defaultValue="Unavailable">
+              <option>Unavailable</option>
+            </select>
+          </label>
+          <label>
+            Due / overdue
+            <input placeholder="Unavailable" />
+          </label>
+          <label>
+            Brand
+            <select defaultValue="Unavailable">
+              <option>Unavailable</option>
+            </select>
+          </label>
+          <p>Filters stay disabled while the Phase 3 capability is disabled.</p>
+        </fieldset>
+        <section aria-labelledby="privacy-request-review-records">
+          <header className="privacy-request-review__records-heading">
+            <h2 id="privacy-request-review-records">Requests</h2>
+            <span>Phase 3 disabled</span>
+          </header>
+          <div className="privacy-request-review__empty" role="status">
+            <div className="privacy-request-review__columns" aria-hidden="true">
+              <span>Request / verification</span>
+              <span>Right / scope</span>
+              <span>Due / holds</span>
+              <span>Owner work</span>
+              <span>Fulfillment</span>
+              <span>Audit</span>
+            </div>
+            <div>
+              <h3>Requests are not available</h3>
+              <p>
+                The Phase 3 Privacy Request capability is not enabled. No sample case, contact,
+                owner or rights data is shown.
+              </p>
+            </div>
+          </div>
+        </section>
+        <aside
+          className="privacy-request-review__actions"
+          aria-labelledby="privacy-request-review-actions"
+        >
+          <h3 id="privacy-request-review-actions">Owner actions disabled</h3>
+          <p>
+            Intake, verification, owner collection, fulfillment/denial and close require enabled
+            capability and authorized owner Commands.
+          </p>
+        </aside>
+        <p className="privacy-request-review__privacy">
+          Privacy rights workflows contain sensitive contact and verification data. This Review
+          contains no request data.
+        </p>
+      </section>
+    </AppFrame>
+  );
+}
 export function PrivacyRequestList({ view }: { readonly view: PrivacyRequestView }) {
   const readOnly = view.freshness !== "Current" || view.partial;
   return (
@@ -51,6 +155,10 @@ export function PrivacyRequestList({ view }: { readonly view: PrivacyRequestView
         </div>
       </header>
       {readOnly ? <PrivacyRequestState state="Stale" /> : null}
+      <p id="privacy-actions-unavailable" role="note">
+        Authenticated privacy commands are not connected. This page is read-only; no request or
+        owner data will be changed here.
+      </p>
       <div className="list-filters">
         <label>
           Case ref / verified contact
@@ -64,7 +172,9 @@ export function PrivacyRequestList({ view }: { readonly view: PrivacyRequestView
         </label>
       </div>
       {view.permissions.mayIntake ? (
-        <button disabled={readOnly}>Intake tracked request</button>
+        <button disabled aria-describedby="privacy-actions-unavailable">
+          Intake tracked request
+        </button>
       ) : null}
       <div className="card-list">
         {view.rows.map((row) => (
@@ -87,17 +197,19 @@ export function PrivacyRequestList({ view }: { readonly view: PrivacyRequestView
             ) : null}
             <div className="card-actions">
               {view.permissions.mayVerify && row.status === "Intake" ? (
-                <button disabled={readOnly}>Verify proportionally</button>
+                <button disabled aria-describedby="privacy-actions-unavailable">
+                  Verify proportionally
+                </button>
               ) : null}
               {view.permissions.mayFulfill ? (
                 <>
-                  <button disabled={readOnly || row.status !== "Assigned"}>
+                  <button disabled aria-describedby="privacy-actions-unavailable">
                     Collect scoped owner data
                   </button>
-                  <button disabled={readOnly || row.status !== "InReview"}>
+                  <button disabled aria-describedby="privacy-actions-unavailable">
                     Fulfill / deny with approved reason
                   </button>
-                  <button disabled={readOnly || !["Fulfilled", "Denied"].includes(row.status)}>
+                  <button disabled aria-describedby="privacy-actions-unavailable">
                     Close
                   </button>
                 </>

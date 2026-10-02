@@ -1,8 +1,12 @@
+import { ProductCreatePage } from "./ProductCreatePage.js";
+import { ProductEditPage } from "./ProductEditPage.js";
+import { CatalogProductListPage, ProductListState } from "./CatalogProductListPage.js";
+import { CurrentStoreCapabilityPage } from "./CurrentStoreCapabilityPage.js";
 import { RefundPaymentPage } from "./RefundPaymentPage.js";
 import { DiningSessionWorkspace } from "./DiningSessionWorkspace.js";
 import { CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
 import { StoreServiceControlPanel } from "./StoreServiceControlPanel.js";
-import { StatePanel } from "@bop-rms/ui";
+import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { MerchantShell } from "./MerchantShell.js";
@@ -81,6 +85,7 @@ import { OperationalDashboardPage } from "./OperationalDashboardPage.js";
 import { ReportBuilderPage, ReportCatalogPage } from "./ReportPages.js";
 import { ReportRunHistoryPage } from "./ReportRunHistoryPage.js";
 import { PipelineRunPage } from "./PipelineRunPage.js";
+import { TaskInboxPage, TaskInboxStatePanel } from "./TaskInboxPage.js";
 import { ComplianceDashboardPage } from "./ComplianceDashboardPage.js";
 import { ComplianceCaseDetailPage, ComplianceCaseListPage } from "./ComplianceCasePages.js";
 import {
@@ -104,7 +109,7 @@ import {
 import { ApiClientPage } from "./ApiClientPage.js";
 import { OperatingEntityDetailPage, OperatingEntityListPage } from "./OperatingEntityPages.js";
 import { BrandDetailPage, BrandListPage } from "./BrandAdminPages.js";
-import { FeatureFlagListPage, StoreCapabilityPage } from "./FeatureControlAdminPages.js";
+import { FeatureFlagListPage } from "./FeatureControlAdminPages.js";
 import { PlatformLiveGatePage, StoreLiveGatePage } from "./LiveGatePages.js";
 import { RoleEditorPage, RoleListPage } from "./RoleAdministrationPages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
@@ -229,6 +234,30 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
         }
       />
       <Route
+        path="/app/tasks"
+        element={
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            {state.kind === "Ready" && !state.switching ? (
+              <TaskInboxPage key={state.workspace.selectedScope.storeReference + state.csrf} />
+            ) : (
+              <AppFrame title="Tasks" description="TASK-INBOX">
+                <TaskInboxStatePanel
+                  state={
+                    state.kind === "Offline"
+                      ? "Offline"
+                      : state.kind === "SignedOut"
+                        ? "PermissionDenied"
+                        : state.kind === "Failure"
+                          ? "Unavailable"
+                          : "Loading"
+                  }
+                />
+              </AppFrame>
+            )}
+          </LocalDemoRoute>
+        }
+      />
+      <Route
         path="/app/organization/stores"
         element={
           <LocalDemoRoute notice={demo?.Notice ?? null}>
@@ -264,7 +293,23 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
           </LocalDemoRoute>
         }
       />
-      <Route path="/app/organization/stores/:id/capabilities" element={<StoreCapabilityPage />} />
+      <Route
+        path="/app/organization/stores/:id/capabilities"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <CurrentStoreCapabilityPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              scope={{ storeReference: state.workspace.selectedScope.storeReference }}
+              csrf={state.csrf}
+              storeLabel={state.workspace.selectedScope.storeLabel}
+            />
+          ) : (
+            <StatePanel heading="Store capabilities unavailable" status>
+              <p>A current merchant session and selected Store are required.</p>
+            </StatePanel>
+          )
+        }
+      />
       <Route path="/app/organization/stores/:id/live-gate" element={<StoreLiveGatePage />} />
       <Route
         path="/app/organization/stores/:id"
@@ -289,6 +334,103 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
         }
       />
       <Route path="/app/exports" element={<ExportJobListPage />} />
+      <Route
+        path="/app/commerce/products"
+        element={
+          state.kind === "Ready" &&
+          !state.switching &&
+          state.workspace.navigation.some(
+            (item) =>
+              item.screenId === "CAT-PRODUCT-LIST" &&
+              item.href === "/app/commerce/products" &&
+              item.permission === "catalog.manage",
+          ) ? (
+            <CatalogProductListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              storeReference={state.workspace.selectedScope.storeReference}
+              storeLabel={state.workspace.selectedScope.storeLabel}
+              brandLabel={state.workspace.selectedScope.brandLabel}
+              csrf={state.csrf}
+            />
+          ) : (
+            <ProductListState
+              state={
+                state.kind === "Ready" && !state.switching
+                  ? "Denied"
+                  : state.kind === "Loading"
+                    ? "Loading"
+                    : state.kind === "Offline"
+                      ? "Offline"
+                      : state.kind === "SignedOut"
+                        ? "Denied"
+                        : "Unavailable"
+              }
+            />
+          )
+        }
+      />
+      <Route
+        path="/app/commerce/products/new"
+        element={
+          state.kind === "Ready" &&
+          !state.switching &&
+          state.workspace.navigation.some(
+            (item) =>
+              item.screenId === "CAT-PRODUCT-LIST" &&
+              item.href === "/app/commerce/products" &&
+              item.permission === "catalog.manage",
+          ) ? (
+            <ProductCreatePage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              storeReference={state.workspace.selectedScope.storeReference}
+              storeLabel={state.workspace.selectedScope.storeLabel}
+              brandLabel={state.workspace.selectedScope.brandLabel}
+              csrf={state.csrf}
+            />
+          ) : (
+            <ProductListState
+              state={
+                state.kind === "Loading"
+                  ? "Loading"
+                  : state.kind === "Offline"
+                    ? "Offline"
+                    : "Denied"
+              }
+            />
+          )
+        }
+      />
+      <Route
+        path="/app/commerce/products/:id/edit"
+        element={
+          state.kind === "Ready" &&
+          !state.switching &&
+          state.workspace.navigation.some(
+            (item) =>
+              item.screenId === "CAT-PRODUCT-LIST" &&
+              item.href === "/app/commerce/products" &&
+              item.permission === "catalog.manage",
+          ) ? (
+            <ProductEditPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              storeReference={state.workspace.selectedScope.storeReference}
+              storeLabel={state.workspace.selectedScope.storeLabel}
+              brandLabel={state.workspace.selectedScope.brandLabel}
+              csrf={state.csrf}
+            />
+          ) : (
+            <ProductListState
+              state={
+                state.kind === "Loading"
+                  ? "Loading"
+                  : state.kind === "Offline"
+                    ? "Offline"
+                    : "Denied"
+              }
+            />
+          )
+        }
+      />
       <Route
         path="/app/commerce/menus"
         element={
@@ -457,6 +599,15 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
                 csrf={state.csrf}
                 storeReference={state.workspace.selectedScope.storeReference}
                 storeLabel={state.workspace.selectedScope.storeLabel}
+                navigation={state.workspace.navigation.map((item) => (
+                  <a
+                    key={item.screenId}
+                    href={item.href}
+                    aria-current={item.screenId === "KIT-KITCHEN-QUEUE" ? "page" : undefined}
+                  >
+                    {item.label}
+                  </a>
+                ))}
               />
             ) : (
               <StatePanel heading="Kitchen Board unavailable">
@@ -475,6 +626,11 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
               key={state.workspace.selectedScope.storeReference + state.csrf}
               csrf={state.csrf}
               storeLabel={state.workspace.selectedScope.storeLabel}
+              navigation={state.workspace.navigation.map((item) => (
+                <a key={item.screenId} href={item.href}>
+                  {item.label}
+                </a>
+              ))}
             />
           ) : (
             <StatePanel heading="Dining unavailable">
@@ -500,6 +656,15 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
                 csrf={state.csrf}
                 storeReference={state.workspace.selectedScope.storeReference}
                 storeLabel={state.workspace.selectedScope.storeLabel}
+                navigation={state.workspace.navigation.map((item) => (
+                  <a
+                    key={item.screenId}
+                    href={item.href}
+                    aria-current={item.href === "/operations/kitchen" ? "page" : undefined}
+                  >
+                    {item.label}
+                  </a>
+                ))}
               />
             ) : (
               <StatePanel heading="Kitchen work item unavailable">

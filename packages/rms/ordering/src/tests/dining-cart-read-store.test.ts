@@ -62,15 +62,16 @@ describe("current shared Dining Cart PostgreSQL port", () => {
     expect(f.run).toHaveBeenCalledTimes(1);
     expect(f.query.mock.calls.map((call) => call[1])).toEqual([
       [id(1), id(2)],
-      [id(1), id(2), id(3)],
+      [id(1), id(2), id(3), at],
       [id(1), id(2)],
       [id(1), id(2), id(4)],
-      [id(1), id(2), id(3)],
+      [id(1), id(2), id(3), at],
     ]);
     const sql = f.query.mock.calls[1]?.[0] ?? "";
     expect(sql).toContain("LIMIT 2");
-    expect(sql).not.toContain("lifecycle_status = 'Active'");
-    expect(sql).not.toContain("idle_expires_at >");
+    expect(sql).toContain("lifecycle_status = 'Active'");
+    expect(sql).toContain("idle_expires_at > $4");
+    expect(sql).toContain("absolute_expires_at > $4");
   });
   it("returns null only when the Session has no cart", async () => {
     const f = fixture({ first: { rows: [] } });
@@ -114,33 +115,18 @@ describe("current shared Dining Cart PostgreSQL port", () => {
       fixture({ loaded: { rows: [{ cart: { ...cart(), ...change } }] } }).store.current(input),
     ).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
   });
-  it("preserves the cart at exact expiry for the read service to report Expired", async () => {
-    const f = fixture();
+  it("does not select a Cart at exact idle expiry", async () => {
+    const f = fixture({ first: { rows: [] } });
     expect(
       await f.store.current({ ...input, observedAt: "2026-08-02T15:00:00.000Z" as never }),
-    ).toEqual(cart());
+    ).toBeNull();
+    expect(f.query.mock.calls[1]?.[1]).toEqual([id(1), id(2), id(3), "2026-08-02T15:00:00.000Z"]);
   });
-  it.each(["Expired", "Abandoned"])(
-    "returns %s history without reviving or replacing it",
-    async (status) => {
-      const existing = cart();
-      const terminal = {
-        ...existing,
-        updatedAt: status === "Expired" ? "2026-08-02T15:00:00.000Z" : at,
-        lifecycle: {
-          ...existing.lifecycle,
-          status,
-          terminalAt: status === "Expired" ? "2026-08-02T15:00:00.000Z" : at,
-          terminalReason: status === "Expired" ? "IDLE_TIMEOUT" : "CUSTOMER_ABANDONED",
-        },
-      };
-      const f = fixture({ loaded: { rows: [{ cart: terminal }] } });
-      expect(
-        await f.store.current({ ...input, observedAt: "2026-08-02T15:01:00.000Z" as never }),
-      ).toEqual(terminal);
-      expect(f.query.mock.calls.every(([sql]) => sql.startsWith("SELECT"))).toBe(true);
-    },
-  );
+  it("filters terminal Cart history from the current selection", async () => {
+    const f = fixture({ first: { rows: [] } });
+    expect(await f.store.current(input)).toBeNull();
+    expect(f.query.mock.calls[1]?.[0]).toContain("lifecycle_status = 'Active'");
+  });
   it.each([
     { ...input, brandReference: id(9) },
     { ...input, storeReference: id(9) },

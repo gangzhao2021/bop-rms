@@ -127,6 +127,17 @@ it("preserves conflicts without inserting default selections", async () => {
     ),
   ).toMatchObject({ reason: "OPTION_CONFLICT" });
 });
+it("refuses a disabled default even when another active choice satisfies capacity", () => {
+  const p = pair();
+  p.optionSet.draft.options[0].lifecycle = "Inactive";
+  expect(() => resolveCurrentCatalogSelectionRules([p])).toThrowError(
+    expect.objectContaining({ code: "CATALOG_UNAVAILABLE" }),
+  );
+  p.binding.defaultSelections = [{ optionReference: id(14), quantity: 1 }];
+  expect(
+    resolveCurrentCatalogSelectionRules([p])[0]?.options.map((o) => o.optionReference),
+  ).toEqual([id(14)]);
+});
 it("requires triggered child rules only when the triggering option is selected", async () => {
   const root = pair(),
     child = pair(30);
@@ -187,7 +198,7 @@ it("ignores unavailable required children only when their trigger is unreachable
   root.optionSet.draft.options[1].triggeredOptionSetReference = id(30);
   root.optionSet.draft.options[1].lifecycle = "Inactive";
   child.optionSet.draft.options.forEach((option) => {
-    option.lifecycle = "Inactive";
+    option.lifecycle = "Draft";
   });
   expect(await validate([root, child], [{ optionReference: id(13), quantity: 1 }])).toMatchObject({
     status: "Accepted",

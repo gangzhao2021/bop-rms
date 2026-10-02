@@ -1,5 +1,10 @@
 import {
+  parseMerchantTaskInboxFilters,
+  resolveMerchantTaskOwnerFilters,
+} from "./merchant-task-inbox-filters.js";
+import {
   createTaskRecord,
+  matchesTaskQueueFilters,
   parseTaskReference,
   parseTaskInstant,
   type TaskRecord,
@@ -53,18 +58,24 @@ export function createMerchantTaskInboxRead(options: {
     task: TaskRecord,
   ): Promise<boolean>;
 }) {
-  return async (cookie: unknown, input: { afterTaskReference: string | null }) => {
+  return async (
+    cookie: unknown,
+    input: { afterTaskReference: string | null; filters?: unknown },
+  ) => {
     try {
+      const requestedFilters = parseMerchantTaskInboxFilters(input.filters);
       const afterTaskReference =
         input.afterTaskReference === null ? null : parseTaskReference(input.afterTaskReference);
       return await options.transactions.run(async (tx) => {
         const scope = authority(await options.authorize(tx, cookie));
         const observedAt = parseTaskInstant(options.now());
+        const filters = resolveMerchantTaskOwnerFilters(requestedFilters, scope.actorReference);
         const page = await options.queue(tx, scope).list(tx, {
           queueReference: scope.queueReference,
           afterTaskReference,
           limit: 50,
           observedAt,
+          filters,
         });
         if (
           page.scope.kind !== "Store" ||
@@ -91,6 +102,7 @@ export function createMerchantTaskInboxRead(options: {
             task.currentAssignment?.target.kind !== "Queue" ||
             task.currentAssignment.target.reference !== scope.queueReference ||
             task.updatedAt > observedAt ||
+            !matchesTaskQueueFilters(task, filters, observedAt) ||
             (previous !== null && task.taskReference <= previous)
           )
             return fail();
@@ -112,7 +124,6 @@ export function createMerchantTaskInboxRead(options: {
                     : "ClaimedByStaff",
               dueAt: task.dueAt,
               sourceType: task.source.sourceType,
-              sourceReference: task.source.sourceReference,
               canClaim: scope.canClaim && task.status === "Assigned",
             }),
           );

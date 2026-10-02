@@ -52,6 +52,7 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
       await admin.query(
         `GRANT SELECT,INSERT ON rms_ordering.cart,rms_ordering.dining_cart_operation,platform_audit.audit_record TO ${role}`,
       );
+      await admin.query(`GRANT SELECT ON rms_ordering.dining_cart_replacement TO ${role}`);
       // PostgreSQL requires an UPDATE column grant for FOR SHARE; the adapter issues no Cart UPDATE.
       await admin.query(`GRANT UPDATE (aggregate_version) ON rms_ordering.cart TO ${role}`);
       await admin.query(`GRANT SELECT ON rms_ordering.cart_line TO ${role}`);

@@ -26,7 +26,11 @@ export type DiningSessionStartStore = Pick<
   "resolveStartOperation" | "start"
 > & {
   loadSession(reference: string): Promise<ReturnType<typeof parseDiningSession> | null>;
+  loadSessions(
+    references: readonly string[],
+  ): Promise<readonly (ReturnType<typeof parseDiningSession> | null)[]>;
 };
+export type DiningSessionReadStore = Pick<DiningSessionStartStore, "loadSession" | "loadSessions">;
 function closed(value: unknown, keys: readonly string[]) {
   const copied = captureSessionData(value);
   if (
@@ -45,6 +49,14 @@ function rows(value: unknown): readonly unknown[] {
   if (!descriptor || !("value" in descriptor)) return sessionDependency();
   const copied = captureSessionData(descriptor.value);
   if (!Array.isArray(copied) || copied.length > 1) return sessionDependency();
+  return copied;
+}
+function boundedRows(value: unknown, maximum: number): readonly unknown[] {
+  if (value === null || typeof value !== "object") return sessionDependency();
+  const descriptor = Object.getOwnPropertyDescriptor(value, "rows");
+  if (!descriptor || !("value" in descriptor)) return sessionDependency();
+  const copied = captureSessionData(descriptor.value);
+  if (!Array.isArray(copied) || copied.length > maximum) return sessionDependency();
   return copied;
 }
 function changed(value: unknown) {
@@ -71,6 +83,87 @@ function failure(error: unknown): never {
   return sessionDependency();
 }
 
+/** Read-only Dining-owned Session lookup; callers still establish current authorization. */
+export function createPostgresDiningSessionReadStore(
+  runner: DiningTableTransactionRunner,
+  scopeInput: DiningTableStoreScope,
+): DiningSessionReadStore {
+  const scope = closed(scopeInput, ["tenantReference", "brandReference", "storeReference"]);
+  const tenant = reference(scope.tenantReference);
+  const brand = reference(scope.brandReference);
+  const store = reference(scope.storeReference);
+  const context = (tx: DiningTableTransaction) =>
+    tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      brand,
+      store,
+    ]);
+  return Object.freeze({
+    async loadSession(value: string) {
+      const sessionReference = reference(value);
+      try {
+        return await runner.run(async (tx) => {
+          await context(tx);
+          const result = rows(
+            await tx.query(
+              "SELECT session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4",
+              [tenant, brand, store, sessionReference],
+            ),
+          );
+          if (result.length === 0) return null;
+          const session = parseDiningSession(closed(result[0], ["session"]).session);
+          if (
+            session.diningSessionReference !== sessionReference ||
+            session.brandReference !== brand ||
+            session.storeReference !== store
+          )
+            return sessionDependency();
+          return session;
+        });
+      } catch {
+        return sessionDependency();
+      }
+    },
+    async loadSessions(values: readonly string[]) {
+      if (!Array.isArray(values) || values.length > 100) return sessionDependency();
+      const requested = values.map(reference);
+      if (new Set(requested).size !== requested.length) return sessionDependency();
+      if (requested.length === 0) return Object.freeze([]);
+      try {
+        return await runner.run(async (tx) => {
+          await context(tx);
+          const result = boundedRows(
+            await tx.query(
+              "SELECT session_id AS reference, session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=ANY($4::uuid[])",
+              [tenant, brand, store, requested],
+            ),
+            requested.length,
+          );
+          const found = new Map<string, ReturnType<typeof parseDiningSession>>();
+          for (const value of result) {
+            const row = closed(value, ["reference", "session"]),
+              sessionReference = reference(row.reference),
+              session = parseDiningSession(row.session);
+            if (
+              !requested.includes(sessionReference) ||
+              found.has(sessionReference) ||
+              session.diningSessionReference !== sessionReference ||
+              session.brandReference !== brand ||
+              session.storeReference !== store
+            )
+              return sessionDependency();
+            found.set(sessionReference, session);
+          }
+          return Object.freeze(
+            requested.map((sessionReference) => found.get(sessionReference) ?? null),
+          );
+        });
+      } catch {
+        return sessionDependency();
+      }
+    },
+  });
+}
+
 /** Internal owner storage; current Staff authorization is mandatory in the Session service. */
 export function createPostgresDiningSessionStartStore(
   runner: DiningTableTransactionRunner,
@@ -81,6 +174,7 @@ export function createPostgresDiningSessionStartStore(
   const tenant = reference(scope.tenantReference);
   const brand = reference(scope.brandReference);
   const store = reference(scope.storeReference);
+  const sessionReader = createPostgresDiningSessionReadStore(runner, scopeInput);
   const hash = credentials.hashOperationIntent.bind(credentials);
   const equals = credentials.equals.bind(credentials);
   const validate = (value: unknown): DiningStartRecord => {
@@ -140,31 +234,8 @@ export function createPostgresDiningSessionStartStore(
         return sessionDependency();
       }
     },
-    async loadSession(value: string) {
-      const sessionReference = reference(value);
-      try {
-        return await runner.run(async (tx) => {
-          await context(tx);
-          const result = rows(
-            await tx.query(
-              "SELECT session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4",
-              [tenant, brand, store, sessionReference],
-            ),
-          );
-          if (result.length === 0) return null;
-          const session = parseDiningSession(closed(result[0], ["session"]).session);
-          if (
-            session.diningSessionReference !== sessionReference ||
-            session.brandReference !== brand ||
-            session.storeReference !== store
-          )
-            return sessionDependency();
-          return session;
-        });
-      } catch {
-        return sessionDependency();
-      }
-    },
+    loadSession: sessionReader.loadSession,
+    loadSessions: sessionReader.loadSessions,
     async start(value) {
       let input;
       let record;

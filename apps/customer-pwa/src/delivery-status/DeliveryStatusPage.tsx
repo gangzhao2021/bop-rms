@@ -82,18 +82,37 @@ export function DeliveryStatusPage({
   }, [client, orderReference]);
   return (
     <main id="main-content" className="order-status">
-      <header>
+      <header className="cart-page__header delivery-status__header">
+        <p className="cart-page__eyebrow">BOP</p>
+        <p className="delivery-status__title">Delivery status</p>
+        <p>Customer order journey</p>
+      </header>
+      <nav
+        className="cart-page__navigation delivery-status__navigation"
+        aria-label="Customer journey"
+      >
+        <Link to="/">Entry</Link>
+        <Link to="/menu">Menu</Link>
+        <Link to="/cart">Cart</Link>
+        <Link to="/checkout">Checkout</Link>
+        <span aria-current="step">Order</span>
+        <Link to={`/orders/${orderReference}/receipt`}>Receipt</Link>
+      </nav>
+      <div className="delivery-status__intro">
         <h1>Track your delivery</h1>
         <p>Your authorized Guest Session—not this reference alone—grants access.</p>
-      </header>
+      </div>
       {state.kind === "Loading" ? (
-        <section role="status">
+        <section className="order-status__card" role="status">
           <h2>Loading delivery status</h2>
         </section>
       ) : null}
       {state.kind !== "Loading" && state.kind !== "Ready" ? (
-        <section role="alert">
-          <h2>
+        <section className="order-status__unavailable delivery-status__unavailable" role="alert">
+          <span className="order-status__unavailable-icon" aria-hidden="true">
+            !
+          </span>
+          <h2 id="delivery-unavailable-heading">
             {state.kind === "PermissionDenied"
               ? "Delivery access denied"
               : state.kind === "FeatureDisabled"
@@ -104,11 +123,13 @@ export function DeliveryStatusPage({
                     ? "Delivery not found"
                     : "Delivery status unavailable"}
           </h2>
-          <p>No courier, location or proof fact is inferred.</p>
+          <p>No courier, location or proof details are available.</p>
         </section>
       ) : null}
       {state.kind === "Ready" ? <DeliveryTrackingContent view={state.view} /> : null}
-      <Link to={`/orders/${orderReference}`}>Back to order status</Link>
+      <Link className="order-status__back" to={`/orders/${orderReference}`}>
+        Back to order status
+      </Link>
     </main>
   );
 }

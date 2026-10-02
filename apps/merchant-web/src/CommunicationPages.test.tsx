@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   CommunicationHistory,
+  CommunicationHistoryUnavailable,
   CommunicationState,
   CommunicationTemplates,
 } from "./CommunicationPages.js";
@@ -65,12 +66,29 @@ const templates = () => ({
   ],
 });
 describe("Communication pages", () => {
-  it("renders eligible operational resend separately from suppression", () => {
+  it("renders safe delivery fields without opaque references and keeps commands disabled", () => {
     const html = renderToStaticMarkup(
       <CommunicationHistory view={parseCommunicationHistoryView(history())} />,
     );
-    expect(html).toContain("Resend eligible operational notification");
-    expect(html).toContain("Verified suppress / unsuppress");
+    expect(html).toContain("Source reference unavailable");
+    expect(html).toContain("Version 2");
+    expect(html).toContain("e***@example.invalid");
+    expect(html).not.toContain(id(1));
+    expect(html).not.toContain(id(2));
+    expect(html).not.toContain(id(3));
+    expect(html).toContain("Resend operational");
+    expect(html).toContain("Manage suppression");
+    expect(html).toContain("Communication commands are not connected");
+    expect((html.match(/<button(?=[^>]* disabled)(?=[^>]*aria-describedby)/gu) ?? []).length).toBe(
+      2,
+    );
+  });
+  it("shows source-limited unavailable history instead of sample rows", () => {
+    const html = renderToStaticMarkup(<CommunicationHistoryUnavailable state="FeatureDisabled" />);
+    expect(html).toContain("History unavailable");
+    expect(html).toContain("Source values unavailable");
+    expect(html).toContain("disabled");
+    expect(html).not.toContain("example.invalid");
   });
   it("rejects a Marketing row with an unsafe recipient value", () => {
     const value = history();
@@ -86,6 +104,10 @@ describe("Communication pages", () => {
     expect(html).toContain("tracking prohibited");
     expect(html).toContain("Send test to approved sink");
     expect(html).toContain("Review / publish");
+    expect(html).toContain("Communication commands are not connected");
+    expect((html.match(/<button(?=[^>]* disabled)(?=[^>]*aria-describedby)/gu) ?? []).length).toBe(
+      3,
+    );
   });
   it("fails closed without Provider inference", () => {
     expect(renderToStaticMarkup(<CommunicationState state="Unavailable" />)).toContain(

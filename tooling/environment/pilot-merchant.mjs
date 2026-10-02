@@ -17,6 +17,7 @@ import { createMerchantOrdinaryRefundRequest } from "../../apps/api/dist/merchan
 import { createMerchantDiningJoinState } from "../../apps/api/dist/merchant-dining-join-state.js";
 import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant-dining-join-regenerate.js";
 import { createMerchantDiningSessionStart } from "../../apps/api/dist/merchant-dining-session-start.js";
+import { createMerchantDiningTableCommand } from "../../apps/api/dist/merchant-dining-table-command.js";
 import { createMerchantDiningTables } from "../../apps/api/dist/merchant-dining-tables.js";
 import { createMerchantDiningClosingCommand } from "../../apps/api/dist/merchant-dining-closing-command.js";
 import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
@@ -295,7 +296,18 @@ export async function createInternalMerchant(
     retentionPolicyCode: "AUDIT_DEFAULT",
     retentionPolicyVersion: 1,
   });
-  const diningTables = createMerchantDiningTables({ persistence, authentication: service });
+  const diningTableCommand = createMerchantDiningTableCommand({
+    persistence,
+    authentication: service,
+    newReference: () => resources.credentials.reference(),
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+  });
+  const diningTables = createMerchantDiningTables({
+    persistence,
+    authentication: service,
+    tableAvailabilityCommandEnabled: true,
+  });
   const diningOrderProgress = createMerchantDiningOrderProgress({
     locale: "en-CA",
     persistence,
@@ -361,6 +373,7 @@ export async function createInternalMerchant(
       diningJoinRegenerate,
       diningSessionStart,
       diningTables,
+      diningTableCommand,
       diningClosing,
       orderClosure,
       taskInbox,

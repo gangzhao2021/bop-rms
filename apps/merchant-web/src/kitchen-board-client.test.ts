@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
-import { parseKitchenBoardView, parseKitchenWorkItemView } from "./kitchen-board.js";
+import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen-board.js";
 const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-09-19T12:00:00.000Z";
 const item = (n = 1) => ({
@@ -10,6 +10,13 @@ const item = (n = 1) => ({
   orderItemReference: id(4),
   stationReference: id(5),
   localizedDisplayNames: { "en-CA": "Synthetic rice" },
+  selectedOptions: [
+    {
+      optionReference: id(40),
+      quantity: 2,
+      localizedNames: { "en-CA": "Extra mushrooms" },
+    },
+  ],
   status: "Queued",
   requiredQuantity: 2,
   completedQuantity: 0,
@@ -21,7 +28,7 @@ const item = (n = 1) => ({
 });
 const metadata = {
   storeReference: id(99),
-  operatorStatus: "Named",
+  operatorStatus: "Unverified",
   projectionName: "kitchen_work_queue_v1",
   projectionVersion: 1,
   projectionGenerationReference: id(6),
@@ -52,7 +59,9 @@ it("uses private same-origin transport and preserves versions without fabricatin
   expect(view.items[0]?.execution?.ticketVersion).toBe("9007199254740993");
   expect(view.items[0]?.allergenCue).toBe("Unavailable");
   expect(view.items[0]?.exceptionStatus).toBe("Unavailable");
-  expect(view.operatorStatus).toBe("Named");
+  expect(view.items[0]?.stationLabel).toBeNull();
+  expect(view.items[0]?.selectedOptions).toEqual([{ displayName: "Extra mushrooms", quantity: 2 }]);
+  expect(view.operatorStatus).toBe("Unverified");
   expect(f.fetcher.mock.calls[0]?.[0]).toBe("/merchant/kitchen/query");
   expect(f.fetcher.mock.calls[0]?.[1]).toMatchObject({
     method: "POST",
@@ -62,12 +71,37 @@ it("uses private same-origin transport and preserves versions without fabricatin
     headers: { "X-BOP-CSRF": "a".repeat(43) },
   });
 });
+it("applies exact Order and Ticket references only in the authorized query body", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(response({ ...metadata, items: [], nextCursor: null }));
+  await f.client.loadQueue({ kind: "Order", reference: id(3) });
+  expect(JSON.parse(String(f.fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+    kind: "List",
+    filters: {
+      orderReference: id(3),
+      ticketReference: null,
+      workItemReference: null,
+    },
+  });
+  f.fetcher.mockResolvedValue(response({ ...metadata, items: [], nextCursor: null }));
+  await f.client.loadQueue({ kind: "Ticket", reference: id(2) });
+  expect(JSON.parse(String(f.fetcher.mock.calls[1]?.[1]?.body))).toMatchObject({
+    filters: { orderReference: null, ticketReference: id(2) },
+  });
+  await expect(
+    f.client.loadQueue({ kind: "Order", reference: "not-a-reference" }),
+  ).rejects.toThrow();
+  expect(f.fetcher).toHaveBeenCalledTimes(2);
+});
 it("reads matching detail and rejects mismatched reference", async () => {
   const f = setup();
   f.fetcher.mockImplementation(async () => response({ ...metadata, item: item() }));
-  expect(parseKitchenWorkItemView(await f.client.loadWorkItem(id(1))).displayName).toBe(
-    "Synthetic rice",
-  );
+  const detail = parseKitchenWorkItemDetailView(await f.client.loadWorkItem(id(1)));
+  expect(detail.item.displayName).toBe("Synthetic rice");
+  expect(detail.item.selectedOptions).toEqual([{ displayName: "Extra mushrooms", quantity: 2 }]);
+  expect(JSON.stringify(detail.item)).not.toContain(id(40));
+  expect(detail.projectedAt).toBe(metadata.projectedAt);
+  expect(detail.operatorStatus).toBe("Unverified");
   await expect(f.client.loadWorkItem(id(9))).rejects.toMatchObject({ code: "Unavailable" });
 });
 it("combines only pages from the same generation", async () => {
@@ -123,6 +157,32 @@ it("rejects unsafe versions, repeated rows, missing cache policy and incomplete 
   await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
   f.fetcher.mockResolvedValueOnce(
     response({ ...metadata, partial: true, items: [], nextCursor: null }),
+  );
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+});
+it("fails closed when the projection's modifier snapshot is missing or malformed", async () => {
+  const f = setup();
+  const missing = { ...item() };
+  Reflect.deleteProperty(missing, "selectedOptions");
+  f.fetcher.mockResolvedValueOnce(response({ ...metadata, items: [missing], nextCursor: null }));
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+  f.fetcher.mockResolvedValueOnce(
+    response({
+      ...metadata,
+      items: [
+        {
+          ...item(),
+          selectedOptions: [
+            {
+              optionReference: id(40),
+              quantity: 0,
+              localizedNames: { "en-CA": "Extra mushrooms" },
+            },
+          ],
+        },
+      ],
+      nextCursor: null,
+    }),
   );
   await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
 });

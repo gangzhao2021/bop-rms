@@ -134,7 +134,7 @@ export function createMerchantKitchenQuery(options: {
         });
         return {
           ...result,
-          operatorStatus: "Named" as const,
+          operatorStatus: "Unverified" as const,
           storeReference: authority.storeReference,
           items: result.items.map(itemView),
         };
@@ -145,7 +145,7 @@ export function createMerchantKitchenQuery(options: {
       });
       return {
         ...result,
-        operatorStatus: "Named" as const,
+        operatorStatus: "Unverified" as const,
         storeReference: authority.storeReference,
         item: itemView(result.item),
       };

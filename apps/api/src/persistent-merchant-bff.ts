@@ -1,3 +1,7 @@
+import {
+  allowsProductListNavigation,
+  type MerchantProductListNavigationAuthority,
+} from "./merchant-product-list-navigation.js";
 import { createMerchantServicePauseProof } from "./merchant-service-pause-proof.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
@@ -41,6 +45,7 @@ export interface PersistentMerchantBffOptions {
   readonly transactions: Persistence["transactions"];
   readonly currentActor: Persistence["currentActor"];
   readonly now: () => string;
+  readonly catalogProductNavigation?: MerchantProductListNavigationAuthority;
   readonly publication: Pick<
     Parameters<typeof createPostgresCurrentStorePublicationProof>[0],
     "configurationType" | "purposeCode" | "requiredLiveGateRequirementCodes"
@@ -152,6 +157,18 @@ export function createPersistentMerchantBffService(
       throw new Error("MERCHANT_BFF_UNAVAILABLE");
     const navigation = [];
     for (const item of result.navigation) {
+      if (item.screenId === "CAT-PRODUCT-LIST") {
+        if (
+          await allowsProductListNavigation(
+            tx,
+            selected,
+            session.sessionReference,
+            options.catalogProductNavigation,
+          )
+        )
+          navigation.push(item);
+        continue;
+      }
       if (item.permission === "merchant.access" || (await allowed(item.permission)))
         navigation.push(item);
     }

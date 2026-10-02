@@ -4,7 +4,11 @@ import { createPostgresPriceBookRepository } from "../../rms/pricing/src/index.t
 import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
-import { createPostgresCurrentPriceBookStore, resolvePrice } from "../../rms/pricing/src/index.ts";
+import {
+  createPostgresCurrentPriceBookStore,
+  createPostgresPriceBookReferenceSourceStore,
+  resolvePrice,
+} from "../../rms/pricing/src/index.ts";
 import { input } from "../../rms/pricing/src/tests/price-quote.fixture.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client } = pg;
@@ -165,6 +169,107 @@ it("reads current owner PriceBook with exact money, scoped precedence and DST bo
       assert.equal(await reader.load(request), null);
       await version(id(106), 3, "Archived");
       assert.equal(await reader.load(request), null);
+      // Actual owner SQL with an explicitly synthetic authority and opaque Catalog intent.
+      // This profile proves configuration references, not full Pricing review or foreign membership.
+      let holds = 0;
+      let denyHold = 0;
+      const impactRequest = {
+        purposeCode: "CATALOG_LIFECYCLE_PRICING_SOURCE_READ",
+        brandReference: book.brandReference,
+        actorReference: id(100),
+        operationReference: id(200),
+        catalogIntentDigest: "sha256:" + "a".repeat(64),
+      };
+      const impact = createPostgresPriceBookReferenceSourceStore({
+        tenantReference: id(201),
+        brandReference: book.brandReference,
+        actorReference: id(100),
+        transactions: runner,
+        clock: { now: () => new Date().toISOString() },
+        authority: {
+          async holdUntilTransactionCompletes(tx, authority) {
+            void tx;
+            assert.equal(authority.permission, "pricing.price-book.manage");
+            assert.deepEqual(authority.request, impactRequest);
+            if (++holds === denyHold) throw new Error("synthetic authority denied");
+          },
+        },
+      });
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT has_table_privilege($1,'rms_catalog.product','SELECT') allowed",
+            [role],
+          )
+        ).rows[0].allowed,
+        false,
+      );
+      const historical = await impact.loadSnapshot(impactRequest);
+      assert.equal(holds, 2);
+      assert.equal(historical.profile, "PriceBookEntries");
+      assert.equal(historical.consistency, "StatementSnapshot");
+      assert.equal(historical.references.length, 2);
+      assert.ok(
+        historical.references.every((r) => r.lifecycle === "Published" && !r.isCurrentVersion),
+      );
+      assert.equal(
+        historical.references.find((r) => r.entryReference === id(102)).temporalStatus,
+        historical.observedAt < "2026-11-01T05:30:00.000Z"
+          ? "Future"
+          : historical.observedAt < "2026-11-01T06:30:00.000Z"
+            ? "Effective"
+            : "Expired",
+      );
+      assert.equal(
+        historical.references.find((r) => r.entryReference === id(101)).temporalStatus,
+        "Effective",
+      );
+      assert.equal(JSON.stringify(historical).includes("amountMinor"), false);
+      assert.equal(JSON.stringify(historical).includes("productReference"), false);
+      assert.equal((await impact.loadSnapshot(impactRequest)).digest, historical.digest);
+      await entry(
+        id(202),
+        id(106),
+        "Region",
+        id(203),
+        "100",
+        "2026-07-01T00:00:00.000Z",
+        "2026-08-01T00:00:00.000Z",
+      );
+      await entry(
+        id(206),
+        id(105),
+        "StoreGroup",
+        id(207),
+        "100",
+        new Date(Date.now() + 86400000).toISOString(),
+      );
+      const changed = await impact.loadSnapshot(impactRequest);
+      assert.notEqual(changed.digest, historical.digest);
+      assert.equal(changed.references.length, 4);
+      assert.equal(
+        changed.references.find((r) => r.entryReference === id(206)).temporalStatus,
+        "Future",
+      );
+      assert.equal(changed.references.find((r) => r.entryReference === id(206)).lifecycle, "Draft");
+      assert.deepEqual(
+        changed.references.find((r) => r.entryReference === id(202)).temporalStatus,
+        "Expired",
+      );
+      assert.equal(
+        changed.references.find((r) => r.entryReference === id(202)).lifecycle,
+        "Archived",
+      );
+      denyHold = holds + 1;
+      await assert.rejects(impact.loadSnapshot(impactRequest), {
+        code: "PRICE_BOOK_REFERENCE_SOURCE_UNAVAILABLE",
+      });
+      denyHold = holds + 2;
+      await assert.rejects(impact.loadSnapshot(impactRequest), {
+        code: "PRICE_BOOK_REFERENCE_SOURCE_UNAVAILABLE",
+      });
+      denyHold = 0;
+      assert.equal((await impact.loadSnapshot(impactRequest)).digest, changed.digest);
       await version(id(107), 4, "Published", "2026-11-02T00:00:00.000Z");
       assert.equal(await reader.load(request), null);
       await version(id(108), 5, "Published");

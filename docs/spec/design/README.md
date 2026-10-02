@@ -9,6 +9,8 @@ f7a4c90 (WP-2350), then reconciled at local integration with 4c3f9be52db676641a2
 
 ## Read in this order
 
+Current continuation: [design closure inventory](whole-project-design-closure.md) records the Owner-delegated software design duties and separates unfinished design detail, implementation and real evidence. Its current scope supersedes a request for Owner-provided design artifacts; historical proposals below retain their original status.
+
 1. [Business scenario coverage](./business-scenario-coverage.md): sources, owners, inputs/results,
    failure recovery and acceptance for the principal business journeys.
 2. [Customer, Order and Payment handoffs](./customer-order-payment-handoffs.md): Cart/Session,
@@ -16,7 +18,7 @@ f7a4c90 (WP-2350), then reconciled at local integration with 4c3f9be52db676641a2
 3. [Approval and operating-day flow](./approval-and-operating-day.md): canonical work surfaces,
    source-domain actions and opening/closing/handover responsibilities.
 4. [Refund approval boundaries](./refund-approval-boundaries.md): source-preserved controls, precise
-   unresolved day/window/cumulative decisions and their boundary scenarios.
+   accepted day/window/cumulative disposition and retained historical boundary scenarios.
 5. [System completeness contracts](./system-completeness-contracts.md): component compatibility,
    privacy-owner coverage and performance acceptance inputs.
 
@@ -81,19 +83,15 @@ Other mapping gaps still need a real owning execution WP, as recorded by the sce
 
 ## Current decision, implementation and evidence state
 
-The linked disposition record owns each decision; this view distinguishes implementation from approval.
-A missing adapter or test does not reopen an accepted decision. The
-[current scenario evidence view](./business-scenario-coverage.md#current-scenario-evidence-view)
-owns per-layer progress through WP-2352.
+Each linked disposition owns its policy; the [scenario evidence view](./business-scenario-coverage.md#current-scenario-evidence-view) owns implementation progress, and the [candidate register](../../runbooks/project-candidate-register.md) identifies which checkout supplies it. Accepted sharing/capacity/refund decisions are not reopened by missing adapters or later acceptance.
 
-| Decision / source                                                                                        | Decision acceptance                                     | Implemented scope                                                                                                                          | Remaining implementation / acceptance                                                                                             |
-| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| [DEC-H01/H02, WP-2228](../work-packages/WP-2228.md)                                                      | Accepted product choices                                | Shared Dining Cart and acknowledged foreground credential recovery; browser evidence in WP-2327                                            | Cross-document continuity, authoritative commercial inputs and Dining Quote/Checkout; no new sharing/recovery approval required   |
-| [DEC-H03](./capacity-source-decision.md#decision-state)                                                  | Accepted scoped topology addendum                       | Scheduled capacity lifecycle and PostgreSQL owner reads/writes through WP-2347                                                             | Current application authority, exact clock seal, atomic Ordering linkage and composed rollback/Unknown/late-payment acceptance    |
-| [DEC-H03-DINING](./capacity-checkout-handoff.md#proposed-dine-in-interpretation-dec-h03-dining)          | Accepted scoped interpretation, 2026-09-10              | Owner persistence and current-authorized preparation in [WP-2402](../work-packages/WP-2402.md); connected Order/Payment activation remains | Implement the accepted owner lifecycle, linkage and closure-race evidence                                                         |
-| [DEC-H04/H05](./customer-order-payment-handoffs.md#h-order-01-acceptance-cancellation-and-final-closure) | Source decisions/proposals pending                      | Existing owner-local Order/Payment/fulfillment boundaries remain                                                                           | Exact acceptance/cancellation/close rules, producer fences and cross-owner race evidence                                          |
-| [DEC-H06/H07](./refund-approval-boundaries.md)                                                           | RF-D01–06 accepted by Owner on 2026-09-13               | Original-method adapter and separate paid-unfulfillable compensation baseline                                                              | Implement accepted [RF-D01–06](./pilot-ordinary-refund-policy-proposal.md), common claim exclusion and ordinary refund acceptance |
-| [AOD-D01–03](./approval-and-operating-day.md), [SC-D01–06](./system-completeness-contracts.md)           | Proposals/source decisions retain their recorded status | Existing source contracts and policy gates only                                                                                            | Scoped work routing, operating-day, compatibility, privacy coverage and performance decisions/evidence                            |
+| Decision                                | Accepted source                                                                                                                                               | Current evidence / remaining scope                                                                                                                                  |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DEC-H01/H02                             | [WP-2228](../work-packages/WP-2228.md)                                                                                                                        | Shared Cart and foreground recovery; later Customer reload/history evidence is scoped in WP-2402, not universal browser/compatibility acceptance.                   |
+| DEC-H03 / DEC-H03-DINING                | [Capacity topology](./capacity-source-decision.md) and [Dining interpretation](./capacity-checkout-handoff.md#proposed-dine-in-interpretation-dec-h03-dining) | Recorded composed submission/payment/closure journeys; final candidate and applicable Store/Provider gates remain.                                                  |
+| RF-D01–06 / DEC-H06–07 policy questions | [Accepted ordinary-refund policy](./pilot-ordinary-refund-policy-proposal.md#decision-record), 2026-09-13                                                     | Recorded local ordinary refund and common balance exclusion; real Provider/Terminal/Store activation remains separate.                                              |
+| DEC-H04/H05                             | [Finality review](./customer-order-payment-handoffs.md#h-order-01-acceptance-cancellation-and-final-closure)                                                  | Preserve original proposal scope; named pilot finality evidence does not accept every generalization.                                                               |
+| AOD-D01–03 / SC-D01–06                  | [Delivery decision inputs](./project-delivery-decision-inputs.md)                                                                                             | Existing Handoff 80.8 targets/load/browser floor are accepted; precise release tuples, privacy coverage, operational routing and measured application need closure. |
 
 ## Owner decisions recorded after the review
 
@@ -111,15 +109,10 @@ Pickup Quote persistence/HTTP and continuous recalculation have WP-2255–2268 e
 authority and fresh expiry checks across asynchronous Pricing/persistence. These are local owner-store
 proofs with labeled synthetic commercial/Staff/QR inputs, not real Store or Provider readiness.
 
-Remaining DC-01 obligations include cross-document credential continuity (foreground response-loss
-recovery is not browser-reload recovery), authoritative Catalog selection/commercial producers and
-Dining Quote/Checkout composition. DC-04's topology is accepted in DEC-H03; full submission-to-Payment
-still needs its producer, exact clock/linkage and composed race/recovery evidence.
-The Dining interpretation is accepted; its implementation and the separate Order finality decisions
-remain outstanding as shown above.
+The preceding component descriptions are historical milestones. Subsequent WP-2402 and parallel candidate evidence is maintained in the current scenario/register views; their scope does not supply real Store commercial approval, a complete supported-client matrix or universal finality acceptance.
 Do not reopen accepted topology or sharing/recovery choices to resolve these implementation duties.
 
-## Recommended execution order
+## Historical review execution order
 
 1. Continue source-ready producer/composition work for Catalog selection, commercial Quote inputs
    and Dining Quote/Checkout; keep unavailable results where their owner inputs are absent. Establish

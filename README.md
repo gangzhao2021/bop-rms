@@ -1,5 +1,11 @@
 # BOP-RMS
 
+## Project documentation entry
+
+Read [specification authority](docs/spec/README.md), [whole-product scenario coverage](docs/spec/design/business-scenario-coverage.md#current-scenario-evidence-view), [candidate integration status](docs/runbooks/project-candidate-register.md), and [the documentation remediation record](docs/runbooks/project-documentation-remediation.md). The project now contains BOP/RMS Domain contracts and scoped persistence/application work; normal-entry assembly and production readiness remain feature- and candidate-specific.
+
+The foundation supervisor below and the recorded Windows/WSL InternalTest installation are separate environments. Cloning this source checkout does not transfer an installation, its private configuration or its acceptance evidence.
+
 BOP-RMS is the Business Operating Platform and Restaurant Management System for configurable, multi-restaurant operations.
 
 This repository is implemented one reviewed Work Package at a time. WP-0001 through WP-0006 establish the deterministic monorepo, quality baseline, application skeletons, local PostgreSQL, and root environment lifecycle. WP-0007 materializes repository guidance without starting a business vertical slice.
@@ -111,7 +117,7 @@ pnpm db:migrate -- verify --env-file .env
 pnpm db:migrate -- apply --env-file .env --confirm-target local:bop_rms_local
 ```
 
-`apply` is the only mutating command。It uses one dedicated client、the accepted advisory lock and one transaction per migration。There is no down、repair、baseline、force or checksum-bypass path；applied migrations are immutable and corrected through reviewed forward migrations。The only current database object is `platform_core.migration_history`。WP-0021 is decision-closed as a separately authorized schema-only implementation：three empty schemas plus Core ACL hardening，with zero new functional tables。
+`apply` is the only mutating command。It uses one dedicated client、the accepted advisory lock and one transaction per migration。There is no down、repair、baseline、force or checksum-bypass path；applied migrations are immutable and corrected through reviewed forward migrations。At the original WP-0020 milestone, the runner-owned object was `platform_core.migration_history`。Later accepted WPs add foundation and Domain-owned objects through forward migrations；the current catalog and each owning manifest determine their scope。WP-0021 remains the bounded three-schema / Core ACL milestone, not the current project database inventory。
 
 After applying the catalog to an explicitly configured target，run the independent read-only verifier with `pnpm foundation:verify -- --env-file <path>`。It checks exact foundation schemas、owner、PUBLIC / default privileges and unexpected objects without executing DDL or repairing state。
 
@@ -121,9 +127,9 @@ After applying the catalog to an explicitly configured target，run the independ
 - `packages/`: reusable BOP/RMS modules, contracts, persistence infrastructure, and testing support
 - `tooling/`: shared engineering configuration and developer tooling
 
-At the current bootstrap stage, `apps/` contains only deployable runtime/shell composition roots. `packages/ui` contains semantic tokens and minimal accessibility wrappers; it is not a business component library.
+At the original bootstrap milestone, `apps/` contained deployable runtime/shell composition roots. It now also contains scoped business composition; consult the current scenario and candidate records for actual normal-entry coverage. `packages/ui` contains semantic tokens and minimal accessibility wrappers; it is not a business component library.
 
-## Roadmap
+## Historical foundation milestones
 
 - WP-0001–WP-0003: monorepo and quality baseline (integrated)
 - WP-0004: runtime application skeletons and Screen Registry (integrated)

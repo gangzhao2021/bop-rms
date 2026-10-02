@@ -1,3 +1,4 @@
+export * from "./contracts/task-queue.js";
 export * from "./contracts/task.js";
 export * from "./domain/task-lifecycle.js";
 export * from "./application/task-service.js";

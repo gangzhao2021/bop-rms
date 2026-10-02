@@ -52,7 +52,7 @@ function useClient(
 
 function useMenuLoad(
   client: CustomerMenuClient | null,
-  input: Readonly<{ searchTerm?: string }> | null = {},
+  input: Readonly<{ searchTerm?: string; sectionReference?: string }> | null = {},
 ) {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<ScreenState>(() =>
@@ -106,13 +106,26 @@ export function MenuBrowsePage({ context, client, readOnlyNotice }: MenuPageProp
 export function MenuSearchPage({ context, client, readOnlyNotice }: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const [draft, setDraft] = useState("");
+  const [sectionDraft, setSectionDraft] = useState("");
   const [term, setTerm] = useState<string | null>(null);
-  const input = useMemo(() => (term === null ? null : { searchTerm: term }), [term]);
+  const [section, setSection] = useState<string | null>(null);
+  const sectionInput = useMemo(() => ({}), []);
+  const sections = useMenuLoad(resolvedClient, sectionInput);
+  const input = useMemo(() => {
+    if (term === null && section === null) return null;
+    return {
+      ...(term === null ? {} : { searchTerm: term }),
+      ...(section === null ? {} : { sectionReference: section }),
+    };
+  }, [section, term]);
   const loaded = useMenuLoad(resolvedClient, input);
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const normalized = normalizeMenuSearch(draft);
-    if (normalized !== null) setTerm(normalized);
+    if (normalized !== null || sectionDraft !== "") {
+      setTerm(normalized);
+      setSection(sectionDraft || null);
+    }
   };
   return (
     <MenuScreen
@@ -122,29 +135,61 @@ export function MenuSearchPage({ context, client, readOnlyNotice }: MenuPageProp
       onRetry={loaded.retry}
       readOnlyNotice={readOnlyNotice}
       search={
-        <form className="menu-search" role="search" onSubmit={submit}>
-          <label htmlFor="menu-search-input">Search the menu</label>
-          <div>
-            <input
-              id="menu-search-input"
-              maxLength={100}
-              value={draft}
-              onChange={(event) => setDraft(event.currentTarget.value)}
-            />
-            <button type="submit" disabled={normalizeMenuSearch(draft) === null}>
-              Search
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setDraft("");
-                setTerm(null);
-              }}
-            >
-              Clear
-            </button>
-          </div>
-        </form>
+        <section className="menu-search-view">
+          <form className="menu-search" role="search" onSubmit={submit}>
+            <label className="sr-only" htmlFor="menu-search-input">
+              Search the menu
+            </label>
+            <div className="menu-search-primary">
+              <input
+                id="menu-search-input"
+                maxLength={100}
+                placeholder="Search menu items"
+                value={draft}
+                onChange={(event) => setDraft(event.currentTarget.value)}
+              />
+              <button
+                type="submit"
+                disabled={normalizeMenuSearch(draft) === null && sectionDraft === ""}
+              >
+                Search
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft("");
+                  setSectionDraft("");
+                  setTerm(null);
+                  setSection(null);
+                }}
+              >
+                Clear
+              </button>
+            </div>
+            <div className="menu-search-section">
+              <label htmlFor="menu-search-section">Menu section</label>
+              <select
+                id="menu-search-section"
+                value={sectionDraft}
+                disabled={sections.state.kind !== "Found"}
+                onChange={(event) => setSectionDraft(event.currentTarget.value)}
+              >
+                <option value="">All sections</option>
+                {sections.state.kind === "Found"
+                  ? sections.state.menu.sections.map((item) => (
+                      <option key={item.sectionReference} value={item.sectionReference}>
+                        {item.name}
+                      </option>
+                    ))
+                  : null}
+              </select>
+            </div>
+            <p className="menu-search-boundary">
+              Dietary tags are not provided by this menu. Availability is shown on each result; ask
+              staff for dietary help.
+            </p>
+          </form>
+        </section>
       }
       searchTerm={term}
       state={loaded.state}
@@ -203,33 +248,47 @@ export function MenuScreen({
   state,
 }: MenuScreenProps) {
   const title =
-    mode === "search"
-      ? "Search menu"
-      : mode === "detail" && detail
-        ? detail.name
-        : state.kind === "Found"
-          ? state.menu.name
-          : "Menu";
+    mode === "search" ? "Search menu" : mode === "detail" && detail ? detail.name : "Menu";
   return (
     <AppFrame
-      title={title}
+      className={`customer-menu-screen customer-menu-screen--${mode}`}
+      title={context?.storeDisplayName ?? title}
       description={
         context
-          ? `${context.brandDisplayName} · ${context.storeDisplayName}`
+          ? `${context.brandDisplayName} · ${context.channel === "DineIn" ? "Dine-in" : "Pickup"}`
           : "A location QR code is required"
       }
     >
+      <div className="menu-page-intro">
+        <h2>{title}</h2>
+        {context ? <span>{context.channel === "DineIn" ? "Dine-in" : "Pickup"}</span> : null}
+      </div>
       <nav className="menu-navigation" aria-label="Menu">
-        <Link to="/menu">Browse menu</Link>
-        <Link to="/menu/search">Search</Link>
-        <Link to="/cart">Cart</Link>
+        {mode === "search" ? (
+          <div className="menu-navigation__links menu-navigation__links--search">
+            <Link to="/menu">← Back to menu</Link>
+            <Link to="/cart">Cart</Link>
+          </div>
+        ) : (
+          <>
+            <Link aria-label="Search menu" className="menu-navigation__search" to="/menu/search">
+              Search menu
+            </Link>
+            <div className="menu-navigation__links">
+              <Link to="/menu" aria-current="page">
+                Browse menu
+              </Link>
+              <Link to="/cart">Cart</Link>
+            </div>
+          </>
+        )}
       </nav>
       {state.kind === "MissingContext" ? null : search}
-      {state.kind !== "MissingContext" &&
-      mode === "search" &&
-      searchTerm !== null &&
-      searchTerm !== undefined ? (
-        <p className="menu-search-result">Search results for “{searchTerm}”</p>
+      {state.kind === "Found" && mode === "search" ? (
+        <section className="menu-search-summary" aria-label="Search results">
+          <h2>Search results</h2>
+          {searchTerm ? <p>Matched term · {searchTerm}</p> : null}
+        </section>
       ) : null}
       <div className="menu-content" aria-live="polite" aria-busy={state.kind === "Loading"}>
         <MenuState
@@ -243,7 +302,7 @@ export function MenuScreen({
           state={state}
         />
       </div>
-      <AllergenHelp />
+      {state.kind === "PermissionDenied" ? null : <AllergenHelp />}
     </AppFrame>
   );
 }
@@ -293,7 +352,7 @@ function MenuState({
     );
   if (state.kind === "IdleSearch")
     return (
-      <section className="menu-state" role="status">
+      <section className="menu-state menu-state--idle-search" role="status">
         <Heading headingRef={headingRef}>Search this menu</Heading>
         <p>Enter a published item name or approved search term.</p>
       </section>
@@ -303,6 +362,22 @@ function MenuState({
       <section className="menu-state" role="status">
         <Heading headingRef={headingRef}>Loading the current menu</Heading>
         <p>Checking the latest published items…</p>
+      </section>
+    );
+  if (state.kind === "PermissionDenied")
+    return (
+      <section
+        className="menu-state menu-state--warning menu-state--permission-denied"
+        role="alert"
+      >
+        <Heading headingRef={headingRef}>This menu can’t be opened</Heading>
+        <p>
+          The current Store session can’t access this menu. Scan the location QR code again or ask
+          staff for help.
+        </p>
+        <Link className="menu-action" to="/">
+          Return to entry
+        </Link>
       </section>
     );
   if (state.kind === "Offline")
@@ -354,48 +429,61 @@ function MenuState({
         readOnlyNotice={readOnlyNotice}
       />
     );
-  return <MenuContents menu={state.menu} headingRef={headingRef} />;
+  return <MenuContents menu={state.menu} headingRef={headingRef} mode={mode} />;
 }
 
 function MenuContents({
   menu,
   headingRef,
+  mode,
 }: {
   readonly menu: MenuView;
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
+  readonly mode: MenuScreenProps["mode"];
 }) {
   const count = menu.sections.reduce((total, section) => total + section.sellables.length, 0);
   if (count === 0)
     return (
-      <section className="menu-state">
+      <section className="menu-state menu-state--empty">
         <Heading headingRef={headingRef}>No items available</Heading>
         <p>The current published menu has no matching items.</p>
       </section>
     );
   return (
     <>
-      <Heading headingRef={headingRef}>{menu.name}</Heading>
-      <nav className="menu-sections" aria-label="Menu sections">
-        {menu.sections.map((section) => (
-          <a key={section.sectionReference} href={`#section-${section.sectionReference}`}>
-            {section.name}
-          </a>
-        ))}
-      </nav>
-      <p className="menu-filter-boundary">
-        Showing available items only. Dietary filters are not available in this published menu;
-        review allergen disclosures and ask staff for assistance.
-      </p>
+      {mode === "browse" ? <Heading headingRef={headingRef}>{menu.name}</Heading> : null}
+      {mode === "browse" ? (
+        <nav className="menu-sections" aria-label="Menu sections">
+          {menu.sections.map((section) => (
+            <a key={section.sectionReference} href={`#section-${section.sectionReference}`}>
+              {section.name}
+            </a>
+          ))}
+        </nav>
+      ) : null}
+      {mode === "browse" ? (
+        <p className="menu-filter-boundary">
+          <strong>Showing available items only.</strong> Dietary filters are not available in this
+          published menu; review allergen disclosures and ask staff for assistance.
+        </p>
+      ) : null}
       {menu.sections.map((section) => (
         <section
           className="menu-section"
           key={section.sectionReference}
-          aria-labelledby={`section-${section.sectionReference}`}
+          aria-label={mode === "search" ? `Results in ${section.name}` : undefined}
+          aria-labelledby={mode === "browse" ? `section-${section.sectionReference}` : undefined}
         >
-          <h3 id={`section-${section.sectionReference}`}>{section.name}</h3>
+          {mode === "browse" ? (
+            <h3 id={`section-${section.sectionReference}`}>{section.name}</h3>
+          ) : null}
           <div className="menu-grid">
             {section.sellables.map((item) => (
-              <SellableCard key={item.sellableReference} sellable={item} />
+              <SellableCard
+                key={item.sellableReference}
+                sellable={item}
+                {...(mode === "search" ? { sectionName: section.name } : {})}
+              />
             ))}
           </div>
         </section>
@@ -404,7 +492,13 @@ function MenuContents({
   );
 }
 
-function SellableCard({ sellable }: { readonly sellable: MenuSellable }) {
+function SellableCard({
+  sellable,
+  sectionName,
+}: {
+  readonly sellable: MenuSellable;
+  readonly sectionName?: string | undefined;
+}) {
   return (
     <article className="menu-card">
       <div className="menu-media" aria-label="Image not available">
@@ -420,11 +514,21 @@ function SellableCard({ sellable }: { readonly sellable: MenuSellable }) {
               : "Featured item"}
         </p>
       ) : null}
-      <p>Available now</p>
+      <p className="menu-available">Available now</p>
       <p>Price confirmed in your final quote</p>
+      {sectionName ? (
+        <p className="menu-result-section">
+          <span>Section</span>
+          {sectionName}
+        </p>
+      ) : null}
       <AllergenSummary sellable={sellable} />
-      <Link className="menu-action" to={`/menu/items/${sellable.sellableReference}`}>
-        View {sellable.name}
+      <Link
+        aria-label={`View ${sellable.name}`}
+        className="menu-action"
+        to={`/menu/items/${sellable.sellableReference}`}
+      >
+        View item
       </Link>
     </article>
   );
@@ -777,7 +881,6 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
           ))}
         </ul>
       )}
-      <p>Ask staff for allergen assistance before ordering.</p>
     </div>
   );
 }

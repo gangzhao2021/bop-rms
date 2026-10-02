@@ -1,3 +1,18 @@
+import { createMerchantProductCategoryPolicyAuthority } from "./merchant-product-category-policy-authority.js";
+import {
+  createMerchantProductWriteGuard,
+  MerchantProductWriteFeatureDisabled,
+  type MerchantProductWriteAuthority,
+} from "./merchant-product-write-authority.js";
+import {
+  parseMerchantProductCommandScope,
+  bindMerchantProductCommandScope,
+} from "./merchant-product-command-scope.js";
+import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
+import {
+  createMerchantProductCategoryAssignments,
+  type MerchantProductCategoryPolicy,
+} from "./merchant-product-category-assignments.js";
 import { readClosedRecord } from "@bop/identity";
 import { sha256Hex } from "@bop/audit";
 import {
@@ -10,19 +25,29 @@ import {
   parseCatalogCode,
   parseCatalogDecimal,
   parseCatalogLocale,
+  parseProductCategoryClassification,
   parseLocalizedNames,
   parseVariantSelections,
+  parseCatalogProductInitialEditorContent,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
+import {
+  createMerchantProductEditorContentAuthority,
+  type MerchantProductEditorContentAuthority,
+} from "./merchant-product-editor-content-authority.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
 const fail = (code: ConstructorParameters<typeof CatalogError>[0]): never => {
   throw new CatalogError(code);
 };
-function decode(value: unknown) {
+function decode(value: unknown, completeContentConfigured: boolean) {
   try {
+    const classified =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "categoryClassification");
+    const complete =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "editorContent");
     const raw = readClosedRecord(value, [
       "internalCode",
       "productType",
@@ -31,6 +56,8 @@ function decode(value: unknown) {
       "taxClassificationReference",
       "skus",
       "operationReference",
+      ...(classified ? ["categoryClassification"] : []),
+      ...(complete ? ["editorContent"] : []),
     ]);
     if (
       (raw.productType !== "PreparedFood" && raw.productType !== "NonAlcoholicBeverage") ||
@@ -60,6 +87,8 @@ function decode(value: unknown) {
         unitQuantity,
       };
     });
+    if (complete && (!completeContentConfigured || skus.length !== 0))
+      return fail("CATALOG_INPUT_INVALID");
     return {
       internalCode: parseCatalogCode(raw.internalCode),
       productType: raw.productType,
@@ -70,6 +99,17 @@ function decode(value: unknown) {
           ? null
           : parseCatalogReference(raw.taxClassificationReference),
       skus,
+      ...(complete
+        ? {
+            editorContent: parseCatalogProductInitialEditorContent(
+              raw.editorContent,
+              defaultLocale,
+            ),
+          }
+        : {}),
+      ...(classified
+        ? { categoryClassification: parseProductCategoryClassification(raw.categoryClassification) }
+        : {}),
       operationReference: parseCatalogReference(raw.operationReference),
     };
   } catch {
@@ -94,37 +134,44 @@ export function createMerchantProductCreationCommand(options: {
   merchant: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   auditReference(operationReference: string): string;
+  categoryPolicy?: MerchantProductCategoryPolicy;
+  writeAuthority?: MerchantProductWriteAuthority;
+  editorContentAuthority?: MerchantProductEditorContentAuthority;
 }) {
   const resolveScope = createMerchantBrandScope(options.merchant);
-  return async (request: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
+  const host = createMerchantCategoryTransactions(options.merchant.transactions);
+  if (
+    options.editorContentAuthority !== undefined &&
+    typeof options.editorContentAuthority !== "function"
+  )
+    return fail("CATALOG_DEPENDENCY_UNAVAILABLE");
+  const contentAuthority = options.editorContentAuthority?.bind(options);
+  return async (request: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    command: unknown;
+    expectedScope: unknown;
+  }) => {
+    const expectedScope = parseMerchantProductCommandScope(request.expectedScope);
     const session = await options.authentication.authorize({
       sessionCookie: request.sessionCookie,
       csrf: request.csrf,
     });
-    const command = decode(request.command);
-    return options.merchant.transactions.run(async (identityTransaction) => {
-      const transaction: ProductLifecycleTransaction = {
-        async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
-          const result = await identityTransaction.query(sql, values);
-          if (!result || typeof result !== "object") return fail("CATALOG_DEPENDENCY_UNAVAILABLE");
-          const rows = Object.getOwnPropertyDescriptor(result, "rows");
-          const count = Object.getOwnPropertyDescriptor(result, "rowCount");
-          if (
-            !rows ||
-            !("value" in rows) ||
-            !Array.isArray(rows.value) ||
-            !count ||
-            !("value" in count) ||
-            (count.value !== null && (!Number.isSafeInteger(count.value) || count.value < 0))
-          )
-            return fail("CATALOG_DEPENDENCY_UNAVAILABLE");
-          return { rows: rows.value as readonly Row[], rowCount: count.value as number | null };
-        },
-      };
+    const command = decode(request.command, contentAuthority !== undefined);
+    let callbackCompleted = false;
+    const transactionResult = host.transactions.run(async (identityTransaction) => {
+      const transaction: ProductLifecycleTransaction = identityTransaction;
       const scope = await resolveScope(
         transaction,
         request.sessionCookie,
         session.sessionReference,
+      );
+      const actualScope = bindMerchantProductCommandScope(
+        {
+          brandReference: scope.context.brand.brandReference,
+          storeReference: scope.selectedStoreReference,
+        },
+        expectedScope,
       );
       const permission = async () => {
         const decision = await scope.authorizeAction("catalog.product.manage");
@@ -136,9 +183,70 @@ export function createMerchantProductCreationCommand(options: {
       };
       if (!(await permission())) return fail("CATALOG_PERMISSION_DENIED");
       const brand = parseCatalogReference(scope.context.brand.brandReference);
+      await host.registerBeforeCommit(transaction, async () => {
+        if (!(await permission())) return fail("CATALOG_PERMISSION_DENIED");
+      });
       const product = identity(command.operationReference, brand, "Product", 0);
+      const writeGuard = createMerchantProductWriteGuard({
+        transaction,
+        scope,
+        sessionReference: session.sessionReference,
+        productReference: product,
+        operationReference: command.operationReference,
+        intent: {
+          action: "Create",
+          expectedAggregateVersion: null,
+          createsSkus: command.skus.length > 0,
+        },
+        authority: options.writeAuthority,
+        now: options.merchant.now,
+        registerBeforeCommit: host.registerBeforeCommit,
+      });
+      await writeGuard.holdAndRegister();
+      const categoryAssignments = createMerchantProductCategoryAssignments({
+        transaction,
+        tenantReference: scope.tenantReference,
+        brandReference: brand,
+        actorReference: scope.actorReference,
+        now: options.merchant.now,
+        policy:
+          options.categoryPolicy === undefined
+            ? undefined
+            : createMerchantProductCategoryPolicyAuthority({
+                merchant: options.merchant,
+                transaction,
+                sessionCookie: request.sessionCookie,
+                sessionReference: session.sessionReference,
+                scope: {
+                  tenantReference: scope.tenantReference,
+                  brandReference: brand,
+                  storeReference: scope.selectedStoreReference,
+                  actorReference: scope.actorReference,
+                  productReference: product,
+                },
+                holdPolicyUntilTransactionCompletes: options.categoryPolicy,
+              }),
+        registerBeforeCommit: host.registerBeforeCommit,
+      });
+
+      const editorContentAuthority =
+        contentAuthority === undefined
+          ? undefined
+          : createMerchantProductEditorContentAuthority({
+              transaction,
+              scope,
+              sessionReference: session.sessionReference,
+              productReference: product,
+              operationReference: command.operationReference,
+              authority: contentAuthority,
+              purposeCode: "CATALOG_PRODUCT_CREATE",
+              now: options.merchant.now,
+              registerBeforeCommit: host.registerBeforeCommit,
+            });
       const store = createPostgresProductCreationStore({
         brandReference: brand,
+        ...(editorContentAuthority === undefined ? {} : { editorContentAuthority }),
+        ...(categoryAssignments === undefined ? {} : { categoryAssignments }),
         transactions: { run: (work) => work(transaction) },
         authorize: async (_tx, input) =>
           (input.productReference === null || input.productReference === product) &&
@@ -196,18 +304,35 @@ export function createMerchantProductCreationCommand(options: {
       });
       const result = await service.create({ ...command, requestedAt });
       if (!(await permission())) return fail("CATALOG_PERMISSION_DENIED");
+      callbackCompleted = true;
       return {
         status: result.status,
+        scope: actualScope,
+        operationReference: command.operationReference,
         productReference: result.aggregate.productReference,
         versionReference: result.aggregate.draft.versionReference,
         aggregateVersion: result.aggregate.aggregateVersion,
         lifecycle: result.aggregate.lifecycle,
+        ...(result.aggregate.draft.categoryClassification === undefined
+          ? {}
+          : { categoryClassification: result.aggregate.draft.categoryClassification }),
         skus: result.aggregate.draft.skus.map((sku) => ({
           skuReference: sku.skuReference,
           skuCode: sku.skuCode,
           lifecycle: sku.lifecycle,
         })),
       };
+    });
+    return transactionResult.catch((error: unknown) => {
+      // Once the authorized callback returned, a lost COMMIT acknowledgement is
+      // an unavailable transaction outcome, never evidence of permission denial.
+      if (
+        callbackCompleted &&
+        !(error instanceof CatalogError) &&
+        !(error instanceof MerchantProductWriteFeatureDisabled)
+      )
+        return fail("CATALOG_DEPENDENCY_UNAVAILABLE");
+      throw error;
     });
   };
 }

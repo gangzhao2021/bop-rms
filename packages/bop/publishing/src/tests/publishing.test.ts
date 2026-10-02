@@ -1,4 +1,9 @@
 import {
+  publishingOptionSetPublicationPolicyDigest,
+  optionSetPolicyScopeLevels,
+} from "../index.js";
+import { publishingProductPublicationPolicyDigest, productPolicyScopeLevels } from "../index.js";
+import {
   evaluatePermission,
   parseEvidenceReference,
   parsePolicyReference,
@@ -319,6 +324,49 @@ describe("Publishing contracts and transition policy", () => {
 });
 
 describe("Publishing application service", () => {
+  it("binds and detaches a typed Product policy before committing through current authorization", async () => {
+    const body = {
+      profile: "PublishingProductPublicationPolicyV1",
+      tenantReference: ids.policy,
+      brandReference: ids.brand,
+      familyReference: ids.family,
+      policyReference: ids.snapshotA,
+      policyVersion: 1,
+      scopeOrder: [...productPolicyScopeLevels],
+      approvalPolicy: "Required",
+      warningOverrideAllowed: false,
+      requiredLocales: ["en-CA"],
+      mediaRequirement: "Required",
+      effectiveFrom: at,
+      effectiveUntil: null,
+    };
+    const next = createPublishingLifecycleRecord({
+      ...lifecycle("Draft", 1),
+      scope: createPublishingScope({
+        kind: "Brand",
+        brandReference: ids.brand,
+        storeReference: null,
+      }),
+      configurationType: parsePublishingCode("PRODUCT_PUBLICATION_POLICY"),
+      purposeCode: parsePublishingCode("PRODUCT_PUBLICATION_POLICY"),
+      snapshotDigest: parsePublishingDigest(publishingProductPublicationPolicyDigest(body)),
+    });
+    const harness = ports();
+    await executePublishingMutation(
+      mutation("CreateDraft", null, next, { productPolicyContent: body }),
+      harness.value,
+    );
+    body.requiredLocales.push("fr-CA");
+    expect(harness.commits[0]?.productPolicyContent?.requiredLocales).toEqual(["en-CA"]);
+    await expect(
+      executePublishingMutation(
+        mutation("CreateDraft", null, next, { productPolicyContent: body }),
+        harness.value,
+      ),
+    ).rejects.toMatchObject({ code: "PUBLISHING_MUTATION_INVALID" });
+    expect(harness.commits).toHaveLength(1);
+  });
+
   it("returns the original persisted Audit receipt on replay", async () => {
     const harness = ports();
     const original = parsePublishingReference(ids.otherActor);
@@ -670,5 +718,50 @@ describe("Publishing application service", () => {
         validUntil: before,
       }),
     ).toThrow(PublishingContractError);
+  });
+});
+
+describe("Option policy authorized application entry", () => {
+  it("binds and detaches a typed Option policy before committing through current authorization", async () => {
+    const body = {
+      profile: "PublishingOptionSetPublicationPolicyV1",
+      tenantReference: ids.policy,
+      brandReference: ids.brand,
+      familyReference: ids.family,
+      policyReference: ids.snapshotA,
+      policyVersion: 1,
+      scopeOrder: [...optionSetPolicyScopeLevels],
+      approvalPolicy: "Required",
+      warningOverrideAllowed: false,
+      requiredLocales: ["en-CA"],
+      mediaRequirement: "Required",
+      effectiveFrom: at,
+      effectiveUntil: null,
+    };
+    const next = createPublishingLifecycleRecord({
+      ...lifecycle("Draft", 1),
+      scope: createPublishingScope({
+        kind: "Brand",
+        brandReference: ids.brand,
+        storeReference: null,
+      }),
+      configurationType: parsePublishingCode("OPTION_SET_PUBLICATION_POLICY"),
+      purposeCode: parsePublishingCode("OPTION_SET_PUBLICATION_POLICY"),
+      snapshotDigest: parsePublishingDigest(publishingOptionSetPublicationPolicyDigest(body)),
+    });
+    const harness = ports();
+    await executePublishingMutation(
+      mutation("CreateDraft", null, next, { optionSetPolicyContent: body }),
+      harness.value,
+    );
+    body.requiredLocales.push("fr-CA");
+    expect(harness.commits[0]?.optionSetPolicyContent?.requiredLocales).toEqual(["en-CA"]);
+    await expect(
+      executePublishingMutation(
+        mutation("CreateDraft", null, next, { optionSetPolicyContent: body }),
+        harness.value,
+      ),
+    ).rejects.toMatchObject({ code: "PUBLISHING_MUTATION_INVALID" });
+    expect(harness.commits).toHaveLength(1);
   });
 });

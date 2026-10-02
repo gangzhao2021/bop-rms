@@ -54,6 +54,113 @@ export function ReportRunHistoryState({
     </StatePanel>
   );
 }
+const unavailableFilters = [
+  "Run reference",
+  "Report",
+  "Status",
+  "Date range",
+  "Requester",
+  "Trigger",
+] as const;
+const registeredRunFields = [
+  "Run reference",
+  "Definition / version",
+  "Scope / parameters",
+  "Status",
+  "Row count / freshness",
+  "Duration",
+  "Artifact / expiry",
+  "Error",
+] as const;
+export function UnavailableReportRunHistory() {
+  return (
+    <main className="report-run-history-review page-shell">
+      <div className="report-run-history-review__brand" aria-label="BOP Operations">
+        <strong>BOP</strong>
+        <span>OPERATIONS</span>
+      </div>
+      <div className="report-run-history-review__content">
+        <header className="report-run-history-review__heading">
+          <h1>Report Run history</h1>
+          <p className="bop-eyebrow">RPT-RUN-HISTORY · PHASE 2–3 · DESIGN REVIEW</p>
+          <p>Review layout · current run source unavailable</p>
+        </header>
+        <section className="report-run-history-review__notice" role="status">
+          <h2>Authorized run history is unavailable</h2>
+          <p>
+            Run records, parameter details, and artifacts remain hidden until the authorized
+            reporting projection is connected.
+          </p>
+        </section>
+        <section
+          className="report-run-history-review__filters"
+          aria-labelledby="report-run-filters"
+        >
+          <h2 id="report-run-filters">Filters</h2>
+          <div className="report-run-history-review__filter-grid">
+            {unavailableFilters.map((label) => (
+              <label key={label}>
+                {label}
+                <input aria-label={label} disabled placeholder="Unavailable" />
+              </label>
+            ))}
+          </div>
+          <p>
+            Run and artifact filters require the authorized run-history projection and remain
+            disabled here.
+          </p>
+        </section>
+        <section
+          className="report-run-history-review__results"
+          aria-labelledby="report-run-results"
+        >
+          <header>
+            <h2 id="report-run-results">Run history</h2>
+            <span>Unavailable</span>
+          </header>
+          <div className="report-run-history-review__surface">
+            <table>
+              <thead>
+                <tr>
+                  {registeredRunFields.map((field) => (
+                    <th key={field} scope="col">
+                      {field}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colSpan={registeredRunFields.length}>No run rows shown</td>
+                </tr>
+              </tbody>
+            </table>
+            <div
+              className="report-run-history-review__mobile-fields"
+              aria-label="Registered run fields; no records"
+            >
+              {registeredRunFields.map((field) => (
+                <div key={field}>
+                  <strong>{field}</strong>
+                  <span>Unavailable</span>
+                </div>
+              ))}
+              <p>No run rows shown</p>
+            </div>
+            <p className="report-run-history-review__empty-copy">
+              The authorized run history projection is not connected. No zero count or artifact
+              availability is inferred.
+            </p>
+          </div>
+        </section>
+        <p className="report-run-history-review__boundary">
+          Historical runs remain immutable; reruns pin the same report version and parameter
+          snapshot. Artifact storage URLs are never shown here.
+        </p>
+      </div>
+    </main>
+  );
+}
 export function ReportRunHistory({ view }: { readonly view: ReportRunHistoryView }) {
   return (
     <main className="page-shell">
@@ -64,6 +171,10 @@ export function ReportRunHistory({ view }: { readonly view: ReportRunHistoryView
           <p>Generated {view.generatedAt}</p>
         </div>
       </header>
+      <p id="report-actions-unavailable" role="note">
+        Reporting commands are not connected. This page is read-only; no report, certification,
+        schedule, run, or artifact will be changed here.
+      </p>
       <form className="list-filters" aria-label="Report Run filters">
         <label>
           Run reference
@@ -118,17 +229,25 @@ export function ReportRunHistory({ view }: { readonly view: ReportRunHistoryView
               )}
               <div className="card-actions">
                 {view.permissions.mayRerun ? (
-                  <button>Rerun exact version and parameters</button>
+                  <button disabled aria-describedby="report-actions-unavailable">
+                    Rerun exact version and parameters
+                  </button>
                 ) : null}
                 {view.permissions.mayCancel &&
                 (run.status === "Queued" || run.status === "Running") ? (
-                  <button>Cancel</button>
+                  <button disabled aria-describedby="report-actions-unavailable">
+                    Cancel
+                  </button>
                 ) : null}
                 {view.permissions.mayDownload && run.artifact && !run.artifact.revoked ? (
-                  <button>Authorize download</button>
+                  <button disabled aria-describedby="report-actions-unavailable">
+                    Authorize download
+                  </button>
                 ) : null}
                 {view.permissions.mayRevoke && run.artifact && !run.artifact.revoked ? (
-                  <button>Revoke artifact</button>
+                  <button disabled aria-describedby="report-actions-unavailable">
+                    Revoke artifact
+                  </button>
                 ) : null}
               </div>
             </article>
@@ -163,7 +282,9 @@ export function ReportRunHistoryPage({
       active = false;
     };
   }, [client]);
-  return state.kind === "Found" ? (
+  return state.kind === "Unavailable" ? (
+    <UnavailableReportRunHistory />
+  ) : state.kind === "Found" ? (
     <ReportRunHistory view={state.view} />
   ) : (
     <ReportRunHistoryState state={state.kind} />

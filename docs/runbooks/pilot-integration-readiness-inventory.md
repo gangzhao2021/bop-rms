@@ -1,5 +1,9 @@
 # Pilot Integration Readiness Inventory
 
+## Evidence intake navigation
+
+Use [release evidence intake](release-evidence-intake.md), [cloud control intake](cloud-evidence-intake.md), [Cross-Region recovery](cross-region-disaster-recovery.md) and [key/secret rotation](key-secret-rotation.md) for source-backed collection and failure handling. Templates begin unrecorded and confer no approval. Candidate identity and assembly conflicts are in the [project register](project-candidate-register.md). Existing readiness states and external gates below are not upgraded by these guides.
+
 ## Purpose and authority
 
 This is an owner-action inventory for the planned Ontario Pilot. It summarizes gates already named

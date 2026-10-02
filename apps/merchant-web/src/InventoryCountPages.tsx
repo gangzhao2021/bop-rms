@@ -53,6 +53,206 @@ export function InventoryCountState({
   );
 }
 
+export function InventoryCountListUnavailable() {
+  return (
+    <AppFrame className="inventory-count-list-shell" title="OPERATIONS" description="">
+      <div className="inventory-count-list-review">
+        <header className="inventory-count-list-heading">
+          <div>
+            <p className="bop-eyebrow">INV-COUNT-LIST · PHASE 2</p>
+            <h2>Inventory Counts</h2>
+            <p>Inventory · Store scope unavailable</p>
+          </div>
+          <button type="button" disabled aria-describedby="inventory-count-list-source-boundary">
+            Create Count unavailable
+          </button>
+        </header>
+        <section
+          className="inventory-count-list-source-boundary"
+          id="inventory-count-list-source-boundary"
+          role="status"
+          aria-label="Count projection unavailable"
+        >
+          <h3>Count execution queue</h3>
+          <p>
+            No authorized Inventory Count projection is connected. Count, Store, assignee, frozen
+            snapshot, progress, variance and due facts are unavailable.
+          </p>
+        </section>
+        <section aria-labelledby="inventory-count-list-status-title">
+          <h3 id="inventory-count-list-status-title">Count status and execution</h3>
+          <div className="inventory-count-list-status-grid">
+            {[
+              ["Reference / scope", "Count reference and Store scope are unavailable."],
+              ["Status / assignee", "Status and assignee are unavailable."],
+              ["Snapshot / progress", "Frozen snapshot and progress are unavailable."],
+            ].map(([label, detail]) => (
+              <article className="inventory-count-list-status-card" key={label}>
+                <p>{label}</p>
+                <strong>Unavailable</strong>
+                <small>{detail}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+        <fieldset className="inventory-count-list-filters" disabled>
+          <legend>Search and filters</legend>
+          <p>Filters unavailable until the authorized Count projection is connected.</p>
+          <div className="inventory-count-list-filter-grid">
+            {[
+              "Count ref / Store scope",
+              "Status / type / assignee",
+              "Due / variance / overdue",
+            ].map((label) => (
+              <label key={label}>
+                {label}
+                <select aria-label={`${label} filter`} defaultValue="Unavailable">
+                  <option>Unavailable</option>
+                </select>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <section
+          className="inventory-count-list-empty"
+          aria-labelledby="inventory-count-list-empty-title"
+        >
+          <h3 id="inventory-count-list-empty-title">Count list unavailable</h3>
+          <p>
+            No authorized count records are available. Store, assignee, snapshot, progress, variance
+            and due facts remain unavailable.
+          </p>
+        </section>
+        <section
+          className="inventory-count-list-fields"
+          aria-labelledby="inventory-count-list-fields-title"
+        >
+          <h3 id="inventory-count-list-fields-title">
+            Registered list fields when the authorized source is available
+          </h3>
+          <p>
+            Count reference / scope / type / status / assignee · frozen snapshot / progress /
+            variance / due
+          </p>
+        </section>
+        <p className="inventory-count-list-footer">
+          Create, assign, start, submit, approve/reject and cancel remain unavailable until
+          authorized commands are connected.
+        </p>
+      </div>
+    </AppFrame>
+  );
+}
+
+export function InventoryCountWorkbenchUnavailable() {
+  return (
+    <AppFrame className="inventory-count-list-shell" title="OPERATIONS" description="">
+      <div className="inventory-count-list-review inventory-count-workbench-review">
+        <header className="inventory-count-list-heading">
+          <div>
+            <p className="bop-eyebrow">INV-COUNT-WORKBENCH · PHASE 2</p>
+            <h2>Stock Count Workbench</h2>
+            <p>Count reference unavailable · scope unavailable</p>
+          </div>
+          <button type="button" disabled aria-describedby="inventory-count-workbench-boundary">
+            Scan item unavailable
+          </button>
+        </header>
+        <section
+          className="inventory-count-list-source-boundary"
+          id="inventory-count-workbench-boundary"
+          role="status"
+          aria-label="Count workbench projection unavailable"
+        >
+          <h3>Count workbench unavailable</h3>
+          <p>
+            No authorized workbench projection is connected. Count, Store, Item, Lot, Location,
+            snapshot, quantity, variance and conflict facts are unavailable.
+          </p>
+          <p>Blind expected quantities stay hidden until authorized submission.</p>
+        </section>
+        <section aria-labelledby="inventory-count-workbench-context-title">
+          <h3 id="inventory-count-workbench-context-title">Count context and execution</h3>
+          <div className="inventory-count-list-status-grid">
+            {[
+              ["Count / scope", "Count reference and Store scope are unavailable."],
+              ["Snapshot / blind policy", "Snapshot and expected-quantity policy are unavailable."],
+              ["Progress / conflict", "Line progress and conflict state are unavailable."],
+            ].map(([label, detail]) => (
+              <article className="inventory-count-list-status-card" key={label}>
+                <p>{label}</p>
+                <strong>Unavailable</strong>
+                <small>{detail}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+        <fieldset className="inventory-count-list-filters" disabled>
+          <legend>Line search and filters</legend>
+          <p>
+            Line data and filters unavailable until the authorized workbench projection is
+            connected.
+          </p>
+          <div className="inventory-count-workbench-filter-grid">
+            <label>
+              Item / barcode
+              <input aria-label="Item or barcode search unavailable" placeholder="Unavailable" />
+            </label>
+            {["Line / counted status", "Variance / recount"].map((label) => (
+              <label key={label}>
+                {label}
+                <select aria-label={`${label} filter unavailable`} defaultValue="Unavailable">
+                  <option>Unavailable</option>
+                </select>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <section
+          className="inventory-count-list-empty"
+          aria-labelledby="inventory-count-workbench-lines-title"
+        >
+          <h3 id="inventory-count-workbench-lines-title">Count lines unavailable</h3>
+          <p>
+            No authorized count lines are available. Item, lot, location, quantity, variance and
+            conflict facts remain unavailable.
+          </p>
+        </section>
+        <section
+          className="inventory-count-list-fields"
+          aria-labelledby="inventory-count-workbench-fields-title"
+        >
+          <h3 id="inventory-count-workbench-fields-title">
+            Registered workbench fields when the authorized source is available
+          </h3>
+          <p>
+            Item / lot / location · blind expected-quantity policy · counted quantity / unit ·
+            variance / reason · progress / conflict
+          </p>
+        </section>
+        <fieldset className="inventory-count-workbench-actions" disabled>
+          <legend>Count actions unavailable</legend>
+          <p>Authorized Inventory Count commands are not connected.</p>
+          <div>
+            {[
+              "Scan or enter quantity",
+              "Save progress",
+              "Recount",
+              "Submit count",
+              "Approve / reject",
+              "Post Movements",
+            ].map((label) => (
+              <button type="button" key={label}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      </div>
+    </AppFrame>
+  );
+}
+
 function CountCard({ count }: { readonly count: InventoryCountViewRow }) {
   return (
     <article className="store-card">
@@ -242,6 +442,10 @@ function Page({
   }, [client, screenId]);
   return state.kind === "Found" ? (
     <InventoryCountScreen view={state.view} />
+  ) : screenId === "INV-COUNT-LIST" && state.kind === "Unavailable" ? (
+    <InventoryCountListUnavailable />
+  ) : screenId === "INV-COUNT-WORKBENCH" && state.kind === "Unavailable" ? (
+    <InventoryCountWorkbenchUnavailable />
   ) : (
     <InventoryCountState state={state.kind} />
   );

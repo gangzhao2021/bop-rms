@@ -89,7 +89,7 @@ function fixture() {
     persistence: source as unknown as Parameters<
       typeof createPersistentMerchantTaskInbox
     >[0]["persistence"],
-    queue,
+    queues: [queue],
     authorizeSource,
   });
   return { read, allowed, resolved, queue, source, authorizeAction, authorizeSource, tx };
@@ -121,6 +121,64 @@ it("composes current scope, public queue and source authorization in one transac
 it("rejects foreign Store before queue access", async () => {
   const f = fixture();
   f.resolved.store.storeReference = id(99);
+  await expect(f.read("synthetic-cookie", { afterTaskReference: null })).rejects.toThrow(
+    "MERCHANT_TASK_INBOX_UNAVAILABLE",
+  );
+  expect(mocks.queue).not.toHaveBeenCalled();
+});
+it("selects only the server-configured Queue for the authenticated Store", async () => {
+  const f = fixture(),
+    targetStoreReference = id(33),
+    targetQueueReference = id(34);
+  f.resolved.store.storeReference = targetStoreReference;
+  f.resolved.store.displayName = "Synthetic Target Store";
+  mocks.queue.mockImplementationOnce((options) => ({
+    list: async (_transaction: unknown, query: { queueReference: string }) => {
+      expect(options.scope).toEqual({
+        kind: "Store",
+        brandReference: id(2),
+        storeReference: targetStoreReference,
+      });
+      expect(query.queueReference).toBe(targetQueueReference);
+      return {
+        scope: options.scope,
+        queueReference: targetQueueReference,
+        observedAt: at,
+        items: [],
+        nextAfterTaskReference: null,
+      };
+    },
+  }));
+  const read = createPersistentMerchantTaskInbox({
+    persistence: f.source as unknown as Parameters<
+      typeof createPersistentMerchantTaskInbox
+    >[0]["persistence"],
+    queues: [
+      f.queue,
+      {
+        ...f.queue,
+        storeReference: targetStoreReference,
+        queueReference: targetQueueReference,
+      },
+    ],
+    authorizeSource: f.authorizeSource,
+  });
+  const view = await read("synthetic-cookie", { afterTaskReference: null });
+  expect(view.storeLabel).toBe("Synthetic Target Store");
+  expect(view.items).toEqual([]);
+});
+it("rejects duplicate Store Queue configuration and permission denial", async () => {
+  const f = fixture();
+  expect(() =>
+    createPersistentMerchantTaskInbox({
+      persistence: f.source as unknown as Parameters<
+        typeof createPersistentMerchantTaskInbox
+      >[0]["persistence"],
+      queues: [f.queue, f.queue],
+      authorizeSource: f.authorizeSource,
+    }),
+  ).toThrow("MERCHANT_TASK_INBOX_UNAVAILABLE");
+  f.allowed.mockResolvedValue(false);
   await expect(f.read("synthetic-cookie", { afterTaskReference: null })).rejects.toThrow(
     "MERCHANT_TASK_INBOX_UNAVAILABLE",
   );

@@ -37,3 +37,25 @@ export * from "./infrastructure/persistence/current-configured-quote-service.js"
 export { allocateOrdinaryRefundFromQuote } from "./domain/ordinary-refund-quote-allocation.js";
 
 export * from "./infrastructure/persistence/price-book-repository.js";
+
+export * from "./contracts/price-book-reference-source.js";
+export * from "./infrastructure/persistence/price-book-reference-source-store.js";
+
+export * from "./contracts/option-price-reference-source.js";
+export * from "./infrastructure/persistence/option-price-reference-source-store.js";
+
+export * from "./contracts/promotion-reference-source.js";
+export * from "./infrastructure/persistence/promotion-reference-source-store.js";
+
+export * from "./contracts/configuration-reference-matches.js";
+
+export * from "./contracts/tax-configuration-reference-source.js";
+export * from "./infrastructure/persistence/tax-configuration-reference-source-store.js";
+
+export * from "./contracts/tax-classification-reference-matches.js";
+
+export * from "./contracts/brand-tax-reference-source.js";
+export * from "./infrastructure/persistence/brand-tax-reference-source-store.js";
+
+export * from "./contracts/configuration-reference-source.js";
+export * from "./infrastructure/persistence/configuration-reference-source-store.js";

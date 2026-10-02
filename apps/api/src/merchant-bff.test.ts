@@ -1,3 +1,4 @@
+import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
 import { BrowserSessionError } from "@bop/identity";
 import { parsePaymentReference, ReconciliationFollowUpError } from "@rms/payment";
 import { parsePaymentInstant } from "@rms/payment";
@@ -212,7 +213,7 @@ async function request(
   options: {
     readonly body?: string;
     readonly method?: string;
-    readonly headers?: Readonly<Record<string, string | undefined>>;
+    readonly headers?: Readonly<Record<string, string | string[] | undefined>>;
   } = {},
 ) {
   return await new Promise<{
@@ -897,6 +898,12 @@ it("protects Product lifecycle transport and sanitizes command failures", async 
     ...safeHeaders,
     Cookie: "__Host-bop-merchant=" + sessionCookie,
     "X-BOP-CSRF": csrf,
+    "X-BOP-Catalog-Scope": Buffer.from(
+      JSON.stringify({
+        brandReference: "01902409-0000-7000-8000-000000000001",
+        storeReference: "01902409-0000-7000-8000-000000000002",
+      }),
+    ).toString("base64url"),
   };
   const submit = (
     extra: Record<string, string> = {},
@@ -908,9 +915,45 @@ it("protects Product lifecycle transport and sanitizes command failures", async 
   expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
   expect((await submit({ Cookie: "" })).status).toBe(403);
   expect((await submit({}, "/merchant/catalog/products/lifecycle?brand=other")).status).toBe(403);
+  for (const value of [
+    "",
+    "e30",
+    "a".repeat(513),
+    headers["X-BOP-Catalog-Scope"] + "," + headers["X-BOP-Catalog-Scope"],
+  ])
+    expect((await submit({ "X-BOP-Catalog-Scope": value })).status).toBe(403);
+  expect(
+    (
+      await request(root, "/merchant/catalog/products/lifecycle", {
+        method: "POST",
+        body: "{}",
+        headers: {
+          ...headers,
+          "X-BOP-Catalog-Scope": [headers["X-BOP-Catalog-Scope"], headers["X-BOP-Catalog-Scope"]],
+        },
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await request(root, "/merchant/catalog/products/lifecycle", {
+        method: "POST",
+        body: "{}",
+        headers: { ...safeHeaders, Cookie: headers.Cookie, "X-BOP-CSRF": csrf },
+      })
+    ).status,
+  ).toBe(403);
   expect(write).not.toHaveBeenCalled();
   const response = await submit();
   expect(response.status).toBe(200);
+  expect(write).toHaveBeenCalledWith(
+    expect.objectContaining({
+      expectedScope: {
+        brandReference: "01902409-0000-7000-8000-000000000001",
+        storeReference: "01902409-0000-7000-8000-000000000002",
+      },
+    }),
+  );
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(await response.json()).toEqual(result);
   for (const [code, status] of [
@@ -925,6 +968,10 @@ it("protects Product lifecycle transport and sanitizes command failures", async 
     expect(failed.status).toBe(status);
     expect(JSON.stringify(await failed.json())).not.toContain(code);
   }
+  write.mockRejectedValueOnce(new MerchantProductWriteFeatureDisabled());
+  const disabled = await submit();
+  expect(disabled.status).toBe(409);
+  expect(await disabled.json()).toEqual({ error: "product_lifecycle_feature_disabled" });
   write.mockRejectedValueOnce(new Error("synthetic-private-error"));
   expect(await (await submit()).json()).toEqual({ error: "request_denied" });
   const unconfigured = await serve(fakeService());
@@ -978,6 +1025,12 @@ it.each(["creation", "draft"] as const)(
       ...safeHeaders,
       Cookie: "__Host-bop-merchant=" + sessionCookie,
       "X-BOP-CSRF": csrf,
+      "X-BOP-Catalog-Scope": Buffer.from(
+        JSON.stringify({
+          brandReference: "01902409-0000-7000-8000-000000000001",
+          storeReference: "01902409-0000-7000-8000-000000000002",
+        }),
+      ).toString("base64url"),
     };
     const submit = (extra: Record<string, string> = {}, path = route) =>
       request(root, path, { method: "POST", body: "{}", headers: { ...headers, ...extra } });
@@ -987,12 +1040,23 @@ it.each(["creation", "draft"] as const)(
       { "Sec-Fetch-Site": "cross-site" },
       { "X-BOP-CSRF": "" },
       { Cookie: "" },
+      { "X-BOP-Catalog-Scope": "" },
+      { "X-BOP-Catalog-Scope": "e30" },
+      { "X-BOP-Catalog-Scope": "a".repeat(513) },
     ])
       expect((await submit(extra)).status).toBe(403);
     expect((await submit({}, route + "?brand=other")).status).toBe(403);
     expect(write).not.toHaveBeenCalled();
     const response = await submit();
     expect(response.status).toBe(200);
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedScope: {
+          brandReference: "01902409-0000-7000-8000-000000000001",
+          storeReference: "01902409-0000-7000-8000-000000000002",
+        },
+      }),
+    );
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual(result);
     for (const [code, status] of [
@@ -1007,6 +1071,15 @@ it.each(["creation", "draft"] as const)(
       expect(failed.status).toBe(status);
       expect(JSON.stringify(await failed.json())).not.toContain(code);
     }
+    write.mockRejectedValueOnce(new MerchantProductWriteFeatureDisabled());
+    const disabled = await submit();
+    expect(disabled.status).toBe(409);
+    expect(await disabled.json()).toEqual({
+      error:
+        mode === "creation"
+          ? "product_creation_feature_disabled"
+          : "product_draft_feature_disabled",
+    });
     write.mockRejectedValueOnce(new Error("synthetic-private-error"));
     expect(await (await submit()).json()).toEqual({ error: "request_denied" });
     const unconfigured = await serve(fakeService());
@@ -1889,6 +1962,111 @@ async function serveDiningSessionStart(
   if (!address || typeof address === "string") throw new Error("listener unavailable");
   return `http://127.0.0.1:${address.port}`;
 }
+
+async function serveDiningTableCommand(
+  diningTableCommand?: MerchantBffRouterOptions["diningTableCommand"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(diningTableCommand ? { diningTableCommand } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("server unavailable");
+  return { server, url: `http://127.0.0.1:${address.port}` };
+}
+
+it("protects the Dining table command route and returns only its allowlisted result", async () => {
+  const result = {
+      status: "Applied" as const,
+      tableReference: "0190fad7-0000-7000-8000-000000000005" as never,
+      operationalState: "TemporarilyBlocked" as const,
+      aggregateVersion: 2,
+      privateAudit: "must not be exposed",
+    },
+    command = vi.fn<NonNullable<MerchantBffRouterOptions["diningTableCommand"]>>(
+      async () => result,
+    ),
+    root = await serveDiningTableCommand(command),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  try {
+    expect(
+      (
+        await request(root.url, "/merchant/dining/tables/availability?store=other", {
+          method: "POST",
+          body: "{}",
+          headers,
+        })
+      ).status,
+    ).toBe(403);
+    expect(command).not.toHaveBeenCalled();
+    const response = await request(root.url, "/merchant/dining/tables/availability", {
+      method: "POST",
+      body: "{}",
+      headers,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      status: "Applied",
+      tableReference: result.tableReference,
+      operationalState: result.operationalState,
+      aggregateVersion: 2,
+    });
+    for (const badHeaders of [
+      { Origin: "https://foreign.invalid" },
+      { "Sec-Fetch-Site": "cross-site" },
+      { Cookie: "" },
+      { "X-BOP-CSRF": "" },
+    ])
+      expect(
+        (
+          await request(root.url, "/merchant/dining/tables/availability", {
+            method: "POST",
+            body: "{}",
+            headers: { ...headers, ...badHeaders },
+          })
+        ).status,
+      ).toBe(403);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      root.server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+it("keeps an unconfigured Dining table command unavailable", async () => {
+  const root = await serveDiningTableCommand();
+  try {
+    const response = await request(root.url, "/merchant/dining/tables/availability", {
+      method: "POST",
+      body: "{}",
+      headers: {
+        ...safeHeaders,
+        Cookie: "__Host-bop-merchant=" + sessionCookie,
+        "X-BOP-CSRF": csrf,
+        "Content-Type": "application/json",
+      },
+    });
+    expect(response.status).toBe(503);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      root.server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
 
 it("protects session start and returns one-time credentials only for Issued", async () => {
   const result = {
@@ -3074,4 +3252,95 @@ it("protects reconciliation assignee directory and bounds public output", async 
   expect((await request(unconfigured, path, { method: "POST", headers, body: "{}" })).status).toBe(
     503,
   );
+});
+
+it("admits canonical Product navigation without treating a parsed candidate as a grant", () => {
+  const item = {
+    screenId: "CAT-PRODUCT-LIST",
+    label: "Products",
+    href: "/app/commerce/products",
+    permission: "catalog.manage",
+  };
+  expect(parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [item] }).navigation).toEqual([
+    item,
+  ]);
+  for (const change of [
+    { href: "/operations/products" },
+    { permission: "catalog.read" },
+    { permission: "catalog.product.manage" },
+    { extra: true },
+  ])
+    expect(() =>
+      parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [{ ...item, ...change }] }),
+    ).toThrow("MERCHANT_WORKSPACE_DENIED");
+});
+
+it("bounds complete Draft JSON separately and preserves legacy, other route and origin refusal", async () => {
+  // Parser/transport only: this synthetic command port deliberately refuses every
+  // candidate, so reaching it cannot be mistaken for full source admission.
+  const draft = vi.fn<NonNullable<MerchantBffRouterOptions["productDraft"]>>(async () => {
+    throw new CatalogError("CATALOG_INPUT_INVALID");
+  });
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      productDraft: draft,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    ...safeHeaders,
+    "Content-Type": "application/json",
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "X-BOP-Catalog-Scope": Buffer.from(
+      JSON.stringify({ brandReference: storeReference, storeReference }),
+    ).toString("base64url"),
+  };
+  const complete = JSON.stringify({ draft: { editorContent: { description: "茶".repeat(3000) } } });
+  expect(Buffer.byteLength(complete)).toBeGreaterThan(8192);
+  const send = (
+    body: string,
+    path = "/merchant/catalog/products/draft",
+    extra = {},
+    method = "POST",
+  ) => request(root, path, { method, body, headers: { ...headers, ...extra } });
+  const acceptedTransport = await send(complete);
+  expect(acceptedTransport.status).toBe(400);
+  expect(await acceptedTransport.json()).toEqual({ error: "product_draft_invalid" });
+  expect(draft).toHaveBeenCalledOnce();
+  expect(draft.mock.calls[0]?.[0].command).toEqual(JSON.parse(complete));
+  draft.mockClear();
+  for (const body of [
+    JSON.stringify({ draft: { description: "茶".repeat(3000) } }),
+    JSON.stringify({ draft: { editorContent: "茶".repeat(22000) } }),
+  ]) {
+    const rejected = await send(body);
+    expect(rejected.status).toBe(413);
+    expect(rejected.headers.get("cache-control")).toBe("no-store");
+    expect(rejected.headers.get("content-type")).toMatch(/^application\/json/);
+    expect(await rejected.json()).toEqual({ error: "product_draft_invalid" });
+  }
+  const malformed = await send('{"draft":');
+  expect(malformed.status).toBe(400);
+  expect(await malformed.json()).toEqual({ error: "product_draft_invalid" });
+  for (const [path, method] of [
+    ["/merchant/catalog/products", "POST"],
+    ["/merchant/catalog/products/draft/extra", "POST"],
+    ["/merchant/catalog/products/draft", "PUT"],
+  ]) {
+    expect((await send(complete, path, {}, method)).status).toBe(413);
+  }
+  expect((await send(complete, undefined, { Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect((await send(complete, undefined, { "X-BOP-CSRF": "" })).status).toBe(403);
+  expect(draft).not.toHaveBeenCalled();
 });

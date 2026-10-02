@@ -101,7 +101,7 @@ describe("customer PWA shell", () => {
     expect(payment).toContain("Secure payment");
     expect(payment).not.toContain('id="payment-tip"');
     expect(payment).toContain("Loading checkout");
-    expect(result).toContain("Verify your payment");
+    expect(result).toContain("Check your payment");
     expect(result).toContain("Verifying payment");
     expect(result).not.toContain("Payment confirmed");
     expect(result).not.toContain("provider-secret");
@@ -115,7 +115,7 @@ describe("customer PWA shell", () => {
     );
     expect(html).toContain("Track your order");
     expect(html).toContain("Loading order status");
-    expect(html).toContain("Check your order progress and pickup details.");
+    expect(html).toContain("Check your order progress and available next steps.");
     expect(html).not.toContain(`>${reference}<`);
   });
   it("uses the HTTP client for normal order routes and preserves the matching demo", () => {
@@ -182,6 +182,7 @@ describe("customer PWA shell", () => {
       </MemoryRouter>,
     );
     expect(html).toContain("Loading the current menu");
-    expect(html).toContain("BOP Test Kitchen · Harbour Test Store");
+    expect(html).toContain("<h1>Harbour Test Store</h1>");
+    expect(html).toContain("BOP Test Kitchen · Dine-in");
   });
 });

@@ -73,6 +73,35 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).not.toContain("$0");
   });
 
+  it("renders matched search terms and the source menu section on result cards", () => {
+    const html = render({
+      context,
+      mode: "search",
+      searchTerm: "iced",
+      state: { kind: "Found", menu },
+    });
+    expect(html).toContain('aria-label="Search results"');
+    expect(html).toContain("Matched term · iced");
+    expect(html).toContain("Section</span>Drinks");
+    expect(html).toContain("Available now");
+    expect(html).not.toContain("Dietary filter");
+  });
+
+  it("renders an empty published menu as a quiet state without item or order actions", () => {
+    const emptyMenu = { ...menu, sections: [] };
+    const html = render({
+      context,
+      mode: "browse",
+      state: { kind: "Found", menu: emptyMenu },
+    });
+    expect(html).toContain('class="menu-state menu-state--empty"');
+    expect(html).toContain("No items available");
+    expect(html).toContain("The current published menu has no matching items.");
+    expect(html).not.toContain("<article");
+    expect(html).not.toContain("Try again");
+    expect(html).not.toContain("Add to cart");
+  });
+
   it("renders honest product-detail gaps and a bounded configure intent", () => {
     const html = render({
       context,
@@ -91,6 +120,7 @@ describe("WP-1701 Customer Menu screens", () => {
     ["MissingContext", "Scan the location QR code", "Return to entry"],
     ["IdleSearch", "Search this menu", "approved search term"],
     ["Loading", "Loading the current menu", "latest published items"],
+    ["PermissionDenied", "This menu can’t be opened", "current Store session can’t access"],
     ["Offline", "You’re offline", "No cached menu"],
     ["Stale", "Menu is being refreshed", "out-of-date menu"],
     ["Unavailable", "Menu is unavailable", "No item or order was submitted"],
@@ -99,6 +129,14 @@ describe("WP-1701 Customer Menu screens", () => {
     const html = render({ context, mode: "browse", state: { kind } as never });
     expect(html).toContain(heading);
     expect(html).toContain(copy);
+  });
+
+  it("offers re-entry without retrying a denied menu request", () => {
+    const html = render({ context, mode: "browse", state: { kind: "PermissionDenied" } });
+    expect(html).toContain('href="/"');
+    expect(html).toContain("Return to entry");
+    expect(html).not.toContain("Try again");
+    expect(html).not.toContain("Accessibility and allergen help");
   });
 
   it("never claims allergen absence when the disclosure list is empty", () => {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
 import { createHttpOrderStatusClient } from "./order-status-client.js";
+import { createOrderStatusController } from "./order-status-controller.js";
 
 const id = (n: number) => `018f7a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 function payload() {
@@ -57,6 +58,30 @@ function responder(body: unknown, status = 200) {
 afterEach(() => setCustomerCsrfCredential(null));
 
 describe("customer order status HTTP client", () => {
+  it.each([false, true])(
+    "clears accepted order data on context replacement, offline=%s",
+    async (offline) => {
+      setCustomerCsrfCredential("a".repeat(43));
+      const controller = createOrderStatusController(
+        id(1),
+        createHttpOrderStatusClient(responder(payload())),
+      );
+      const unsubscribe = controller.subscribe(() => undefined);
+      try {
+        await controller.load();
+        expect(controller.getState().status).toBe("ready");
+        if (offline) controller.setOnline(false);
+        setCustomerCsrfCredential("b".repeat(43));
+        expect(controller.getState()).toEqual({ status: "permission-denied" });
+        controller.setOnline(false);
+        expect(controller.getState()).toEqual({ status: "offline", view: null });
+      } finally {
+        unsubscribe();
+        controller.dispose();
+      }
+    },
+  );
+
   it("loads the exact same-origin order with current session and lossless money", async () => {
     setCustomerCsrfCredential("a".repeat(43));
     const body = payload();

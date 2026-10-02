@@ -17,7 +17,15 @@ import {
 
 /** Original current-clock Ready fulfillment; capability and staff/device/location
  * approvals are explicit synthetic inputs. No simulated future completion. */
-export async function exerciseEntryPickupHandoff({ admin, role, run, scope, ready, reference }) {
+export async function exerciseEntryPickupHandoff({
+  admin,
+  role,
+  run,
+  scope,
+  ready,
+  reference,
+  onReadyForMerchantBff,
+}) {
   const now = () => new Date().toISOString();
   const sha256 = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
   const fulfillmentReference = ready.creation.aggregate.fulfillmentReference;
@@ -212,11 +220,38 @@ export async function exerciseEntryPickupHandoff({ admin, role, run, scope, read
         workstation: { deviceReference, pickupLocationReference },
       });
     const queueRequest = { afterFulfillmentReference: null, limit: 1, includeCompleted: false };
+    const currentQueue = await listQueue();
     const httpQueue = await http.query(queueRequest);
     assert.equal(httpQueue.status, 200);
+    assert.equal(httpQueue.body.source, "CurrentFulfillment");
     assert.equal(httpQueue.body.storeReference, scope.storeReference);
+    assert(Number.isFinite(Date.parse(httpQueue.body.observedAt)));
+    assert.equal(httpQueue.body.workstation, null);
+    assert.equal(httpQueue.body.items.length, 1);
     assert.equal(httpQueue.body.items[0].fulfillmentReference, fulfillmentReference);
-    assert.equal(typeof httpQueue.body.items[0].aggregateVersion, "string");
+    assert.equal(httpQueue.body.items[0].phase, "Ready");
+    assert.equal(
+      httpQueue.body.items[0].aggregateVersion,
+      currentQueue.items[0].aggregateVersion.toString(),
+    );
+    assert.equal(httpQueue.body.items[0].readyAt, currentQueue.items[0].readyAt);
+    assert.equal(
+      httpQueue.body.items[0].publicOrderReference,
+      currentQueue.items[0].publicOrderReference,
+    );
+    assert.deepEqual(httpQueue.body.items[0].proof, currentQueue.items[0].proof);
+    assert.deepEqual(httpQueue.body.items[0].items, currentQueue.items[0].items);
+    assert.equal(typeof httpQueue.body.items[0].publicOrderReference, "string");
+    assert.deepEqual(Object.keys(httpQueue.body.items[0].proof).sort(), [
+      "expiresAt",
+      "generation",
+      "kind",
+    ]);
+    assert.equal("credential" in httpQueue.body.items[0], false);
+    assert.equal("selectorHash" in httpQueue.body.items[0], false);
+    const serializedQueue = JSON.stringify(httpQueue.body);
+    assert.equal(serializedQueue.includes(proofCredential), false);
+    assert.equal(serializedQueue.includes(issuedSource.capability.selectorHash), false);
     assert.equal((await http.query({ ...queueRequest, actorReference })).status, 400);
     const proofIntent = {
       orderReference,
@@ -273,6 +308,7 @@ export async function exerciseEntryPickupHandoff({ admin, role, run, scope, read
     assert.equal("selectorHash" in withProof.proof, false);
     assert.equal("verificationReference" in withProof.proof, false);
     assert.equal(withProof.items[0].handedOverQuantity, 0);
+    if (onReadyForMerchantBff) await onReadyForMerchantBff(ready);
 
     const command = {
       ...scope,

@@ -70,7 +70,17 @@ const localKitchenBoardClient: KitchenBoardClient = Object.freeze({
   },
   async loadWorkItem(reference: string) {
     if (reference !== KITCHEN_REFS.work) throw new KitchenBoardClientError("NotFound");
-    return kitchenItemFixture();
+    const board = kitchenBoardFixture();
+    return {
+      screenId: "KIT-WORK-ITEM" as const,
+      projectionName: "kitchen_work_queue_v1" as const,
+      projectionVersion: 1 as const,
+      storeLabel: board.storeLabel,
+      projectedAt: board.projectedAt,
+      freshnessStatus: board.freshnessStatus,
+      operatorStatus: board.operatorStatus,
+      item: kitchenItemFixture(),
+    };
   },
 });
 

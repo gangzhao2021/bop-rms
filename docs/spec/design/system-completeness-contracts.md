@@ -70,10 +70,10 @@ new recovery endpoint. If that path is unavailable, retain uncertainty and provi
 
 ### Decision required and acceptance
 
-| ID     | Required decision/input                                                                                                                          | Accountable roles                          |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
-| SC-D01 | Source-reconciled supported-client/build set, support/retirement duration and safe recovery behavior; no arbitrary universal N-minus-one policy. | Product + Customer PWA + API               |
-| SC-D02 | Database/Worker coexistence combinations, contract observation window and rollback-compatible release sequence.                                  | Release + Database + Event/Consumer owners |
+| ID     | Required decision/input                                                                                                                                                     | Accountable roles                          |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| SC-D01 | Source-reconciled application build set, support/retirement duration and safe recovery; preserve the accepted browser-family latest/previous-major floor in Handoff 80.8.4. | Product + Customer PWA + API               |
+| SC-D02 | Database/Worker coexistence combinations, contract observation window and rollback-compatible release sequence.                                                             | Release + Database + Event/Consumer owners |
 
 Real cohort observations, migration/backfill execution and rollback drills are External Evidence.
 Neither the accepted 10-minute canary minimum nor the proposed cohort record supplies an automatic
@@ -158,8 +158,7 @@ External Evidence. The accepted retention periods are preserved; this proposal a
 
 ### Baseline
 
-[WP-0045](../work-packages/WP-0045.md) leaves numeric thresholds/windows to an accepted SLO/capacity
-WP. [WP-2065](../work-packages/WP-2065.md) and the
+Handoff 80.8 already accepts availability, latency, projection freshness, browser coverage and minimum load floors. The [delivery input record](project-delivery-decision-inputs.md#accepted-performance-floors-and-remaining-measurement-inputs) materializes those targets. The earlier [WP-0045](../work-packages/WP-0045.md) future-WP wording does not supersede them. Remaining inputs are measurement windows/eligibility, concrete environment and forecast/headroom, not a blank numeric baseline. [WP-2065](../work-packages/WP-2065.md) and the
 [capacity policy](../../security/cloud-operations-evidence-baseline.json) require bounded scaling,
 CPU/memory/request-load/queue-lag signals and a maximum 70% database connection budget, including
 protection during deployment. Cost alarms remain notify-only and cannot stop transactions/delete data.
@@ -206,7 +205,7 @@ Proposed measurement rules:
 | SC-D06 | Representative Pilot/scale workload, resource allocation, overload priority and recovery acceptance boundaries. | Store Operations + Platform/SRE + Domain owners |
 
 Measured Store demand, production capacity, Provider behavior, alert delivery and operator drills
-remain External Evidence. No production latency, throughput or availability threshold is assigned.
+remain External Evidence. This proposal assigns no new production thresholds and does not claim the accepted Handoff 80.8 objectives have been measured or achieved.
 
 | Scenario ID | Designed acceptance; all unexecuted in WP-2224                                                                                                                   |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -1,10 +1,15 @@
 export type KitchenStatus = "Queued" | "Held" | "In Progress" | "Completed" | "Cancelled";
 
+export interface KitchenSelectedOption {
+  readonly displayName: string;
+  readonly quantity: number;
+}
+
 export interface KitchenBoardItem {
   readonly workItemReference: string;
   readonly ticketReference: string;
   readonly orderReference: string;
-  readonly stationLabel: string;
+  readonly stationLabel: string | null;
   readonly displayName: string;
   readonly status: KitchenStatus;
   readonly requiredQuantity: number;
@@ -12,6 +17,7 @@ export interface KitchenBoardItem {
   readonly createdAt: string;
   readonly allergenCue: "None" | "ReviewRequired" | "Acknowledged" | "Unavailable";
   readonly exceptionStatus: "None" | "Reported" | "Unavailable";
+  readonly selectedOptions: readonly KitchenSelectedOption[];
   readonly execution?: {
     readonly orderItemReference: string;
     readonly stationReference: string;
@@ -29,13 +35,29 @@ export interface KitchenBoardView {
   readonly storeLabel: string;
   readonly projectedAt: string;
   readonly freshnessStatus: "Fresh" | "Stale";
-  readonly operatorStatus: "Named" | "Locked" | "HandoverRequired" | "Unavailable";
+  readonly operatorStatus: "Named" | "Locked" | "HandoverRequired" | "Unavailable" | "Unverified";
   readonly items: readonly KitchenBoardItem[];
 }
 
+export interface KitchenWorkItemDetailView {
+  readonly screenId: "KIT-WORK-ITEM";
+  readonly projectionName: "kitchen_work_queue_v1";
+  readonly projectionVersion: 1;
+  readonly storeLabel: string;
+  readonly projectedAt: string;
+  readonly freshnessStatus: "Fresh" | "Stale";
+  readonly operatorStatus: KitchenBoardView["operatorStatus"];
+  readonly item: KitchenBoardItem;
+}
+
 export interface KitchenBoardClient {
-  loadQueue(): Promise<unknown>;
+  loadQueue(search?: KitchenQueueSearch): Promise<unknown>;
   loadWorkItem(reference: string): Promise<unknown>;
+}
+
+export interface KitchenQueueSearch {
+  readonly kind: "Order" | "Ticket";
+  readonly reference: string;
 }
 
 export class KitchenBoardClientError extends Error {
@@ -87,6 +109,24 @@ function instant(value: unknown): string {
   return value;
 }
 
+function selectedOption(value: unknown): KitchenSelectedOption {
+  const input = closed(value, ["displayName", "quantity"]);
+  if (
+    typeof input.displayName !== "string" ||
+    !SAFE_TEXT.test(input.displayName) ||
+    !Number.isSafeInteger(input.quantity) ||
+    Number(input.quantity) < 1 ||
+    Number(input.quantity) > 999
+  )
+    throw new Error("KITCHEN_BOARD_INVALID");
+  return Object.freeze({ displayName: input.displayName, quantity: Number(input.quantity) });
+}
+
+function selectedOptions(value: unknown): readonly KitchenSelectedOption[] {
+  if (!Array.isArray(value) || value.length > 100) throw new Error("KITCHEN_BOARD_INVALID");
+  return Object.freeze(value.map(selectedOption));
+}
+
 function item(value: unknown): KitchenBoardItem {
   const hasExecution =
     value !== null && typeof value === "object" && Object.hasOwn(value, "execution");
@@ -102,11 +142,12 @@ function item(value: unknown): KitchenBoardItem {
     "createdAt",
     "allergenCue",
     "exceptionStatus",
+    "selectedOptions",
     ...(hasExecution ? ["execution"] : []),
   ]);
   if (
-    typeof input.stationLabel !== "string" ||
-    !SAFE_TEXT.test(input.stationLabel) ||
+    (input.stationLabel !== null &&
+      (typeof input.stationLabel !== "string" || !SAFE_TEXT.test(input.stationLabel))) ||
     typeof input.displayName !== "string" ||
     !SAFE_TEXT.test(input.displayName) ||
     !["Queued", "Held", "In Progress", "Completed", "Cancelled"].includes(String(input.status)) ||
@@ -125,7 +166,7 @@ function item(value: unknown): KitchenBoardItem {
     workItemReference: parseKitchenRouteReference(input.workItemReference),
     ticketReference: parseKitchenRouteReference(input.ticketReference),
     orderReference: parseKitchenRouteReference(input.orderReference),
-    stationLabel: input.stationLabel,
+    stationLabel: input.stationLabel as string | null,
     displayName: input.displayName,
     status: input.status as KitchenStatus,
     requiredQuantity: Number(input.requiredQuantity),
@@ -133,6 +174,7 @@ function item(value: unknown): KitchenBoardItem {
     createdAt: instant(input.createdAt),
     allergenCue: input.allergenCue as KitchenBoardItem["allergenCue"],
     exceptionStatus: input.exceptionStatus as KitchenBoardItem["exceptionStatus"],
+    selectedOptions: selectedOptions(input.selectedOptions),
     ...(hasExecution ? { execution: execution(input.execution) } : {}),
   });
 }
@@ -183,7 +225,7 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     typeof input.storeLabel !== "string" ||
     !SAFE_TEXT.test(input.storeLabel) ||
     !["Fresh", "Stale"].includes(String(input.freshnessStatus)) ||
-    !["Named", "Locked", "HandoverRequired", "Unavailable"].includes(
+    !["Named", "Locked", "HandoverRequired", "Unavailable", "Unverified"].includes(
       String(input.operatorStatus),
     ) ||
     !Array.isArray(input.items) ||
@@ -207,6 +249,41 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
 
 export function parseKitchenWorkItemView(value: unknown): KitchenBoardItem {
   return item(value);
+}
+
+export function parseKitchenWorkItemDetailView(value: unknown): KitchenWorkItemDetailView {
+  const input = closed(value, [
+    "screenId",
+    "projectionName",
+    "projectionVersion",
+    "storeLabel",
+    "projectedAt",
+    "freshnessStatus",
+    "operatorStatus",
+    "item",
+  ]);
+  if (
+    input.screenId !== "KIT-WORK-ITEM" ||
+    input.projectionName !== "kitchen_work_queue_v1" ||
+    input.projectionVersion !== 1 ||
+    typeof input.storeLabel !== "string" ||
+    !SAFE_TEXT.test(input.storeLabel) ||
+    !["Fresh", "Stale"].includes(String(input.freshnessStatus)) ||
+    !["Named", "Locked", "HandoverRequired", "Unavailable", "Unverified"].includes(
+      String(input.operatorStatus),
+    )
+  )
+    throw new Error("KITCHEN_BOARD_INVALID");
+  return Object.freeze({
+    screenId: "KIT-WORK-ITEM",
+    projectionName: "kitchen_work_queue_v1",
+    projectionVersion: 1,
+    storeLabel: input.storeLabel,
+    projectedAt: instant(input.projectedAt),
+    freshnessStatus: input.freshnessStatus as KitchenWorkItemDetailView["freshnessStatus"],
+    operatorStatus: input.operatorStatus as KitchenWorkItemDetailView["operatorStatus"],
+    item: item(input.item),
+  });
 }
 
 export const unavailableKitchenBoardClient: KitchenBoardClient = Object.freeze({

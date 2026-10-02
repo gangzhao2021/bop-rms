@@ -47,6 +47,12 @@ const moduleManifestInput =
       "rms.kitchen.kitchen-work-accepted.v1",
       "rms.kitchen.kitchen-work-created.v1",
       "rms.kitchen.kitchen-work-started.v1",
+
+      "rms.kitchen.production-batch-completed.v1",
+      "rms.kitchen.production-batch-observation-recorded.v1",
+      "rms.kitchen.production-batch-planned.v1",
+      "rms.kitchen.production-batch-quarantined.v1",
+      "rms.kitchen.production-batch-started.v1",
     ],
     ownedDatabase: {
       schema: "rms_kitchen",

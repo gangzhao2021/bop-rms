@@ -1,4 +1,8 @@
-# Ordinary refund source rules and pending approval boundaries
+# Ordinary refund source rules and accepted approval boundaries
+
+## Current disposition — 2026-09-29
+
+RF-D01–06 were accepted on 2026-09-13 as `PILOT_ORDINARY_REFUND_V1`; [the accepted policy and decision record](./pilot-ordinary-refund-policy-proposal.md#decision-record) owns the exact rules. The decision table below preserves the questions used during WP-2400 review and is historical, not a new approval queue. Scope-specific implementation evidence is in [the pilot acceptance table](../../runbooks/single-store-pilot.md#current-acceptance-and-remaining-work); real Store/Provider and release gates remain separate.
 
 Prepared in [WP-2400](../work-packages/WP-2400.md) for DEC-H06/H07 in the
 [Customer, Order and Payment handoff](./customer-order-payment-handoffs.md).
@@ -8,10 +12,9 @@ permission, runtime behavior or an execution Work Package.
 ## Source and authority
 
 The [Specification Index](../README.md) retains the accepted composite authority: Handoff
-Sections 0–91 plus repository-accepted Sections 92–97. The local, untracked
-`BOP-RMS Complete Handoff Package.md`, inspected on 2026-09-10, identifies itself as `0.5.9`.
+Sections 0–91 plus repository-accepted Sections 92–97. The source inspected on 2026-09-10 was then local and untracked. The Owner authorized tracking and syncing `BOP-RMS Complete Handoff Package.md` on 2026-09-22; it identifies itself as `0.5.9`.
 Its Section 87.9 contains the refund text summarized below; finding that file does not accept a
-replacement complete Handoff version. The source remains outside Git and is not duplicated here.
+replacement complete Handoff version. The source is now tracked; this summary does not duplicate it.
 Section references identify the observed source; they do not independently change its authority.
 
 [WP-1301](../work-packages/WP-1301.md) already cites Section 87.9, owns normalized original-method
@@ -28,9 +31,9 @@ changes require recent MFA and Owner/Finance approval from another active Actor.
 rules must be reconciled and retained, rather than treating the entire subject as unspecified.
 They do not answer the narrower questions below or authorize implementation before its owning WP.
 
-## Decision table
+## Historical decision questions — superseded by accepted RF-D01–06
 
-Every unresolved cell is **Pending**. The table deliberately chooses no day boundary, clock anchor,
+At the WP-2400 review, every unresolved cell was **Pending**; all RF-D01–06 policy questions now resolve through the accepted record above. The table deliberately chooses no day boundary, clock anchor,
 cumulative bucket, pending-claim policy or permission identifier. The examples use synthetic values.
 The future decision must state the exact result for each scenario and its source/policy version;
 these are acceptance specifications, not tests executed by WP-2400.

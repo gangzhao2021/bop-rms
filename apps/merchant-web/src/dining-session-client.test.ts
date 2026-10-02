@@ -10,6 +10,7 @@ const table: StaffDiningTable = {
   operationalState: "Available",
   aggregateVersion: 2,
   currentDiningSessionReference: null,
+  elapsedMinutes: null,
 };
 const response = (r: unknown) =>
   new Response(JSON.stringify(r), {
@@ -63,8 +64,56 @@ it("treats wrong session assignment result as unknown", async () => {
   ).rejects.toMatchObject({ code: "Unknown" });
 });
 it("rejects duplicate table rows and mismatched next cursor", async () => {
-  const f = vi.fn(async () => response({ items: [table, table], nextAfterTableReference: null }));
+  const f = vi.fn(async () =>
+    response({ canOperateTables: false, items: [table, table], nextAfterTableReference: null }),
+  );
   await expect(createDiningSessionClient(f).tables("A".repeat(43))).rejects.toThrow();
+});
+it("accepts elapsed minutes only when a current Session is linked", async () => {
+  const f = vi.fn(async () =>
+    response({
+      canOperateTables: true,
+      items: [{ ...table, currentDiningSessionReference: id(3), elapsedMinutes: 0 }],
+      nextAfterTableReference: null,
+    }),
+  );
+  expect((await createDiningSessionClient(f).tables("A".repeat(43))).items[0]?.elapsedMinutes).toBe(
+    0,
+  );
+  const inconsistent = vi.fn(async () =>
+    response({
+      canOperateTables: true,
+      items: [{ ...table, currentDiningSessionReference: id(3), elapsedMinutes: null }],
+      nextAfterTableReference: null,
+    }),
+  );
+  await expect(createDiningSessionClient(inconsistent).tables("A".repeat(43))).rejects.toThrow();
+});
+it("retries the identical table availability command after an unknown result", async () => {
+  const f = vi
+    .fn<typeof fetch>()
+    .mockRejectedValueOnce(new Error("response lost"))
+    .mockResolvedValueOnce(
+      response({
+        status: "AlreadyApplied",
+        tableReference: id(1),
+        operationalState: "TemporarilyBlocked",
+        aggregateVersion: 3,
+      }),
+    );
+  const command = createDiningSessionClient(f).prepareAvailability(
+    table,
+    "SetBlock",
+    "MAINTENANCE",
+    id(4),
+  );
+  await expect(command.execute("A".repeat(43))).rejects.toMatchObject({ code: "Unknown" });
+  await expect(command.execute("A".repeat(43))).resolves.toMatchObject({
+    status: "AlreadyApplied",
+    operationalState: "TemporarilyBlocked",
+    aggregateVersion: 3,
+  });
+  expect(f.mock.calls[1]?.[1]?.body).toBe(f.mock.calls[0]?.[1]?.body);
 });
 it("binds replacement generation and kind", async () => {
   const f = vi.fn(async () =>

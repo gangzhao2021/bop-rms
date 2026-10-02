@@ -129,6 +129,72 @@ function objectShape(value, allowed, diagnostics, file, code, label) {
   }
   return true;
 }
+// WP-2409/WP-2421: this exact owner facade composes the owning reader;
+// direct SQL permits fixed setup and one exact current-candidate code boolean read.
+function productDraftOwnerCompositionSqlOnly(text, file) {
+  const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const codeSql =
+    "SELECT EXISTS(SELECT 1 FROM rms_catalog.product WHERE brand_id=$1 AND product_id=$3 AND internal_code=$2) AS candidate_matches,NOT EXISTS(SELECT 1 FROM rms_catalog.product WHERE brand_id=$1 AND internal_code=$2 AND product_id<>$3) AS internal_code_unique";
+  const allowed = new Map([
+    [codeSql, ["brand", "aggregate.internalCode", "aggregate.productReference"]],
+    [
+      "SELECT set_config('lock_timeout','5000',true),set_config('statement_timeout','5000',true)",
+      [],
+    ],
+    ["SELECT current_setting('transaction_isolation') AS isolation", []],
+    [
+      "SELECT set_config('lock_timeout','5000',true),set_config('statement_timeout','60000',true),set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
+      ["tenant", "brand"],
+    ],
+  ]);
+  function insideCurrentCandidate(node) {
+    for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
+      if (ts.isFunctionDeclaration(ancestor))
+        return ancestor.name?.text === "createPostgresProductValidationCandidateSource";
+    }
+    return false;
+  }
+  let valid = true;
+  const seen = new Set();
+  function visit(node) {
+    if (ts.isElementAccessExpression(node)) valid = false;
+    if (ts.isBindingElement(node) && (node.propertyName ?? node.name).getText(parsed) === "query")
+      valid = false;
+    if (ts.isPropertyAccessExpression(node) && node.name.text === "query") {
+      const call = node.parent;
+      if (
+        !ts.isCallExpression(call) ||
+        call.expression !== node ||
+        !ts.isIdentifier(node.expression) ||
+        node.expression.text !== "tx" ||
+        call.arguments.length !== 2 ||
+        !(
+          ts.isStringLiteral(call.arguments[0]) ||
+          ts.isNoSubstitutionTemplateLiteral(call.arguments[0])
+        ) ||
+        !ts.isArrayLiteralExpression(call.arguments[1])
+      )
+        valid = false;
+      else {
+        const sql = call.arguments[0].text,
+          expected = allowed.get(sql),
+          values = call.arguments[1].elements;
+        if (
+          !expected ||
+          seen.has(sql) ||
+          values.length !== expected.length ||
+          values.some((v, i) => v.getText(parsed) !== expected[i]) ||
+          (sql === codeSql && !insideCurrentCandidate(call))
+        )
+          valid = false;
+        seen.add(sql);
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(parsed);
+  return valid;
+}
 async function isExactFile(root, target) {
   const rel = relative(root, target);
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) return false;
@@ -177,6 +243,78 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
           module.manifest.ownedDatabase?.tables?.includes("guest_session") &&
           moduleRelative === "src/infrastructure/persistence/guest-session-entry-store.ts";
+        // WP-2409: exact owner reader composition, no direct business-table SQL.
+        const acceptedProductDraftBaselineAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "product",
+            "product_version",
+            "sku",
+            "product_version_category_assignment",
+            "product_option_binding",
+            "product_option_binding_option",
+            "product_option_binding_sku_scope",
+            "product_option_binding_channel",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/product-draft-baseline-store.ts";
+        // WP-2421: exact Catalog registered-content configuration asset, no broader exception.
+        const acceptedProductContentRegistryAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          module.manifest.ownedDatabase?.tables?.includes("product_content_registry_record") &&
+          moduleRelative === "src/infrastructure/persistence/product-content-registry-store.ts";
+        const acceptedFullOptionDraftAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "option_set",
+            "option_set_version",
+            "option",
+            "option_conflict",
+            "option_set_operation_record",
+            "option_set_draft_content_snapshot",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/option-set-full-draft-store.ts";
+        // WP-2420: Catalog's Product publication owner repository and frozen content.
+        const acceptedProductPublicationAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "product",
+            "product_version",
+            "sku",
+            "product_option_binding",
+            "product_version_category_assignment",
+            "product_operation_record",
+            "product_operation_snapshot",
+            "product_publication_revision",
+            "product_publication_content",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/product-publication-store.ts";
+        const acceptedProductCategoryAssignmentAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          ["category", "product_version", "product_version_category_assignment"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/product-category-assignment.ts";
+        // WP-2408: Category owner repository over this complete exact table set.
+        const acceptedCategoryRepositoryAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "category",
+            "category_operation_record",
+            "category_operation_snapshot",
+            "category_source_head",
+            "category_source_commit",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          [
+            "src/infrastructure/persistence/category-repository.ts",
+            "src/infrastructure/persistence/category-source-store.ts",
+            "src/infrastructure/persistence/category-source-consumer.ts",
+          ].includes(moduleRelative);
         // WP-2219/WP-2402 admit the Catalog projection reader and registered builder over this exact owned set.
         const acceptedPublishedMenuAsset =
           module.packageName === "@rms/catalog" &&
@@ -242,11 +380,41 @@ async function scanUnsupported(root, module, diagnostics) {
             "product_option_binding_channel",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/current-selection-facts-store.ts";
+        const acceptedCatalogProductPublicationSourceAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "product",
+            "product_version",
+            "product_publication_revision",
+            "product_publication_content",
+            "product_operation_record",
+            "product_operation_snapshot",
+            "product_source_commit",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/product-publication-source-store.ts";
+        const acceptedFeatureControlAdministrationQueryAsset =
+          module.packageName === "@bop/feature-control" &&
+          module.manifest.ownedDatabase?.schema === "bop_feature_control" &&
+          ["control_version", "control_dependency"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/administration-query-store.ts";
         const acceptedKillSwitchQueryAsset =
           module.packageName === "@bop/feature-control" &&
           module.manifest.ownedDatabase?.schema === "bop_feature_control" &&
           module.manifest.ownedDatabase?.tables?.includes("kill_switch_version") &&
           moduleRelative === "src/infrastructure/persistence/kill-switch-query-store.ts";
+        const acceptedCatalogProductListAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "product_search_generation",
+            "product_search_row",
+            "product_search_activation",
+            "product_source_head",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/product-list-query-store.ts";
         const acceptedCurrentSkuAsset =
           module.packageName === "@rms/catalog" &&
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
@@ -266,6 +434,28 @@ async function scanUnsupported(root, module, diagnostics) {
             "menu_version_order_type",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/current-menu-release-store.ts";
+        const acceptedBundleReferenceSourceAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "bundle_reference_generation",
+            "bundle",
+            "bundle_version",
+            "bundle_component_group",
+            "bundle_component_sellable",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/bundle-reference-source-store.ts";
+        const acceptedMenuReferenceSourceAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "menu_reference_generation",
+            "menu_review_content",
+            "menu_publication_revision",
+            "menu_publication_release",
+            "menu_release_effective_period",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/menu-reference-source-store.ts";
         const acceptedAvailabilityQueryAsset =
           module.packageName === "@rms/catalog" &&
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
@@ -316,6 +506,32 @@ async function scanUnsupported(root, module, diagnostics) {
             "recipe_preparation_content",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/recipe-preparation-content-store.ts";
+        const acceptedRecipeReferenceAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe",
+            "recipe_version",
+            "recipe_scope_binding",
+            "recipe_modifier_version",
+            "recipe_reference_generation",
+            "recipe_reference_binding",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          (moduleRelative === "src/infrastructure/persistence/recipe-reference-source-store.ts" ||
+            moduleRelative ===
+              "src/infrastructure/persistence/option-consumption-yield-source-store.ts");
+        const acceptedRecipeInventoryReferenceAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe",
+            "recipe_version",
+            "recipe_ingredient_requirement",
+            "recipe_modifier_version",
+            "recipe_reference_generation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/recipe-inventory-reference-source-store.ts";
         const acceptedRecipeStoreAsset =
           module.packageName === "@rms/recipe" &&
           module.manifest.ownedDatabase?.schema === "rms_recipe" &&
@@ -362,13 +578,118 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/recipe-binding-store.ts";
+        const acceptedRecipeAdminQueryAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe_admin_projection",
+            "recipe_admin_projection_generation",
+            "recipe_admin_projection_checkpoint",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-admin-query-store.ts";
+        // WP-2404 admits the exact Recipe owner source capture path and tables.
+        const acceptedRecipeOwnerCoverageAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe",
+            "recipe_version",
+            "recipe_preparation_content",
+            "recipe_modifier_version",
+            "recipe_scope_binding",
+            "recipe_admin_source_capture",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-owner-coverage-source.ts";
+        // WP-2404 admits only the Recipe owner coverage publication adapter.
+        const acceptedRecipeCoveragePublicationAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe_admin_source_generation",
+            "recipe_admin_source_checkpoint",
+            "recipe_admin_source_binding",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-coverage-publication-store.ts";
+        const acceptedRecipeCorePublicationAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe_admin_core_generation",
+            "recipe_admin_core_row",
+            "recipe_admin_core_checkpoint",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-core-publication-store.ts";
+        const acceptedRecipeCoreQueryAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe_admin_core_checkpoint",
+            "recipe_admin_core_generation",
+            "recipe_admin_core_row",
+            "recipe_admin_source_generation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-core-query-store.ts";
+        const acceptedRecipeCoreRebuildStateAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe_admin_source_checkpoint",
+            "recipe_admin_source_generation",
+            "recipe_admin_core_checkpoint",
+            "recipe_admin_core_generation",
+            "recipe_admin_core_row",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-core-rebuild-state-store.ts";
         const acceptedRecipeQueryAsset =
           module.packageName === "@rms/recipe" &&
           module.manifest.ownedDatabase?.schema === "rms_recipe" &&
           ["recipe", "recipe_version", "recipe_operation_record"].every((table) =>
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
-          moduleRelative === "src/infrastructure/persistence/recipe-query-store.ts";
+          (moduleRelative === "src/infrastructure/persistence/recipe-query-store.ts" ||
+            (moduleRelative ===
+              "src/infrastructure/persistence/recipe-measurement-draft-store.ts" &&
+              module.manifest.ownedDatabase?.tables?.includes("recipe_measurement_content")) ||
+            (moduleRelative ===
+              "src/infrastructure/persistence/current-published-recipe-measurement-graph-source.ts" &&
+              ["recipe_measurement_content", "recipe_review_record"].every((table) =>
+                module.manifest.ownedDatabase?.tables?.includes(table),
+              )) ||
+            ([
+              "src/infrastructure/persistence/current-published-recipe-content-source.ts",
+              "src/infrastructure/persistence/current-published-recipe-dependency-graph-source.ts",
+            ].includes(moduleRelative) &&
+              module.manifest.ownedDatabase?.tables?.includes("recipe_review_record")));
+        const acceptedInventoryConfigurationReferenceAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          [
+            "inventory_item",
+            "inventory_item_version",
+            "inventory_item_operation",
+            "configuration_reference_generation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          (moduleRelative ===
+            "src/infrastructure/persistence/configuration-reference-source-store.ts" ||
+            moduleRelative ===
+              "src/infrastructure/persistence/option-consumption-unit-source-store.ts" ||
+            moduleRelative ===
+              "src/infrastructure/persistence/recipe-ingredient-unit-source-store.ts");
+        const acceptedInventorySkuMappingAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          [
+            "inventory_item",
+            "inventory_item_version",
+            "inventory_item_operation",
+            "item_sku_mapping_version",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          (moduleRelative === "src/infrastructure/persistence/inventory-sku-mapping-store.ts" ||
+            (moduleRelative ===
+              "src/infrastructure/persistence/sku-mapping-reference-source-store.ts" &&
+              module.manifest.ownedDatabase?.tables?.includes(
+                "configuration_reference_generation",
+              )));
         const acceptedLotHoldAsset =
           module.packageName === "@rms/inventory" &&
           module.manifest.ownedDatabase?.schema === "rms_inventory" &&
@@ -390,6 +711,29 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/brand-lifecycle-store.ts";
+        // WP-2410 admits only the owning complete metadata reference reader.
+        const acceptedBrandTaxReferenceAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          ["tax_reference_generation", "tax_reference_scope"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/brand-tax-reference-source-store.ts";
+        const acceptedSelectedTaxReferenceAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          ["tax_configuration", "tax_configuration_version", "tax_configuration_rule"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/tax-configuration-reference-source-store.ts";
+        const acceptedTenantStoreReferenceAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          ["brand", "store_reference_generation", "store_reference_projection"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/store-reference-source.ts";
         const acceptedMerchantOrganizationAsset =
           module.packageName === "@bop/tenant" &&
           module.manifest.ownedDatabase?.schema === "bop_tenant" &&
@@ -568,6 +912,29 @@ async function scanUnsupported(root, module, diagnostics) {
             "stock_lot_hold_version",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/stock-candidate-source.ts";
+        const acceptedCatalogAllergenCoverageAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "allergen_registry_version",
+            "allergen_registry_entry",
+            "allergen_source_evidence",
+            "allergen_source_assertion",
+            "recipe_allergen_source_capture",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-allergen-coverage-source.ts";
+        const acceptedInventoryRecipeCoverageAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          [
+            "inventory_item",
+            "inventory_item_version",
+            "inventory_item_operation",
+            "recipe_configuration_source_version",
+            "recipe_configuration_source_capture",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/recipe-configuration-coverage-source.ts";
         const acceptedInventoryItemAsset =
           module.packageName === "@rms/inventory" &&
           module.manifest.ownedDatabase?.schema === "rms_inventory" &&
@@ -672,11 +1039,96 @@ async function scanUnsupported(root, module, diagnostics) {
               "allergen_source_assertion",
             ],
           },
+          "src/infrastructure/persistence/product-search-generation-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_version",
+              "product_version_category_assignment",
+              "sku",
+              "product_source_head",
+              "product_source_commit",
+              "product_operation_snapshot",
+              "product_option_binding",
+              "product_option_binding_option",
+              "product_option_binding_sku_scope",
+              "product_option_binding_channel",
+              "product_search_generation",
+              "product_search_row",
+              "product_search_activation",
+            ],
+          },
+          "src/infrastructure/persistence/product-source-producer.ts": {
+            owner: "catalog",
+            tables: ["product_source_head", "product_source_commit", "product_operation_record"],
+          },
+          "src/infrastructure/persistence/category-repository.ts": {
+            owner: "catalog",
+            tables: [
+              "category",
+              "category_operation_record",
+              "category_operation_snapshot",
+              "category_source_head",
+              "category_source_commit",
+            ],
+          },
+          "src/infrastructure/persistence/category-source-store.ts": {
+            owner: "catalog",
+            tables: [
+              "category",
+              "category_operation_record",
+              "category_operation_snapshot",
+              "category_source_head",
+              "category_source_commit",
+            ],
+          },
+          "src/infrastructure/persistence/category-source-consumer.ts": {
+            owner: "catalog",
+            tables: [
+              "category",
+              "category_operation_record",
+              "category_operation_snapshot",
+              "category_source_head",
+              "category_source_commit",
+            ],
+          },
+          "src/infrastructure/persistence/product-category-assignment.ts": {
+            owner: "catalog",
+            tables: ["category", "product_version", "product_version_category_assignment"],
+          },
+          // WP-2421 milestones40/41: exact owning public compositions, no broad exemption.
+          "src/infrastructure/persistence/product-editor-source-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_version",
+              "sku",
+              "product_option_binding",
+              "product_option_binding_option",
+              "product_option_binding_sku_scope",
+              "product_option_binding_channel",
+              "product_version_category_assignment",
+              "product_source_head",
+            ],
+          },
+          "src/infrastructure/persistence/product-whole-scope-replacement-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_publication_revision",
+              "product_scope_journal",
+              "product_source_head",
+              "product_source_commit",
+              "product_operation_record",
+              "product_operation_snapshot",
+            ],
+          },
           "src/infrastructure/persistence/product-lifecycle-store.ts": {
             owner: "catalog",
             tables: [
               "product",
               "product_version",
+              "product_version_category_assignment",
               "sku",
               "product_operation_record",
               "product_operation_snapshot",
@@ -684,6 +1136,9 @@ async function scanUnsupported(root, module, diagnostics) {
               "product_option_binding_option",
               "product_option_binding_sku_scope",
               "product_option_binding_channel",
+              "product_publication_revision",
+              "product_source_head",
+              "product_source_commit",
             ],
           },
           // Public Publishing owner composition; this facade contains no direct SQL.
@@ -707,6 +1162,52 @@ async function scanUnsupported(root, module, diagnostics) {
               "menu_release_effective_period",
               "menu_publication_operation_record",
               "menu_publication_operation_snapshot",
+            ],
+          },
+          // WP-2409: complete reviewed Menu Product reference source.
+          "src/infrastructure/persistence/product-menu-source-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "sku",
+              "product_version",
+              "menu_review_content",
+              "menu_publication_revision",
+              "menu_publication_release",
+              "menu_release_effective_period",
+            ],
+          },
+          // WP-2409: complete Product/SKU Bundle reference statement source.
+          "src/infrastructure/persistence/product-bundle-source-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "sku",
+              "bundle",
+              "bundle_version",
+              "bundle_component_group",
+              "bundle_component_sellable",
+            ],
+          },
+          // WP-2409: complete Product/SKU Availability reference statement source.
+          "src/infrastructure/persistence/availability-reference-source-store.ts": {
+            owner: "catalog",
+            tables: ["availability_reference_generation", "availability_rule"],
+          },
+          "src/infrastructure/persistence/product-availability-source-store.ts": {
+            owner: "catalog",
+            tables: ["product", "sku", "availability_rule"],
+          },
+          // WP-2409: complete Brand Menu Category reference statement source only.
+          "src/infrastructure/persistence/menu-category-source-store.ts": {
+            owner: "catalog",
+            tables: [
+              "menu",
+              "menu_version",
+              "menu_section",
+              "menu_section_category",
+              "menu_review_content",
+              "menu_publication_revision",
             ],
           },
           "src/infrastructure/persistence/menu-draft-source.ts": {
@@ -735,6 +1236,69 @@ async function scanUnsupported(root, module, diagnostics) {
               "sku",
               "product",
               "product_version",
+            ],
+          },
+          "src/infrastructure/persistence/product-reference-history-source-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_operation_record",
+              "product_operation_snapshot",
+              "product_publication_revision",
+              "product_source_commit",
+            ],
+          },
+          "src/infrastructure/persistence/inventory-sku-reference-source-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_version",
+              "sku",
+              "product_version_category_assignment",
+              "product_option_binding",
+              "product_option_binding_option",
+              "product_option_binding_sku_scope",
+              "product_option_binding_channel",
+              "product_source_head",
+            ],
+          },
+          "src/infrastructure/persistence/product-pricing-binding-source-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_version",
+              "sku",
+              "product_version_category_assignment",
+              "product_option_binding",
+              "product_option_binding_option",
+              "product_option_binding_sku_scope",
+              "product_option_binding_channel",
+            ],
+          },
+          "src/infrastructure/persistence/promotion-reference-source-store.ts": {
+            owner: "pricing",
+            tables: ["promotion", "promotion_version", "promotion_eligibility_reference"],
+          },
+          "src/infrastructure/persistence/tax-configuration-reference-source-store.ts": {
+            owner: "pricing",
+            tables: ["tax_configuration", "tax_configuration_version", "tax_configuration_rule"],
+          },
+          "src/infrastructure/persistence/option-price-reference-source-store.ts": {
+            owner: "pricing",
+            tables: ["option_price_rule", "option_price_rule_version"],
+          },
+          // WP-2409: Pricing-owned complete PriceBook entry reference profile.
+          "src/infrastructure/persistence/price-book-reference-source-store.ts": {
+            owner: "pricing",
+            tables: ["price_book", "price_book_version", "price_entry"],
+          },
+          "src/infrastructure/persistence/configuration-reference-source-store.ts": {
+            owner: "pricing",
+            tables: [
+              "configuration_reference_generation",
+              "price_book",
+              "option_price_rule",
+              "promotion",
             ],
           },
           "src/infrastructure/persistence/price-book-repository.ts": {
@@ -1666,21 +2230,37 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedGuestBindingAsset &&
           !acceptedGuestDiningBindingAsset &&
           !acceptedPublishedMenuAsset &&
+          !acceptedCategoryRepositoryAsset &&
+          !acceptedProductCategoryAssignmentAsset &&
+          !acceptedProductDraftBaselineAsset &&
+          !acceptedProductPublicationAsset &&
+          !acceptedProductContentRegistryAsset &&
+          !acceptedFullOptionDraftAsset &&
           !acceptedAvailabilityQueryAsset &&
+          !acceptedMenuReferenceSourceAsset &&
+          !acceptedBundleReferenceSourceAsset &&
           !acceptedCurrentMenuReleaseAsset &&
           !acceptedCurrentMenuPlacementAsset &&
           !acceptedCurrentSelectionFactsAsset &&
           !acceptedKillSwitchQueryAsset &&
+          !acceptedCatalogProductListAsset &&
+          !acceptedFeatureControlAdministrationQueryAsset &&
+          !acceptedCatalogProductPublicationSourceAsset &&
           !acceptedCurrentSkuAsset &&
           !acceptedCurrentOptionBindingsAsset &&
           !acceptedCapacityQueryAsset &&
           !acceptedCapacityHoldWriterAsset &&
           !acceptedAsapCapacityAsset &&
           !acceptedInventoryItemAsset &&
+          !acceptedCatalogAllergenCoverageAsset &&
+          !acceptedInventoryRecipeCoverageAsset &&
           !acceptedStockCandidateAsset &&
           !acceptedInventoryFinalValidationAsset &&
           !acceptedStockReservationAsset &&
           !acceptedBrowserSessionSelectionAsset &&
+          !acceptedBrandTaxReferenceAsset &&
+          !acceptedSelectedTaxReferenceAsset &&
+          !acceptedTenantStoreReferenceAsset &&
           !acceptedMerchantOrganizationAsset &&
           !acceptedBrandLifecycleAsset &&
           !acceptedBrowserSessionStoreAsset &&
@@ -1703,14 +2283,24 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedWorkflowDefinitionAsset &&
           !acceptedCurrentLiveGateAsset &&
           !acceptedPublishingMutationAsset &&
+          !acceptedRecipeReferenceAsset &&
+          !acceptedRecipeInventoryReferenceAsset &&
           !acceptedRecipeStoreAsset &&
           !acceptedRecipePreparationContentAsset &&
           !acceptedRecipeVersionAsset &&
           !acceptedRecipeModifierAsset &&
           !acceptedRecipeDemandAsset &&
           !acceptedRecipeBindingAsset &&
+          !acceptedRecipeOwnerCoverageAsset &&
+          !acceptedRecipeCoveragePublicationAsset &&
+          !acceptedRecipeCorePublicationAsset &&
+          !acceptedRecipeCoreQueryAsset &&
+          !acceptedRecipeCoreRebuildStateAsset &&
           !acceptedRecipeQueryAsset &&
+          !acceptedRecipeAdminQueryAsset &&
           !acceptedLotHoldAsset &&
+          !acceptedInventoryConfigurationReferenceAsset &&
+          !acceptedInventorySkuMappingAsset &&
           !acceptedCurrentPickupCapacityAsset &&
           !acceptedCapacityHoldTransitionAsset &&
           !acceptedCapacityAllocationTerminalAsset &&
@@ -1829,6 +2419,15 @@ async function scanUnsupported(root, module, diagnostics) {
           );
         else if (codeExtensions.has(extname(path).toLowerCase())) {
           const text = await readFile(path, "utf8");
+          if (acceptedProductDraftBaselineAsset && !productDraftOwnerCompositionSqlOnly(text, file))
+            diagnostics.push(
+              diag(
+                "UNSUPPORTED_DATABASE_ASSET",
+                file,
+                "Draft owner composition permits only exact setup SQL and the owning current-candidate code boolean read via direct tx.query",
+              ),
+            );
+
           if (
             /from\s+["'](?:drizzle-orm(?:\/[^"']*)?|pg)["']|require\(\s*["'](?:drizzle-orm(?:\/[^"']*)?|pg)["']\s*\)/u.test(
               text,

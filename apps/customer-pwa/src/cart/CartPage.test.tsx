@@ -136,6 +136,9 @@ describe("CUST-CART page contract", () => {
     expect(html).toContain("Continue shopping");
     expect(html).toContain("Clear cart");
     expect(html).toContain("Review checkout");
+    expect(html).toContain('aria-label="Customer journey"');
+    expect(html).toContain('href="/menu/search"');
+    expect(html).toContain('aria-current="page">Cart</span>');
     expect(html).toContain("Clear cart requires an atomic server command and is unavailable.");
     expect(html).toContain("Available payment options and the final total are shown at checkout.");
     expect(html).toContain("disabled");

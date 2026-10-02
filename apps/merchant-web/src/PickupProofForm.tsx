@@ -29,7 +29,10 @@ export function PickupProofForm({
   >("Idle");
   const intent = useRef<Intent | null>(null),
     controller = useRef<AbortController | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null),
+    formRef = useRef<HTMLFormElement>(null),
+    retryButtonRef = useRef<HTMLButtonElement>(null),
+    restoreRetryFocus = useRef(false);
   useEffect(
     () => () => {
       controller.current?.abort();
@@ -40,8 +43,16 @@ export function PickupProofForm({
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
+  useEffect(() => {
+    if (status !== "OutcomeUnknown" || !restoreRetryFocus.current) return;
+    restoreRetryFocus.current = false;
+    if (document.activeElement === document.body) retryButtonRef.current?.focus();
+  }, [status]);
   const submit = async (retry: boolean) => {
     if (controller.current || status === "Verified" || status === "Rejected") return;
+    restoreRetryFocus.current = retry
+      ? document.activeElement === retryButtonRef.current
+      : Boolean(formRef.current?.contains(document.activeElement));
     try {
       if (!retry) {
         if (intent.current) return;
@@ -85,6 +96,7 @@ export function PickupProofForm({
       <p>Verify the code for this exact order. Verification does not complete handoff.</p>
       {status === "Idle" ? (
         <form
+          ref={formRef}
           autoComplete="off"
           onSubmit={(event) => {
             event.preventDefault();
@@ -131,7 +143,9 @@ export function PickupProofForm({
         />
       ) : null}
       {status === "OutcomeUnknown" ? (
-        <button onClick={() => void submit(true)}>Retry same verification</button>
+        <button ref={retryButtonRef} onClick={() => void submit(true)}>
+          Retry same verification
+        </button>
       ) : null}
     </section>
   );

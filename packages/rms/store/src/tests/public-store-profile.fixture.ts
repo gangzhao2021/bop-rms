@@ -18,17 +18,17 @@ export const ids = {
 
 export const digest = `sha256:${"a".repeat(64)}`;
 export const periodDigest = `sha256:${"b".repeat(64)}`;
-export function candidate() {
+export function candidate({ brandReference = ids.brand, storeReference = ids.store } = {}) {
   const scope = {
     kind: "Store",
-    brandReference: ids.brand,
-    storeReference: ids.store as string,
+    brandReference,
+    storeReference: storeReference as string,
   };
   return {
     profileReference: ids.profile,
     profileVersion: 1,
-    brandReference: ids.brand,
-    storeReference: ids.store as string,
+    brandReference,
+    storeReference: storeReference as string,
     classification: "Public",
     defaultLocale: "en-CA",
     supportedLocales: ["en-CA", "fr-CA"],

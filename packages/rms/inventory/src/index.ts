@@ -96,3 +96,79 @@ export type {
 } from "./infrastructure/persistence/stock-reservation-store.js";
 
 export { evaluateIntactReservationPaymentRule } from "./application/intact-reservation-payment-rule.js";
+
+export {
+  inventoryConfigurationReferenceFields,
+  inventoryConfigurationReferenceMaximumRows,
+  inventoryConfigurationReferencePermissions,
+  parseInventoryConfigurationReferenceRequest,
+  buildInventoryConfigurationReferenceSnapshot,
+  parseInventoryConfigurationReferenceSnapshot,
+  type InventoryConfigurationReferenceRequest,
+  type InventoryConfigurationReferenceSnapshot,
+  type InventoryConfigurationRootReference,
+  type InventoryConfigurationVersionReference,
+  type InventoryConfigurationOperationReference,
+} from "./contracts/configuration-reference-source.js";
+export {
+  createPostgresInventoryConfigurationReferenceSourceStore,
+  type InventoryConfigurationReferenceOptions,
+  type InventoryConfigurationReferenceTransaction,
+} from "./infrastructure/persistence/configuration-reference-source-store.js";
+
+export {
+  parseInventorySkuMappingCommand,
+  parseInventorySkuMappingCurrentItem,
+  parseInventorySkuMappingHeldSku,
+  type InventorySkuMappingCommand,
+  type InventorySkuMappingTarget,
+  type InventorySkuMappingVersion,
+  type InventorySkuMappingCurrentItem,
+  type InventorySkuMappingHeldSku,
+} from "./domain/inventory-sku-mapping.js";
+export {
+  inventorySkuMappingWriteFields,
+  inventorySkuMappingIntentDigest,
+  verifyInventorySkuMappingVersion,
+  planInventorySkuMapping,
+  recoverInventorySkuMapping,
+} from "./contracts/inventory-sku-mapping.js";
+
+export {
+  createPostgresInventorySkuMappingStore,
+  inventorySkuMappingWritePermissions,
+} from "./infrastructure/persistence/inventory-sku-mapping-store.js";
+export type {
+  InventorySkuMappingStoreOptions,
+  InventorySkuMappingWriteResult,
+} from "./infrastructure/persistence/inventory-sku-mapping-store.js";
+export * from "./contracts/sku-mapping-reference-source.js";
+export { createPostgresInventorySkuMappingReferenceSourceStore } from "./infrastructure/persistence/sku-mapping-reference-source-store.js";
+export type { InventorySkuMappingReferenceSourceOptions } from "./infrastructure/persistence/sku-mapping-reference-source-store.js";
+export {
+  matchInventorySkuMappingReferenceGraphs,
+  type InventorySkuMappingReferenceTarget,
+} from "./contracts/sku-mapping-reference-matches.js";
+export * from "./infrastructure/persistence/recipe-configuration-coverage-source.js";
+
+export { matchOptionDraftInventoryConsumptionMetadata } from "./contracts/configuration-reference-source.js";
+
+export {
+  assessInventoryOptionConsumptionUnits,
+  inventoryOptionConsumptionUnitFields,
+} from "./contracts/option-consumption-unit-source.js";
+export {
+  createPostgresInventoryOptionConsumptionUnitSource,
+  type InventoryOptionConsumptionUnitOptions,
+} from "./infrastructure/persistence/option-consumption-unit-source-store.js";
+
+export { assessCurrentRecipeIngredientInventoryReferences } from "./contracts/recipe-ingredient-current-references.js";
+
+export * from "./contracts/recipe-ingredient-unit-source.js";
+export {
+  createPostgresInventoryRecipeIngredientUnitSource,
+  type InventoryRecipeIngredientUnitOptions,
+} from "./infrastructure/persistence/recipe-ingredient-unit-source-store.js";
+
+export * from "./contracts/recipe-ingredient-unit-assessment.js";
+export * from "./contracts/recipe-base-demand-assessment.js";

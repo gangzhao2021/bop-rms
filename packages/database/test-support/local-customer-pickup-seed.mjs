@@ -6,16 +6,14 @@ import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
 import { createEffectivePeriod } from "../../bop/effective-period/src/index.ts";
 import { createPriceQuote } from "../../rms/pricing/src/index.ts";
 import { input as quoteInput } from "../../rms/pricing/src/tests/price-quote.fixture.ts";
-import {
-  id,
-  now as at,
-} from "../../../apps/api/test-support/customer-entry-composition-fixture.ts";
+import { prepareEntryPickupItems } from "./entry-pickup-items.mjs";
+import { id } from "../../../apps/api/test-support/customer-entry-composition-fixture.ts";
 
 const { Client } = pg;
 const scope = { brandReference: id(1), storeReference: id(2) };
 
 /** Synthetic selection/commercial facts, real scoped owner stores and public Audit. */
-export async function seedPickup({ admin, context, sessionRole }) {
+export async function seedPickup({ admin, context, sessionRole, observedAt }) {
   const orderingRole = "wp2401_o_" + context.runId;
   const pricingRole = "wp2401_p_" + context.runId;
   for (const role of [orderingRole, pricingRole]) {
@@ -38,6 +36,11 @@ export async function seedPickup({ admin, context, sessionRole }) {
   await admin.query(
     "GRANT SELECT,INSERT ON bop_identity.guest_binding_preparation TO " + sessionRole,
   );
+  await admin.query("GRANT USAGE ON SCHEMA bop_identity TO " + orderingRole);
+  await admin.query(
+    "GRANT SELECT ON bop_identity.guest_session,bop_identity.guest_session_operation TO " +
+      orderingRole,
+  );
   await admin.query(
     "GRANT UPDATE (status,revocation_reason,revoked_at,version) ON bop_identity.guest_session TO " +
       sessionRole,
@@ -50,6 +53,9 @@ export async function seedPickup({ admin, context, sessionRole }) {
   await admin.query(
     "GRANT SELECT,INSERT ON rms_ordering.cart_operation_record,rms_ordering.cart_binding_record,rms_ordering.cart_quote_attachment,rms_ordering.cart_quote_attachment_line,rms_ordering.cart_quote_expiry_record TO " +
       orderingRole,
+  );
+  await admin.query(
+    "GRANT SELECT,INSERT ON rms_ordering.checkout_details_record TO " + orderingRole,
   );
   await admin.query("GRANT USAGE ON SCHEMA rms_pricing TO " + pricingRole);
   await admin.query(
@@ -65,6 +71,24 @@ export async function seedPickup({ admin, context, sessionRole }) {
     generate: () => id(++sequence),
     hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
     equals: (a, b) => a === b,
+  };
+  const rawOwnerRunner = runner(orderingRole);
+  const diagnosticOwnerRunner = {
+    run: (work) =>
+      rawOwnerRunner.run((tx) =>
+        work({
+          query: async (sql, values) => {
+            const result = await tx.query(sql, values);
+            if (sql.includes("recipe_operation_record"))
+              diagnostics.push({
+                component: "recipe-operation-read",
+                rowCount: Array.isArray(result?.rows) ? result.rows.length : null,
+                columns: result?.rows?.[0] ? Object.keys(result.rows[0]).length : 0,
+              });
+            return result;
+          },
+        }),
+      ),
   };
   function runner(role, readOnly = false) {
     return {
@@ -136,31 +160,27 @@ export async function seedPickup({ admin, context, sessionRole }) {
       descriptor.observedAt,
       descriptor.operationReference,
     );
-  const catalog = {
-    async validateSelection(input) {
-      assert.equal(input.brandReference, scope.brandReference);
-      assert.equal(input.storeReference, scope.storeReference);
-      assert.equal(input.sellableReference, id(13));
-      assert.equal(input.orderType, "Pickup");
-      assert.deepEqual(input.optionSelections, []);
-      return {
-        ...input,
-        status: "Accepted",
-        menuVersionReference: id(4),
-        productVersionReference: id(14),
-        catalogChannelCode: "CUSTOMER_PWA",
-        catalogOrderTypeCode: "PICKUP",
-        ruleEvidence: [],
-        validatedAt: input.observedAt,
-      };
-    },
-  };
+  let catalogItems;
+  try {
+    catalogItems = await prepareEntryPickupItems({
+      admin,
+      role: orderingRole,
+      run: (work) => diagnosticOwnerRunner.run(work),
+      scope: { ...scope, tenantReference: id(29990) },
+      at: observedAt,
+    });
+  } catch (error) {
+    throw new Error(
+      JSON.stringify({ stage: "pickup-catalog-seed", ownerDiagnostics: diagnostics }),
+      { cause: error },
+    );
+  }
   const source = quoteInput();
   const period = createEffectivePeriod({
     timeZone: "UTC",
     effectiveFrom: {
-      instant: "2026-01-01T00:00:00.000Z",
-      localDateTime: "2026-01-01T00:00:00.000",
+      instant: new Date(Date.parse(observedAt) - 86_400_000).toISOString(),
+      localDateTime: new Date(Date.parse(observedAt) - 86_400_000).toISOString().slice(0, -1),
       utcOffsetMinutes: 0,
     },
     effectiveUntil: null,
@@ -168,10 +188,10 @@ export async function seedPickup({ admin, context, sessionRole }) {
   const priceBook = {
     ...source.priceBook,
     brandReference: scope.brandReference,
-    createdAt: at,
+    createdAt: observedAt,
     entries: source.priceBook.entries.map((entry) => ({
       ...entry,
-      sellableReference: id(13),
+      sellableReference: id(70013),
       effectivePeriod: period,
       amount: { ...entry.amount, amountMinor: 500n },
     })),
@@ -179,16 +199,16 @@ export async function seedPickup({ admin, context, sessionRole }) {
   const taxConfiguration = {
     ...source.taxConfiguration,
     ...scope,
-    createdAt: at,
+    createdAt: observedAt,
     effectivePeriod: period,
     registrationEvidence: {
       ...source.taxConfiguration.registrationEvidence,
-      validUntil: "2026-02-01T00:00:00.000Z",
+      validUntil: new Date(Date.parse(observedAt) + 86_400_000).toISOString(),
     },
     professionalEvidence: {
       ...source.taxConfiguration.professionalEvidence,
-      reviewedAt: "2026-01-01T00:00:00.000Z",
-      validUntil: "2026-02-01T00:00:00.000Z",
+      reviewedAt: new Date(Date.parse(observedAt) - 86_400_000).toISOString(),
+      validUntil: new Date(Date.parse(observedAt) + 86_400_000).toISOString(),
     },
   };
   const options = {
@@ -214,8 +234,8 @@ export async function seedPickup({ admin, context, sessionRole }) {
           policyDigest: "sha256:" + "a".repeat(64),
           idleTimeoutSeconds: 3600,
           absoluteTimeoutSeconds: 86400,
-          validFrom: "2026-01-01T00:00:00.000Z",
-          validUntil: "2026-02-01T00:00:00.000Z",
+          validFrom: new Date(Date.parse(observedAt) - 86_400_000).toISOString(),
+          validUntil: new Date(Date.parse(observedAt) + 86_400_000).toISOString(),
         },
         sourceChannel: "Qr",
         generateReference: references.generate,
@@ -231,12 +251,7 @@ export async function seedPickup({ admin, context, sessionRole }) {
       recovery: createGuestBindingCredentialProvider(key),
       preparationLifetimeSeconds: 300,
     },
-    cartItems: {
-      writeTransactions: runner(orderingRole),
-      references,
-      audit: orderingAudit,
-      catalog,
-    },
+    catalogCartItems: catalogItems.catalogCartItems,
     cartRemoval: { writeTransactions: runner(orderingRole), references, audit: orderingAudit },
     cartQuote: {
       attachmentTransactions: runner(orderingRole),
@@ -272,7 +287,7 @@ export async function seedPickup({ admin, context, sessionRole }) {
           createdAt: input.requestedAt,
           expiresAt: new Date(Date.parse(input.requestedAt) + 300000).toISOString(),
           lines: input.lines.map((item) => {
-            assert.equal(item.sellableReference, id(13));
+            assert.equal(item.sellableReference, id(70013));
             assert.deepEqual(item.optionSelections, []);
             const template = source.lines[0];
             return {
@@ -320,6 +335,9 @@ export async function seedPickup({ admin, context, sessionRole }) {
   };
   return {
     options,
+    orderingRole,
+    orderingTransactions: runner(orderingRole),
+    checkoutDetailsTransactions: runner(orderingRole),
     diagnostics,
     async inspect() {
       const counts = await admin.query(
@@ -333,6 +351,7 @@ export async function seedPickup({ admin, context, sessionRole }) {
           "SELECT " +
             "(SELECT count(*)::int FROM rms_ordering.cart) AS carts," +
             "(SELECT count(*)::int FROM rms_ordering.cart_line) AS lines," +
+            "(SELECT coalesce(sum(quantity),0)::int FROM rms_ordering.cart_line) AS quantity," +
             "(SELECT count(*)::int FROM rms_pricing.price_quote) AS quotes," +
             "(SELECT count(*)::int FROM rms_ordering.cart_quote_attachment) AS attachments," +
             "(SELECT count(*)::int FROM rms_ordering.cart_quote_attachment_line) AS attachment_lines",
@@ -340,7 +359,8 @@ export async function seedPickup({ admin, context, sessionRole }) {
       ).rows[0];
       assert.deepEqual(counts, {
         carts: journeys,
-        lines: 0,
+        lines: journeys,
+        quantity: journeys * 2,
         quotes: journeys * 2,
         attachments: journeys * 2,
         attachment_lines: journeys * 2,
@@ -355,6 +375,37 @@ export async function seedPickup({ admin, context, sessionRole }) {
         [...Array(journeys).fill("565"), ...Array(journeys).fill("1130")],
       );
       assert.equal(active, 0);
+    },
+    async verifyCheckoutDetails(journeys) {
+      const rows = (
+        await admin.query(
+          "SELECT snapshot_json FROM rms_ordering.checkout_details_record WHERE brand_id=$1 AND store_id=$2 ORDER BY details_id,details_version",
+          [scope.brandReference, scope.storeReference],
+        )
+      ).rows;
+      assert.equal(rows.length, journeys);
+      for (const row of rows) {
+        assert.equal(row.snapshot_json.orderType, "Pickup");
+        assert.equal(row.snapshot_json.pickupContact.name, "Synthetic Guest");
+        assert.equal(row.snapshot_json.pickupContact.channel, "Email");
+        assert.equal(row.snapshot_json.pickupContact.value, "synthetic@example.invalid");
+        assert.deepEqual(row.snapshot_json.receipt, { choice: "InSession", email: null });
+        assert.deepEqual(row.snapshot_json.policies, []);
+      }
+    },
+    async verifyCheckoutSessions(journeys) {
+      const counts = (
+        await admin.query(
+          "SELECT (SELECT count(*)::int FROM rms_ordering.checkout_session_allocation) allocations,(SELECT count(*)::int FROM rms_ordering.checkout_session_record) sessions,(SELECT count(*)::int FROM rms_fulfillment.capacity_asap_commitment) commitments,(SELECT count(*)::int FROM rms_ordering.order_header) orders,(SELECT count(*)::int FROM rms_inventory.stock_reservation_version) reservations",
+        )
+      ).rows[0];
+      assert.deepEqual(counts, {
+        allocations: journeys,
+        sessions: journeys,
+        commitments: journeys,
+        orders: 0,
+        reservations: 0,
+      });
     },
     close() {
       key.fill(0);

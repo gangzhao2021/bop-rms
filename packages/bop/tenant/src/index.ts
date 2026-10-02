@@ -15,5 +15,15 @@ export * from "./infrastructure/persistence/merchant-organization-source.js";
 
 export {
   createPostgresBrandLifecycleStore,
+  createPostgresTenantBrandConfigurationContentSource,
+  tenantBrandConfigurationContentDigest,
+  tenantBrandConfigurationRequiredFields,
   type BrandLifecycleTransaction,
+  type TenantBrandConfigurationTransaction,
+  type TenantRecordedBrandConfiguration,
+  type TenantBrandConfigurationContentSourceOptions,
 } from "./infrastructure/persistence/brand-lifecycle-store.js";
+
+export * from "./contracts/store-reference-source.js";
+export * from "./contracts/brand-configuration-content-source.js";
+export * from "./infrastructure/persistence/store-reference-source.js";

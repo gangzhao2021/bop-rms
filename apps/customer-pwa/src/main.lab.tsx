@@ -23,7 +23,6 @@ let hash = "";
 let diningAdmissionEnabled = false;
 let cartEnabled = false;
 let quoteEnabled = false;
-let labInstant: number | undefined;
 if (window.location.pathname === "/" && window.location.search === "") {
   try {
     const response = await window.fetch("/__local/customer-entry", {
@@ -46,18 +45,12 @@ if (window.location.pathname === "/" && window.location.search === "") {
           "diningAdmissionEnabled" in body && body.diningAdmissionEnabled === true;
         cartEnabled = "cartEnabled" in body && body.cartEnabled === true;
         quoteEnabled = "quoteEnabled" in body && body.quoteEnabled === true;
-        if (quoteEnabled && "observedAt" in body && typeof body.observedAt === "string") {
-          const instant = Date.parse(body.observedAt);
-          if (Number.isFinite(instant) && new Date(instant).toISOString() === body.observedAt)
-            labInstant = instant;
-        }
       }
     }
   } catch {
     // The canonical missing-entry screen remains actionable without fabricated context.
   }
 }
-const fixedLabInstant = labInstant;
 const entryClient = createCustomerEntryClient({
   fetch: window.fetch.bind(window),
   hash,
@@ -92,7 +85,7 @@ createRoot(root).render(
         {diningAdmissionEnabled ? ", dining admission" : ""}
         {cartEnabled ? ", Cart item editing" : ""}
         {quoteEnabled ? " and persisted synthetic quotes" : ""}. Order submission and payment are
-        unavailable. The clock is fixed for repeatable verification.
+        unavailable. Checkout uses the current local clock.
         <button
           type="button"
           onClick={async (event) => {
@@ -119,7 +112,7 @@ createRoot(root).render(
       <App
         entryClient={entryClient}
         diningAdmission={diningAdmission}
-        {...(fixedLabInstant === undefined ? {} : { checkoutNow: () => fixedLabInstant })}
+        {...(quoteEnabled ? { checkoutNow: Date.now } : {})}
       />
     </BrowserRouter>
   </StrictMode>,
