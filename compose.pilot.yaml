@@ -13,6 +13,8 @@ services:
     init: true
     environment:
       TZ: UTC
+      # An existing role for the readiness probe; without it pg_isready logs a FATAL per probe.
+      PILOT_DB_HEALTH_ROLE: ${PILOT_DB_HEALTH_ROLE:-bop_rms_wp2402_v4_admin}
     command: [postgres, -c, port=55435, -c, timezone=UTC, -c, "datestyle=ISO, YMD"]
     ports:
       - 127.0.0.1:55435:55435
@@ -21,8 +23,12 @@ services:
     volumes:
       - pilot-data:/var/lib/postgresql
     healthcheck:
-      test: [CMD-SHELL, "pg_isready --quiet --host=127.0.0.1 --port=55435"]
-      interval: 2s
+      test:
+        [
+          CMD-SHELL,
+          'pg_isready --quiet --host=127.0.0.1 --port=55435 --username="$$PILOT_DB_HEALTH_ROLE" --dbname=postgres',
+        ]
+      interval: 10s
       timeout: 5s
       retries: 30
     stop_grace_period: 30s

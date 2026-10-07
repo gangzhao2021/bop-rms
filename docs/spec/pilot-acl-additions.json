@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kds_operator_shift_event",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner option A/A1 2026-10-07"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kds_operator_shift_event",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner option A/A1 2026-10-07"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kds_operator_handover",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner option A/A1 2026-10-07"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kds_operator_handover",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner option A/A1 2026-10-07"
+    }
+  ]
+}
