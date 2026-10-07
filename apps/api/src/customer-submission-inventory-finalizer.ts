@@ -2,7 +2,7 @@ import { canonicalizeRfc8785, sha256Hex, type AppendAuditRecordInput } from "@bo
 import { createPostgresWorkflowDefinitionStore } from "@bop/workflow";
 import {
   createInventoryReservation,
-  createInventoryRecipeDemandSource,
+  createInventoryRecipeLineDemandSource,
   createPostgresInventoryItemStore,
   createPostgresSubmissionStockPlanSource,
   createPostgresSubmissionReservationStore,
@@ -263,13 +263,15 @@ function createBatchInventoryFinalizer<V extends 1 | 2>(
           : null;
         const requirements =
           plan?.requirements ??
-          (await createInventoryRecipeDemandSource(
-            createPostgresInventoryItemStore(bound, {
-              tenantReference: scope.tenantReference,
-              brandReference: scope.brandReference,
-            }),
-            scope,
-          ).resolve(recipe.contributions, observedAt));
+          (
+            await createInventoryRecipeLineDemandSource(
+              createPostgresInventoryItemStore(bound, {
+                tenantReference: scope.tenantReference,
+                brandReference: scope.brandReference,
+              }),
+              scope,
+            ).resolve(recipe.contributions, observedAt)
+          ).requirements;
         const makeAudit = (
           auditId: string,
           actionCode: string,
@@ -320,6 +322,7 @@ function createBatchInventoryFinalizer<V extends 1 | 2>(
                   quoteReference: checkout.quoteReference,
                   demandReference: demand.demandReference,
                   demandDigest,
+                  cartItemReference: allocation.cartItemReference ?? fail(),
                 },
               }),
               audit: makeAudit(

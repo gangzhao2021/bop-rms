@@ -68,7 +68,8 @@ export function createCustomerSubmissionInventorySource(
           if (lines.has(reference)) return fail();
           lines.set(reference, parseOrderCatalogLineSnapshot(raw.catalog));
         }
-        const contributions: RecipeItemDemandContribution[] = [];
+        // WP-2423: each contribution keeps its Order line so Inventory reserves and consumes per line.
+        const contributions: (RecipeItemDemandContribution & { cartItemReference: string })[] = [];
         const evidence = [];
         for (const item of [...cart.items].sort((a, b) =>
           a.cartItemReference.localeCompare(b.cartItemReference),
@@ -125,6 +126,7 @@ export function createCustomerSubmissionInventorySource(
                 unitDimension: requirement.unitDimension,
                 quantityNumerator: requirement.quantityNumerator,
                 quantityDenominator: requirement.quantityDenominator,
+                cartItemReference: item.cartItemReference,
               }),
             );
           }

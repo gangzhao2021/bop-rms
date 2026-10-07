@@ -10,6 +10,7 @@ import { createInternalReceiptConsumer } from "./pilot-receipt-consumer.mjs";
 import { createInternalPickupFulfillment } from "./pilot-pickup-fulfillment.mjs";
 import { createInternalKitchen } from "./pilot-kitchen.mjs";
 import { createInternalKitchenConsumers } from "./pilot-kitchen-consumers.mjs";
+import { createInternalInventoryConsumers } from "./pilot-inventory-consumers.mjs";
 import { createInternalPickupReadiness } from "./pilot-pickup-readiness.mjs";
 import { createInternalPickupProofConsumer } from "./pilot-pickup-proof-consumer.mjs";
 import { createInternalOrderCompletionConsumer } from "./pilot-order-completion-consumer.mjs";
@@ -37,6 +38,7 @@ const factories = {
   createInternalPickupFulfillment,
   createInternalKitchen,
   createInternalKitchenConsumers,
+  createInternalInventoryConsumers,
   createInternalPickupReadiness,
   createInternalPickupProofConsumer,
   createInternalOrderCompletionConsumer,
@@ -113,6 +115,7 @@ export function composeConfiguredBusinessWorker({
     createInternalKitchen: f.createInternalKitchen,
     createInternalKitchenConsumers: (r) =>
       f.createInternalKitchenConsumers(r, { createQueue: queue }),
+    createInternalInventoryConsumers: f.createInternalInventoryConsumers,
     createInternalPickupReadiness: readiness,
     createInternalPickupProofConsumer: (r) =>
       f.createInternalPickupProofConsumer(r, {

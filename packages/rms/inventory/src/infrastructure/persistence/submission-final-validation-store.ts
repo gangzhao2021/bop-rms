@@ -2,7 +2,9 @@ import { createPostgresStockCandidateSource } from "./stock-candidate-source.js"
 import { createPostgresInventoryItemStore } from "./inventory-item-store.js";
 import {
   createInventoryRecipeDemandSource,
+  createInventoryRecipeLineDemandSource,
   type RecipeItemDemandContribution,
+  type RecipeLineDemandContribution,
 } from "../../application/recipe-demand-source.js";
 import {
   appendAuditRecordInTransaction,
@@ -379,16 +381,24 @@ export function createPostgresSubmissionFinalValidationStore(
             Reflect.ownKeys(source.contributions).length !== source.contributions.length + 1
           )
             return fail();
+          let tagged: boolean | null = null;
           const contributions = Object.freeze(
             Array.from({ length: source.contributions.length }, (_, index) => {
               const slot = Object.getOwnPropertyDescriptor(source.contributions, String(index));
               if (!slot?.enumerable || !("value" in slot)) return fail();
+              const line =
+                slot.value !== null &&
+                typeof slot.value === "object" &&
+                Object.hasOwn(slot.value, "cartItemReference");
+              if (tagged !== null && tagged !== line) return fail();
+              tagged = line;
               const raw = closed(slot.value, [
                 "itemReference",
                 "configurationOperationReference",
                 "unitDimension",
                 "quantityNumerator",
                 "quantityDenominator",
+                ...(line ? ["cartItemReference"] : []),
               ]);
               if (
                 typeof raw.unitDimension !== "string" ||
@@ -404,6 +414,9 @@ export function createPostgresSubmissionFinalValidationStore(
                 unitDimension: raw.unitDimension,
                 quantityNumerator: raw.quantityNumerator,
                 quantityDenominator: raw.quantityDenominator,
+                ...(line
+                  ? { cartItemReference: parseInventoryReference(raw.cartItemReference) }
+                  : {}),
               });
             }),
           );
@@ -417,10 +430,18 @@ export function createPostgresSubmissionFinalValidationStore(
             if ((await itemStore.loadForUpdate(reference)) === null)
               return fail("INVENTORY_FINAL_VALIDATION_CONFLICT");
           }
-          const requirements = await createInventoryRecipeDemandSource(itemStore, scope).resolve(
-            contributions,
-            current.observedAt,
-          );
+          // Per-line demand (WP-2423) validates the same rounded line totals that were reserved.
+          const requirements = tagged
+            ? (
+                await createInventoryRecipeLineDemandSource(itemStore, scope).resolve(
+                  contributions as readonly RecipeLineDemandContribution[],
+                  current.observedAt,
+                )
+              ).requirements
+            : await createInventoryRecipeDemandSource(itemStore, scope).resolve(
+                contributions,
+                current.observedAt,
+              );
           if (requirements.length !== current.items.length)
             return fail("INVENTORY_FINAL_VALIDATION_CONFLICT");
           for (const actual of requirements) {

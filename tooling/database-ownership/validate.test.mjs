@@ -2434,6 +2434,84 @@ describe("Database Schema Ownership Architecture Test", () => {
       expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
     },
   );
+  it("admits only the Ordering item inventory link reader without a driver", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "ordering", "rms_ordering", [
+      "order_item",
+      "order_batch",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/order-item-inventory-link-reader.ts",
+    );
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(asset, "export const synthetic = true;");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg"; export {pg};');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each(["owner", "schema", "path", "order_item", "order_batch"])(
+    "rejects the Ordering item inventory link reader with changed %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other" : "ordering",
+        changed === "schema" ? "rms_other" : "rms_ordering",
+        ["order_item", "order_batch"].filter((v) => v !== changed),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence/" +
+            (changed === "path" ? "other.ts" : "order-item-inventory-link-reader.ts"),
+        ),
+        "export const synthetic = true;",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+  it("admits only the Inventory order-line consumption owner adapter without a driver", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "inventory", "rms_inventory", [
+      "stock_balance",
+      "stock_reservation_version",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/order-line-consumption-store.ts",
+    );
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(asset, "export const synthetic = true;");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg"; export {pg};');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each(["owner", "schema", "path", "stock_balance", "stock_reservation_version"])(
+    "rejects the Inventory order-line consumption store with changed %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other" : "inventory",
+        changed === "schema" ? "rms_other" : "rms_inventory",
+        ["stock_balance", "stock_reservation_version"].filter((v) => v !== changed),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence/" +
+            (changed === "path" ? "other.ts" : "order-line-consumption-store.ts"),
+        ),
+        "export const synthetic = true;",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
   it("admits only the Kitchen KDS operator shift owner adapter without a driver", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "kitchen", "rms_kitchen", [

@@ -1,6 +1,8 @@
 import {
   createInventoryRecipeDemandSource,
+  createInventoryRecipeLineDemandSource,
   type RecipeItemDemandContribution,
+  type RecipeLineDemandContribution,
 } from "../../application/recipe-demand-source.js";
 import { createPostgresInventoryItemStore } from "./inventory-item-store.js";
 import { createPostgresStockCandidateSource } from "./stock-candidate-source.js";
@@ -8,6 +10,7 @@ import { planStockAllocation } from "../../domain/stock-allocation.js";
 import {
   parseInventoryReservationSet,
   planInventoryReservationSetRelease,
+  reservationOrderKey,
   type InventoryReservationSet,
 } from "../../domain/reservation-set.js";
 import { parseLotHoldSnapshot } from "../../domain/lot-hold-snapshot.js";
@@ -315,16 +318,18 @@ export function createPostgresStockReservationStore(
         occurredAt: reservation.updatedAt,
         actor: recordAudit.actor,
       });
+      // Per-line reservations (schema 2) may reserve the same account once per Order line.
+      const accountLine = accountReference + ":" + (b.cartItemReference ?? "");
       if (
         (common !== null && common !== binding) ||
         operations.has(operationReference) ||
-        accounts.has(accountReference) ||
+        accounts.has(accountLine) ||
         reservations.has(reservation.reservationReference)
       )
         return fail("STOCK_RESERVATION_CONFLICT");
       common = binding;
       operations.add(operationReference);
-      accounts.add(accountReference);
+      accounts.add(accountLine);
       reservations.add(reservation.reservationReference);
       entries.push({
         index,
@@ -340,9 +345,12 @@ export function createPostgresStockReservationStore(
         },
       });
     }
+    // Same-account writes commit in Order-line order, matching the plan's ledger sequence.
+    const sortKey = (input: StockReservationWrite) =>
+      reservationOrderKey(input.reservation, input.accountReference);
     entries.sort((a, b) => {
-      const left = a.input.reservation.binding.itemReference + ":" + a.input.accountReference;
-      const right = b.input.reservation.binding.itemReference + ":" + b.input.accountReference;
+      const left = sortKey(a.input);
+      const right = sortKey(b.input);
       return left < right ? -1 : left > right ? 1 : 0;
     });
     return entries;
@@ -423,8 +431,8 @@ export function createPostgresStockReservationStore(
       if (originals.size || at === undefined) return fail();
       const occurredAt = at;
       writes.sort((a, b) => {
-        const left = a.reservation.binding.itemReference + ":" + a.accountReference,
-          right = b.reservation.binding.itemReference + ":" + b.accountReference;
+        const left = reservationOrderKey(a.reservation, a.accountReference),
+          right = reservationOrderKey(b.reservation, b.accountReference);
         return left < right ? -1 : left > right ? 1 : 0;
       });
       return run(async (tx) => {
@@ -732,6 +740,37 @@ export function createPostgresStockReservationStore(
         return Object.freeze(saved);
       });
     },
+    /** Latest state of every per-line (schema 2) reservation of one Order line, account order. */
+    async loadOrderLine(submission: string, cartItem: string) {
+      const submissionReference = parseInventoryReference(submission);
+      const cartItemReference = parseInventoryReference(cartItem);
+      return run(async (tx) => {
+        const found = rows(
+          await tx.query(
+            "SELECT DISTINCT ON (reservation_id) " +
+              columns +
+              " FROM rms_inventory.stock_reservation_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND submission_id=$4 AND snapshot_json->'binding'->>'cartItemReference'=$5 ORDER BY reservation_id, version DESC",
+            [tenant, brand, store, submissionReference, cartItemReference],
+          ),
+        );
+        return Object.freeze(
+          found
+            .map((row) => {
+              const current = decode(row);
+              return Object.freeze({
+                accountReference: current.account,
+                reservation: current.reservation,
+              });
+            })
+            .sort((a, b) =>
+              reservationOrderKey(a.reservation, a.accountReference) <
+              reservationOrderKey(b.reservation, b.accountReference)
+                ? -1
+                : 1,
+            ),
+        );
+      });
+    },
     /**
      * Latest scoped observation, not operation recovery or Payment authorization.
      * Callers needing a stable decision through a write must provide their transaction fence.
@@ -992,7 +1031,10 @@ export function createPostgresStockReservationStore(
           item.updatedAt > next.updatedAt ||
           !item.trackingPolicy.stockTrackingEnabled ||
           canonicalizeRfc8785(item.baseUnit) !== canonicalizeRfc8785(next.unit) ||
-          (item.lifecycle !== "Active" && !(action === "Release" && item.lifecycle === "Inactive"))
+          // Starting production is a safety gate; Release and Consume record what already happened
+          // (WP-2423), so an Item deactivated after production started is still settled.
+          (item.lifecycle !== "Active" &&
+            !((action === "Release" || action === "Consume") && item.lifecycle === "Inactive"))
         )
           return fail("STOCK_RESERVATION_ITEM_INELIGIBLE");
         const accountRows = rows(
@@ -1029,7 +1071,8 @@ export function createPostgresStockReservationStore(
           (lotMode === "LotExpiryRequired" && account.expiry === null)
         )
           return fail("STOCK_RESERVATION_ITEM_INELIGIBLE");
-        if (account.lot !== null && action !== "Release") {
+        // A quality hold blocks new Reserve/StartProduction, not the record of stock already used.
+        if (account.lot !== null && action !== "Release" && action !== "Consume") {
           const holds = rows(
             await tx.query(
               `SELECT record_json->'hold' AS hold,version::text AS version,
@@ -1211,7 +1254,7 @@ export interface SubmissionInventoryDemand {
   readonly workflowVersion: number;
   readonly reserveTrigger: "OrderSubmission";
   readonly sourceDigest: string;
-  readonly contributions: readonly RecipeItemDemandContribution[];
+  readonly contributions: readonly StockDemandContribution[];
 }
 
 /** Internal composition: authorize current caller; only original recovery skips current source resolution. */
@@ -1299,6 +1342,9 @@ export function createPostgresSubmissionReservationStore(
             unit: w.reservation.unit,
             stockSiteReference: w.reservation.binding.stockSiteReference,
             lotReference: w.reservation.binding.lotReference,
+            ...(w.reservation.binding.cartItemReference === undefined
+              ? {}
+              : { cartItemReference: w.reservation.binding.cartItemReference }),
           }));
           const canonicalSet = (values: readonly unknown[]) =>
             canonicalizeRfc8785(values.map((value) => canonicalizeRfc8785(value)).sort());
@@ -1319,6 +1365,8 @@ export interface SubmissionStockAllocation {
   readonly unit: InventoryUnit;
   readonly stockSiteReference: string;
   readonly lotReference: string | null;
+  /** Present for per-line submission demand (WP-2423). */
+  readonly cartItemReference?: string;
 }
 export type SubmissionExpiryCutoff = (
   transaction: InventoryItemTransaction,
@@ -1330,23 +1378,35 @@ export type SubmissionExpiryCutoff = (
   }>,
 ) => Promise<string>;
 
-function captureStockContributions(value: unknown): readonly RecipeItemDemandContribution[] {
+/** A recipe contribution; submission demand tags each one with its Order line (all or none). */
+export type StockDemandContribution = RecipeItemDemandContribution & {
+  readonly cartItemReference?: string;
+};
+function captureStockContributions(value: unknown): readonly StockDemandContribution[] {
   if (
     !Array.isArray(value) ||
     value.length > 4096 ||
     Reflect.ownKeys(value).length !== value.length + 1
   )
     return fail();
+  let tagged: boolean | null = null;
   const contributions = Object.freeze(
     Array.from({ length: value.length }, (_, i) => {
       const slot = Object.getOwnPropertyDescriptor(value, String(i));
       if (!slot?.enumerable || !("value" in slot)) return fail();
+      const line =
+        slot.value !== null &&
+        typeof slot.value === "object" &&
+        Object.hasOwn(slot.value, "cartItemReference");
+      if (tagged !== null && tagged !== line) return fail();
+      tagged = line;
       const c = closed(slot.value, [
         "itemReference",
         "configurationOperationReference",
         "unitDimension",
         "quantityNumerator",
         "quantityDenominator",
+        ...(line ? ["cartItemReference"] : []),
       ]);
       if (
         typeof c.unitDimension !== "string" ||
@@ -1360,6 +1420,7 @@ function captureStockContributions(value: unknown): readonly RecipeItemDemandCon
         unitDimension: c.unitDimension,
         quantityNumerator: c.quantityNumerator,
         quantityDenominator: c.quantityDenominator,
+        ...(line ? { cartItemReference: parseInventoryReference(c.cartItemReference) } : {}),
       });
     }),
   );
@@ -1457,24 +1518,76 @@ export function createPostgresRecipeStockPlanSource(
             run: async <T>(work: (tx: InventoryItemTransaction) => Promise<T>) => work(tx),
           };
           try {
-            const requirements = await createInventoryRecipeDemandSource(
-              createPostgresInventoryItemStore(bound, {
-                tenantReference: demand.tenantReference,
-                brandReference: demand.brandReference,
-              }),
-              { tenantReference: demand.tenantReference, brandReference: demand.brandReference },
-            ).resolve(demand.contributions, observedAt);
+            const itemStore = createPostgresInventoryItemStore(bound, {
+              tenantReference: demand.tenantReference,
+              brandReference: demand.brandReference,
+            });
+            const itemScope = {
+              tenantReference: demand.tenantReference,
+              brandReference: demand.brandReference,
+            };
+            const perLine = demand.contributions.some((c) => c.cartItemReference !== undefined);
+            // Per-line demand (WP-2423) allocates each Order line separately; the aggregate path
+            // is kept for pre-submission observations that have no line identity.
+            type Requirement = Awaited<
+              ReturnType<ReturnType<typeof createInventoryRecipeDemandSource>["resolve"]>
+            >[number];
+            let requirements: readonly Requirement[];
+            let work: { cartItemReference: string | null; requirement: Requirement }[];
+            if (perLine) {
+              const resolved = await createInventoryRecipeLineDemandSource(
+                itemStore,
+                itemScope,
+              ).resolve(
+                demand.contributions as readonly RecipeLineDemandContribution[],
+                observedAt,
+              );
+              requirements = resolved.requirements;
+              work = resolved.lines.flatMap((line) =>
+                line.requirements.map((requirement) => ({
+                  cartItemReference: line.cartItemReference,
+                  requirement,
+                })),
+              );
+            } else {
+              requirements = await createInventoryRecipeDemandSource(itemStore, itemScope).resolve(
+                demand.contributions,
+                observedAt,
+              );
+              work = requirements.map((requirement) => ({ cartItemReference: null, requirement }));
+            }
             const expected: SubmissionStockAllocation[] = [];
-            for (const requirement of requirements) {
+            const candidateCache = new Map<
+              string,
+              Awaited<ReturnType<ReturnType<typeof createPostgresStockCandidateSource>["list"]>>
+            >();
+            // Running per-account state across lines: availability already planned and the
+            // ledger version each further Reserve on that account will observe.
+            const running = new Map<string, { usedMicro: bigint; reserves: number }>();
+            const microOf = (value: string) => {
+              const [whole = "0", fraction = ""] = value.split(".");
+              return BigInt(whole + fraction.padEnd(6, "0"));
+            };
+            const decimalOf = (value: bigint) => {
+              const fraction = (value % 1_000_000n).toString().padStart(6, "0").replace(/0+$/u, "");
+              return (value / 1_000_000n).toString() + (fraction ? "." + fraction : "");
+            };
+            for (const { cartItemReference, requirement } of work) {
               if (requirement.quantity === "0") continue;
               if (!requirement.trackingPolicy.stockTrackingEnabled) continue;
-              const candidates = await createPostgresStockCandidateSource(bound, scope).list({
-                itemReference: requirement.itemReference,
-                stockSiteReference: demand.stockSiteReference,
-                observedAt,
-              });
+              let candidates = candidateCache.get(requirement.itemReference);
+              if (!candidates) {
+                candidates = await createPostgresStockCandidateSource(bound, scope).list({
+                  itemReference: requirement.itemReference,
+                  stockSiteReference: demand.stockSiteReference,
+                  observedAt,
+                });
+                candidateCache.set(requirement.itemReference, candidates);
+              }
               const normalized = [];
               for (const c of candidates) {
+                const state = running.get(c.accountReference) ?? { usedMicro: 0n, reserves: 0 };
+                const remaining = microOf(c.available) - state.usedMicro;
                 normalized.push({
                   tenantReference: c.tenantReference,
                   brandReference: c.brandReference,
@@ -1484,10 +1597,10 @@ export function createPostgresRecipeStockPlanSource(
                   currentItemVersion: c.currentItemVersion,
                   accountReference: c.accountReference,
                   locationReference: c.locationReference,
-                  ledgerVersion: c.ledgerVersion,
+                  ledgerVersion: c.ledgerVersion + state.reserves,
                   unitCode: c.unit.unitCode,
                   ledgerPrecision: c.unit.ledgerPrecision,
-                  available: c.available,
+                  available: decimalOf(remaining > 0n ? remaining : 0n),
                   holdStatus: c.holdStatus,
                   firstReceivedAt: c.firstReceivedAt,
                   observedAt: c.observedAt,
@@ -1522,12 +1635,21 @@ export function createPostgresRecipeStockPlanSource(
                   (c) => c.accountReference === allocation.accountReference,
                 );
                 if (!candidate) return fail();
+                const state = running.get(candidate.accountReference) ?? {
+                  usedMicro: 0n,
+                  reserves: 0,
+                };
+                running.set(candidate.accountReference, {
+                  usedMicro: state.usedMicro + microOf(allocation.quantity),
+                  reserves: state.reserves + 1,
+                });
                 expected.push({
                   ...allocation,
                   itemReference: requirement.itemReference,
                   unit: requirement.unit,
                   stockSiteReference: demand.stockSiteReference,
                   lotReference: candidate.lotReference,
+                  ...(cartItemReference === null ? {} : { cartItemReference }),
                 });
               }
             }

@@ -210,3 +210,64 @@ describe("Inventory reservation lifecycle", () => {
     );
   });
 });
+describe("WP-2423 per-Order-line reservations", () => {
+  const line = id(30);
+  const perLine = () => ({
+    ...source(),
+    binding: { ...source().binding, cartItemReference: line },
+  });
+  it("creates schema 2 when the Order line is bound and keeps it through transitions", () => {
+    const reserved = createInventoryReservation(perLine());
+    expect(reserved.schemaVersion).toBe(2);
+    expect(reserved.binding.cartItemReference).toBe(line);
+    const started = advanceInventoryReservation(reserved, {
+      reservationReference: id(1),
+      binding: reserved.binding,
+      expectedVersion: 1,
+      action: "StartProduction",
+      quantity: null,
+      occurredAt: next,
+    });
+    expect(started.binding.cartItemReference).toBe(line);
+    expect(() =>
+      advanceInventoryReservation(started, {
+        reservationReference: id(1),
+        binding: started.binding,
+        expectedVersion: 2,
+        action: "Release",
+        quantity: "0.1",
+        occurredAt: next,
+      }),
+    ).toThrow(expect.objectContaining({ code: "INVENTORY_RESERVATION_RELEASE_DENIED" }));
+  });
+  it("keeps schema 1 history readable and rejects mixed shapes", () => {
+    const legacy = createInventoryReservation(source());
+    expect(legacy.schemaVersion).toBe(1);
+    expect(legacy.binding).not.toHaveProperty("cartItemReference");
+    expect(() =>
+      parseInventoryReservation({
+        ...legacy,
+        binding: { ...legacy.binding, cartItemReference: line },
+      }),
+    ).toThrow(expect.objectContaining({ code: "INVENTORY_RESERVATION_INVALID" }));
+    const lined = createInventoryReservation(perLine());
+    const withoutLine: Record<string, unknown> = { ...lined.binding };
+    delete withoutLine.cartItemReference;
+    expect(() => parseInventoryReservation({ ...lined, binding: withoutLine })).toThrow(
+      expect.objectContaining({ code: "INVENTORY_RESERVATION_INVALID" }),
+    );
+  });
+  it("rejects a transition that changes the bound Order line", () => {
+    const reserved = createInventoryReservation(perLine());
+    expect(() =>
+      advanceInventoryReservation(reserved, {
+        reservationReference: id(1),
+        binding: { ...reserved.binding, cartItemReference: id(31) },
+        expectedVersion: 1,
+        action: "Consume",
+        quantity: "0.1",
+        occurredAt: next,
+      }),
+    ).toThrow(expect.objectContaining({ code: "INVENTORY_RESERVATION_BINDING_MISMATCH" }));
+  });
+});

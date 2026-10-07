@@ -22,10 +22,12 @@ export interface InventoryReservationBinding {
   readonly quoteReference: InventoryReference;
   readonly demandReference: InventoryReference;
   readonly demandDigest: string;
+  /** Schema 2: the Order line whose recipe demand this reservation holds (per-line consumption). */
+  readonly cartItemReference?: InventoryReference;
 }
 
 export interface InventoryReservation {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 1 | 2;
   readonly reservationReference: InventoryReference;
   readonly binding: InventoryReservationBinding;
   readonly unit: InventoryUnit;
@@ -82,7 +84,7 @@ function version(value: unknown): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1) return invalid();
   return Number(value);
 }
-function binding(value: unknown): InventoryReservationBinding {
+function binding(value: unknown, schemaVersion: 1 | 2): InventoryReservationBinding {
   const refs = [
     "tenantReference",
     "brandReference",
@@ -95,7 +97,13 @@ function binding(value: unknown): InventoryReservationBinding {
     "quoteReference",
     "demandReference",
   ] as const;
-  const raw = exact(value, [...refs, "lotReference", "cartVersion", "demandDigest"]);
+  const raw = exact(value, [
+    ...refs,
+    "lotReference",
+    "cartVersion",
+    "demandDigest",
+    ...(schemaVersion === 2 ? ["cartItemReference"] : []),
+  ]);
   const references = Object.fromEntries(
     refs.map((key) => [key, parseInventoryReference(raw[key])]),
   ) as Readonly<Record<(typeof refs)[number], InventoryReference>>;
@@ -106,6 +114,9 @@ function binding(value: unknown): InventoryReservationBinding {
     lotReference: raw.lotReference === null ? null : parseInventoryReference(raw.lotReference),
     cartVersion: version(raw.cartVersion),
     demandDigest: raw.demandDigest,
+    ...(schemaVersion === 2
+      ? { cartItemReference: parseInventoryReference(raw.cartItemReference) }
+      : {}),
   });
 }
 function quantity(value: unknown, precision: number): bigint {
@@ -144,7 +155,8 @@ export function parseInventoryReservation(value: unknown): InventoryReservation 
       "updatedAt",
       "version",
     ]);
-    if (raw.schemaVersion !== 1) return invalid();
+    if (raw.schemaVersion !== 1 && raw.schemaVersion !== 2) return invalid();
+    const schemaVersion = raw.schemaVersion;
     const unit = parseInventoryUnit(exact(raw.unit, unitFields));
     if (!/^[A-Z0-9][A-Z0-9_-]{0,31}$/u.test(unit.unitCode)) return invalid();
     const original = quantity(raw.originalQuantity, unit.ledgerPrecision),
@@ -165,9 +177,9 @@ export function parseInventoryReservation(value: unknown): InventoryReservation 
     )
       return invalid();
     return Object.freeze({
-      schemaVersion: 1,
+      schemaVersion,
       reservationReference: parseInventoryReference(raw.reservationReference),
-      binding: binding(raw.binding),
+      binding: binding(raw.binding, schemaVersion),
       unit,
       originalQuantity: decimal(original),
       remainingQuantity: decimal(remaining),
@@ -185,8 +197,12 @@ export function parseInventoryReservation(value: unknown): InventoryReservation 
 export function createInventoryReservation(value: unknown): InventoryReservation {
   return guarded(() => {
     const raw = exact(value, ["reservationReference", "binding", "unit", "quantity", "occurredAt"]);
+    const perLine =
+      raw.binding !== null &&
+      typeof raw.binding === "object" &&
+      Object.hasOwn(raw.binding, "cartItemReference");
     return parseInventoryReservation({
-      schemaVersion: 1,
+      schemaVersion: perLine ? 2 : 1,
       reservationReference: raw.reservationReference,
       binding: raw.binding,
       unit: raw.unit,
@@ -219,7 +235,8 @@ export function advanceInventoryReservation(
     ]);
     if (
       parseInventoryReference(raw.reservationReference) !== current.reservationReference ||
-      JSON.stringify(binding(raw.binding)) !== JSON.stringify(current.binding)
+      JSON.stringify(binding(raw.binding, current.schemaVersion)) !==
+        JSON.stringify(current.binding)
     )
       throw new InventoryReservationError("INVENTORY_RESERVATION_BINDING_MISMATCH");
     if (

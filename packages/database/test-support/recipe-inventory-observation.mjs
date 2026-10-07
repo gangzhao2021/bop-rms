@@ -56,176 +56,21 @@ export async function seedRecipeObservationInventory({
       assert(
         required.every((r) => r.unitDimension === "Mass" && r.itemVersionReference === operation),
       );
-      await admin.query("SET ROLE " + role);
-      const ports = {
-        authorization: { authorize: async () => ({ authorized: true }) },
-        references: {
-          generate: () => item,
-          hashIntent: (text) => "sha256:" + createHash("sha256").update(text).digest("hex"),
-          equals: (a, b) => a === b,
-        },
-        audit: {
-          create: async ({ command, after }) => ({
-            auditId: next(),
-            brandId: scope.brandReference,
-            actor: { type: "User", reference: id(3) },
-            actionCode: "INVENTORY_ITEM_" + command.action.toUpperCase(),
-            targetType: "InventoryItem",
-            targetId: after.itemReference,
-            reasonCode: "SYNTHETIC_RECIPE_SETUP",
-            correlationId: command.operationReference,
-            occurredAt: at,
-            sourceChannel: "MERCHANT_WEB",
-            dataClassification: "Internal",
-            retentionPolicyCode: "SYNTHETIC_AUDIT",
-            retentionPolicyVersion: 1,
-          }),
-        },
-        repository: createPostgresInventoryItemStore(runner, itemScope),
-      };
-      const common = {
-        ...itemScope,
-        actorReference: id(3),
-        purpose: "InventoryItemManagement",
-        permission: "inventory.manage",
-        occurredAt: at,
-      };
-      await executeInventoryItemCommand(
-        {
-          ...common,
-          action: "Create",
-          operationReference: next(),
-          payload: {
-            internalCode: "OBS_ITEM_" + sequence,
-            itemType: "RawMaterial",
-            localizedNames: { en: "Synthetic observation ingredient" },
-            baseUnit: {
-              unitCode: "KG",
-              dimension: "Mass",
-              displayPrecision: 2,
-              ledgerPrecision: 4,
-              roundingMode: "HalfEven",
-            },
-            trackingPolicy: {
-              stockTrackingEnabled: true,
-              lotTrackingMode: "NoLot",
-              defaultShelfLifeDays: null,
-              expiryWarningDays: null,
-              issuePolicy: "FIFO",
-              negativeStockPolicy: "Block",
-            },
-          },
-        },
-        ports,
-      );
-      await executeInventoryItemCommand(
-        {
-          ...common,
-          action: "Activate",
-          operationReference: operation,
-          payload: { itemReference: item, expectedVersion: 1, reasonCode: "READY" },
-        },
-        ports,
-      );
-      await admin.query("RESET ROLE");
-      const account = next(),
-        location = next(),
-        movement = next(),
-        audit = next();
-      await admin.query(
-        "INSERT INTO rms_inventory.stock_account (tenant_id,brand_id,store_id,stock_site_id,location_id,account_id,item_id,item_version,unit_code,ledger_precision,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,2,'KG',4,$8)",
-        [
-          scope.tenantReference,
-          scope.brandReference,
-          scope.storeReference,
-          scope.stockSiteReference,
-          location,
-          account,
-          item,
-          at,
-        ],
-      );
-      await admin.query(
-        "INSERT INTO rms_inventory.stock_balance (tenant_id,brand_id,store_id,account_id,ledger_version,on_hand,reserved,in_transit) VALUES ($1,$2,$3,$4,1,0,0,0)",
-        [scope.tenantReference, scope.brandReference, scope.storeReference, account],
-      );
-      const balance = (n, v) => ({
-        onHand: n,
-        reserved: "0",
-        available: n,
-        inTransit: "0",
-        unitCode: "KG",
-        ledgerVersion: v,
-      });
-      const record = {
-        movementReference: movement,
-        tenantReference: scope.tenantReference,
-        brandReference: scope.brandReference,
-        itemReference: item,
-        movementType: "Receive",
-        quantityDelta: "100",
-        unitCode: "KG",
-        baseQuantityDelta: "100",
-        baseUnitCode: "KG",
-        conversionMultiplier: "1",
-        sourceScope: null,
-        destinationScope: { scopeType: "Location", scopeReference: location },
-        lotReference: null,
-        expiryDate: null,
-        businessSourceType: "SYNTHETIC_RECEIPT",
-        businessSourceReference: next(),
-        reasonCode: "SYNTHETIC_TEST",
-        performedBy: id(3),
-        occurredAt: at,
-        before: balance("0", 1),
-        after: balance("100", 2),
-        auditReference: audit,
-        correctsMovementReference: null,
-      };
-      await admin.query("BEGIN");
-      try {
-        await admin.query(
-          "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
-          [scope.tenantReference, scope.brandReference, scope.storeReference],
-        );
-        await admin.query(
-          "INSERT INTO rms_inventory.stock_movement (tenant_id,brand_id,store_id,account_id,movement_id,ledger_version,movement_type,base_quantity_delta,record_json,audit_id,occurred_at) VALUES ($1,$2,$3,$4,$5,2,'Receive',100,$6,$7,$8)",
-          [
-            scope.tenantReference,
-            scope.brandReference,
-            scope.storeReference,
-            account,
-            movement,
-            record,
-            audit,
-            at,
-          ],
-        );
-        await appendAuditRecordInTransaction(
-          { query: (sql, values) => admin.query(sql, [...values]) },
-          {
-            auditId: audit,
-            brandId: scope.brandReference,
-            storeId: scope.storeReference,
-            actor: { type: "User", reference: id(3) },
-            actionCode: "INVENTORY_RECEIVE",
-            targetType: "StockMovement",
-            targetId: movement,
-            reasonCode: "SYNTHETIC_TEST",
-            correlationId: next(),
-            occurredAt: at,
-            sourceChannel: "MERCHANT_WEB",
-            dataClassification: "Internal",
-            retentionPolicyCode: "SYNTHETIC_AUDIT",
-            retentionPolicyVersion: 1,
-          },
-        );
-        await admin.query("COMMIT");
-      } catch (error) {
-        await admin.query("ROLLBACK");
-        throw error;
-      }
     }
+    await seedSyntheticInventoryItems({
+      admin,
+      role,
+      runner,
+      id,
+      at,
+      scope,
+      next,
+      items: [...pins].map(([itemReference, operationReference]) => ({
+        itemReference,
+        operationReference,
+        onHand: "100",
+      })),
+    });
     return { scope, version, pins };
   } finally {
     await admin.query("SET ROLE " + role);
@@ -298,4 +143,197 @@ export async function exerciseRecipeInventoryObservation(options) {
   } finally {
     await admin.query("SET ROLE " + role);
   }
+}
+
+/** Synthetic isolated Inventory Items, each Active with one Location account received to `onHand`.
+ * Not a real Store receipt; tests own the scope, references and audit identities. */
+export async function seedSyntheticInventoryItems({
+  admin,
+  role,
+  runner,
+  id,
+  at,
+  scope,
+  next,
+  items,
+}) {
+  const itemScope = {
+    tenantReference: scope.tenantReference,
+    brandReference: scope.brandReference,
+  };
+  const accounts = [];
+  for (const { itemReference: item, operationReference: operation, onHand } of items) {
+    await admin.query("SET ROLE " + role);
+    const ports = {
+      authorization: { authorize: async () => ({ authorized: true }) },
+      references: {
+        generate: () => item,
+        hashIntent: (text) => "sha256:" + createHash("sha256").update(text).digest("hex"),
+        equals: (a, b) => a === b,
+      },
+      audit: {
+        create: async ({ command, after }) => ({
+          auditId: next(),
+          brandId: scope.brandReference,
+          actor: { type: "User", reference: id(3) },
+          actionCode: "INVENTORY_ITEM_" + command.action.toUpperCase(),
+          targetType: "InventoryItem",
+          targetId: after.itemReference,
+          reasonCode: "SYNTHETIC_RECIPE_SETUP",
+          correlationId: command.operationReference,
+          occurredAt: at,
+          sourceChannel: "MERCHANT_WEB",
+          dataClassification: "Internal",
+          retentionPolicyCode: "SYNTHETIC_AUDIT",
+          retentionPolicyVersion: 1,
+        }),
+      },
+      repository: createPostgresInventoryItemStore(runner, itemScope),
+    };
+    const common = {
+      ...itemScope,
+      actorReference: id(3),
+      purpose: "InventoryItemManagement",
+      permission: "inventory.manage",
+      occurredAt: at,
+    };
+    await executeInventoryItemCommand(
+      {
+        ...common,
+        action: "Create",
+        operationReference: next(),
+        payload: {
+          internalCode: "OBS_ITEM_" + item.slice(-8).toUpperCase(),
+          itemType: "RawMaterial",
+          localizedNames: { en: "Synthetic observation ingredient" },
+          baseUnit: {
+            unitCode: "KG",
+            dimension: "Mass",
+            displayPrecision: 2,
+            ledgerPrecision: 4,
+            roundingMode: "HalfEven",
+          },
+          trackingPolicy: {
+            stockTrackingEnabled: true,
+            lotTrackingMode: "NoLot",
+            defaultShelfLifeDays: null,
+            expiryWarningDays: null,
+            issuePolicy: "FIFO",
+            negativeStockPolicy: "Block",
+          },
+        },
+      },
+      ports,
+    );
+    await executeInventoryItemCommand(
+      {
+        ...common,
+        action: "Activate",
+        operationReference: operation,
+        payload: { itemReference: item, expectedVersion: 1, reasonCode: "READY" },
+      },
+      ports,
+    );
+    await admin.query("RESET ROLE");
+    const account = next(),
+      location = next(),
+      movement = next(),
+      audit = next();
+    await admin.query(
+      "INSERT INTO rms_inventory.stock_account (tenant_id,brand_id,store_id,stock_site_id,location_id,account_id,item_id,item_version,unit_code,ledger_precision,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,2,'KG',4,$8)",
+      [
+        scope.tenantReference,
+        scope.brandReference,
+        scope.storeReference,
+        scope.stockSiteReference,
+        location,
+        account,
+        item,
+        at,
+      ],
+    );
+    await admin.query(
+      "INSERT INTO rms_inventory.stock_balance (tenant_id,brand_id,store_id,account_id,ledger_version,on_hand,reserved,in_transit) VALUES ($1,$2,$3,$4,1,0,0,0)",
+      [scope.tenantReference, scope.brandReference, scope.storeReference, account],
+    );
+    const balance = (n, v) => ({
+      onHand: n,
+      reserved: "0",
+      available: n,
+      inTransit: "0",
+      unitCode: "KG",
+      ledgerVersion: v,
+    });
+    const record = {
+      movementReference: movement,
+      tenantReference: scope.tenantReference,
+      brandReference: scope.brandReference,
+      itemReference: item,
+      movementType: "Receive",
+      quantityDelta: onHand,
+      unitCode: "KG",
+      baseQuantityDelta: onHand,
+      baseUnitCode: "KG",
+      conversionMultiplier: "1",
+      sourceScope: null,
+      destinationScope: { scopeType: "Location", scopeReference: location },
+      lotReference: null,
+      expiryDate: null,
+      businessSourceType: "SYNTHETIC_RECEIPT",
+      businessSourceReference: next(),
+      reasonCode: "SYNTHETIC_TEST",
+      performedBy: id(3),
+      occurredAt: at,
+      before: balance("0", 1),
+      after: balance(onHand, 2),
+      auditReference: audit,
+      correctsMovementReference: null,
+    };
+    await admin.query("BEGIN");
+    try {
+      await admin.query(
+        "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+        [scope.tenantReference, scope.brandReference, scope.storeReference],
+      );
+      await admin.query(
+        "INSERT INTO rms_inventory.stock_movement (tenant_id,brand_id,store_id,account_id,movement_id,ledger_version,movement_type,base_quantity_delta,record_json,audit_id,occurred_at) VALUES ($1,$2,$3,$4,$5,2,'Receive',$9,$6,$7,$8)",
+        [
+          scope.tenantReference,
+          scope.brandReference,
+          scope.storeReference,
+          account,
+          movement,
+          record,
+          audit,
+          at,
+          onHand,
+        ],
+      );
+      await appendAuditRecordInTransaction(
+        { query: (sql, values) => admin.query(sql, [...values]) },
+        {
+          auditId: audit,
+          brandId: scope.brandReference,
+          storeId: scope.storeReference,
+          actor: { type: "User", reference: id(3) },
+          actionCode: "INVENTORY_RECEIVE",
+          targetType: "StockMovement",
+          targetId: movement,
+          reasonCode: "SYNTHETIC_TEST",
+          correlationId: next(),
+          occurredAt: at,
+          sourceChannel: "MERCHANT_WEB",
+          dataClassification: "Internal",
+          retentionPolicyCode: "SYNTHETIC_AUDIT",
+          retentionPolicyVersion: 1,
+        },
+      );
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+    accounts.push({ itemReference: item, accountReference: account });
+  }
+  return accounts;
 }

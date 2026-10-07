@@ -62,7 +62,11 @@ export { createInventoryRecipeItemSource } from "./application/recipe-item-sourc
 
 export { calculateRecipeDemandQuantity } from "./domain/recipe-demand-quantity.js";
 
-export { createInventoryRecipeDemandSource } from "./application/recipe-demand-source.js";
+export {
+  createInventoryRecipeDemandSource,
+  createInventoryRecipeLineDemandSource,
+  type RecipeLineDemandContribution,
+} from "./application/recipe-demand-source.js";
 export type { RecipeItemDemandContribution } from "./application/recipe-demand-source.js";
 
 export { createPostgresStockCandidateSource } from "./infrastructure/persistence/stock-candidate-source.js";
@@ -191,3 +195,12 @@ export {
   type InventoryProductPublicationSkuMappingReferenceOptionsV2,
 } from "./infrastructure/persistence/sku-mapping-reference-source-store.js";
 export { matchInventoryProductPublicationSkuMappingReferenceGraphsV2 } from "./contracts/sku-mapping-reference-matches.js";
+export {
+  planOrderLineKitchenEffects,
+  type OrderLineInventoryEffect,
+  type OrderLineReservation,
+} from "./domain/order-line-consumption.js";
+export {
+  createPostgresOrderLineConsumptionStore,
+  OrderLineConsumptionError,
+} from "./infrastructure/persistence/order-line-consumption-store.js";

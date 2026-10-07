@@ -183,3 +183,61 @@ describe("complete submission release planning", () => {
     });
   });
 });
+describe("WP-2423 per-Order-line reservation sets", () => {
+  const lined = (n: number, account: number, line: number) => ({
+    ...entry(n),
+    accountReference: id(account),
+    reservation: createInventoryReservation({
+      reservationReference: id(n + 4),
+      binding: { ...binding, cartItemReference: id(line) },
+      unit: {
+        unitCode: "KG",
+        dimension: "Mass",
+        displayPrecision: 2,
+        ledgerPrecision: 6,
+        roundingMode: "HalfEven",
+      },
+      quantity: "0.5",
+      occurredAt: "2026-09-11T10:00:00.000Z",
+    }),
+  });
+  it("accepts one reservation per account and Order line", () => {
+    const set = parseInventoryReservationSet({
+      ...input(),
+      entries: [lined(100, 90, 300), lined(200, 90, 301)],
+    });
+    expect(set.entries.map((e) => e.reservation.binding.cartItemReference)).toEqual([
+      id(300),
+      id(301),
+    ]);
+  });
+  it("rejects a duplicate account and line, and mixed per-line and legacy children", () => {
+    expect(() =>
+      parseInventoryReservationSet({
+        ...input(),
+        entries: [lined(100, 90, 300), lined(200, 90, 300)],
+      }),
+    ).toThrow();
+    expect(() =>
+      parseInventoryReservationSet({ ...input(), entries: [lined(100, 90, 300), entry(200)] }),
+    ).toThrow();
+  });
+  it("releases per-line reservations in Item, account, Order-line order", () => {
+    const set = parseInventoryReservationSet({
+      ...input(),
+      entries: [lined(200, 90, 301), lined(100, 90, 300)],
+    });
+    const plan = planInventoryReservationSetRelease({
+      set,
+      current: set.entries.map((e) => ({
+        accountReference: e.accountReference,
+        reservation: e.reservation,
+      })),
+      occurredAt: "2026-09-11T10:05:00.000Z",
+    });
+    expect(plan.entries.map((e) => e.reservation.binding.cartItemReference)).toEqual([
+      id(300),
+      id(301),
+    ]);
+  });
+});

@@ -360,3 +360,8 @@ export * from "./infrastructure/persistence/order-batch-checkout-expiry-store.js
 export * from "./domain/order-batch-checkout-cancellation.js";
 
 export * from "./application/order-expired-payment-disposition.js";
+export {
+  createPostgresOrderItemInventoryLinkReader,
+  OrderItemInventoryLinkError,
+  type OrderItemInventoryLink,
+} from "./infrastructure/persistence/order-item-inventory-link-reader.js";

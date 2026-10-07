@@ -523,12 +523,11 @@ it("commits reservation movement and Audit atomically and recovers original oper
         quantity: "4",
         occurredAt: at,
       });
+      // WP-2423: stock already in production is still recorded as consumed after the Item is
+      // deactivated; only starting production is gated by the Item lifecycle (asserted above).
       await lifecycle("Inactive");
-      await assert.rejects(adapter().commit(input(75, "Consume", consumed, "4", 4)), {
-        code: "STOCK_RESERVATION_ITEM_INELIGIBLE",
-      });
-      await lifecycle("Active");
       await adapter().commit(input(75, "Consume", consumed, "4", 4));
+      await lifecycle("Active");
       assert.deepEqual(
         (await adapter().loadCurrent(reservation.reservationReference)).reservation,
         consumed,

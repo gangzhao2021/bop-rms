@@ -1369,6 +1369,13 @@ async function scanUnsupported(root, module, diagnostics) {
             "stock_lot_hold_version",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/stock-reservation-store.ts";
+        const acceptedOrderLineConsumptionAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          ["stock_balance", "stock_reservation_version"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/order-line-consumption-store.ts";
         const acceptedStockCandidateAsset =
           module.packageName === "@rms/inventory" &&
           module.manifest.ownedDatabase?.schema === "rms_inventory" &&
@@ -2522,6 +2529,13 @@ async function scanUnsupported(root, module, diagnostics) {
             "order_termination_record",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/order-fulfillment-source-store.ts";
+        const acceptedOrderItemInventoryLinkAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["order_item", "order_batch"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/order-item-inventory-link-reader.ts";
         const acceptedOrderKitchenSourceAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -2951,6 +2965,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedStockCandidateAsset &&
           !acceptedInventoryFinalValidationAsset &&
           !acceptedStockReservationAsset &&
+          !acceptedOrderLineConsumptionAsset &&
+          !acceptedOrderItemInventoryLinkAsset &&
           !acceptedBrowserSessionSelectionAsset &&
           !acceptedBrowserBrandSessionSelectionAsset &&
           !acceptedBrandCatalogSourceAsset &&

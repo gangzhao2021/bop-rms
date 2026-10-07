@@ -52,6 +52,7 @@ export function parseInventoryReservationSet(value: unknown) {
   const used = new Map<string, Set<string>>();
   const entries = [];
   let common: string | undefined;
+  let lineMode: boolean | undefined;
   for (let index = 0; index < raw.entries.length; index++) {
     const slot = Object.getOwnPropertyDescriptor(raw.entries, String(index));
     if (!slot?.enumerable || !("value" in slot)) return fail();
@@ -93,8 +94,12 @@ export function parseInventoryReservationSet(value: unknown) {
     ]);
     if (common !== undefined && common !== binding) return fail();
     common = binding;
+    // WP-2423: a per-line set (schema 2) holds one reservation per account and Order line.
+    if (lineMode !== undefined && lineMode !== (reservation.schemaVersion === 2)) return fail();
+    lineMode = reservation.schemaVersion === 2;
     for (const [field, reference] of Object.entries({
       ...refs,
+      accountReference: refs.accountReference + ":" + (b.cartItemReference ?? ""),
       reservationReference: reservation.reservationReference,
     })) {
       const set = used.get(field) ?? new Set<string>();
@@ -117,6 +122,22 @@ export function parseInventoryReservationSet(value: unknown) {
   });
 }
 export type InventoryReservationSet = ReturnType<typeof parseInventoryReservationSet>;
+
+/** Canonical write order: Item, account, then Order line, so same-account ledger versions follow. */
+export function reservationOrderKey(
+  reservation: Readonly<{
+    binding: Readonly<{ itemReference: string; cartItemReference?: string }>;
+  }>,
+  accountReference: string,
+) {
+  return (
+    reservation.binding.itemReference +
+    ":" +
+    accountReference +
+    ":" +
+    (reservation.binding.cartItemReference ?? "")
+  );
+}
 
 /** Pure complete-submission release candidates. The caller must establish cancellation authority,
  * resolve durable replay first, and persist every candidate atomically under current source fences.
@@ -174,8 +195,8 @@ export function planInventoryReservationSetRelease(value: unknown) {
   }
   if (originals.size !== 0) return fail();
   entries.sort((a, b) => {
-    const left = a.reservation.binding.itemReference + ":" + a.accountReference;
-    const right = b.reservation.binding.itemReference + ":" + b.accountReference;
+    const left = reservationOrderKey(a.reservation, a.accountReference);
+    const right = reservationOrderKey(b.reservation, b.accountReference);
     return left < right ? -1 : left > right ? 1 : 0;
   });
   return Object.freeze({
