@@ -6,8 +6,9 @@
 /**
  * Bump on any change to codes, risks, legacy replacements or role templates; the installed digest
  * covers all of them. v2 (2026-10-07): Store Manager may approve role changes (DEC-PERM-CATALOG A).
+ * v3 (2026-10-07): Brand role templates for Brand-level master data (DEC-PERM-BRAND-ROLES).
  */
-export const storePermissionCatalogVersion = 2 as const;
+export const storePermissionCatalogVersion = 3 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -490,4 +491,70 @@ export function withLegacyEquivalents(catalogCodes: readonly string[]): readonly
   for (const [legacy, replacements] of Object.entries(legacyPermissionReplacements))
     if (replacements.every((code) => codes.has(code))) codes.add(legacy);
   return Object.freeze([...codes].sort());
+}
+
+export type BrandRoleTemplateCode = "brand-owner" | "recipe-developer" | "recipe-reviewer";
+/**
+ * DEC-PERM-BRAND-ROLES: Brand-level System roles for facts every Store of the Brand shares (Recipes,
+ * Catalog, pricing, Inventory Item master data). Grants apply to the Brand and every Store of it.
+ */
+export const brandRoleTemplates: Readonly<Record<BrandRoleTemplateCode, readonly string[]>> =
+  Object.freeze({
+    "brand-owner": Object.freeze(
+      pick([
+        "merchant.access",
+        "organization.staff.",
+        "organization.brand.manage",
+        "identity.role.",
+        "catalog.",
+        "pricing.",
+        "recipe.",
+        "inventory.item.",
+        "media.",
+        "audit.catalog.",
+        "audit.inventory.item.",
+      ]),
+    ),
+    "recipe-developer": Object.freeze([
+      "merchant.access",
+      "recipe.read",
+      "recipe.update",
+      "inventory.item.read",
+    ]),
+    "recipe-reviewer": Object.freeze([
+      "merchant.access",
+      "recipe.read",
+      "recipe.approve",
+      "inventory.item.read",
+    ]),
+  });
+export const brandRoleTemplateCodes: readonly BrandRoleTemplateCode[] = Object.freeze([
+  "brand-owner",
+  "recipe-developer",
+  "recipe-reviewer",
+]);
+export const brandRoleTemplateProfiles: Readonly<
+  Record<
+    BrandRoleTemplateCode,
+    { readonly roleCode: string; readonly displayName: string; readonly description: string }
+  >
+> = Object.freeze({
+  "brand-owner": {
+    roleCode: "brand_owner",
+    displayName: "Brand Owner",
+    description: "Recipes, menu and products, pricing, supply items and Brand staff roles",
+  },
+  "recipe-developer": {
+    roleCode: "recipe_developer",
+    displayName: "Recipe Developer",
+    description: "Write and revise recipe drafts",
+  },
+  "recipe-reviewer": {
+    roleCode: "recipe_reviewer",
+    displayName: "Recipe Reviewer",
+    description: "Review recipe cost and food safety before publication",
+  },
+});
+export function brandRoleTemplateActions(template: BrandRoleTemplateCode): readonly string[] {
+  return withLegacyEquivalents(brandRoleTemplates[template]);
 }

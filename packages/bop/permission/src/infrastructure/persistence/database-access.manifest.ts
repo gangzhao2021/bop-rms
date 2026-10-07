@@ -99,6 +99,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      table: "brand_role_provisioning",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "role_assignment_change",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@bop/permission" },
@@ -664,6 +672,156 @@ const databaseAccessManifestInput = {
       readPattern: null,
       source:
         "packages/bop/permission/src/infrastructure/persistence/store-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.read.brand_role_provisioning",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "brand_role_provisioning" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.read.permission_catalog_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_catalog_revision" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.read.policy_state",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "policy_state" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.read.permission_definition",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_definition" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.read.role",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.write.brand_role_provisioning",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "brand_role_provisioning" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.write.policy_state",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "policy_state" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.write.role",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.write.permission_grant",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_grant" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.write.role_administration_version",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_administration_version" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.write.role_administration_permission",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_administration_permission" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.write.role_administration_decision",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_administration_decision" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.read.permission_grant",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_grant" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.read.role_administration_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_administration_version" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
+    },
+    {
+      id: "brand-role-provisioning-store.write.role_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_assignment" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-role-provisioning-store.ts",
     },
     {
       id: "role-administration-store.read.role_administration_version",

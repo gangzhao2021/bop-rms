@@ -5,6 +5,9 @@ import {
   storePermissionCatalog,
   storePermissionCatalogVersion,
   storeRoleTemplateActions,
+  brandRoleTemplateActions,
+  brandRoleTemplateCodes,
+  brandRoleTemplateProfiles,
   storeRoleTemplateCodes,
   storeRoleTemplateProfiles,
 } from "../../catalog/store-permission-catalog.js";
@@ -76,6 +79,11 @@ export function permissionCatalogDigest(): string {
       template,
       ...storeRoleTemplateProfiles[template],
       actions: storeRoleTemplateActions(template),
+    })),
+    brandTemplates: brandRoleTemplateCodes.map((template) => ({
+      template,
+      ...brandRoleTemplateProfiles[template],
+      actions: brandRoleTemplateActions(template),
     })),
   });
   return "sha256:" + createHash("sha256").update(body).digest("hex");

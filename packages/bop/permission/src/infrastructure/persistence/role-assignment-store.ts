@@ -6,6 +6,8 @@ import { appendAuditRecordInTransaction } from "@bop/audit";
  * the subject) approves it before it takes effect. Revoking is a privilege decrease and applies at
  * once. A Store always keeps at least one active Owner. Every effective change advances the Brand
  * policy version so current authorization re-reads it.
+ * DEC-PERM-BRAND-ROLES: the same rules apply to Brand roles (`storeReference` null), whose subject
+ * needs an Active Brand Membership only and whose last Brand Owner cannot be removed.
  */
 export interface RoleAssignmentTransaction {
   query(
@@ -15,7 +17,8 @@ export interface RoleAssignmentTransaction {
 }
 export interface RoleAssignmentScope {
   readonly brandReference: string;
-  readonly storeReference: string;
+  /** Null for Brand roles. */
+  readonly storeReference: string | null;
 }
 export interface StoreRoleAssignmentView {
   readonly assignmentReference: string;
@@ -53,10 +56,17 @@ const fail = (code: RoleAssignmentError["code"]): never => {
 };
 const iso = (value: unknown) =>
   value instanceof Date ? value.toISOString() : new Date(String(value)).toISOString();
-const scopeSql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)";
+const scopeSql =
+  "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',COALESCE($2::text,''),true)";
+/** Store rows of the Store, or Brand rows (no Store) when the scope has no Store. */
+const storeMatch = (column: string, parameter: string) =>
+  `${column} IS NOT DISTINCT FROM ${parameter}::uuid`;
+const ownerRole = (scope: RoleAssignmentScope) =>
+  scope.storeReference === null ? "brand_owner" : "store_owner";
+const lockScope = (scope: RoleAssignmentScope) =>
+  scope.storeReference ?? "brand:" + scope.brandReference;
 const roleNameSql = `COALESCE((SELECT v.display_name FROM bop_permission.role_administration_version v
    WHERE v.brand_id=r.brand_id AND v.role_id=r.role_id ORDER BY v.version DESC LIMIT 1),r.role_code)`;
-const ownerRoleCode = "store_owner";
 
 export async function listStoreRoleAssignments(
   tx: RoleAssignmentTransaction,
@@ -71,7 +81,7 @@ export async function listStoreRoleAssignments(
     await tx.query(
       `SELECT a.assignment_id::text assignment,a.role_id::text role,r.role_code,${roleNameSql} role_name,a.actor_id::text actor,a.effective_from
        FROM bop_permission.role_assignment a JOIN bop_permission.role r ON r.role_id=a.role_id AND r.brand_id=a.brand_id
-       WHERE a.brand_id=$1 AND a.store_id=$2 AND a.lifecycle='Active'
+       WHERE a.brand_id=$1 AND ${storeMatch("a.store_id", "$2")} AND a.lifecycle='Active'
          AND a.effective_from<=$3::timestamptz AND (a.effective_until IS NULL OR a.effective_until>$3::timestamptz)
        ORDER BY a.actor_id,r.role_code`,
       [scope.brandReference, scope.storeReference, at],
@@ -91,7 +101,7 @@ export async function listStoreRoleAssignments(
       `SELECT c.change_id::text change,c.role_id::text role,r.role_code,${roleNameSql} role_name,c.actor_id::text actor,
          c.requested_by::text requested_by,c.requested_at
        FROM bop_permission.role_assignment_change c JOIN bop_permission.role r ON r.role_id=c.role_id AND r.brand_id=c.brand_id
-       WHERE c.brand_id=$1 AND c.store_id=$2 AND c.kind='Assign'
+       WHERE c.brand_id=$1 AND ${storeMatch("c.store_id", "$2")} AND c.kind='Assign'
          AND NOT EXISTS (SELECT 1 FROM bop_permission.role_assignment_change_decision d WHERE d.change_id=c.change_id)
        ORDER BY c.requested_at`,
       [scope.brandReference, scope.storeReference],
@@ -124,7 +134,7 @@ async function audit(tx: RoleAssignmentTransaction, scope: RoleAssignmentScope, 
   await appendAuditRecordInTransaction(tx, {
     auditId: value.auditReference,
     brandId: scope.brandReference,
-    storeId: scope.storeReference,
+    ...(scope.storeReference === null ? {} : { storeId: scope.storeReference }),
     actor: { type: "User", reference: value.actorReference },
     actionCode: value.actionCode,
     targetType: "RoleAssignment",
@@ -158,7 +168,7 @@ async function advancePolicy(
 async function activeRole(tx: RoleAssignmentTransaction, scope: RoleAssignmentScope, role: string) {
   const row = (
     await tx.query(
-      "SELECT role_code,lifecycle FROM bop_permission.role WHERE role_id=$1 AND brand_id=$2 AND store_id=$3",
+      `SELECT role_code,lifecycle FROM bop_permission.role WHERE role_id=$1 AND brand_id=$2 AND ${storeMatch("store_id", "$3")}`,
       [role, scope.brandReference, scope.storeReference],
     )
   ).rows[0];
@@ -176,16 +186,19 @@ export async function requestRoleAssignment(
     readonly roleReference: string;
     readonly actorReference: string;
     readonly membershipReference: string;
-    readonly storeAssignmentReference: string;
+    /** Null for a Brand role. */
+    readonly storeAssignmentReference: string | null;
     readonly requestedBy: string;
     readonly at: string;
     readonly auditReference: string;
   },
 ): Promise<{ readonly status: "Requested" | "AlreadyApplied" }> {
   if (input.requestedBy === input.actorReference) fail("ROLE_ASSIGNMENT_SELF");
+  if ((input.storeReference === null) !== (input.storeAssignmentReference === null))
+    fail("ROLE_ASSIGNMENT_INVALID");
   await tx.query(scopeSql, [input.brandReference, input.storeReference]);
   await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-    "bop_permission.role_assignment:" + input.storeReference + ":" + input.actorReference,
+    "bop_permission.role_assignment:" + lockScope(input) + ":" + input.actorReference,
   ]);
   const prior = (
     await tx.query(
@@ -256,11 +269,11 @@ export async function decideRoleAssignment(
     /** Signed Platform approval evidence when Platform support decides instead of the Store. */
     readonly platformApprovalEvidence?: string;
   },
-  /** Membership owner's confirmation that the subject is still an Active member of the Store. */
+  /** Membership owner's confirmation that the subject is still an Active member (of the Store). */
   confirmMember: (member: {
     readonly actorReference: string;
     readonly membershipReference: string;
-    readonly storeAssignmentReference: string;
+    readonly storeAssignmentReference: string | null;
   }) => Promise<boolean>,
 ): Promise<{
   readonly status: "Applied" | "AlreadyApplied";
@@ -271,13 +284,13 @@ export async function decideRoleAssignment(
     await tx.query(
       `SELECT kind,role_id::text role,assignment_id::text assignment,actor_id::text actor,membership_id::text membership,
          store_assignment_id::text store_assignment,requested_by::text requested_by
-       FROM bop_permission.role_assignment_change WHERE change_id=$1 AND brand_id=$2 AND store_id=$3`,
+       FROM bop_permission.role_assignment_change WHERE change_id=$1 AND brand_id=$2 AND ${storeMatch("store_id", "$3")}`,
       [input.changeReference, input.brandReference, input.storeReference],
     )
   ).rows[0];
   if (change === undefined || change.kind !== "Assign") return fail("ROLE_ASSIGNMENT_NOT_FOUND");
   await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-    "bop_permission.role_assignment:" + input.storeReference + ":" + String(change.actor),
+    "bop_permission.role_assignment:" + lockScope(input) + ":" + String(change.actor),
   ]);
   const decided = (
     await tx.query(
@@ -306,7 +319,8 @@ export async function decideRoleAssignment(
       (await confirmMember({
         actorReference: String(change.actor),
         membershipReference: String(change.membership),
-        storeAssignmentReference: String(change.store_assignment),
+        storeAssignmentReference:
+          change.store_assignment === null ? null : String(change.store_assignment),
       })) !== true
     )
       fail("ROLE_ASSIGNMENT_CONFLICT");
@@ -399,16 +413,16 @@ export async function revokeRoleAssignment(
     await tx.query(
       `SELECT a.role_id::text role,a.actor_id::text actor,a.membership_id::text membership,a.store_assignment_id::text store_assignment,r.role_code
        FROM bop_permission.role_assignment a JOIN bop_permission.role r ON r.role_id=a.role_id AND r.brand_id=a.brand_id
-       WHERE a.assignment_id=$1 AND a.brand_id=$2 AND a.store_id=$3 AND a.lifecycle='Active'`,
+       WHERE a.assignment_id=$1 AND a.brand_id=$2 AND ${storeMatch("a.store_id", "$3")} AND a.lifecycle='Active'`,
       [input.assignmentReference, input.brandReference, input.storeReference],
     )
   ).rows[0];
   if (assignment === undefined) return fail("ROLE_ASSIGNMENT_NOT_FOUND");
   if (assignment.actor === input.revokedBy) fail("ROLE_ASSIGNMENT_SELF");
   await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-    "bop_permission.role_assignment:" + input.storeReference + ":owners",
+    "bop_permission.role_assignment:" + lockScope(input) + ":owners",
   ]);
-  if (assignment.role_code === ownerRoleCode) {
+  if (assignment.role_code === ownerRole(input)) {
     const owners = Number(
       (
         await tx.query(

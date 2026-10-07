@@ -49,3 +49,27 @@ export async function confirmStoreMemberScope(
   );
   return result.rows.length === 1;
 }
+
+/**
+ * WP-2423 / DEC-PERM-BRAND-ROLES: Membership owner's confirmation that an Actor holds an Active Brand
+ * Membership effective at the given instant (Brand-level roles need no Store assignment).
+ */
+export async function confirmBrandMemberScope(
+  tx: StoreMemberScopeTransaction,
+  scope: {
+    readonly brandReference: string;
+    readonly actorReference: string;
+    readonly membershipReference: string;
+    readonly at: string;
+  },
+): Promise<boolean> {
+  const membership = String(parseMembershipReference(scope.membershipReference));
+  await tx.query("SELECT set_config('bop.brand_id',$1,true)", [scope.brandReference]);
+  const result = await tx.query(
+    `SELECT 1 FROM bop_membership.membership m
+     WHERE m.membership_id=$1 AND m.actor_id=$2 AND m.brand_id=$3 AND m.lifecycle='Active'
+       AND m.effective_from<=$4::timestamptz AND (m.effective_until IS NULL OR m.effective_until>$4::timestamptz)`,
+    [membership, scope.actorReference, scope.brandReference, scope.at],
+  );
+  return result.rows.length === 1;
+}

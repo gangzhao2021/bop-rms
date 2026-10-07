@@ -17,12 +17,15 @@ export interface StaffAssignmentView {
   readonly assignmentReference: string;
   readonly roleReference: string;
   readonly roleName: string;
+  /** Brand roles apply to every Store of the Brand (DEC-PERM-BRAND-ROLES). */
+  readonly scope: "Store" | "Brand";
   readonly since: string;
   readonly mayRevoke: boolean;
 }
 export interface StaffPendingView {
   readonly changeReference: string;
   readonly roleName: string;
+  readonly scope: "Store" | "Brand";
   readonly requestedBy: string;
   readonly requestedAt: string;
   readonly mayDecide: boolean;
@@ -44,11 +47,17 @@ export interface StaffMemberView {
 export interface StaffPageView {
   readonly screenId: "IAM-USER-LIST" | "IAM-USER-DETAIL";
   readonly sourceAsOf: string;
-  readonly viewer: { readonly mayManage: boolean; readonly mayApprove: boolean };
+  readonly viewer: {
+    readonly mayManage: boolean;
+    readonly mayApprove: boolean;
+    readonly brandMayManage: boolean;
+    readonly brandMayApprove: boolean;
+  };
   readonly roles: readonly {
     readonly roleReference: string;
     readonly code: string;
     readonly name: string;
+    readonly scope: "Store" | "Brand";
   }[];
   readonly staff: readonly StaffMemberView[];
 }
@@ -101,6 +110,7 @@ const text = (value: unknown) =>
 const time = (value: unknown) =>
   typeof value === "string" && instant.test(value) ? value : invalid();
 const flag = (value: unknown) => (typeof value === "boolean" ? value : invalid());
+const level = (value: unknown) => (value === "Store" || value === "Brand" ? value : invalid());
 const list = <T>(value: unknown, map: (item: unknown) => T): readonly T[] =>
   Array.isArray(value) ? Object.freeze(value.map(map)) : invalid();
 
@@ -113,7 +123,7 @@ export function parseStaffPageView(
 ): StaffPageView {
   const r = closed(value, ["screenId", "sourceAsOf", "viewer", "roles", "staff"]);
   if (r.screenId !== screenId) invalid();
-  const viewer = closed(r.viewer, ["mayManage", "mayApprove"]);
+  const viewer = closed(r.viewer, ["mayManage", "mayApprove", "brandMayManage", "brandMayApprove"]);
   const staff = list(r.staff, (item) => {
     const m = closed(item, [
       "actorReference",
@@ -142,6 +152,7 @@ export function parseStaffPageView(
           "assignmentReference",
           "roleReference",
           "roleName",
+          "scope",
           "since",
           "mayRevoke",
         ]);
@@ -149,6 +160,7 @@ export function parseStaffPageView(
           assignmentReference: ref(x.assignmentReference),
           roleReference: ref(x.roleReference),
           roleName: text(x.roleName),
+          scope: level(x.scope),
           since: time(x.since),
           mayRevoke: flag(x.mayRevoke),
         });
@@ -157,6 +169,7 @@ export function parseStaffPageView(
         const x = closed(p, [
           "changeReference",
           "roleName",
+          "scope",
           "requestedBy",
           "requestedAt",
           "mayDecide",
@@ -165,6 +178,7 @@ export function parseStaffPageView(
         return Object.freeze({
           changeReference: ref(x.changeReference),
           roleName: text(x.roleName),
+          scope: level(x.scope),
           requestedBy: text(x.requestedBy),
           requestedAt: time(x.requestedAt),
           mayDecide: flag(x.mayDecide),
@@ -182,13 +196,16 @@ export function parseStaffPageView(
     viewer: Object.freeze({
       mayManage: flag(viewer.mayManage),
       mayApprove: flag(viewer.mayApprove),
+      brandMayManage: flag(viewer.brandMayManage),
+      brandMayApprove: flag(viewer.brandMayApprove),
     }),
     roles: list(r.roles, (item) => {
-      const x = closed(item, ["roleReference", "code", "name"]);
+      const x = closed(item, ["roleReference", "code", "name", "scope"]);
       return Object.freeze({
         roleReference: ref(x.roleReference),
         code: text(x.code),
         name: text(x.name),
+        scope: level(x.scope),
       });
     }),
     staff,

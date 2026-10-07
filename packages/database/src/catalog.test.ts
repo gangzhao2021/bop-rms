@@ -652,6 +652,7 @@ describe("migration catalog", () => {
       "2000_007_create_item_stock_exposure",
       "2000_008_create_opening_stock_count",
       "2000_009_create_store_receipt",
+      "2000_010_create_brand_role_provisioning",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -1868,6 +1869,7 @@ describe("migration catalog", () => {
       ["2000_003_create_store_role_provisioning", "@bop/permission", "bop_permission"],
       ["2000_004_alter_store_role_provisioning_upgrade", "@bop/permission", "bop_permission"],
       ["2000_006_create_role_assignment_change", "@bop/permission", "bop_permission"],
+      ["2000_010_create_brand_role_provisioning", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",

@@ -1,5 +1,6 @@
 import { appendAuditRecordInTransaction } from "@bop/audit";
 import {
+  confirmBrandMemberScope,
   confirmStoreMemberScope,
   listStoreMembers,
   loadStoreMember,
@@ -17,6 +18,7 @@ import {
   type RoleAdministrationTransaction,
   type RoleAssignmentTransaction,
 } from "@bop/permission";
+import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -27,6 +29,8 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
  * organization.staff.read. Maintaining names, requesting, withdrawing and revoking need
  * organization.staff.manage; approving or rejecting a role assignment needs identity.role.approve and
  * is never done by the requester or the subject.
+ * DEC-PERM-BRAND-ROLES: Brand roles (Recipes, Catalog, pricing) are assigned on the same page; they
+ * need the same actions held at Brand scope, and the subject needs only an Active Brand Membership.
  */
 export class MerchantStaffAdministrationError extends Error {
   constructor(
@@ -118,6 +122,7 @@ export function createMerchantStaffAdministration(options: {
   references: { next(): string };
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
+  const resolveBrandScope = createMerchantBrandScope(options.persistence);
   type Tx = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
   const directoryTx = (tx: Tx) => tx as unknown as MemberDirectoryTransaction;
   const permissionTx = (tx: Tx) =>
@@ -138,28 +143,65 @@ export function createMerchantStaffAdministration(options: {
   }
   const may = async (scope: Awaited<ReturnType<typeof scopeFor>>, action: string) =>
     (await scope.authorizeAction(action))?.effect === "Allow";
+  /** Brand-scoped decisions; a Store grant alone never satisfies them. */
+  const brandMay = async (tx: Tx, sessionCookie: unknown, sessionReference: string) => {
+    const brand = await resolveBrandScope(tx, sessionCookie, sessionReference).catch(() => null);
+    return async (action: string) =>
+      brand !== null && (await brand.authorizeAction(action))?.effect === "Allow";
+  };
+  /** Store and Brand assignments with the scope each one belongs to. */
+  async function assignmentsOf(tx: Tx, owner: { brandReference: string; storeReference: string }) {
+    const now = options.persistence.now();
+    const store = await listStoreRoleAssignments(permissionTx(tx), owner, now);
+    const brand = await listStoreRoleAssignments(
+      permissionTx(tx),
+      { brandReference: owner.brandReference, storeReference: null },
+      now,
+    );
+    return {
+      assignments: [
+        ...store.assignments.map((item) => ({ ...item, scope: "Store" as const })),
+        ...brand.assignments.map((item) => ({ ...item, scope: "Brand" as const })),
+      ],
+      pending: [
+        ...store.pending.map((item) => ({ ...item, scope: "Store" as const })),
+        ...brand.pending.map((item) => ({ ...item, scope: "Brand" as const })),
+      ],
+    };
+  }
 
-  async function view(tx: Tx, scope: Awaited<ReturnType<typeof scopeFor>>, actor: string | null) {
+  async function view(
+    tx: Tx,
+    scope: Awaited<ReturnType<typeof scopeFor>>,
+    actor: string | null,
+    brandAllowed: (action: string) => Promise<boolean>,
+  ) {
     const owner = {
       brandReference: scope.context.brand.brandReference,
       storeReference: scope.store.storeReference,
     };
     const viewer = String(scope.actorReference);
     const mayManage = await may(scope, "organization.staff.manage"),
-      mayApprove = await may(scope, "identity.role.approve");
+      mayApprove = await may(scope, "identity.role.approve"),
+      brandMayManage = await brandAllowed("organization.staff.manage"),
+      brandMayApprove = await brandAllowed("identity.role.approve");
+    const manages = (scope: "Store" | "Brand") => (scope === "Store" ? mayManage : brandMayManage),
+      approves = (scope: "Store" | "Brand") => (scope === "Store" ? mayApprove : brandMayApprove);
     const now = options.persistence.now();
     const members =
       actor === null
         ? await listStoreMembers(directoryTx(tx), owner)
         : [await loadStoreMember(directoryTx(tx), owner, actor)];
-    const { assignments, pending } = await listStoreRoleAssignments(permissionTx(tx), owner, now);
+    const { assignments, pending } = await assignmentsOf(tx, owner);
     const roles = (await listRoleAdministration(permissionTx(tx), owner, now))
-      .filter((role) => role.record.storeReference !== null && role.record.lifecycle === "Active")
+      .filter((role) => role.record.lifecycle === "Active")
       .map((role) => ({
         roleReference: role.record.roleReference,
         code: role.record.code,
         name: role.record.displayName,
-      }));
+        scope: role.record.storeReference === null ? ("Brand" as const) : ("Store" as const),
+      }))
+      .filter((role) => manages(role.scope));
     const names = new Map(
       (actor === null ? members : await listStoreMembers(directoryTx(tx), owner)).map((member) => [
         member.actorReference,
@@ -171,7 +213,7 @@ export function createMerchantStaffAdministration(options: {
     return {
       screenId: actor === null ? "IAM-USER-LIST" : "IAM-USER-DETAIL",
       sourceAsOf: now,
-      viewer: { mayManage, mayApprove },
+      viewer: { mayManage, mayApprove, brandMayManage, brandMayApprove },
       roles: actor === null ? [] : roles,
       staff: members.map((member) => {
         const self = member.actorReference === viewer;
@@ -189,20 +231,22 @@ export function createMerchantStaffAdministration(options: {
               assignmentReference: item.assignmentReference,
               roleReference: item.roleReference,
               roleName: item.roleName,
+              scope: item.scope,
               since: item.effectiveFrom,
-              mayRevoke: mayManage && !self,
+              mayRevoke: manages(item.scope) && !self,
             })),
           pending: pending
             .filter((item) => item.actorReference === member.actorReference)
             .map((item) => ({
               changeReference: item.changeReference,
               roleName: item.roleName,
+              scope: item.scope,
               requestedBy: label(item.requestedBy),
               requestedAt: item.requestedAt,
-              mayDecide: mayApprove && !self && item.requestedBy !== viewer,
-              mayWithdraw: mayManage && item.requestedBy === viewer,
+              mayDecide: approves(item.scope) && !self && item.requestedBy !== viewer,
+              mayWithdraw: manages(item.scope) && item.requestedBy === viewer,
             })),
-          mayRequest: mayManage && !self,
+          mayRequest: (mayManage || brandMayManage) && !self,
           mayRename: mayManage,
         };
       }),
@@ -218,8 +262,9 @@ export function createMerchantStaffAdministration(options: {
     return retryTransactionConflict(() =>
       options.persistence.transactions.run(async (tx) => {
         const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+        const brandAllowed = await brandMay(tx, input.sessionCookie, current.sessionReference);
         try {
-          return await view(tx, scope, input.actorReference);
+          return await view(tx, scope, input.actorReference, brandAllowed);
         } catch (error) {
           if (error instanceof MemberDirectoryError) return fail("NotFound");
           throw error;
@@ -240,9 +285,13 @@ export function createMerchantStaffAdministration(options: {
         };
         const viewer = String(scope.actorReference);
         const at = options.persistence.now();
-        const require = async (action: string) => {
-          if (!(await may(scope, action))) fail("PermissionDenied");
+        const brandAllowed = await brandMay(tx, input.sessionCookie, current.sessionReference);
+        const require = async (action: string, at: "Store" | "Brand" = "Store") => {
+          if (!(await (at === "Store" ? may(scope, action) : brandAllowed(action))))
+            fail("PermissionDenied");
         };
+        const scoped = (at: "Store" | "Brand") =>
+          at === "Store" ? owner : { brandReference: owner.brandReference, storeReference: null };
         try {
           switch (command.operation) {
             case "SetDisplayName": {
@@ -267,26 +316,38 @@ export function createMerchantStaffAdministration(options: {
               );
             }
             case "RequestRole": {
-              await require("organization.staff.manage");
+              const role = (await listRoleAdministration(permissionTx(tx), owner, at)).find(
+                (item) => item.record.roleReference === command.roleReference,
+              );
+              if (role === undefined) return fail("NotFound");
+              const level = role.record.storeReference === null ? "Brand" : "Store";
+              await require("organization.staff.manage", level);
               const member = await loadStoreMember(directoryTx(tx), owner, command.actorReference);
-              if (
-                !(await confirmStoreMemberScope(directoryTx(tx), {
-                  ...owner,
-                  actorReference: member.actorReference,
-                  membershipReference: member.membershipReference,
-                  storeAssignmentReference: member.storeAssignmentReference,
-                  at,
-                }))
-              )
-                fail("Conflict");
+              const confirmed =
+                level === "Store"
+                  ? await confirmStoreMemberScope(directoryTx(tx), {
+                      ...owner,
+                      actorReference: member.actorReference,
+                      membershipReference: member.membershipReference,
+                      storeAssignmentReference: member.storeAssignmentReference,
+                      at,
+                    })
+                  : await confirmBrandMemberScope(directoryTx(tx), {
+                      brandReference: owner.brandReference,
+                      actorReference: member.actorReference,
+                      membershipReference: member.membershipReference,
+                      at,
+                    });
+              if (!confirmed) fail("Conflict");
               return await requestRoleAssignment(permissionTx(tx), {
-                ...owner,
+                ...scoped(level),
                 changeReference: command.operationReference,
                 assignmentReference: options.references.next(),
                 roleReference: command.roleReference,
                 actorReference: member.actorReference,
                 membershipReference: member.membershipReference,
-                storeAssignmentReference: member.storeAssignmentReference,
+                storeAssignmentReference:
+                  level === "Store" ? member.storeAssignmentReference : null,
                 requestedBy: viewer,
                 at,
                 auditReference: options.references.next(),
@@ -295,15 +356,17 @@ export function createMerchantStaffAdministration(options: {
             case "Approve":
             case "Reject":
             case "Withdraw": {
-              await require(
-                command.operation === "Withdraw"
-                  ? "organization.staff.manage"
-                  : "identity.role.approve",
+              const change = (await assignmentsOf(tx, owner)).pending.find(
+                (item) => item.changeReference === command.changeReference,
               );
+              if (change === undefined) return fail("NotFound");
+              await require(command.operation === "Withdraw"
+                ? "organization.staff.manage"
+                : "identity.role.approve", change.scope);
               return await decideRoleAssignment(
                 permissionTx(tx),
                 {
-                  ...owner,
+                  ...scoped(change.scope),
                   changeReference: command.changeReference,
                   decision:
                     command.operation === "Approve"
@@ -316,13 +379,31 @@ export function createMerchantStaffAdministration(options: {
                   auditReference: options.references.next(),
                   snapshotReference: options.references.next(),
                 },
-                (member) => confirmStoreMemberScope(directoryTx(tx), { ...owner, ...member, at }),
+                (member) =>
+                  member.storeAssignmentReference === null
+                    ? confirmBrandMemberScope(directoryTx(tx), {
+                        brandReference: owner.brandReference,
+                        actorReference: member.actorReference,
+                        membershipReference: member.membershipReference,
+                        at,
+                      })
+                    : confirmStoreMemberScope(directoryTx(tx), {
+                        ...owner,
+                        actorReference: member.actorReference,
+                        membershipReference: member.membershipReference,
+                        storeAssignmentReference: member.storeAssignmentReference,
+                        at,
+                      }),
               );
             }
             case "Revoke": {
-              await require("organization.staff.manage");
+              const assignment = (await assignmentsOf(tx, owner)).assignments.find(
+                (item) => item.assignmentReference === command.assignmentReference,
+              );
+              if (assignment === undefined) return fail("NotFound");
+              await require("organization.staff.manage", assignment.scope);
               return await revokeRoleAssignment(permissionTx(tx), {
-                ...owner,
+                ...scoped(assignment.scope),
                 changeReference: command.operationReference,
                 assignmentReference: command.assignmentReference,
                 revokedBy: viewer,

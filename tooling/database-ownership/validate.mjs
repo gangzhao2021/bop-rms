@@ -2663,6 +2663,23 @@ async function scanUnsupported(root, module, diagnostics) {
             "role_administration_decision",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/store-role-provisioning-store.ts";
+        // WP-2423 / DEC-PERM-BRAND-ROLES: signed Brand role provisioning.
+        const acceptedBrandRoleProvisioningAsset =
+          module.packageName === "@bop/permission" &&
+          module.manifest.ownedDatabase?.schema === "bop_permission" &&
+          [
+            "brand_role_provisioning",
+            "permission_catalog_revision",
+            "policy_state",
+            "permission_definition",
+            "role",
+            "role_assignment",
+            "permission_grant",
+            "role_administration_version",
+            "role_administration_permission",
+            "role_administration_decision",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/brand-role-provisioning-store.ts";
         const acceptedReceiptStoreIdentityAsset =
           module.packageName === "@bop/tenant" &&
           module.manifest.ownedDatabase?.schema === "bop_tenant" &&
@@ -3213,6 +3230,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedReceiptStoreIdentityAsset &&
           !acceptedStoreOpeningScopeAsset &&
           !acceptedStoreRoleProvisioningAsset &&
+          !acceptedBrandRoleProvisioningAsset &&
           !acceptedRoleAdministrationAsset &&
           !acceptedRoleAssignmentAsset &&
           !acceptedReceiptIssuerAsset &&

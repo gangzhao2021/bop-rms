@@ -32,7 +32,8 @@ export interface RoleAssignmentPlatformApproval {
   readonly purposeCode: typeof roleAssignmentApprovalPurpose;
   readonly environmentReference: string;
   readonly brandReference: string;
-  readonly storeReference: string;
+  /** Null for a Brand role assignment (DEC-PERM-BRAND-ROLES). */
+  readonly storeReference: string | null;
   readonly changeReference: string;
   readonly roleReference: string;
   readonly subjectReference: string;
@@ -70,7 +71,8 @@ export function parseRoleAssignmentPlatformApproval(
     purposeCode: r.purposeCode,
     environmentReference: approvalReference(r.environmentReference, unavailable),
     brandReference: approvalReference(r.brandReference, unavailable),
-    storeReference: approvalReference(r.storeReference, unavailable),
+    storeReference:
+      r.storeReference === null ? null : approvalReference(r.storeReference, unavailable),
     changeReference: approvalReference(r.changeReference, unavailable),
     roleReference: approvalReference(r.roleReference, unavailable),
     subjectReference: approvalReference(r.subjectReference, unavailable),
@@ -106,7 +108,7 @@ export function verifyRoleAssignmentPlatformApproval(input: {
   readonly now: string;
   readonly expected: {
     readonly brandReference: string;
-    readonly storeReference: string;
+    readonly storeReference: string | null;
     readonly changeReference: string;
     readonly roleReference: string;
     readonly subjectReference: string;

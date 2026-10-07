@@ -97,12 +97,14 @@ function Member({
           </form>
         ) : null}
       </StatePanel>
-      <StatePanel heading="Roles in this Store">
+      <StatePanel heading="Roles">
         {member.assignments.length === 0 ? <p>No active role.</p> : null}
         <ul>
           {member.assignments.map((item) => (
             <li key={item.assignmentReference}>
-              <strong>{item.roleName}</strong> · since {item.since}{" "}
+              <strong>{item.roleName}</strong>
+              {item.scope === "Brand" ? " (all Stores of the Brand)" : " (this Store)"} · since{" "}
+              {item.since}{" "}
               {item.mayRevoke ? (
                 <button
                   disabled={busy}
@@ -141,6 +143,7 @@ function Member({
                 {requestable.map((item) => (
                   <option key={item.roleReference} value={item.roleReference}>
                     {item.name}
+                    {item.scope === "Brand" ? " — Brand, all Stores" : " — this Store"}
                   </option>
                 ))}
               </select>
@@ -154,7 +157,8 @@ function Member({
         <ul>
           {member.pending.map((item) => (
             <li key={item.changeReference}>
-              <strong>{item.roleName}</strong> · requested by {item.requestedBy} at{" "}
+              <strong>{item.roleName}</strong>
+              {item.scope === "Brand" ? " (Brand)" : ""} · requested by {item.requestedBy} at{" "}
               {item.requestedAt}{" "}
               {item.mayDecide ? (
                 <>
