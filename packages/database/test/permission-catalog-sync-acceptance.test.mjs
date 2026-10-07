@@ -4,6 +4,7 @@ import { it } from "vitest";
 import {
   permissionCatalogDigest,
   permissionCatalogInstallationCodes,
+  storePermissionCatalogVersion,
   synchronizePermissionCatalog,
 } from "../../bop/permission/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -124,7 +125,12 @@ it("installs the Store permission catalog once, insert-only, audited and separat
         )
       ).rows;
       assert.deepEqual(revision, [
-        { catalog_version: 1, operator, approver, added_count: codes.length - 1 },
+        {
+          catalog_version: storePermissionCatalogVersion,
+          operator,
+          approver,
+          added_count: codes.length - 1,
+        },
       ]);
       // History is append-only, even for the database owner.
       await assert.rejects(
@@ -138,7 +144,7 @@ it("installs the Store permission catalog once, insert-only, audited and separat
       // The database also refuses a self-approved revision written around the synchronizer.
       await assert.rejects(
         admin.query(
-          "INSERT INTO bop_permission.permission_catalog_revision VALUES(2,$1,$2,$3,$3,$4,$5,1,0,now()::timestamptz(3),'ConfigurationMetadata')",
+          "INSERT INTO bop_permission.permission_catalog_revision VALUES(99,$1,$2,$3,$3,$4,$5,1,0,now()::timestamptz(3),'ConfigurationMetadata')",
           [permissionCatalogDigest(), id(30), operator, id(31), id(32)],
         ),
         /permission_catalog_revision_separation/u,

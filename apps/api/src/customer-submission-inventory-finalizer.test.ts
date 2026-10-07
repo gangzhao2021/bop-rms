@@ -95,6 +95,7 @@ function fixture(dineIn = false) {
       effects: [{ ownerModule: "inventory", commandCode: "ReserveInventory" }],
     },
   });
+  const line = f.cart.items[0]?.cartItemReference;
   const unit = {
     unitCode: "KG",
     dimension: "Mass",
@@ -111,6 +112,8 @@ function fixture(dineIn = false) {
         unitDimension: "Mass",
         quantityNumerator: "300000",
         quantityDenominator: "1",
+        // WP-2423: contributions and allocations carry their Order line.
+        cartItemReference: line,
       },
     ],
   });
@@ -135,6 +138,7 @@ function fixture(dineIn = false) {
         unit,
         stockSiteReference: id(2),
         lotReference: null,
+        cartItemReference: line,
       },
     ],
   });

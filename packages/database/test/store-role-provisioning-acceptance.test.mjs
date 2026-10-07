@@ -7,12 +7,14 @@ import {
   buildStoreRoleProvisioningPlan,
   permissionCatalogDigest,
   provisionStoreRoles,
+  readStoreTemplateRoles,
   storePermissionCatalogVersion,
   storeRoleProvisioningPlanDigest,
   storeRoleProvisioningSigningBytes,
   storeRoleTemplateActions,
   synchronizePermissionCatalog,
 } from "../../bop/permission/src/index.ts";
+import { confirmStoreMemberScope } from "../../bop/membership/src/index.ts";
 import { confirmStoreOpeningScope } from "../../bop/tenant/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
@@ -43,6 +45,17 @@ it("provisions a Store's template System roles once under an independent signed 
         "INSERT INTO bop_tenant.store VALUES ($1,$2,'PILOT_STORE','Pilot Store','America/Toronto','en-CA','CAD','Draft',1,$3,$3)",
         [store, brand, at],
       );
+      const owner = id(7),
+        membership = id(8),
+        storeAssignment = id(9);
+      await admin.query(
+        "INSERT INTO bop_membership.membership(membership_id,actor_id,brand_id,workforce_relationship_reference,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$5,'Active',$4,NULL,1,$4,$4)",
+        [membership, owner, brand, at, id(60)],
+      );
+      await admin.query(
+        "INSERT INTO bop_membership.store_assignment(assignment_id,membership_id,actor_id,brand_id,store_id,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,'Active',$6,NULL,1,$6,$6)",
+        [storeAssignment, membership, owner, brand, store, at],
+      );
       await admin.query("BEGIN");
       await synchronizePermissionCatalog(admin, {
         operationReference: id(10),
@@ -59,7 +72,8 @@ it("provisions a Store's template System roles once under an independent signed 
         "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
       );
       for (const sql of [
-        "GRANT USAGE ON SCHEMA bop_permission,bop_tenant,platform_audit,platform_helpers TO ROLE_",
+        "GRANT USAGE ON SCHEMA bop_permission,bop_tenant,bop_membership,platform_audit,platform_helpers TO ROLE_",
+        "GRANT SELECT ON bop_membership.membership,bop_membership.store_assignment TO ROLE_",
         "GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ROLE_",
         "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ROLE_",
         "GRANT SELECT ON bop_tenant.store,bop_permission.permission_catalog_revision TO ROLE_",
@@ -77,6 +91,11 @@ it("provisions a Store's template System roles once under an independent signed 
         storeReference: store,
         catalogVersion: storePermissionCatalogVersion,
         catalogDigest: permissionCatalogDigest(),
+        ownerAssignment: {
+          actorReference: owner,
+          membershipReference: membership,
+          storeAssignmentReference: storeAssignment,
+        },
         effectiveFrom: at,
         reasonCode: "STORE_OPENING",
         templates: ["owner", "store-manager", "front-of-house", "kitchen", "inventory-manager"],
@@ -146,6 +165,7 @@ it("provisions a Store's template System roles once under an independent signed 
         },
         readApprovalMaterial: async () => material(),
         storeScope: { confirm: confirmStoreOpeningScope },
+        memberScope: { confirm: confirmStoreMemberScope },
         nextReference: next,
       });
       const transaction = async (work) => {
@@ -251,6 +271,130 @@ it("provisions a Store's template System roles once under an independent signed 
         admin.query("UPDATE bop_permission.store_role_provisioning SET role_count=1"),
         /append-only/u,
       );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT r.role_code,a.actor_id::text actor FROM bop_permission.role_assignment a JOIN bop_permission.role r ON r.role_id=a.role_id WHERE a.lifecycle='Active'",
+          )
+        ).rows,
+        [{ role_code: "store_owner", actor: owner }],
+      );
+
+      // Upgrade: make the opened Store look as if it had been opened at catalog version 1 whose
+      // Store Manager template lacked identity.role.approve (test-only rewind of the isolated
+      // database; the append-only trigger is suspended solely for this setup).
+      await admin.query("RESET ROLE");
+      await admin.query(
+        "INSERT INTO bop_permission.permission_catalog_revision VALUES(1,$1,$2,$3,$4,$5,$6,1,0,$7,'ConfigurationMetadata')",
+        ["sha256:" + "0".repeat(64), id(40), operator, approver, id(41), id(42), at],
+      );
+      await admin.query(
+        "ALTER TABLE bop_permission.store_role_provisioning DISABLE TRIGGER store_role_provisioning_append_only",
+      );
+      await admin.query("UPDATE bop_permission.store_role_provisioning SET catalog_version=1");
+      await admin.query(
+        "ALTER TABLE bop_permission.store_role_provisioning ENABLE TRIGGER store_role_provisioning_append_only",
+      );
+      await admin.query(
+        `UPDATE bop_permission.permission_grant g SET lifecycle='Revoked',version=2 FROM bop_permission.role r,bop_permission.permission_definition d
+         WHERE g.role_id=r.role_id AND d.permission_id=g.permission_id AND r.role_code='store_manager' AND d.action_code='identity.role.approve'`,
+      );
+      const current = await transaction((tx) =>
+        readStoreTemplateRoles(tx, {
+          tenantReference: tenant,
+          brandReference: brand,
+          storeReference: store,
+        }),
+      );
+      assert.equal(current.latestCatalogVersion, 1);
+      const upgrade = buildStoreRoleProvisioningPlan({
+        environmentReference: environment,
+        operationReference: id(50),
+        operatorReference: operator,
+        tenantReference: tenant,
+        brandReference: brand,
+        storeReference: store,
+        catalogVersion: storePermissionCatalogVersion,
+        catalogDigest: permissionCatalogDigest(),
+        previousCatalogVersion: 1,
+        existingRoles: current.roles,
+        effectiveFrom: at,
+        reasonCode: "STORE_ROLE_TEMPLATE_UPGRADE",
+        templates: ["owner", "store-manager", "front-of-house", "kitchen", "inventory-manager"],
+        nextReference: next,
+      });
+      // Platform may assign an Owner only while the Store has none.
+      const withOwner = buildStoreRoleProvisioningPlan({
+        environmentReference: environment,
+        operationReference: id(55),
+        operatorReference: operator,
+        tenantReference: tenant,
+        brandReference: brand,
+        storeReference: store,
+        catalogVersion: storePermissionCatalogVersion,
+        catalogDigest: permissionCatalogDigest(),
+        previousCatalogVersion: 1,
+        existingRoles: current.roles,
+        ownerAssignment: {
+          actorReference: owner,
+          membershipReference: membership,
+          storeAssignmentReference: storeAssignment,
+        },
+        effectiveFrom: at,
+        reasonCode: "STORE_ROLE_TEMPLATE_UPGRADE",
+        templates: ["owner", "store-manager", "front-of-house", "kitchen", "inventory-manager"],
+        nextReference: next,
+      });
+      await assert.rejects(
+        transaction((tx) =>
+          provisionStoreRoles(
+            tx,
+            withOwner,
+            options(() => ({ approval: signed(withOwner, id(56)), trust: trust() })),
+          ),
+        ),
+        { code: "STORE_ROLE_PROVISIONING_CONFLICT" },
+      );
+      const upgraded = await transaction((tx) =>
+        provisionStoreRoles(
+          tx,
+          upgrade,
+          options(() => ({ approval: signed(upgrade, id(51)), trust: trust() })),
+        ),
+      );
+      assert.deepEqual(
+        { status: upgraded.status, added: upgraded.addedCount, revoked: upgraded.revokedCount },
+        { status: "Applied", added: 1, revoked: 0 },
+      );
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id',$2,false)",
+        [brand, store],
+      );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT max(version)::int v,count(DISTINCT role_id)::int n FROM bop_permission.role_administration_version",
+          )
+        ).rows[0],
+        { v: 2, n: 5 },
+      );
+      const repeated = await transaction((tx) =>
+        provisionStoreRoles(
+          tx,
+          upgrade,
+          options(() => ({ approval: signed(upgrade, id(51)), trust: trust() })),
+        ),
+      );
+      assert.equal(repeated.status, "AlreadyApplied");
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM bop_permission.role_assignment WHERE lifecycle='Active'",
+          )
+        ).rows[0].n,
+        1,
+      );
+
       // A second, different plan for the same Store is a conflict, not a second set of roles.
       const second = buildStoreRoleProvisioningPlan({
         ...plan,

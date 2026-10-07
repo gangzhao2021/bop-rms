@@ -3,7 +3,11 @@
  * Codes named in Handoff Section 88 are used verbatim; the rest follow its `module.resource.action`
  * convention. Database definitions, Store role templates and code checks all derive from this list.
  */
-export const storePermissionCatalogVersion = 1 as const;
+/**
+ * Bump on any change to codes, risks, legacy replacements or role templates; the installed digest
+ * covers all of them. v2 (2026-10-07): Store Manager may approve role changes (DEC-PERM-CATALOG A).
+ */
+export const storePermissionCatalogVersion = 2 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -360,6 +364,7 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "organization.store.read",
       "organization.staff.read",
       "identity.role.read",
+      "identity.role.approve",
       ...pick([
         "ordering.order.",
         "kitchen.",
@@ -474,7 +479,14 @@ export const storeRoleTemplateProfiles: Readonly<
  * never granted more than the template intends.
  */
 export function storeRoleTemplateActions(template: StoreRoleTemplateCode): readonly string[] {
-  const codes = new Set(storeRoleTemplates[template]);
+  return withLegacyEquivalents(storeRoleTemplates[template]);
+}
+/**
+ * Catalog codes plus every legacy consolidated code whose replacements are all present; used for
+ * template and Custom roles alike. Legacy codes cannot be selected directly.
+ */
+export function withLegacyEquivalents(catalogCodes: readonly string[]): readonly string[] {
+  const codes = new Set(catalogCodes);
   for (const [legacy, replacements] of Object.entries(legacyPermissionReplacements))
     if (replacements.every((code) => codes.has(code))) codes.add(legacy);
   return Object.freeze([...codes].sort());

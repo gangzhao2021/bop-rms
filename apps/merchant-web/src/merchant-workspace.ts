@@ -59,7 +59,7 @@ const NAVIGATION = Object.freeze({
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
-  "IAM-ROLE-LIST": ["/app/organization/roles", "identity.manage"],
+  "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
 } as const);
 
 function record(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {

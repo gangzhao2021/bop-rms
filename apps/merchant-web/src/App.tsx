@@ -122,6 +122,7 @@ import type { MerchantBrandWorkspaceClient } from "./merchant-brand-workspace.js
 import { FeatureFlagListPage } from "./FeatureControlAdminPages.js";
 import { PlatformLiveGatePage, StoreLiveGatePage } from "./LiveGatePages.js";
 import { RoleEditorPage, RoleListPage } from "./RoleAdministrationPages.js";
+import { createRoleAdministrationPageClient } from "./role-administration-pages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
 import { PlatformTenantDetailPage } from "./PlatformTenantPages.js";
 import { PlatformTemplateWorkspace } from "./PlatformTemplateWorkspace.js";
@@ -390,8 +391,32 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         }
       />
       <Route path="/app/organization/features" element={<FeatureFlagListPage />} />
-      <Route path="/app/organization/roles" element={<RoleListPage />} />
-      <Route path="/app/organization/roles/:id" element={<RoleEditorPage />} />
+      <Route
+        path="/app/organization/roles"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <RoleListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createRoleAdministrationPageClient(state.csrf)}
+            />
+          ) : (
+            <RoleListPage />
+          )
+        }
+      />
+      <Route
+        path="/app/organization/roles/:id"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <RoleEditorPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createRoleAdministrationPageClient(state.csrf)}
+            />
+          ) : (
+            <RoleEditorPage />
+          )
+        }
+      />
       <Route path="/platform/live-gates" element={<PlatformLiveGatePage />} />
       <Route path="/platform/tenants" element={<PlatformTemplateWorkspace />} />
       <Route path="/platform/tenants/:id" element={<PlatformTenantDetailPage />} />

@@ -25,6 +25,7 @@ const role = {
   submittedBy: "Synthetic submitter",
   approvedBy: null,
   history: ["Draft saved", "Submitted for independent approval"],
+  operations: ["Approve", "Reject"],
 } as const;
 export const roleListFixture = {
   screenId: "IAM-ROLE-LIST",
@@ -33,5 +34,6 @@ export const roleListFixture = {
   completeness: "Complete",
   roles: [role],
   mayManage: true,
+  catalog: [],
 } as const;
 export const roleEditorFixture = { ...roleListFixture, screenId: "IAM-ROLE-EDITOR" } as const;

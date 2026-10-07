@@ -50,63 +50,31 @@ it.each([
   expect(parseBusinessAction(action)).toBe(action);
   expect(definition(action).action).toBe(action);
 });
+// DEC-PERM-CATALOG (WP-2423) replaced the per-code underscore exceptions with one grammar shared
+// with the database: any well-formed underscore word is accepted, malformed spellings still fail.
 it.each([
-  "catalog.option_set.submit.other",
-  "catalog.option_set.publish.other",
-  "catalog.option_set.submit.*",
-  "catalog.option_set.publish.*",
-  "catalog.option_set.Submit",
-  "catalog.option_set.Publish",
-  "catalog.option_set.submit\n",
-  "catalog.option_set.publish\n",
-  "catalog.option__set.submit",
-  "catalog.option__set.publish",
-  "catalog.other_set.submit",
-  "catalog.other_set.publish",
-  "catalog.option_set.submit/other",
-  "catalog.option_set.publish/other",
   "catalog.option_set.approve",
-  "catalog.option_set.write",
-  "catalog.option_set.manage",
-  "catalog.option_set.create.other",
-  "catalog.option_set.update.other",
-  "catalog.option_set.create.*",
-  "catalog.option_set.update.*",
-  "catalog.option_set.Create",
-  "catalog.option_set.Update",
-  "catalog.option_set.create\n",
-  "catalog.option_set.update\n",
-  "catalog.option__set.create",
-  "catalog.option__set.update",
-  "catalog.other_set.create",
-  "catalog.other_set.update",
-  "catalog.option_set.create/other",
-  "catalog.option_set.update/other",
-  "catalog.option__set.read",
-  "catalog.option_set.read.other",
-  "catalog.other_set.read",
-  "catalog.option_set.read\n",
-  "catalog.option_set.read.*",
-])("does not accept arbitrary underscore actions %s", (action) => {
-  expect(() => parseBusinessAction(action)).toThrow();
-  expect(() => definition(action)).toThrow();
-});
-
-it.each([
-  "catalog.option_set.history",
+  "catalog.other_set.publish",
   "catalog.option_set.history.write",
-  "catalog.option_set.history.manage",
-  "catalog.option_set.history.Read",
-  "catalog.option_set.History.read",
-  "catalog.option_set.history.read.other",
-  "catalog.option_set.history.read.*",
-  "catalog.option_set.history.read/other",
-  "catalog.option_set.history.read\n",
+  "kitchen.work_item.read",
+  "inventory.opening_balance.post",
+  "ordering.order.create_staff",
+])("accepts a well-formed underscore action %s in both owning parsers", (action) => {
+  expect(parseBusinessAction(action)).toBe(action);
+  expect(definition(action).action).toBe(action);
+});
+it.each([
+  "catalog.option_set.submit.*",
+  "catalog.option_set.Submit",
+  "catalog.option_set.submit\n",
+  "catalog.option__set.submit",
+  "catalog._option_set.read",
+  "catalog.option_set_.read",
+  "catalog.option_set.submit/other",
   "catalog.option_set.history..read",
-  "catalog.option__set.history.read",
-  "catalog.other_set.history.read",
-  "catalog.option_set_history.read",
-])("refuses history near miss %s in both public action parsers", (action) => {
+  "catalog.option_set.History.read",
+  "catalog.option_set.read.*",
+])("rejects malformed underscore action %s in both owning parsers", (action) => {
   expect(() => parseBusinessAction(action)).toThrow();
   expect(() => definition(action)).toThrow();
 });

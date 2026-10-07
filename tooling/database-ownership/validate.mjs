@@ -1244,7 +1244,11 @@ async function scanUnsupported(root, module, diagnostics) {
           ["membership", "store_assignment"].every((table) =>
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
-          moduleRelative === "src/infrastructure/persistence/current-membership-store.ts";
+          [
+            "src/infrastructure/persistence/current-membership-store.ts",
+            // WP-2423: public Store member scope confirmation.
+            "src/infrastructure/persistence/store-member-scope-source.ts",
+          ].includes(moduleRelative);
         // WP-2421 initialize-only Membership leaf owns no StoreAssignment fact.
         const acceptedMembershipBrandDiscoveryAsset =
           module.packageName === "@bop/membership" &&
@@ -2581,6 +2585,22 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_tenant" &&
           module.manifest.ownedDatabase?.tables?.includes("store") &&
           moduleRelative === "src/infrastructure/persistence/store-opening-scope-source.ts";
+        // WP-2423: Store role administration (IAM-ROLE-LIST / IAM-ROLE-EDITOR).
+        const acceptedRoleAdministrationAsset =
+          module.packageName === "@bop/permission" &&
+          module.manifest.ownedDatabase?.schema === "bop_permission" &&
+          [
+            "role_administration_version",
+            "role_administration_permission",
+            "role_administration_decision",
+            "role_administration_operation",
+            "role",
+            "role_assignment",
+            "permission_definition",
+            "permission_grant",
+            "policy_state",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/role-administration-store.ts";
         // WP-2423 / DEC-PERM-CATALOG: signed Store opening role provisioning.
         const acceptedStoreRoleProvisioningAsset =
           module.packageName === "@bop/permission" &&
@@ -2591,6 +2611,7 @@ async function scanUnsupported(root, module, diagnostics) {
             "policy_state",
             "permission_definition",
             "role",
+            "role_assignment",
             "permission_grant",
             "role_administration_version",
             "role_administration_permission",
@@ -3145,6 +3166,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedReceiptStoreIdentityAsset &&
           !acceptedStoreOpeningScopeAsset &&
           !acceptedStoreRoleProvisioningAsset &&
+          !acceptedRoleAdministrationAsset &&
           !acceptedReceiptIssuerAsset &&
           !acceptedTaxRegistrantSourceAsset &&
           !acceptedDigitalReceiptAsset &&

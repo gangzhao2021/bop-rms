@@ -16,7 +16,7 @@ import {
  */
 export const storeRoleProvisioningPurpose = "STORE_ROLE_PROVISIONING" as const;
 export const storeRoleProvisioningSignatureDomain = "BOP-RMS:StoreRoleProvisioningApprovalV1\n";
-const planDigestDomain = "BOP-RMS:StoreRoleProvisioningPlanV1\n";
+const planDigestDomain = "BOP-RMS:StoreRoleProvisioningPlanV2\n";
 
 export class StoreRoleProvisioningError extends Error {
   constructor(
@@ -107,8 +107,19 @@ export interface StoreRoleProvisioningRole {
   readonly description: string;
   readonly actions: readonly string[];
 }
+export interface StoreRoleProvisioningOwnerAssignment {
+  readonly actorReference: string;
+  readonly membershipReference: string;
+  readonly storeAssignmentReference: string;
+  readonly assignmentReference: string;
+}
+/**
+ * V2 (V1 was only ever applied to an internal test database). `previousCatalogVersion` is null when
+ * the Store is opened and otherwise the version its template roles are upgraded from. A plan may
+ * assign an Owner while the Store has none; the Owner must be an Active member assigned to the Store.
+ */
 export interface StoreRoleProvisioningPlan {
-  readonly profile: "StoreRoleProvisioningPlanV1";
+  readonly profile: "StoreRoleProvisioningPlanV2";
   readonly purposeCode: typeof storeRoleProvisioningPurpose;
   readonly environmentReference: string;
   readonly operationReference: string;
@@ -118,6 +129,8 @@ export interface StoreRoleProvisioningPlan {
   readonly storeReference: string;
   readonly catalogVersion: number;
   readonly catalogDigest: string;
+  readonly previousCatalogVersion: number | null;
+  readonly ownerAssignment: StoreRoleProvisioningOwnerAssignment | null;
   readonly effectiveFrom: string;
   readonly reasonCode: string;
   readonly roles: readonly StoreRoleProvisioningRole[];
@@ -133,6 +146,8 @@ const planFields = [
   "storeReference",
   "catalogVersion",
   "catalogDigest",
+  "previousCatalogVersion",
+  "ownerAssignment",
   "effectiveFrom",
   "reasonCode",
   "roles",
@@ -142,7 +157,7 @@ const planFields = [
 export function parseStoreRoleProvisioningPlan(value: unknown): StoreRoleProvisioningPlan {
   const r = record(value, planFields, invalidPlan);
   if (
-    r.profile !== "StoreRoleProvisioningPlanV1" ||
+    r.profile !== "StoreRoleProvisioningPlanV2" ||
     r.purposeCode !== storeRoleProvisioningPurpose ||
     typeof r.catalogVersion !== "number" ||
     !Number.isSafeInteger(r.catalogVersion) ||
@@ -207,12 +222,38 @@ export function parseStoreRoleProvisioningPlan(value: unknown): StoreRoleProvisi
     });
   });
   if (!templates.has("owner")) return invalidPlan();
+  const previousCatalogVersion = r.previousCatalogVersion;
+  if (
+    previousCatalogVersion !== null &&
+    (typeof previousCatalogVersion !== "number" ||
+      !Number.isSafeInteger(previousCatalogVersion) ||
+      previousCatalogVersion < 1 ||
+      previousCatalogVersion >= r.catalogVersion)
+  )
+    return invalidPlan();
+  let ownerAssignment: StoreRoleProvisioningOwnerAssignment | null = null;
+  if (r.ownerAssignment !== null) {
+    const owner = record(
+      r.ownerAssignment,
+      ["actorReference", "membershipReference", "storeAssignmentReference", "assignmentReference"],
+      invalidPlan,
+    );
+    ownerAssignment = Object.freeze({
+      actorReference: reference(owner.actorReference, invalidPlan),
+      membershipReference: reference(owner.membershipReference, invalidPlan),
+      storeAssignmentReference: reference(owner.storeAssignmentReference, invalidPlan),
+      assignmentReference: unique(reference(owner.assignmentReference, invalidPlan)),
+    });
+    if (ownerAssignment.actorReference === scope.operatorReference) return invalidPlan();
+  }
   return Object.freeze({
-    profile: "StoreRoleProvisioningPlanV1",
+    profile: "StoreRoleProvisioningPlanV2",
     purposeCode: storeRoleProvisioningPurpose,
     ...scope,
     catalogVersion: r.catalogVersion,
     catalogDigest: r.catalogDigest,
+    previousCatalogVersion,
+    ownerAssignment,
     effectiveFrom: instant(r.effectiveFrom, invalidPlan),
     reasonCode: r.reasonCode,
     roles: Object.freeze(
@@ -386,7 +427,8 @@ export function verifyStoreRoleProvisioningApproval(input: {
     approval.planDigest !== storeRoleProvisioningPlanDigest(plan) ||
     approval.notBefore > now ||
     approval.validUntil <= now ||
-    trust.revokedApprovalEvidenceReferences.includes(approval.approvalEvidenceReference)
+    trust.revokedApprovalEvidenceReferences.includes(approval.approvalEvidenceReference) ||
+    approval.approvedByReference === plan.ownerAssignment?.actorReference
   )
     return unavailable();
   const key = trust.keys.find((item) => item.keyReference === approval.keyReference);
@@ -430,13 +472,27 @@ export function buildStoreRoleProvisioningPlan(input: {
   readonly storeReference: string;
   readonly catalogVersion: number;
   readonly catalogDigest: string;
+  readonly previousCatalogVersion?: number | null;
+  readonly ownerAssignment?: Omit<
+    StoreRoleProvisioningOwnerAssignment,
+    "assignmentReference"
+  > | null;
+  /** Existing template roles of the Store keep their references when upgraded. */
+  readonly existingRoles?: Readonly<
+    Partial<
+      Record<
+        StoreRoleTemplateCode,
+        { readonly roleReference: string; readonly administrationReference: string }
+      >
+    >
+  >;
   readonly effectiveFrom: string;
   readonly reasonCode: string;
   readonly templates: readonly StoreRoleTemplateCode[];
   readonly nextReference: () => string;
 }): StoreRoleProvisioningPlan {
   return parseStoreRoleProvisioningPlan({
-    profile: "StoreRoleProvisioningPlanV1",
+    profile: "StoreRoleProvisioningPlanV2",
     purposeCode: storeRoleProvisioningPurpose,
     environmentReference: input.environmentReference,
     operationReference: input.operationReference,
@@ -446,12 +502,18 @@ export function buildStoreRoleProvisioningPlan(input: {
     storeReference: input.storeReference,
     catalogVersion: input.catalogVersion,
     catalogDigest: input.catalogDigest,
+    previousCatalogVersion: input.previousCatalogVersion ?? null,
+    ownerAssignment:
+      input.ownerAssignment == null
+        ? null
+        : { ...input.ownerAssignment, assignmentReference: input.nextReference() },
     effectiveFrom: input.effectiveFrom,
     reasonCode: input.reasonCode,
     roles: input.templates.map((template) => ({
       template,
-      roleReference: input.nextReference(),
-      administrationReference: input.nextReference(),
+      roleReference: input.existingRoles?.[template]?.roleReference ?? input.nextReference(),
+      administrationReference:
+        input.existingRoles?.[template]?.administrationReference ?? input.nextReference(),
       ...storeRoleTemplateProfiles[template],
       actions: [...storeRoleTemplateActions(template)],
     })),

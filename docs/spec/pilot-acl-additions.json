@@ -36,6 +36,96 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "WP-2423 Owner option A/A1 2026-10-07"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_permission",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_permission",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_decision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_decision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_grant",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
     }
   ]
 }

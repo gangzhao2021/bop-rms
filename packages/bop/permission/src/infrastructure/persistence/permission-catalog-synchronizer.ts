@@ -4,6 +4,9 @@ import {
   legacyPermissionReplacements,
   storePermissionCatalog,
   storePermissionCatalogVersion,
+  storeRoleTemplateActions,
+  storeRoleTemplateCodes,
+  storeRoleTemplateProfiles,
 } from "../../catalog/store-permission-catalog.js";
 
 /**
@@ -69,6 +72,11 @@ export function permissionCatalogDigest(): string {
       .map(({ code, module, risk }) => ({ code, module, risk }))
       .sort((a, b) => (a.code < b.code ? -1 : 1)),
     legacy: legacyPermissionReplacements,
+    templates: storeRoleTemplateCodes.map((template) => ({
+      template,
+      ...storeRoleTemplateProfiles[template],
+      actions: storeRoleTemplateActions(template),
+    })),
   });
   return "sha256:" + createHash("sha256").update(body).digest("hex");
 }

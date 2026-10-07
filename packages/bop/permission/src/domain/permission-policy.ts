@@ -183,18 +183,14 @@ function parseRole(value: unknown): PermissionRoleReference {
   return uuid(value);
 }
 
+/**
+ * DEC-PERM-CATALOG: the same action grammar as the database (0300_011 / 2000_001): dot-separated
+ * segments whose words join with single underscores or hyphens.
+ */
+export const permissionActionPattern =
+  /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:-[a-z0-9]+)*){1,7}$/u;
 function parseAction(value: unknown): PolicyBusinessAction {
-  if (
-    typeof value !== "string" ||
-    value.length > 128 ||
-    (value !== "catalog.option_set.read" &&
-      value !== "catalog.option_set.create" &&
-      value !== "catalog.option_set.update" &&
-      value !== "catalog.option_set.submit" &&
-      value !== "catalog.option_set.publish" &&
-      value !== "catalog.option_set.history.read" &&
-      !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*){1,7}$/u.test(value))
-  )
+  if (typeof value !== "string" || value.length > 128 || !permissionActionPattern.test(value))
     throw new PermissionPolicyContractError("PERMISSION_POLICY_INPUT_INVALID");
   return value;
 }

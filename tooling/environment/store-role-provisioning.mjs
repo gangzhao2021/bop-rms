@@ -11,12 +11,14 @@ import {
   parseStoreRoleProvisioningPlan,
   permissionCatalogDigest,
   provisionStoreRoles,
+  readStoreTemplateRoles,
   storePermissionCatalogVersion,
   storeRoleProvisioningPlanDigest,
   storeRoleProvisioningSigningBytes,
   storeRoleTemplateCodes,
 } from "../../packages/bop/permission/src/index.ts";
 import { confirmStoreOpeningScope } from "../../packages/bop/tenant/src/index.ts";
+import { confirmStoreMemberScope } from "../../packages/bop/membership/src/index.ts";
 import { uuidV7 } from "./permission-catalog-install.mjs";
 
 /**
@@ -25,6 +27,10 @@ import { uuidV7 } from "./permission-catalog-install.mjs";
  *   keygen   (approver, once)  --private-key <out.pem>  → prints the trust key entry to publish
  *   prepare  (operator)        --environment --operator --tenant --brand --store
  *                              --effective-from <ISO> --templates owner,store-manager,... --out <plan.json>
+ *                              [--owner-actor --owner-membership --owner-store-assignment]
+ *   prepare-upgrade (operator) the prepare flags plus --env-file: upgrades the Store's template roles
+ *                              from its latest provisioned catalog version
+ *   Owner flags assign an Owner, accepted only while the Store has no active Owner.
  *   sign     (approver)        --plan --private-key --approved-by --approval-evidence --key
  *                              --valid-hours <1..72> --out <approval.json>
  *   apply    (operator)        --env-file --confirm-target <environment>:<database>
@@ -37,8 +43,21 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const require = createRequire(new URL("../../packages/database/package.json", import.meta.url));
 const pg = require("pg");
 
+const ownerFlags = ["--owner-actor", "--owner-membership", "--owner-store-assignment"];
+const optional = { prepare: ownerFlags, "prepare-upgrade": ownerFlags };
 const commands = {
   keygen: ["--private-key"],
+  "prepare-upgrade": [
+    "--env-file",
+    "--environment",
+    "--operator",
+    "--tenant",
+    "--brand",
+    "--store",
+    "--effective-from",
+    "--templates",
+    "--out",
+  ],
   prepare: [
     "--environment",
     "--operator",
@@ -63,13 +82,15 @@ const commands = {
 export function parseCommand(args) {
   const [command, ...rest] = args;
   const flags = commands[command];
-  if (!flags) throw new Error("usage: store-role-provisioning keygen|prepare|sign|apply …");
+  if (!flags)
+    throw new Error("usage: store-role-provisioning keygen|prepare|prepare-upgrade|sign|apply …");
+  const allowed = [...flags, ...(optional[command] ?? [])];
   const values = new Map();
   for (let index = 0; index < rest.length; index += 2) {
     const flag = rest[index],
       value = rest[index + 1];
     if (
-      !flags.includes(flag) ||
+      !allowed.includes(flag) ||
       values.has(flag) ||
       typeof value !== "string" ||
       value.startsWith("--")
@@ -77,8 +98,12 @@ export function parseCommand(args) {
       throw new Error(`usage: store-role-provisioning ${command} ${flags.join(" ")}`);
     values.set(flag, value);
   }
-  if (values.size !== flags.length)
-    throw new Error(`usage: store-role-provisioning ${command} ${flags.join(" ")}`);
+  const optionalGiven = (optional[command] ?? []).filter((flag) => values.has(flag)).length;
+  if (
+    flags.some((flag) => !values.has(flag)) ||
+    (optionalGiven !== 0 && optionalGiven !== (optional[command] ?? []).length)
+  )
+    throw new Error(`usage: store-role-provisioning ${command} ${allowed.join(" ")}`);
   return { command, get: (flag) => values.get(flag) };
 }
 const readJson = async (file) => JSON.parse(await readFile(file, "utf8"));
@@ -91,10 +116,13 @@ export async function keygen(get) {
     publicKeySpki: publicKey.export({ format: "der", type: "spki" }).toString("base64url"),
   };
 }
-export async function prepare(get, nextReference = () => uuidV7()) {
+function templatesOf(get) {
   const templates = get("--templates").split(",");
   if (templates.some((template) => !storeRoleTemplateCodes.includes(template)))
     throw new Error("unknown template; expected " + storeRoleTemplateCodes.join(","));
+  return templates;
+}
+async function writePlan(get, input, nextReference) {
   const plan = buildStoreRoleProvisioningPlan({
     environmentReference: get("--environment"),
     operationReference: nextReference(),
@@ -105,12 +133,57 @@ export async function prepare(get, nextReference = () => uuidV7()) {
     catalogVersion: storePermissionCatalogVersion,
     catalogDigest: permissionCatalogDigest(),
     effectiveFrom: get("--effective-from"),
-    reasonCode: "STORE_OPENING",
-    templates,
+    templates: templatesOf(get),
     nextReference,
+    ...input,
   });
   await writeNew(get("--out"), JSON.stringify(plan, null, 2) + "\n", 0o644);
   return summary(plan);
+}
+const ownerOf = (get) =>
+  get("--owner-actor") === undefined
+    ? null
+    : {
+        actorReference: get("--owner-actor"),
+        membershipReference: get("--owner-membership"),
+        storeAssignmentReference: get("--owner-store-assignment"),
+      };
+export async function prepare(get, nextReference = () => uuidV7()) {
+  return writePlan(
+    get,
+    { reasonCode: "STORE_OPENING", ownerAssignment: ownerOf(get) },
+    nextReference,
+  );
+}
+export async function prepareUpgrade(get, nextReference = () => uuidV7()) {
+  const current = await withClient(
+    get,
+    async (client) => {
+      await client.query("BEGIN READ ONLY");
+      try {
+        return await readStoreTemplateRoles(client, {
+          tenantReference: get("--tenant"),
+          brandReference: get("--brand"),
+          storeReference: get("--store"),
+        });
+      } finally {
+        await client.query("ROLLBACK");
+      }
+    },
+    false,
+  );
+  if (current.latestCatalogVersion === null)
+    throw new Error("the Store has not been opened; use prepare");
+  return writePlan(
+    get,
+    {
+      reasonCode: "STORE_ROLE_TEMPLATE_UPGRADE",
+      ownerAssignment: ownerOf(get),
+      previousCatalogVersion: current.latestCatalogVersion,
+      existingRoles: current.roles,
+    },
+    nextReference,
+  );
 }
 function summary(plan) {
   return {
@@ -118,6 +191,8 @@ function summary(plan) {
     operationReference: plan.operationReference,
     storeReference: plan.storeReference,
     catalogVersion: plan.catalogVersion,
+    previousCatalogVersion: plan.previousCatalogVersion,
+    ownerAssignment: plan.ownerAssignment?.actorReference ?? null,
     roles: plan.roles.map((role) => ({ roleCode: role.roleCode, actions: role.actions.length })),
   };
 }
@@ -161,11 +236,10 @@ export async function apply(get, attempts = 3) {
       if (attempt >= attempts || !["40001", "40P01"].includes(error?.code)) throw error;
     }
 }
-async function applyOnce(get) {
+async function withClient(get, work, confirm = true) {
   const config = await loadMigrationConnectionConfig(root, get("--env-file"));
-  if (get("--confirm-target") !== `${config.environment}:${config.database}`)
+  if (confirm && get("--confirm-target") !== `${config.environment}:${config.database}`)
     throw new Error("STORE_ROLE_PROVISIONING_TARGET_NOT_CONFIRMED");
-  const plan = await readJson(get("--plan"));
   const client = new pg.Client({
     application_name: "bop-rms-store-role-provisioning",
     connectionTimeoutMillis: 10_000,
@@ -178,37 +252,47 @@ async function applyOnce(get) {
   });
   await client.connect();
   try {
-    await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
-    let latest = 0;
-    const result = await provisionStoreRoles(client, plan, {
-      clock: {
-        now: () => {
-          latest = Math.max(latest, Date.now());
-          return new Date(latest).toISOString();
-        },
-      },
-      // Files are reread before COMMIT so a revocation published meanwhile is honoured.
-      readApprovalMaterial: async () => ({
-        approval: await readJson(get("--approval")),
-        trust: await readJson(get("--trust")),
-      }),
-      storeScope: { confirm: confirmStoreOpeningScope },
-      nextReference: () => uuidV7(),
-    });
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
+    return await work(client);
   } finally {
     await client.end().catch(() => undefined);
   }
+}
+async function applyOnce(get) {
+  const plan = await readJson(get("--plan"));
+  return withClient(get, async (client) => {
+    await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+    try {
+      let latest = 0;
+      const result = await provisionStoreRoles(client, plan, {
+        clock: {
+          now: () => {
+            latest = Math.max(latest, Date.now());
+            return new Date(latest).toISOString();
+          },
+        },
+        // Files are reread before COMMIT so a revocation published meanwhile is honoured.
+        readApprovalMaterial: async () => ({
+          approval: await readJson(get("--approval")),
+          trust: await readJson(get("--trust")),
+        }),
+        storeScope: { confirm: confirmStoreOpeningScope },
+        memberScope: { confirm: confirmStoreMemberScope },
+        nextReference: () => uuidV7(),
+      });
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
+  });
 }
 
 export async function run(args) {
   const { command, get } = parseCommand(args);
   if (command === "keygen") return keygen(get);
   if (command === "prepare") return prepare(get);
+  if (command === "prepare-upgrade") return prepareUpgrade(get);
   if (command === "sign") return signPlan(get);
   return apply(get);
 }

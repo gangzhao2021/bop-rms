@@ -187,6 +187,10 @@ import type { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
 import type { createMerchantKitchenRelease } from "./merchant-kitchen-release.js";
+import {
+  MerchantRoleAdministrationError,
+  type createMerchantRoleAdministration,
+} from "./merchant-role-administration.js";
 import type { createMerchantKitchenQuery } from "./merchant-kitchen-query.js";
 import { KitchenQueueProjectionError, KitchenWorkLifecycleError } from "@rms/kitchen";
 import type { createBrandLifecycleCommand } from "./brand-lifecycle-command.js";
@@ -252,7 +256,7 @@ const merchantNavigation = Object.freeze({
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
-  "IAM-ROLE-LIST": ["/app/organization/roles", "identity.manage"],
+  "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
 } as const);
 
 export interface MerchantNavigationItem {
@@ -406,6 +410,7 @@ export interface MerchantBffRouterOptions {
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
+  readonly roleAdministration?: ReturnType<typeof createMerchantRoleAdministration>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
   readonly ordinaryRefundSend?: ReturnType<typeof createMerchantOrdinaryRefundSendCommand>;
   readonly ordinaryRefundReconciliation?: ReturnType<
@@ -4703,6 +4708,78 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }[error.code];
         response.status(status).json({ error: error.code });
       });
+  });
+
+  // WP-2423: IAM-ROLE-LIST / IAM-ROLE-EDITOR reads and role administration commands.
+  const roleAdministrationStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    InUse: 409,
+    Invalid: 400,
+    Unavailable: 503,
+  } as const;
+  const roleAdministrationFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantRoleAdministrationError)) {
+      denied(response);
+      return;
+    }
+    response.status(roleAdministrationStatus[error.code]).json({ error: error.code });
+  };
+  router.post("/organization/roles/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { roleReference?: unknown } | undefined;
+    const roleReference = body?.roleReference ?? null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).join(",") !== "roleReference" ||
+      (roleReference !== null &&
+        (typeof roleReference !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            roleReference,
+          )))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.roleAdministration) {
+      response.status(503).json({ error: "role_administration_unavailable" });
+      return;
+    }
+    const roles = options.roleAdministration;
+    void (
+      roleReference === null
+        ? roles.list({ sessionCookie, csrf })
+        : roles.detail({ sessionCookie, csrf, roleReference })
+    )
+      .then((result) => response.json(result))
+      .catch((error: unknown) => roleAdministrationFailure(response, error));
+  });
+  router.post("/organization/roles/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.roleAdministration) {
+      response.status(503).json({ error: "role_administration_unavailable" });
+      return;
+    }
+    void options.roleAdministration
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => roleAdministrationFailure(response, error));
   });
 
   router.post("/kitchen/release", sameOriginMutation(options), (request, response) => {

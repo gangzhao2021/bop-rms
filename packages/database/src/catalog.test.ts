@@ -646,6 +646,7 @@ describe("migration catalog", () => {
       "2000_001_alter_permission_catalog_identifiers",
       "2000_002_create_permission_catalog_revision",
       "2000_003_create_store_role_provisioning",
+      "2000_004_alter_store_role_provisioning_upgrade",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -1860,6 +1861,7 @@ describe("migration catalog", () => {
       ["2000_001_alter_permission_catalog_identifiers", "@bop/permission", "bop_permission"],
       ["2000_002_create_permission_catalog_revision", "@bop/permission", "bop_permission"],
       ["2000_003_create_store_role_provisioning", "@bop/permission", "bop_permission"],
+      ["2000_004_alter_store_role_provisioning_upgrade", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",
