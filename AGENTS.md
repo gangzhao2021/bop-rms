@@ -52,3 +52,9 @@
 - Review the final diff for scope, generated files, migrations, secrets, PII, permissions, tenant/store filters, error states, and documentation drift.
 - Done means every acceptance criterion has evidence. Report skipped or blocked checks exactly; never claim an unrun check passed.
 - Do not commit, push, merge, deploy, rotate credentials, alter external services, or perform destructive data/Git operations unless the assigned task explicitly authorizes that action.
+
+## Pilot track (WP-2423)
+
+- While WP-2423 is active, a routine change records one line in WP-2423: what changed, the check command and its result. No fingerprint checkpoint, evidence write-up or crosswalk.
+- Full evidence discipline still applies to payment, refund, reconciliation, settlement, migrations, authorization and data classification.
+- Do not work on items listed as bypassed in WP-2423 unless the pilot path is blocked by them.
