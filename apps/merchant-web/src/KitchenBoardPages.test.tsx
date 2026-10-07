@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import {
+  KitchenBoardPage,
   KitchenBoardScreen,
   KitchenBoardStatePanel,
   KitchenWorkItemScreen,
@@ -372,4 +373,25 @@ it("does not present permission as proof of an active named operator session", (
   );
   expect(html).toContain('disabled=""');
   expect(html).not.toContain("Unverified operator");
+});
+
+describe("IDR-0039 named-operator KDS handover", () => {
+  it("offers handover only for a current named merchant Session", () => {
+    const named = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardPage
+          csrf="synthetic-csrf"
+          storeReference="store"
+          storeLabel="Training Store"
+        />
+      </MemoryRouter>,
+    );
+    expect(named).toContain("Hand over / sign out");
+    const anonymous = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardPage />
+      </MemoryRouter>,
+    );
+    expect(anonymous).not.toContain("Hand over / sign out");
+  });
 });

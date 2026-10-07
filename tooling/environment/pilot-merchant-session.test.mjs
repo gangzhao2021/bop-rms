@@ -238,3 +238,15 @@ it("production is rejected before reading identity configuration or credentials"
   expect(f.loadEmployee).not.toHaveBeenCalled();
   expect(f.createInternalMerchantCredentials).not.toHaveBeenCalled();
 });
+it("issues the IDR-0039 named KDS Operator policy only for an explicit kitchen display", async () => {
+  const f = setup(),
+    session = await f.create();
+  await session.issue("author");
+  await session.issue("author", "KitchenDisplay");
+  await expect(session.issue("author", "Privileged")).rejects.toThrow(/^INTERNAL_MERCHANT_DENIED$/);
+  expect(seam.created.map((value) => value.policyCode)).toEqual([
+    "WorkforceStandard",
+    "NamedKdsOperator",
+  ]);
+  expect(seam.created[1].actor.actorReference).toBe(id(4));
+});

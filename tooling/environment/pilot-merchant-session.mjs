@@ -217,7 +217,9 @@ export async function createInternalMerchantSession(
           ),
       );
     },
-    async issue(selector) {
+    /** `KitchenDisplay` issues the IDR-0039 named KDS Operator Session for the same named Actor. */
+    async issue(selector, purpose = "Workforce") {
+      if (purpose !== "Workforce" && purpose !== "KitchenDisplay") return denied();
       const entries = await roster(),
         entry =
           selector === undefined
@@ -238,7 +240,7 @@ export async function createInternalMerchantSession(
       await store.createSession({
         sessionReference,
         actor,
-        policyCode: "WorkforceStandard",
+        policyCode: purpose === "KitchenDisplay" ? "NamedKdsOperator" : "WorkforceStandard",
         sessionSelectorHash: identity.hasher.hash(cookie),
         csrfSelectorHash: identity.hasher.hash(csrf),
         encryptedSecrets: await identity.envelopes.encrypt(

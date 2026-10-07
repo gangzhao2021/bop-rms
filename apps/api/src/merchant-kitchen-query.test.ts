@@ -1,5 +1,5 @@
-import { beforeEach, expect, it, vi } from "vitest";
-import { createMerchantKitchenQuery } from "./merchant-kitchen-query.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMerchantKitchenQuery, kdsOperatorStatus } from "./merchant-kitchen-query.js";
 const doubles = vi.hoisted(() => ({
   scope: vi.fn(),
   service: vi.fn(),
@@ -158,4 +158,65 @@ it("preserves projection-owned selected modifiers through List and Get", async (
 
   expect(list).toMatchObject({ items: [{ selectedOptions }] });
   expect(detail).toMatchObject({ item: { selectedOptions } });
+});
+describe("kdsOperatorStatus", () => {
+  const base = (session: object, overrides: object = {}) => ({
+    session: session as Parameters<typeof kdsOperatorStatus>[0]["session"],
+    actorReference: id(2),
+    brandReference: id(3),
+    storeReference: id(4),
+    observedAt: "2026-09-19T12:00:00.000Z",
+    projection: {
+      projectionGenerationReference: id(7),
+      sourceCheckpointReference: id(8),
+      freshnessStatus: "Fresh" as const,
+      asOfUtc: "2026-09-19T11:59:59.000Z",
+    },
+    ...overrides,
+  });
+  const kds = (overrides: object = {}) => ({
+    sessionReference: id(9),
+    status: "Active",
+    version: 1,
+    policy: { code: "NamedKdsOperator" },
+    idleExpiresAt: "2026-09-19T13:00:00.000Z",
+    absoluteExpiresAt: "2026-09-19T23:00:00.000Z",
+    ...overrides,
+  });
+  it("is Named only for a current NamedKdsOperator Session", () => {
+    expect(kdsOperatorStatus(base(kds()))).toBe("Named");
+  });
+  it("keeps ordinary Workforce Sessions unverified for Kitchen commands", () => {
+    expect(kdsOperatorStatus(base(kds({ policy: { code: "WorkforceStandard" } })))).toBe(
+      "Unverified",
+    );
+  });
+  it("fails closed at the earlier of idle and absolute expiry", () => {
+    // Authentication already refuses expired Sessions; Kitchen evidence also refuses them.
+    expect(kdsOperatorStatus(base(kds({ idleExpiresAt: "2026-09-19T11:59:00.000Z" })))).toBe(
+      "Unavailable",
+    );
+    expect(kdsOperatorStatus(base(kds({ absoluteExpiresAt: "2026-09-19T12:00:00.000Z" })))).toBe(
+      "Unavailable",
+    );
+    expect(kdsOperatorStatus(base(kds({ status: "Revoked" })))).toBe("Locked");
+  });
+  it("leaves staleness to the board freshness gate", () => {
+    const stale = base(kds());
+    expect(
+      kdsOperatorStatus({
+        ...stale,
+        projection: { ...stale.projection, freshnessStatus: "Stale" },
+      }),
+    ).toBe("Named");
+  });
+  it("fails closed for projection evidence newer than the observation", () => {
+    const future = base(kds());
+    expect(
+      kdsOperatorStatus({
+        ...future,
+        projection: { ...future.projection, asOfUtc: "2026-09-19T12:00:01.000Z" },
+      }),
+    ).toBe("Unavailable");
+  });
 });

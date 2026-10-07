@@ -83,7 +83,7 @@ it("renders escaped aliases with native keyboard buttons and no identity/grant f
 it("explicitly selects one configured identity and preserves the secure session redirect", async () => {
   const f = setup();
   await f.post({ ...base, body: { ...base.body, staffSelector: "reviewer" } });
-  expect(f.issue).toHaveBeenCalledExactlyOnceWith("reviewer");
+  expect(f.issue).toHaveBeenCalledExactlyOnceWith("reviewer", "Workforce");
   expect(f.res.statusCode).toBe(303);
   expect(f.res.location).toBe("/operations/orders");
   expect(f.res.headers["Set-Cookie"].endsWith("; Path=/; Secure; HttpOnly; SameSite=Strict")).toBe(
@@ -95,7 +95,7 @@ it("preserves the original single-identity POST without adding a multi-identity 
   const single = setup(true);
   await single.post({ ...base, body: { confirmation: "DEMO_STAFF_LOGIN" } });
   expect(single.res.statusCode).toBe(303);
-  expect(single.issue).toHaveBeenCalledExactlyOnceWith();
+  expect(single.issue).toHaveBeenCalledExactlyOnceWith(undefined, "Workforce");
   const multiple = setup();
   await multiple.post({ ...base, body: { confirmation: "DEMO_STAFF_LOGIN" } });
   expect(multiple.res.statusCode).toBe(400);
@@ -182,4 +182,24 @@ it("refuses malformed ports before installing routes", () => {
   }
   expect(app.get).not.toHaveBeenCalled();
   expect(app.post).not.toHaveBeenCalled();
+});
+
+it("starts a named kitchen display Session for one explicit identity", async () => {
+  const f = setup();
+  await f.get();
+  expect(f.res.body).toContain('name="purpose" value="KitchenDisplay"');
+  expect(f.res.body).toContain("Start kitchen display as DEMO author &lt;1&gt;");
+  await f.post({
+    ...base,
+    body: { ...base.body, staffSelector: "reviewer", purpose: "KitchenDisplay" },
+  });
+  expect(f.issue).toHaveBeenCalledExactlyOnceWith("reviewer", "KitchenDisplay");
+  expect(f.res.statusCode).toBe(303);
+  expect(f.res.location).toBe("/operations/kitchen");
+});
+it("rejects any other login purpose before issuing", async () => {
+  const f = setup();
+  await f.post({ ...base, body: { ...base.body, purpose: "Privileged" } });
+  expect(f.res.statusCode).toBe(400);
+  expect(f.issue).not.toHaveBeenCalled();
 });

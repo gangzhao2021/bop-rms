@@ -930,7 +930,7 @@ function useClient({ client, csrf, storeLabel, storeReference }: KitchenPageProp
     [client, csrf, storeLabel, storeReference],
   );
 }
-export function KitchenBoardPage(props: KitchenPageProps) {
+function KitchenBoardContent(props: KitchenPageProps) {
   const client = useClient(props),
     [revision, setRevision] = useState(0);
   const [search, setSearch] = useState<KitchenQueueSearch | null>(null);
@@ -1030,6 +1030,79 @@ export function KitchenBoardPage(props: KitchenPageProps) {
           ) : null}
         </>
       )}
+    </>
+  );
+}
+/** IDR-0039 named-operator browser KDS: visibility loss covers the whole board (no snapshot),
+ * and handover signs the current named Session out before the next operator signs in. */
+export function KitchenBoardPage(
+  props: KitchenPageProps & { readonly signOut?: () => Promise<void> },
+) {
+  const [covered, setCovered] = useState(false),
+    [handover, setHandover] = useState<"Idle" | "SigningOut" | "SignedOut" | "Failed">("Idle"),
+    [resumed, setResumed] = useState(0);
+  useEffect(() => {
+    const cover = () => {
+      if (document.visibilityState === "hidden") setCovered(true);
+    };
+    document.addEventListener("visibilitychange", cover);
+    return () => document.removeEventListener("visibilitychange", cover);
+  }, []);
+  const named = Boolean(props.csrf && props.storeReference);
+  const signOut =
+    props.signOut ??
+    (async () => {
+      const response = await fetch("/merchant/logout", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      if (!response.ok) throw new Error("KDS_SIGN_OUT_FAILED");
+    });
+  if (handover === "SignedOut")
+    return (
+      <StatePanel heading="Kitchen display signed out" status>
+        <p>The next named operator must sign in before using this board.</p>
+      </StatePanel>
+    );
+  if (covered)
+    return (
+      <StatePanel heading="Kitchen display covered" tone="offline" status>
+        <p>
+          The board was hidden while this device was away. Resume reloads the board and rechecks the
+          current operator Session.
+        </p>
+        <button
+          onClick={() => {
+            setCovered(false);
+            setResumed((value) => value + 1);
+          }}
+        >
+          Resume as current operator
+        </button>
+      </StatePanel>
+    );
+  return (
+    <>
+      {named ? (
+        <p>
+          <button
+            disabled={handover === "SigningOut"}
+            onClick={() => {
+              setHandover("SigningOut");
+              signOut().then(
+                () => setHandover("SignedOut"),
+                () => setHandover("Failed"),
+              );
+            }}
+          >
+            Hand over / sign out
+          </button>
+          {handover === "Failed" ? (
+            <span role="alert"> Sign-out was not confirmed. Retry before handing over.</span>
+          ) : null}
+        </p>
+      ) : null}
+      <KitchenBoardContent key={resumed} {...props} />
     </>
   );
 }

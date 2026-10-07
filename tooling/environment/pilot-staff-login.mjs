@@ -91,7 +91,8 @@ export function installInternalStaffLogin(app, merchant) {
         forms = entries
           .map(
             (entry) =>
-              `<form method="post" action="/merchant/internal-test/login"><input type="hidden" name="confirmation" value="DEMO_STAFF_LOGIN"><button name="staffSelector" value="${escape(entry.selector)}" type="submit">Enter as ${escape(entry.label)}</button></form>`,
+              `<form method="post" action="/merchant/internal-test/login"><input type="hidden" name="confirmation" value="DEMO_STAFF_LOGIN"><button name="staffSelector" value="${escape(entry.selector)}" type="submit">Enter as ${escape(entry.label)}</button></form>` +
+              `<form method="post" action="/merchant/internal-test/login"><input type="hidden" name="confirmation" value="DEMO_STAFF_LOGIN"><input type="hidden" name="purpose" value="KitchenDisplay"><button name="staffSelector" value="${escape(entry.selector)}" type="submit">Start kitchen display as ${escape(entry.label)}</button></form>`,
           )
           .join("");
       return res
@@ -108,7 +109,7 @@ export function installInternalStaffLogin(app, merchant) {
     express.urlencoded({ extended: false, limit: "1kb" }),
     async (req, res) => {
       res.set("Cache-Control", "no-store");
-      let requested;
+      let requested, kitchenDisplay;
       try {
         if (
           !requestScope(req) ||
@@ -116,19 +117,20 @@ export function installInternalStaffLogin(app, merchant) {
           req.headers["sec-fetch-site"] !== "same-origin"
         )
           return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
-        const body = record(
-          req.body,
-          Object.hasOwn(req.body ?? {}, "staffSelector")
-            ? ["confirmation", "staffSelector"]
-            : ["confirmation"],
-        );
+        const body = record(req.body, [
+          "confirmation",
+          ...(Object.hasOwn(req.body ?? {}, "staffSelector") ? ["staffSelector"] : []),
+          ...(Object.hasOwn(req.body ?? {}, "purpose") ? ["purpose"] : []),
+        ]);
         if (
           body.confirmation !== "DEMO_STAFF_LOGIN" ||
+          (Object.hasOwn(body, "purpose") && body.purpose !== "KitchenDisplay") ||
           (Object.hasOwn(body, "staffSelector") &&
             (typeof body.staffSelector !== "string" || !selectorPattern.test(body.staffSelector)))
         )
           return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
         requested = body.staffSelector;
+        kitchenDisplay = body.purpose === "KitchenDisplay";
       } catch {
         return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
       }
@@ -139,7 +141,8 @@ export function installInternalStaffLogin(app, merchant) {
           (requested !== undefined && !entries.some((entry) => entry.selector === requested))
         )
           return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
-        const credentials = requested === undefined ? await issue() : await issue(requested);
+        const purpose = kitchenDisplay ? "KitchenDisplay" : "Workforce";
+        const credentials = await issue(requested, purpose);
         if (
           typeof credentials?.sessionCookie !== "string" ||
           !/^[A-Za-z0-9_-]{43}$/u.test(credentials.sessionCookie)
@@ -151,7 +154,7 @@ export function installInternalStaffLogin(app, merchant) {
             credentials.sessionCookie +
             "; Path=/; Secure; HttpOnly; SameSite=Strict",
         );
-        return res.redirect(303, "/operations/orders");
+        return res.redirect(303, kitchenDisplay ? "/operations/kitchen" : "/operations/orders");
       } catch {
         return res.status(503).json({ code: "INTERNAL_STAFF_LOGIN_UNAVAILABLE" });
       }

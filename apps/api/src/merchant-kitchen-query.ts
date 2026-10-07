@@ -1,6 +1,7 @@
 import { readClosedRecord } from "@bop/identity";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  buildKdsContinuityState,
   createKitchenQueueProjectionService,
   createPostgresKitchenQueueQueries,
   lockPostgresKitchenQueueRead,
@@ -14,6 +15,61 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 const unavailable = async (): Promise<never> => {
   throw new KitchenQueueProjectionError("KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE");
 };
+type OperatorStatus = "Named" | "Locked" | "Unavailable" | "Unverified";
+interface ProjectionMetadata {
+  projectionGenerationReference: string;
+  sourceCheckpointReference: string;
+  freshnessStatus: "Fresh" | "Stale";
+  asOfUtc: string;
+}
+
+/** IDR-0039 named-operator browser KDS: only a current NamedKdsOperator Session can operate.
+ * Kitchen owns the continuity decision; projection staleness stays a separate UI gate. */
+export function kdsOperatorStatus(input: {
+  session: Awaited<ReturnType<MerchantBffService["authorize"]>>;
+  actorReference: string;
+  brandReference: string;
+  storeReference: string;
+  observedAt: string;
+  projection: ProjectionMetadata;
+}): OperatorStatus {
+  const { session } = input;
+  if (session?.policy?.code !== "NamedKdsOperator") return "Unverified";
+  try {
+    const validUntil =
+      Date.parse(session.idleExpiresAt) < Date.parse(session.absoluteExpiresAt)
+        ? session.idleExpiresAt
+        : session.absoluteExpiresAt;
+    const state = buildKdsContinuityState({
+      session: {
+        sessionReference: session.sessionReference,
+        actorReference: input.actorReference,
+        brandReference: input.brandReference,
+        storeReference: input.storeReference,
+        sessionVersion: session.version,
+        sessionKind: "NamedKdsOperator",
+        state: session.status === "Active" ? "Active" : "Ended",
+        observedAt: input.observedAt,
+        validUntil,
+      },
+      projection: {
+        projectionGenerationReference: input.projection.projectionGenerationReference,
+        sourceCheckpointReference: input.projection.sourceCheckpointReference,
+        freshnessStatus: input.projection.freshnessStatus,
+        partial: false,
+        asOfUtc: input.projection.asOfUtc,
+      },
+      connection: "Online",
+      observedAt: input.observedAt,
+      recoveryRequired: false,
+      // Kitchen re-parses every reference and instant at runtime before deciding.
+    } as unknown as Parameters<typeof buildKdsContinuityState>[0]);
+    if (state.mode === "Locked") return "Locked";
+    return state.mode === "Live" || state.mode === "StaleReadOnly" ? "Named" : "Unavailable";
+  } catch {
+    return "Unavailable";
+  }
+}
 const itemView = (item: KitchenQueueItemView) => ({
   ...item,
   ticketAggregateVersion: item.ticketAggregateVersion.toString(10),
@@ -125,6 +181,8 @@ export function createMerchantKitchenQuery(options: {
         clock: { now: () => authority.observedAt },
         digests: { sha256: options.sha256 },
       });
+      const operatorStatus = (projection: ProjectionMetadata) =>
+        kdsOperatorStatus({ session, ...authority, projection });
       if (query.kind === "List") {
         const result = await service.list({
           ...authority,
@@ -134,7 +192,7 @@ export function createMerchantKitchenQuery(options: {
         });
         return {
           ...result,
-          operatorStatus: "Unverified" as const,
+          operatorStatus: operatorStatus(result),
           storeReference: authority.storeReference,
           items: result.items.map(itemView),
         };
@@ -145,7 +203,7 @@ export function createMerchantKitchenQuery(options: {
       });
       return {
         ...result,
-        operatorStatus: "Unverified" as const,
+        operatorStatus: operatorStatus(result),
         storeReference: authority.storeReference,
         item: itemView(result.item),
       };
