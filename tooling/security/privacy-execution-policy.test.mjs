@@ -49,12 +49,14 @@ function allowedCookie(policy, name, file) {
 }
 
 describe("WP-2051 privacy execution policy", () => {
-  it("allows only the three necessary host-only credential cookies", async () => {
+  it("allows only the five necessary host-only credential cookies", async () => {
     const value = await policy();
     expect(value.necessaryCookies.map(({ name }) => name)).toEqual([
       "__Host-bop-auth",
       "__Host-bop-merchant",
       "__Host-bop-guest",
+      "__Host-bop-platform-auth",
+      "__Host-bop-platform",
     ]);
     for (const cookie of value.necessaryCookies) {
       expect(cookie).toMatchObject({

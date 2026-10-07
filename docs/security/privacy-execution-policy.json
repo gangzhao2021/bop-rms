@@ -35,6 +35,24 @@
       "sameSite": "Lax",
       "path": "/",
       "domain": null
+    },
+    {
+      "name": "__Host-bop-platform-auth",
+      "purpose": "platform-oauth-transaction",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null
+    },
+    {
+      "name": "__Host-bop-platform",
+      "purpose": "platform-operator-session",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null
     }
   ],
   "prohibitedTracking": [

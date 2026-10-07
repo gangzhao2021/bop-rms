@@ -84,8 +84,8 @@ jobs:
           pnpm lint
           pnpm typecheck
           pnpm screen-registry:check
-          pnpm test
           pnpm build
+          pnpm test
 
       - name: Verify local demo browser acceptance
         run: |
