@@ -421,6 +421,15 @@ const databaseAccessManifestInput = {
       readPattern: "owner-repository",
       source: "packages/bop/tenant/src/infrastructure/persistence/receipt-store-identity-source.ts",
     },
+    {
+      id: "store-opening-scope-source.read.store",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_tenant", table: "store" },
+      principal: { kind: "module", id: "@bop/tenant" },
+      readPattern: "owner-repository",
+      source: "packages/bop/tenant/src/infrastructure/persistence/store-opening-scope-source.ts",
+    },
   ],
 } as const;
 

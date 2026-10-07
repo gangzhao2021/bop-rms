@@ -2575,6 +2575,28 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/payment-receipt-coverage-source.ts";
+        // WP-2423: Tenant owner's Store opening scope confirmation.
+        const acceptedStoreOpeningScopeAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          module.manifest.ownedDatabase?.tables?.includes("store") &&
+          moduleRelative === "src/infrastructure/persistence/store-opening-scope-source.ts";
+        // WP-2423 / DEC-PERM-CATALOG: signed Store opening role provisioning.
+        const acceptedStoreRoleProvisioningAsset =
+          module.packageName === "@bop/permission" &&
+          module.manifest.ownedDatabase?.schema === "bop_permission" &&
+          [
+            "store_role_provisioning",
+            "permission_catalog_revision",
+            "policy_state",
+            "permission_definition",
+            "role",
+            "permission_grant",
+            "role_administration_version",
+            "role_administration_permission",
+            "role_administration_decision",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/store-role-provisioning-store.ts";
         const acceptedReceiptStoreIdentityAsset =
           module.packageName === "@bop/tenant" &&
           module.manifest.ownedDatabase?.schema === "bop_tenant" &&
@@ -3121,6 +3143,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedOrderStatusProjectionAsset &&
           !acceptedPaymentReceiptCoverageAsset &&
           !acceptedReceiptStoreIdentityAsset &&
+          !acceptedStoreOpeningScopeAsset &&
+          !acceptedStoreRoleProvisioningAsset &&
           !acceptedReceiptIssuerAsset &&
           !acceptedTaxRegistrantSourceAsset &&
           !acceptedDigitalReceiptAsset &&

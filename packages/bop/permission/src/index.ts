@@ -48,12 +48,17 @@ export * from "./infrastructure/brand-provisioning-approval-files.js";
 export * from "./contracts/brand-initial-policy.js";
 export * from "./infrastructure/persistence/brand-initial-policy-store.js";
 export * from "./infrastructure/persistence/permission-catalog-synchronizer.js";
+export * from "./infrastructure/persistence/store-role-provisioning-store.js";
+export * from "./contracts/store-role-provisioning.js";
 export * from "./contracts/brand-initial-provisioning-plan.js";
 export {
   legacyPermissionReplacements,
   storePermissionCatalog,
   storePermissionCatalogVersion,
   storePermissionCodes,
+  storeRoleTemplateActions,
+  storeRoleTemplateCodes,
+  storeRoleTemplateProfiles,
   storeRoleTemplates,
   type PermissionRisk,
   type StorePermissionDefinition,

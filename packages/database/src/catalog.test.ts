@@ -645,6 +645,7 @@ describe("migration catalog", () => {
       "1900_016_create_stock_site_location",
       "2000_001_alter_permission_catalog_identifiers",
       "2000_002_create_permission_catalog_revision",
+      "2000_003_create_store_role_provisioning",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -1858,6 +1859,7 @@ describe("migration catalog", () => {
       ["0300_010_create_platform_permission", "@bop/permission", "bop_permission"],
       ["2000_001_alter_permission_catalog_identifiers", "@bop/permission", "bop_permission"],
       ["2000_002_create_permission_catalog_revision", "@bop/permission", "bop_permission"],
+      ["2000_003_create_store_role_provisioning", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",
@@ -2313,12 +2315,12 @@ $unsafe$;
       ),
     );
     await writeFile(
-      path.join(root, "migrations/2000-release-001/2000_003_create_permission_catalog_probe.sql"),
+      path.join(root, "migrations/2000-release-001/2000_900_create_permission_catalog_probe.sql"),
       sql,
     );
     const catalog = await readMigrationCatalog(root);
     expect(catalog.diagnostics).toEqual([]);
-    expect(catalog.migrations.at(-1)?.id).toBe("2000_003_create_permission_catalog_probe");
+    expect(catalog.migrations.at(-1)?.id).toBe("2000_900_create_permission_catalog_probe");
   });
 
   it("rejects a symbolic namespace registry", async () => {

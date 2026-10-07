@@ -426,3 +426,56 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "recipe.read",
     ]),
   });
+
+export const storeRoleTemplateCodes: readonly StoreRoleTemplateCode[] = Object.freeze([
+  "owner",
+  "store-manager",
+  "front-of-house",
+  "kitchen",
+  "inventory-manager",
+]);
+/** Store role code (database grammar is lowercase snake case) and display text per template. */
+export const storeRoleTemplateProfiles: Readonly<
+  Record<
+    StoreRoleTemplateCode,
+    { readonly roleCode: string; readonly displayName: string; readonly description: string }
+  >
+> = Object.freeze({
+  owner: {
+    roleCode: "store_owner",
+    displayName: "Owner",
+    description: "All Store permissions, including staff, roles, finance and refund approval",
+  },
+  "store-manager": {
+    roleCode: "store_manager",
+    displayName: "Store Manager",
+    description:
+      "Orders, exceptions, refunds within limit, kitchen, pickup, stock and availability",
+  },
+  "front-of-house": {
+    roleCode: "front_of_house",
+    displayName: "Front of House",
+    description: "View and accept orders, staff-entered orders, pickup handoff and waste records",
+  },
+  kitchen: {
+    roleCode: "kitchen",
+    displayName: "Kitchen",
+    description: "Kitchen display work items and kitchen exceptions",
+  },
+  "inventory-manager": {
+    roleCode: "inventory_manager",
+    displayName: "Inventory Manager",
+    description: "Inventory items, receiving, counts, adjustments and waste",
+  },
+});
+/**
+ * Exact actions a provisioned template role holds: its catalog codes plus each legacy consolidated
+ * code whose replacements the role holds completely, so a module still checking a legacy code is
+ * never granted more than the template intends.
+ */
+export function storeRoleTemplateActions(template: StoreRoleTemplateCode): readonly string[] {
+  const codes = new Set(storeRoleTemplates[template]);
+  for (const [legacy, replacements] of Object.entries(legacyPermissionReplacements))
+    if (replacements.every((code) => codes.has(code))) codes.add(legacy);
+  return Object.freeze([...codes].sort());
+}
