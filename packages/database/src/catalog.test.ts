@@ -417,6 +417,7 @@ describe("migration catalog", () => {
       "0300_008_alter_option_publication_action_identifier",
       "0300_009_alter_option_history_action_identifier",
       "0300_010_create_platform_permission",
+      "0300_011_alter_permission_catalog_identifiers",
       "0400_001_create_feature_control_administration",
       "0400_002_create_live_gate_workflow",
       "0400_003_create_support_case",
@@ -1851,6 +1852,7 @@ describe("migration catalog", () => {
       ["0300_008_alter_option_publication_action_identifier", "@bop/permission", "bop_permission"],
       ["0300_009_alter_option_history_action_identifier", "@bop/permission", "bop_permission"],
       ["0300_010_create_platform_permission", "@bop/permission", "bop_permission"],
+      ["0300_011_alter_permission_catalog_identifiers", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",

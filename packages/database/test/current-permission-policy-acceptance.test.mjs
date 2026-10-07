@@ -136,10 +136,9 @@ it("evaluates actual workforce policy, deny precedence, revocation and lock rete
       const historyAllowed = await evaluate(undefined, historyAction);
       assert.equal(historyAllowed.effect, "Allow");
       assert.equal(historyAllowed.action, historyAction);
+      // DEC-PERM-CATALOG: well-formed underscore names are valid; only the catalog provisioner
+      // writes definitions. The format still rejects case, control characters and wildcards.
       for (const action of [
-        "catalog.option_set.history.write",
-        "catalog.option_set.history.read.extra",
-        "catalog.option_set.history_read",
         "catalog.option_set.history.read\n",
         "catalog.option_set.History.read",
         "catalog.option_set.history.*",

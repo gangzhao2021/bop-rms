@@ -274,9 +274,9 @@ async function proveOptionWorkflowActions(context) {
         action,
       );
     }
+    // DEC-PERM-CATALOG: well-formed underscore names are valid; only the catalog provisioner
+    // writes definitions. Case, control characters, wildcards and doubled underscores stay invalid.
     for (const action of [
-      "catalog.option_set.submit.other",
-      "catalog.option_set.publish.other",
       "catalog.option_set.submit.*",
       "catalog.option_set.publish.*",
       "catalog.option_set.Submit",
@@ -285,8 +285,8 @@ async function proveOptionWorkflowActions(context) {
       "catalog.option_set.publish\n",
       "catalog.option__set.submit",
       "catalog.option__set.publish",
-      "catalog.option_set.approve",
-      "catalog.other_set.publish",
+      "catalog.option_set_.publish",
+      "catalog._option_set.publish",
     ]) {
       await assert.rejects(
         client.query(

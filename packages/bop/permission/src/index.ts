@@ -48,3 +48,13 @@ export * from "./infrastructure/brand-provisioning-approval-files.js";
 export * from "./contracts/brand-initial-policy.js";
 export * from "./infrastructure/persistence/brand-initial-policy-store.js";
 export * from "./contracts/brand-initial-provisioning-plan.js";
+export {
+  legacyPermissionReplacements,
+  storePermissionCatalog,
+  storePermissionCatalogVersion,
+  storePermissionCodes,
+  storeRoleTemplates,
+  type PermissionRisk,
+  type StorePermissionDefinition,
+  type StoreRoleTemplateCode,
+} from "./catalog/store-permission-catalog.js";
