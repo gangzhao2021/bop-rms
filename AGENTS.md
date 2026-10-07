@@ -58,3 +58,4 @@
 - While WP-2423 is active, a routine change records one line in WP-2423: what changed, the check command and its result. No fingerprint checkpoint, evidence write-up or crosswalk.
 - Full evidence discipline still applies to payment, refund, reconciliation, settlement, migrations, authorization and data classification.
 - Do not work on items listed as bypassed in WP-2423 unless the pilot path is blocked by them.
+- Commercial fidelity (Owner, 2026-10-07): design for how a real store operates, never choose an option because it is simpler. Existing designs that fall short must be listed in WP-2423 and corrected. Test-environment-only shortcuts must be labelled as such.
