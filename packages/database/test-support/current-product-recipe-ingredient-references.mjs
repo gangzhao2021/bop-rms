@@ -76,7 +76,6 @@ export async function exerciseCurrentProductRecipeIngredientReferences({
     ...scope,
     actorReference: id(3),
     purpose: "InventoryItemManagement",
-    permission: "inventory.manage",
     occurredAt: at,
   };
   const createOperation = next();

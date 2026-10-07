@@ -41,6 +41,7 @@ import { createMerchantKitchenQuery } from "../../apps/api/dist/merchant-kitchen
 import { createMerchantKitchenRelease } from "../../apps/api/dist/merchant-kitchen-release.js";
 import { createMerchantRoleAdministration } from "../../apps/api/dist/merchant-role-administration.js";
 import { createMerchantStaffAdministration } from "../../apps/api/dist/merchant-staff-administration.js";
+import { createMerchantInventoryItems } from "../../apps/api/dist/merchant-inventory-items.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
 export async function createInternalMerchant(
@@ -151,6 +152,12 @@ export async function createInternalMerchant(
           label: "Pickup",
           href: "/operations/pickup",
           permission: "fulfillment.operate",
+        },
+        {
+          screenId: "INV-ITEM-LIST",
+          label: "Inventory items",
+          href: "/app/supply/items",
+          permission: "inventory.item.read",
         },
         {
           screenId: "IAM-USER-LIST",
@@ -405,6 +412,12 @@ export async function createInternalMerchant(
     authentication: service,
     references: { next: () => resources.credentials.reference() },
   });
+  const inventoryItems = createMerchantInventoryItems({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
   const { pickupQuery, pickupProof, pickupHandoff } = await createInternalMerchantPickup(
     resources,
     { persistence, service },
@@ -516,6 +529,7 @@ export async function createInternalMerchant(
       kitchenRelease,
       roleAdministration,
       staffAdministration,
+      inventoryItems,
       pickupQuery,
       pickupProof,
       pickupHandoff,

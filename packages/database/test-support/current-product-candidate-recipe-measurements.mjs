@@ -107,7 +107,6 @@ export async function exerciseCurrentProductCandidateRecipeMeasurements({
       ...scope,
       actorReference: actor,
       purpose: "InventoryItemManagement",
-      permission: "inventory.manage",
       occurredAt: at,
     };
     const created = await executeInventoryItemCommand(
@@ -688,7 +687,6 @@ export async function exerciseCurrentProductCandidateRecipeMeasurements({
                       ...scope,
                       actorReference: actor,
                       purpose: "InventoryItemManagement",
-                      permission: "inventory.manage",
                       action: "Deactivate",
                       operationReference: next(),
                       occurredAt: new Date().toISOString(),

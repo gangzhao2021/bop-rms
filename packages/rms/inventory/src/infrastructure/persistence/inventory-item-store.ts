@@ -58,6 +58,18 @@ function rows(value: unknown): readonly unknown[] {
     return fail();
   return descriptor.value as unknown[];
 }
+function boundedRows(value: unknown, maximum: number): readonly unknown[] {
+  if (value === null || typeof value !== "object") return fail();
+  const descriptor = Object.getOwnPropertyDescriptor(value, "rows");
+  if (
+    !descriptor ||
+    !("value" in descriptor) ||
+    !Array.isArray(descriptor.value) ||
+    descriptor.value.length > maximum
+  )
+    return fail();
+  return descriptor.value as unknown[];
+}
 function action(value: unknown): InventoryItemAction {
   if (typeof value !== "string" || !Object.hasOwn(actionCodes, value)) return fail();
   return value as InventoryItemAction;
@@ -114,6 +126,20 @@ export function createPostgresInventoryItemStore(
 ): InventoryItemPorts["repository"] & {
   /** Internal submission fence; hold the transaction through dependent writes. */
   loadForUpdate(reference: string): Promise<InventoryItemAggregate | null>;
+  /**
+   * True once any Store opened a stock account for the item, even before its first movement (which
+   * marks the item itself, 1900_005); the account fixes the unit, so administration treats both alike.
+   */
+  stockAccountsOpened(reference: string): Promise<boolean>;
+  /** True while any Store of the Brand holds, reserves or expects the item (archive guard). */
+  stockExposure(reference: string): Promise<boolean>;
+  /** INV-ITEM-LIST: current versions ordered by internal code, keyset paged. */
+  list(input: {
+    readonly search: string | null;
+    readonly lifecycle: InventoryItemAggregate["lifecycle"] | null;
+    readonly afterInternalCode: string | null;
+    readonly limit: number;
+  }): Promise<{ readonly items: readonly InventoryItemAggregate[]; readonly hasMore: boolean }>;
 } {
   const scope = closed(scopeInput, ["tenantReference", "brandReference"]);
   const tenant = parseInventoryReference(scope.tenantReference),
@@ -205,6 +231,18 @@ export function createPostgresInventoryItemStore(
   return Object.freeze({
     resolveOperation: (operation) => run((tx) => resolve(tx, parseInventoryReference(operation))),
     load: (reference) => run((tx) => load(tx, parseInventoryReference(reference))),
+    stockAccountsOpened: (reference) =>
+      run(async (tx) => {
+        const item = parseInventoryReference(reference);
+        return (
+          rows(
+            await tx.query(
+              "SELECT 1 FROM rms_inventory.item_stock_exposure WHERE tenant_id=$1 AND brand_id=$2 AND item_id=$3 LIMIT 1",
+              [tenant, brand, item],
+            ),
+          ).length === 1
+        );
+      }),
     loadForUpdate: (reference) => {
       const itemReference = parseInventoryReference(reference);
       return run(async (tx) => {
@@ -238,6 +276,61 @@ export function createPostgresInventoryItemStore(
             ),
           ).length === 1
         );
+      }),
+    stockExposure: (reference) =>
+      run(async (tx) => {
+        const item = parseInventoryReference(reference);
+        return (
+          rows(
+            await tx.query(
+              "SELECT 1 FROM rms_inventory.item_stock_exposure WHERE tenant_id=$1 AND brand_id=$2 AND item_id=$3 AND exposed LIMIT 1",
+              [tenant, brand, item],
+            ),
+          ).length === 1
+        );
+      }),
+    list: (input) =>
+      run(async (tx) => {
+        const raw = closed(input, ["search", "lifecycle", "afterInternalCode", "limit"]);
+        const limit = raw.limit;
+        if (
+          !Number.isSafeInteger(limit) ||
+          (limit as number) < 1 ||
+          (limit as number) > 200 ||
+          (raw.search !== null && (typeof raw.search !== "string" || raw.search.length > 80)) ||
+          (raw.lifecycle !== null &&
+            !["Active", "Inactive", "Archived"].includes(String(raw.lifecycle))) ||
+          (raw.afterInternalCode !== null &&
+            (typeof raw.afterInternalCode !== "string" ||
+              !/^[A-Z0-9][A-Z0-9_-]{0,63}$/u.test(raw.afterInternalCode)))
+        )
+          return fail("INVENTORY_ITEM_INVALID");
+        const pattern =
+          raw.search === null || (raw.search as string).trim() === ""
+            ? null
+            : "%" + (raw.search as string).trim().replace(/[\\%_]/gu, (c) => "\\" + c) + "%";
+        const result = boundedRows(
+          await tx.query(
+            `SELECT v.snapshot_json AS snapshot,v.version::text AS version,
+               to_char(v.recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "recordedAt"
+             FROM rms_inventory.inventory_item i
+             JOIN LATERAL (SELECT * FROM rms_inventory.inventory_item_version x
+               WHERE x.tenant_id=i.tenant_id AND x.brand_id=i.brand_id AND x.item_id=i.item_id
+               ORDER BY x.version DESC LIMIT 1) v ON true
+             WHERE i.tenant_id=$1 AND i.brand_id=$2
+               AND ($3::text IS NULL OR i.internal_code > $3)
+               AND ($4::text IS NULL OR v.snapshot_json->>'lifecycle' = $4)
+               AND ($5::text IS NULL OR i.internal_code ILIKE $5 OR EXISTS (SELECT 1 FROM jsonb_each_text(v.snapshot_json->'localizedNames') n WHERE n.value ILIKE $5))
+             ORDER BY i.internal_code COLLATE "C" LIMIT $6`,
+            [tenant, brand, raw.afterInternalCode, raw.lifecycle, pattern, (limit as number) + 1],
+          ),
+          (limit as number) + 1,
+        );
+        const items = result.slice(0, limit as number).map((row) => decode(row));
+        return Object.freeze({
+          items: Object.freeze(items),
+          hasMore: result.length > (limit as number),
+        });
       }),
     commit: (input) =>
       run(async (tx) => {

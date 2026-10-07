@@ -41,13 +41,7 @@ import {
 import { WaitlistBoardPage } from "./WaitlistPages.js";
 import { CapacityPolicyPage } from "./CapacityPolicyPage.js";
 import { StaffOrderEntryPage } from "./StaffOrderEntryPage.js";
-import {
-  InventoryItemCreatePage,
-  InventoryItemDetailPage,
-  InventoryItemEditPage,
-  InventoryItemListPage,
-  StockOverviewPage,
-} from "./InventoryPages.js";
+import { StockOverviewPage } from "./InventoryPages.js";
 import {
   InventoryItemStockHistoryPage,
   InventoryMovementDetailPage,
@@ -124,6 +118,8 @@ import { PlatformLiveGatePage, StoreLiveGatePage } from "./LiveGatePages.js";
 import { RoleEditorPage, RoleListPage } from "./RoleAdministrationPages.js";
 import { createRoleAdministrationPageClient } from "./role-administration-pages.js";
 import { StaffDetailPage, StaffListPage } from "./StaffAdministrationPages.js";
+import { SupplyItemDetailPage, SupplyItemFormPage, SupplyItemListPage } from "./SupplyItemPages.js";
+import { createSupplyItemClient } from "./supply-item-pages.js";
 import { createStaffPageClient } from "./staff-administration-pages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
 import { PlatformTenantDetailPage } from "./PlatformTenantPages.js";
@@ -639,11 +635,61 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route path="/operations/inventory/transfers/:id" element={<InventoryTransferDetailPage />} />
       <Route path="/operations/inventory/lots" element={<InventoryLotExpiryPage />} />
       <Route path="/operations/receiving/new" element={<GoodsReceiptPage />} />
-      <Route path="/app/supply/items" element={<InventoryItemListPage />} />
-      <Route path="/app/supply/items/new" element={<InventoryItemCreatePage />} />
-      <Route path="/app/supply/items/:id/edit" element={<InventoryItemEditPage />} />
+      <Route
+        path="/app/supply/items"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <SupplyItemListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createSupplyItemClient(state.csrf)}
+            />
+          ) : (
+            <SupplyItemListPage />
+          )
+        }
+      />
+      <Route
+        path="/app/supply/items/new"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <SupplyItemFormPage
+              mode="Create"
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createSupplyItemClient(state.csrf)}
+            />
+          ) : (
+            <SupplyItemFormPage mode="Create" />
+          )
+        }
+      />
+      <Route
+        path="/app/supply/items/:id/edit"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <SupplyItemFormPage
+              mode="Edit"
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createSupplyItemClient(state.csrf)}
+            />
+          ) : (
+            <SupplyItemFormPage mode="Edit" />
+          )
+        }
+      />
       <Route path="/app/supply/items/:id/movements" element={<InventoryItemStockHistoryPage />} />
-      <Route path="/app/supply/items/:id" element={<InventoryItemDetailPage />} />
+      <Route
+        path="/app/supply/items/:id"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <SupplyItemDetailPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createSupplyItemClient(state.csrf)}
+            />
+          ) : (
+            <SupplyItemDetailPage />
+          )
+        }
+      />
       <Route path="/app/supply/movements" element={<InventoryMovementListPage />} />
       <Route path="/app/supply/movements/:id" element={<InventoryMovementDetailPage />} />
       <Route path="/app/supply/replenishment" element={<InventoryReplenishmentPage />} />

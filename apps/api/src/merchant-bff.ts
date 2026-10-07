@@ -192,6 +192,10 @@ import {
   type createMerchantRoleAdministration,
 } from "./merchant-role-administration.js";
 import {
+  MerchantInventoryItemError,
+  type createMerchantInventoryItems,
+} from "./merchant-inventory-items.js";
+import {
   MerchantStaffAdministrationError,
   type createMerchantStaffAdministration,
 } from "./merchant-staff-administration.js";
@@ -262,6 +266,7 @@ const merchantNavigation = Object.freeze({
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
   "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
   "IAM-USER-LIST": ["/app/organization/users", "organization.staff.read"],
+  "INV-ITEM-LIST": ["/app/supply/items", "inventory.item.read"],
 } as const);
 
 export interface MerchantNavigationItem {
@@ -417,6 +422,7 @@ export interface MerchantBffRouterOptions {
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
   readonly roleAdministration?: ReturnType<typeof createMerchantRoleAdministration>;
   readonly staffAdministration?: ReturnType<typeof createMerchantStaffAdministration>;
+  readonly inventoryItems?: ReturnType<typeof createMerchantInventoryItems>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
   readonly ordinaryRefundSend?: ReturnType<typeof createMerchantOrdinaryRefundSendCommand>;
   readonly ordinaryRefundReconciliation?: ReturnType<
@@ -4853,6 +4859,85 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .command({ sessionCookie, csrf, body: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => staffFailure(response, error));
+  });
+
+  // WP-2423: INV-ITEM-LIST / DETAIL / CREATE / EDIT reads and Inventory Item commands.
+  const inventoryItemStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    StockRemaining: 409,
+    Locked: 409,
+    Invalid: 400,
+    Unavailable: 503,
+  } as const;
+  const inventoryItemFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantInventoryItemError)) {
+      denied(response);
+      return;
+    }
+    response.status(inventoryItemStatus[error.code]).json({ error: error.code });
+  };
+  router.post("/supply/items/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as Record<string, unknown> | undefined;
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).sort().join(",") !== "afterInternalCode,itemReference,lifecycle,search" ||
+      (body.itemReference !== null &&
+        (typeof body.itemReference !== "string" || !uuid.test(body.itemReference))) ||
+      (body.search !== null && (typeof body.search !== "string" || body.search.length > 80)) ||
+      (body.lifecycle !== null &&
+        !["Active", "Inactive", "Archived"].includes(String(body.lifecycle))) ||
+      (body.afterInternalCode !== null &&
+        (typeof body.afterInternalCode !== "string" ||
+          !/^[A-Z0-9][A-Z0-9_-]{0,63}$/u.test(body.afterInternalCode)))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.inventoryItems) {
+      response.status(503).json({ error: "inventory_items_unavailable" });
+      return;
+    }
+    void options.inventoryItems
+      .query({
+        sessionCookie,
+        csrf,
+        itemReference: body.itemReference as string | null,
+        search: body.search as string | null,
+        lifecycle: body.lifecycle as "Active" | "Inactive" | "Archived" | null,
+        afterInternalCode: body.afterInternalCode as string | null,
+      })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => inventoryItemFailure(response, error));
+  });
+  router.post("/supply/items/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.inventoryItems) {
+      response.status(503).json({ error: "inventory_items_unavailable" });
+      return;
+    }
+    void options.inventoryItems
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => inventoryItemFailure(response, error));
   });
 
   router.post("/kitchen/release", sameOriginMutation(options), (request, response) => {

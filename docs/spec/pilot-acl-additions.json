@@ -189,6 +189,15 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 DEC-PERM-CATALOG A 2026-10-07: Store staff role assignment"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "item_stock_exposure",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 2026-10-07: Inventory Item administration (archive and unit guard)"
     }
   ]
 }

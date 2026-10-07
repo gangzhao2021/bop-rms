@@ -27,6 +27,7 @@ const moduleManifestInput: ModuleManifest =
         "configuration_reference_generation",
         "inventory_item",
         "inventory_item_operation",
+        "item_stock_exposure",
         "inventory_item_version",
         "item_sku_mapping_version",
         "recipe_configuration_source_capture",

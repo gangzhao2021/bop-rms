@@ -40,7 +40,6 @@ export async function seedSubmissionInventoryStock({
     ...scope,
     actorReference: id(3),
     purpose: "InventoryItemManagement",
-    permission: "inventory.manage",
     operationReference: id(10),
     occurredAt: now,
     action: "Create",

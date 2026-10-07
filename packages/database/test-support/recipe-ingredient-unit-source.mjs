@@ -108,7 +108,6 @@ export async function exerciseRecipeIngredientUnitSource({
         ...scope,
         actorReference: id(3),
         purpose: "InventoryItemManagement",
-        permission: "inventory.manage",
         occurredAt: new Date(Date.parse(at) + 2).toISOString(),
         action: "Deactivate",
         operationReference: op,

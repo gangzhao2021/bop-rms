@@ -32,7 +32,8 @@ export interface MerchantNavigationItem {
     | "FUL-PICKUP-QUEUE"
     | "DEV-KDS-PROFILE"
     | "IAM-ROLE-LIST"
-    | "IAM-USER-LIST";
+    | "IAM-USER-LIST"
+    | "INV-ITEM-LIST";
   readonly label: string;
   readonly href: string;
   readonly permission: string;
@@ -62,6 +63,7 @@ const NAVIGATION = Object.freeze({
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
   "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
   "IAM-USER-LIST": ["/app/organization/users", "organization.staff.read"],
+  "INV-ITEM-LIST": ["/app/supply/items", "inventory.item.read"],
 } as const);
 
 function record(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {

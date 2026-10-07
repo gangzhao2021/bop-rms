@@ -191,7 +191,6 @@ export async function seedSyntheticInventoryItems({
       ...itemScope,
       actorReference: id(3),
       purpose: "InventoryItemManagement",
-      permission: "inventory.manage",
       occurredAt: at,
     };
     await executeInventoryItemCommand(

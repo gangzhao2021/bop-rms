@@ -131,6 +131,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      table: "item_stock_exposure",
+      classification: "aggregate-child-entity",
+      writeOwner: { kind: "module", id: "@rms/inventory" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["none"],
+    },
+    {
       table: "inventory_item_operation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/inventory" },
@@ -305,6 +313,15 @@ const databaseAccessManifestInput = {
       readPattern: "owner-repository",
       source:
         "packages/rms/inventory/src/infrastructure/persistence/configuration-reference-source-store.ts",
+    },
+    {
+      id: "inventory-item-store.read.item_stock_exposure",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "item_stock_exposure" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source: "packages/rms/inventory/src/infrastructure/persistence/inventory-item-store.ts",
     },
   ],
 } as const;

@@ -68,7 +68,6 @@ export async function exerciseCurrentProductRecipeGraphIngredients({
     ...scope,
     actorReference: id(3),
     purpose: "InventoryItemManagement",
-    permission: "inventory.manage",
     occurredAt: at,
   };
   const tables = [

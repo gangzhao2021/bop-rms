@@ -91,7 +91,6 @@ it("composes Inventory commands with original recovery, current version fencing 
         ...scope,
         actorReference: id(3),
         purpose: "InventoryItemManagement",
-        permission: "inventory.manage",
         operationReference: id(10),
         occurredAt: now,
         action: "Create",
