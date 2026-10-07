@@ -192,6 +192,10 @@ import {
   type createMerchantRoleAdministration,
 } from "./merchant-role-administration.js";
 import {
+  MerchantStockPlaceError,
+  type createMerchantStockPlaces,
+} from "./merchant-stock-places.js";
+import {
   MerchantInventoryItemError,
   type createMerchantInventoryItems,
 } from "./merchant-inventory-items.js";
@@ -267,6 +271,7 @@ const merchantNavigation = Object.freeze({
   "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
   "IAM-USER-LIST": ["/app/organization/users", "organization.staff.read"],
   "INV-ITEM-LIST": ["/app/supply/items", "inventory.item.read"],
+  "INV-LOCATION-LIST": ["/app/supply/locations", "inventory.location.read"],
 } as const);
 
 export interface MerchantNavigationItem {
@@ -423,6 +428,7 @@ export interface MerchantBffRouterOptions {
   readonly roleAdministration?: ReturnType<typeof createMerchantRoleAdministration>;
   readonly staffAdministration?: ReturnType<typeof createMerchantStaffAdministration>;
   readonly inventoryItems?: ReturnType<typeof createMerchantInventoryItems>;
+  readonly stockPlaces?: ReturnType<typeof createMerchantStockPlaces>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
   readonly ordinaryRefundSend?: ReturnType<typeof createMerchantOrdinaryRefundSendCommand>;
   readonly ordinaryRefundReconciliation?: ReturnType<
@@ -4939,6 +4945,54 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .then((result) => response.json(result))
       .catch((error: unknown) => inventoryItemFailure(response, error));
   });
+
+  // WP-2423 / DEC-INV-LOCATIONS: INV-LOCATION-LIST reads and Stock Site / Storage Location commands.
+  const stockPlaceStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    DefaultRequired: 409,
+    StockRemaining: 409,
+    Invalid: 400,
+    Unavailable: 503,
+  } as const;
+  const stockPlaceFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantStockPlaceError)) {
+      denied(response);
+      return;
+    }
+    response.status(stockPlaceStatus[error.code]).json({ error: error.code });
+  };
+  for (const [path, handler] of [
+    ["/supply/locations/query", "query"],
+    ["/supply/locations/command", "command"],
+  ] as const)
+    router.post(path, sameOriginMutation(options), (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0 ||
+        (handler === "query" &&
+          (request.body === undefined || Object.keys(request.body as object).length !== 0))
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.stockPlaces) {
+        response.status(503).json({ error: "stock_places_unavailable" });
+        return;
+      }
+      void (
+        handler === "query"
+          ? options.stockPlaces.query({ sessionCookie, csrf })
+          : options.stockPlaces.command({ sessionCookie, csrf, body: request.body })
+      )
+        .then((result) => response.json(result))
+        .catch((error: unknown) => stockPlaceFailure(response, error));
+    });
 
   router.post("/kitchen/release", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");

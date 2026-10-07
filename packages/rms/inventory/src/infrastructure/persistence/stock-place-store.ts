@@ -75,6 +75,22 @@ export function createPostgresStockPlaceStore(
     return found.length === 1 ? (found[0]?.snapshot as StockSite | StorageLocation) : null;
   }
   return Object.freeze({
+    /** Locations of this Store that still hold, reserve or expect stock (deactivation guard). */
+    async locationsHoldingStock(): Promise<readonly string[]> {
+      return runner.run(async (tx) => {
+        await scoped(tx);
+        return rows(
+          await tx.query(
+            `SELECT DISTINCT a.location_id::text AS location FROM rms_inventory.stock_account a
+             JOIN rms_inventory.stock_balance b ON b.tenant_id=a.tenant_id AND b.brand_id=a.brand_id
+               AND b.store_id=a.store_id AND b.account_id=a.account_id
+             WHERE a.tenant_id=$1 AND a.brand_id=$2 AND a.store_id=$3
+               AND (b.on_hand<>0 OR b.reserved<>0 OR b.in_transit<>0)`,
+            [tenant, brand, store],
+          ),
+        ).map((row) => String(row.location));
+      });
+    },
     async list() {
       return runner.run(async (tx) => {
         await scoped(tx);
@@ -164,6 +180,17 @@ export function createPostgresStockPlaceStore(
             return Object.freeze({ status: "AlreadyApplied" as const, place: place ?? fail() });
           }
           if (input.command.action === "Create") {
+            // Codes are unique per Store; decided here rather than from database error text, which
+            // a caller's transaction runner may withhold.
+            const taken = rows(
+              await tx.query(
+                kind === "StockSite"
+                  ? "SELECT 1 FROM rms_inventory.stock_site WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND code=$4"
+                  : "SELECT 1 FROM rms_inventory.storage_location WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND code=$4",
+                [tenant, brand, store, candidate.code],
+              ),
+            );
+            if (taken.length > 0) return fail("STOCK_PLACE_CONFLICT");
             if (kind === "StockSite") {
               const site = candidate as StockSite;
               await tx.query(

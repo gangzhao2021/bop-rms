@@ -265,6 +265,7 @@ it("keeps Store stock places versioned, audited, idempotent and guarded by remai
         }
       };
       await move("Receive", "2", balance("0", 1), balance("2", 2), 5);
+      assert.ok((await places.locationsHoldingStock()).includes(fridge));
       await assert.rejects(
         execute(
           await current(fridge),
@@ -276,6 +277,7 @@ it("keeps Store stock places versioned, audited, idempotent and guarded by remai
       // A Waste larger than on hand, and an Adjustment that would go negative, are refused.
       await assert.rejects(move("Waste", "-3", balance("2", 2), balance("-1", 3), 6));
       await move("Adjustment", "-2", balance("2", 2), balance("0", 3), 6);
+      assert.ok(!(await places.locationsHoldingStock()).includes(fridge));
       const off = await execute(
         await current(fridge),
         { kind: "StorageLocation", action: "Deactivate", expectedVersion: 1 },

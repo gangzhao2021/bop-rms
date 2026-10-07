@@ -120,6 +120,8 @@ import { createRoleAdministrationPageClient } from "./role-administration-pages.
 import { StaffDetailPage, StaffListPage } from "./StaffAdministrationPages.js";
 import { SupplyItemDetailPage, SupplyItemFormPage, SupplyItemListPage } from "./SupplyItemPages.js";
 import { createSupplyItemClient } from "./supply-item-pages.js";
+import { StockLocationListPage } from "./StockLocationPages.js";
+import { createStockLocationClient } from "./stock-location-pages.js";
 import { createStaffPageClient } from "./staff-administration-pages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
 import { PlatformTenantDetailPage } from "./PlatformTenantPages.js";
@@ -635,6 +637,19 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route path="/operations/inventory/transfers/:id" element={<InventoryTransferDetailPage />} />
       <Route path="/operations/inventory/lots" element={<InventoryLotExpiryPage />} />
       <Route path="/operations/receiving/new" element={<GoodsReceiptPage />} />
+      <Route
+        path="/app/supply/locations"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StockLocationListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStockLocationClient(state.csrf)}
+            />
+          ) : (
+            <StockLocationListPage />
+          )
+        }
+      />
       <Route
         path="/app/supply/items"
         element={

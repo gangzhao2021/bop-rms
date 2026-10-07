@@ -323,6 +323,24 @@ const databaseAccessManifestInput = {
       readPattern: "owner-repository",
       source: "packages/rms/inventory/src/infrastructure/persistence/inventory-item-store.ts",
     },
+    {
+      id: "stock-place-store.read.stock_account",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "stock_account" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source: "packages/rms/inventory/src/infrastructure/persistence/stock-place-store.ts",
+    },
+    {
+      id: "stock-place-store.read.stock_balance",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "stock_balance" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source: "packages/rms/inventory/src/infrastructure/persistence/stock-place-store.ts",
+    },
   ],
 } as const;
 export default databaseAccessManifestInput;

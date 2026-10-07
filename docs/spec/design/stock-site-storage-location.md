@@ -17,7 +17,9 @@ Section 30.4 规定库存余额按 Inventory Item × Stock Site × Storage Locat
 3. 存放位置属性：编码（门店内唯一）、多语言名称、温区 `Ambient | Chilled | Frozen`、排序、状态 `Active | Inactive`。
    仍有库存（在库或预留不为零）的位置不能停用，须先调拨或盘空；默认位置不能停用。
 4. 新增页面 **`INV-LOCATION-LIST`**，路由 `/app/supply/locations`，导航分组 Supply：列出当前门店的仓点与位置，
-   支持新增、改名、设置温区与排序、停用/启用；需要 `inventory.manage`；遵循 Section 88 的状态、响应式与无障碍规则。
+   支持新增、改名、设置温区与排序、停用/启用；读取需要 `inventory.location.read`，维护需要 `inventory.location.manage`
+   （2026-10-07 按 DEC-PERM-CATALOG 由 `inventory.manage` 细分）；门店尚无仓点时，页面提供“开通门店库存”，在一个事务中建立
+   默认仓点与默认位置；遵循 Section 88 的状态、响应式与无障碍规则。
 5. 进货、盘点、损耗选择存放位置；批次与临期视图按位置筛选。库存账户（品项 × 仓点 × 位置 × 批次）只能引用
    已登记的仓点与位置。
 

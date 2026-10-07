@@ -198,6 +198,96 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "WP-2423 2026-10-07: Inventory Item administration (archive and unit guard)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_site",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_site",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_site_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_site_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "storage_location",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "storage_location",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "storage_location_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "storage_location_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_place_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_place_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
     }
   ]
 }
