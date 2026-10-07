@@ -561,6 +561,46 @@ const databaseAccessManifestInput = {
       source: "packages/rms/inventory/src/infrastructure/persistence/ledger-posting.ts",
     },
     {
+      id: "inventory-recipe-facts.read.inventory_item",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/inventory-recipe-facts-store.ts",
+    },
+    {
+      id: "inventory-recipe-facts.read.inventory_item_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item_version" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/inventory-recipe-facts-store.ts",
+    },
+    {
+      id: "inventory-recipe-facts.read.inventory_item_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "inventory_item_operation" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/inventory-recipe-facts-store.ts",
+    },
+    {
+      id: "inventory-recipe-facts.read.stock_movement",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "stock_movement" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/inventory/src/infrastructure/persistence/inventory-recipe-facts-store.ts",
+    },
+    {
       id: "store-receipt-store.read.store_receipt",
       operation: "read",
       mechanism: "repository",

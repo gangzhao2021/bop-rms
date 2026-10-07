@@ -516,3 +516,40 @@ export async function readRoleAssignmentDecision(
         policyVersion: row.policy_version === null ? null : Number(row.policy_version),
       };
 }
+
+/**
+ * DEC-RECIPE-AUTHORING: whether every given Actor currently holds `action` through an Active Brand-level
+ * role assignment, with no Deny override. Used to re-check independent reviewers when the reviewed
+ * content is published; Membership currency is checked by its owner.
+ */
+export async function brandActionHeldBy(
+  tx: RoleAssignmentTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly actorReferences: readonly string[];
+    readonly action: string;
+    readonly at: string;
+  },
+): Promise<boolean> {
+  if (input.actorReferences.length === 0) return false;
+  await tx.query(scopeSql, [input.brandReference, null]);
+  const rows = (
+    await tx.query(
+      `SELECT DISTINCT a.actor_id::text actor
+       FROM bop_permission.role_assignment a
+       JOIN bop_permission.role r ON r.role_id=a.role_id AND r.brand_id=a.brand_id AND r.store_id IS NULL AND r.lifecycle='Active'
+         AND r.effective_from<=$4::timestamptz AND (r.effective_until IS NULL OR r.effective_until>$4::timestamptz)
+       JOIN bop_permission.permission_grant g ON g.role_id=r.role_id AND g.brand_id=r.brand_id AND g.store_id IS NULL AND g.lifecycle='Active'
+         AND g.effective_from<=$4::timestamptz AND (g.effective_until IS NULL OR g.effective_until>$4::timestamptz)
+       JOIN bop_permission.permission_definition d ON d.permission_id=g.permission_id AND d.lifecycle='Active' AND d.action_code=$3
+       WHERE a.brand_id=$1 AND a.store_id IS NULL AND a.actor_id=ANY($2::uuid[]) AND a.lifecycle='Active'
+         AND a.effective_from<=$4::timestamptz AND (a.effective_until IS NULL OR a.effective_until>$4::timestamptz)
+         AND NOT EXISTS (SELECT 1 FROM bop_permission.permission_override o WHERE o.permission_id=d.permission_id
+           AND o.actor_id=a.actor_id AND o.brand_id=a.brand_id AND o.effect='Deny' AND o.lifecycle='Active'
+           AND o.effective_from<=$4::timestamptz AND (o.effective_until IS NULL OR o.effective_until>$4::timestamptz))`,
+      [input.brandReference, [...input.actorReferences], input.action, input.at],
+    )
+  ).rows;
+  const holders = new Set(rows.map((row) => String(row.actor)));
+  return input.actorReferences.every((actor) => holders.has(actor));
+}

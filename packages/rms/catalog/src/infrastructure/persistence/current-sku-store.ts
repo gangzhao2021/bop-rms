@@ -127,3 +127,47 @@ export function createPostgresCurrentSkuStore(
     },
   });
 }
+
+/**
+ * WP-2423 / DEC-RECIPE-AUTHORING: the Brand's SKUs a recipe may be bound to, with their unit of sale.
+ * Caller authorizes and owns the transaction.
+ */
+export async function listBrandSkuChoices(
+  tx: {
+    query(
+      sql: string,
+      values: readonly unknown[],
+    ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+  },
+  scope: { readonly brandReference: string },
+): Promise<
+  readonly {
+    readonly skuReference: string;
+    readonly skuCode: string;
+    readonly localizedNames: Readonly<Record<string, string>>;
+    readonly unitOfSale: string;
+    readonly active: boolean;
+  }[]
+> {
+  const brand = parseCatalogReference(scope.brandReference);
+  await tx.query(
+    "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', '', true)",
+    [brand],
+  );
+  return (
+    await tx.query(
+      `SELECT s.sku_id::text sku,s.sku_code,s.localized_names_json names,s.unit_of_sale,s.lifecycle sku_lifecycle,p.lifecycle product_lifecycle
+       FROM rms_catalog.sku s JOIN rms_catalog.product p ON p.product_id=s.product_id AND p.brand_id=s.brand_id
+       WHERE s.brand_id=$1 ORDER BY s.sku_code LIMIT 2000`,
+      [brand],
+    )
+  ).rows.map((row) =>
+    Object.freeze({
+      skuReference: String(row.sku),
+      skuCode: String(row.sku_code),
+      localizedNames: (row.names ?? {}) as Readonly<Record<string, string>>,
+      unitOfSale: String(row.unit_of_sale),
+      active: row.sku_lifecycle === "Active" && row.product_lifecycle === "Active",
+    }),
+  );
+}

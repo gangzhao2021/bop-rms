@@ -36,7 +36,8 @@ export interface MerchantNavigationItem {
     | "INV-ITEM-LIST"
     | "INV-LOCATION-LIST"
     | "INV-OPENING-COUNT"
-    | "INV-RECEIPT-LIST";
+    | "INV-RECEIPT-LIST"
+    | "RECIPE-LIST";
   readonly label: string;
   readonly href: string;
   readonly permission: string;
@@ -70,6 +71,7 @@ const NAVIGATION = Object.freeze({
   "INV-LOCATION-LIST": ["/app/supply/locations", "inventory.location.read"],
   "INV-OPENING-COUNT": ["/app/supply/opening-count", "inventory.count.read"],
   "INV-RECEIPT-LIST": ["/operations/receiving", "inventory.receipt.read"],
+  "RECIPE-LIST": ["/app/commerce/recipes", "recipe.read"],
 } as const);
 
 function record(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {

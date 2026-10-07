@@ -45,6 +45,7 @@ import { createMerchantInventoryItems } from "../../apps/api/dist/merchant-inven
 import { createMerchantStockPlaces } from "../../apps/api/dist/merchant-stock-places.js";
 import { createMerchantOpeningCount } from "../../apps/api/dist/merchant-opening-count.js";
 import { createMerchantStoreReceipts } from "../../apps/api/dist/merchant-store-receipts.js";
+import { createMerchantRecipes } from "../../apps/api/dist/merchant-recipes.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
 export async function createInternalMerchant(
@@ -173,6 +174,12 @@ export async function createInternalMerchant(
           label: "Receiving",
           href: "/operations/receiving",
           permission: "inventory.receipt.read",
+        },
+        {
+          screenId: "RECIPE-LIST",
+          label: "Recipes",
+          href: "/app/commerce/recipes",
+          permission: "recipe.read",
         },
         {
           screenId: "INV-OPENING-COUNT",
@@ -457,6 +464,12 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en",
   });
+  const recipes = createMerchantRecipes({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
   const { pickupQuery, pickupProof, pickupHandoff } = await createInternalMerchantPickup(
     resources,
     { persistence, service },
@@ -572,6 +585,7 @@ export async function createInternalMerchant(
       stockPlaces,
       openingCount,
       storeReceipts,
+      recipes,
       pickupQuery,
       pickupProof,
       pickupHandoff,

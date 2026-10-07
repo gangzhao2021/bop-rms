@@ -432,6 +432,105 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 DEC-INV-DIRECT-RECEIPT 2026-10-07: Store direct receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_scope_binding",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_scope_binding_end",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_scope_binding_end",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_version_presentation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_version_presentation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_authoring_review",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_authoring_review",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_binding",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_binding",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_generation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_generation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
     }
   ]
 }

@@ -36,7 +36,7 @@ export async function bootstrapKitchenRecipe({
     safety = next();
   await admin.query("GRANT USAGE ON SCHEMA rms_recipe TO " + role);
   await admin.query(
-    "GRANT SELECT,INSERT,UPDATE ON rms_recipe.recipe,rms_recipe.recipe_scope_binding,rms_recipe.recipe_modifier_version TO " +
+    "GRANT SELECT,INSERT,UPDATE ON rms_recipe.recipe,rms_recipe.recipe_scope_binding,rms_recipe.recipe_scope_binding_end,rms_recipe.recipe_modifier_version TO " +
       role,
   );
   await admin.query(

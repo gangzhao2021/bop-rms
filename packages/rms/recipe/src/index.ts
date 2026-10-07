@@ -8,6 +8,8 @@ export { createPostgresRecipeAdminQueryStore } from "./infrastructure/persistenc
 export * from "./domain/publication-review.js";
 export { createPostgresRecipeStore } from "./infrastructure/persistence/recipe-store.js";
 export { createPostgresBaseRecipeSource } from "./infrastructure/persistence/recipe-binding-store.js";
+export * from "./domain/recipe-authoring.js";
+export * from "./infrastructure/persistence/recipe-authoring-store.js";
 export * from "./domain/recipe-demand.js";
 export { createPostgresBaseRecipeDemandSource } from "./infrastructure/persistence/recipe-demand-store.js";
 export * from "./domain/recipe-modifier.js";

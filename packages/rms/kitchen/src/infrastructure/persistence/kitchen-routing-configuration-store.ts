@@ -14,6 +14,7 @@ import {
   parseKitchenTicketReference,
   parseKitchenTicketInstant,
 } from "../../domain/kitchen-ticket.js";
+import { parseKitchenStationRoutingCandidateSetEvidence } from "../../domain/station-routing.js";
 
 export function createPostgresKitchenRoutingConfigurationStore(options: {
   readonly brandReference: string;
@@ -197,4 +198,44 @@ export function createPostgresKitchenRoutingConfigurationStore(options: {
       }
     },
   });
+}
+
+/**
+ * WP-2423 / DEC-RECIPE-AUTHORING: the Store's current kitchen stations and the station capabilities a
+ * recipe step may require, from the latest recorded routing configuration. Caller authorizes.
+ */
+export async function listKitchenStationCapabilities(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+): Promise<
+  readonly {
+    readonly stationReference: string;
+    readonly stationActive: boolean;
+    readonly selectorKind: string;
+    readonly capabilityReferences: readonly string[];
+  }[]
+> {
+  const brand = parseKitchenTicketReference(scope.brandReference);
+  const store = parseKitchenTicketReference(scope.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const row = (
+    await tx.query(
+      "SELECT record_json->'configuration' AS configuration FROM rms_kitchen.kitchen_routing_configuration " +
+        "WHERE brand_id=$1 AND store_id=$2 ORDER BY version_number DESC LIMIT 1",
+      [brand, store],
+    )
+  ).rows[0];
+  if (!row) return [];
+  const configuration = parseKitchenStationRoutingCandidateSetEvidence(row.configuration);
+  return configuration.candidates.map((candidate) =>
+    Object.freeze({
+      stationReference: candidate.stationReference,
+      stationActive: candidate.stationStatus === "Active",
+      selectorKind: candidate.selector.kind,
+      capabilityReferences: Object.freeze([...candidate.stationCapabilityReferences]),
+    }),
+  );
 }

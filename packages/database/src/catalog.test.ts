@@ -653,6 +653,7 @@ describe("migration catalog", () => {
       "2000_008_create_opening_stock_count",
       "2000_009_create_store_receipt",
       "2000_010_create_brand_role_provisioning",
+      "2000_011_create_recipe_authoring",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

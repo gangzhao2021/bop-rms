@@ -28,7 +28,9 @@ export async function exerciseRecipeOwnerCoverage({ admin, context, role, id, sc
     `GRANT SELECT ON rms_recipe.recipe_preparation_content,rms_recipe.recipe_modifier_version TO ${role}`,
   );
   await admin.query(`GRANT MAINTAIN ON rms_recipe.recipe_preparation_content TO ${role}`);
-  await admin.query(`GRANT SELECT ON rms_recipe.recipe_scope_binding TO ${role}`);
+  await admin.query(
+    `GRANT SELECT ON rms_recipe.recipe_scope_binding,rms_recipe.recipe_scope_binding_end TO ${role}`,
+  );
   await admin.query(
     `GRANT MAINTAIN ON rms_recipe.recipe_modifier_version,rms_recipe.recipe_scope_binding TO ${role}`,
   );

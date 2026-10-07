@@ -346,7 +346,10 @@ export * from "./application/ports/production-batch-ports.js";
 
 export { createPostgresKitchenTicketStore } from "./infrastructure/persistence/kitchen-ticket-store.js";
 
-export { createPostgresKitchenRoutingConfigurationStore } from "./infrastructure/persistence/kitchen-routing-configuration-store.js";
+export {
+  createPostgresKitchenRoutingConfigurationStore,
+  listKitchenStationCapabilities,
+} from "./infrastructure/persistence/kitchen-routing-configuration-store.js";
 export {
   parseKitchenRoutingConfigurationRecord,
   rebindKitchenRoutingEvidence,

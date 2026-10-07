@@ -19,7 +19,7 @@ export async function seedCartRecipeInventory({
     itemVersion = id(28004);
   await admin.query("GRANT USAGE ON SCHEMA rms_recipe,rms_catalog,rms_ordering TO " + role);
   await admin.query(
-    "GRANT SELECT ON rms_catalog.sku,rms_catalog.product,rms_catalog.product_version,rms_catalog.category,rms_ordering.cart,rms_ordering.cart_line,rms_recipe.recipe,rms_recipe.recipe_version,rms_recipe.recipe_scope_binding,rms_recipe.recipe_modifier_version TO " +
+    "GRANT SELECT ON rms_catalog.sku,rms_catalog.product,rms_catalog.product_version,rms_catalog.category,rms_ordering.cart,rms_ordering.cart_line,rms_recipe.recipe,rms_recipe.recipe_version,rms_recipe.recipe_scope_binding,rms_recipe.recipe_scope_binding_end,rms_recipe.recipe_modifier_version TO " +
       role,
   );
   const snapshot = {

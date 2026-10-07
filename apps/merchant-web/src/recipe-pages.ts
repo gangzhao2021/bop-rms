@@ -1,391 +1,311 @@
-export type RecipeClientErrorCode =
+/** WP-2423 / DEC-RECIPE-AUTHORING: RECIPE-LIST / RECIPE-EDITOR view contract and same-origin client. */
+export type RecipeErrorCode =
   | "PermissionDenied"
   | "NotFound"
-  | "FeatureDisabled"
-  | "Stale"
   | "Conflict"
-  | "CommandFailed"
+  | "CodeTaken"
+  | "ReviewRequired"
+  | "ReviewerNotIndependent"
+  | "Lifecycle"
+  | "InUse"
+  | "LineInvalid"
+  | "Invalid"
   | "Offline"
   | "Unavailable";
-export class RecipeClientError extends Error {
-  constructor(readonly code: RecipeClientErrorCode) {
-    super("Recipe view is unavailable");
-    this.name = "RecipeClientError";
+export class RecipePageError extends Error {
+  constructor(
+    readonly code: RecipeErrorCode,
+    readonly line: number | null = null,
+  ) {
+    super("Recipes are unavailable");
+    this.name = "RecipePageError";
   }
 }
-export const recipeSourceKinds = [
-  "Recipe",
-  "Inventory",
-  "Supplier",
-  "Allergen",
-  "Preparation",
-  "Substitution",
-  "Usage",
-] as const;
-export type RecipeSourceKind = (typeof recipeSourceKinds)[number];
-export type RecipeSummary<T = string> =
-  | {
-      readonly status: "Available";
-      readonly value: T;
-      readonly source: RecipeSourceKind;
-      readonly sourceVersion: string;
-    }
-  | { readonly status: "Unavailable" | "PermissionHidden" };
-export type RecipeSource =
-  | { readonly status: "Current" | "Stale"; readonly version: string; readonly asOfUtc: string }
-  | { readonly status: "Unavailable" | "PermissionHidden" };
-export interface RecipeViewMetadata {
-  readonly projectionVersion: 2;
-  readonly asOfUtc: string;
-  readonly scope: { readonly tenantReference: string; readonly brandReference: string };
-  readonly partial: boolean;
-  readonly freshness: "Fresh" | "Stale";
-  readonly sources: Readonly<Record<RecipeSourceKind, RecipeSource>>;
+export type RecipeLifecycle = "Draft" | "Published" | "Invalidated" | "Archived";
+export interface RecipeBinding {
+  readonly bindingReference: string;
+  readonly recipeVersionReference: string;
+  readonly skuReference: string;
+  readonly storeReference: string | null;
+  readonly since: string;
 }
-export interface RecipeCost {
-  readonly amountMinor: string;
-  readonly currencyCode: string;
-}
-export interface RecipeListItemView {
+export interface RecipeSummary {
   readonly recipeReference: string;
+  readonly familyReference: string;
+  readonly familyRevision: number;
   readonly name: string;
-  readonly stableCode: string;
-  readonly lifecycle: "Draft" | "Published" | "Invalidated" | "Archived";
-  readonly yieldSummary: string;
-  readonly cost: RecipeSummary<RecipeCost>;
-  readonly allergenStatus: "Verified" | "Unverified" | "MissingEvidence";
-  readonly usageSummary: RecipeSummary;
-  readonly effectiveVersion: string;
-  readonly ingredientSummary: RecipeSummary;
-  readonly mappingMissing: boolean | null;
-  readonly costChanged: boolean | null;
+  readonly code: string;
+  readonly lifecycle: RecipeLifecycle;
+  readonly versionReference: string;
   readonly aggregateVersion: number;
+  readonly yieldQuantity: string;
+  readonly yieldUnit: string;
+  readonly ingredientCount: number;
+  readonly standardCostCents: string;
+  readonly kitchenInstructions: "NotPublished" | "Published";
+  readonly bindings: readonly RecipeBinding[];
+  readonly updatedAt: string;
 }
-export interface RecipeListView extends RecipeViewMetadata {
-  readonly screenId: "RECIPE-LIST";
-  readonly asOfUtc: string;
-  readonly items: readonly RecipeListItemView[];
+export interface RecipeDraftIngredient {
+  readonly kind: "InventoryItem" | "SubRecipe";
+  readonly sourceReference: string;
+  readonly quantity: string;
+  readonly lossPercent: string;
+  readonly unitCostCents: string | null;
 }
-export interface RecipeEditorView extends RecipeListItemView, RecipeViewMetadata {
-  readonly screenId: "RECIPE-EDITOR";
-  readonly ingredients: readonly {
-    readonly sourceReference: string;
-    readonly sourceKind: "InventoryItem" | "SubRecipe";
-    readonly sourceName: RecipeSummary;
-    readonly quantitySummary: string;
-    readonly lossSummary: string;
-    readonly allergenSummary: RecipeSummary;
-    readonly evidenceSummary: RecipeSummary;
-    readonly mappingStatus: "Resolved" | "Unresolved";
+export interface RecipeDraftStep {
+  readonly sequence: number;
+  readonly instruction: string;
+  readonly durationSeconds: number;
+  readonly capabilityReference: string;
+}
+export interface RecipeDraft {
+  readonly name: string;
+  readonly code: string;
+  readonly yieldQuantity: string;
+  readonly yieldUnit: string;
+  readonly ingredients: readonly RecipeDraftIngredient[];
+  readonly steps: readonly RecipeDraftStep[];
+}
+export interface RecipeReview {
+  readonly reviewReference: string;
+  readonly subject: "Recipe" | "Preparation";
+  readonly kind: "Cost" | "FoodSafety";
+  readonly decision: "Approved" | "Rejected";
+  readonly reviewerReference: string;
+  readonly reviewerLabel: string;
+  readonly comment: string | null;
+  readonly reviewedAt: string;
+  readonly current: boolean;
+}
+export interface RecipeDetail extends RecipeSummary {
+  readonly draft: RecipeDraft;
+  readonly authorReference: string;
+  readonly authorLabel: string;
+  readonly reviews: readonly RecipeReview[];
+  readonly family: readonly {
+    readonly recipeReference: string;
+    readonly revision: number;
+    readonly lifecycle: string;
   }[];
-  readonly preparationSummary: RecipeSummary;
-  readonly substitutionPolicySummary: RecipeSummary;
-  readonly allergenUnionSummary: RecipeSummary;
-  readonly costDerivationSummary: RecipeSummary;
-  readonly productSkuUsageSummary: RecipeSummary;
-  readonly reviewSummary: RecipeSummary;
-  readonly historySummary: RecipeSummary;
 }
+export interface RecipeChoices {
+  readonly yieldUnits: readonly string[];
+  readonly items: readonly {
+    readonly itemReference: string;
+    readonly internalCode: string;
+    readonly name: string;
+    readonly unitCode: string;
+    readonly latestUnitCostCents: number | null;
+  }[];
+  readonly subRecipes: readonly {
+    readonly recipeReference: string;
+    readonly name: string;
+    readonly yieldUnit: string;
+  }[];
+  readonly stations: readonly { readonly capabilityReference: string; readonly name: string }[];
+  readonly skus: readonly {
+    readonly skuReference: string;
+    readonly code: string;
+    readonly name: string;
+    readonly unitOfSale: string;
+  }[];
+}
+interface RecipeViewBase {
+  readonly sourceAsOf: string;
+  readonly permissions: {
+    readonly mayEdit: boolean;
+    readonly mayReview: boolean;
+    readonly mayPublish: boolean;
+  };
+  readonly viewer: string;
+  readonly choices: RecipeChoices;
+}
+export interface RecipeListView extends RecipeViewBase {
+  readonly screenId: "RECIPE-LIST";
+  readonly recipes: readonly RecipeSummary[];
+}
+export interface RecipeEditorView extends RecipeViewBase {
+  readonly screenId: "RECIPE-EDITOR";
+  readonly recipe: RecipeDetail;
+}
+export type RecipeCommand =
+  | {
+      readonly action: "SaveDraft";
+      readonly operationReference: string;
+      readonly recipeReference: string;
+      readonly expectedAggregateVersion: number | null;
+      readonly revisionOf: string | null;
+      readonly draft: RecipeDraft;
+    }
+  | {
+      readonly action: "Review";
+      readonly operationReference: string;
+      readonly recipeReference: string;
+      readonly versionReference: string;
+      readonly subject: "Recipe" | "Preparation";
+      readonly kind: "Cost" | "FoodSafety";
+      readonly decision: "Approved" | "Rejected";
+      readonly comment: string | null;
+    }
+  | {
+      readonly action: "Publish" | "Archive";
+      readonly operationReference: string;
+      readonly recipeReference: string;
+      readonly expectedAggregateVersion: number;
+    }
+  | {
+      readonly action: "PublishKitchen";
+      readonly operationReference: string;
+      readonly recipeReference: string;
+    }
+  | {
+      readonly action: "BindSku";
+      readonly operationReference: string;
+      readonly recipeReference: string;
+      readonly skuReference: string;
+      readonly storeOnly: boolean;
+    }
+  | {
+      readonly action: "EndStoreBinding";
+      readonly operationReference: string;
+      readonly bindingReference: string;
+    };
 export interface RecipeClient {
-  readonly scope: RecipeViewMetadata["scope"] | null;
-  list(): Promise<RecipeListView>;
-  load(reference: string): Promise<RecipeEditorView>;
+  load(recipeReference: string | null): Promise<unknown>;
+  command?(command: RecipeCommand): Promise<unknown>;
 }
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const code = /^[A-Z][A-Z0-9_-]{0,63}$/u;
-const minor = /^(?:0|[1-9][0-9]{0,29})$/u;
-function object(value: unknown, keys: readonly string[]) {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.getPrototypeOf(value) !== Object.prototype ||
-    Reflect.ownKeys(value).length !== keys.length ||
-    Reflect.ownKeys(value).some((key) => typeof key !== "string" || !keys.includes(key))
-  )
-    throw new RecipeClientError("Unavailable");
-  if (Object.values(Object.getOwnPropertyDescriptors(value)).some((field) => !("value" in field)))
-    throw new RecipeClientError("Unavailable");
-  return value as Record<string, unknown>;
-}
-function text(value: unknown, max = 220) {
-  if (
-    typeof value !== "string" ||
-    value.trim().length === 0 ||
-    value.length > max ||
-    /[<>{}]|https?:\/\//iu.test(value)
-  )
-    throw new RecipeClientError("Unavailable");
-  return value.trim();
-}
-function choice<T extends string>(value: unknown, values: readonly T[]): T {
-  if (!values.includes(value as T)) throw new RecipeClientError("Unavailable");
-  return value as T;
-}
-function integer(value: unknown) {
-  if (!Number.isSafeInteger(value) || (value as number) < 1)
-    throw new RecipeClientError("Unavailable");
-  return value as number;
-}
-function instant(value: unknown): string {
-  if (typeof value !== "string") throw new RecipeClientError("Unavailable");
-  try {
-    if (new Date(value).toISOString() !== value) throw new Error("instant");
-  } catch {
-    throw new RecipeClientError("Unavailable");
-  }
-  return value;
-}
-const metadataKeys = [
-  "projectionVersion",
-  "asOfUtc",
-  "scope",
-  "partial",
-  "freshness",
-  "sources",
-] as const;
-function metadata(raw: Record<string, unknown>): RecipeViewMetadata {
-  if (raw.projectionVersion !== 2 || typeof raw.partial !== "boolean")
-    throw new RecipeClientError("Unavailable");
-  const scope = object(raw.scope, ["tenantReference", "brandReference"]);
-  for (const value of Object.values(scope))
-    if (typeof value !== "string" || !uuid.test(value)) throw new RecipeClientError("Unavailable");
-  const asOfUtc = instant(raw.asOfUtc);
-  const sourceInput = object(raw.sources, recipeSourceKinds);
-  const sources = Object.fromEntries(
-    recipeSourceKinds.map((kind) => {
-      const candidate = sourceInput[kind];
-      // Inspect descriptors before reading untrusted properties, including the discriminant.
-      const status =
-        candidate !== null && typeof candidate === "object"
-          ? (Object.getOwnPropertyDescriptor(candidate, "status")?.value as unknown)
-          : undefined;
-      if (status === "Unavailable" || status === "PermissionHidden") {
-        object(candidate, ["status"]);
-        if (!raw.partial) throw new RecipeClientError("Unavailable");
-        return [kind, Object.freeze({ status })];
-      }
-      const source = object(candidate, ["status", "version", "asOfUtc"]);
-      const state = choice(source.status, ["Current", "Stale"]);
-      const sourceAsOf = instant(source.asOfUtc);
-      if (
-        Date.parse(sourceAsOf) > Date.parse(asOfUtc) ||
-        (state === "Stale" && raw.freshness !== "Stale")
-      )
-        throw new RecipeClientError("Unavailable");
-      return [
-        kind,
-        Object.freeze({ status: state, version: text(source.version, 120), asOfUtc: sourceAsOf }),
-      ];
-    }),
-  ) as Record<RecipeSourceKind, RecipeSource>;
-  return Object.freeze({
-    projectionVersion: 2,
-    asOfUtc,
-    scope: Object.freeze({
-      tenantReference: scope.tenantReference as string,
-      brandReference: scope.brandReference as string,
-    }),
-    partial: raw.partial,
-    freshness: choice(raw.freshness, ["Fresh", "Stale"]),
-    sources: Object.freeze(sources),
-  });
-}
-function summary<T = string>(
-  value: unknown,
-  meta: RecipeViewMetadata,
-  parse: (value: unknown) => T = text as (value: unknown) => T,
-): RecipeSummary<T> {
-  const status =
-    value !== null && typeof value === "object"
-      ? (Object.getOwnPropertyDescriptor(value, "status")?.value as unknown)
-      : undefined;
-  if (status === "Unavailable" || status === "PermissionHidden") {
-    object(value, ["status"]);
-    if (!meta.partial) throw new RecipeClientError("Unavailable");
-    return Object.freeze({ status });
-  }
-  const raw = object(value, ["status", "value", "source", "sourceVersion"]);
-  if (raw.status !== "Available") throw new RecipeClientError("Unavailable");
-  const source = choice(raw.source, recipeSourceKinds);
-  const evidence = meta.sources[source];
-  if (
-    (evidence.status !== "Current" && evidence.status !== "Stale") ||
-    evidence.version !== raw.sourceVersion
-  )
-    throw new RecipeClientError("Unavailable");
-  return Object.freeze({
-    status: "Available",
-    value: parse(raw.value),
-    source,
-    sourceVersion: evidence.version,
-  });
-}
-function cost(value: unknown): RecipeCost {
-  const raw = object(value, ["amountMinor", "currencyCode"]);
-  if (
-    typeof raw.amountMinor !== "string" ||
-    !minor.test(raw.amountMinor) ||
-    typeof raw.currencyCode !== "string" ||
-    !/^[A-Z]{3}$/u.test(raw.currencyCode)
-  )
-    throw new RecipeClientError("Unavailable");
-  return Object.freeze({ amountMinor: raw.amountMinor, currencyCode: raw.currencyCode });
-}
-export function recipeSummaryText(value: RecipeSummary): string {
-  return value.status === "Available"
-    ? value.value
-    : value.status === "PermissionHidden"
-      ? "Restricted"
-      : "Unavailable";
-}
-const commonKeys = [
-  "recipeReference",
-  "name",
-  "stableCode",
-  "lifecycle",
-  "yieldSummary",
-  "cost",
-  "allergenStatus",
-  "usageSummary",
-  "effectiveVersion",
-  "ingredientSummary",
-  "mappingMissing",
-  "costChanged",
-  "aggregateVersion",
-] as const;
-function common(raw: Record<string, unknown>, meta: RecipeViewMetadata): RecipeListItemView {
-  if (
-    typeof raw.recipeReference !== "string" ||
-    !uuid.test(raw.recipeReference) ||
-    typeof raw.stableCode !== "string" ||
-    !code.test(raw.stableCode) ||
-    (raw.mappingMissing !== null && typeof raw.mappingMissing !== "boolean") ||
-    (raw.costChanged !== null && typeof raw.costChanged !== "boolean") ||
-    (!meta.partial && (raw.mappingMissing === null || raw.costChanged === null))
-  )
-    throw new RecipeClientError("Unavailable");
-  return Object.freeze({
-    recipeReference: raw.recipeReference,
-    name: text(raw.name, 120),
-    stableCode: raw.stableCode,
-    lifecycle: choice(raw.lifecycle, ["Draft", "Published", "Invalidated", "Archived"]),
-    yieldSummary: text(raw.yieldSummary),
-    cost: summary(raw.cost, meta, cost),
-    allergenStatus: safeAllergenStatus(raw.allergenStatus, meta),
-    usageSummary: summary(raw.usageSummary, meta),
-    effectiveVersion: text(raw.effectiveVersion),
-    ingredientSummary: summary(raw.ingredientSummary, meta),
-    mappingMissing: raw.mappingMissing,
-    costChanged: raw.costChanged,
-    aggregateVersion: integer(raw.aggregateVersion),
-  });
-}
-function safeAllergenStatus(
-  value: unknown,
-  meta: RecipeViewMetadata,
-): RecipeListItemView["allergenStatus"] {
-  const status = choice(value, ["Verified", "Unverified", "MissingEvidence"]);
-  const safety = recipeSourceKinds.filter((kind) => kind !== "Usage");
-  if (
-    status === "Verified" &&
-    (meta.freshness !== "Fresh" || safety.some((kind) => meta.sources[kind].status !== "Current"))
-  )
-    return "Unverified";
-  return status;
-}
-export function assertRecipeViewScope(
-  view: RecipeViewMetadata,
-  scope: RecipeClient["scope"],
-): void {
-  if (
-    scope === null ||
-    view.scope.tenantReference !== scope.tenantReference ||
-    view.scope.brandReference !== scope.brandReference
-  )
-    throw new RecipeClientError("PermissionDenied");
-}
-export function parseRecipeRouteReference(value: unknown) {
-  if (typeof value !== "string" || !uuid.test(value)) throw new RecipeClientError("NotFound");
-  return value;
-}
+
+const invalid = (): never => {
+  throw new Error("RECIPE_PAGE_INVALID");
+};
 export function parseRecipeListView(value: unknown): RecipeListView {
-  const raw = object(value, ["screenId", ...metadataKeys, "items"]);
+  const r = value as Record<string, unknown> | null;
   if (
-    raw.screenId !== "RECIPE-LIST" ||
-    typeof raw.asOfUtc !== "string" ||
-    !Array.isArray(raw.items)
+    r === null ||
+    typeof r !== "object" ||
+    r.screenId !== "RECIPE-LIST" ||
+    !Array.isArray(r.recipes) ||
+    typeof r.choices !== "object" ||
+    r.choices === null
   )
-    throw new RecipeClientError("Unavailable");
-  const meta = metadata(raw);
-  return Object.freeze({
-    screenId: "RECIPE-LIST",
-    ...meta,
-    items: Object.freeze(raw.items.map((item) => common(object(item, commonKeys), meta))),
-  });
+    return invalid();
+  return r as unknown as RecipeListView;
 }
 export function parseRecipeEditorView(value: unknown): RecipeEditorView {
-  const raw = object(value, [
-    "screenId",
-    ...metadataKeys,
-    ...commonKeys,
-    "ingredients",
-    "preparationSummary",
-    "substitutionPolicySummary",
-    "allergenUnionSummary",
-    "costDerivationSummary",
-    "productSkuUsageSummary",
-    "reviewSummary",
-    "historySummary",
-  ]);
-  if (raw.screenId !== "RECIPE-EDITOR" || !Array.isArray(raw.ingredients))
-    throw new RecipeClientError("Unavailable");
-  const meta = metadata(raw);
-  return Object.freeze({
-    ...common(raw, meta),
-    ...meta,
-    screenId: "RECIPE-EDITOR",
-    ingredients: Object.freeze(
-      raw.ingredients.map((candidate) => {
-        const item = object(candidate, [
-          "sourceReference",
-          "sourceKind",
-          "sourceName",
-          "quantitySummary",
-          "lossSummary",
-          "allergenSummary",
-          "evidenceSummary",
-          "mappingStatus",
-        ]);
-        if (typeof item.sourceReference !== "string" || !uuid.test(item.sourceReference))
-          throw new RecipeClientError("Unavailable");
-        return Object.freeze({
-          sourceReference: item.sourceReference,
-          sourceKind: choice(item.sourceKind, ["InventoryItem", "SubRecipe"]),
-          sourceName: summary(item.sourceName, meta),
-          quantitySummary: text(item.quantitySummary),
-          lossSummary: text(item.lossSummary),
-          allergenSummary: summary(item.allergenSummary, meta),
-          evidenceSummary: summary(item.evidenceSummary, meta),
-          mappingStatus: choice(item.mappingStatus, ["Resolved", "Unresolved"]),
-        });
-      }),
-    ),
-    preparationSummary: summary(raw.preparationSummary, meta),
-    substitutionPolicySummary: summary(raw.substitutionPolicySummary, meta),
-    allergenUnionSummary: summary(raw.allergenUnionSummary, meta),
-    costDerivationSummary: summary(raw.costDerivationSummary, meta),
-    productSkuUsageSummary: summary(raw.productSkuUsageSummary, meta),
-    reviewSummary: summary(raw.reviewSummary, meta),
-    historySummary: summary(raw.historySummary, meta),
-  });
+  const r = value as Record<string, unknown> | null;
+  const recipe = r?.recipe as Record<string, unknown> | undefined;
+  if (
+    r === null ||
+    typeof r !== "object" ||
+    r.screenId !== "RECIPE-EDITOR" ||
+    typeof recipe !== "object" ||
+    recipe === null ||
+    typeof recipe.draft !== "object" ||
+    !Array.isArray(recipe.reviews)
+  )
+    return invalid();
+  return r as unknown as RecipeEditorView;
 }
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+export function parseRecipeRouteReference(value: unknown): string {
+  return typeof value === "string" && uuid.test(value) ? value : invalid();
+}
+
+/** Code suggestion from a name: uppercase letters, digits and hyphens, starting with a letter. */
+export function suggestRecipeCode(name: string): string {
+  const base = name
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/gu, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 32);
+  return /^[A-Z]/u.test(base) && base.length >= 2 ? base : base ? "R-" + base : "";
+}
+/** CAD cents (decimal string) as dollars with two decimals, rounding half to even. */
+export function centsText(cents: string): string {
+  const value = BigInt(cents);
+  const negative = value < 0n,
+    absolute = negative ? -value : value;
+  return (
+    (negative ? "-" : "") +
+    (absolute / 100n).toString() +
+    "." +
+    (absolute % 100n).toString().padStart(2, "0")
+  );
+}
+/** Line standard cost in cents for the editor preview, using the same exact decimal arithmetic. */
+export function lineCostCentsText(
+  quantity: string,
+  lossPercent: string,
+  unitCostCents: string | null,
+) {
+  const scaled = (value: string, scale: number) => {
+    const match = /^(\d+)(?:\.(\d+))?$/u.exec(value.trim());
+    if (!match || (match[2]?.length ?? 0) > scale) return null;
+    return BigInt((match[1] ?? "0") + (match[2] ?? "").padEnd(scale, "0"));
+  };
+  const q = scaled(quantity, 6),
+    loss = scaled(lossPercent || "0", 2),
+    cost = unitCostCents === null ? 0n : scaled(unitCostCents, 4);
+  if (q === null || loss === null || cost === null) return null;
+  const numerator = q * (10_000n + loss) * cost,
+    denominator = 1_000_000n * 10_000n * 10_000n;
+  const quotient = numerator / denominator,
+    twice = (numerator % denominator) * 2n;
+  return (
+    twice > denominator || (twice === denominator && quotient % 2n === 1n)
+      ? quotient + 1n
+      : quotient
+  ).toString();
+}
+
 export const unavailableRecipeClient: RecipeClient = Object.freeze({
-  scope: null,
-  async list() {
-    throw new RecipeClientError("Unavailable");
-  },
-  async load() {
-    throw new RecipeClientError("Unavailable");
+  load: async () => {
+    throw new RecipePageError("Unavailable");
   },
 });
+const codes = new Set<RecipeErrorCode>([
+  "PermissionDenied",
+  "NotFound",
+  "Conflict",
+  "CodeTaken",
+  "ReviewRequired",
+  "ReviewerNotIndependent",
+  "Lifecycle",
+  "InUse",
+  "LineInvalid",
+  "Invalid",
+]);
+export function createRecipeClient(csrf: string, fetcher: typeof fetch = fetch): RecipeClient {
+  const post = async (path: string, body: unknown) => {
+    let response: Response;
+    try {
+      response = await fetcher(path, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", "x-bop-csrf": csrf },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new RecipePageError("Offline");
+    }
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as {
+        error?: unknown;
+        line?: unknown;
+      } | null;
+      const code = String(payload?.error) as RecipeErrorCode;
+      throw new RecipePageError(
+        codes.has(code) ? code : response.status === 403 ? "PermissionDenied" : "Unavailable",
+        typeof payload?.line === "number" ? payload.line : null,
+      );
+    }
+    return response.json() as Promise<unknown>;
+  };
+  return {
+    load: (recipeReference) => post("/merchant/commerce/recipes/query", { recipeReference }),
+    command: (command) => post("/merchant/commerce/recipes/command", command),
+  };
+}

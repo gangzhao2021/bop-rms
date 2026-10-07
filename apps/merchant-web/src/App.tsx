@@ -129,6 +129,7 @@ import {
   StoreReceiptListPage,
 } from "./StoreReceiptPages.js";
 import { createStoreReceiptClient } from "./store-receipt-pages.js";
+import { createRecipeClient } from "./recipe-pages.js";
 import { createStaffPageClient } from "./staff-administration-pages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
 import { PlatformTenantDetailPage } from "./PlatformTenantPages.js";
@@ -610,8 +611,32 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       />
       <Route path="/app/commerce/promotions" element={<PromotionListPage />} />
       <Route path="/app/commerce/promotions/:id/edit" element={<PromotionEditorPage />} />
-      <Route path="/app/commerce/recipes" element={<RecipeListPage />} />
-      <Route path="/app/commerce/recipes/:id/edit" element={<RecipeEditorPage />} />
+      <Route
+        path="/app/commerce/recipes"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <RecipeListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createRecipeClient(state.csrf)}
+            />
+          ) : (
+            <RecipeListPage />
+          )
+        }
+      />
+      <Route
+        path="/app/commerce/recipes/:id/edit"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <RecipeEditorPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createRecipeClient(state.csrf)}
+            />
+          ) : (
+            <RecipeEditorPage />
+          )
+        }
+      />
       <Route
         path="/operations/orders"
         element={

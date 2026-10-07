@@ -195,6 +195,7 @@ import {
   MerchantStoreReceiptError,
   type createMerchantStoreReceipts,
 } from "./merchant-store-receipts.js";
+import { MerchantRecipeError, type createMerchantRecipes } from "./merchant-recipes.js";
 import {
   MerchantOpeningCountError,
   type createMerchantOpeningCount,
@@ -282,6 +283,7 @@ const merchantNavigation = Object.freeze({
   "INV-LOCATION-LIST": ["/app/supply/locations", "inventory.location.read"],
   "INV-OPENING-COUNT": ["/app/supply/opening-count", "inventory.count.read"],
   "INV-RECEIPT-LIST": ["/operations/receiving", "inventory.receipt.read"],
+  "RECIPE-LIST": ["/app/commerce/recipes", "recipe.read"],
 } as const);
 
 export interface MerchantNavigationItem {
@@ -441,6 +443,7 @@ export interface MerchantBffRouterOptions {
   readonly stockPlaces?: ReturnType<typeof createMerchantStockPlaces>;
   readonly openingCount?: ReturnType<typeof createMerchantOpeningCount>;
   readonly storeReceipts?: ReturnType<typeof createMerchantStoreReceipts>;
+  readonly recipes?: ReturnType<typeof createMerchantRecipes>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
   readonly ordinaryRefundSend?: ReturnType<typeof createMerchantOrdinaryRefundSendCommand>;
   readonly ordinaryRefundReconciliation?: ReturnType<
@@ -843,7 +846,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     if (
       request.method === "POST" &&
       (request.path === "/supply/opening-count/command" ||
-        request.path === "/supply/receipts/command")
+        request.path === "/supply/receipts/command" ||
+        request.path === "/commerce/recipes/command")
     ) {
       express.json({ limit: 1_048_576, strict: true })(request, response, (error?: unknown) => {
         if (!error) {
@@ -5179,6 +5183,78 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .command({ sessionCookie, csrf, body: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => receiptFailure(response, error));
+  });
+
+  // WP-2423 / DEC-RECIPE-AUTHORING: RECIPE-LIST / RECIPE-EDITOR reads and recipe commands.
+  const recipeStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    CodeTaken: 409,
+    ReviewRequired: 409,
+    ReviewerNotIndependent: 403,
+    Lifecycle: 409,
+    InUse: 409,
+    LineInvalid: 422,
+    Invalid: 400,
+  } as const;
+  const recipeFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantRecipeError)) {
+      denied(response);
+      return;
+    }
+    response.status(recipeStatus[error.code]).json({ error: error.code, line: error.line });
+  };
+  router.post("/commerce/recipes/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { recipeReference?: unknown } | undefined;
+    const recipeReference = body?.recipeReference ?? null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).join(",") !== "recipeReference" ||
+      (recipeReference !== null &&
+        (typeof recipeReference !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            recipeReference,
+          )))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.recipes) {
+      response.status(503).json({ error: "recipes_unavailable" });
+      return;
+    }
+    void options.recipes
+      .query({ sessionCookie, csrf, recipeReference: recipeReference as string | null })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => recipeFailure(response, error));
+  });
+  router.post("/commerce/recipes/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.recipes) {
+      response.status(503).json({ error: "recipes_unavailable" });
+      return;
+    }
+    void options.recipes
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => recipeFailure(response, error));
   });
 
   router.post("/kitchen/release", sameOriginMutation(options), (request, response) => {

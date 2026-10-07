@@ -197,7 +197,7 @@ async function prove(context) {
     );
     await admin.query("GRANT SELECT,INSERT,UPDATE ON rms_recipe.recipe TO " + role);
     await admin.query(
-      "GRANT SELECT,INSERT ON rms_recipe.recipe_version,rms_recipe.recipe_ingredient_requirement,rms_recipe.recipe_allergen_evidence,rms_recipe.recipe_preparation_step,rms_recipe.recipe_operation_record,rms_recipe.recipe_review_record,rms_recipe.recipe_scope_binding,rms_recipe.recipe_modifier_version TO " +
+      "GRANT SELECT,INSERT ON rms_recipe.recipe_version,rms_recipe.recipe_ingredient_requirement,rms_recipe.recipe_allergen_evidence,rms_recipe.recipe_preparation_step,rms_recipe.recipe_operation_record,rms_recipe.recipe_review_record,rms_recipe.recipe_scope_binding,rms_recipe.recipe_scope_binding_end,rms_recipe.recipe_modifier_version TO " +
         role,
     );
     await admin.query("GRANT SELECT,INSERT ON platform_audit.audit_record TO " + role);

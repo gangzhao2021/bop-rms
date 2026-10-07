@@ -787,6 +787,22 @@ async function scanUnsupported(root, module, diagnostics) {
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative ===
             "src/infrastructure/persistence/recipe-inventory-reference-source-store.ts";
+        // WP-2423 / DEC-RECIPE-AUTHORING: Merchant recipe drafts, reviews and SKU bindings.
+        const acceptedRecipeAuthoringAsset =
+          module.packageName === "@rms/recipe" &&
+          module.manifest.ownedDatabase?.schema === "rms_recipe" &&
+          [
+            "recipe",
+            "recipe_version",
+            "recipe_version_presentation",
+            "recipe_authoring_review",
+            "recipe_scope_binding",
+            "recipe_scope_binding_end",
+            "recipe_preparation_content",
+            "recipe_reference_binding",
+            "recipe_ingredient_requirement",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/recipe-authoring-store.ts";
         const acceptedRecipeStoreAsset =
           module.packageName === "@rms/recipe" &&
           module.manifest.ownedDatabase?.schema === "rms_recipe" &&
@@ -1465,6 +1481,17 @@ async function scanUnsupported(root, module, diagnostics) {
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative ===
             "src/infrastructure/persistence/recipe-configuration-coverage-source.ts";
+        // WP-2423 / DEC-RECIPE-AUTHORING: Item pins, units and latest Store unit cost for recipes.
+        const acceptedInventoryRecipeFactsAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          [
+            "inventory_item",
+            "inventory_item_version",
+            "inventory_item_operation",
+            "stock_movement",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/inventory-recipe-facts-store.ts";
         const acceptedInventoryItemAsset =
           module.packageName === "@rms/inventory" &&
           module.manifest.ownedDatabase?.schema === "rms_inventory" &&
@@ -3084,6 +3111,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedCapacityHoldWriterAsset &&
           !acceptedAsapCapacityAsset &&
           !acceptedInventoryItemAsset &&
+          !acceptedInventoryRecipeFactsAsset &&
           !acceptedCatalogAllergenCoverageAsset &&
           !acceptedInventoryRecipeCoverageAsset &&
           !acceptedStockCandidateAsset &&
@@ -3148,6 +3176,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedRecipeReferenceAsset &&
           !acceptedRecipeInventoryReferenceAsset &&
           !acceptedRecipeStoreAsset &&
+          !acceptedRecipeAuthoringAsset &&
           !acceptedRecipePreparationContentAsset &&
           !acceptedRecipeVersionAsset &&
           !acceptedRecipeModifierAsset &&

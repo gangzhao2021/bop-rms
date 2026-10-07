@@ -341,7 +341,9 @@ it("holds complete stored Recipe Inventory references through outer COMMIT", asy
         assert.equal((await writer.query(sql, values)).rowCount, 1);
         await writer.query("ROLLBACK");
       }
-      await admin.query(`GRANT SELECT ON rms_recipe.recipe_scope_binding TO ${role}`);
+      await admin.query(
+        `GRANT SELECT ON rms_recipe.recipe_scope_binding,rms_recipe.recipe_scope_binding_end TO ${role}`,
+      );
       await admin.query(`GRANT INSERT ON rms_recipe.recipe_scope_binding TO ${role}`);
       await writer.query("BEGIN");
       await writer.query(`SET LOCAL ROLE ${role}`);
