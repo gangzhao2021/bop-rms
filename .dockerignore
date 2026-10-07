@@ -1,0 +1,13 @@
+# The pilot image is built from tracked source only. Runtime state, secrets and
+# host-built outputs are never copied; the runtime directory is mounted at run time.
+.git
+.local
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+**/test-results
+**/playwright-report

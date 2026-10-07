@@ -163,7 +163,7 @@ export async function createInternalMerchant(
     throw new Error("INTERNAL_TASK_QUEUE_UNAVAILABLE");
   const taskInbox = createPersistentMerchantTaskInbox({
     persistence,
-    queue,
+    queues: [queue],
     authorizeSource: createMerchantDiningTaskSource(persistence),
   });
   const service = createPersistentMerchantBffService(persistence);

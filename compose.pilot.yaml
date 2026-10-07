@@ -1,0 +1,64 @@
+# WP-2423 P1: run the single-store pilot (database, supervised services, loopback ports).
+# All pilot containers share the database container's network namespace, so the installation's
+# fixed 127.0.0.1 database, API (4300) and Customer HTTPS (4443) addresses keep working.
+# Services bind to loopback; the proxy forwards the published host ports to them.
+#
+#   PILOT_UID=$(id -u) PILOT_GID=$(id -g) docker compose -f compose.pilot.yaml up -d --build
+name: bop-rms-pilot
+
+services:
+  postgres:
+    image: postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
+    restart: unless-stopped
+    init: true
+    environment:
+      TZ: UTC
+    command: [postgres, -c, port=55435, -c, timezone=UTC, -c, "datestyle=ISO, YMD"]
+    ports:
+      - 127.0.0.1:55435:55435
+      - 127.0.0.1:4300:14300
+      - 127.0.0.1:4443:14443
+    volumes:
+      - pilot-data:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready --quiet --host=127.0.0.1 --port=55435"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    stop_grace_period: 30s
+
+  pilot:
+    build:
+      context: .
+      dockerfile: Dockerfile.pilot
+    image: bop-rms-pilot:local
+    restart: unless-stopped
+    init: true
+    user: "${PILOT_UID:?Set PILOT_UID to the owner of the runtime directory}:${PILOT_GID:?Set PILOT_GID}"
+    network_mode: service:postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Mount the parent of the runtime directory: Docker Desktop shows a bind-mount root as
+    # root-owned, while the runtime directory below it keeps its real owner and mode.
+    volumes:
+      - ${PILOT_RUNTIME_ROOT:-./.local/pilot-runtime}:/app/.local
+    environment:
+      PILOT_RUNTIME_DIRECTORY: ${PILOT_RUNTIME_DIRECTORY:-.local/pilot-v14}
+    stop_grace_period: 60s
+
+  proxy:
+    image: alpine/socat:1.8.0.3@sha256:beb4a68d9e4fe6b0f21ea774a0fde6c31f580dde6368939ed70100c5385b015e
+    restart: unless-stopped
+    network_mode: service:postgres
+    depends_on: [postgres]
+    entrypoint: [sh, -c]
+    command:
+      - >-
+        socat TCP-LISTEN:14300,fork,reuseaddr TCP:127.0.0.1:4300 &
+        exec socat TCP-LISTEN:14443,fork,reuseaddr TCP:127.0.0.1:4443
+
+volumes:
+  pilot-data:
+    name: ${PILOT_DATA_VOLUME:-bop-rms-pilot-v14-mac-data}
+    external: true
