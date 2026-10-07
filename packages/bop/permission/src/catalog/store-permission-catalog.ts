@@ -7,8 +7,10 @@
  * Bump on any change to codes, risks, legacy replacements or role templates; the installed digest
  * covers all of them. v2 (2026-10-07): Store Manager may approve role changes (DEC-PERM-CATALOG A).
  * v3 (2026-10-07): Brand role templates for Brand-level master data (DEC-PERM-BRAND-ROLES).
+ * v4 (2026-10-07): Menu review actions, legacy names still checked by Catalog/Pricing services, and
+ * the Brand Menu Manager template (second person for menu and price approval).
  */
-export const storePermissionCatalogVersion = 3 as const;
+export const storePermissionCatalogVersion = 4 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -132,6 +134,9 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["catalog.menu.read", "Read Menu drafts and releases", "Low"],
     ["catalog.menu.update", "Edit Menu drafts", "Medium"],
     ["catalog.menu.publish", "Publish or schedule a Menu release", "High"],
+    ["catalog.menu.submit", "Submit a Menu version for review", "Medium"],
+    ["catalog.menu.approve", "Approve a submitted Menu version", "High"],
+    ["catalog.menu.archive", "Archive a Menu release", "High"],
     ["catalog.content_registry.read", "Read registered product content", "Low"],
     ["catalog.content_registry.manage", "Register product content", "Medium"],
   ]),
@@ -344,6 +349,10 @@ export const legacyPermissionReplacements: Readonly<Record<string, readonly stri
     ],
     "store.service.read": ["organization.store.read"],
     "pricing.price-book.manage": ["pricing.price_book.update"],
+    // v4: names still checked by the Catalog/Pricing services (DEC-PERM-CATALOG step-wise migration).
+    "pricing.price-book.approve": ["pricing.price_book.approve"],
+    "catalog.option_set.manage": ["catalog.option_set.create", "catalog.option_set.update"],
+    "catalog.category.manage": ["catalog.category.create", "catalog.category.update"],
     "pricing.tax-config.manage": ["pricing.tax_config.manage"],
     "operations.order-exception.manage": ["operations.order_exception.manage"],
     "integration.manage": ["integration.receipt_template.manage"],
@@ -493,7 +502,8 @@ export function withLegacyEquivalents(catalogCodes: readonly string[]): readonly
   return Object.freeze([...codes].sort());
 }
 
-export type BrandRoleTemplateCode = "brand-owner" | "recipe-developer" | "recipe-reviewer";
+export type BrandRoleTemplateCode =
+  "brand-owner" | "recipe-developer" | "recipe-reviewer" | "menu-manager";
 /**
  * DEC-PERM-BRAND-ROLES: Brand-level System roles for facts every Store of the Brand shares (Recipes,
  * Catalog, pricing, Inventory Item master data). Grants apply to the Brand and every Store of it.
@@ -527,11 +537,22 @@ export const brandRoleTemplates: Readonly<Record<BrandRoleTemplateCode, readonly
       "recipe.approve",
       "inventory.item.read",
     ]),
+    "menu-manager": Object.freeze(
+      pick([
+        "merchant.access",
+        "catalog.",
+        "pricing.price_book.",
+        "pricing.tax_config.read",
+        "recipe.read",
+        "inventory.item.read",
+      ]),
+    ),
   });
 export const brandRoleTemplateCodes: readonly BrandRoleTemplateCode[] = Object.freeze([
   "brand-owner",
   "recipe-developer",
   "recipe-reviewer",
+  "menu-manager",
 ]);
 export const brandRoleTemplateProfiles: Readonly<
   Record<
@@ -553,6 +574,11 @@ export const brandRoleTemplateProfiles: Readonly<
     roleCode: "recipe_reviewer",
     displayName: "Recipe Reviewer",
     description: "Review recipe cost and food safety before publication",
+  },
+  "menu-manager": {
+    roleCode: "menu_manager",
+    displayName: "Menu Manager",
+    description: "Products, menus and prices, including approving another person's changes",
   },
 });
 export function brandRoleTemplateActions(template: BrandRoleTemplateCode): readonly string[] {
