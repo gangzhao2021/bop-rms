@@ -1,7 +1,10 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { createOrdinaryRefundFailureRecorder } from "./ordinary-refund-failure-recorder.js";
 const f = vi.hoisted(() => ({ append: vi.fn() }));
-vi.mock("@bop/audit", () => ({ appendAuditRecordInTransaction: f.append }));
+vi.mock("@bop/audit", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@bop/audit")>()),
+  appendAuditRecordInTransaction: f.append,
+}));
 const id = (n: number) => "01909979-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const candidate = {
   operationReference: id(4),

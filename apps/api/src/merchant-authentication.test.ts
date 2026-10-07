@@ -672,6 +672,92 @@ describe("merchant exception current authorization", () => {
               permission_override: snapshot.permissionOverrides,
             }
           : {};
+        if (sql.includes("'PermissionCurrentPolicyPacketV1'")) {
+          // The owning reader now fetches one closed JSON packet per checkpoint.
+          const packetFields: Record<string, readonly string[]> = {
+            policy_state: ["brand_id", "snapshot_id", "version", "updated_at"],
+            permission_definition: [
+              "permission_id",
+              "action_code",
+              "lifecycle",
+              "version",
+              "created_at",
+              "updated_at",
+            ],
+            role: [
+              "role_id",
+              "brand_id",
+              "store_id",
+              "role_code",
+              "lifecycle",
+              "effective_from",
+              "effective_until",
+              "version",
+              "created_at",
+              "updated_at",
+            ],
+            role_assignment: [
+              "assignment_id",
+              "role_id",
+              "membership_id",
+              "store_assignment_id",
+              "actor_id",
+              "brand_id",
+              "store_id",
+              "lifecycle",
+              "effective_from",
+              "effective_until",
+              "version",
+              "created_at",
+              "updated_at",
+            ],
+            permission_grant: [
+              "grant_id",
+              "role_id",
+              "permission_id",
+              "brand_id",
+              "store_id",
+              "lifecycle",
+              "effective_from",
+              "effective_until",
+              "version",
+              "created_at",
+              "updated_at",
+            ],
+            permission_override: [
+              "override_id",
+              "permission_id",
+              "actor_id",
+              "brand_id",
+              "store_id",
+              "effect",
+              "lifecycle",
+              "reason_reference",
+              "correlation_reference",
+              "effective_from",
+              "effective_until",
+              "version",
+              "created_at",
+              "updated_at",
+            ],
+          };
+          const packet = Object.fromEntries(
+            Object.entries(packetFields).map(([name, fields]) => [
+              name,
+              (tables[name] ?? []).map((value) => {
+                const row = databaseRow(value) as Record<string, unknown>;
+                return Object.fromEntries(
+                  fields.map((field) => {
+                    const cell = row[field];
+                    return [field, cell instanceof Date ? cell.toISOString() : (cell ?? null)];
+                  }),
+                );
+              }),
+            ]),
+          );
+          const rows = [{ packet: { profile: "PermissionCurrentPolicyPacketV1", ...packet } }];
+          return { rows: rows as unknown as readonly Row[], rowCount: 1 };
+        }
         const table = /^SELECT [*] FROM bop_permission[.]([a-z_]+) /u.exec(sql)?.[1];
         const rows = table ? (tables[table] ?? []).map(databaseRow) : [];
         return { rows: rows as unknown as readonly Row[], rowCount: rows.length };
