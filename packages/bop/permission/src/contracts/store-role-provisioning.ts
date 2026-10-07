@@ -38,7 +38,7 @@ const unavailable = (): never => {
   throw new StoreRoleProvisioningError("STORE_ROLE_PROVISIONING_APPROVAL_UNAVAILABLE");
 };
 
-function record(
+export function closedApprovalRecord(
   value: unknown,
   fields: readonly string[],
   fail: () => never,
@@ -75,7 +75,8 @@ function array(value: unknown, maximum: number, fail: () => never): readonly unk
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const reference = (value: unknown, fail: () => never): string =>
   typeof value === "string" && uuidV7.test(value) ? value : fail();
-function instant(value: unknown, fail: () => never): string {
+export const approvalReference = reference;
+export function approvalInstant(value: unknown, fail: () => never): string {
   if (
     typeof value !== "string" ||
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value) ||
@@ -86,7 +87,7 @@ function instant(value: unknown, fail: () => never): string {
     return fail();
   return value;
 }
-function base64url(value: unknown, bytes: number, fail: () => never): string {
+export function approvalBase64url(value: unknown, bytes: number, fail: () => never): string {
   if (
     typeof value !== "string" ||
     value.length !== Math.ceil((bytes * 4) / 3) ||
@@ -155,7 +156,7 @@ const planFields = [
 
 /** Exact released content: every role equals its template profile and template actions. */
 export function parseStoreRoleProvisioningPlan(value: unknown): StoreRoleProvisioningPlan {
-  const r = record(value, planFields, invalidPlan);
+  const r = closedApprovalRecord(value, planFields, invalidPlan);
   if (
     r.profile !== "StoreRoleProvisioningPlanV2" ||
     r.purposeCode !== storeRoleProvisioningPurpose ||
@@ -184,7 +185,7 @@ export function parseStoreRoleProvisioningPlan(value: unknown): StoreRoleProvisi
   };
   const templates = new Set<string>();
   const roles = array(r.roles, storeRoleTemplateCodes.length, invalidPlan).map((item) => {
-    const role = record(
+    const role = closedApprovalRecord(
       item,
       [
         "template",
@@ -233,7 +234,7 @@ export function parseStoreRoleProvisioningPlan(value: unknown): StoreRoleProvisi
     return invalidPlan();
   let ownerAssignment: StoreRoleProvisioningOwnerAssignment | null = null;
   if (r.ownerAssignment !== null) {
-    const owner = record(
+    const owner = closedApprovalRecord(
       r.ownerAssignment,
       ["actorReference", "membershipReference", "storeAssignmentReference", "assignmentReference"],
       invalidPlan,
@@ -254,7 +255,7 @@ export function parseStoreRoleProvisioningPlan(value: unknown): StoreRoleProvisi
     catalogDigest: r.catalogDigest,
     previousCatalogVersion,
     ownerAssignment,
-    effectiveFrom: instant(r.effectiveFrom, invalidPlan),
+    effectiveFrom: approvalInstant(r.effectiveFrom, invalidPlan),
     reasonCode: r.reasonCode,
     roles: Object.freeze(
       roles.sort((a, b) =>
@@ -291,7 +292,7 @@ export interface StoreRoleProvisioningApproval {
   readonly signature: string;
 }
 export function parseStoreRoleProvisioningApproval(value: unknown): StoreRoleProvisioningApproval {
-  const r = record(
+  const r = closedApprovalRecord(
     value,
     [
       "profile",
@@ -312,8 +313,8 @@ export function parseStoreRoleProvisioningApproval(value: unknown): StoreRolePro
   );
   const operatorReference = reference(r.operatorReference, unavailable),
     approvedByReference = reference(r.approvedByReference, unavailable),
-    notBefore = instant(r.notBefore, unavailable),
-    validUntil = instant(r.validUntil, unavailable);
+    notBefore = approvalInstant(r.notBefore, unavailable),
+    validUntil = approvalInstant(r.validUntil, unavailable);
   if (
     r.profile !== "StoreRoleProvisioningApprovalV1" ||
     r.purposeCode !== storeRoleProvisioningPurpose ||
@@ -336,7 +337,7 @@ export function parseStoreRoleProvisioningApproval(value: unknown): StoreRolePro
     notBefore,
     validUntil,
     keyReference: reference(r.keyReference, unavailable),
-    signature: base64url(r.signature, 64, unavailable),
+    signature: approvalBase64url(r.signature, 64, unavailable),
   });
 }
 /** Exact bytes the approver signs: the domain line plus the canonical approval without signature. */
@@ -360,11 +361,19 @@ export interface StoreRoleProvisioningTrust {
   readonly keys: readonly StoreRoleProvisioningTrustKey[];
   readonly revokedApprovalEvidenceReferences: readonly string[];
 }
-export function parseStoreRoleProvisioningTrust(value: unknown): StoreRoleProvisioningTrust {
-  const r = record(value, ["profile", "keys", "revokedApprovalEvidenceReferences"], unavailable);
+/** Platform approver trust; each key serves exactly one approval purpose. */
+export function parseStoreRoleProvisioningTrust(
+  value: unknown,
+  purpose: string = storeRoleProvisioningPurpose,
+): StoreRoleProvisioningTrust {
+  const r = closedApprovalRecord(
+    value,
+    ["profile", "keys", "revokedApprovalEvidenceReferences"],
+    unavailable,
+  );
   if (r.profile !== "StoreRoleProvisioningTrustV1") return unavailable();
   const keys = array(r.keys, 32, unavailable).map((item) => {
-    const k = record(
+    const k = closedApprovalRecord(
       item,
       [
         "keyReference",
@@ -377,17 +386,16 @@ export function parseStoreRoleProvisioningTrust(value: unknown): StoreRoleProvis
       ],
       unavailable,
     );
-    const notBefore = instant(k.notBefore, unavailable),
-      validUntil = instant(k.validUntil, unavailable);
-    if (k.purposeCode !== storeRoleProvisioningPurpose || validUntil <= notBefore)
-      return unavailable();
+    const notBefore = approvalInstant(k.notBefore, unavailable),
+      validUntil = approvalInstant(k.validUntil, unavailable);
+    if (k.purposeCode !== purpose || validUntil <= notBefore) return unavailable();
     return Object.freeze({
       keyReference: reference(k.keyReference, unavailable),
       approvedByReference: reference(k.approvedByReference, unavailable),
       environmentReference: reference(k.environmentReference, unavailable),
       notBefore,
       validUntil,
-      publicKeySpki: base64url(k.publicKeySpki, 44, unavailable),
+      publicKeySpki: approvalBase64url(k.publicKeySpki, 44, unavailable),
     });
   });
   const revoked = array(r.revokedApprovalEvidenceReferences, 256, unavailable).map((item) =>
@@ -417,7 +425,7 @@ export function verifyStoreRoleProvisioningApproval(input: {
 }): StoreRoleProvisioningApproval {
   const approval = parseStoreRoleProvisioningApproval(input.approval),
     trust = parseStoreRoleProvisioningTrust(input.trust),
-    now = instant(input.now, unavailable),
+    now = approvalInstant(input.now, unavailable),
     plan = input.plan;
   if (
     approval.environmentReference !== plan.environmentReference ||

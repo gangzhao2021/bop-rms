@@ -1248,6 +1248,8 @@ async function scanUnsupported(root, module, diagnostics) {
             "src/infrastructure/persistence/current-membership-store.ts",
             // WP-2423: public Store member scope confirmation.
             "src/infrastructure/persistence/store-member-scope-source.ts",
+            // WP-2423: Store staff directory and member display names.
+            "src/infrastructure/persistence/member-directory-store.ts",
           ].includes(moduleRelative);
         // WP-2421 initialize-only Membership leaf owns no StoreAssignment fact.
         const acceptedMembershipBrandDiscoveryAsset =
@@ -2585,6 +2587,19 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_tenant" &&
           module.manifest.ownedDatabase?.tables?.includes("store") &&
           moduleRelative === "src/infrastructure/persistence/store-opening-scope-source.ts";
+        // WP-2423: Store staff role assignment (IAM-USER-DETAIL).
+        const acceptedRoleAssignmentAsset =
+          module.packageName === "@bop/permission" &&
+          module.manifest.ownedDatabase?.schema === "bop_permission" &&
+          [
+            "role_assignment",
+            "role_assignment_change",
+            "role_assignment_change_decision",
+            "role",
+            "role_administration_version",
+            "policy_state",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/role-assignment-store.ts";
         // WP-2423: Store role administration (IAM-ROLE-LIST / IAM-ROLE-EDITOR).
         const acceptedRoleAdministrationAsset =
           module.packageName === "@bop/permission" &&
@@ -3167,6 +3182,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedStoreOpeningScopeAsset &&
           !acceptedStoreRoleProvisioningAsset &&
           !acceptedRoleAdministrationAsset &&
+          !acceptedRoleAssignmentAsset &&
           !acceptedReceiptIssuerAsset &&
           !acceptedTaxRegistrantSourceAsset &&
           !acceptedDigitalReceiptAsset &&

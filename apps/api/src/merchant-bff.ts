@@ -191,6 +191,10 @@ import {
   MerchantRoleAdministrationError,
   type createMerchantRoleAdministration,
 } from "./merchant-role-administration.js";
+import {
+  MerchantStaffAdministrationError,
+  type createMerchantStaffAdministration,
+} from "./merchant-staff-administration.js";
 import type { createMerchantKitchenQuery } from "./merchant-kitchen-query.js";
 import { KitchenQueueProjectionError, KitchenWorkLifecycleError } from "@rms/kitchen";
 import type { createBrandLifecycleCommand } from "./brand-lifecycle-command.js";
@@ -257,6 +261,7 @@ const merchantNavigation = Object.freeze({
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
   "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
+  "IAM-USER-LIST": ["/app/organization/users", "organization.staff.read"],
 } as const);
 
 export interface MerchantNavigationItem {
@@ -411,6 +416,7 @@ export interface MerchantBffRouterOptions {
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
   readonly roleAdministration?: ReturnType<typeof createMerchantRoleAdministration>;
+  readonly staffAdministration?: ReturnType<typeof createMerchantStaffAdministration>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
   readonly ordinaryRefundSend?: ReturnType<typeof createMerchantOrdinaryRefundSendCommand>;
   readonly ordinaryRefundReconciliation?: ReturnType<
@@ -4780,6 +4786,73 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .command({ sessionCookie, csrf, body: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => roleAdministrationFailure(response, error));
+  });
+
+  // WP-2423: IAM-USER-LIST / IAM-USER-DETAIL reads and staff role assignment commands.
+  const staffStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    LastOwner: 409,
+    Invalid: 400,
+  } as const;
+  const staffFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantStaffAdministrationError)) {
+      denied(response);
+      return;
+    }
+    response.status(staffStatus[error.code]).json({ error: error.code });
+  };
+  router.post("/organization/staff/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { actorReference?: unknown } | undefined;
+    const actorReference = body?.actorReference ?? null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).join(",") !== "actorReference" ||
+      (actorReference !== null &&
+        (typeof actorReference !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            actorReference,
+          )))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.staffAdministration) {
+      response.status(503).json({ error: "staff_administration_unavailable" });
+      return;
+    }
+    void options.staffAdministration
+      .query({ sessionCookie, csrf, actorReference })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => staffFailure(response, error));
+  });
+  router.post("/organization/staff/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.staffAdministration) {
+      response.status(503).json({ error: "staff_administration_unavailable" });
+      return;
+    }
+    void options.staffAdministration
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => staffFailure(response, error));
   });
 
   router.post("/kitchen/release", sameOriginMutation(options), (request, response) => {

@@ -45,6 +45,8 @@ const moduleManifestInput = {
       "permission_definition",
       "permission_catalog_revision",
       "store_role_provisioning",
+      "role_assignment_change",
+      "role_assignment_change_decision",
       "role",
       "role_assignment",
       "permission_grant",

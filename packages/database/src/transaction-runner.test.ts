@@ -1,6 +1,10 @@
 import type { PoolClient } from "pg";
 import { describe, expect, it, vi } from "vitest";
-import { createTenantTransactionRunner, type DatabaseTransaction } from "./transaction-runner.js";
+import {
+  createTenantTransactionRunner,
+  isRetryableTransactionConflict,
+  type DatabaseTransaction,
+} from "./transaction-runner.js";
 
 const scope = { brandId: "018f3f7a-8b1c-7a11-8d01-000000000041" };
 function fixture(failure?: string) {
@@ -81,6 +85,35 @@ describe("WP-2212 pooled transaction runner", () => {
     ).rejects.toThrow();
     expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
     expect(f.release).toHaveBeenCalledWith(true);
+  });
+  it.each(["55P03", "40001", "40P01"])(
+    "reports a %s conflict as retryable even when the action rewraps it",
+    async (code) => {
+      const f = fixture();
+      f.query.mockImplementation(async (sql: string) => {
+        if (sql === "LOCK TABLE x") throw Object.assign(new Error("private"), { code });
+        return { rows: [] };
+      });
+      const failure = await f.runner
+        .run(async (t) => {
+          try {
+            await t.query("LOCK TABLE x", []);
+          } catch {
+            throw new Error("domain wrapper");
+          }
+        })
+        .catch((error: unknown) => error);
+      expect(isRetryableTransactionConflict(failure)).toBe(true);
+      expect(String((failure as Error).message)).not.toContain("private");
+      expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
+    },
+  );
+  it("keeps other failures non-retryable", async () => {
+    const f = fixture("SELECT secret");
+    const failure = await f.runner
+      .run((t) => t.query("SELECT secret", []))
+      .catch((error: unknown) => error);
+    expect(isRetryableTransactionConflict(failure)).toBe(false);
   });
   it("does not invoke scope accessors", async () => {
     const f = fixture();

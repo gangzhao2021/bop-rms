@@ -123,6 +123,8 @@ import { FeatureFlagListPage } from "./FeatureControlAdminPages.js";
 import { PlatformLiveGatePage, StoreLiveGatePage } from "./LiveGatePages.js";
 import { RoleEditorPage, RoleListPage } from "./RoleAdministrationPages.js";
 import { createRoleAdministrationPageClient } from "./role-administration-pages.js";
+import { StaffDetailPage, StaffListPage } from "./StaffAdministrationPages.js";
+import { createStaffPageClient } from "./staff-administration-pages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
 import { PlatformTenantDetailPage } from "./PlatformTenantPages.js";
 import { PlatformTemplateWorkspace } from "./PlatformTemplateWorkspace.js";
@@ -391,6 +393,32 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         }
       />
       <Route path="/app/organization/features" element={<FeatureFlagListPage />} />
+      <Route
+        path="/app/organization/users"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StaffListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStaffPageClient(state.csrf)}
+            />
+          ) : (
+            <StaffListPage />
+          )
+        }
+      />
+      <Route
+        path="/app/organization/users/:id"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StaffDetailPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStaffPageClient(state.csrf)}
+            />
+          ) : (
+            <StaffDetailPage />
+          )
+        }
+      />
       <Route
         path="/app/organization/roles"
         element={

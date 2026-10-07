@@ -50,8 +50,10 @@ export * from "./infrastructure/persistence/brand-initial-policy-store.js";
 export * from "./infrastructure/persistence/permission-catalog-synchronizer.js";
 export * from "./infrastructure/persistence/store-role-provisioning-store.js";
 export * from "./infrastructure/persistence/role-administration-store.js";
+export * from "./infrastructure/persistence/role-assignment-store.js";
 export * from "./application/plan-role-administration-change.js";
 export * from "./contracts/store-role-provisioning.js";
+export * from "./contracts/role-assignment-approval.js";
 export * from "./contracts/brand-initial-provisioning-plan.js";
 export {
   legacyPermissionReplacements,

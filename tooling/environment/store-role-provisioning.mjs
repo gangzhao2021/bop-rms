@@ -10,8 +10,13 @@ import {
   buildStoreRoleProvisioningPlan,
   parseStoreRoleProvisioningPlan,
   permissionCatalogDigest,
+  decideRoleAssignment,
+  listStoreRoleAssignments,
   provisionStoreRoles,
+  readRoleAssignmentDecision,
   readStoreTemplateRoles,
+  roleAssignmentApprovalSigningBytes,
+  verifyRoleAssignmentPlatformApproval,
   storePermissionCatalogVersion,
   storeRoleProvisioningPlanDigest,
   storeRoleProvisioningSigningBytes,
@@ -31,6 +36,13 @@ import { uuidV7 } from "./permission-catalog-install.mjs";
  *   prepare-upgrade (operator) the prepare flags plus --env-file: upgrades the Store's template roles
  *                              from its latest provisioned catalog version
  *   Owner flags assign an Owner, accepted only while the Store has no active Owner.
+ *
+ * Platform approval of a Store's pending role assignment request (a Store without a second
+ * administrator able to approve it):
+ *   prepare-assignment (operator) --env-file --environment --tenant --brand --store --change --out
+ *   sign-assignment    (approver) --request --private-key --approved-by --approval-evidence --key
+ *                                 --valid-hours <1..72> --out
+ *   apply-assignment   (operator) --env-file --confirm-target --approval --trust
  *   sign     (approver)        --plan --private-key --approved-by --approval-evidence --key
  *                              --valid-hours <1..72> --out <approval.json>
  *   apply    (operator)        --env-file --confirm-target <environment>:<database>
@@ -78,6 +90,25 @@ const commands = {
     "--out",
   ],
   apply: ["--env-file", "--confirm-target", "--plan", "--approval", "--trust"],
+  "prepare-assignment": [
+    "--env-file",
+    "--environment",
+    "--tenant",
+    "--brand",
+    "--store",
+    "--change",
+    "--out",
+  ],
+  "sign-assignment": [
+    "--request",
+    "--private-key",
+    "--approved-by",
+    "--approval-evidence",
+    "--key",
+    "--valid-hours",
+    "--out",
+  ],
+  "apply-assignment": ["--env-file", "--confirm-target", "--approval", "--trust"],
 };
 export function parseCommand(args) {
   const [command, ...rest] = args;
@@ -288,12 +319,143 @@ async function applyOnce(get) {
   });
 }
 
+async function readPending(client, scope, changeReference) {
+  const { pending } = await listStoreRoleAssignments(client, scope, new Date().toISOString());
+  return pending.find((item) => item.changeReference === changeReference) ?? null;
+}
+export async function prepareAssignment(get) {
+  const scope = { brandReference: get("--brand"), storeReference: get("--store") };
+  const change = await withClient(
+    get,
+    async (client) => {
+      await client.query("BEGIN READ ONLY");
+      try {
+        return await readPending(client, scope, get("--change"));
+      } finally {
+        await client.query("ROLLBACK");
+      }
+    },
+    false,
+  );
+  if (change === null) throw new Error("no pending role assignment request with that reference");
+  // No personal data: the approver identifies the request by references and the role.
+  const request = {
+    profile: "RoleAssignmentApprovalRequestV1",
+    environmentReference: get("--environment"),
+    tenantReference: get("--tenant"),
+    ...scope,
+    changeReference: change.changeReference,
+    roleReference: change.roleReference,
+    roleCode: change.roleCode,
+    subjectReference: change.actorReference,
+    requestedByReference: change.requestedBy,
+    requestedAt: change.requestedAt,
+  };
+  await writeNew(get("--out"), JSON.stringify(request, null, 2) + "\n", 0o644);
+  return request;
+}
+export async function signAssignment(get, now = () => Date.now()) {
+  const request = await readJson(get("--request"));
+  if (request.profile !== "RoleAssignmentApprovalRequestV1")
+    throw new Error("not an approval request");
+  const hours = Number(get("--valid-hours"));
+  if (!Number.isInteger(hours) || hours < 1 || hours > 72)
+    throw new Error("--valid-hours must be 1..72");
+  const approvedBy = get("--approved-by");
+  if (approvedBy === request.requestedByReference || approvedBy === request.subjectReference)
+    throw new Error("the approver must be neither the requester nor the subject");
+  const start = Math.floor(now() / 1000) * 1000;
+  const unsigned = {
+    profile: "RoleAssignmentPlatformApprovalV1",
+    purposeCode: "ROLE_ASSIGNMENT_APPROVAL",
+    environmentReference: request.environmentReference,
+    brandReference: request.brandReference,
+    storeReference: request.storeReference,
+    changeReference: request.changeReference,
+    roleReference: request.roleReference,
+    subjectReference: request.subjectReference,
+    requestedByReference: request.requestedByReference,
+    approvedByReference: approvedBy,
+    approvalEvidenceReference: get("--approval-evidence"),
+    notBefore: new Date(start).toISOString(),
+    validUntil: new Date(start + hours * 3_600_000).toISOString(),
+    keyReference: get("--key"),
+  };
+  const signature = sign(
+    null,
+    Buffer.from(roleAssignmentApprovalSigningBytes(unsigned), "utf8"),
+    createPrivateKey(await readFile(get("--private-key"))),
+  ).toString("base64url");
+  await writeNew(get("--out"), JSON.stringify({ ...unsigned, signature }, null, 2) + "\n", 0o644);
+  return {
+    changeReference: unsigned.changeReference,
+    roleCode: request.roleCode,
+    validUntil: unsigned.validUntil,
+  };
+}
+export async function applyAssignment(get) {
+  const approval = await readJson(get("--approval"));
+  return withClient(get, async (client) => {
+    await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+    try {
+      const scope = {
+        brandReference: approval.brandReference,
+        storeReference: approval.storeReference,
+      };
+      const change = await readPending(client, scope, approval.changeReference);
+      if (change === null) {
+        // A rerun after this approval already applied reports it instead of failing.
+        const decided = await readRoleAssignmentDecision(client, scope, approval.changeReference);
+        await client.query("ROLLBACK");
+        if (decided?.decision === "Approved" && decided.decidedBy === approval.approvedByReference)
+          return { status: "AlreadyApplied", policyVersion: decided.policyVersion };
+        throw new Error("ROLE_ASSIGNMENT_NOT_PENDING");
+      }
+      const at = new Date().toISOString();
+      const verified = verifyRoleAssignmentPlatformApproval({
+        approval,
+        trust: await readJson(get("--trust")),
+        now: at,
+        expected: {
+          ...scope,
+          changeReference: change.changeReference,
+          roleReference: change.roleReference,
+          subjectReference: change.actorReference,
+          requestedByReference: change.requestedBy,
+        },
+      });
+      const result = await decideRoleAssignment(
+        client,
+        {
+          ...scope,
+          changeReference: change.changeReference,
+          decision: "Approved",
+          decidedBy: verified.approvedByReference,
+          at,
+          auditReference: uuidV7(),
+          snapshotReference: uuidV7(),
+          platformApprovalEvidence: verified.approvalEvidenceReference,
+        },
+        (member) => confirmStoreMemberScope(client, { ...scope, ...member, at }),
+      );
+      await client.query("COMMIT");
+      return { ...result, approvalEvidence: verified.approvalEvidenceReference };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
+  });
+}
+
 export async function run(args) {
   const { command, get } = parseCommand(args);
   if (command === "keygen") return keygen(get);
   if (command === "prepare") return prepare(get);
   if (command === "prepare-upgrade") return prepareUpgrade(get);
   if (command === "sign") return signPlan(get);
+  if (command === "prepare-assignment") return prepareAssignment(get);
+  if (command === "sign-assignment") return signAssignment(get);
+  if (command === "apply-assignment") return applyAssignment(get);
   return apply(get);
 }
 

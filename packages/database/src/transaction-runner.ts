@@ -5,6 +5,22 @@ import {
   type TenantDatabaseScope,
 } from "./tenant-context.js";
 
+const retryableSqlStates: ReadonlySet<string> = new Set(["55P03", "40001", "40P01"]);
+function sqlState(error: unknown): string {
+  const code =
+    error !== null && typeof error === "object"
+      ? Object.getOwnPropertyDescriptor(error, "code")?.value
+      : undefined;
+  return typeof code === "string" ? code : "";
+}
+/** True for a transaction that failed only because of a lock or serialization conflict. */
+export function isRetryableTransactionConflict(error: unknown): boolean {
+  return (
+    error instanceof TenantContextDatabaseError &&
+    error.code === "TENANT_DATABASE_TRANSACTION_CONFLICT"
+  );
+}
+
 export interface DatabaseTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
 }
@@ -43,6 +59,7 @@ export function createTenantTransactionRunner(
         }
         let active = true;
         let failed = false;
+        let conflicted = false;
         let pending = 0;
         try {
           const result = await action(
@@ -53,9 +70,16 @@ export function createTenantTransactionRunner(
                 pending += 1;
                 try {
                   return await client.query(sql, [...values]);
-                } catch {
+                } catch (error) {
                   failed = true;
-                  throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
+                  // Lock timeout, serialization failure and deadlock leave nothing committed; the
+                  // caller may rerun the whole idempotent transaction. No SQL detail is exposed.
+                  if (retryableSqlStates.has(sqlState(error))) conflicted = true;
+                  throw new TenantContextDatabaseError(
+                    conflicted
+                      ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
+                      : "TENANT_DATABASE_TRANSACTION_FAILED",
+                  );
                 } finally {
                   pending -= 1;
                 }
@@ -63,8 +87,17 @@ export function createTenantTransactionRunner(
             }),
           );
           if (failed || pending !== 0)
-            throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
+            throw new TenantContextDatabaseError(
+              conflicted
+                ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
+                : "TENANT_DATABASE_TRANSACTION_FAILED",
+            );
           return result;
+        } catch (error) {
+          // Whatever the action made of it, a conflicted transaction is reported as retryable.
+          if (conflicted)
+            throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_CONFLICT");
+          throw error;
         } finally {
           active = false;
         }

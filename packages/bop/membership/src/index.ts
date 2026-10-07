@@ -4,6 +4,7 @@ export * from "./domain/membership.js";
 
 export * from "./infrastructure/persistence/current-membership-store.js";
 export * from "./infrastructure/persistence/store-member-scope-source.js";
+export * from "./infrastructure/persistence/member-directory-store.js";
 export * from "./contracts/initial-brand-membership.js";
 export * from "./infrastructure/persistence/initial-brand-membership-store.js";
 

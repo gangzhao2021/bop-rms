@@ -4,6 +4,7 @@ export const tenantContextDatabaseErrorCodes = [
   "TENANT_DATABASE_SCOPE_INVALID",
   "TENANT_DATABASE_ACQUIRE_FAILED",
   "TENANT_DATABASE_TRANSACTION_FAILED",
+  "TENANT_DATABASE_TRANSACTION_CONFLICT",
 ] as const;
 export type TenantContextDatabaseErrorCode = (typeof tenantContextDatabaseErrorCodes)[number];
 
@@ -11,6 +12,7 @@ const safeMessages: Readonly<Record<TenantContextDatabaseErrorCode, string>> = {
   TENANT_DATABASE_SCOPE_INVALID: "tenant database scope is invalid",
   TENANT_DATABASE_ACQUIRE_FAILED: "tenant database connection is unavailable",
   TENANT_DATABASE_TRANSACTION_FAILED: "tenant database transaction failed",
+  TENANT_DATABASE_TRANSACTION_CONFLICT: "tenant database transaction conflicted; it may be retried",
 };
 
 export class TenantContextDatabaseError extends Error {
