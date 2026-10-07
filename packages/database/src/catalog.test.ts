@@ -601,6 +601,7 @@ describe("migration catalog", () => {
       "1500_008_create_kitchen_creation_record",
       "1500_009_create_kitchen_routing_configuration",
       "1500_010_alter_kitchen_lifecycle_effect_record",
+      "1500_011_create_kds_operator_shift_event",
       "1600_001_create_device_management",
       "1600_002_create_kds_profile_management",
       "1600_003_create_digital_receipt_template",

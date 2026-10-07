@@ -1052,6 +1052,13 @@ export function KitchenBoardPage(
   const signOut =
     props.signOut ??
     (async () => {
+      // Kitchen records the Release first; the next named operator's Start derives the handover.
+      const release = await fetch("/merchant/kitchen/release", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "x-bop-csrf": props.csrf ?? "" },
+      });
+      if (release.status !== 204) throw new Error("KDS_RELEASE_FAILED");
       const response = await fetch("/merchant/logout", {
         method: "POST",
         credentials: "same-origin",
@@ -1098,7 +1105,10 @@ export function KitchenBoardPage(
             Hand over / sign out
           </button>
           {handover === "Failed" ? (
-            <span role="alert"> Sign-out was not confirmed. Retry before handing over.</span>
+            <span role="alert">
+              {" "}
+              Handover was not recorded or sign-out was not confirmed. Retry before handing over.
+            </span>
           ) : null}
         </p>
       ) : null}

@@ -6,6 +6,7 @@ import {
   createPostgresBrowserSessionStore,
   createPostgresBrowserSessionSelectionStore,
 } from "../../packages/bop/identity/src/index.ts";
+import { createPostgresKdsOperatorShiftStore } from "../../packages/rms/kitchen/src/index.ts";
 const referencePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const selectorPattern = /^[a-z][a-z0-9-]{0,39}$/u;
 const denied = () => {
@@ -197,7 +198,36 @@ export async function createInternalMerchantSession(
     transactions,
     now: clock,
     currentActor,
-    onSessionCreated: async (tx, record) => selection.write(tx, record.session, scope, clock()),
+    onSessionCreated: async (tx, record) => {
+      await selection.write(tx, record.session, scope, clock());
+      if (record.session.policy.code !== "NamedKdsOperator") return;
+      // IDR-0039 / WP-2423: Kitchen records the named operator Start in the same transaction and
+      // derives a handover from the latest released prior operator at this Store.
+      const session = record.session,
+        validUntil =
+          Date.parse(session.idleExpiresAt) < Date.parse(session.absoluteExpiresAt)
+            ? session.idleExpiresAt
+            : session.absoluteExpiresAt;
+      await createPostgresKdsOperatorShiftStore({
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+        references: { next: () => credentials.reference() },
+      }).start({
+        transaction: tx,
+        session: {
+          sessionReference: session.sessionReference,
+          actorReference: session.actor.actorReference,
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          sessionVersion: session.version,
+          sessionKind: "NamedKdsOperator",
+          state: "Active",
+          observedAt: session.createdAt,
+          validUntil,
+        },
+        recordedAt: instant(clock()),
+      });
+    },
   });
   const browser = new BrowserSessionService({ ...identity, store, now: clock });
   return {

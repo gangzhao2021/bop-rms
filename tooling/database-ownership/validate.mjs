@@ -2492,6 +2492,13 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.tables?.includes("kitchen_routing_configuration") &&
           moduleRelative ===
             "src/infrastructure/persistence/kitchen-routing-configuration-store.ts";
+        const acceptedKdsOperatorShiftAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          ["kds_operator_shift_event", "kds_operator_handover"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/kds-operator-shift-store.ts";
         const acceptedKitchenTicketAsset =
           module.packageName === "@rms/kitchen" &&
           module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
@@ -3105,6 +3112,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedKitchenQueueSourceAsset &&
           !acceptedKitchenCustomerStatusAsset &&
           !acceptedKitchenRoutingConfigurationAsset &&
+          !acceptedKdsOperatorShiftAsset &&
           !acceptedOrderPaymentDispositionAsset &&
           !acceptedOrderPaymentWaitAsset &&
           !acceptedTaskStoreAsset &&

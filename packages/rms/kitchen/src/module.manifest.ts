@@ -58,6 +58,7 @@ const moduleManifestInput =
       schema: "rms_kitchen",
       tables: [
         "kds_operator_handover",
+        "kds_operator_shift_event",
         "kds_recovery_reconciliation",
         "kitchen_allergen_acknowledgement",
         "kitchen_allergen_incident_link",

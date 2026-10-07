@@ -19,6 +19,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "personal", "health"],
     },
     {
+      table: "kds_operator_shift_event",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
       table: "kds_operator_handover",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/kitchen" },

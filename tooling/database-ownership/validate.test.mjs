@@ -2434,6 +2434,45 @@ describe("Database Schema Ownership Architecture Test", () => {
       expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
     },
   );
+  it("admits only the Kitchen KDS operator shift owner adapter without a driver", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "kitchen", "rms_kitchen", [
+      "kds_operator_shift_event",
+      "kds_operator_handover",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/kds-operator-shift-store.ts",
+    );
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(asset, "export const synthetic = true;");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg"; export {pg};');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each(["owner", "schema", "path", "kds_operator_shift_event", "kds_operator_handover"])(
+    "rejects the Kitchen KDS operator shift store with changed %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other" : "kitchen",
+        changed === "schema" ? "rms_other" : "rms_kitchen",
+        ["kds_operator_shift_event", "kds_operator_handover"].filter((v) => v !== changed),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence/" +
+            (changed === "path" ? "other.ts" : "kds-operator-shift-store.ts"),
+        ),
+        "export const synthetic = true;",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
   it("admits only the Fulfillment readiness store owner adapter without a driver", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "fulfillment", "rms_fulfillment", [

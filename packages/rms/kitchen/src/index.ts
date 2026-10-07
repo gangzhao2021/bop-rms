@@ -374,3 +374,4 @@ export { createPostgresKitchenQueueSourceReader } from "./infrastructure/persist
 export { createKitchenQueueRebuildSource } from "./application/kitchen-queue-rebuild-source.js";
 
 export { createPostgresKitchenQueueReadModel } from "./infrastructure/kitchen-queue-read-model.js";
+export { createPostgresKdsOperatorShiftStore } from "./infrastructure/persistence/kds-operator-shift-store.js";

@@ -4,6 +4,17 @@ const seam = vi.hoisted(() => ({
   selectionOptions: null,
   created: [],
   selections: [],
+  kdsStarts: [],
+}));
+vi.mock("../../packages/rms/kitchen/src/index.ts", () => ({
+  createPostgresKdsOperatorShiftStore(options) {
+    return {
+      async start(input) {
+        seam.kdsStarts.push({ options, input });
+        return null;
+      },
+    };
+  },
 }));
 vi.mock("../../packages/bop/identity/src/index.ts", async (original) => {
   const actual = await original();
@@ -19,7 +30,16 @@ vi.mock("../../packages/bop/identity/src/index.ts", async (original) => {
                 throw Error("UNEXPECTED_SQL");
               },
             },
-            { session: input },
+            {
+              session: {
+                ...input,
+                policy: { code: input.policyCode },
+                version: 1,
+                createdAt: input.observedAt,
+                idleExpiresAt: "2099-01-01T01:00:00.000Z",
+                absoluteExpiresAt: "2099-01-01T12:00:00.000Z",
+              },
+            },
           );
           seam.created.push(input);
         },
@@ -55,6 +75,7 @@ beforeEach(() => {
   seam.selectionOptions = null;
   seam.created = [];
   seam.selections = [];
+  seam.kdsStarts = [];
 });
 afterEach(() => vi.unstubAllEnvs());
 function setup(multiple = true) {
@@ -249,4 +270,14 @@ it("issues the IDR-0039 named KDS Operator policy only for an explicit kitchen d
     "NamedKdsOperator",
   ]);
   expect(seam.created[1].actor.actorReference).toBe(id(4));
+  expect(seam.kdsStarts).toHaveLength(1);
+  const start = seam.kdsStarts[0];
+  expect(start.options.storeReference).toBe(scope.storeReference);
+  expect(start.input.session).toMatchObject({
+    sessionReference: seam.created[1].sessionReference,
+    actorReference: id(4),
+    sessionKind: "NamedKdsOperator",
+    state: "Active",
+    validUntil: "2099-01-01T01:00:00.000Z",
+  });
 });

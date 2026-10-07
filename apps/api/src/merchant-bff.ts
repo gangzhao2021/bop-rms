@@ -186,6 +186,7 @@ import type { createMerchantPickupProof } from "./merchant-pickup-proof.js";
 import type { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
+import type { createMerchantKitchenRelease } from "./merchant-kitchen-release.js";
 import type { createMerchantKitchenQuery } from "./merchant-kitchen-query.js";
 import { KitchenQueueProjectionError, KitchenWorkLifecycleError } from "@rms/kitchen";
 import type { createBrandLifecycleCommand } from "./brand-lifecycle-command.js";
@@ -404,6 +405,7 @@ export interface MerchantBffRouterOptions {
   readonly pickupHandoff?: ReturnType<typeof createMerchantPickupHandoff>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
+  readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
   readonly ordinaryRefundSend?: ReturnType<typeof createMerchantOrdinaryRefundSendCommand>;
   readonly ordinaryRefundReconciliation?: ReturnType<
@@ -4701,6 +4703,28 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         }[error.code];
         response.status(status).json({ error: error.code });
       });
+  });
+
+  router.post("/kitchen/release", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenRelease) {
+      response.status(503).json({ error: "kitchen_release_unavailable" });
+      return;
+    }
+    void options
+      .kitchenRelease({ sessionCookie, csrf })
+      .then(() => response.status(204).end())
+      .catch(() => denied(response));
   });
 
   router.post("/pickup/query", sameOriginMutation(options), (request, response) => {

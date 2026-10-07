@@ -38,6 +38,7 @@ import { createMerchantDiningServeCommand } from "../../apps/api/dist/merchant-d
 import { createMerchantDiningOrderProgress } from "../../apps/api/dist/merchant-dining-order-progress.js";
 import { createHash } from "node:crypto";
 import { createMerchantKitchenQuery } from "../../apps/api/dist/merchant-kitchen-query.js";
+import { createMerchantKitchenRelease } from "../../apps/api/dist/merchant-kitchen-release.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
 export async function createInternalMerchant(
@@ -375,6 +376,11 @@ export async function createInternalMerchant(
     authentication: service,
     sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
   });
+  const kitchenRelease = createMerchantKitchenRelease({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+  });
   const { pickupQuery, pickupProof, pickupHandoff } = await createInternalMerchantPickup(
     resources,
     { persistence, service },
@@ -394,6 +400,7 @@ export async function createInternalMerchant(
     orderQueue,
     kitchenQuery,
     kitchenCommand,
+    kitchenRelease,
     pickupQuery,
     pickupProof,
     pickupHandoff,
@@ -482,6 +489,7 @@ export async function createInternalMerchant(
       orderQueue,
       kitchenQuery,
       kitchenCommand,
+      kitchenRelease,
       pickupQuery,
       pickupProof,
       pickupHandoff,
