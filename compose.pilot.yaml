@@ -31,6 +31,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.pilot
+      args:
+        # InternalTest simulated payments only; remove when switching to a real Provider.
+        VITE_BOP_INTERNAL_SIMULATED_PAYMENT: "1"
     image: bop-rms-pilot:local
     restart: unless-stopped
     init: true

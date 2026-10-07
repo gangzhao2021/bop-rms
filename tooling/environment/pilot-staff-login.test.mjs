@@ -77,7 +77,7 @@ it("renders escaped aliases with native keyboard buttons and no identity/grant f
   expect(f.res.body).not.toContain("actorReference");
   expect(f.res.body).not.toContain("catalog.product.approve");
   expect(f.res.headers["Cache-Control"]).toBe("no-store");
-  expect(f.res.headers["Referrer-Policy"]).toBe("no-referrer");
+  expect(f.res.headers["Referrer-Policy"]).toBe("same-origin");
   expect(f.issue).not.toHaveBeenCalled();
 });
 it("explicitly selects one configured identity and preserves the secure session redirect", async () => {

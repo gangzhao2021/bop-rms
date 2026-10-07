@@ -8,8 +8,14 @@ RUN corepack enable
 WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile && pnpm build
+# InternalTest only: the local root entry and simulated-payment UI need this explicit
+# customer build (single-store-pilot runbook). Leave unset for any real-payment image.
+ARG VITE_BOP_INTERNAL_SIMULATED_PAYMENT=
+RUN if [ "$VITE_BOP_INTERNAL_SIMULATED_PAYMENT" = "1" ]; then \
+      VITE_BOP_INTERNAL_SIMULATED_PAYMENT=1 pnpm --filter @bop-rms/customer-pwa build; \
+    fi
 
 ENV NODE_ENV=development
 ARG PILOT_RUNTIME_DIRECTORY=.local/pilot-v14
 ENV PILOT_RUNTIME_DIRECTORY=${PILOT_RUNTIME_DIRECTORY}
-CMD ["sh", "-c", "exec node --import ./tooling/environment/register-workspace-typescript.mjs tooling/environment/pilot-supervisor.mjs \"$PILOT_RUNTIME_DIRECTORY\""]
+CMD ["sh", "tooling/environment/pilot-container-start.sh"]

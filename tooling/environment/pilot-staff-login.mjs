@@ -76,7 +76,9 @@ export function installInternalStaffLogin(app, merchant) {
     req.headers.host === "127.0.0.1:4443" &&
     Object.keys(req.query).length === 0;
   app.get("/internal-test/staff", async (req, res) => {
-    res.set("Cache-Control", "no-store").set("Referrer-Policy", "no-referrer");
+    // same-origin, not no-referrer: under no-referrer browsers send `Origin: null` on this
+    // page's same-origin form POST, which the exact-origin check below must reject.
+    res.set("Cache-Control", "no-store").set("Referrer-Policy", "same-origin");
     if (
       !requestScope(req) ||
       (req.headers.origin !== undefined && req.headers.origin !== origin) ||
