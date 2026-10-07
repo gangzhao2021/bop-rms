@@ -4,7 +4,17 @@ import type { StockCountAggregate } from "../domain/stock-count.js";
 import type { StockMovementFact } from "../domain/stock-movement.js";
 
 export type StockCountAction =
-  "Create" | "Assign" | "Start" | "SaveLine" | "Submit" | "Approve" | "Reject" | "Cancel" | "Post";
+  | "Create"
+  | "Assign"
+  | "Start"
+  | "SaveLine"
+  | "Submit"
+  | "Approve"
+  | "Reject"
+  | "Cancel"
+  | "Post"
+  | "ExplainVariance"
+  | "Refresh";
 
 export type StockCountPermission =
   | "inventory.count.read"

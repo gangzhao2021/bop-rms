@@ -218,4 +218,7 @@ export * from "./infrastructure/persistence/opening-count-store.js";
 export * from "./domain/store-receipt.js";
 export * from "./infrastructure/persistence/store-receipt-store.js";
 export * from "./infrastructure/persistence/inventory-recipe-facts-store.js";
+export * from "./domain/store-waste.js";
+export * from "./infrastructure/persistence/store-waste-store.js";
+export * from "./infrastructure/persistence/stock-count-store.js";
 export * from "./infrastructure/persistence/ledger-posting.js";

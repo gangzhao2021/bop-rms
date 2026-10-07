@@ -316,14 +316,9 @@ export function submitStockCount(
   const actorReference = reference(actorReferenceValue);
   if (count.status !== "InProgress" || count.assigneeReference !== actorReference)
     throw new StockCountError("STOCK_COUNT_STATE_CONFLICT");
-  if (
-    count.lines.some(
-      (line) =>
-        line.countedQuantity === null ||
-        line.variance === null ||
-        (line.variance !== "0" && line.varianceReasonCode === null),
-    )
-  )
+  // WP-2423 / DEC-INV-STOCK-COUNT: a blind counter does not see variances; the reviewer explains
+  // them before approval, so submitting needs every line counted only.
+  if (count.lines.some((line) => line.countedQuantity === null || line.variance === null))
     throw new StockCountError("STOCK_COUNT_INCOMPLETE");
   const occurredAt = instant(occurredAtValue);
   return update(count, actorReference, occurredAt, {
@@ -353,6 +348,11 @@ export function decideStockCount(
     throw new StockCountError("STOCK_COUNT_SEGREGATION_REQUIRED");
   const occurredAt = instant(input.occurredAt);
   const approved = input.decision === "Approve";
+  if (
+    approved &&
+    count.lines.some((line) => line.variance !== "0" && line.varianceReasonCode === null)
+  )
+    throw new StockCountError("STOCK_COUNT_INCOMPLETE");
   return update(count, actorReference, occurredAt, {
     status: approved ? "Approved" : "InProgress",
     approvedBy: approved ? actorReference : null,
@@ -410,5 +410,90 @@ export function markStockCountPosted(
   return update(count, reference(actorReferenceValue), instant(occurredAtValue), {
     status: "Posted",
     lines: Object.freeze(lines),
+  });
+}
+
+/**
+ * WP-2423 / DEC-INV-STOCK-COUNT: the reviewer records why a submitted line differs from the expected
+ * quantity (never the submitter under segregated approval). Clearing is not possible; a recount is.
+ */
+export function explainStockCountVariance(
+  count: StockCountAggregate,
+  input: {
+    readonly lineReference: unknown;
+    readonly varianceReasonCode: unknown;
+    readonly expectedVersion: number;
+    readonly actorReference: unknown;
+    readonly occurredAt: unknown;
+  },
+): StockCountAggregate {
+  checkVersion(count, input.expectedVersion);
+  const actorReference = reference(input.actorReference);
+  if (count.status !== "Submitted") throw new StockCountError("STOCK_COUNT_STATE_CONFLICT");
+  if (count.approvalPolicy === "Segregated" && count.submittedBy === actorReference)
+    throw new StockCountError("STOCK_COUNT_SEGREGATION_REQUIRED");
+  const lineReference = reference(input.lineReference);
+  const target = count.lines.find((line) => line.lineReference === lineReference);
+  if (
+    !target ||
+    target.variance === null ||
+    target.variance === "0" ||
+    typeof input.varianceReasonCode !== "string" ||
+    !reasonPattern.test(input.varianceReasonCode)
+  )
+    return invalid();
+  const varianceReasonCode = input.varianceReasonCode;
+  return update(count, actorReference, instant(input.occurredAt), {
+    lines: Object.freeze(
+      count.lines.map((line) =>
+        line.lineReference === lineReference
+          ? Object.freeze({ ...line, varianceReasonCode })
+          : line,
+      ),
+    ),
+  });
+}
+
+/**
+ * WP-2423 / DEC-INV-STOCK-COUNT: stock moved (sales, receipts, waste) on some counted lines after the
+ * snapshot. The counter takes the current expected quantity and ledger version for those lines and
+ * counts them again; other lines keep their counts.
+ */
+export function refreshStockCountLines(
+  count: StockCountAggregate,
+  input: {
+    readonly lines: ReadonlyMap<
+      InventoryReference,
+      { readonly expectedQuantity: InventoryDecimal; readonly balanceVersion: number }
+    >;
+    readonly expectedVersion: number;
+    readonly actorReference: unknown;
+    readonly occurredAt: unknown;
+  },
+): StockCountAggregate {
+  checkVersion(count, input.expectedVersion);
+  const actorReference = reference(input.actorReference);
+  if (count.status !== "InProgress" || count.assigneeReference !== actorReference)
+    throw new StockCountError("STOCK_COUNT_STATE_CONFLICT");
+  if (input.lines.size === 0) return invalid();
+  for (const key of input.lines.keys())
+    if (!count.lines.some((line) => line.lineReference === key)) return invalid();
+  return update(count, actorReference, instant(input.occurredAt), {
+    lines: Object.freeze(
+      count.lines.map((line) => {
+        const fresh = input.lines.get(line.lineReference);
+        return fresh === undefined
+          ? line
+          : Object.freeze({
+              ...line,
+              expectedQuantity: parseStockCountQuantity(fresh.expectedQuantity),
+              balanceVersion: fresh.balanceVersion,
+              countedQuantity: null,
+              variance: null,
+              varianceReasonCode: null,
+              recountNumber: line.recountNumber + 1,
+            });
+      }),
+    ),
   });
 }

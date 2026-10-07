@@ -13,6 +13,7 @@
 - Current execution coordinator: [WP-2423 — single-store pilot track](./work-packages/WP-2423.md)
   (Owner-accepted 2026-10-06). WP-2421 whole-project assembly is paused; WP-2402 remains the retained
   pilot/history owner.
+- Counts and waste (2026-10-07): [DEC-INV-STOCK-COUNT / DEC-INV-WASTE](./design/stock-count-and-waste.md) — blind location counts with reviewer-explained variances and refresh of moved lines; waste posted at once with independent review of high-value records
 - Recipes (2026-10-07): [DEC-RECIPE-AUTHORING](./design/recipe-authoring.md) — Brand recipe drafts, independent cost/food-safety review, kitchen instructions, SKU binding with supersession and revisions
 - Brand roles (2026-10-07): [DEC-PERM-BRAND-ROLES](./design/brand-role-templates.md) — signed Brand role templates (Brand Owner, Recipe Developer, Recipe Reviewer) and Brand role assignment with independent approval
 - Opening stock (2026-10-07): [DEC-INV-OPENING](./design/opening-stock-count.md) — audited one-time Store opening count posted as first ledger movements

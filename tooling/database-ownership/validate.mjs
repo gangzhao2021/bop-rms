@@ -1422,6 +1422,25 @@ async function scanUnsupported(root, module, diagnostics) {
             "src/infrastructure/persistence/ledger-posting.ts",
             "src/infrastructure/persistence/store-receipt-store.ts",
           ].includes(moduleRelative);
+        // WP-2423 / DEC-INV-STOCK-COUNT and DEC-INV-WASTE: Store counts and waste on the ledger.
+        const acceptedStockCountWasteAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          [
+            "stock_count",
+            "stock_count_version",
+            "stock_count_operation",
+            "store_waste",
+            "store_waste_review",
+            "stock_lot",
+            "stock_account",
+            "stock_balance",
+            "stock_movement",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          [
+            "src/infrastructure/persistence/stock-count-store.ts",
+            "src/infrastructure/persistence/store-waste-store.ts",
+          ].includes(moduleRelative);
         // WP-2423 / DEC-INV-OPENING: Store opening count posting to the ledger.
         const acceptedOpeningCountAsset =
           module.packageName === "@rms/inventory" &&
@@ -3120,6 +3139,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedOrderLineConsumptionAsset &&
           !acceptedStockPlaceAsset &&
           !acceptedOpeningCountAsset &&
+          !acceptedStockCountWasteAsset &&
           !acceptedLedgerPostingAsset &&
           !acceptedOrderItemInventoryLinkAsset &&
           !acceptedBrowserSessionSelectionAsset &&

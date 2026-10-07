@@ -197,6 +197,11 @@ import {
 } from "./merchant-store-receipts.js";
 import { MerchantRecipeError, type createMerchantRecipes } from "./merchant-recipes.js";
 import {
+  MerchantStockCountError,
+  type createMerchantStockCounts,
+} from "./merchant-stock-counts.js";
+import { MerchantStoreWasteError, type createMerchantStoreWaste } from "./merchant-store-waste.js";
+import {
   MerchantOpeningCountError,
   type createMerchantOpeningCount,
 } from "./merchant-opening-count.js";
@@ -284,6 +289,8 @@ const merchantNavigation = Object.freeze({
   "INV-OPENING-COUNT": ["/app/supply/opening-count", "inventory.count.read"],
   "INV-RECEIPT-LIST": ["/operations/receiving", "inventory.receipt.read"],
   "RECIPE-LIST": ["/app/commerce/recipes", "recipe.read"],
+  "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
+  "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
 } as const);
 
 export interface MerchantNavigationItem {
@@ -444,6 +451,8 @@ export interface MerchantBffRouterOptions {
   readonly openingCount?: ReturnType<typeof createMerchantOpeningCount>;
   readonly storeReceipts?: ReturnType<typeof createMerchantStoreReceipts>;
   readonly recipes?: ReturnType<typeof createMerchantRecipes>;
+  readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
+  readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
   readonly ordinaryRefundSend?: ReturnType<typeof createMerchantOrdinaryRefundSendCommand>;
   readonly ordinaryRefundReconciliation?: ReturnType<
@@ -5255,6 +5264,161 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .command({ sessionCookie, csrf, body: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => recipeFailure(response, error));
+  });
+
+  // WP-2423 / DEC-INV-STOCK-COUNT: INV-COUNT-LIST / INV-COUNT-WORKBENCH.
+  const countStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    AlreadyOpen: 409,
+    StockChanged: 409,
+    Incomplete: 409,
+    NotIndependent: 403,
+    State: 409,
+    LineInvalid: 422,
+    Invalid: 400,
+  } as const;
+  const countFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantStockCountError)) {
+      denied(response);
+      return;
+    }
+    response
+      .status(countStatus[error.code])
+      .json({ error: error.code, lineReferences: error.lineReferences });
+  };
+  const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+  const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+  const nullable = (value: unknown, pattern: RegExp) =>
+    value === null || (typeof value === "string" && pattern.test(value));
+  router.post("/supply/counts/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { countReference?: unknown; before?: unknown } | undefined;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).sort().join(",") !== "before,countReference" ||
+      !nullable(body.countReference, uuidV7Pattern) ||
+      !nullable(body.before, instantPattern)
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.stockCounts) {
+      response.status(503).json({ error: "stock_counts_unavailable" });
+      return;
+    }
+    void options.stockCounts
+      .query({
+        sessionCookie,
+        csrf,
+        countReference: body.countReference as string | null,
+        before: body.before as string | null,
+      })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => countFailure(response, error));
+  });
+  router.post("/supply/counts/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.stockCounts) {
+      response.status(503).json({ error: "stock_counts_unavailable" });
+      return;
+    }
+    void options.stockCounts
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => countFailure(response, error));
+  });
+
+  // WP-2423 / DEC-INV-WASTE: INV-WASTE-WIZARD and the waste record list with reviews.
+  const wasteStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    NotEnoughStock: 409,
+    AlreadyReviewed: 409,
+    NotIndependent: 403,
+    LineInvalid: 422,
+    Invalid: 400,
+  } as const;
+  const wasteFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantStoreWasteError)) {
+      denied(response);
+      return;
+    }
+    response
+      .status(wasteStatus[error.code])
+      .json({ error: error.code, lineReference: error.lineReference });
+  };
+  router.post("/supply/waste/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as
+      { wasteReference?: unknown; before?: unknown; needsReviewOnly?: unknown } | undefined;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).sort().join(",") !== "before,needsReviewOnly,wasteReference" ||
+      !nullable(body.wasteReference, uuidV7Pattern) ||
+      !nullable(body.before, instantPattern) ||
+      typeof body.needsReviewOnly !== "boolean"
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeWaste) {
+      response.status(503).json({ error: "store_waste_unavailable" });
+      return;
+    }
+    void options.storeWaste
+      .query({
+        sessionCookie,
+        csrf,
+        wasteReference: body.wasteReference as string | null,
+        before: body.before as string | null,
+        needsReviewOnly: body.needsReviewOnly,
+      })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => wasteFailure(response, error));
+  });
+  router.post("/supply/waste/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeWaste) {
+      response.status(503).json({ error: "store_waste_unavailable" });
+      return;
+    }
+    void options.storeWaste
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => wasteFailure(response, error));
   });
 
   router.post("/kitchen/release", sameOriginMutation(options), (request, response) => {

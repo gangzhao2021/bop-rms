@@ -47,8 +47,6 @@ import {
   InventoryMovementDetailPage,
   InventoryMovementListPage,
 } from "./InventoryMovementPages.js";
-import { InventoryCountListPage, InventoryCountWorkbenchPage } from "./InventoryCountPages.js";
-import { InventoryWastePage } from "./InventoryWasteWizard.js";
 import {
   InventoryTransferDetailPage,
   InventoryTransferListPage,
@@ -130,6 +128,10 @@ import {
 } from "./StoreReceiptPages.js";
 import { createStoreReceiptClient } from "./store-receipt-pages.js";
 import { createRecipeClient } from "./recipe-pages.js";
+import { StockCountListPage, StockCountWorkbenchPage } from "./StockCountPages.js";
+import { createStockCountClient } from "./stock-count-pages.js";
+import { StoreWasteDetailPage, StoreWasteFormPage, StoreWasteListPage } from "./StoreWastePages.js";
+import { createStoreWasteClient } from "./store-waste-pages.js";
 import { createStaffPageClient } from "./staff-administration-pages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
 import { PlatformTenantDetailPage } from "./PlatformTenantPages.js";
@@ -662,9 +664,71 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route path="/operations/delivery/exceptions" element={<DeliveryExceptionPage />} />
       <Route path="/operations/order-entry" element={<StaffOrderEntryPage />} />
       <Route path="/operations/inventory" element={<StockOverviewPage />} />
-      <Route path="/operations/inventory/counts" element={<InventoryCountListPage />} />
-      <Route path="/operations/inventory/counts/:id" element={<InventoryCountWorkbenchPage />} />
-      <Route path="/operations/inventory/waste/new" element={<InventoryWastePage />} />
+      <Route
+        path="/operations/inventory/counts"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StockCountListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStockCountClient(state.csrf)}
+            />
+          ) : (
+            <StockCountListPage />
+          )
+        }
+      />
+      <Route
+        path="/operations/inventory/counts/:id"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StockCountWorkbenchPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStockCountClient(state.csrf)}
+            />
+          ) : (
+            <StockCountWorkbenchPage />
+          )
+        }
+      />
+      <Route
+        path="/operations/inventory/waste"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreWasteListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStoreWasteClient(state.csrf)}
+            />
+          ) : (
+            <StoreWasteListPage />
+          )
+        }
+      />
+      <Route
+        path="/operations/inventory/waste/new"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreWasteFormPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStoreWasteClient(state.csrf)}
+            />
+          ) : (
+            <StoreWasteFormPage />
+          )
+        }
+      />
+      <Route
+        path="/operations/inventory/waste/:id"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreWasteDetailPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStoreWasteClient(state.csrf)}
+            />
+          ) : (
+            <StoreWasteDetailPage />
+          )
+        }
+      />
       <Route path="/operations/inventory/transfers" element={<InventoryTransferListPage />} />
       <Route path="/operations/inventory/transfers/:id" element={<InventoryTransferDetailPage />} />
       <Route path="/operations/inventory/lots" element={<InventoryLotExpiryPage />} />

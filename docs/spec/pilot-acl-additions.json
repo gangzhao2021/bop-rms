@@ -540,6 +540,105 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_waste",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-WASTE 2026-10-07: Store waste records"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_waste",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-WASTE 2026-10-07: Store waste records"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_waste_review",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-WASTE 2026-10-07: Store waste records"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_waste_review",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-WASTE 2026-10-07: Store waste records"
     }
   ]
 }

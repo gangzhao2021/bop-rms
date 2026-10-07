@@ -46,6 +46,8 @@ import { createMerchantStockPlaces } from "../../apps/api/dist/merchant-stock-pl
 import { createMerchantOpeningCount } from "../../apps/api/dist/merchant-opening-count.js";
 import { createMerchantStoreReceipts } from "../../apps/api/dist/merchant-store-receipts.js";
 import { createMerchantRecipes } from "../../apps/api/dist/merchant-recipes.js";
+import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
+import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
 export async function createInternalMerchant(
@@ -180,6 +182,18 @@ export async function createInternalMerchant(
           label: "Recipes",
           href: "/app/commerce/recipes",
           permission: "recipe.read",
+        },
+        {
+          screenId: "INV-COUNT-LIST",
+          label: "Stock counts",
+          href: "/operations/inventory/counts",
+          permission: "inventory.count.read",
+        },
+        {
+          screenId: "INV-WASTE-RECORD",
+          label: "Waste",
+          href: "/operations/inventory/waste",
+          permission: "inventory.waste.record",
         },
         {
           screenId: "INV-OPENING-COUNT",
@@ -470,6 +484,18 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en",
   });
+  const stockCounts = createMerchantStockCounts({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
+  const storeWaste = createMerchantStoreWaste({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
   const { pickupQuery, pickupProof, pickupHandoff } = await createInternalMerchantPickup(
     resources,
     { persistence, service },
@@ -586,6 +612,8 @@ export async function createInternalMerchant(
       openingCount,
       storeReceipts,
       recipes,
+      stockCounts,
+      storeWaste,
       pickupQuery,
       pickupProof,
       pickupHandoff,
