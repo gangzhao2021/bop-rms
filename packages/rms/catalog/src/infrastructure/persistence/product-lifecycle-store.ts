@@ -3,6 +3,7 @@ import {
   type ProductEditorContentAuthority,
 } from "../../application/product-editor-content-authority.js";
 import { parseProductPublicationVersion } from "../../contracts/product-publication.js";
+import { parseProductPublicationVersionV2 } from "../../contracts/product-publication-v2.js";
 import { catalogProductPublicationEventTypes } from "../../contracts/product-publication-event.js";
 import type { ProductCategoryAssignmentAuthority } from "./product-category-assignment.js";
 import { holdProductSourceBarrier, appendProductSourceCommit } from "./product-source-producer.js";
@@ -65,6 +66,9 @@ export function createPostgresProductLifecycleStore(options: {
     request: {
       productReference: string | null;
       record?: CatalogOperationRecord;
+      /** Set only by this owning reader after validating immutable SQL receipt
+       * and snapshot coherence. A proposed write never receives this origin. */
+      readonly recordOrigin?: "StoredOperation";
     },
   ): Promise<boolean>;
 }): Store {
@@ -73,9 +77,14 @@ export function createPostgresProductLifecycleStore(options: {
     tx: ProductLifecycleTransaction,
     product: string | null,
     record?: CatalogOperationRecord,
+    recordOrigin?: "StoredOperation",
   ) => {
     if (
-      !(await options.authorize(tx, { productReference: product, ...(record ? { record } : {}) }))
+      !(await options.authorize(tx, {
+        productReference: product,
+        ...(record ? { record } : {}),
+        ...(recordOrigin === undefined ? {} : { recordOrigin }),
+      }))
     )
       return fail("CATALOG_PERMISSION_DENIED");
     await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
@@ -109,6 +118,7 @@ export function createPostgresProductLifecycleStore(options: {
   const replay = async (
     tx: ProductLifecycleTransaction,
     operation: string,
+    requested?: { readonly productReference: string; readonly aggregateVersion: number },
   ): Promise<CatalogOperationRecord | null> => {
     const rows = (
       await tx.query(
@@ -120,6 +130,14 @@ export function createPostgresProductLifecycleStore(options: {
     const row = rows[0];
     if (rows.length !== 1 || !row) return fail();
     const product = parseCatalogReference(row.product_id);
+    // Historical version reads must bind the requested tuple before admitting
+    // any returned original record, including internally coherent foreign rows.
+    if (
+      requested &&
+      (product !== requested.productReference ||
+        row.result_aggregate_version !== requested.aggregateVersion)
+    )
+      return fail();
     await allowed(tx, product);
     if (
       !["Create", "ReplaceDraft", "ChangeLifecycle"].includes(String(row.action_code)) ||
@@ -133,7 +151,13 @@ export function createPostgresProductLifecycleStore(options: {
       row.snapshot_time.toISOString() !== row.occurred_at.toISOString()
     )
       return fail();
-    const aggregate = parseProductAggregate(row.snapshot_json);
+    let aggregate: ProductAggregate;
+    try {
+      aggregate = parseProductAggregate(row.snapshot_json);
+    } catch {
+      // This is owning SQL source data; caller input was parsed before the read.
+      return fail();
+    }
     if (
       aggregate.brandReference !== brand ||
       aggregate.productReference !== product ||
@@ -141,13 +165,16 @@ export function createPostgresProductLifecycleStore(options: {
       aggregate.updatedAt !== row.occurred_at.toISOString()
     )
       return fail();
-    await holdClassification(tx, options, aggregate, "Read");
-    return {
+    const record: CatalogOperationRecord = Object.freeze({
       action: row.action_code as CatalogOperationRecord["action"],
       operationReference: parseCatalogReference(operation),
       operationIntentHash: parseCatalogHash(row.intent_digest.slice(7)),
       aggregate,
-    };
+    });
+    // Only actual coherent original operation facts reach this callback. Its
+    // current authorization must complete before the original Read holder runs.
+    await allowed(tx, product, record, "StoredOperation");
+    return record;
   };
   return Object.freeze<Store>({
     load: (reference) => scoped(parseCatalogReference(reference), (tx) => load(tx, reference)),
@@ -181,8 +208,22 @@ export function createPostgresProductLifecycleStore(options: {
             ).rows;
             if (receipts.length !== 1 || receipts[0]?.coherent !== true) return fail();
             const receipt = receipts[0];
+            const profile =
+              receipt.publication && typeof receipt.publication === "object"
+                ? Object.getOwnPropertyDescriptor(receipt.publication, "profile")
+                : undefined;
+            if (
+              profile !== undefined &&
+              (!profile.enumerable ||
+                !("value" in profile) ||
+                profile.value !== "CatalogProductPublicationVersionV2")
+            )
+              return fail();
             const aggregate = parseProductAggregate(receipt.aggregate),
-              publication = parseProductPublicationVersion(receipt.publication),
+              publication =
+                profile === undefined
+                  ? parseProductPublicationVersion(receipt.publication)
+                  : parseProductPublicationVersionV2(receipt.publication),
               action = receipt.action_code as keyof typeof catalogProductPublicationEventTypes;
             if (
               aggregate.brandReference !== brand ||
@@ -227,7 +268,10 @@ export function createPostgresProductLifecycleStore(options: {
             await holdClassification(tx, options, aggregate, "Read");
             return aggregate;
           }
-          const record = await replay(tx, operation);
+          const record = await replay(tx, operation, {
+            productReference: product,
+            aggregateVersion: version,
+          });
           if (
             !record ||
             record.aggregate.productReference !== product ||
@@ -419,7 +463,9 @@ export function createPostgresProductCreationStore(
       brand,
     ]);
     await holdProductSourceBarrier(tx, brand);
-    if (record) await holdClassification(tx, options, record.aggregate, "Read");
+    // A supplied Create graph is a proposed write. Actual stored snapshots
+    // are read by the owning reader below, including original-operation replay.
+    if (record) await holdClassification(tx, options, record.aggregate, "Write");
   };
   const codes = async (
     tx: ProductLifecycleTransaction,
@@ -503,7 +549,8 @@ export function createPostgresProductCreationStore(
       )
         return fail("CATALOG_INPUT_INVALID");
       return options.transactions.run(async (tx) => {
-        await allowed(tx, aggregate.productReference, record);
+        // Resolve an immutable original before requalifying any proposed references.
+        await allowed(tx, aggregate.productReference);
         const reader = createPostgresProductLifecycleStore({
           ...options,
           transactions: { run: (work) => work(tx) },

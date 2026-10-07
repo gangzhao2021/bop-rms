@@ -7,8 +7,8 @@ import {
   parseCatalogInstant,
   parseCatalogProductContentPolicyBinding,
   assessCatalogProductContentPolicy,
+  assessCatalogProductDraftContentPolicy,
   type CatalogProductContentPolicyBinding,
-  type CatalogProductContentPolicyAssessment,
 } from "@rms/catalog";
 import type { createCurrentBrandConfigurationContentSource } from "./current-brand-configuration-content.js";
 import type { createCurrentProductPublicationPolicySource } from "./current-product-publication-policy.js";
@@ -16,11 +16,23 @@ type BrandSource = ReturnType<typeof createCurrentBrandConfigurationContentSourc
 type PolicySource = ReturnType<typeof createCurrentProductPublicationPolicySource>;
 /** Sources must use the same outer UoW. Catalog supplies its held owning candidate;
  * the returned partial assessment supplies neither caller permission nor sale. */
-export function createCurrentProductContentPolicySource(options: {
+interface ContentPolicySourceOptions {
   readonly brandSource: BrandSource;
   readonly policySource: PolicySource;
   readonly clock: { now(): string };
-}) {
+}
+export function createCurrentProductContentPolicySource(options: ContentPolicySourceOptions) {
+  return createContentPolicySource(options, assessCatalogProductContentPolicy);
+}
+export function createCurrentProductDraftContentPolicySource(options: ContentPolicySourceOptions) {
+  return createContentPolicySource(options, assessCatalogProductDraftContentPolicy);
+}
+function createContentPolicySource<
+  A extends { readonly observedAt: string; readonly validUntil: string },
+>(
+  options: ContentPolicySourceOptions,
+  assess: (aggregate: unknown, brand: unknown, policy: unknown, binding: unknown) => A,
+) {
   const fail = (): never => {
     throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
   };
@@ -33,10 +45,7 @@ export function createCurrentProductContentPolicySource(options: {
         readonly brandRequest: TenantBrandConfigurationContentRequest;
         readonly policyRequest: Parameters<PolicySource["withCurrentPolicy"]>[1];
       },
-      work: (
-        assessment: CatalogProductContentPolicyAssessment,
-        policyPublicationReference: string,
-      ) => Promise<T>,
+      work: (assessment: A, policyPublicationReference: string) => Promise<T>,
     ): Promise<T> {
       try {
         if (
@@ -66,7 +75,7 @@ export function createCurrentProductContentPolicySource(options: {
         let brandCalls = 0,
           policyCalls = 0,
           workCalls = 0;
-        let finalLease: CatalogProductContentPolicyAssessment | undefined;
+        let finalLease: A | undefined;
         let finished = false,
           completed: T | undefined;
         const check = () => {
@@ -96,7 +105,7 @@ export function createCurrentProductContentPolicySource(options: {
                 parseCatalogInstant(binding.validUntil),
               ].sort()[0];
               if (!validUntil) return fail();
-              const assessment = assessCatalogProductContentPolicy(
+              const assessment = assess(
                 aggregate,
                 {
                   tenantReference: brand.tenantReference,

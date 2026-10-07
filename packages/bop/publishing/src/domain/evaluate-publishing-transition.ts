@@ -1,8 +1,14 @@
-export interface DomainPublishingScope {
-  readonly kind: "Brand" | "Store";
-  readonly brandReference: string;
-  readonly storeReference: string | null;
-}
+export type DomainPublishingScope =
+  | {
+      readonly kind: "Brand" | "Store";
+      readonly brandReference: string;
+      readonly storeReference: string | null;
+    }
+  | {
+      readonly kind: "Platform";
+      readonly brandReference: null;
+      readonly storeReference: null;
+    };
 
 export interface DomainPublishingLifecycleRecord {
   readonly lifecycleId: string;
@@ -84,6 +90,8 @@ function result(allowed: boolean): PublishingTransitionEvaluation {
 }
 
 export function evaluatePublishingTransition(input: {
+  /** Only a structurally validated Option waiver; persistence verifies the owning source. */
+  readonly optionSetApprovalWaived?: boolean;
   readonly operation: PublishingOperation;
   readonly expectedVersion: number;
   readonly current: DomainPublishingLifecycleRecord | null;
@@ -132,6 +140,18 @@ export function evaluatePublishingTransition(input: {
         next.validationEvidenceReference === current.validationEvidenceReference &&
         current.approvalEvidenceReference === null &&
         next.approvalEvidenceReference !== null,
+    );
+  if (operation === "Publish" && input.optionSetApprovalWaived === true)
+    return result(
+      current.state === "InReview" &&
+        next.state === "Published" &&
+        current.scope.kind === "Brand" &&
+        current.configurationType === "CATALOG_OPTION_SET" &&
+        current.purposeCode === "CATALOG_OPTION_SET_PUBLICATION" &&
+        current.validationEvidenceReference !== null &&
+        next.validationEvidenceReference === current.validationEvidenceReference &&
+        current.approvalEvidenceReference === null &&
+        next.approvalEvidenceReference === null,
     );
   if (operation === "Publish" || operation === "Rollback")
     return result(

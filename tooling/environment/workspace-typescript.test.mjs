@@ -4,19 +4,22 @@ import { URL, fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-function run(source) {
-  return execFileSync(
-    process.execPath,
-    [
-      "--import",
-      "./tooling/environment/register-workspace-typescript.mjs",
-      "--input-type=module",
-      "-e",
-      source,
-    ],
-    { cwd: root, encoding: "utf8", timeout: 30000 },
-  );
+const loader = fileURLToPath(new URL("./register-workspace-typescript.mjs", import.meta.url));
+function run(source, cwd = root) {
+  return execFileSync(process.execPath, ["--import", loader, "--input-type=module", "-e", source], {
+    cwd,
+    encoding: "utf8",
+    timeout: 30000,
+  });
 }
+it("resolves workspace package specifiers to source rather than built dist", () => {
+  expect(
+    run(
+      `console.log(import.meta.resolve("@rms/catalog"));`,
+      fileURLToPath(new URL("../../apps/api/", import.meta.url)),
+    ).trim(),
+  ).toMatch(/\/packages\/rms\/catalog\/src\/index\.ts$/u);
+});
 it("loads real domain exports and their shared manifest without build artifacts", () => {
   expect(
     run(`

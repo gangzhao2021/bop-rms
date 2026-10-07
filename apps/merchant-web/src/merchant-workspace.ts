@@ -19,9 +19,13 @@ export interface MerchantNavigationItem {
   readonly screenId:
     | "HOME-OVERVIEW"
     | "TASK-INBOX"
+    | "STORE-SETUP"
     | "ORG-STORE-LIST"
+    | "ORG-BRAND-DETAIL"
+    | "TAX-CONFIG"
     | "CAT-MENU-LIST"
     | "CAT-PRODUCT-LIST"
+    | "CAT-OPTIONSET-LIST"
     | "OPS-ORDER-QUEUE"
     | "OPS-ORDER-EXCEPTION"
     | "KIT-KITCHEN-QUEUE"
@@ -47,7 +51,9 @@ const NAVIGATION = Object.freeze({
   "TASK-INBOX": ["/app/tasks", "workflow.operate"],
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
   "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
+  "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.manage"],
   "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.read"],
+  "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
@@ -95,11 +101,45 @@ function storeOption(value: unknown): MerchantStoreOption {
   });
 }
 
-function navigationItem(value: unknown): MerchantNavigationItem {
+function navigationItem(value: unknown, selectedStoreReference: string): MerchantNavigationItem {
   const input = record(value, ["screenId", "label", "href", "permission"]);
+  if (input.screenId === "ORG-BRAND-DETAIL") {
+    const prefix = "/app/organization/brands/";
+    if (
+      typeof input.label !== "string" ||
+      !SAFE_LABEL.test(input.label) ||
+      typeof input.href !== "string" ||
+      !input.href.startsWith(prefix) ||
+      !UUID_V7.test(input.href.slice(prefix.length)) ||
+      input.permission !== "organization.manage"
+    )
+      throw new Error("MERCHANT_WORKSPACE_INVALID");
+    return Object.freeze({
+      screenId: "ORG-BRAND-DETAIL",
+      label: input.label,
+      href: input.href,
+      permission: "organization.manage",
+    });
+  }
+  if (input.screenId === "STORE-SETUP") {
+    const href = "/app/organization/stores/" + selectedStoreReference + "/setup";
+    if (
+      typeof input.label !== "string" ||
+      !SAFE_LABEL.test(input.label) ||
+      input.href !== href ||
+      input.permission !== "organization.manage"
+    )
+      throw new Error("MERCHANT_WORKSPACE_INVALID");
+    return Object.freeze({
+      screenId: "STORE-SETUP",
+      label: input.label,
+      href,
+      permission: "organization.manage",
+    });
+  }
   if (typeof input.screenId !== "string" || !Object.hasOwn(NAVIGATION, input.screenId))
     throw new Error("MERCHANT_WORKSPACE_INVALID");
-  const screenId = input.screenId as MerchantNavigationItem["screenId"];
+  const screenId = input.screenId as keyof typeof NAVIGATION;
   const expected = NAVIGATION[screenId];
   if (
     typeof input.label !== "string" ||
@@ -149,7 +189,9 @@ export function parseMerchantWorkspace(value: unknown): MerchantWorkspaceSnapsho
     throw new Error("MERCHANT_WORKSPACE_INVALID");
   const selectedScope = storeOption(input.selectedScope);
   const authorizedStores = Object.freeze(input.authorizedStores.map(storeOption));
-  const navigation = Object.freeze(input.navigation.map(navigationItem));
+  const navigation = Object.freeze(
+    input.navigation.map((value) => navigationItem(value, selectedScope.storeReference)),
+  );
   if (
     new Set(authorizedStores.map((item) => item.storeReference)).size !== authorizedStores.length ||
     !authorizedStores.some((item) => item.storeReference === selectedScope.storeReference) ||

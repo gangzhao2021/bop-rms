@@ -108,7 +108,11 @@ beforeEach(() => {
   owner.create.mockReturnValue({ resolveCurrentOptionSetPublicationPolicy: owner.read });
   owner.read.mockImplementation(async (q) => current(q.observedAt));
 });
-function fixture() {
+function fixture(
+  qualificationAction?: Parameters<
+    typeof createCurrentOptionSetPublicationPolicySource
+  >[0]["qualificationAction"],
+) {
   let time = at;
   const clock = { now: vi.fn(() => time) },
     authority = {
@@ -122,6 +126,7 @@ function fixture() {
     brandReference: id(2),
     actorReference: id(3),
     actorKind: "User" as "User" | "System",
+    ...(qualificationAction === undefined ? {} : { qualificationAction }),
     clock,
     authority,
   };
@@ -362,4 +367,54 @@ it("reports the actual source observation while retaining the original request c
     expect(source.observedAt).toBe(instant(5000));
     expect(source.validUntil).toBe(instant(20000));
   });
+});
+
+it.each(["Read", "SubmitReview", "Publish"] as const)(
+  "policy owner read holds the actual server-selected %s action",
+  async (mode) => {
+    const f = fixture(mode),
+      action =
+        mode === "Read"
+          ? "catalog.option_set.read"
+          : mode === "SubmitReview"
+            ? "catalog.option_set.submit"
+            : "catalog.option_set.publish";
+    await f.source.withCurrentPolicy(f.tx, request(), async (value) => {
+      expect(value.eligibility).toBe("NotEvaluated");
+    });
+    expect(f.authority.holdUntilTransactionCompletes).toHaveBeenCalledTimes(2);
+    for (const call of f.authority.holdUntilTransactionCompletes.mock.calls)
+      expect(call[1]).toMatchObject({
+        action,
+        permission: "catalog.manage",
+        purposeCode: "CATALOG_OPTION_SET_PUBLICATION",
+      });
+  },
+);
+it("invalid server qualification action does not acquire a policy", () => {
+  const f = fixture();
+  Object.assign(f.options, { qualificationAction: "Allow" });
+  expect(() => createCurrentOptionSetPublicationPolicySource(f.options)).toThrow();
+  expect(owner.read).not.toHaveBeenCalled();
+});
+it("captures the original server action instead of retargeting it later", async () => {
+  const f = fixture("Read");
+  Object.assign(f.options, { qualificationAction: "Publish" });
+  await f.source.withCurrentPolicy(f.tx, request(), async () => "ok");
+  for (const call of f.authority.holdUntilTransactionCompletes.mock.calls)
+    expect(call[1]).toMatchObject({ action: "catalog.option_set.read" });
+});
+it.each(["Read", "SubmitReview"] as const)("late %s field denial remains fatal", async (mode) => {
+  const f = fixture(mode);
+  let withdrawn = false;
+  f.authority.holdUntilTransactionCompletes.mockImplementation(async (_tx, q) => {
+    if (withdrawn) throw Error("synthetic actual field denial");
+    return { observedAt: q.observedAt, validUntil: instant(30000) };
+  });
+  await expect(
+    f.source.withCurrentPolicy(f.tx, request(), async () => {
+      withdrawn = true;
+      return "tentative";
+    }),
+  ).rejects.toThrow();
 });

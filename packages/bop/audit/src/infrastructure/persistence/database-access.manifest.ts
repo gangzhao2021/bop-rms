@@ -4,6 +4,33 @@ const databaseAccessManifestInput = {
   tables: [],
   accesses: [
     {
+      id: "append-platform-actor-audit-record",
+      operation: "write",
+      mechanism: "raw-sql",
+      target: { schema: "platform_audit", table: "platform_actor_audit_record" },
+      principal: { kind: "shared-infrastructure", id: "audit-infrastructure" },
+      readPattern: null,
+      source: "packages/bop/audit/src/infrastructure/persistence/append-platform-audit-record.ts",
+    },
+    {
+      id: "read-platform-actor-audit-chain-head",
+      operation: "read",
+      mechanism: "raw-sql",
+      target: { schema: "platform_audit", table: "platform_actor_audit_chain_head" },
+      principal: { kind: "shared-infrastructure", id: "audit-infrastructure" },
+      readPattern: "owner-repository",
+      source: "packages/bop/audit/src/infrastructure/persistence/append-platform-audit-record.ts",
+    },
+    {
+      id: "advance-platform-actor-audit-chain-head",
+      operation: "write",
+      mechanism: "raw-sql",
+      target: { schema: "platform_audit", table: "platform_actor_audit_chain_head" },
+      principal: { kind: "shared-infrastructure", id: "audit-infrastructure" },
+      readPattern: null,
+      source: "packages/bop/audit/src/infrastructure/persistence/append-platform-audit-record.ts",
+    },
+    {
       id: "verify-operation-binding",
       operation: "read",
       mechanism: "raw-sql",

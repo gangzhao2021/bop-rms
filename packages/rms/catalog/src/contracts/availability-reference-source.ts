@@ -1,3 +1,12 @@
+import {
+  parseCatalogProductWarningAcknowledgementReferenceRequest,
+  productWarningAcknowledgementReferenceRequestFields,
+  type CatalogProductWarningAcknowledgementReferenceRequest,
+} from "./product-warning-acknowledgement-reference-request.js";
+import {
+  parseCatalogProductPublicationReferenceRequestV2,
+  type CatalogProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   CatalogError,
@@ -109,14 +118,9 @@ export function parseAvailabilityReferenceSourceRequest(
     return fail();
   }
 }
-export function buildAvailabilityReferenceSourceSnapshot(
-  value: unknown,
-  input: AvailabilityReferenceSourceRequest,
-  now: string,
-): AvailabilityReferenceSourceSnapshot {
+function parseAvailabilityStoredGraph(value: unknown, expectedBrandReference: string, now: string) {
   try {
-    const request = parseAvailabilityReferenceSourceRequest(input),
-      r = exact(value, ["generation", "rootCount", "observedAt", "rules"]),
+    const r = exact(value, ["generation", "rootCount", "observedAt", "rules"]),
       observedAt = parseCatalogInstant(r.observedAt),
       at = Date.parse(parseCatalogInstant(now)),
       raw = array(r.rules);
@@ -159,7 +163,7 @@ export function buildAvailabilityReferenceSourceSnapshot(
           updatedAt = parseCatalogInstant(v.updatedAt);
         if (
           ids.has(ruleReference) ||
-          brandReference !== request.brandReference ||
+          brandReference !== expectedBrandReference ||
           v.precise !== true ||
           (v.sellableType !== "Product" &&
             v.sellableType !== "Sku" &&
@@ -191,21 +195,34 @@ export function buildAvailabilityReferenceSourceSnapshot(
         });
       })
       .sort((a, b) => a.ruleReference.localeCompare(b.ruleReference));
-    const body = { request, generation, rules: Object.freeze(rules) };
+    const body = { generation, rules: Object.freeze(rules) };
     return Object.freeze({
       ...body,
-      profile: "BrandAvailabilityRuleReferencesV1",
-      consistency: "StatementSnapshot",
-      coverage: "CompleteStoredReferences",
-      applicability: "Unavailable",
       observedAt,
-      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
     });
   } catch {
     return fail();
   }
 }
 /** Parsing validates data only; the owning callback and current authority supply its lifetime. */
+export function buildAvailabilityReferenceSourceSnapshot(
+  value: unknown,
+  input: AvailabilityReferenceSourceRequest,
+  now: string,
+): AvailabilityReferenceSourceSnapshot {
+  const request = parseAvailabilityReferenceSourceRequest(input),
+    { observedAt, ...graph } = parseAvailabilityStoredGraph(value, request.brandReference, now),
+    body = { request, ...graph };
+  return Object.freeze({
+    ...body,
+    profile: "BrandAvailabilityRuleReferencesV1",
+    consistency: "StatementSnapshot",
+    coverage: "CompleteStoredReferences",
+    applicability: "Unavailable",
+    observedAt,
+    digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
+  });
+}
 export function parseAvailabilityReferenceSourceSnapshot(
   value: unknown,
   input: AvailabilityReferenceSourceRequest,
@@ -261,6 +278,212 @@ export function parseAvailabilityReferenceSourceSnapshot(
     );
     if (result.digest !== digest(r.digest)) return fail();
     return result;
+  } catch {
+    return fail();
+  }
+}
+
+export const productPublicationAvailabilityReferenceSourceFieldsV2 = Object.freeze([
+  ...availabilityReferenceSourceFields,
+  "command",
+  "originalIntentDigest",
+  "replacementIntentDigest",
+  "aggregateSnapshotDigest",
+  "currentPublicationDigest",
+  "observedAt",
+  "validUntil",
+] as const);
+/** The fixed publication entry shares only the stored graph parser with V1.
+ * The complete request and original lease are hashed; no lifecycle request,
+ * current sale eligibility, or publication approval is manufactured. */
+export function buildProductPublicationAvailabilityReferenceSourceSnapshotV2(
+  value: unknown,
+  input: CatalogProductPublicationReferenceRequestV2,
+  now: string,
+) {
+  try {
+    const request = parseCatalogProductPublicationReferenceRequestV2(input),
+      graph = parseAvailabilityStoredGraph(value, request.command.brandReference, now),
+      at = parseCatalogInstant(now);
+    if (
+      graph.observedAt < request.observedAt ||
+      graph.observedAt >= request.validUntil ||
+      at >= request.validUntil
+    )
+      return fail();
+    const body = Object.freeze({
+      request,
+      profile: "BrandAvailabilityRulePublicationReferencesV2" as const,
+      coverage: "CompleteStoredReferences" as const,
+      consistency: "StatementSnapshot" as const,
+      applicability: "Unavailable" as const,
+      ...graph,
+      validUntil: request.validUntil,
+    });
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+export type ProductPublicationAvailabilityReferenceSourceSnapshotV2 = ReturnType<
+  typeof buildProductPublicationAvailabilityReferenceSourceSnapshotV2
+>;
+export function parseProductPublicationAvailabilityReferenceSourceSnapshotV2(
+  value: unknown,
+  input: CatalogProductPublicationReferenceRequestV2,
+  now: string,
+): ProductPublicationAvailabilityReferenceSourceSnapshotV2 {
+  try {
+    const r = exact(value, [
+        "request",
+        "profile",
+        "coverage",
+        "consistency",
+        "applicability",
+        "generation",
+        "observedAt",
+        "validUntil",
+        "digest",
+        "rules",
+      ]),
+      request = parseCatalogProductPublicationReferenceRequestV2(input),
+      actual = parseCatalogProductPublicationReferenceRequestV2(r.request);
+    if (
+      canonicalizeRfc8785(request) !== canonicalizeRfc8785(actual) ||
+      r.profile !== "BrandAvailabilityRulePublicationReferencesV2" ||
+      r.coverage !== "CompleteStoredReferences" ||
+      r.consistency !== "StatementSnapshot" ||
+      r.applicability !== "Unavailable" ||
+      typeof r.generation !== "string" ||
+      r.validUntil !== request.validUntil
+    )
+      return fail();
+    const rules = array(r.rules).map((value) => ({
+      ...exact(value, [
+        "ruleReference",
+        "brandReference",
+        "sellableType",
+        "sellableReference",
+        "storeReference",
+        "aggregateVersion",
+        "lifecycle",
+        "effectiveFrom",
+        "effectiveUntil",
+        "updatedAt",
+      ]),
+      precise: true,
+    }));
+    const raw = {
+      generation: r.generation,
+      observedAt: r.observedAt,
+      rootCount: String(rules.length),
+      rules,
+    };
+    const rebuilt = buildProductPublicationAvailabilityReferenceSourceSnapshotV2(raw, request, now);
+    if (canonicalizeRfc8785(rebuilt) !== canonicalizeRfc8785(r)) return fail();
+    return rebuilt;
+  } catch {
+    return fail();
+  }
+}
+
+export const productWarningAcknowledgementAvailabilityReferenceSourceFields = Object.freeze([
+  ...availabilityReferenceSourceFields,
+  ...productWarningAcknowledgementReferenceRequestFields,
+] as const);
+/** The fixed warning acknowledgement entry shares only the stored graph parser with V1.
+ * The actual Ack request and original lease are hashed; no lifecycle request,
+ * current sale eligibility, or publication approval is manufactured. */
+export function buildProductWarningAcknowledgementAvailabilityReferenceSourceSnapshot(
+  value: unknown,
+  input: CatalogProductWarningAcknowledgementReferenceRequest,
+  now: string,
+) {
+  try {
+    const request = parseCatalogProductWarningAcknowledgementReferenceRequest(input),
+      graph = parseAvailabilityStoredGraph(value, request.command.brandReference, now),
+      at = parseCatalogInstant(now);
+    if (
+      graph.observedAt < request.observedAt ||
+      graph.observedAt >= request.validUntil ||
+      at >= request.validUntil
+    )
+      return fail();
+    const body = Object.freeze({
+      request,
+      profile: "BrandAvailabilityRuleWarningAcknowledgementReferencesV1" as const,
+      coverage: "CompleteStoredReferences" as const,
+      consistency: "StatementSnapshot" as const,
+      applicability: "Unavailable" as const,
+      ...graph,
+      validUntil: request.validUntil,
+    });
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+export type ProductWarningAcknowledgementAvailabilityReferenceSourceSnapshot = ReturnType<
+  typeof buildProductWarningAcknowledgementAvailabilityReferenceSourceSnapshot
+>;
+export function parseProductWarningAcknowledgementAvailabilityReferenceSourceSnapshot(
+  value: unknown,
+  input: CatalogProductWarningAcknowledgementReferenceRequest,
+  now: string,
+): ProductWarningAcknowledgementAvailabilityReferenceSourceSnapshot {
+  try {
+    const r = exact(value, [
+        "request",
+        "profile",
+        "coverage",
+        "consistency",
+        "applicability",
+        "generation",
+        "observedAt",
+        "validUntil",
+        "digest",
+        "rules",
+      ]),
+      request = parseCatalogProductWarningAcknowledgementReferenceRequest(input),
+      actual = parseCatalogProductWarningAcknowledgementReferenceRequest(r.request);
+    if (
+      canonicalizeRfc8785(request) !== canonicalizeRfc8785(actual) ||
+      r.profile !== "BrandAvailabilityRuleWarningAcknowledgementReferencesV1" ||
+      r.coverage !== "CompleteStoredReferences" ||
+      r.consistency !== "StatementSnapshot" ||
+      r.applicability !== "Unavailable" ||
+      typeof r.generation !== "string" ||
+      r.validUntil !== request.validUntil
+    )
+      return fail();
+    const rules = array(r.rules).map((value) => ({
+      ...exact(value, [
+        "ruleReference",
+        "brandReference",
+        "sellableType",
+        "sellableReference",
+        "storeReference",
+        "aggregateVersion",
+        "lifecycle",
+        "effectiveFrom",
+        "effectiveUntil",
+        "updatedAt",
+      ]),
+      precise: true,
+    }));
+    const raw = {
+      generation: r.generation,
+      observedAt: r.observedAt,
+      rootCount: String(rules.length),
+      rules,
+    };
+    const rebuilt = buildProductWarningAcknowledgementAvailabilityReferenceSourceSnapshot(
+      raw,
+      request,
+      now,
+    );
+    if (canonicalizeRfc8785(rebuilt) !== canonicalizeRfc8785(r)) return fail();
+    return rebuilt;
   } catch {
     return fail();
   }

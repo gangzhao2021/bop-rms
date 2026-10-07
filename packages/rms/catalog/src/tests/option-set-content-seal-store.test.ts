@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { CatalogError } from "../contracts/product.js";
 import {
   frozenFullOptionSetContentFields,
   createPostgresFullOptionSetContentSealStore,
+  createPostgresFullOptionSetSealHandoffStore,
+  parseFullOptionSetPublicationSealIdentity,
+  createCatalogFullOptionSetContentSealIntent,
 } from "../infrastructure/persistence/option-set-full-draft-store.js";
 const id = (n: number) => "01902421-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-10-01T00:00:00.000Z";
@@ -178,4 +182,105 @@ it("exports the owning complete frozen read fields without a consumer-side map",
     "configurationDigest",
     "digest",
   ]);
+});
+
+const sealIdentity = { operationReference: id(6), publicationIntentDigest: digest, occurredAt: at };
+function handoffFixture() {
+  const f = fixture();
+  return {
+    ...f,
+    handoffOptions: {
+      tenantReference: id(1),
+      brandReference: id(2),
+      actorReference: id(3),
+      originalObservedAt: at,
+      originalValidUntil: "2026-10-01T00:00:05.000Z",
+      sealIdentity,
+      clock: f.options.clock,
+      transactions: f.options.transactions,
+      currentDraftAuthority: f.authority,
+      frozenAuthority: f.authority,
+    },
+  };
+}
+it.each([
+  { ...sealIdentity, qualified: true },
+  { ...sealIdentity, publicationIntentDigest: "unknown" },
+  { ...sealIdentity, operationReference: "unknown" },
+  { ...sealIdentity, occurredAt: "tomorrow" },
+])("rejects unbounded or caller-extended Seal identity", (identity) => {
+  expect(() => parseFullOptionSetPublicationSealIdentity(identity)).toThrow(CatalogError);
+});
+it("copies the fixed Seal identity and refuses its accessor without invocation", () => {
+  const input = { ...sealIdentity },
+    getter = vi.fn(() => at);
+  const parsed = parseFullOptionSetPublicationSealIdentity(input);
+  input.occurredAt = "2026-10-01T00:00:01.000Z";
+  expect(parsed.occurredAt).toBe(at);
+  expect(Object.isFrozen(parsed)).toBe(true);
+  Object.defineProperty(input, "occurredAt", { enumerable: true, get: getter });
+  expect(() => parseFullOptionSetPublicationSealIdentity(input)).toThrow(CatalogError);
+  expect(getter).not.toHaveBeenCalled();
+});
+it.each([
+  { originalValidUntil: "2026-10-01T00:00:05.001Z" },
+  { originalValidUntil: at },
+  { sealIdentity: { ...sealIdentity, occurredAt: "2026-09-30T23:59:59.999Z" } },
+  { sealIdentity: { ...sealIdentity, occurredAt: "2026-10-01T00:00:05.000Z" } },
+])("refuses a Seal outside the captured original five-second host", (change) => {
+  const f = handoffFixture();
+  expect(() =>
+    createPostgresFullOptionSetSealHandoffStore({ ...f.handoffOptions, ...change }),
+  ).toThrow(CatalogError);
+  expect(f.query).not.toHaveBeenCalled();
+});
+it("requires original admission before final revalidation and permanently poisons invalid admission", async () => {
+  const f = handoffFixture(),
+    owner = createPostgresFullOptionSetSealHandoffStore(f.handoffOptions);
+  await expect(owner.revalidate()).rejects.toBeInstanceOf(CatalogError);
+  await expect(owner.admit({} as never, {})).rejects.toBeInstanceOf(CatalogError);
+  expect(f.query).not.toHaveBeenCalled();
+  expect(f.authority.holdUntilTransactionCompletes).not.toHaveBeenCalled();
+});
+
+it("public Seal intent retains the exact original owning canonical bytes and binds every command fact", () => {
+  const input = { tenantReference: id(1), brandReference: id(2), actorReference: id(3), command };
+  const actual = createCatalogFullOptionSetContentSealIntent(input);
+  expect(actual).toBe(
+    "sha256:" +
+      sha256Hex(canonicalizeRfc8785({ profile: "CatalogFullOptionSetContentSealV1", ...input })),
+  );
+  for (const changed of [
+    { ...input, actorReference: id(90) },
+    { ...input, brandReference: id(91) },
+    { ...input, tenantReference: id(92) },
+    { ...input, command: { ...command, occurredAt: "2026-10-01T00:00:01.000Z" } },
+    { ...input, command: { ...command, expectedAggregateVersion: 2 } },
+    { ...input, command: { ...command, operationReference: id(93) } },
+  ])
+    expect(createCatalogFullOptionSetContentSealIntent(changed)).not.toBe(actual);
+});
+it.each([
+  { command: { ...command, expectedAggregateVersion: 2147483647 } },
+  { command: { ...command, sourceDigest: "unknown" } },
+  { command: { ...command, permission: "catalog.manage" } },
+  { command: { ...command, eligibility: "Ready" } },
+  { eligibility: "Ready" },
+])("public Seal intent refuses caller extensions and invalid original command facts", (change) => {
+  expect(() =>
+    createCatalogFullOptionSetContentSealIntent({
+      tenantReference: id(1),
+      brandReference: id(2),
+      actorReference: id(3),
+      command,
+      ...change,
+    }),
+  ).toThrow(CatalogError);
+});
+it("public Seal intent never invokes an untrusted command accessor", () => {
+  const input = { tenantReference: id(1), brandReference: id(2), actorReference: id(3), command },
+    get = vi.fn(() => command);
+  Object.defineProperty(input, "command", { enumerable: true, get });
+  expect(() => createCatalogFullOptionSetContentSealIntent(input)).toThrow(CatalogError);
+  expect(get).not.toHaveBeenCalled();
 });

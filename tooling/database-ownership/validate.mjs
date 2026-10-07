@@ -147,14 +147,113 @@ function productDraftOwnerCompositionSqlOnly(text, file) {
       ["tenant", "brand"],
     ],
   ]);
+  // V1's original direct facade remains legal. The shared V1/V2 implementation
+  // is admitted only through its two fixed, closed protocol selections; a name
+  // match alone must not expose an arbitrary protocol or another SQL caller.
+  function fixedCandidateKernel() {
+    const named = (node, name) => ts.isIdentifier(node) && node.text === name;
+    const declarations = (name) =>
+      parsed.statements.filter(
+        (node) => ts.isFunctionDeclaration(node) && node.name?.text === name,
+      );
+    const kernels = declarations("createCandidateSource");
+    if (kernels.length === 0) return undefined;
+    if (kernels.length !== 1) return false;
+    const kernel = kernels[0];
+    const parameter = (node, name) =>
+      named(node.name, name) && !node.initializer && !node.dotDotDotToken && !node.questionToken;
+    if (
+      kernel.modifiers?.length ||
+      !kernel.body ||
+      kernel.asteriskToken ||
+      kernel.parameters.length !== 2 ||
+      !parameter(kernel.parameters[0], "options") ||
+      !parameter(kernel.parameters[1], "protocol")
+    )
+      return false;
+    const admittedReferences = new Set([kernel.name]);
+    const protocols = [
+      [
+        "createPostgresProductValidationCandidateSource",
+        {
+          parseCommand: "parseProductPublicationCommand",
+          bindCandidate: "bindCatalogProductValidationCandidate",
+          fields: "productValidationCandidateFields",
+        },
+      ],
+      [
+        "createPostgresProductValidationCandidateSourceV2",
+        {
+          parseCommand: "parseProductPublicationCommandV2",
+          bindCandidate: "bindCatalogProductValidationCandidateV2",
+          fields: "productValidationCandidateFieldsV2",
+        },
+      ],
+    ];
+    for (const [name, protocol] of protocols) {
+      const facades = declarations(name);
+      if (facades.length !== 1) return false;
+      const facade = facades[0];
+      if (
+        facade.modifiers?.length !== 1 ||
+        facade.modifiers[0].kind !== ts.SyntaxKind.ExportKeyword ||
+        facade.asteriskToken ||
+        facade.parameters.length !== 1 ||
+        !parameter(facade.parameters[0], "options") ||
+        facade.body?.statements.length !== 1
+      )
+        return false;
+      const statement = facade.body.statements[0];
+      if (
+        !ts.isReturnStatement(statement) ||
+        !statement.expression ||
+        !ts.isCallExpression(statement.expression)
+      )
+        return false;
+      const call = statement.expression;
+      if (
+        !named(call.expression, "createCandidateSource") ||
+        call.arguments.length !== 2 ||
+        !named(call.arguments[0], "options") ||
+        !ts.isObjectLiteralExpression(call.arguments[1])
+      )
+        return false;
+      const properties = call.arguments[1].properties;
+      if (
+        properties.length !== 3 ||
+        properties.some(
+          (property) =>
+            !ts.isPropertyAssignment(property) ||
+            !ts.isIdentifier(property.name) ||
+            !Object.hasOwn(protocol, property.name.text) ||
+            !named(property.initializer, protocol[property.name.text]),
+        ) ||
+        new Set(properties.map((property) => property.name.text)).size !== 3
+      )
+        return false;
+      admittedReferences.add(call.expression);
+    }
+    let privateOnly = true;
+    function references(node) {
+      if (named(node, "createCandidateSource") && !admittedReferences.has(node))
+        privateOnly = false;
+      ts.forEachChild(node, references);
+    }
+    references(parsed);
+    return privateOnly ? kernel : false;
+  }
+  const kernel = fixedCandidateKernel();
   function insideCurrentCandidate(node) {
     for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
       if (ts.isFunctionDeclaration(ancestor))
-        return ancestor.name?.text === "createPostgresProductValidationCandidateSource";
+        return (
+          ancestor === kernel ||
+          ancestor.name?.text === "createPostgresProductValidationCandidateSource"
+        );
     }
     return false;
   }
-  let valid = true;
+  let valid = kernel !== false;
   const seen = new Set();
   function visit(node) {
     if (ts.isElementAccessExpression(node)) valid = false;
@@ -204,6 +303,33 @@ async function isExactFile(root, target) {
     current = join(current, segment);
   }
   return (await state(target))?.isFile() ?? false;
+}
+// This exact Media entry forwards ports to owning factories; it gains no SQL
+// exception. Catch direct query access/aliases and embedded SQL independently
+// of the existing driver prohibition below.
+function mediaWorkerCompositionOnly(text, file) {
+  const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  let valid = true;
+  function visit(node) {
+    if (ts.isIdentifier(node) && ["query", "execute", "prepare"].includes(node.text)) valid = false;
+    if (
+      ts.isStringLiteralLike(node) ||
+      ts.isTemplateHead(node) ||
+      ts.isTemplateMiddle(node) ||
+      ts.isTemplateTail(node)
+    ) {
+      if (
+        /^(?:query|execute|prepare)$/u.test(node.text) ||
+        /\b(?:SELECT|INSERT|UPDATE|DELETE|TRUNCATE|ALTER|CREATE|DROP|GRANT|REVOKE|SAVEPOINT|COMMIT|ROLLBACK)\b|\bbop_media\./iu.test(
+          node.text,
+        )
+      )
+        valid = false;
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(parsed);
+  return valid;
 }
 async function scanUnsupported(root, module, diagnostics) {
   async function walk(directory) {
@@ -264,6 +390,92 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
           module.manifest.ownedDatabase?.tables?.includes("product_content_registry_record") &&
           moduleRelative === "src/infrastructure/persistence/product-content-registry-store.ts";
+        const acceptedMediaUploadAsset =
+          module.packageName === "@bop/media" &&
+          module.manifest.ownedDatabase?.schema === "bop_media" &&
+          ["upload_session", "asset", "asset_version", "operation_record"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/media-upload-store.ts";
+        const acceptedMediaObjectBindingAsset =
+          module.packageName === "@bop/media" &&
+          module.manifest.ownedDatabase?.schema === "bop_media" &&
+          [
+            "upload_session",
+            "operation_record",
+            "upload_object_binding",
+            "finalized_object_binding",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/s3-image-upload-runtime.ts";
+        const mediaProcessingTables = {
+          "src/infrastructure/persistence/media-publication-read-store.ts": [
+            "asset",
+            "asset_version",
+            "image_processing_intent",
+            "image_processing_completion",
+            "image_rendition",
+            "image_scan_admission",
+            "upload_object_binding",
+          ],
+          "src/infrastructure/persistence/media-image-scan-admission-store.ts": [
+            "image_scan_admission",
+            "image_processing_intent",
+          ],
+          "src/infrastructure/persistence/media-image-processing-store.ts": [
+            "asset",
+            "asset_version",
+            "image_processing_intent",
+            "image_processing_completion",
+            "image_rendition",
+          ],
+          "src/infrastructure/persistence/media-image-processing-source.ts": [
+            "upload_session",
+            "asset",
+            "asset_version",
+            "operation_record",
+            "upload_object_binding",
+            "finalized_object_binding",
+          ],
+          "src/infrastructure/persistence/media-image-processing-transaction.ts": [
+            "image_processing_intent",
+            "image_processing_completion",
+            "image_rendition",
+          ],
+        }[moduleRelative];
+        const acceptedMediaImageProcessingAsset =
+          module.packageName === "@bop/media" &&
+          module.manifest.ownedDatabase?.schema === "bop_media" &&
+          mediaProcessingTables !== undefined &&
+          mediaProcessingTables.every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          );
+        const acceptedMediaWorkerCompositionAsset =
+          module.packageName === "@bop/media" &&
+          module.manifest.ownedDatabase?.schema === "bop_media" &&
+          ["image_scan_admission", "image_processing_intent", "image_processing_completion"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/media-image-worker-runtime.ts";
+        const acceptedProductTaxClassificationRegistryAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          module.manifest.ownedDatabase?.tables?.includes(
+            "product_tax_classification_registry_record",
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/product-tax-classification-registry-store.ts";
+        const acceptedSellingUnitRegistryAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "selling_unit_registry_record",
+            "selling_unit_registration_abandonment",
+            "sku",
+            "product",
+            "product_operation_record",
+            "product_operation_snapshot",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/selling-unit-registry-store.ts";
         const acceptedFullOptionDraftAsset =
           module.packageName === "@rms/catalog" &&
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
@@ -276,6 +488,27 @@ async function scanUnsupported(root, module, diagnostics) {
             "option_set_draft_content_snapshot",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/option-set-full-draft-store.ts";
+        const acceptedOptionHistoryAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "option_set",
+            "option_set_version",
+            "option_set_operation_record",
+            "option_set_draft_content_snapshot",
+            "option_set_publication_content",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/option-set-history-store.ts";
+        const acceptedOptionReviewReleaseAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "option_set_review_content",
+            "option_set_publication_release",
+            "option_set_draft_content_snapshot",
+            "option_set_publication_content",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/option-set-review-content-store.ts";
         // WP-2420: Catalog's Product publication owner repository and frozen content.
         const acceptedProductPublicationAsset =
           module.packageName === "@rms/catalog" &&
@@ -393,6 +626,28 @@ async function scanUnsupported(root, module, diagnostics) {
             "product_source_commit",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/product-publication-source-store.ts";
+        const acceptedCatalogProductTaxCoverageSourceAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          [
+            "product",
+            "product_version",
+            "sku",
+            "product_option_binding",
+            "product_option_binding_option",
+            "product_option_binding_sku_scope",
+            "product_option_binding_channel",
+            "product_version_category_assignment",
+            "product_publication_revision",
+            "product_source_head",
+            "product_operation_record",
+            "product_operation_snapshot",
+            "product_source_commit",
+            "product_publication_content",
+            "product_scope_retirement_header",
+            "product_scope_retirement",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/product-tax-coverage-source-store.ts";
         const acceptedFeatureControlAdministrationQueryAsset =
           module.packageName === "@bop/feature-control" &&
           module.manifest.ownedDatabase?.schema === "bop_feature_control" &&
@@ -704,6 +959,52 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/browser-session-selection-store.ts";
+        const acceptedBrandCatalogSourceAsset =
+          module.packageName === "@rms/catalog" &&
+          module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+          ["brand_catalog_source", "brand_catalog_source_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/brand-catalog-source-store.ts";
+        const acceptedBrowserBrandSessionSelectionAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          ["authentication_session", "browser_brand_session_selection"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/browser-brand-session-selection-store.ts";
+        const acceptedPlatformBrandTemplateAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          ["platform_brand_template_revision", "platform_brand_template_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          [
+            "src/infrastructure/persistence/platform-brand-template-store.ts",
+            "src/infrastructure/persistence/platform-brand-template-reference-source.ts",
+            "src/infrastructure/persistence/platform-brand-template-read-kernel.ts",
+          ].includes(moduleRelative);
+        const acceptedBrandConfigurationAuthoringAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          [
+            "brand",
+            "brand_configuration_version",
+            "brand_configuration_authoring_revision",
+            "brand_configuration_authoring_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/brand-configuration-authoring-store.ts";
+        const acceptedBrandStoreTopologyDraftAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          [
+            "brand",
+            "brand_store_topology_draft_revision",
+            "brand_store_topology_draft_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/brand-store-topology-draft-store.ts";
         const acceptedBrandLifecycleAsset =
           module.packageName === "@bop/tenant" &&
           module.manifest.ownedDatabase?.schema === "bop_tenant" &&
@@ -757,12 +1058,71 @@ async function scanUnsupported(root, module, diagnostics) {
           module.packageName === "@bop/identity" &&
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
           module.manifest.ownedDatabase?.tables?.includes("authentication_session") &&
-          moduleRelative === "src/infrastructure/persistence/current-browser-session-source.ts";
+          [
+            "src/infrastructure/persistence/current-browser-session-source.ts",
+            "src/infrastructure/persistence/current-platform-browser-session-source.ts",
+          ].includes(moduleRelative);
         const acceptedCurrentWorkforceMfaAsset =
           module.packageName === "@bop/identity" &&
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
           module.manifest.ownedDatabase?.tables?.includes("workforce_mfa_status") &&
           moduleRelative === "src/infrastructure/persistence/current-workforce-mfa-source.ts";
+        const acceptedCurrentWorkforceInvitationAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          module.manifest.ownedDatabase?.tables?.includes("workforce_invitation") &&
+          moduleRelative ===
+            "src/infrastructure/persistence/current-workforce-invitation-source.ts";
+        const acceptedWorkforceInvitationStoreAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          module.manifest.ownedDatabase?.tables?.includes("workforce_invitation") &&
+          moduleRelative === "src/infrastructure/persistence/workforce-invitation-store.ts";
+        const acceptedPlatformActorDirectoryAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          [
+            "platform_actor_directory_head",
+            "platform_actor_directory_revision",
+            "authentication_session",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          [
+            "src/infrastructure/persistence/platform-actor-directory-store.ts",
+            "src/infrastructure/persistence/platform-actor-directory-provisioner.ts",
+          ].includes(moduleRelative);
+        const acceptedWorkforceAccountBindingAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          ["workforce_account_binding", "workforce_invitation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          [
+            "src/infrastructure/persistence/workforce-account-binding-provisioner.ts",
+            "src/infrastructure/persistence/workforce-account-read-kernel.ts",
+            "src/infrastructure/persistence/current-workforce-account-source.ts",
+            "src/infrastructure/persistence/workforce-authentication-source.ts",
+          ].includes(moduleRelative);
+        const acceptedWorkforceOnboardingOperationAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          ["workforce_onboarding_operation", "workforce_invitation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          [
+            "src/infrastructure/persistence/workforce-onboarding-operation-store.ts",
+            "src/infrastructure/persistence/workforce-onboarding-invitation-source.ts",
+          ].includes(moduleRelative);
+        const acceptedPlatformTemplatePublishingAsset =
+          module.packageName === "@bop/publishing" &&
+          module.manifest.ownedDatabase?.schema === "bop_publishing" &&
+          ["platform_template_publishing_head", "platform_template_publishing_operation"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          [
+            "src/infrastructure/persistence/platform-publishing-store.ts",
+            "src/infrastructure/persistence/platform-template-brand-reference-source.ts",
+            "src/infrastructure/persistence/platform-publishing-read-kernel.ts",
+          ].includes(moduleRelative);
         const acceptedStoreExceptionContentAsset =
           module.packageName === "@rms/store" &&
           module.manifest.ownedDatabase?.schema === "rms_store" &&
@@ -816,6 +1176,30 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_store" &&
           module.manifest.ownedDatabase?.tables?.includes("store_configuration_review_snapshot") &&
           moduleRelative === "src/infrastructure/persistence/review-snapshot-store.ts";
+        const acceptedStoreSetupDraftAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          ["store_setup_draft_revision", "store_setup_draft_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          [
+            "src/infrastructure/persistence/store-setup-draft-store.ts",
+            "src/infrastructure/persistence/publication-setup-basis.ts",
+          ].includes(moduleRelative);
+        const acceptedStoreSetupReferenceAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          ["store_setup_reference_version", "store_setup_reference_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/store-setup-reference-store.ts";
+        const acceptedStorePaymentConfigurationAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          ["store_payment_configuration_version", "store_payment_configuration_operation"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/store-payment-configuration-store.ts";
         const acceptedStoreAuthoringAsset =
           module.packageName === "@rms/store" &&
           module.manifest.ownedDatabase?.schema === "rms_store" &&
@@ -823,6 +1207,14 @@ async function scanUnsupported(root, module, diagnostics) {
             "store_configuration_authoring_operation",
           ) &&
           moduleRelative === "src/infrastructure/persistence/configuration-authoring-store.ts";
+        const acceptedStoreConfigurationOriginalAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          [
+            "store_configuration_authoring_operation",
+            "store_configuration_original_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/store-configuration-original-store.ts";
         const acceptedStoreServiceControlAsset =
           module.packageName === "@rms/store" &&
           module.manifest.ownedDatabase?.schema === "rms_store" &&
@@ -853,6 +1245,23 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/current-membership-store.ts";
+        // WP-2421 initialize-only Membership leaf owns no StoreAssignment fact.
+        const acceptedMembershipBrandDiscoveryAsset =
+          module.packageName === "@bop/membership" &&
+          module.manifest.ownedDatabase?.schema === "bop_membership" &&
+          module.manifest.ownedDatabase?.tables?.includes("membership") &&
+          moduleRelative === "src/infrastructure/persistence/brand-discovery-store.ts";
+        const acceptedInitialBrandMembershipAsset =
+          module.packageName === "@bop/membership" &&
+          module.manifest.ownedDatabase?.schema === "bop_membership" &&
+          module.manifest.ownedDatabase?.tables?.includes("membership") &&
+          moduleRelative === "src/infrastructure/persistence/initial-brand-membership-store.ts";
+        const acceptedApprovedWorkforceMembershipAsset =
+          module.packageName === "@bop/membership" &&
+          module.manifest.ownedDatabase?.schema === "bop_membership" &&
+          module.manifest.ownedDatabase?.tables?.includes("membership") &&
+          moduleRelative ===
+            "src/infrastructure/persistence/approved-workforce-membership-store.ts";
         const acceptedCurrentPermissionAsset =
           module.packageName === "@bop/permission" &&
           module.manifest.ownedDatabase?.schema === "bop_permission" &&
@@ -865,6 +1274,43 @@ async function scanUnsupported(root, module, diagnostics) {
             "permission_override",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/current-policy-store.ts";
+        // WP-2421 initial Brand policy uses existing owning facts only.
+        const acceptedInitialBrandPermissionAsset =
+          module.packageName === "@bop/permission" &&
+          module.manifest.ownedDatabase?.schema === "bop_permission" &&
+          [
+            "policy_state",
+            "permission_definition",
+            "role",
+            "role_assignment",
+            "permission_grant",
+            "permission_override",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          [
+            "src/infrastructure/persistence/brand-initial-policy-store.ts",
+            "src/infrastructure/persistence/approved-workforce-policy-store.ts",
+          ].includes(moduleRelative);
+        const acceptedPlatformPermissionAsset =
+          module.packageName === "@bop/permission" &&
+          module.manifest.ownedDatabase?.schema === "bop_permission" &&
+          ["platform_permission_policy_head", "platform_permission_policy_revision"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          [
+            "src/infrastructure/persistence/platform-permission-store.ts",
+            "src/infrastructure/persistence/platform-permission-provisioner.ts",
+          ].includes(moduleRelative);
+        const acceptedSystemMediaPromotionPermissionAsset =
+          module.packageName === "@bop/permission" &&
+          module.manifest.ownedDatabase?.schema === "bop_permission" &&
+          [
+            "system_media_image_promotion_authorization",
+            "system_media_image_promotion_authorization_decision",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          [
+            "src/infrastructure/persistence/system-media-image-promotion-authorization-store.ts",
+            "src/infrastructure/persistence/system-media-image-promotion-provisioner.ts",
+          ].includes(moduleRelative);
         const acceptedWorkflowDefinitionAsset =
           module.packageName === "@bop/workflow" &&
           module.manifest.ownedDatabase?.schema === "bop_workflow" &&
@@ -882,6 +1328,28 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_publishing" &&
           module.manifest.ownedDatabase?.tables?.includes("publishing_mutation_record") &&
           moduleRelative === "src/infrastructure/persistence/publishing-mutation-store.ts";
+        const acceptedOptionPublicationHistoryAsset =
+          module.packageName === "@bop/publishing" &&
+          module.manifest.ownedDatabase?.schema === "bop_publishing" &&
+          module.manifest.ownedDatabase?.tables?.includes("publishing_mutation_record") &&
+          moduleRelative ===
+            "src/infrastructure/persistence/option-set-publication-history-store.ts";
+        const acceptedOptionPublicationOperationAsset =
+          module.packageName === "@bop/publishing" &&
+          module.manifest.ownedDatabase?.schema === "bop_publishing" &&
+          ["publishing_mutation_record", "option_set_publication_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/option-set-publication-operation-store.ts";
+        const acceptedOptionPriceReviewOperationAsset =
+          module.packageName === "@bop/publishing" &&
+          module.manifest.ownedDatabase?.schema === "bop_publishing" &&
+          ["publishing_mutation_record", "option_price_review_operation"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/option-price-review-operation-store.ts";
         const acceptedInventoryFinalValidationAsset =
           module.packageName === "@rms/inventory" &&
           module.manifest.ownedDatabase?.schema === "rms_inventory" &&
@@ -1011,6 +1479,109 @@ async function scanUnsupported(root, module, diagnostics) {
           ) &&
           moduleRelative === "src/infrastructure/persistence/current-option-price-store.ts";
         const pilotPublicationAsset = {
+          "src/infrastructure/persistence/option-set-list-query-store.ts": {
+            owner: "catalog",
+            tables: [
+              "option_set",
+              "option_set_version",
+              "option",
+              "option_conflict",
+              "product_option_binding",
+            ],
+          },
+          "src/infrastructure/persistence/option-set-authoring-identity.ts": {
+            owner: "catalog",
+            tables: [
+              "option_set_authoring_identity",
+              "option_set_authoring_abandonment",
+              "option_set_operation_record",
+              "option_set_draft_content_snapshot",
+            ],
+          },
+          "src/infrastructure/persistence/option-set-authoring-resolution-store.ts": {
+            owner: "catalog",
+            tables: [
+              "option_set_authoring_identity",
+              "option_set_authoring_abandonment",
+              "option_set_operation_record",
+              "option_set_draft_content_snapshot",
+            ],
+          },
+          "src/infrastructure/persistence/product-authoring-resolution-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product_operation_record",
+              "product_operation_snapshot",
+              "product_source_commit",
+              "product_authoring_operation_abandonment",
+            ],
+          },
+          "src/infrastructure/persistence/product-publication-resolution-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_operation_record",
+              "product_operation_snapshot",
+              "product_publication_revision",
+              "product_publication_operation_abandonment",
+            ],
+          },
+          "src/infrastructure/persistence/product-publication-warning-acknowledgement-record.ts": {
+            owner: "catalog",
+            tables: ["product_publication_warning_acknowledgement"],
+          },
+          "src/infrastructure/persistence/product-publication-warning-acknowledgement-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_version",
+              "product_publication_revision",
+              "product_publication_validation_report",
+              "product_publication_warning_acknowledgement",
+            ],
+          },
+          "src/infrastructure/persistence/product-publication-validation-report-source-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_version",
+              "sku",
+              "product_option_binding",
+              "product_option_binding_option",
+              "product_option_binding_sku_scope",
+              "product_option_binding_channel",
+              "product_version_category_assignment",
+              "product_publication_revision",
+              "product_publication_validation_report",
+              "product_publication_content",
+              "product_operation_record",
+              "product_operation_snapshot",
+              "product_source_commit",
+              "product_source_head",
+              "product_scope_retirement_header",
+              "product_scope_retirement",
+              "product_approval_receipt",
+            ],
+          },
+          "src/infrastructure/persistence/product-publication-validation-report-store.ts": {
+            owner: "catalog",
+            tables: ["product_publication_revision", "product_publication_validation_report"],
+          },
+          "src/infrastructure/persistence/product-scope-retirement-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_publication_revision",
+              "product_publication_content",
+              "product_operation_record",
+              "product_operation_snapshot",
+              "product_source_commit",
+              "product_source_head",
+              "product_scope_retirement_header",
+              "product_scope_retirement",
+              "product_approval_receipt",
+            ],
+          },
           "src/infrastructure/persistence/menu-review-option-source.ts": {
             owner: "catalog",
             tables: [
@@ -1097,6 +1668,20 @@ async function scanUnsupported(root, module, diagnostics) {
             tables: ["category", "product_version", "product_version_category_assignment"],
           },
           // WP-2421 milestones40/41: exact owning public compositions, no broad exemption.
+          // WP-2421: exact Catalog-owned readonly Pricing Binding source.
+          "src/infrastructure/persistence/product-option-price-context-source-store.ts": {
+            owner: "catalog",
+            tables: [
+              "product",
+              "product_version",
+              "sku",
+              "product_option_binding",
+              "product_option_binding_option",
+              "product_option_binding_sku_scope",
+              "product_option_binding_channel",
+              "product_version_category_assignment",
+            ],
+          },
           "src/infrastructure/persistence/product-editor-source-store.ts": {
             owner: "catalog",
             tables: [
@@ -1242,11 +1827,16 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "catalog",
             tables: [
               "product",
+              "product_version",
               "product_operation_record",
               "product_operation_snapshot",
               "product_publication_revision",
               "product_source_commit",
             ],
+          },
+          "src/infrastructure/persistence/product-editor-allergen-registry-source.ts": {
+            owner: "catalog",
+            tables: ["allergen_registry_version", "allergen_registry_entry"],
           },
           "src/infrastructure/persistence/inventory-sku-reference-source-store.ts": {
             owner: "catalog",
@@ -1286,6 +1876,40 @@ async function scanUnsupported(root, module, diagnostics) {
           "src/infrastructure/persistence/option-price-reference-source-store.ts": {
             owner: "pricing",
             tables: ["option_price_rule", "option_price_rule_version"],
+          },
+          "src/infrastructure/persistence/tax-config-authoring-store.ts": {
+            owner: "pricing",
+            tables: [
+              "tax_configuration",
+              "tax_configuration_version",
+              "tax_configuration_rule",
+              "tax_configuration_operation_record",
+              "tax_config_authoring_operation",
+            ],
+          },
+          "src/infrastructure/persistence/tax-config-candidate-store.ts": {
+            owner: "pricing",
+            tables: [
+              "tax_config_publication_candidate",
+              "tax_config_candidate_rule",
+              "tax_config_candidate_operation",
+            ],
+          },
+          "src/infrastructure/persistence/tax-config-material-store.ts": {
+            owner: "pricing",
+            tables: [
+              "tax_config_material",
+              "tax_config_material_version",
+              "tax_config_material_operation",
+            ],
+          },
+          "src/infrastructure/persistence/option-price-authoring-store.ts": {
+            owner: "pricing",
+            tables: [
+              "option_price_rule",
+              "option_price_rule_version",
+              "option_price_authoring_operation",
+            ],
           },
           // WP-2409: Pricing-owned complete PriceBook entry reference profile.
           "src/infrastructure/persistence/price-book-reference-source-store.ts": {
@@ -1923,11 +2547,65 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/receipt-issuer-source.ts";
+        const acceptedTaxRegistrantSourceAsset =
+          module.packageName === "@bop/operating-entity" &&
+          module.manifest.ownedDatabase?.schema === "bop_operating_entity" &&
+          [
+            "store_operating_entity_assignment",
+            "operating_entity",
+            "operating_entity_profile_version",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/tax-registrant-source.ts";
         const acceptedReceiptTemplateAsset =
           module.packageName === "@rms/printing-device" &&
           module.manifest.ownedDatabase?.schema === "rms_device" &&
           module.manifest.ownedDatabase?.tables?.includes("digital_receipt_template_version") &&
           moduleRelative === "src/infrastructure/persistence/digital-receipt-template-store.ts";
+        const acceptedReceiptTemplateArtifactAsset =
+          module.packageName === "@rms/printing-device" &&
+          module.manifest.ownedDatabase?.schema === "rms_device" &&
+          [
+            "digital_receipt_template_artifact_version",
+            "digital_receipt_template_artifact_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/digital-receipt-template-artifact-store.ts";
+        const acceptedReceiptTemplateDraftAsset =
+          module.packageName === "@rms/printing-device" &&
+          module.manifest.ownedDatabase?.schema === "rms_device" &&
+          [
+            "digital_receipt_template_draft_revision",
+            "digital_receipt_template_draft_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/digital-receipt-template-draft-store.ts";
+        const acceptedReceiptTemplateSubmissionAsset =
+          module.packageName === "@rms/printing-device" &&
+          module.manifest.ownedDatabase?.schema === "rms_device" &&
+          ["digital_receipt_template_draft_revision", "digital_receipt_template_submission"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/digital-receipt-template-submission-store.ts";
+        const acceptedReceiptTemplateSubmitAsset =
+          module.packageName === "@rms/printing-device" &&
+          module.manifest.ownedDatabase?.schema === "rms_device" &&
+          [
+            "digital_receipt_template_submit_operation",
+            "digital_receipt_template_submission",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/digital-receipt-template-submit-store.ts";
+        const acceptedReceiptTemplateLifecycleAsset =
+          module.packageName === "@rms/printing-device" &&
+          module.manifest.ownedDatabase?.schema === "rms_device" &&
+          [
+            "digital_receipt_template_lifecycle_operation",
+            "digital_receipt_template_submission",
+            "digital_receipt_template_version",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/digital-receipt-template-lifecycle-store.ts";
         const acceptedReceiptOrderAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -2235,7 +2913,15 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedProductDraftBaselineAsset &&
           !acceptedProductPublicationAsset &&
           !acceptedProductContentRegistryAsset &&
+          !acceptedProductTaxClassificationRegistryAsset &&
+          !acceptedSellingUnitRegistryAsset &&
+          !acceptedMediaUploadAsset &&
+          !acceptedMediaObjectBindingAsset &&
+          !acceptedMediaImageProcessingAsset &&
+          !acceptedMediaWorkerCompositionAsset &&
           !acceptedFullOptionDraftAsset &&
+          !acceptedOptionReviewReleaseAsset &&
+          !acceptedOptionHistoryAsset &&
           !acceptedAvailabilityQueryAsset &&
           !acceptedMenuReferenceSourceAsset &&
           !acceptedBundleReferenceSourceAsset &&
@@ -2246,6 +2932,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedCatalogProductListAsset &&
           !acceptedFeatureControlAdministrationQueryAsset &&
           !acceptedCatalogProductPublicationSourceAsset &&
+          !acceptedCatalogProductTaxCoverageSourceAsset &&
           !acceptedCurrentSkuAsset &&
           !acceptedCurrentOptionBindingsAsset &&
           !acceptedCapacityQueryAsset &&
@@ -2258,20 +2945,35 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedInventoryFinalValidationAsset &&
           !acceptedStockReservationAsset &&
           !acceptedBrowserSessionSelectionAsset &&
+          !acceptedBrowserBrandSessionSelectionAsset &&
+          !acceptedBrandCatalogSourceAsset &&
           !acceptedBrandTaxReferenceAsset &&
           !acceptedSelectedTaxReferenceAsset &&
           !acceptedTenantStoreReferenceAsset &&
           !acceptedMerchantOrganizationAsset &&
           !acceptedBrandLifecycleAsset &&
+          !acceptedBrandConfigurationAuthoringAsset &&
+          !acceptedPlatformBrandTemplateAsset &&
+          !acceptedBrandStoreTopologyDraftAsset &&
           !acceptedBrowserSessionStoreAsset &&
           !acceptedOidcAuthorizationAsset &&
           !acceptedCurrentBrowserSessionAsset &&
+          !acceptedPlatformActorDirectoryAsset &&
+          !acceptedWorkforceAccountBindingAsset &&
+          !acceptedWorkforceOnboardingOperationAsset &&
+          !acceptedPlatformTemplatePublishingAsset &&
           !acceptedCurrentWorkforceMfaAsset &&
+          !acceptedCurrentWorkforceInvitationAsset &&
+          !acceptedWorkforceInvitationStoreAsset &&
           !acceptedStoreExceptionContentAsset &&
           !acceptedStorePauseHistoryAsset &&
           !acceptedStorePublicationContentAsset &&
           !acceptedStorePublicationMaterializerAsset &&
+          !acceptedStoreSetupDraftAsset &&
+          !acceptedStoreSetupReferenceAsset &&
+          !acceptedStorePaymentConfigurationAsset &&
           !acceptedStoreAuthoringAsset &&
+          !acceptedStoreConfigurationOriginalAsset &&
           !acceptedStoreReviewSnapshotAsset &&
           !acceptedPublicStoreProfileTimingAsset &&
           !acceptedPublicStoreProfileAsset &&
@@ -2279,10 +2981,19 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedStoreWeeklyScheduleAsset &&
           !acceptedStoreBusinessDateAsset &&
           !acceptedCurrentMembershipAsset &&
+          !acceptedInitialBrandMembershipAsset &&
+          !acceptedApprovedWorkforceMembershipAsset &&
+          !acceptedMembershipBrandDiscoveryAsset &&
           !acceptedCurrentPermissionAsset &&
+          !acceptedInitialBrandPermissionAsset &&
+          !acceptedPlatformPermissionAsset &&
+          !acceptedSystemMediaPromotionPermissionAsset &&
           !acceptedWorkflowDefinitionAsset &&
           !acceptedCurrentLiveGateAsset &&
           !acceptedPublishingMutationAsset &&
+          !acceptedOptionPublicationOperationAsset &&
+          !acceptedOptionPriceReviewOperationAsset &&
+          !acceptedOptionPublicationHistoryAsset &&
           !acceptedRecipeReferenceAsset &&
           !acceptedRecipeInventoryReferenceAsset &&
           !acceptedRecipeStoreAsset &&
@@ -2367,8 +3078,14 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPaymentReceiptCoverageAsset &&
           !acceptedReceiptStoreIdentityAsset &&
           !acceptedReceiptIssuerAsset &&
+          !acceptedTaxRegistrantSourceAsset &&
           !acceptedDigitalReceiptAsset &&
           !acceptedReceiptTemplateAsset &&
+          !acceptedReceiptTemplateArtifactAsset &&
+          !acceptedReceiptTemplateDraftAsset &&
+          !acceptedReceiptTemplateSubmissionAsset &&
+          !acceptedReceiptTemplateSubmitAsset &&
+          !acceptedReceiptTemplateLifecycleAsset &&
           !acceptedReceiptOrderAsset &&
           !acceptedOrderFulfillmentCompletionAsset &&
           !acceptedSubmittedOwnerAsset &&
@@ -2419,6 +3136,14 @@ async function scanUnsupported(root, module, diagnostics) {
           );
         else if (codeExtensions.has(extname(path).toLowerCase())) {
           const text = await readFile(path, "utf8");
+          if (acceptedMediaWorkerCompositionAsset && !mediaWorkerCompositionOnly(text, file))
+            diagnostics.push(
+              diag(
+                "UNSUPPORTED_DATABASE_ASSET",
+                file,
+                "Media Worker composition forwards owning factories only; direct SQL/query access is not permitted",
+              ),
+            );
           if (acceptedProductDraftBaselineAsset && !productDraftOwnerCompositionSqlOnly(text, file))
             diagnostics.push(
               diag(

@@ -6,7 +6,10 @@ import {
   type RecipeReference,
 } from "../domain/recipe.js";
 import { requireRecipeMeasurementContentDigest } from "./recipe-measurement-content-digest.js";
-import { assessRecipeMeasurementAmounts } from "./recipe-measurement-amount-assessment.js";
+import {
+  assessRecipeMeasurementAmounts,
+  parseRecipeMeasurementOptionPublicationContext,
+} from "./recipe-measurement-amount-assessment.js";
 const fail = (): never => {
   throw new RecipeError("RECIPE_GRAPH_UNRESOLVED");
 };
@@ -31,9 +34,16 @@ export function calculateRecipeMeasurementDemand(
   requestedInput: string,
   now: string,
   activationAt: string,
+  optionPublicationContextInput?: unknown,
 ) {
   const root = requireRecipeMeasurementContentDigest(rootInput),
     requestedYieldMicrounits = parseRecipeYieldQuantityMicrounits(requestedInput);
+  const optionPublicationContext = parseRecipeMeasurementOptionPublicationContext(
+    optionPublicationContextInput,
+    root.snapshot.brandReference,
+    now,
+    activationAt,
+  );
   if (root.snapshot.lifecycle !== "Draft" && root.snapshot.lifecycle !== "Published") return fail();
   if (
     !Array.isArray(childrenInput) ||
@@ -82,7 +92,13 @@ export function calculateRecipeMeasurementDemand(
   if (descendants(root).length !== children.length) return fail();
   const assessments = new Map(
     [root, ...children].map((c) => {
-      const a = assessRecipeMeasurementAmounts(c, descendants(c), now, activationAt);
+      const a = assessRecipeMeasurementAmounts(
+        c,
+        descendants(c),
+        now,
+        activationAt,
+        optionPublicationContext,
+      );
       if (a.quantityArithmetic !== "Pass") return fail();
       return [c.snapshot.versionReference, a] as const;
     }),
@@ -174,6 +190,7 @@ export function calculateRecipeMeasurementDemand(
     requestedYieldMicrounits,
     assessedAt: now,
     activationAt,
+    ...(optionPublicationContext ? { optionPublicationContext } : {}),
     demands: Object.freeze(demands),
     arithmetic: "ExactRational" as const,
     quantityUnit: "TargetUnitMicrounits" as const,

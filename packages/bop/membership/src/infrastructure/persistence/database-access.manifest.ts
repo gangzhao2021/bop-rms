@@ -21,6 +21,55 @@ const databaseAccessManifestInput = {
   ],
   accesses: [
     {
+      id: "approved-workforce-membership.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "membership" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/membership/src/infrastructure/persistence/approved-workforce-membership-store.ts",
+    },
+    {
+      id: "approved-workforce-membership.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "membership" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: null,
+      source:
+        "packages/bop/membership/src/infrastructure/persistence/approved-workforce-membership-store.ts",
+    },
+    {
+      id: "membership-brand-discovery.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "membership" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: "public-query-contract",
+      source: "packages/bop/membership/src/infrastructure/persistence/brand-discovery-store.ts",
+    },
+    {
+      id: "initial-brand-membership.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "membership" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/membership/src/infrastructure/persistence/initial-brand-membership-store.ts",
+    },
+    {
+      id: "initial-brand-membership.insert",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "membership" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: null,
+      source:
+        "packages/bop/membership/src/infrastructure/persistence/initial-brand-membership-store.ts",
+    },
+    {
       id: "current-membership.membership",
       operation: "read",
       mechanism: "repository",

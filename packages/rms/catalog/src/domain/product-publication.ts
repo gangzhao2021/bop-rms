@@ -481,7 +481,7 @@ export interface ProductPublicationContext {
 /** Current policy supplies an explicit complete level order. Effective period filters
  * candidates; it never silently breaks ties. Version scopes are a union of selectors. */
 export function resolveProductPublicationVersion(
-  candidates: readonly ProductPublicationVersion[],
+  candidates: readonly Omit<ProductPublicationVersion, "validationDecision">[],
   context: ProductPublicationContext,
   scopeOrder: readonly ProductPublicationScopeLevel[],
 ) {

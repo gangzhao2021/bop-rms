@@ -19,6 +19,8 @@ export default defineConfig(({ command }) => {
               "/api": { target: apiOrigin, changeOrigin: false },
               "/bff": { target: apiOrigin, changeOrigin: false },
               "/merchant": { target: apiOrigin, changeOrigin: false },
+              "/platform/auth": { target: apiOrigin, changeOrigin: false },
+              "/platform/templates": { target: apiOrigin, changeOrigin: false },
             },
           },
         }),

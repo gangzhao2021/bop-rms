@@ -1,7 +1,11 @@
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { copyCategoryPersistenceValue } from "./category-persistence.js";
 import { CatalogError, parseCatalogInstant, parseProductAggregate } from "./product.js";
-import { parseProductPublicationCommand } from "./product-publication.js";
+import {
+  parseProductPublicationCommand,
+  type ProductPublicationCommand,
+} from "./product-publication.js";
+import { parseProductPublicationCommandV2 } from "./product-publication-v2.js";
 import { deriveCatalogProductPublicationContentIdentity } from "./product-publication-content.js";
 import { productEditorContentFields } from "../application/product-editor-content-authority.js";
 export const productValidationCandidateFields = Object.freeze([
@@ -22,6 +26,11 @@ export const productValidationCandidateFields = Object.freeze([
   "categoryClassification",
   ...productEditorContentFields,
 ] as const);
+export const productValidationCandidateFieldsV2 = Object.freeze([
+  ...productValidationCandidateFields,
+  "replacementIntent",
+  "replacementIntentDigest",
+] as const);
 const fail = (): never => {
   throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
 };
@@ -31,8 +40,33 @@ export function bindCatalogProductValidationCandidate(
   aggregateValue: unknown,
   observedAtValue: unknown,
 ) {
-  const c = parseProductPublicationCommand(commandValue),
-    aggregate = parseProductAggregate(copyCategoryPersistenceValue(aggregateValue)),
+  return Object.freeze({
+    profile: "CatalogProductValidationCandidateV1" as const,
+    ...bindCandidate(parseProductPublicationCommand(commandValue), aggregateValue, observedAtValue),
+  });
+}
+/** Explicit V2 binding retains the entire parsed command in its original hash.
+ * It does not establish that the replacement target is current or undisposed. */
+export function bindCatalogProductValidationCandidateV2(
+  commandValue: unknown,
+  aggregateValue: unknown,
+  observedAtValue: unknown,
+) {
+  const c = parseProductPublicationCommandV2(commandValue);
+  return Object.freeze({
+    profile: "CatalogProductValidationCandidateV2" as const,
+    ...bindCandidate(c, aggregateValue, observedAtValue),
+    replacementIntentDigest: c.replacementIntentDigest,
+  });
+}
+// Only the two fixed owning entry points can select a parser. No projected V1
+// command is passed through a public source, binder or writer for V2 work.
+function bindCandidate(
+  c: ProductPublicationCommand,
+  aggregateValue: unknown,
+  observedAtValue: unknown,
+) {
+  const aggregate = parseProductAggregate(copyCategoryPersistenceValue(aggregateValue)),
     observedAt = parseCatalogInstant(observedAtValue),
     identity = deriveCatalogProductPublicationContentIdentity(aggregate);
   if (
@@ -50,7 +84,6 @@ export function bindCatalogProductValidationCandidate(
   )
     return fail();
   return Object.freeze({
-    profile: "CatalogProductValidationCandidateV1" as const,
     tenantReference: c.tenantReference,
     brandReference: c.brandReference,
     actorReference: c.actorReference,
@@ -110,4 +143,10 @@ export type CatalogCurrentProductValidationCandidate = CatalogProductValidationC
     readonly code: "InternalCode";
     readonly outcome: "Pass" | "HardError";
   };
+};
+export type CatalogProductValidationCandidateV2 = ReturnType<
+  typeof bindCatalogProductValidationCandidateV2
+>;
+export type CatalogCurrentProductValidationCandidateV2 = CatalogProductValidationCandidateV2 & {
+  readonly internalCodeCheck: CatalogCurrentProductValidationCandidate["internalCodeCheck"];
 };

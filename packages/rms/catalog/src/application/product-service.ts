@@ -71,6 +71,7 @@ function failure(error: unknown): never {
   if (
     error instanceof CatalogError &&
     (error.code === "CATALOG_PERMISSION_DENIED" ||
+      error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" ||
       error.code === "CATALOG_VERSION_CONFLICT" ||
       error.code === "CATALOG_IDEMPOTENCY_CONFLICT" ||
       error.code === "CATALOG_CODE_CONFLICT" ||
@@ -280,16 +281,22 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
       });
       const completeContent = Object.hasOwn(raw, "editorContent")
         ? (() => {
-            // Initial full content has no allocated SKU identities. Generation and
-            // mappings require their separate owning command, never guessed UUIDs.
-            if (skuInputs.length !== 0) throw new CatalogError("CATALOG_INPUT_INVALID");
-            return {
-              editorContent: parseProductEditorContentDetails(raw.editorContent, {
-                defaultLocale,
-                skus: [],
-                optionBindings: [],
-              }),
-            };
+            // A single explicit base SKU needs no Variant mapping. Its identity
+            // is allocated by the owner below; initial content contains no SKU IDs.
+            if (skuInputs.length > 1 || skuInputs.some((sku) => sku.variantSelections.length !== 0))
+              throw new CatalogError("CATALOG_INPUT_INVALID");
+            const editorContent = parseProductEditorContentDetails(raw.editorContent, {
+              defaultLocale,
+              skus: [],
+              optionBindings: [],
+            });
+            if (
+              skuInputs.length !== 0 &&
+              (editorContent.variantDimensions.length !== 0 ||
+                editorContent.variantCombinations.length !== 0)
+            )
+              throw new CatalogError("CATALOG_INPUT_INVALID");
+            return { editorContent };
           })()
         : {};
       const intent = parseCatalogHash(

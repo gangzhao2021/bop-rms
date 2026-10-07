@@ -1,8 +1,35 @@
 import {
+  buildCatalogProductPublicationReferenceProvenance,
+  productPublicationQualificationHistoryFields,
+  productWarningAcknowledgementQualificationHistoryFields,
+  type CatalogProductPublicationReferenceProvenance,
+} from "../../contracts/product-publication-reference-provenance.js";
+import {
+  parseCatalogProductWarningAcknowledgementReferenceRequest,
+  bindCatalogProductWarningAcknowledgementReferenceRequestToCurrent,
+  type CatalogProductWarningAcknowledgementReferenceRequest,
+} from "../../contracts/product-warning-acknowledgement-reference-request.js";
+import {
+  buildProductWarningAcknowledgementReferenceHistorySnapshot,
+  productWarningAcknowledgementReferenceHistoryFields,
+  type ProductWarningAcknowledgementReferenceHistorySnapshot,
+} from "../../contracts/product-reference-history-source.js";
+import {
   CatalogError,
   parseCatalogReference,
   parseCatalogInstant,
+  parseProductAggregate,
 } from "../../contracts/product.js";
+import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
+import { copyCategoryPersistenceValue } from "../../contracts/category-persistence.js";
+import { bindCatalogProductPublicationValidationContextV2 } from "../../contracts/product-publication-validation-context-v2.js";
+import { deriveCatalogProductPublicationContentIdentity } from "../../contracts/product-publication-content.js";
+import { parseProductPublicationVersionV2 } from "../../contracts/product-publication-v2.js";
+import {
+  bindCatalogProductPublicationReferenceRequestV2,
+  parseCatalogProductPublicationReferenceRequestV2,
+  type CatalogProductPublicationReferenceRequestV2,
+} from "../../contracts/product-publication-reference-request-v2.js";
 import {
   parseProductLifecycleReviewRequest,
   type ProductLifecycleReviewRequest,
@@ -13,6 +40,9 @@ import {
   productReferenceHistoryCurrentSourceFields,
   productReferenceHistorySourceMaximumRows,
   type ProductReferenceHistorySourceSnapshot,
+  buildProductPublicationReferenceHistorySnapshotV2,
+  productPublicationReferenceHistoryFieldsV2,
+  type ProductPublicationReferenceHistorySnapshotV2,
 } from "../../contracts/product-reference-history-source.js";
 import type { ProductLifecycleTransaction as Transaction } from "./product-lifecycle-store.js";
 import { requireCategoryCurrentReads } from "./category-repository.js";
@@ -23,6 +53,12 @@ import {
   productVariantHistoryFields,
   type ProductVariantIdentityHistoryRequest,
   type ProductVariantIdentityHistorySnapshot,
+  parseProductVariantCreationRequest,
+  buildProductVariantCreationAbsence,
+  assertProductVariantCreationAbsence,
+  productVariantCreationFields,
+  type ProductVariantCreationRequest,
+  type ProductVariantCreationAbsence,
 } from "../../contracts/product-variant-identity-history.js";
 
 export interface ProductReferenceHistorySourceAuthority {
@@ -46,6 +82,18 @@ export interface ProductReferenceHistorySourceAuthority {
 const utc = (column: string) =>
   `to_char(${column} AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
 const limit = productReferenceHistorySourceMaximumRows + 1;
+const variantHistorySelect = `SELECT jsonb_build_object('aggregateVersion',p.aggregate_version,'observedAt',${utc("date_trunc('milliseconds',statement_timestamp())")},'history',CASE WHEN
+    (SELECT sum(octet_length(snapshot_json::text)) FROM rms_catalog.product_operation_snapshot WHERE brand_id=$1 AND product_id=$2)<=8388608 THEN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object('aggregate',s.snapshot_json,'operationReference',s.operation_id,'snapshotDigest',c.snapshot_digest,'coherent',
+      r.result_aggregate_version=s.result_aggregate_version AND r.occurred_at=s.occurred_at AND c.result_aggregate_version=s.result_aggregate_version AND c.occurred_at=s.occurred_at
+      AND s.snapshot_json->'aggregateVersion'=to_jsonb(s.result_aggregate_version) AND s.snapshot_json->>'updatedAt'=${utc("s.occurred_at")}
+      AND (SELECT count(*) FROM rms_catalog.product_operation_record o WHERE o.brand_id=p.brand_id AND o.product_id=p.product_id)=p.aggregate_version
+      AND (SELECT count(*) FROM rms_catalog.product_source_commit sc WHERE sc.brand_id=p.brand_id AND sc.product_id=p.product_id)=p.aggregate_version)
+      ORDER BY s.result_aggregate_version)
+    FROM (SELECT * FROM rms_catalog.product_operation_snapshot WHERE brand_id=$1 AND product_id=$2 ORDER BY result_aggregate_version LIMIT 1001) s
+    LEFT JOIN rms_catalog.product_operation_record r ON r.operation_id=s.operation_id AND r.brand_id=s.brand_id AND r.product_id=s.product_id
+    LEFT JOIN rms_catalog.product_source_commit c ON c.operation_id=s.operation_id AND c.brand_id=s.brand_id AND c.product_id=s.product_id
+  ),'[]'::jsonb) ELSE NULL END) source FROM rms_catalog.product p WHERE p.brand_id=$1 AND p.product_id=$2 AND p.aggregate_version=$3`;
 // Distinct reference configurations keep repeated lifecycle history bounded by configurations, not operations.
 const select = `WITH recorded AS (
  SELECT s.result_aggregate_version,s.occurred_at,
@@ -214,6 +262,496 @@ export function createPostgresProductReferenceHistorySourceStore(options: {
   });
 }
 
+export interface ProductPublicationReferenceHistorySourceOptionsV2 {
+  readonly tenantReference: string;
+  readonly brandReference: string;
+  readonly actorReference: string;
+  readonly actorKind: "User" | "System";
+  readonly clock: { now(): string };
+  readonly transactions: { run<T>(work: (tx: Transaction) => Promise<T>): Promise<T> };
+  readonly registerBeforeCommit: (
+    tx: Transaction,
+    guard: () => Promise<void>,
+    finalAssert: () => void,
+  ) => Promise<void>;
+  readonly authority: {
+    holdUntilTransactionCompletes(
+      tx: Transaction,
+      input: {
+        readonly tenantReference: string;
+        readonly brandReference: string;
+        readonly actorReference: string;
+        readonly actorKind: "User" | "System";
+        readonly request: CatalogProductPublicationReferenceRequestV2;
+        readonly purposeCode: "CATALOG_PRODUCT_PUBLICATION_REFERENCE_HISTORY_READ";
+        readonly permission: "catalog.manage";
+        readonly owningAction: "catalog.product.history.read";
+        readonly requiredScope: "FullBrandScope";
+        readonly requiredFields: typeof productPublicationReferenceHistoryFieldsV2;
+        readonly observedAt: string;
+      },
+    ): Promise<void>;
+  };
+}
+/** Fixed publication entry over the same immutable owning history. The current
+ * root is read under the Product writer barrier; no lifecycle action is invented.
+ * The caller may then write this Product through its owning CAS writer. */
+export interface ProductWarningAcknowledgementReferenceHistorySourceOptions {
+  readonly tenantReference: string;
+  readonly brandReference: string;
+  readonly actorReference: string;
+  readonly actorKind: "User";
+  readonly clock: { now(): string };
+  readonly transactions: { run<T>(work: (tx: Transaction) => Promise<T>): Promise<T> };
+  readonly registerBeforeCommit: (
+    tx: Transaction,
+    guard: () => Promise<void>,
+    finalAssert: () => void,
+  ) => Promise<void>;
+  readonly authority: {
+    holdUntilTransactionCompletes(
+      tx: Transaction,
+      input: {
+        readonly tenantReference: string;
+        readonly brandReference: string;
+        readonly actorReference: string;
+        readonly actorKind: "User";
+        readonly request: CatalogProductWarningAcknowledgementReferenceRequest;
+        readonly purposeCode: "CATALOG_PRODUCT_WARNING_ACKNOWLEDGEMENT_REFERENCE_HISTORY_READ";
+        readonly permission: "catalog.manage";
+        readonly owningAction: "catalog.product.history.read";
+        readonly requiredScope: "FullBrandScope";
+        readonly requiredFields: typeof productWarningAcknowledgementReferenceHistoryFields;
+        readonly observedAt: string;
+      },
+    ): Promise<void>;
+  };
+}
+export function createPostgresProductPublicationReferenceHistorySourceV2(
+  options: ProductPublicationReferenceHistorySourceOptionsV2,
+) {
+  if (typeof options.authority?.holdUntilTransactionCompletes !== "function") return fail();
+  const hold = options.authority.holdUntilTransactionCompletes.bind(options.authority);
+  return createIntentReferenceHistorySource<
+    CatalogProductPublicationReferenceRequestV2,
+    ProductPublicationReferenceHistorySnapshotV2
+  >(options, {
+    parse: parseCatalogProductPublicationReferenceRequestV2,
+    build: buildProductPublicationReferenceHistorySnapshotV2,
+    verify: verifyReferenceHistoryConfiguration,
+    bind: (request, aggregate, current) =>
+      bindCatalogProductPublicationReferenceRequestV2(
+        request,
+        bindCatalogProductPublicationValidationContextV2({
+          command: request.command,
+          aggregate,
+          current,
+          content: null,
+          observedAt: request.observedAt,
+        }),
+      ),
+    authorize: (tx, input) =>
+      hold(
+        tx,
+        Object.freeze({
+          ...input,
+          purposeCode: "CATALOG_PRODUCT_PUBLICATION_REFERENCE_HISTORY_READ",
+          requiredFields: productPublicationReferenceHistoryFieldsV2,
+        }),
+      ),
+  });
+}
+export function createPostgresProductWarningAcknowledgementReferenceHistorySource(
+  options: ProductWarningAcknowledgementReferenceHistorySourceOptions,
+) {
+  if (
+    options.actorKind !== "User" ||
+    typeof options.authority?.holdUntilTransactionCompletes !== "function"
+  )
+    return fail();
+  const hold = options.authority.holdUntilTransactionCompletes.bind(options.authority);
+  return createIntentReferenceHistorySource<
+    CatalogProductWarningAcknowledgementReferenceRequest,
+    ProductWarningAcknowledgementReferenceHistorySnapshot
+  >(options, {
+    poisonInvalidRequest: true,
+    parse: parseCatalogProductWarningAcknowledgementReferenceRequest,
+    build: buildProductWarningAcknowledgementReferenceHistorySnapshot,
+    verify: verifyReferenceHistoryConfiguration,
+    bind: (request: CatalogProductWarningAcknowledgementReferenceRequest, aggregate, current) =>
+      bindCatalogProductWarningAcknowledgementReferenceRequestToCurrent(
+        request,
+        aggregate,
+        current,
+      ),
+    authorize: (tx, input) => {
+      if (input.actorKind !== "User") return fail();
+      return hold(
+        tx,
+        Object.freeze({
+          ...input,
+          actorKind: "User",
+          purposeCode: "CATALOG_PRODUCT_WARNING_ACKNOWLEDGEMENT_REFERENCE_HISTORY_READ",
+          requiredFields: productWarningAcknowledgementReferenceHistoryFields,
+        }),
+      );
+    },
+  });
+}
+
+function verifyReferenceHistoryConfiguration(
+  snapshot: {
+    readonly configurations: ProductPublicationReferenceHistorySnapshotV2["configurations"];
+  },
+  aggregate: ReturnType<typeof parseProductAggregate>,
+): void {
+  const identity = deriveCatalogProductPublicationContentIdentity(aggregate);
+  if (
+    !snapshot.configurations.some(
+      (configuration) =>
+        canonicalizeRfc8785(configuration) === canonicalizeRfc8785(identity.referenceConfiguration),
+    )
+  )
+    return fail();
+}
+
+function createIntentReferenceHistorySource<
+  Request extends
+    | CatalogProductPublicationReferenceRequestV2
+    | CatalogProductWarningAcknowledgementReferenceRequest,
+  Snapshot,
+>(
+  options: Omit<ProductPublicationReferenceHistorySourceOptionsV2, "authority">,
+  protocol: {
+    readonly poisonInvalidRequest?: true;
+    readonly qualification?: true;
+    parse(value: unknown): Request;
+    build(value: unknown, request: Request, now: string): Snapshot;
+    verify?(snapshot: Snapshot, aggregate: ReturnType<typeof parseProductAggregate>): void;
+    bind?(
+      request: Request,
+      aggregate: ReturnType<typeof parseProductAggregate>,
+      current: ReturnType<typeof parseProductPublicationVersionV2> | null,
+    ): unknown;
+    authorize(
+      tx: Transaction,
+      input: Omit<
+        Parameters<
+          ProductPublicationReferenceHistorySourceOptionsV2["authority"]["holdUntilTransactionCompletes"]
+        >[1],
+        "request" | "purposeCode" | "requiredFields"
+      > & { readonly request: Request },
+    ): Promise<void>;
+  },
+) {
+  const tenant = parseCatalogReference(options.tenantReference),
+    brand = parseCatalogReference(options.brandReference),
+    actor = parseCatalogReference(options.actorReference),
+    kind = options.actorKind;
+  if (
+    (kind !== "User" && kind !== "System") ||
+    typeof options.clock?.now !== "function" ||
+    typeof options.transactions?.run !== "function" ||
+    typeof protocol.authorize !== "function" ||
+    typeof options.registerBeforeCommit !== "function"
+  )
+    return fail();
+  const now = options.clock.now.bind(options.clock),
+    run = options.transactions.run.bind(options.transactions),
+    authorize = protocol.authorize,
+    beforeCommit = options.registerBeforeCommit.bind(options),
+    failed = new WeakSet<object>(),
+    active = new WeakSet<object>();
+  const rejectEntry = async (): Promise<never> => {
+    await run(async (tx) => {
+      if (!tx || typeof tx !== "object" || typeof tx.query !== "function") return fail();
+      failed.add(tx);
+      await beforeCommit(
+        tx,
+        async () => fail(),
+        () => {
+          fail();
+        },
+      );
+      return fail();
+    });
+    return fail();
+  };
+  const hash = (value: unknown) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
+  const exactRow = (
+    result: unknown,
+    fields: readonly string[],
+    preserveIndependentBudgets = false,
+  ) => {
+    if (!result || typeof result !== "object") return fail();
+    const rows = Object.getOwnPropertyDescriptor(result, "rows");
+    if (
+      !rows ||
+      !("value" in rows) ||
+      !Array.isArray(rows.value) ||
+      Object.getPrototypeOf(rows.value) !== Array.prototype ||
+      rows.value.length !== 1 ||
+      Reflect.ownKeys(rows.value).length !== 2
+    )
+      return fail();
+    const descriptor = Object.getOwnPropertyDescriptor(rows.value, "0");
+    if (!descriptor?.enumerable || !("value" in descriptor)) return fail();
+    const row = descriptor.value;
+    if (
+      !row ||
+      typeof row !== "object" ||
+      Object.getPrototypeOf(row) !== Object.prototype ||
+      Reflect.ownKeys(row).length !== fields.length
+    )
+      return fail();
+    const output: Record<string, unknown> = {};
+    for (const field of fields) {
+      const d = Object.getOwnPropertyDescriptor(row, field);
+      if (!d?.enumerable || !("value" in d)) return fail();
+      output[field] = preserveIndependentBudgets ? d.value : copyCategoryPersistenceValue(d.value);
+    }
+    return output;
+  };
+  return Object.freeze({
+    async withCurrentSnapshot<T>(
+      input: Request,
+      work: (snapshot: Snapshot, tx: Transaction) => Promise<T>,
+    ): Promise<T> {
+      let request: Request;
+      try {
+        request = protocol.parse(input);
+        const c = request.command;
+        if (
+          c.tenantReference !== tenant ||
+          c.brandReference !== brand ||
+          c.actorReference !== actor ||
+          c.actorKind !== kind ||
+          typeof work !== "function"
+        )
+          return fail();
+      } catch (error) {
+        if (protocol.poisonInvalidRequest) return rejectEntry();
+        throw error;
+      }
+      const c = request.command;
+      let calls = 0,
+        completed: { value: T } | undefined,
+        transaction: Transaction | undefined,
+        poisoned = false,
+        finish: (() => void) | undefined;
+      const poison = (): never => {
+        poisoned = true;
+        if (transaction) failed.add(transaction);
+        return fail();
+      };
+      try {
+        const result = await run(async (tx) => {
+          if (!tx || typeof tx !== "object" || typeof tx.query !== "function") return poison();
+          transaction = tx;
+          // Capture the actual transaction before refusing reentry, so a caught
+          // nested failure also poisons the already-active outer acquisition.
+          if (++calls !== 1 || failed.has(tx) || active.has(tx)) return poison();
+          active.add(tx);
+          const originalQuery = tx.query,
+            capturedQuery = originalQuery.bind(tx);
+          let latest = request.observedAt,
+            ready = false,
+            guardCalls = 0;
+          const check = () => {
+            let at: string;
+            try {
+              at = parseCatalogInstant(now());
+            } catch {
+              return poison();
+            }
+            if (
+              poisoned ||
+              failed.has(tx) ||
+              tx.query !== originalQuery ||
+              at < latest ||
+              at >= request.validUntil
+            )
+              return poison();
+            latest = at;
+            return at;
+          };
+          finish = () => {
+            check();
+          };
+          const query: Transaction["query"] = async <Row = Record<string, unknown>>(
+            sql: string,
+            values: readonly unknown[],
+          ) => {
+            check();
+            const value = await capturedQuery<Row>(sql, values);
+            check();
+            return value;
+          };
+          const hold = async () => {
+            const at = check();
+            if (
+              (await authorize(
+                tx,
+                Object.freeze({
+                  tenantReference: tenant,
+                  brandReference: brand,
+                  actorReference: actor,
+                  actorKind: kind,
+                  request,
+                  permission: "catalog.manage",
+                  owningAction: "catalog.product.history.read",
+                  requiredScope: "FullBrandScope",
+                  observedAt: at,
+                }),
+              )) !== undefined
+            )
+              return poison();
+            check();
+          };
+          try {
+            // Register before the first holder/read, so a swallowed early refusal
+            // cannot commit unrelated work in this borrowed transaction.
+            if (
+              (await beforeCommit(
+                tx,
+                async () => {
+                  try {
+                    if (++guardCalls !== 1 || !ready) return poison();
+                    await hold();
+                    check();
+                  } catch (error) {
+                    poisoned = true;
+                    failed.add(tx);
+                    throw error;
+                  }
+                },
+                () => {
+                  check();
+                },
+              )) !== undefined
+            )
+              return poison();
+            check();
+            await hold();
+            await requireCategoryCurrentReads({ query });
+            await query(
+              "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true),set_config('lock_timeout','5000',true),set_config('statement_timeout','60000',true)",
+              [tenant, brand],
+            );
+            await holdProductSourceBarrier({ query }, brand);
+            let snapshot: Snapshot;
+            if (protocol.qualification) {
+              // The verified builder separately budgets each full aggregate;
+              // copying the entire history here would impose an unrelated node cap.
+              const raw = exactRow(
+                await query(variantHistorySelect, [
+                  brand,
+                  c.productReference,
+                  c.expectedProductAggregateVersion,
+                ]),
+                ["source"],
+                true,
+              );
+              snapshot = protocol.build(raw.source, request, check());
+            } else {
+              const current = exactRow(
+                await query(
+                  `SELECT s.snapshot_json aggregate,sc.snapshot_digest,
+ r.snapshot_json publication,
+ (p.aggregate_version=$3 AND v.product_version_id=$4 AND v.status='Draft' AND
+ s.result_aggregate_version=p.aggregate_version AND o.operation_id IS NOT NULL AND sc.operation_id IS NOT NULL AND
+ o.result_aggregate_version=s.result_aggregate_version AND sc.result_aggregate_version=s.result_aggregate_version AND
+ o.occurred_at=s.occurred_at AND sc.occurred_at=s.occurred_at AND s.occurred_at=p.updated_at AND
+ s.snapshot_json->>'brandReference'=p.brand_id::text AND s.snapshot_json->>'productReference'=p.product_id::text AND
+ s.snapshot_json->'aggregateVersion'=to_jsonb(p.aggregate_version) AND s.snapshot_json#>>'{draft,versionReference}'=v.product_version_id::text AND
+ s.snapshot_json->>'updatedAt'=${utc("s.occurred_at")} AND date_trunc('milliseconds',s.occurred_at)=s.occurred_at) coherent,
+ (r.operation_id IS NULL OR (po.operation_id IS NOT NULL AND ps.operation_id IS NOT NULL AND r.tenant_id=$5 AND
+ r.snapshot_json->>'tenantReference'=r.tenant_id::text AND r.snapshot_json->>'brandReference'=r.brand_id::text AND
+ r.snapshot_json->>'productReference'=r.product_id::text AND r.snapshot_json->>'versionReference'=r.product_version_id::text AND
+ r.snapshot_json->>'operationReference'=r.operation_id::text AND r.snapshot_json->>'intentDigest'=r.intent_digest AND
+ r.snapshot_json->>'occurredAt'=${utc("r.occurred_at")} AND r.snapshot_json->>'state'=r.state AND
+ r.snapshot_json->'productAggregateVersion'=to_jsonb(r.source_aggregate_version) AND r.snapshot_json->'publicationVersion'=to_jsonb(r.publication_version) AND
+ po.action_code='ProductPublication' AND po.result_aggregate_version=r.result_aggregate_version AND ps.result_aggregate_version=r.result_aggregate_version AND
+ po.intent_digest=r.intent_digest AND po.occurred_at=r.occurred_at AND ps.occurred_at=r.occurred_at AND
+ ps.actor_id::text=r.snapshot_json->>'actorReference' AND ps.event_type=CASE r.action_code WHEN 'Validate' THEN 'ProductValidationCompleted' WHEN 'SubmitReview' THEN 'ProductReviewSubmitted' WHEN 'Approve' THEN 'ProductVersionApproved' WHEN 'Reject' THEN 'ProductVersionRejected' WHEN 'SchedulePublish' THEN 'ProductVersionPublishScheduled' WHEN 'ReschedulePublish' THEN 'ProductVersionPublishRescheduled' WHEN 'CancelScheduledPublish' THEN 'ProductVersionPublishScheduleCancelled' WHEN 'Supersede' THEN 'ProductVersionSuperseded' ELSE 'ProductVersionPublished' END)) publication_coherent
+ FROM rms_catalog.product p
+ JOIN rms_catalog.product_version v ON v.brand_id=p.brand_id AND v.product_id=p.product_id AND v.product_version_id=$4
+ JOIN rms_catalog.product_operation_snapshot s ON s.brand_id=p.brand_id AND s.product_id=p.product_id AND s.result_aggregate_version=p.aggregate_version
+ LEFT JOIN rms_catalog.product_operation_record o ON o.operation_id=s.operation_id AND o.brand_id=s.brand_id AND o.product_id=s.product_id
+ LEFT JOIN rms_catalog.product_source_commit sc ON sc.operation_id=s.operation_id AND sc.brand_id=s.brand_id AND sc.product_id=s.product_id
+ LEFT JOIN LATERAL (SELECT * FROM rms_catalog.product_publication_revision WHERE brand_id=p.brand_id AND product_id=p.product_id AND product_version_id=$4 ORDER BY publication_version DESC LIMIT 1) r ON true
+ LEFT JOIN rms_catalog.product_operation_record po ON po.operation_id=r.operation_id AND po.brand_id=r.brand_id AND po.product_id=r.product_id
+ LEFT JOIN rms_catalog.product_source_commit ps ON ps.operation_id=r.operation_id AND ps.brand_id=r.brand_id AND ps.product_id=r.product_id
+ WHERE p.brand_id=$1 AND p.product_id=$2`,
+                  [
+                    brand,
+                    c.productReference,
+                    c.expectedProductAggregateVersion,
+                    c.versionReference,
+                    tenant,
+                  ],
+                ),
+                ["aggregate", "snapshot_digest", "publication", "coherent", "publication_coherent"],
+              );
+              const aggregate = parseProductAggregate(current.aggregate),
+                publication =
+                  current.publication === null
+                    ? null
+                    : parseProductPublicationVersionV2(current.publication);
+              if (
+                current.coherent !== true ||
+                current.publication_coherent !== true ||
+                canonicalizeRfc8785(current.aggregate) !== canonicalizeRfc8785(aggregate) ||
+                current.snapshot_digest !== hash(aggregate) ||
+                (publication !== null &&
+                  canonicalizeRfc8785(current.publication) !== canonicalizeRfc8785(publication))
+              )
+                return fail();
+              if (!protocol.bind || !protocol.verify) return fail();
+              protocol.bind(request, aggregate, publication);
+              const raw = exactRow(await query(select, [brand, c.productReference]), ["source"]);
+              snapshot = protocol.build(raw.source, request, check());
+              protocol.verify(snapshot, aggregate);
+            }
+            await hold();
+            check();
+            const value = await work(snapshot, tx);
+            check();
+            await hold();
+            check();
+            completed = Object.freeze({ value });
+            ready = true;
+            return completed;
+          } catch (error) {
+            poisoned = true;
+            failed.add(tx);
+            throw error;
+          } finally {
+            active.delete(tx);
+          }
+        });
+        if (
+          poisoned ||
+          calls !== 1 ||
+          !completed ||
+          result !== completed ||
+          !transaction ||
+          failed.has(transaction) ||
+          !finish
+        )
+          return poison();
+        finish();
+        return completed.value;
+      } catch (error) {
+        if (transaction) failed.add(transaction);
+        if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
+          throw error;
+        return fail();
+      }
+    },
+  });
+}
+
 /** Current owner history, held through caller work and its outer COMMIT. This
  * shares the existing history persistence asset and Product source barrier. */
 export function createPostgresProductVariantIdentityHistorySource(options: {
@@ -241,18 +779,7 @@ export function createPostgresProductVariantIdentityHistorySource(options: {
   const tenantReference = parseCatalogReference(options.tenantReference),
     brandReference = parseCatalogReference(options.brandReference),
     actorReference = parseCatalogReference(options.actorReference);
-  const query = `SELECT jsonb_build_object('aggregateVersion',p.aggregate_version,'observedAt',${utc("date_trunc('milliseconds',statement_timestamp())")},'history',CASE WHEN
-    (SELECT sum(octet_length(snapshot_json::text)) FROM rms_catalog.product_operation_snapshot WHERE brand_id=$1 AND product_id=$2)<=8388608 THEN COALESCE((
-    SELECT jsonb_agg(jsonb_build_object('aggregate',s.snapshot_json,'operationReference',s.operation_id,'snapshotDigest',c.snapshot_digest,'coherent',
-      r.result_aggregate_version=s.result_aggregate_version AND r.occurred_at=s.occurred_at AND c.result_aggregate_version=s.result_aggregate_version AND c.occurred_at=s.occurred_at
-      AND s.snapshot_json->'aggregateVersion'=to_jsonb(s.result_aggregate_version) AND s.snapshot_json->>'updatedAt'=${utc("s.occurred_at")}
-      AND (SELECT count(*) FROM rms_catalog.product_operation_record o WHERE o.brand_id=p.brand_id AND o.product_id=p.product_id)=p.aggregate_version
-      AND (SELECT count(*) FROM rms_catalog.product_source_commit sc WHERE sc.brand_id=p.brand_id AND sc.product_id=p.product_id)=p.aggregate_version)
-      ORDER BY s.result_aggregate_version)
-    FROM (SELECT * FROM rms_catalog.product_operation_snapshot WHERE brand_id=$1 AND product_id=$2 ORDER BY result_aggregate_version LIMIT 1001) s
-    LEFT JOIN rms_catalog.product_operation_record r ON r.operation_id=s.operation_id AND r.brand_id=s.brand_id AND r.product_id=s.product_id
-    LEFT JOIN rms_catalog.product_source_commit c ON c.operation_id=s.operation_id AND c.brand_id=s.brand_id AND c.product_id=s.product_id
-  ),'[]'::jsonb) ELSE NULL END) source FROM rms_catalog.product p WHERE p.brand_id=$1 AND p.product_id=$2 AND p.aggregate_version=$3`;
+
   return Object.freeze({
     async withCurrentSnapshot<T>(
       input: ProductVariantIdentityHistoryRequest,
@@ -290,7 +817,7 @@ export function createPostgresProductVariantIdentityHistorySource(options: {
             [tenantReference, brandReference],
           );
           await holdProductSourceBarrier(tx, brandReference);
-          const result = await tx.query<{ source: unknown }>(query, [
+          const result = await tx.query<{ source: unknown }>(variantHistorySelect, [
             brandReference,
             request.productReference,
             request.expectedAggregateVersion,
@@ -317,10 +844,408 @@ export function createPostgresProductVariantIdentityHistorySource(options: {
         if (calls !== 1 || !completed || returned !== completed) return fail();
         return completed.value;
       } catch (error) {
+        if (
+          error instanceof CatalogError &&
+          (error.code === "CATALOG_PERMISSION_DENIED" ||
+            error.code === "CATALOG_DEPENDENCY_UNAVAILABLE")
+        )
+          throw error;
+        return fail();
+      }
+    },
+  });
+}
+
+export interface ProductVariantCreationSourceOptions {
+  readonly tenantReference: string;
+  readonly brandReference: string;
+  readonly actorReference: string;
+  readonly clock: { now(): string };
+  readonly transactions: { run<T>(work: (tx: Transaction) => Promise<T>): Promise<T> };
+  readonly registerBeforeCommit: (
+    tx: Transaction,
+    guard: () => Promise<void>,
+    finalAssert: () => void,
+  ) => Promise<void>;
+  readonly authority: {
+    holdUntilTransactionCompletes(
+      tx: Transaction,
+      input: {
+        readonly tenantReference: string;
+        readonly brandReference: string;
+        readonly actorReference: string;
+        readonly actorKind: "User";
+        readonly purposeCode: "CATALOG_PRODUCT_VARIANT_CREATION_CHECK";
+        readonly permission: "catalog.product.history.read";
+        readonly owningAction: "catalog.product.create";
+        readonly requiredScope: "FullBrandScope";
+        readonly request: ProductVariantCreationRequest;
+        readonly requiredFields: typeof productVariantCreationFields;
+        readonly observedAt: string;
+        readonly validUntil: string;
+      },
+    ): Promise<void>;
+  };
+}
+
+/** New Create only. Existing history parsing remains strict about a missing root.
+ * The absence is read under the same Brand/operation/Product locks as Create.
+ * A later hold reuses that original proof: this transaction may now contain its
+ * own INSERT, so re-querying absence would reject the write it just admitted. */
+export function createPostgresProductVariantCreationSource(
+  options: ProductVariantCreationSourceOptions,
+) {
+  const tenant = parseCatalogReference(options.tenantReference),
+    brand = parseCatalogReference(options.brandReference),
+    actor = parseCatalogReference(options.actorReference),
+    now = options.clock?.now?.bind(options.clock),
+    run = options.transactions?.run?.bind(options.transactions),
+    authorize = options.authority?.holdUntilTransactionCompletes?.bind(options.authority),
+    register = options.registerBeforeCommit?.bind(options);
+  if (!now || !run || !authorize || !register) return fail();
+  interface State {
+    readonly query: Transaction["query"];
+    readonly fingerprint: string;
+    latest: string;
+    active: boolean;
+    failed: boolean;
+    ready: boolean;
+    final: boolean;
+    guards: number;
+    guardComplete: boolean;
+    proof?: ProductVariantCreationAbsence;
+  }
+  const states = new WeakMap<Transaction, State>(),
+    failed = new WeakSet<Transaction>();
+  return Object.freeze({
+    async withCreationAbsence<T>(
+      value: unknown,
+      work: (proof: ProductVariantCreationAbsence, tx: Transaction) => Promise<T>,
+    ): Promise<T> {
+      // Capture before the first await. Invalid input is exposed only after a
+      // poison guard is attached to the actual borrowed transaction.
+      let request: ProductVariantCreationRequest | undefined;
+      try {
+        request = parseProductVariantCreationRequest(value);
+        if (
+          request.aggregate.brandReference !== brand ||
+          request.aggregate.createdByActorReference !== actor ||
+          typeof work !== "function"
+        )
+          request = undefined;
+      } catch {
+        request = undefined;
+      }
+      let transaction: Transaction | undefined,
+        calls = 0,
+        completed: { value: T } | undefined;
+      const poison = (): never => {
+        if (transaction) {
+          failed.add(transaction);
+          const state = states.get(transaction);
+          if (state) state.failed = true;
+        }
+        return fail();
+      };
+      try {
+        const returned = await run(async (tx) => {
+          transaction = tx;
+          if (!tx || typeof tx !== "object" || typeof tx.query !== "function" || ++calls !== 1)
+            return poison();
+          const prior = states.get(tx);
+          if (prior?.active || failed.has(tx) || prior?.final) return poison();
+          if (!request) {
+            if (!prior)
+              await register(
+                tx,
+                async () => poison(),
+                () => poison(),
+              );
+            return poison();
+          }
+          const captured = request,
+            fingerprint = canonicalizeRfc8785(captured);
+          if (prior && prior.fingerprint !== fingerprint) return poison();
+          const state: State = prior ?? {
+            query: tx.query,
+            fingerprint,
+            latest: captured.observedAt,
+            active: false,
+            failed: false,
+            ready: false,
+            final: false,
+            guards: 0,
+            guardComplete: false,
+          };
+          states.set(tx, state);
+          state.active = true;
+          const check = () => {
+            let at: string;
+            try {
+              at = parseCatalogInstant(now());
+            } catch {
+              return poison();
+            }
+            if (
+              state.failed ||
+              failed.has(tx) ||
+              tx.query !== state.query ||
+              state.final ||
+              at < state.latest ||
+              at >= captured.validUntil
+            )
+              return poison();
+            state.latest = at;
+            return at;
+          };
+          const hold = async () => {
+            const at = check();
+            if (
+              (await authorize(
+                tx,
+                Object.freeze({
+                  tenantReference: tenant,
+                  brandReference: brand,
+                  actorReference: actor,
+                  actorKind: "User",
+                  purposeCode: "CATALOG_PRODUCT_VARIANT_CREATION_CHECK",
+                  permission: "catalog.product.history.read",
+                  owningAction: "catalog.product.create",
+                  requiredScope: "FullBrandScope",
+                  request: captured,
+                  requiredFields: productVariantCreationFields,
+                  observedAt: at,
+                  validUntil: captured.validUntil,
+                }),
+              )) !== undefined
+            )
+              return poison();
+            check();
+          };
+          const query: Transaction["query"] = async <Row = Record<string, unknown>>(
+            sql: string,
+            values: readonly unknown[],
+          ) => {
+            check();
+            try {
+              const result = await state.query.call(tx, sql, values);
+              check();
+              return result as { rows: readonly Row[]; rowCount?: number | null };
+            } catch (error) {
+              state.failed = true;
+              failed.add(tx);
+              throw error;
+            }
+          };
+          try {
+            if (
+              !prior &&
+              (await register(
+                tx,
+                async () => {
+                  try {
+                    if (++state.guards !== 1 || !state.ready || state.active) return poison();
+                    await hold();
+                    state.guardComplete = true;
+                  } catch (error) {
+                    state.failed = true;
+                    failed.add(tx);
+                    throw error;
+                  }
+                },
+                () => {
+                  check();
+                  if (!state.ready || state.active || state.guards !== 1 || !state.guardComplete)
+                    return poison();
+                  state.final = true;
+                },
+              )) !== undefined
+            )
+              return poison();
+            await hold();
+            if (!state.proof) {
+              await requireCategoryCurrentReads({ query });
+              await query(
+                "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true),set_config('lock_timeout','5000',true),set_config('statement_timeout','5000',true)",
+                [tenant, brand],
+              );
+              await holdProductSourceBarrier({ query }, brand);
+              await query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+                "CatalogProductOperation:" + brand + ":" + captured.operationReference,
+              ]);
+              await query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+                "CatalogProduct:" + brand + ":" + captured.aggregate.productReference,
+              ]);
+              const result = await query<{ source: unknown }>(
+                `SELECT jsonb_build_object(
+                'productExists',EXISTS(SELECT 1 FROM rms_catalog.product WHERE brand_id=$1 AND product_id=$2),
+                'operationExists',EXISTS(SELECT 1 FROM rms_catalog.product_operation_record WHERE brand_id=$1 AND (operation_id=$3 OR product_id=$2)),
+                'historyExists',EXISTS(SELECT 1 FROM rms_catalog.product_version WHERE brand_id=$1 AND (product_id=$2 OR product_version_id=$4))
+                  OR EXISTS(SELECT 1 FROM rms_catalog.product_operation_snapshot WHERE brand_id=$1 AND (product_id=$2 OR operation_id=$3))
+                  OR EXISTS(SELECT 1 FROM rms_catalog.product_source_commit WHERE brand_id=$1 AND (product_id=$2 OR operation_id=$3)),
+                'observedAt',${utc("date_trunc('milliseconds',statement_timestamp())")}) source`,
+                [
+                  brand,
+                  captured.aggregate.productReference,
+                  captured.operationReference,
+                  captured.aggregate.draft.versionReference,
+                ],
+              );
+              const descriptor = Object.getOwnPropertyDescriptor(result, "rows");
+              if (
+                !descriptor ||
+                !("value" in descriptor) ||
+                !Array.isArray(descriptor.value) ||
+                descriptor.value.length !== 1 ||
+                Reflect.ownKeys(descriptor.value).length !== 2
+              )
+                return poison();
+              const row = Object.getOwnPropertyDescriptor(descriptor.value, "0");
+              if (!row?.enumerable || !("value" in row)) return poison();
+              const copied = copyCategoryPersistenceValue(row.value);
+              if (
+                !copied ||
+                typeof copied !== "object" ||
+                Array.isArray(copied) ||
+                Object.keys(copied).length !== 1 ||
+                !Object.hasOwn(copied, "source")
+              )
+                return poison();
+              state.proof = buildProductVariantCreationAbsence(
+                (copied as { source: unknown }).source,
+                captured,
+              );
+              if (state.proof.observedAt > check()) return poison();
+            }
+            assertProductVariantCreationAbsence(captured, state.proof);
+            await hold();
+            const result = await work(state.proof, tx);
+            await hold();
+            state.ready = true;
+            completed = Object.freeze({ value: result });
+            return completed;
+          } catch (error) {
+            state.failed = true;
+            failed.add(tx);
+            throw error;
+          } finally {
+            state.active = false;
+          }
+        });
+        if (
+          calls !== 1 ||
+          !transaction ||
+          failed.has(transaction) ||
+          !completed ||
+          returned !== completed
+        )
+          return poison();
+        return completed.value;
+      } catch (error) {
+        if (transaction) failed.add(transaction);
         if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
           throw error;
         return fail();
       }
     },
   });
+}
+
+export interface ProductPublicationQualificationHistorySourceOptions extends Omit<
+  ProductPublicationReferenceHistorySourceOptionsV2,
+  "authority"
+> {
+  readonly authority: {
+    holdUntilTransactionCompletes(
+      tx: Transaction,
+      input: Omit<
+        Parameters<
+          ProductPublicationReferenceHistorySourceOptionsV2["authority"]["holdUntilTransactionCompletes"]
+        >[1],
+        "purposeCode" | "requiredFields"
+      > & {
+        readonly purposeCode: "CATALOG_PRODUCT_PUBLICATION_QUALIFICATION_HISTORY_READ";
+        readonly requiredFields: typeof productPublicationQualificationHistoryFields;
+      },
+    ): Promise<void>;
+  };
+}
+export interface ProductWarningAcknowledgementQualificationHistorySourceOptions extends Omit<
+  ProductWarningAcknowledgementReferenceHistorySourceOptions,
+  "authority"
+> {
+  readonly authority: {
+    holdUntilTransactionCompletes(
+      tx: Transaction,
+      input: Omit<
+        Parameters<
+          ProductWarningAcknowledgementReferenceHistorySourceOptions["authority"]["holdUntilTransactionCompletes"]
+        >[1],
+        "purposeCode" | "requiredFields"
+      > & {
+        readonly purposeCode: "CATALOG_PRODUCT_WARNING_ACKNOWLEDGEMENT_QUALIFICATION_HISTORY_READ";
+        readonly requiredFields: typeof productWarningAcknowledgementQualificationHistoryFields;
+      },
+    ): Promise<void>;
+  };
+}
+/** One exact immutable-history read yields the old Variant identity view and
+ * per-root full identity provenance. Publication heads are held by the caller's
+ * separate coverage source, never inferred from a Draft version ID. */
+export function createPostgresProductPublicationQualificationHistorySource(
+  options: ProductPublicationQualificationHistorySourceOptions,
+) {
+  if (typeof options.authority?.holdUntilTransactionCompletes !== "function") return fail();
+  const hold = options.authority.holdUntilTransactionCompletes.bind(options.authority);
+  const source = createIntentReferenceHistorySource<
+    CatalogProductPublicationReferenceRequestV2,
+    CatalogProductPublicationReferenceProvenance
+  >(options, {
+    poisonInvalidRequest: true,
+    qualification: true,
+    parse: parseCatalogProductPublicationReferenceRequestV2,
+    build: buildCatalogProductPublicationReferenceProvenance,
+    authorize: (tx, input) =>
+      hold(
+        tx,
+        Object.freeze({
+          ...input,
+          purposeCode: "CATALOG_PRODUCT_PUBLICATION_QUALIFICATION_HISTORY_READ",
+          requiredFields: productPublicationQualificationHistoryFields,
+        }),
+      ),
+  });
+  return Object.freeze({ withCurrentQualificationHistory: source.withCurrentSnapshot });
+}
+export function createPostgresProductWarningAcknowledgementQualificationHistorySource(
+  options: ProductWarningAcknowledgementQualificationHistorySourceOptions,
+) {
+  if (
+    options.actorKind !== "User" ||
+    typeof options.authority?.holdUntilTransactionCompletes !== "function"
+  )
+    return fail();
+  const hold = options.authority.holdUntilTransactionCompletes.bind(options.authority);
+  const source = createIntentReferenceHistorySource<
+    CatalogProductWarningAcknowledgementReferenceRequest,
+    CatalogProductPublicationReferenceProvenance
+  >(options, {
+    poisonInvalidRequest: true,
+    qualification: true,
+    parse: parseCatalogProductWarningAcknowledgementReferenceRequest,
+    build: buildCatalogProductPublicationReferenceProvenance,
+    authorize: (tx, input) => {
+      if (input.actorKind !== "User") return fail();
+      return hold(
+        tx,
+        Object.freeze({
+          ...input,
+          actorKind: "User",
+          purposeCode: "CATALOG_PRODUCT_WARNING_ACKNOWLEDGEMENT_QUALIFICATION_HISTORY_READ",
+          requiredFields: productWarningAcknowledgementQualificationHistoryFields,
+        }),
+      );
+    },
+  });
+  return Object.freeze({ withCurrentQualificationHistory: source.withCurrentSnapshot });
 }

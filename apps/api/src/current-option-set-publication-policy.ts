@@ -30,6 +30,8 @@ export const currentOptionSetPolicyFields = Object.freeze([
   "effectivePeriod",
 ] as const);
 
+export type OptionSetQualificationAction = "Read" | "SubmitReview" | "Publish";
+
 export interface CurrentOptionSetPolicyAuthority {
   holdUntilTransactionCompletes(
     tx: PublishingTransaction,
@@ -39,7 +41,8 @@ export interface CurrentOptionSetPolicyAuthority {
       actorReference: string;
       actorKind: "User" | "System";
       permission: "catalog.manage";
-      action: "catalog.option_set.publish";
+      action:
+        "catalog.option_set.read" | "catalog.option_set.submit" | "catalog.option_set.publish";
       purposeCode: "CATALOG_OPTION_SET_PUBLICATION";
       optionSetReference: string;
       policyReference: string;
@@ -73,14 +76,24 @@ export function createCurrentOptionSetPublicationPolicySource(options: {
   readonly brandReference: string;
   readonly actorReference: string;
   readonly actorKind: "User" | "System";
+  readonly qualificationAction?: OptionSetQualificationAction;
   readonly clock: { now(): string };
   readonly authority: CurrentOptionSetPolicyAuthority;
 }) {
   const tenant = parseCatalogReference(options.tenantReference),
     brand = parseCatalogReference(options.brandReference),
     actor = parseCatalogReference(options.actorReference),
-    actorKind = options.actorKind;
+    actorKind = options.actorKind,
+    qualificationAction =
+      options.qualificationAction === undefined ? "Publish" : options.qualificationAction,
+    catalogAction =
+      qualificationAction === "Read"
+        ? "catalog.option_set.read"
+        : qualificationAction === "SubmitReview"
+          ? "catalog.option_set.submit"
+          : "catalog.option_set.publish";
   if (
+    !["Read", "SubmitReview", "Publish"].includes(qualificationAction) ||
     !["User", "System"].includes(actorKind) ||
     typeof options.clock?.now !== "function" ||
     typeof options.authority?.holdUntilTransactionCompletes !== "function"
@@ -155,7 +168,7 @@ export function createCurrentOptionSetPublicationPolicySource(options: {
                     actorReference: actor,
                     actorKind,
                     permission: "catalog.manage" as const,
-                    action: "catalog.option_set.publish" as const,
+                    action: catalogAction,
                     purposeCode: "CATALOG_OPTION_SET_PUBLICATION" as const,
                     optionSetReference,
                     policyReference,

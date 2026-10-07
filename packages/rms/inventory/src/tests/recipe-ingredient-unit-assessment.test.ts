@@ -387,3 +387,37 @@ it.each(["request", "base", "conversion", "pins"])(
     expect(invoked).toBe(false);
   },
 );
+
+it("uses only the exact original Option publication clock for immediate activation", () => {
+  const f = setup(),
+    current = "2026-10-01T05:00:00.001Z",
+    clock = {
+      profile: "OptionPublicationOriginalClockV1",
+      operationReference: request.operationReference,
+      catalogIntentDigest: request.catalogIntentDigest,
+      observedAt: at,
+      validUntil: "2026-10-01T05:00:05.000Z",
+    };
+  const run = (clockInput: unknown = clock, now = current) =>
+    assess([row()], f.facts(), now, at, clockInput);
+  expect(run()).toMatchObject({
+    assessedAt: current,
+    activationAt: at,
+    originalPublicationClock: clock,
+  });
+  expect(() => assess([row()], f.facts(), current, at)).toThrow();
+  expect(() => run({ ...clock, operationReference: id(999) })).toThrow();
+  expect(() => run({ ...clock, catalogIntentDigest: "sha256:" + "b".repeat(64) })).toThrow();
+  expect(() => run(clock, "2026-10-01T04:59:59.999Z")).toThrow();
+  expect(() => run(clock, clock.validUntil)).toThrow();
+  expect(() =>
+    run(
+      Object.defineProperty({ ...clock }, "observedAt", {
+        enumerable: true,
+        get() {
+          throw Error("must not invoke accessor");
+        },
+      }),
+    ),
+  ).toThrow();
+});

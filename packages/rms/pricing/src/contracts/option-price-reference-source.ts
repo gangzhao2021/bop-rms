@@ -1,3 +1,8 @@
+import {
+  parsePricingProductPublicationReferenceRequestV2,
+  pricingProductPublicationReferenceRequestFieldsV2,
+  type PricingProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { parseEffectivePeriodInstant } from "@bop/effective-period";
 import {
@@ -169,14 +174,13 @@ const positive = (value: unknown): string => {
 };
 const optional = (v: unknown) => (v === null ? null : parsePricingReference(v));
 /** Complete owning bindings/history profile; foreign Catalog membership is never inferred. */
-export function buildOptionPriceReferenceSourceSnapshot(
+function parseOptionPriceReferenceGraph(
   value: unknown,
-  input: PriceBookReferenceSourceRequest,
+  expectedBrandReference: string,
   now: string,
-): OptionPriceReferenceSourceSnapshot {
+) {
   try {
-    const request = parsePriceBookReferenceSourceRequest(input),
-      raw = exact(copy(value), ["observedAt", "references"]),
+    const raw = exact(copy(value), ["observedAt", "references"]),
       observedAt = parseEffectivePeriodInstant(raw.observedAt),
       at = parseEffectivePeriodInstant(now);
     if (
@@ -204,7 +208,7 @@ export function buildOptionPriceReferenceSourceSnapshot(
         updatedAt: parseEffectivePeriodInstant(r.updatedAt),
       });
       if (
-        root.brandReference !== request.brandReference ||
+        root.brandReference !== expectedBrandReference ||
         root.rootCreatedAt > root.updatedAt ||
         root.updatedAt > observedAt
       )
@@ -279,16 +283,32 @@ export function buildOptionPriceReferenceSourceSnapshot(
         versions.get(r.currentVersionReference)?.ruleReference !== r.ruleReference
       )
         return fail();
-    const source = {
-      request,
-      profile: "OptionPriceBindings" as const,
+    return Object.freeze({
+      observedAt,
       roots: Object.freeze(
         [...roots.values()].sort((a, b) => a.ruleReference.localeCompare(b.ruleReference)),
       ),
       versions: Object.freeze(
         [...versions.values()].sort((a, b) => a.versionReference.localeCompare(b.versionReference)),
       ),
-    };
+    });
+  } catch {
+    return fail();
+  }
+}
+export function buildOptionPriceReferenceSourceSnapshot(
+  value: unknown,
+  input: PriceBookReferenceSourceRequest,
+  now: string,
+): OptionPriceReferenceSourceSnapshot {
+  try {
+    const request = parsePriceBookReferenceSourceRequest(input),
+      { observedAt, roots, versions } = parseOptionPriceReferenceGraph(
+        value,
+        request.brandReference,
+        now,
+      );
+    const source = { request, profile: "OptionPriceBindings" as const, roots, versions };
     return Object.freeze({
       ...source,
       consistency: "StatementSnapshot",
@@ -336,6 +356,90 @@ export function parseOptionPriceReferenceSourceSnapshot(
         : [{ root, version: null, precise: true }];
     });
     const parsed = buildOptionPriceReferenceSourceSnapshot(
+      { observedAt: raw.observedAt, references },
+      input,
+      now,
+    );
+    if (canonicalizeRfc8785(parsed) !== canonicalizeRfc8785(raw)) return fail();
+    return parsed;
+  } catch {
+    return fail();
+  }
+}
+
+export const productPublicationOptionPriceReferenceSourceFieldsV2 = Object.freeze([
+  ...new Set([
+    ...optionPriceReferenceSourceFields,
+    ...pricingProductPublicationReferenceRequestFieldsV2,
+  ]),
+] as const);
+export interface ProductPublicationOptionPriceReferenceSourceSnapshotV2 extends Omit<
+  OptionPriceReferenceSourceSnapshot,
+  "request" | "profile"
+> {
+  readonly request: PricingProductPublicationReferenceRequestV2;
+  readonly profile: "ProductPublicationOptionPriceBindingsV2";
+  readonly validUntil: string;
+}
+/** Complete stored graph only; neither sale eligibility nor publication approval. */
+export function buildProductPublicationOptionPriceReferenceSourceSnapshotV2(
+  value: unknown,
+  input: PricingProductPublicationReferenceRequestV2,
+  now: string,
+): ProductPublicationOptionPriceReferenceSourceSnapshotV2 {
+  try {
+    const request = parsePricingProductPublicationReferenceRequestV2(input),
+      graph = parseOptionPriceReferenceGraph(value, request.brandReference, now),
+      at = parseEffectivePeriodInstant(now);
+    if (graph.observedAt < request.observedAt || at >= request.validUntil) return fail();
+    const source = {
+      request,
+      profile: "ProductPublicationOptionPriceBindingsV2" as const,
+      ...graph,
+      coverage: "Complete" as const,
+      consistency: "StatementSnapshot" as const,
+      validUntil: request.validUntil,
+    };
+    return Object.freeze({ ...source, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(source)) });
+  } catch {
+    return fail();
+  }
+}
+export function parseProductPublicationOptionPriceReferenceSourceSnapshotV2(
+  value: unknown,
+  input: PricingProductPublicationReferenceRequestV2,
+  now: string,
+): ProductPublicationOptionPriceReferenceSourceSnapshotV2 {
+  try {
+    const raw = exact(copy(value), [
+      "request",
+      "profile",
+      "coverage",
+      "consistency",
+      "observedAt",
+      "digest",
+      "validUntil",
+      "roots",
+      "versions",
+    ]);
+    if (!Array.isArray(raw.roots) || !Array.isArray(raw.versions)) return fail();
+    const roots = raw.roots.map((v) => exact(v, rootFields)),
+      versions = raw.versions.map((v) =>
+        exact(v, ["ruleReference", ...versionFields, "isCurrentVersion", "temporalStatus"]),
+      );
+    if (versions.some((v) => !roots.some((r) => r.ruleReference === v.ruleReference)))
+      return fail();
+    const references = roots.flatMap<unknown>((root) => {
+      const owned = versions.filter((v) => v.ruleReference === root.ruleReference);
+      return owned.length
+        ? owned.map((v) => ({
+            root,
+            version: Object.fromEntries(versionFields.map((k) => [k, v[k]])),
+            precise: true,
+          }))
+        : [{ root, version: null, precise: true }];
+    });
+    const parsed = buildProductPublicationOptionPriceReferenceSourceSnapshotV2(
       { observedAt: raw.observedAt, references },
       input,
       now,

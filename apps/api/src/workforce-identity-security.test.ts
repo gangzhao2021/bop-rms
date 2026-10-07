@@ -1,9 +1,15 @@
-import type {
-  SecurityOperationContext,
-  SessionRevocationRequest,
-  WorkforceIdentitySecurityService,
+import {
+  createIdentityActor,
+  type SecurityOperationContext,
+  type SessionRevocationRequest,
+  type WorkforceIdentitySecurityService,
 } from "@bop/identity";
-import type { Membership, MembershipAccessInvalidation, StoreAssignment } from "@bop/membership";
+import {
+  createMembership,
+  type Membership,
+  type MembershipAccessInvalidation,
+  type StoreAssignment,
+} from "@bop/membership";
 import type { RoleAssignment } from "@bop/permission";
 import { describe, expect, it } from "vitest";
 import {
@@ -114,6 +120,83 @@ describe("WP-0108 API cross-Domain composition", () => {
       membershipReference: ids.membership,
       storeAssignmentReferences: [ids.assignment],
     });
+  });
+
+  it("issues from a genuine approved Pending Membership without activating it or requiring a Store", async () => {
+    const { calls, composition } = harness();
+    const pending = createMembership(
+      {
+        ...membership(),
+        lifecycle: "PendingActivation",
+        workforceRelationshipReference: null,
+      },
+      createIdentityActor({
+        actorType: "User",
+        actorReference: ids.actor,
+        accountKind: "Workforce",
+        status: "Active",
+        authenticationMethod: "Oidc",
+        verificationLevel: "SingleFactor",
+        authenticatedAt: FROM,
+        recentMfaAt: null,
+      }),
+    );
+    const input = {
+      actorReference: pending.actorReference,
+      brandReference: pending.brandReference,
+      storeReferences: [],
+      memberships: [pending],
+      storeAssignments: [assignment()],
+      corporateEmail: "worker@example.invalid",
+      observedAt: AT,
+      operation,
+    };
+    await composition.issueInvitation(input);
+    expect(calls[0]).toMatchObject({
+      membershipReference: ids.membership,
+      storeAssignmentReferences: [],
+    });
+    await composition.issueInvitation({ ...input, storeReferences: [ids.store as never] });
+    expect(calls[1]).toMatchObject({
+      membershipReference: ids.membership,
+      storeAssignmentReferences: [ids.assignment],
+    });
+    expect(pending.lifecycle).toBe("PendingActivation");
+    expect(pending.version).toBe(1);
+    expect(pending.workforceRelationshipReference).toBeNull();
+  });
+
+  it("rejects duplicate Store requests, ambiguous assignments and expired scope before issuing", async () => {
+    const { calls, composition } = harness();
+    const input = {
+      actorReference: ids.actor as never,
+      brandReference: ids.brand as never,
+      storeReferences: [ids.store as never],
+      memberships: [membership()],
+      storeAssignments: [assignment()],
+      corporateEmail: "worker@example.invalid",
+      observedAt: AT,
+      operation,
+    };
+    for (const invalid of [
+      { ...input, storeReferences: [ids.store as never, ids.store as never] },
+      {
+        ...input,
+        storeAssignments: [
+          assignment(),
+          Object.freeze({
+            ...assignment(),
+            storeAssignmentReference: uuid("22"),
+          }) as StoreAssignment,
+        ],
+      },
+      { ...input, observedAt: UNTIL },
+      { ...input, observedAt: "2026-07-29T10:00:00.000Z" },
+    ])
+      await expect(composition.issueInvitation(invalid)).rejects.toBeInstanceOf(
+        WorkforceIdentitySecurityCompositionError,
+      );
+    expect(calls).toHaveLength(0);
   });
 
   it("fails closed for suspended or ambiguous Membership evidence", async () => {

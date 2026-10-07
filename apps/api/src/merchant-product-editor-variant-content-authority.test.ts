@@ -105,7 +105,9 @@ function fixture() {
       aggregateVersion: root,
       draft: { ...original.draft, localizedNames: { "en-CA": "Synthetic root " + root } },
     });
-  const query = vi.fn(async (sql: string, values: readonly unknown[]) => {
+  const query = vi.fn<
+    (sql: string, values: readonly unknown[]) => Promise<{ rows: readonly unknown[] }>
+  >(async (sql: string, values: readonly unknown[]) => {
     if (sql.includes("transaction_isolation")) return { rows: [{ isolation: "read committed" }] };
     if (sql.includes("jsonb_build_object('aggregateVersion'")) {
       if (values[2] !== actualRoot) return { rows: [] };
@@ -239,7 +241,7 @@ it("prospective Draft uses actual current owner history and retains five mandato
     f.query.mock.calls.every(([sql]) => !/COMMIT|ROLLBACK|BEGIN|INSERT|UPDATE/.test(sql)),
   ).toBe(true);
 });
-it("post-write owning Read advances selector, while historical Read cannot lower it", async () => {
+it("post-write and historical Reads retain the original pre-write history proof", async () => {
   const f = fixture();
   await f.authority(f.tx, f.read());
   await f.authority(f.tx, f.write());
@@ -249,8 +251,69 @@ it("post-write owning Read advances selector, while historical Read cannot lower
   await f.authority(f.tx, f.write());
   expect(f.variantHold).toHaveBeenLastCalledWith(
     f.tx,
-    expect.objectContaining({ request: expect.objectContaining({ expectedAggregateVersion: 2 }) }),
+    expect.objectContaining({ request: expect.objectContaining({ expectedAggregateVersion: 1 }) }),
   );
+  expect(
+    f.query.mock.calls.filter(([sql]) => sql.includes("jsonb_build_object('aggregateVersion'")),
+  ).toHaveLength(1);
+});
+it("repeat Draft guards after own CAS do not query the obsolete original root", async () => {
+  const f = fixture();
+  await f.authority(f.tx, f.read());
+  await f.authority(f.tx, f.write());
+  const reads = f.query.mock.calls.length;
+  f.root(2);
+  await f.authority(f.tx, f.read());
+  await f.authority(f.tx, f.write());
+  expect(f.query.mock.calls.length).toBe(reads);
+  expect(f.variantHold).toHaveBeenCalledTimes(5);
+});
+it.each(["candidate", "lease", "query"])(
+  "retained history rejects changed %s before reacquisition",
+  async (kind) => {
+    const f = fixture();
+    await f.authority(f.tx, f.read());
+    await f.authority(f.tx, f.write());
+    const count = f.query.mock.calls.length;
+    let input = f.write();
+    if (kind === "candidate")
+      input = f.write(
+        parseProductAggregate({
+          ...f.next(2),
+          draft: { ...f.next(2).draft, localizedNames: { "en-CA": "Changed" } },
+        }),
+      );
+    else if (kind === "lease")
+      input = {
+        ...input,
+        observedAt: "2026-09-30T23:55:01.000Z",
+        validUntil: "2026-09-30T23:55:06.000Z",
+      };
+    else Object.assign(f.tx, { query: vi.fn(async () => ({ rows: [] })) });
+    await expect(f.authority(f.tx, input)).rejects.toMatchObject(unavailable);
+    expect(f.query.mock.calls.length).toBe(count);
+  },
+);
+it("retained history rechecks current permission and poisons failed reuse", async () => {
+  const f = fixture();
+  await f.authority(f.tx, f.read());
+  await f.authority(f.tx, f.write());
+  f.root(2);
+  f.variantHold.mockRejectedValue(new CatalogError("CATALOG_PERMISSION_DENIED"));
+  await expect(f.authority(f.tx, f.write())).rejects.toMatchObject({
+    code: "CATALOG_PERMISSION_DENIED",
+  });
+  f.variantHold.mockResolvedValue(undefined);
+  await expect(f.authority(f.tx, f.write())).rejects.toMatchObject(unavailable);
+});
+it("remaining holder cannot swallow retained history reentry and permit completion", async () => {
+  const f = fixture();
+  await f.authority(f.tx, f.read());
+  await f.authority(f.tx, f.write());
+  f.remaining.mockImplementationOnce(async () => {
+    await expect(f.authority(f.tx, f.write())).rejects.toMatchObject(unavailable);
+  });
+  await expect(f.authority(f.tx, f.write())).rejects.toMatchObject(unavailable);
 });
 it("never guesses a predecessor when no admitted owning Read exists", async () => {
   const f = fixture();
@@ -462,3 +525,231 @@ it.each(["conflict", "late-denial", "late-expiry", "unknown"])(
     await expect(f.authority(f.tx, f.read())).rejects.toMatchObject(unavailable);
   },
 );
+
+function creationFixture() {
+  const f = fixture(),
+    aggregate = parseProductAggregate({
+      ...f.original,
+      draft: {
+        ...f.original.draft,
+        skus: [],
+        editorContent: {
+          ...f.original.draft.editorContent,
+          variantCombinations: [
+            {
+              selections: [{ dimensionReference: id(6), valueReference: id(7) }],
+              disposition: "NotGenerated",
+              skuReference: null,
+            },
+          ],
+        },
+      },
+    });
+  let sourceAt = at,
+    exists = false;
+  f.query.mockImplementation(async (sql: string) => {
+    if (sql.includes("transaction_isolation")) return { rows: [{ isolation: "read committed" }] };
+    if (sql.includes("'productExists'"))
+      return {
+        rows: [
+          {
+            source: {
+              productExists: exists,
+              operationExists: exists,
+              historyExists: exists,
+              observedAt: sourceAt,
+            },
+          },
+        ],
+      };
+    return { rows: [] };
+  });
+  const guards: { work: () => Promise<void>; final: () => void }[] = [],
+    hold = vi.fn<NonNullable<Options["creation"]>["authority"]["holdUntilTransactionCompletes"]>(
+      async () => undefined,
+    ),
+    register = vi.fn<NonNullable<Options["creation"]>["registerBeforeCommit"]>(
+      async (tx, work, final) => {
+        expect(tx).toBe(f.tx);
+        guards.push({ work, final });
+      },
+    ),
+    options: Options = {
+      ...f.options,
+      creation: {
+        authority: { holdUntilTransactionCompletes: hold },
+        registerBeforeCommit: register,
+      },
+    },
+    input = { ...f.write(aggregate), purposeCode: "CATALOG_PRODUCT_CREATE" as const },
+    authority = create(options);
+  return {
+    ...f,
+    aggregate,
+    input,
+    options,
+    authority,
+    hold,
+    register,
+    guards,
+    exists: (value: boolean) => {
+      exists = value;
+    },
+    source: (value: string) => {
+      sourceAt = value;
+    },
+    async commit() {
+      for (const g of guards) await g.work();
+      for (const g of guards) g.final();
+    },
+  };
+}
+it("Create uses owning absence with full original candidate and keeps mandatory remaining fields", async () => {
+  const f = creationFixture();
+  await f.authority(f.tx, f.input);
+  expect(f.variantHold).not.toHaveBeenCalled();
+  expect(f.hold).toHaveBeenCalledWith(
+    f.tx,
+    expect.objectContaining({
+      purposeCode: "CATALOG_PRODUCT_VARIANT_CREATION_CHECK",
+      owningAction: "catalog.product.create",
+      request: expect.objectContaining({
+        aggregate: f.aggregate,
+        operationReference: f.base.operationReference,
+        observedAt: at,
+        validUntil: f.base.validUntil,
+      }),
+    }),
+  );
+  expect(f.remaining).toHaveBeenCalledWith(
+    f.tx,
+    expect.objectContaining({
+      purposeCode: "CATALOG_PRODUCT_CREATE",
+      aggregate: f.aggregate,
+      requiredReferenceChecks: remainingProductEditorVariantReferenceChecks,
+    }),
+  );
+  expect(f.guards).toHaveLength(1);
+  await f.commit();
+});
+it("Create keeps original absence after its own INSERT rather than rereading current absence", async () => {
+  const f = creationFixture();
+  await f.authority(f.tx, f.input);
+  f.exists(true);
+  f.clock("2026-09-30T23:55:01.000Z");
+  await f.authority(f.tx, f.input);
+  await f.commit();
+  expect(f.query.mock.calls.filter(([sql]) => sql.includes("'productExists'"))).toHaveLength(1);
+  expect(f.guards).toHaveLength(1);
+  expect(f.hold.mock.calls.every(([, request]) => request.request.observedAt === at)).toBe(true);
+});
+it("Create first proof observation follows actual candidate creation but retains original deadline", async () => {
+  const f = creationFixture(),
+    later = "2026-09-30T23:55:01.000Z";
+  f.clock(later);
+  f.source(later);
+  const aggregate = parseProductAggregate({
+    ...f.aggregate,
+    createdAt: later,
+    updatedAt: later,
+    draft: { ...f.aggregate.draft, createdAt: later, updatedAt: later },
+  });
+  await f.authority(f.tx, { ...f.input, aggregate });
+  expect(f.hold).toHaveBeenCalledWith(
+    f.tx,
+    expect.objectContaining({
+      request: expect.objectContaining({
+        observedAt: later,
+        validUntil: f.base.validUntil,
+      }),
+    }),
+  );
+  await f.commit();
+});
+it("Create refuses unconfigured absence instead of borrowing existing history", async () => {
+  const f = creationFixture();
+  const { creation, ...options } = f.options;
+  void creation;
+  await expect(create(options)(f.tx, f.input)).rejects.toMatchObject(unavailable);
+  expect(f.query).not.toHaveBeenCalled();
+  expect(f.remaining).not.toHaveBeenCalled();
+});
+it("Create refuses existing Product/operation/history", async () => {
+  const f = creationFixture();
+  f.exists(true);
+  await expect(f.authority(f.tx, f.input)).rejects.toMatchObject(unavailable);
+  expect(f.remaining).not.toHaveBeenCalled();
+  await expect(f.commit()).rejects.toMatchObject(unavailable);
+});
+it("Create poisoned candidate replacement cannot commit an earlier admission", async () => {
+  const f = creationFixture();
+  await f.authority(f.tx, f.input);
+  const aggregate = parseProductAggregate({
+    ...f.aggregate,
+    draft: { ...f.aggregate.draft, localizedNames: { "en-CA": "Changed" } },
+  });
+  await expect(f.authority(f.tx, { ...f.input, aggregate })).rejects.toMatchObject(unavailable);
+  await expect(f.commit()).rejects.toMatchObject(unavailable);
+  expect(f.query.mock.calls.filter(([sql]) => sql.includes("'productExists'"))).toHaveLength(1);
+});
+it.each(["Read", "root", "intent", "deadline"])(
+  "Create refuses changed %s before absence query",
+  async (kind) => {
+    const f = creationFixture();
+    const input =
+      kind === "Read"
+        ? { ...f.input, mode: "Read" as const, requiredReferenceChecks: [] }
+        : kind === "root"
+          ? {
+              ...f.input,
+              aggregate: parseProductAggregate({ ...f.aggregate, aggregateVersion: 2 }),
+            }
+          : kind === "intent"
+            ? { ...f.input, aggregate: f.original }
+            : { ...f.input, validUntil: "2026-09-30T23:55:06.000Z" };
+    await expect(f.authority(f.tx, input)).rejects.toMatchObject(unavailable);
+    expect(f.query).not.toHaveBeenCalled();
+    expect(f.remaining).not.toHaveBeenCalled();
+  },
+);
+it.each(["expire", "deny", "query"])("Create original COMMIT checks refuse %s", async (kind) => {
+  const f = creationFixture();
+  await f.authority(f.tx, f.input);
+  if (kind === "expire") f.clock(f.base.validUntil);
+  else if (kind === "deny") f.hold.mockRejectedValue(new CatalogError("CATALOG_PERMISSION_DENIED"));
+  else Object.assign(f.tx, { query: vi.fn(async () => ({ rows: [] })) });
+  await expect(f.commit()).rejects.toMatchObject(
+    kind === "deny" ? { code: "CATALOG_PERMISSION_DENIED" } : unavailable,
+  );
+});
+it("Create remaining business conflict is surfaced after owning final checks", async () => {
+  const f = creationFixture();
+  f.remaining.mockRejectedValue(new CatalogError("CATALOG_LIFECYCLE_CONFLICT"));
+  await expect(f.authority(f.tx, f.input)).rejects.toMatchObject({
+    code: "CATALOG_LIFECYCLE_CONFLICT",
+  });
+  await expect(f.commit()).rejects.toMatchObject(unavailable);
+});
+
+it("Create cannot renew the original lease by changing observation and deadline", async () => {
+  const f = creationFixture();
+  await f.authority(f.tx, f.input);
+  f.clock("2026-09-30T23:55:01.000Z");
+  await expect(
+    f.authority(f.tx, {
+      ...f.input,
+      observedAt: "2026-09-30T23:55:01.000Z",
+      validUntil: "2026-09-30T23:55:06.000Z",
+    }),
+  ).rejects.toMatchObject(unavailable);
+  await expect(f.commit()).rejects.toMatchObject(unavailable);
+  expect(f.query.mock.calls.filter(([sql]) => sql.includes("'productExists'"))).toHaveLength(1);
+});
+it("Create swallowed reentry poisons original owning proof and commit", async () => {
+  const f = creationFixture();
+  f.remaining.mockImplementationOnce(async () => {
+    await expect(f.authority(f.tx, f.input)).rejects.toMatchObject(unavailable);
+  });
+  await expect(f.authority(f.tx, f.input)).rejects.toMatchObject(unavailable);
+  await expect(f.commit()).rejects.toMatchObject(unavailable);
+});

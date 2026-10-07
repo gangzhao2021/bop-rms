@@ -46,6 +46,7 @@ export function assessRecipeBaseDemands(
   facts: Parameters<typeof readRecipeIngredientAssessmentFacts>[0],
   nowInput: string,
   activationInput: string,
+  originalPublicationClockInput?: unknown,
 ) {
   try {
     const rows = unitList(value, 4096).map((value) => {
@@ -87,7 +88,13 @@ export function assessRecipeBaseDemands(
       selectors.set(key, pin);
     }
     const pins = parseRecipeIngredientUnitPins([...selectors.values()]);
-    const held = readRecipeIngredientAssessmentFacts(facts, pins, nowInput, activationInput);
+    const held = readRecipeIngredientAssessmentFacts(
+      facts,
+      pins,
+      nowInput,
+      activationInput,
+      originalPublicationClockInput,
+    );
     const totals = new Map<
       string,
       {
@@ -176,6 +183,9 @@ export function assessRecipeBaseDemands(
       validUntil: held.expiry,
       assessedAt: held.now,
       activationAt: held.activationAt,
+      ...(held.originalPublicationClock
+        ? { originalPublicationClock: held.originalPublicationClock }
+        : {}),
       matches: Object.freeze(matches),
       aggregates: Object.freeze(aggregates),
       aggregateStatus: overflow

@@ -1,3 +1,8 @@
+import {
+  parseInventoryProductPublicationReferenceRequestV2,
+  inventoryProductPublicationReferenceRequestFieldsV2,
+  type InventoryProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   InventoryItemError,
@@ -6,6 +11,8 @@ import {
 } from "../domain/inventory-item.js";
 import {
   parseInventoryConfigurationReferenceSnapshot,
+  parseInventoryProductPublicationConfigurationReferenceSnapshotV2,
+  type InventoryProductPublicationConfigurationReferenceSnapshotV2,
   parseInventoryConfigurationReferenceRequest,
   inventoryConfigurationReferenceMaximumRows,
   inventoryConfigurationReferenceFields,
@@ -123,16 +130,17 @@ function hash(v: unknown): string {
 }
 /** Complete stored direct links, with explicit unknown coverage for legacy Items.
  * Does not resolve Recipe usage, Catalog current configuration or stock applicability. */
-export function buildInventorySkuMappingReferenceSnapshot(
+function parseMappingGraph(
   value: unknown,
-  baseInput: InventoryConfigurationReferenceSnapshot,
-  input: InventoryConfigurationReferenceRequest,
+  configuration: Pick<
+    InventoryConfigurationReferenceSnapshot,
+    "items" | "versions" | "operations" | "generation" | "observedAt"
+  >,
+  request: { readonly tenantReference: string; readonly brandReference: string },
   now: string,
-): InventorySkuMappingReferenceSnapshot {
+) {
   try {
-    const request = parseInventoryConfigurationReferenceRequest(input),
-      configuration = parseInventoryConfigurationReferenceSnapshot(baseInput, request, now),
-      r = exact(value, ["generation", "observedAt", "count", "mappings"]),
+    const r = exact(value, ["generation", "observedAt", "count", "mappings"]),
       raw = list(r.mappings),
       at = parseInventoryInstant(now),
       mappingObservedAt = parseInventoryInstant(r.observedAt);
@@ -295,6 +303,25 @@ export function buildInventorySkuMappingReferenceSnapshot(
         });
       })
       .sort((a, b) => a.itemReference.localeCompare(b.itemReference));
+    return Object.freeze({
+      mappings: Object.freeze(mappings),
+      items: Object.freeze(items),
+      observedAt,
+    });
+  } catch {
+    return fail();
+  }
+}
+export function buildInventorySkuMappingReferenceSnapshot(
+  value: unknown,
+  baseInput: InventoryConfigurationReferenceSnapshot,
+  input: InventoryConfigurationReferenceRequest,
+  now: string,
+): InventorySkuMappingReferenceSnapshot {
+  try {
+    const request = parseInventoryConfigurationReferenceRequest(input),
+      configuration = parseInventoryConfigurationReferenceSnapshot(baseInput, request, now),
+      { mappings, items, observedAt } = parseMappingGraph(value, configuration, request, now);
     const content = {
       request,
       profile: "BrandInventorySkuMappingReferencesV1" as const,
@@ -414,6 +441,131 @@ export function parseInventorySkuMappingReferenceSnapshot(
       if (!v || fields.some((k) => e[k] !== v[k])) return fail();
     }
     return built;
+  } catch {
+    return fail();
+  }
+}
+
+export const inventoryProductPublicationSkuMappingReferenceFieldsV2 = Object.freeze([
+  ...new Set([
+    ...inventorySkuMappingReferenceFields,
+    ...inventoryProductPublicationReferenceRequestFieldsV2,
+  ]),
+]);
+export function buildInventoryProductPublicationSkuMappingReferenceSnapshotV2(
+  value: unknown,
+  baseInput: InventoryProductPublicationConfigurationReferenceSnapshotV2,
+  input: InventoryProductPublicationReferenceRequestV2,
+  now: string,
+) {
+  try {
+    const request = parseInventoryProductPublicationReferenceRequestV2(input),
+      configuration = parseInventoryProductPublicationConfigurationReferenceSnapshotV2(
+        baseInput,
+        request,
+        now,
+      ),
+      graph = parseMappingGraph(value, configuration, request, now),
+      at = parseInventoryInstant(now);
+    if (graph.observedAt < request.observedAt || at >= request.validUntil) return fail();
+    const body = {
+      request,
+      profile: "BrandInventoryProductPublicationSkuMappingReferencesV2" as const,
+      coverage: "CompleteStoredMappingReferences" as const,
+      consistency: "HeldInventoryConfigurationSnapshot" as const,
+      applicability: "Unavailable" as const,
+      sourceVersionKind: "InventoryItemSkuMappingVersion" as const,
+      generation: configuration.generation,
+      configuration,
+      ...graph,
+      validUntil: request.validUntil,
+    };
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+export type InventoryProductPublicationSkuMappingReferenceSnapshotV2 = ReturnType<
+  typeof buildInventoryProductPublicationSkuMappingReferenceSnapshotV2
+>;
+export function parseInventoryProductPublicationSkuMappingReferenceSnapshotV2(
+  value: unknown,
+  input: InventoryProductPublicationReferenceRequestV2,
+  now: string,
+): InventoryProductPublicationSkuMappingReferenceSnapshotV2 {
+  try {
+    const r = exact(value, [
+        "request",
+        "profile",
+        "coverage",
+        "consistency",
+        "applicability",
+        "sourceVersionKind",
+        "generation",
+        "observedAt",
+        "validUntil",
+        "digest",
+        "configuration",
+        "mappings",
+        "items",
+      ]),
+      configuration = parseInventoryProductPublicationConfigurationReferenceSnapshotV2(
+        r.configuration,
+        input,
+        now,
+      ),
+      mappings = list(r.mappings).map((value) => {
+        const e = exact(value, [...mappingFields, "current", "sourceConfigurationState"]);
+        if (
+          typeof e.mappingVersion !== "number" ||
+          !Number.isSafeInteger(e.mappingVersion) ||
+          typeof e.sourceItemVersion !== "number" ||
+          !Number.isSafeInteger(e.sourceItemVersion)
+        )
+          return fail();
+        return {
+          ...Object.fromEntries(mappingFields.map((k) => [k, e[k]])),
+          mappingVersion: String(e.mappingVersion),
+          sourceItemVersion: String(e.sourceItemVersion),
+          precise: true,
+        };
+      });
+    list(r.items).forEach((value) =>
+      exact(value, [
+        "itemReference",
+        "currentMappingReference",
+        "currentMappingVersion",
+        "coverage",
+        "currentLink",
+      ]),
+    );
+    const actualRequest = parseInventoryProductPublicationReferenceRequestV2(r.request),
+      expectedRequest = parseInventoryProductPublicationReferenceRequestV2(input);
+    if (
+      canonicalizeRfc8785(actualRequest) !== canonicalizeRfc8785(expectedRequest) ||
+      r.profile !== "BrandInventoryProductPublicationSkuMappingReferencesV2" ||
+      r.coverage !== "CompleteStoredMappingReferences" ||
+      r.consistency !== "HeldInventoryConfigurationSnapshot" ||
+      r.applicability !== "Unavailable" ||
+      r.sourceVersionKind !== "InventoryItemSkuMappingVersion" ||
+      r.validUntil !== expectedRequest.validUntil ||
+      typeof r.generation !== "string"
+    )
+      return fail();
+    hash(r.digest);
+    const source = buildInventoryProductPublicationSkuMappingReferenceSnapshotV2(
+      {
+        generation: r.generation,
+        observedAt: r.observedAt,
+        count: String(mappings.length),
+        mappings,
+      },
+      configuration,
+      input,
+      now,
+    );
+    if (canonicalizeRfc8785(r) !== canonicalizeRfc8785(source)) return fail();
+    return source;
   } catch {
     return fail();
   }

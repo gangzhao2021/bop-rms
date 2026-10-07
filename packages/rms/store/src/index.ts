@@ -49,3 +49,22 @@ export * from "./infrastructure/persistence/public-store-profile-store.js";
 export * from "./infrastructure/public-profile-authority.js";
 
 export * from "./infrastructure/persistence/public-store-profile-timing-store.js";
+
+export * from "./contracts/store-setup-draft.js";
+
+export * from "./contracts/store-setup-operation.js";
+export * from "./contracts/store-setup-service-mode-preparation.js";
+export * from "./infrastructure/persistence/store-setup-draft-store.js";
+
+export * from "./contracts/store-setup-reference.js";
+export * from "./infrastructure/persistence/store-setup-reference-store.js";
+
+export * from "./contracts/store-setup-fee-context-preparation.js";
+
+export * from "./contracts/store-fee-context.js";
+export * from "./contracts/store-configuration-publication-content.js";
+
+export * from "./infrastructure/configuration-v2-preparation.js";
+
+export * from "./contracts/store-configuration-original.js";
+export * from "./infrastructure/persistence/store-configuration-original-store.js";

@@ -1,4 +1,20 @@
 import {
+  parsePublishingOptionPricePublicationPolicy,
+  publishingOptionPricePublicationPolicyDigest,
+  optionPricePolicyConfigurationType,
+  type PublishingOptionPricePublicationPolicy,
+} from "../contracts/option-price-publication-policy.js";
+import {
+  parsePublishingOptionSetCurrentQualification,
+  type PublishingOptionSetCurrentQualification,
+} from "../contracts/option-set-current-qualification.js";
+import {
+  parsePublishingOptionSetReviewPolicy,
+  parsePublishingOptionSetApprovalWaiver,
+  type PublishingOptionSetReviewPolicy,
+  type PublishingOptionSetApprovalWaiver,
+} from "../contracts/option-set-approval-waiver.js";
+import {
   parsePublishingOptionSetPublicationPolicy,
   publishingOptionSetPublicationPolicyDigest,
   optionSetPolicyConfigurationType,
@@ -10,7 +26,7 @@ import {
   productPolicyConfigurationType,
   type PublishingProductPublicationPolicy,
 } from "../contracts/product-publication-policy.js";
-import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
+import { canonicalizeRfc8785, validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import {
   parseBusinessAction,
   revalidateTenantContext,
@@ -18,7 +34,11 @@ import {
   type PermissionDecision,
   type PermissionResourceScope,
 } from "@bop/permission";
-import type { TenantContext } from "@bop/tenant";
+import {
+  parseBrandAdministrationContext,
+  type TenantContext,
+  type BrandAdministrationContext,
+} from "@bop/tenant";
 import {
   createPublishingApprovalEvidence,
   createPublishingLifecycleRecord,
@@ -43,7 +63,11 @@ import {
   publishingOperations,
   type PublishingOperation,
 } from "../domain/evaluate-publishing-transition.js";
-import type { PublishingPorts } from "./ports/publishing-ports.js";
+import type {
+  PublishingPorts,
+  BrandAdministrationPublishingPorts,
+  PublishingAuthorizationRequest,
+} from "./ports/publishing-ports.js";
 
 export const publishingServiceErrorCodes = [
   "PUBLISHING_MUTATION_INVALID",
@@ -88,7 +112,10 @@ function fail(code: PublishingServiceErrorCode): never {
   throw new PublishingServiceError(code);
 }
 
-function validateMutationEnvelope(input: unknown): void {
+function validateMutationEnvelope(
+  input: unknown,
+  contextKey: "tenantContext" | "administrationContext" = "tenantContext",
+): void {
   if (
     input === null ||
     typeof input !== "object" ||
@@ -97,7 +124,7 @@ function validateMutationEnvelope(input: unknown): void {
   )
     fail("PUBLISHING_MUTATION_INVALID");
   const required = [
-    "tenantContext",
+    contextKey,
     "operation",
     "expectedVersion",
     "current",
@@ -117,6 +144,10 @@ function validateMutationEnvelope(input: unknown): void {
     "rollbackTarget",
     "productPolicyContent",
     "optionSetPolicyContent",
+    "optionPricePolicyContent",
+    "optionSetReviewPolicy",
+    "optionSetApprovalWaiver",
+    "optionSetCurrentQualification",
   ]);
   const keys = Reflect.ownKeys(input);
   const descriptors = Object.getOwnPropertyDescriptors(input);
@@ -132,9 +163,12 @@ function validateMutationEnvelope(input: unknown): void {
     fail("PUBLISHING_MUTATION_INVALID");
 }
 
-function exactContext(context: TenantContext, scope: PublishingScope): boolean {
+function exactContext(
+  context: TenantContext | BrandAdministrationContext,
+  scope: PublishingScope,
+): boolean {
   return (
-    context.scopeKind === scope.kind &&
+    ("profile" in context ? scope.kind === "Brand" : context.scopeKind === scope.kind) &&
     context.brand.brandReference === scope.brandReference &&
     (context.store?.storeReference ?? null) === scope.storeReference
   );
@@ -184,6 +218,7 @@ function validateValidation(
   input: PublishingValidationEvidence | undefined,
   record: PublishingLifecycleRecord,
   occurredAt: string,
+  historical = false,
 ): PublishingValidationEvidence {
   if (input === undefined) return fail("PUBLISHING_VALIDATION_DENIED");
   let evidence: PublishingValidationEvidence;
@@ -194,7 +229,9 @@ function validateValidation(
   }
   if (
     !sameSnapshot(record, evidence) ||
-    !evidenceCurrent(occurredAt, evidence.checkedAt, evidence.validUntil)
+    (historical
+      ? evidence.checkedAt > occurredAt
+      : !evidenceCurrent(occurredAt, evidence.checkedAt, evidence.validUntil))
   )
     return fail("PUBLISHING_VALIDATION_DENIED");
   return evidence;
@@ -205,6 +242,7 @@ function validateApproval(
   review: PublishingLifecycleRecord,
   expectedReviewVersion: number,
   occurredAt: string,
+  historical = false,
 ): PublishingApprovalEvidence {
   if (input === undefined) return fail("PUBLISHING_APPROVAL_DENIED");
   let evidence: PublishingApprovalEvidence;
@@ -217,7 +255,9 @@ function validateApproval(
     evidence.reviewLifecycleId !== review.lifecycleId ||
     evidence.reviewVersion !== expectedReviewVersion ||
     !sameSnapshot(review, evidence) ||
-    !evidenceCurrent(occurredAt, evidence.approvedAt, evidence.validUntil)
+    (historical
+      ? evidence.approvedAt > occurredAt
+      : !evidenceCurrent(occurredAt, evidence.approvedAt, evidence.validUntil))
   )
     return fail("PUBLISHING_APPROVAL_DENIED");
   return evidence;
@@ -307,7 +347,7 @@ function validateRelease(input: {
 
 function createAudit(input: {
   operation: PublishingOperation;
-  context: TenantContext;
+  context: TenantContext | BrandAdministrationContext;
   lifecycle: PublishingLifecycleRecord;
   auditId: PublishingReference;
   correlationId: PublishingReference;
@@ -341,7 +381,11 @@ function createAudit(input: {
 }
 
 export interface ExecutePublishingMutationInput {
+  readonly optionSetCurrentQualification?: unknown;
+  readonly optionSetReviewPolicy?: unknown;
+  readonly optionSetApprovalWaiver?: unknown;
   readonly optionSetPolicyContent?: unknown;
+  readonly optionPricePolicyContent?: unknown;
   readonly productPolicyContent?: unknown;
   readonly tenantContext: TenantContext;
   readonly operation: PublishingOperation;
@@ -366,11 +410,74 @@ export interface ExecutePublishingMutationResult {
   readonly auditReference: PublishingReference;
 }
 
-export async function executePublishingMutation(
+export type ExecuteBrandAdministrationPublishingMutationInput = Omit<
+  ExecutePublishingMutationInput,
+  | "tenantContext"
+  | "optionSetCurrentQualification"
+  | "optionSetReviewPolicy"
+  | "optionSetApprovalWaiver"
+  | "optionSetPolicyContent"
+  | "optionPricePolicyContent"
+  | "productPolicyContent"
+> & {
+  readonly administrationContext: BrandAdministrationContext;
+  readonly optionSetCurrentQualification?: never;
+  readonly optionSetReviewPolicy?: never;
+  readonly optionSetApprovalWaiver?: never;
+  readonly optionSetPolicyContent?: never;
+  readonly optionPricePolicyContent?: never;
+  readonly productPolicyContent?: never;
+};
+type MutationContext = TenantContext | BrandAdministrationContext;
+type InternalAuthorizationRequest = Omit<PublishingAuthorizationRequest, "tenantContext"> & {
+  readonly context: MutationContext;
+};
+interface InternalMutationPorts {
+  readonly authorize: (request: InternalAuthorizationRequest) => Promise<PermissionDecision>;
+  readonly unitOfWork: PublishingPorts["unitOfWork"];
+}
+export function executePublishingMutation(
   input: ExecutePublishingMutationInput,
   ports: PublishingPorts,
 ): Promise<ExecutePublishingMutationResult> {
-  let context: TenantContext;
+  return executeMutation(
+    input,
+    {
+      unitOfWork: ports.unitOfWork,
+      authorize: ({ context, ...request }) => {
+        if ("profile" in context) return fail("PUBLISHING_MUTATION_INVALID");
+        return ports.authorization.authorize({
+          ...request,
+          tenantContext: revalidateTenantContext(context),
+        });
+      },
+    },
+    false,
+  );
+}
+export function executeBrandAdministrationPublishingMutation(
+  input: ExecuteBrandAdministrationPublishingMutationInput,
+  ports: BrandAdministrationPublishingPorts,
+): Promise<ExecutePublishingMutationResult> {
+  return executeMutation(
+    input,
+    {
+      unitOfWork: ports.unitOfWork,
+      authorize: ({ context, ...request }) =>
+        ports.authorization.authorize({
+          ...request,
+          administrationContext: parseBrandAdministrationContext(context),
+        }),
+    },
+    true,
+  );
+}
+async function executeMutation(
+  input: ExecutePublishingMutationInput | ExecuteBrandAdministrationPublishingMutationInput,
+  ports: InternalMutationPorts,
+  administrative: boolean,
+): Promise<ExecutePublishingMutationResult> {
+  let context: MutationContext;
   let current: PublishingLifecycleRecord | null;
   let next: PublishingLifecycleRecord;
   let expectedVersion: PublishingVersion;
@@ -379,10 +486,41 @@ export async function executePublishingMutation(
   let correlationId: PublishingReference;
   let occurredAt: string;
   let sourceChannel: PublishingCode;
+  let optionSetReviewPolicy: PublishingOptionSetReviewPolicy | undefined;
+  let optionSetApprovalWaiver: PublishingOptionSetApprovalWaiver | undefined;
   let optionSetPolicyContent: PublishingOptionSetPublicationPolicy | undefined;
+  let optionPricePolicyContent: PublishingOptionPricePublicationPolicy | undefined;
   let productPolicyContent: PublishingProductPublicationPolicy | undefined;
+  let optionSetCurrentQualification: PublishingOptionSetCurrentQualification | undefined;
   try {
-    validateMutationEnvelope(input);
+    validateMutationEnvelope(input, administrative ? "administrationContext" : "tenantContext");
+    if (
+      administrative &&
+      [
+        "optionSetCurrentQualification",
+        "optionSetReviewPolicy",
+        "optionSetApprovalWaiver",
+        "optionSetPolicyContent",
+        "optionPricePolicyContent",
+        "productPolicyContent",
+        "rollbackTarget",
+      ].some((key) => Object.hasOwn(input, key))
+    )
+      return fail("PUBLISHING_MUTATION_INVALID");
+    if (Object.hasOwn(input, "optionSetCurrentQualification"))
+      optionSetCurrentQualification = parsePublishingOptionSetCurrentQualification(
+        input.optionSetCurrentQualification,
+      );
+    if (Object.hasOwn(input, "optionSetReviewPolicy")) {
+      if (input.operation !== "SubmitReview") return fail("PUBLISHING_MUTATION_INVALID");
+      optionSetReviewPolicy = parsePublishingOptionSetReviewPolicy(input.optionSetReviewPolicy);
+    }
+    if (Object.hasOwn(input, "optionSetApprovalWaiver")) {
+      if (input.operation !== "Publish") return fail("PUBLISHING_MUTATION_INVALID");
+      optionSetApprovalWaiver = parsePublishingOptionSetApprovalWaiver(
+        input.optionSetApprovalWaiver,
+      );
+    }
     if (Object.hasOwn(input, "productPolicyContent")) {
       if (input.operation !== "CreateDraft") return fail("PUBLISHING_MUTATION_INVALID");
       productPolicyContent = parsePublishingProductPublicationPolicy(input.productPolicyContent);
@@ -394,10 +532,38 @@ export async function executePublishingMutation(
         input.optionSetPolicyContent,
       );
     }
+    if (Object.hasOwn(input, "optionPricePolicyContent")) {
+      if (input.operation !== "CreateDraft" || productPolicyContent || optionSetPolicyContent)
+        return fail("PUBLISHING_MUTATION_INVALID");
+      optionPricePolicyContent = parsePublishingOptionPricePublicationPolicy(
+        input.optionPricePolicyContent,
+      );
+    }
     if (!publishingOperations.includes(input.operation)) fail("PUBLISHING_MUTATION_INVALID");
-    context = revalidateTenantContext(input.tenantContext);
+    context =
+      administrative && "administrationContext" in input
+        ? parseBrandAdministrationContext(input.administrationContext)
+        : "tenantContext" in input
+          ? revalidateTenantContext(input.tenantContext)
+          : fail("PUBLISHING_MUTATION_INVALID");
     current = input.current === null ? null : createPublishingLifecycleRecord(input.current);
     next = createPublishingLifecycleRecord(input.next);
+    if (
+      administrative &&
+      (!["CreateDraft", "SubmitReview", "Approve", "Publish", "Archive"].includes(
+        input.operation,
+      ) ||
+        next.configurationType !== "BRAND_CONFIGURATION" ||
+        next.purposeCode !== "BRAND_CONFIGURATION" ||
+        next.scope.kind !== "Brand" ||
+        next.scope.storeReference !== null ||
+        next.familyReference !== String(context.brand.brandReference) ||
+        (current !== null &&
+          (current.configurationType !== "BRAND_CONFIGURATION" ||
+            current.purposeCode !== "BRAND_CONFIGURATION" ||
+            current.familyReference !== String(context.brand.brandReference))))
+    )
+      return fail("PUBLISHING_MUTATION_INVALID");
     if (
       productPolicyContent &&
       (next.scope.kind !== "Brand" ||
@@ -420,6 +586,18 @@ export async function executePublishingMutation(
         next.snapshotDigest !== publishingOptionSetPublicationPolicyDigest(optionSetPolicyContent))
     )
       return fail("PUBLISHING_MUTATION_INVALID");
+    if (
+      optionPricePolicyContent &&
+      (next.scope.kind !== "Brand" ||
+        next.configurationType !== optionPricePolicyConfigurationType ||
+        next.purposeCode !== optionPricePolicyConfigurationType ||
+        String(next.scope.brandReference) !== optionPricePolicyContent.brandReference ||
+        next.familyReference !== optionPricePolicyContent.familyReference ||
+        next.snapshotReference !== optionPricePolicyContent.policyReference ||
+        next.snapshotDigest !==
+          publishingOptionPricePublicationPolicyDigest(optionPricePolicyContent))
+    )
+      return fail("PUBLISHING_MUTATION_INVALID");
     expectedVersion = parsePublishingVersion(input.expectedVersion);
     idempotencyKey = parsePublishingReference(input.idempotencyKey);
     auditId = parsePublishingReference(input.auditId);
@@ -437,6 +615,7 @@ export async function executePublishingMutation(
 
   const transition = evaluatePublishingTransition({
     operation: input.operation,
+    optionSetApprovalWaived: optionSetApprovalWaiver !== undefined,
     expectedVersion,
     current,
     next,
@@ -445,8 +624,8 @@ export async function executePublishingMutation(
 
   let decision: PermissionDecision;
   try {
-    decision = await ports.authorization.authorize({
-      tenantContext: context,
+    decision = await ports.authorize({
+      context,
       action: actions[input.operation],
       resourceScope: permissionScope(next.scope),
       familyReference: next.familyReference,
@@ -458,6 +637,32 @@ export async function executePublishingMutation(
   }
   if (!accepted(decision, actions[input.operation], next.scope))
     fail("PUBLISHING_PERMISSION_DENIED");
+
+  if (optionSetCurrentQualification) {
+    const q = optionSetCurrentQualification;
+    if (
+      input.operation !== "Publish" ||
+      !current ||
+      next.configurationType !== "CATALOG_OPTION_SET" ||
+      next.purposeCode !== "CATALOG_OPTION_SET_PUBLICATION" ||
+      String(q.actorReference) !== String(context.actor.actorReference) ||
+      q.operationReference !== idempotencyKey ||
+      q.familyReference !== current.familyReference ||
+      q.lifecycleReference !== current.lifecycleId ||
+      q.expectedLifecycleVersion !== current.version ||
+      q.snapshotReference !== current.snapshotReference ||
+      q.snapshotDigest !== current.snapshotDigest ||
+      q.validationEvidenceReference !== current.validationEvidenceReference ||
+      q.approvalEvidenceReference !== current.approvalEvidenceReference ||
+      !samePublishingScope(q.scope, current.scope) ||
+      !evidenceCurrent(occurredAt, q.checkedAt, q.validUntil) ||
+      (optionSetApprovalWaiver &&
+        (!optionSetApprovalWaiver.currentQualification ||
+          canonicalizeRfc8785(optionSetApprovalWaiver.currentQualification) !==
+            canonicalizeRfc8785(q)))
+    )
+      fail("PUBLISHING_VALIDATION_DENIED");
+  } else if (optionSetApprovalWaiver?.currentQualification) fail("PUBLISHING_VALIDATION_DENIED");
 
   let retainedValidation: PublishingValidationEvidence | null = null;
   let retainedApproval: PublishingApprovalEvidence | null = null;
@@ -485,19 +690,33 @@ export async function executePublishingMutation(
   const previous = validatePreviousRelease(input.previousRelease, next);
   if (input.operation === "Publish" || input.operation === "Rollback") {
     if (current === null) fail("PUBLISHING_MUTATION_INVALID");
-    const validation = validateValidation(input.validationEvidence, current, occurredAt);
-    retainedValidation = validation;
-    const approval = validateApproval(
-      input.approvalEvidence,
+    const validation = validateValidation(
+      input.validationEvidence,
       current,
-      current.version - 1,
       occurredAt,
+      optionSetCurrentQualification !== undefined,
     );
-    retainedApproval = approval;
-    if (
-      current.validationEvidenceReference !== validation.evidenceReference ||
-      current.approvalEvidenceReference !== approval.evidenceReference
-    )
+    retainedValidation = validation;
+    if (optionSetApprovalWaiver) {
+      if (
+        input.approvalEvidence !== undefined ||
+        current.approvalEvidenceReference !== null ||
+        optionSetApprovalWaiver.recordedAt !== occurredAt
+      )
+        fail("PUBLISHING_APPROVAL_DENIED");
+    } else {
+      const approval = validateApproval(
+        input.approvalEvidence,
+        current,
+        current.version - 1,
+        occurredAt,
+        optionSetCurrentQualification !== undefined,
+      );
+      retainedApproval = approval;
+      if (current.approvalEvidenceReference !== approval.evidenceReference)
+        fail("PUBLISHING_MUTATION_INVALID");
+    }
+    if (current.validationEvidenceReference !== validation.evidenceReference)
       fail("PUBLISHING_MUTATION_INVALID");
     const validated = validateRelease({
       operation: input.operation,
@@ -526,11 +745,29 @@ export async function executePublishingMutation(
     occurredAt,
     sourceChannel,
   });
+  const binding = optionSetReviewPolicy ?? optionSetApprovalWaiver?.reviewPolicy;
+  if (binding) {
+    const original = optionSetReviewPolicy ? next : current;
+    if (
+      canonicalizeRfc8785(binding.reviewLifecycle) !== canonicalizeRfc8785(original) ||
+      canonicalizeRfc8785(binding.validationEvidence) !== canonicalizeRfc8785(retainedValidation) ||
+      (optionSetReviewPolicy &&
+        (binding.reviewOperationReference !== idempotencyKey ||
+          audit.actor.type !== "User" ||
+          binding.submittedActorReference !== audit.actor.reference ||
+          binding.submittedAt !== occurredAt))
+    )
+      fail("PUBLISHING_MUTATION_INVALID");
+  }
   let originalAuditReference: PublishingReference;
   try {
     const committed = await ports.unitOfWork.commit({
+      ...(optionSetCurrentQualification === undefined ? {} : { optionSetCurrentQualification }),
+      ...(optionSetReviewPolicy === undefined ? {} : { optionSetReviewPolicy }),
+      ...(optionSetApprovalWaiver === undefined ? {} : { optionSetApprovalWaiver }),
       ...(productPolicyContent === undefined ? {} : { productPolicyContent }),
       ...(optionSetPolicyContent === undefined ? {} : { optionSetPolicyContent }),
+      ...(optionPricePolicyContent === undefined ? {} : { optionPricePolicyContent }),
       operation: input.operation,
       validationEvidence: retainedValidation,
       approvalEvidence: retainedApproval,

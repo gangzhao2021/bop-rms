@@ -17,7 +17,7 @@ export interface ReceiptTemplateTransaction {
     values: readonly unknown[],
   ): Promise<{
     readonly rows: readonly Record<string, unknown>[];
-    readonly rowCount: number | null;
+    readonly rowCount?: number | null;
   }>;
 }
 const fail = (): never => {
@@ -53,11 +53,13 @@ export function createPostgresDigitalReceiptTemplateStore(options: {
 }) {
   const brand = parseDeviceReference(options.brandReference),
     store = parseDeviceReference(options.storeReference);
+  const poisoned = new WeakSet<ReceiptTemplateTransaction>();
   const authorize = async (
     tx: ReceiptTemplateTransaction,
     template: string,
     action: "Read" | "Publish",
   ) => {
+    if (poisoned.has(tx)) return fail();
     if (
       (await options.authorize(tx, {
         brandReference: brand,
@@ -101,7 +103,237 @@ export function createPostgresDigitalReceiptTemplateStore(options: {
     if (result.rows.length > 100) return fail();
     return result.rows.map(decode);
   };
+  const append = async (
+    tx: ReceiptTemplateTransaction,
+    input: {
+      version: unknown;
+      operationReference: string;
+      publicationDigest: string;
+      audit: unknown;
+    },
+    held: boolean,
+  ) => {
+    const queryPort = tx.query,
+      authorizePort = options.authorize,
+      validatePort = options.validatePublication,
+      currentPort = options.isCurrentPublication,
+      digest =
+        input && typeof input === "object"
+          ? Object.getOwnPropertyDescriptor(input, "publicationDigest")?.value
+          : undefined;
+    const captured = () => {
+      if (poisoned.has(tx)) return fail();
+      if (
+        held &&
+        (tx.query !== queryPort ||
+          options.authorize !== authorizePort ||
+          options.validatePublication !== validatePort ||
+          options.isCurrentPublication !== currentPort ||
+          options.brandReference !== brand ||
+          options.storeReference !== store ||
+          Object.getOwnPropertyDescriptor(input, "publicationDigest")?.value !== digest)
+      )
+        return fail();
+    };
+    const query: ReceiptTemplateTransaction["query"] = async (statement, values) => {
+      captured();
+      const result = held
+        ? await queryPort.call(tx, statement, values)
+        : await tx.query(statement, values);
+      captured();
+      return result;
+    };
+    const sqlTransaction = held ? { query } : tx;
+    const admit = async (template: string) => {
+      captured();
+      await authorize(tx, template, "Publish");
+      captured();
+    };
+    try {
+      if (held) {
+        if (
+          !input ||
+          Object.getPrototypeOf(input) !== Object.prototype ||
+          Reflect.ownKeys(input).length !== 4
+        )
+          return fail();
+        for (const key of ["version", "operationReference", "publicationDigest", "audit"]) {
+          const field = Object.getOwnPropertyDescriptor(input, key);
+          if (!field?.enumerable || !("value" in field)) return fail();
+        }
+      }
+      captured();
+      const version = parseDigitalReceiptTemplateVersion(input.version),
+        operation = parseDeviceReference(input.operationReference);
+      const audit = validateAuditRecord(input.audit);
+      if (
+        version.brandReference !== brand ||
+        version.storeReference !== store ||
+        !/^sha256:[0-9a-f]{64}$/u.test(input.publicationDigest) ||
+        audit.brandId !== brand ||
+        audit.storeId !== store ||
+        audit.targetType !== "DigitalReceiptTemplate" ||
+        audit.targetId !== version.versionReference ||
+        audit.actionCode !== "RECEIPT_TEMPLATE_PUBLISH" ||
+        audit.correlationId !== operation ||
+        audit.occurredAt !== version.publishedAt ||
+        audit.dataClassification !== "Confidential" ||
+        audit.beforeSummary !== undefined ||
+        audit.afterSummary !== undefined
+      )
+        return fail();
+      await admit(version.templateReference);
+      await fence(sqlTransaction, version.templateReference);
+      captured();
+      await query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "ReceiptTemplateOperation:" + brand + ":" + store + ":" + operation,
+      ]);
+      await admit(version.templateReference);
+      const prior = await query(
+        "SELECT version_json,publication_digest,audit_id FROM rms_device.digital_receipt_template_version WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+        [brand, store, operation],
+      );
+      const existing = prior.rows[0];
+      if (existing) {
+        const record = parseDigitalReceiptTemplateVersion(existing.version_json);
+        if (
+          encode(record) !== encode(version) ||
+          existing.publication_digest !== input.publicationDigest ||
+          existing.audit_id !== audit.auditId
+        )
+          throw new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_CONFLICT");
+        return Object.freeze({ status: "Existing" as const, version: record });
+      }
+      const versions = await read(sqlTransaction, version.templateReference);
+      if (version.versionNumber !== (versions.at(-1)?.versionNumber ?? 0) + 1)
+        throw new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_CONFLICT");
+      const valid = await options.validatePublication(tx, version, input.publicationDigest);
+      captured();
+      if (valid !== true) return fail();
+      const current = [];
+      for (const priorVersion of versions) {
+        const accepted = await options.isCurrentPublication(
+          tx,
+          priorVersion,
+          version.effectiveFrom,
+        );
+        captured();
+        if (accepted !== true && accepted !== false) return fail();
+        if (accepted) current.push(priorVersion);
+      }
+      resolveDigitalReceiptTemplate({
+        brandReference: brand,
+        storeReference: store,
+        templateReference: version.templateReference,
+        locale: version.locale,
+        observedAt: version.effectiveFrom,
+        versions: [...current, version],
+      });
+      await admit(version.templateReference);
+      const write = async () => {
+        const inserted = await query(
+          "INSERT INTO rms_device.digital_receipt_template_version (version_id,brand_id,store_id,template_id,version_number,version_code,operation_id,audit_id,publication_id,publication_digest,published_at,version_json,data_classification) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'Confidential')",
+          [
+            version.versionReference,
+            brand,
+            store,
+            version.templateReference,
+            version.versionNumber,
+            version.versionCode,
+            operation,
+            audit.auditId,
+            version.publicationReference,
+            input.publicationDigest,
+            version.publishedAt,
+            encode(version),
+          ],
+        );
+        if (inserted.rowCount !== 1) return fail();
+        captured();
+        await appendAuditRecordInTransaction(tx, audit);
+        captured();
+      };
+      if (held) await write();
+      else {
+        await query("SAVEPOINT receipt_template_publish", []);
+        try {
+          await write();
+          await query("RELEASE SAVEPOINT receipt_template_publish", []);
+        } catch {
+          await query("ROLLBACK TO SAVEPOINT receipt_template_publish", []);
+          await query("RELEASE SAVEPOINT receipt_template_publish", []);
+          return fail();
+        }
+      }
+      captured();
+      return Object.freeze({ status: "Created" as const, version });
+    } catch (error) {
+      if (held) poisoned.add(tx);
+      if (error instanceof DigitalReceiptTemplateError) throw error;
+      return fail();
+    }
+  };
   return Object.freeze({
+    /** Server allocation input only. History does not establish a current
+     * release, live Store readiness or professional receipt approval. */
+    async readPublicationSequence(
+      tx: ReceiptTemplateTransaction,
+      input: { templateReference: string },
+    ) {
+      try {
+        if (
+          !input ||
+          Object.getPrototypeOf(input) !== Object.prototype ||
+          Reflect.ownKeys(input).length !== 1
+        )
+          return fail();
+        const descriptor = Object.getOwnPropertyDescriptor(input, "templateReference");
+        if (!descriptor?.enumerable || !("value" in descriptor)) return fail();
+        const template = parseDeviceReference(descriptor.value),
+          queryPort = tx.query,
+          authorizePort = options.authorize;
+        const captured = () => {
+          if (
+            tx.query !== queryPort ||
+            options.authorize !== authorizePort ||
+            options.brandReference !== brand ||
+            options.storeReference !== store
+          )
+            return fail();
+        };
+        captured();
+        await authorize(tx, template, "Read");
+        captured();
+        await fence(tx, template);
+        captured();
+        const versions = await read(tx, template);
+        captured();
+        if (
+          versions.length >= 100 ||
+          versions.some(
+            (version, index) =>
+              version.brandReference !== brand ||
+              version.storeReference !== store ||
+              version.templateReference !== template ||
+              version.versionNumber !== index + 1,
+          )
+        )
+          return fail();
+        await authorize(tx, template, "Read");
+        captured();
+        return Object.freeze({
+          profile: "DigitalReceiptTemplatePublicationSequenceV1" as const,
+          brandReference: brand,
+          storeReference: store,
+          templateReference: template,
+          nextVersionNumber: versions.length + 1,
+          latestVersionReference: versions.at(-1)?.versionReference ?? null,
+        });
+      } catch (error) {
+        if (error instanceof DigitalReceiptTemplateError) throw error;
+        return fail();
+      }
+    },
     async resolve(
       tx: ReceiptTemplateTransaction,
       input: { templateReference: string; locale: string; observedAt: string },
@@ -142,103 +374,23 @@ export function createPostgresDigitalReceiptTemplateStore(options: {
         audit: unknown;
       },
     ) {
-      try {
-        const version = parseDigitalReceiptTemplateVersion(input.version),
-          operation = parseDeviceReference(input.operationReference);
-        const audit = validateAuditRecord(input.audit);
-        if (
-          version.brandReference !== brand ||
-          version.storeReference !== store ||
-          !/^sha256:[0-9a-f]{64}$/u.test(input.publicationDigest) ||
-          audit.brandId !== brand ||
-          audit.storeId !== store ||
-          audit.targetType !== "DigitalReceiptTemplate" ||
-          audit.targetId !== version.versionReference ||
-          audit.actionCode !== "RECEIPT_TEMPLATE_PUBLISH" ||
-          audit.correlationId !== operation ||
-          audit.occurredAt !== version.publishedAt ||
-          audit.dataClassification !== "Confidential" ||
-          audit.beforeSummary !== undefined ||
-          audit.afterSummary !== undefined
-        )
-          return fail();
-        await authorize(tx, version.templateReference, "Publish");
-        await fence(tx, version.templateReference);
-        await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-          "ReceiptTemplateOperation:" + brand + ":" + store + ":" + operation,
-        ]);
-        await authorize(tx, version.templateReference, "Publish");
-        const prior = await tx.query(
-          "SELECT version_json,publication_digest,audit_id FROM rms_device.digital_receipt_template_version WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
-          [brand, store, operation],
-        );
-        const existing = prior.rows[0];
-        if (existing) {
-          const record = parseDigitalReceiptTemplateVersion(existing.version_json);
-          if (
-            encode(record) !== encode(version) ||
-            existing.publication_digest !== input.publicationDigest ||
-            existing.audit_id !== audit.auditId
-          )
-            throw new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_CONFLICT");
-          return Object.freeze({ status: "Existing" as const, version: record });
-        }
-        const versions = await read(tx, version.templateReference);
-        if (version.versionNumber !== (versions.at(-1)?.versionNumber ?? 0) + 1)
-          throw new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_CONFLICT");
-        if ((await options.validatePublication(tx, version, input.publicationDigest)) !== true)
-          return fail();
-        const current = [];
-        for (const priorVersion of versions) {
-          const accepted = await options.isCurrentPublication(
-            tx,
-            priorVersion,
-            version.effectiveFrom,
-          );
-          if (accepted !== true && accepted !== false) return fail();
-          if (accepted) current.push(priorVersion);
-        }
-        resolveDigitalReceiptTemplate({
-          brandReference: brand,
-          storeReference: store,
-          templateReference: version.templateReference,
-          locale: version.locale,
-          observedAt: version.effectiveFrom,
-          versions: [...current, version],
-        });
-        await authorize(tx, version.templateReference, "Publish");
-        await tx.query("SAVEPOINT receipt_template_publish", []);
-        try {
-          const inserted = await tx.query(
-            "INSERT INTO rms_device.digital_receipt_template_version (version_id,brand_id,store_id,template_id,version_number,version_code,operation_id,audit_id,publication_id,publication_digest,published_at,version_json,data_classification) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'Confidential')",
-            [
-              version.versionReference,
-              brand,
-              store,
-              version.templateReference,
-              version.versionNumber,
-              version.versionCode,
-              operation,
-              audit.auditId,
-              version.publicationReference,
-              input.publicationDigest,
-              version.publishedAt,
-              encode(version),
-            ],
-          );
-          if (inserted.rowCount !== 1) return fail();
-          await appendAuditRecordInTransaction(tx, audit);
-          await tx.query("RELEASE SAVEPOINT receipt_template_publish", []);
-        } catch {
-          await tx.query("ROLLBACK TO SAVEPOINT receipt_template_publish", []);
-          await tx.query("RELEASE SAVEPOINT receipt_template_publish", []);
-          return fail();
-        }
-        return Object.freeze({ status: "Created" as const, version });
-      } catch (error) {
-        if (error instanceof DigitalReceiptTemplateError) throw error;
-        return fail();
-      }
+      return append(tx, input, false);
+    },
+    /** Held outer transaction only: no internal SAVEPOINT or COMMIT. Caller must
+     * retain actual authorization/publication/artifact fences and roll back the
+     * whole transaction on any rejection, including Audit or terminal failure.
+     * A rejected held append poisons this store for the same transaction.
+     */
+    async appendPublishedInTransaction(
+      tx: ReceiptTemplateTransaction,
+      input: {
+        version: unknown;
+        operationReference: string;
+        publicationDigest: string;
+        audit: unknown;
+      },
+    ) {
+      return append(tx, input, true);
     },
   });
 }

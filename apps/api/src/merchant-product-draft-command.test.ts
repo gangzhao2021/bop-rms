@@ -255,3 +255,53 @@ it("accepts only exclusive complete pinned Option configuration inside current p
   ])
     expect(() => build(patch)).toThrow(CatalogError);
 });
+it("Draft Media/Safety requires exclusive actual source ports and a remaining field holder", () => {
+  const holder = { holdUntilTransactionCompletes: vi.fn() },
+    mediaSafety = {
+      allergenRegistryVersionReference: id(17),
+      mediaAuthority: holder,
+      safetyAuthority: holder,
+      remainingAuthority: vi.fn(),
+    },
+    pinnedOptions = { optionAuthority: holder, mediaSafety },
+    contentPolicy = {
+      configurationVersionReference: id(15),
+      expectedBrandVersion: 1,
+      policyReference: id(16),
+      policyVersion: 1,
+      brandAuthority: { withCurrentContentRead: vi.fn(), isCurrent: vi.fn() },
+      policyAuthority: holder,
+    };
+  const build = (value: unknown) =>
+    createMerchantProductDraftCommand({
+      merchant: { now: () => at, transactions: { run: vi.fn() } } as never,
+      authentication: { authorize: vi.fn() },
+      auditReference: () => id(10),
+      registeredEditorContent: {
+        registryAuthority: holder,
+        variantHistory: {
+          authority: holder,
+          contentPolicy: { ...contentPolicy, pinnedOptions: value },
+        },
+      },
+    } as never);
+  expect(() => build(pinnedOptions)).not.toThrow();
+  expect(() =>
+    build({
+      ...pinnedOptions,
+      mediaSafety: { ...mediaSafety, allergenRegistryVersionReference: null },
+    }),
+  ).not.toThrow();
+  for (const value of [
+    { ...pinnedOptions, remainingAuthority: vi.fn() },
+    { ...pinnedOptions, mediaSafety: null },
+    { ...pinnedOptions, mediaSafety: { ...mediaSafety, mediaAuthority: undefined } },
+    { ...pinnedOptions, mediaSafety: { ...mediaSafety, safetyAuthority: undefined } },
+    { ...pinnedOptions, mediaSafety: { ...mediaSafety, remainingAuthority: undefined } },
+    {
+      ...pinnedOptions,
+      mediaSafety: { ...mediaSafety, allergenRegistryVersionReference: "invalid" },
+    },
+  ])
+    expect(() => build(value)).toThrow(CatalogError);
+});

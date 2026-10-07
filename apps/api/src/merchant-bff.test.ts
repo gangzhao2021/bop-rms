@@ -1,3 +1,9 @@
+import { BrandStoreTopologyError } from "@bop/tenant";
+import {
+  parsePublishingOptionSetPublicationOperation,
+  parsePublishingReference,
+  parsePublishingInstant,
+} from "@bop/publishing";
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
 import { BrowserSessionError } from "@bop/identity";
 import { parsePaymentReference, ReconciliationFollowUpError } from "@rms/payment";
@@ -10,7 +16,20 @@ import {
   KitchenWorkLifecycleError,
   parseKitchenWorkLifecycleResult,
 } from "@rms/kitchen";
-import { CatalogError } from "@rms/catalog";
+import {
+  CatalogError,
+  CatalogOptionSetListError,
+  buildCatalogProductAuthoringResolution,
+  buildCatalogSellingUnitRegistrationResolution,
+  materializeFullOptionSetCreation,
+  createCatalogOptionSetAuthoringResolution,
+  parseCatalogOptionSetAuthoringResolutionCommand,
+  parseCatalogInstant,
+  parseCatalogReference,
+  optionContentReviewValidationCodes,
+  parseCatalogOptionSetHistoryResult,
+  parseCatalogOptionSetHistoryRequest,
+} from "@rms/catalog";
 import { PriceBookWorkflowError } from "@rms/pricing";
 import { parseStoreReference, parseCanonicalInstant } from "@bop/tenant";
 import { parseStoreAdministrationReference } from "@rms/store";
@@ -23,6 +42,7 @@ import {
   type RawBrowserCredential,
 } from "@bop/identity";
 import express from "express";
+import { createApp } from "./app.js";
 import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -3343,4 +3363,1313 @@ it("bounds complete Draft JSON separately and preserves legacy, other route and 
   expect((await send(complete, undefined, { Origin: "https://foreign.invalid" })).status).toBe(403);
   expect((await send(complete, undefined, { "X-BOP-CSRF": "" })).status).toBe(403);
   expect(draft).not.toHaveBeenCalled();
+});
+
+async function serveAuthoring(
+  options: Pick<
+    MerchantBffRouterOptions,
+    | "productAuthoringResolution"
+    | "productAuthoringContext"
+    | "productSellingUnitRegistry"
+    | "optionSetAuthoring"
+    | "optionSetEditor"
+    | "optionSetHistory"
+    | "optionSetCurrentPublication"
+    | "productOptionPicker"
+    | "optionSetAuthoringResolution"
+    | "optionSetAuthoringContext"
+    | "optionSetList"
+    | "optionSetPublicationContext"
+    | "optionSetPublicationCommand"
+    | "optionSetPublicationResolution"
+  >,
+  application = false,
+) {
+  const routerOptions = {
+    service: fakeService(),
+    exactOrigin: "https://merchant.invalid",
+    acceptedHost: "merchant.invalid",
+    ...options,
+  };
+  const app = application ? createApp({ merchantBff: routerOptions }) : express();
+  if (!application) app.use("/merchant", createMerchantBffRouter(routerOptions));
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+const authoringId = (n: number) => "01902421-0016-7000-8000-" + n.toString(16).padStart(12, "0");
+const authoringScope = {
+  brandReference: authoringId(2),
+  storeReference: authoringId(3),
+};
+const authoringHeaders = {
+  ...safeHeaders,
+  Cookie: `__Host-bop-merchant=${sessionCookie}`,
+  "Content-Type": "application/json",
+  "X-BOP-CSRF": csrf,
+  "X-BOP-Catalog-Scope": Buffer.from(JSON.stringify(authoringScope)).toString("base64url"),
+};
+it("Option List HTTP protects scoped current reads, bounded errors and the actual app body budget", async () => {
+  let failure: Error | undefined;
+  let corrupt = false;
+  const filters = {
+    locale: "en-CA",
+    search: null,
+    lifecycle: null,
+    selectionType: null,
+    includeArchived: false,
+    hasProductBinding: null,
+    hasPricingReference: null,
+    hasConsumptionReference: null,
+    hasConflict: null,
+    missingTranslationLocale: null,
+    publishingStatus: null,
+    sort: "updatedAt",
+    direction: "DESC",
+    limit: 20,
+    cursor: null,
+  };
+  const view = {
+    projection: {
+      name: "catalog_option_set_search_v1",
+      version: 1,
+      asOfUtc: serverTime,
+      stale: false,
+      partial: true,
+      sourceGeneration: "sha256:" + "a".repeat(64),
+    },
+    scope: { tenantReference: authoringId(1), ...authoringScope, actorReference: authoringId(4) },
+    locale: "en-CA",
+    items: [],
+    hasMore: false,
+    nextCursor: null,
+  };
+  const list = vi.fn<NonNullable<MerchantBffRouterOptions["optionSetList"]>>(async () => {
+    if (failure) throw failure;
+    return {
+      ...view,
+      projection: { ...view.projection, partial: corrupt ? false : true },
+    } as Awaited<ReturnType<NonNullable<MerchantBffRouterOptions["optionSetList"]>>>;
+  });
+  const root = await serveAuthoring({ optionSetList: list }, true);
+  const send = (
+    headers: Record<string, string> = authoringHeaders,
+    suffix = "",
+    body = JSON.stringify(filters),
+  ) =>
+    request(root, "/merchant/catalog/option-sets/list" + suffix, { method: "POST", headers, body });
+  const first = await send();
+  expect(first.status).toBe(200);
+  expect(first.headers.get("cache-control")).toBe("no-store");
+  expect(await first.json()).toEqual(view);
+  expect(list).toHaveBeenCalledExactlyOnceWith({
+    sessionCookie,
+    csrf,
+    filters,
+    expectedScope: authoringScope,
+  });
+  for (const [code, status, expected] of [
+    ["Invalid", 400, "option_set_list_invalid"],
+    ["Denied", 403, "request_denied"],
+    ["FeatureDisabled", 409, "option_set_list_feature_disabled"],
+    ["Stale", 409, "option_set_list_stale"],
+    ["DependencyUnavailable", 503, "option_set_list_unavailable"],
+  ] as const) {
+    failure = new CatalogOptionSetListError(code);
+    const denied = await send();
+    expect(denied.status).toBe(status);
+    expect(await denied.json()).toEqual({ error: expected });
+  }
+  failure = new Error("SYNTHETIC_PRIVATE_SOURCE");
+  expect(await (await send()).json()).toEqual({ error: "option_set_list_unavailable" });
+  failure = undefined;
+  corrupt = true;
+  expect((await send()).status).toBe(503);
+  const calls = list.mock.calls.length;
+  for (const headers of [
+    { ...authoringHeaders, "X-BOP-CSRF": "invalid" },
+    { ...authoringHeaders, "X-BOP-Catalog-Scope": "invalid" },
+    { ...authoringHeaders, Origin: "https://foreign.invalid" },
+  ])
+    expect((await send(headers)).status).toBe(403);
+  expect((await send(authoringHeaders, "?scope=untrusted")).status).toBe(403);
+  expect(
+    (await send(authoringHeaders, "", JSON.stringify({ value: "x".repeat(9000) }))).status,
+  ).toBe(413);
+  expect(list).toHaveBeenCalledTimes(calls);
+  const unavailable = await serveAuthoring({}, true);
+  expect(
+    (
+      await request(unavailable, "/merchant/catalog/option-sets/list", {
+        method: "POST",
+        headers: authoringHeaders,
+        body: JSON.stringify(filters),
+      })
+    ).status,
+  ).toBe(503);
+});
+const optionHttpBody = {
+  internalCode: "SYNTHETIC_OPTIONS",
+  draft: {
+    defaultLocale: "en-CA",
+    localizedNames: { "en-CA": "Synthetic options" },
+    localizedDescriptions: {},
+    displayStyle: "MultiChoice",
+    minimumSelection: 0,
+    maximumSelection: 1,
+    allowRepeatedOption: false,
+    perOptionMaximumQuantity: 1,
+    maximumTotalQuantity: 1,
+    options: [],
+  },
+  additionalContent: {
+    profile: "CatalogOptionSetEditorContentV1",
+    optionDetails: [],
+    conditionalRules: [],
+    conflictRules: [],
+    scopeSet: [{ level: "Brand", reference: null, channelCodes: [], orderTypeCodes: [] }],
+    effectivePeriod: {
+      timeZone: "UTC",
+      effectiveFrom: {
+        instant: serverTime,
+        localDateTime: serverTime.slice(0, 23),
+        utcOffsetMinutes: 0,
+      },
+      effectiveUntil: null,
+    },
+  },
+  operationReference: authoringId(5),
+};
+const optionHttpPrepared = materializeFullOptionSetCreation(
+  {
+    ...optionHttpBody,
+    occurredAt: serverTime,
+    reasonCode: "AUTHORIZED_OPERATION",
+  },
+  {
+    brandReference: authoringScope.brandReference,
+    actorReference: authoringId(4),
+    allocations: {
+      optionSetReference: authoringId(6),
+      versionReference: authoringId(7),
+      options: [],
+    },
+  },
+);
+const optionHttpResolution = createCatalogOptionSetAuthoringResolution({
+  outcome: "Abandoned",
+  command: parseCatalogOptionSetAuthoringResolutionCommand({
+    profile: "CatalogOptionSetAuthoringResolutionCommandV1",
+    tenantReference: authoringId(1),
+    brandReference: authoringScope.brandReference,
+    actorReference: authoringId(4),
+    action: "Create",
+    reasonCode: "AUTHORIZED_OPERATION",
+    operationReference: authoringId(5),
+    optionSetReference: null,
+    expectedAggregateVersion: null,
+  }),
+  identity: null,
+  recordedAt: parseCatalogInstant(serverTime),
+});
+it.each(["create", "draft", "current-editor", "authoring/resolve", "authoring/context"] as const)(
+  "Option authoring HTTP %s forwards scoped requests and sanitizes failures",
+  async (mode) => {
+    let failure: Error | undefined;
+    const create = vi.fn<NonNullable<MerchantBffRouterOptions["optionSetAuthoring"]>["create"]>(
+      async () => {
+        if (failure) throw failure;
+        return {
+          profile: "CatalogOptionSetAuthoringCommandResultV1",
+          action: "Create",
+          status: "Applied",
+          storeReference: authoringScope.storeReference,
+          operationReference: authoringId(5),
+          content: optionHttpPrepared.content,
+          contentDigest: optionHttpPrepared.contentDigest,
+          configurationDigest: optionHttpPrepared.configurationDigest,
+          referenceEligibility: "NotEvaluated",
+        };
+      },
+    );
+    const edit = vi.fn<NonNullable<MerchantBffRouterOptions["optionSetAuthoring"]>["edit"]>(
+      async () => {
+        if (failure) throw failure;
+        return {
+          profile: "CatalogOptionSetAuthoringCommandResultV1",
+          action: "Edit",
+          status: "Replayed",
+          storeReference: authoringScope.storeReference,
+          operationReference: authoringId(5),
+          content: optionHttpPrepared.content,
+          contentDigest: optionHttpPrepared.contentDigest,
+          configurationDigest: optionHttpPrepared.configurationDigest,
+          referenceEligibility: "NotEvaluated",
+        };
+      },
+    );
+    const read = vi.fn<NonNullable<MerchantBffRouterOptions["optionSetEditor"]>>(async () => {
+      if (failure) throw failure;
+      return {
+        profile: "CatalogOptionSetCurrentEditorResultV1",
+        tenantReference: authoringId(1),
+        brandReference: authoringScope.brandReference,
+        actorReference: authoringId(4),
+        storeReference: authoringScope.storeReference,
+        content: optionHttpPrepared.content,
+        sourceDigest: optionHttpPrepared.sourceDigest,
+        contentDigest: optionHttpPrepared.contentDigest,
+        configurationDigest: optionHttpPrepared.configurationDigest,
+        referenceEligibility: "NotEvaluated",
+      };
+    });
+    const recover = vi.fn<NonNullable<MerchantBffRouterOptions["optionSetAuthoringResolution"]>>(
+      async () => {
+        if (failure) throw failure;
+        return {
+          profile: "CatalogOptionSetAuthoringResolutionResultV1",
+          storeReference: authoringScope.storeReference,
+          resolution: optionHttpResolution,
+          content: null,
+        };
+      },
+    );
+    const context = vi.fn<NonNullable<MerchantBffRouterOptions["optionSetAuthoringContext"]>>(
+      async () => {
+        if (failure) throw failure;
+        return {
+          profile: "CatalogOptionSetAuthoringContextV1",
+          action: "Create",
+          tenantReference: authoringId(1),
+          brandReference: authoringScope.brandReference,
+          storeReference: authoringScope.storeReference,
+          actorReference: authoringId(4),
+          observedAt: serverTime,
+          validUntil: new Date(Date.parse(serverTime) + 5000).toISOString(),
+        };
+      },
+    );
+    const root = await serveAuthoring({
+      optionSetAuthoringContext: context,
+      optionSetAuthoring: { create, edit },
+      optionSetEditor: read,
+      optionSetAuthoringResolution: recover,
+    });
+    const command =
+      mode === "authoring/context"
+        ? { action: "Create" }
+        : mode === "create"
+          ? optionHttpBody
+          : mode === "draft"
+            ? {
+                optionSetReference: authoringId(6),
+                expectedAggregateVersion: 1,
+                draft: optionHttpBody.draft,
+                additionalContent: optionHttpBody.additionalContent,
+                archiveOptionReferences: [],
+                operationReference: authoringId(5),
+              }
+            : mode === "current-editor"
+              ? { optionSetReference: authoringId(6), expectedAggregateVersion: null }
+              : {
+                  profile: "CatalogOptionSetAuthoringResolutionRequestV1",
+                  tenantReference: authoringId(1),
+                  action: "Create",
+                  operationReference: authoringId(5),
+                  optionSetReference: null,
+                  expectedAggregateVersion: null,
+                };
+    const handler =
+      mode === "create"
+        ? create
+        : mode === "draft"
+          ? edit
+          : mode === "current-editor"
+            ? read
+            : mode === "authoring/resolve"
+              ? recover
+              : context;
+    const path = "/merchant/catalog/option-sets/" + mode;
+    const send = (headers: Record<string, string> = authoringHeaders, suffix = "") =>
+      request(root, path + suffix, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(command),
+      });
+    const result = await send();
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(handler).toHaveBeenCalledExactlyOnceWith({
+      sessionCookie,
+      csrf,
+      command,
+      expectedScope: authoringScope,
+    });
+    for (const headers of [
+      { ...authoringHeaders, "X-BOP-CSRF": "invalid" },
+      { ...authoringHeaders, Origin: "https://foreign.invalid" },
+      { ...authoringHeaders, "X-BOP-Catalog-Scope": "invalid" },
+    ])
+      expect((await send(headers)).status).toBe(403);
+    expect((await send(authoringHeaders, "?actor=untrusted")).status).toBe(403);
+    expect(handler).toHaveBeenCalledTimes(1);
+    for (const [error, status, code] of [
+      [new CatalogError("CATALOG_INPUT_INVALID"), 400, "option_set_authoring_invalid"],
+      [new CatalogError("CATALOG_PERMISSION_DENIED"), 403, "request_denied"],
+      [new CatalogError("CATALOG_VERSION_CONFLICT"), 409, "option_set_authoring_conflict"],
+      [new CatalogError("CATALOG_CODE_CONFLICT"), 409, "option_set_authoring_conflict"],
+      [new MerchantProductWriteFeatureDisabled(), 409, "option_set_authoring_conflict"],
+      [new Error("private source detail"), 503, "option_set_authoring_unavailable"],
+    ] as const) {
+      failure = error;
+      const rejected = await send();
+      expect(rejected.status).toBe(status);
+      expect(await rejected.json()).toEqual({ error: code });
+    }
+    const unavailableRoot = await serveAuthoring({});
+    expect(
+      (
+        await request(unavailableRoot, path, {
+          method: "POST",
+          headers: authoringHeaders,
+          body: JSON.stringify(command),
+        })
+      ).status,
+    ).toBe(503);
+  },
+);
+it.each(["create", "draft", "current-editor", "authoring/resolve", "authoring/context"] as const)(
+  "Option authoring HTTP %s applies its exact bounded JSON budget",
+  async (mode) => {
+    const rejected = vi.fn(async () => {
+      throw new CatalogError("CATALOG_INPUT_INVALID");
+    });
+    const root = await serveAuthoring(
+      {
+        optionSetAuthoring: { create: rejected, edit: rejected },
+        optionSetEditor: rejected,
+        optionSetAuthoringResolution: rejected,
+        optionSetAuthoringContext: rejected,
+      },
+      true,
+    );
+    const path = "/merchant/catalog/option-sets/" + mode;
+    const send = (body: string) =>
+      request(root, path, { method: "POST", headers: authoringHeaders, body });
+    const full = mode === "create" || mode === "draft";
+    const options = Array.from({ length: 50 }, (_, index) => ({
+      stableCode: "OPTION_" + index,
+      lifecycle: "Draft",
+      localizedNames: { "en-CA": "Synthetic option " + index },
+      localizedDescriptions: { "en-CA": "界".repeat(440) },
+      sortOrder: index,
+      defaultEligible: false,
+      triggeredOptionSetReference: null,
+      conflictOptionCodes: [],
+    }));
+    const largeBody = {
+      ...optionHttpBody,
+      draft: { ...optionHttpBody.draft, options },
+      additionalContent: {
+        ...optionHttpBody.additionalContent,
+        optionDetails: options.map((option) => ({
+          stableCode: option.stableCode,
+          quantityRule: { minimumQuantity: 0, maximumQuantity: 1 },
+          media: null,
+          pricingRule: null,
+          consumption: null,
+          triggeredOptionSetVersionReference: null,
+        })),
+      },
+    };
+    materializeFullOptionSetCreation(
+      { ...largeBody, occurredAt: serverTime, reasonCode: "AUTHORIZED_OPERATION" },
+      {
+        brandReference: authoringScope.brandReference,
+        actorReference: authoringId(4),
+        allocations: {
+          optionSetReference: authoringId(6),
+          versionReference: authoringId(7),
+          options: options.map((option, index) => ({
+            stableCode: option.stableCode,
+            optionReference: authoringId(500 + index),
+          })),
+        },
+      },
+    );
+    const large = JSON.stringify(largeBody);
+    expect(Buffer.byteLength(large)).toBeGreaterThan(64 * 1024);
+    const within = await send(large);
+    expect(within.status).toBe(full ? 400 : 413);
+    expect(rejected).toHaveBeenCalledTimes(full ? 1 : 0);
+    const oversized = await send(JSON.stringify({ content: "x".repeat(1_048_576) }));
+    expect(oversized.status).toBe(413);
+    expect(oversized.headers.get("cache-control")).toBe("no-store");
+    expect(await oversized.json()).toEqual({ error: "option_set_authoring_invalid" });
+    const malformed = await send('{"draft":');
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toEqual({ error: "option_set_authoring_invalid" });
+    expect(rejected).toHaveBeenCalledTimes(full ? 1 : 0);
+  },
+);
+it.each(["authoring-context", "authoring-resolution"])(
+  "authoring HTTP %s forwards exact current identity and protects the transport",
+  async (route) => {
+    const resolution = buildCatalogProductAuthoringResolution({
+      outcome: "Abandoned",
+      command: {
+        profile: "CatalogProductAuthoringResolutionCommandV1",
+        tenantReference: authoringId(1),
+        brandReference: authoringId(2),
+        actorReference: authoringId(4),
+        action: "Create",
+        operationReference: authoringId(5),
+        productReference: null,
+        expectedAggregateVersion: null,
+      },
+      productReference: null,
+      versionReference: null,
+      aggregateVersion: null,
+      originalIntentDigest: null,
+      recordedAt: serverTime,
+    });
+    const context = vi.fn<NonNullable<MerchantBffRouterOptions["productAuthoringContext"]>>(
+      async () => ({
+        profile: "CatalogProductAuthoringContextV1",
+        action: "Create",
+        tenantReference: authoringId(1),
+        brandReference: authoringId(2),
+        storeReference: authoringId(3),
+        actorReference: authoringId(4),
+        observedAt: serverTime,
+        validUntil: "2026-07-29T12:00:05.000Z",
+      }),
+    );
+    const recover = vi.fn<NonNullable<MerchantBffRouterOptions["productAuthoringResolution"]>>(
+      async () => ({
+        profile: "CatalogProductAuthoringResolutionResultV1",
+        storeReference: authoringId(3),
+        resolution,
+      }),
+    );
+    const root = await serveAuthoring({
+        productAuthoringContext: context,
+        productAuthoringResolution: recover,
+      }),
+      body =
+        route === "authoring-context"
+          ? { action: "Create" }
+          : {
+              profile: "CatalogProductAuthoringResolutionRequestV1",
+              tenantReference: authoringId(1),
+              action: "Create",
+              operationReference: authoringId(5),
+              productReference: null,
+              expectedAggregateVersion: null,
+            },
+      handler = route === "authoring-context" ? context : recover;
+    const result = await request(root, "/merchant/catalog/products/" + route, {
+      method: "POST",
+      headers: authoringHeaders,
+      body: JSON.stringify(body),
+    });
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(handler).toHaveBeenCalledExactlyOnceWith({
+      sessionCookie,
+      csrf,
+      command: body,
+      expectedScope: authoringScope,
+    });
+    for (const headers of [
+      { ...authoringHeaders, "X-BOP-CSRF": "invalid" },
+      { ...authoringHeaders, Origin: "https://foreign.invalid" },
+      { ...authoringHeaders, "X-BOP-Catalog-Scope": "invalid" },
+    ]) {
+      const denied = await request(root, "/merchant/catalog/products/" + route, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      expect(denied.status).toBe(403);
+    }
+    const query = await request(root, "/merchant/catalog/products/" + route + "?actor=untrusted", {
+      method: "POST",
+      headers: authoringHeaders,
+      body: JSON.stringify(body),
+    });
+    expect(query.status).toBe(403);
+    expect(handler).toHaveBeenCalledTimes(1);
+  },
+);
+it.each(["authoring-context", "authoring-resolution"])(
+  "authoring HTTP %s refuses unconfigured sources",
+  async (route) => {
+    const root = await serveAuthoring({});
+    const result = await request(root, "/merchant/catalog/products/" + route, {
+      method: "POST",
+      headers: authoringHeaders,
+      body: JSON.stringify({ action: "Create" }),
+    });
+    expect(result.status).toBe(503);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+  },
+);
+
+it.each(["context", "resolve", "inspect", "register"] as const)(
+  "selling units HTTP %s holds transport scope and sanitizes errors",
+  async (mode) => {
+    const registry: NonNullable<MerchantBffRouterOptions["productSellingUnitRegistry"]> = {
+      context: vi.fn(async () => ({
+        profile: "CatalogSellingUnitRegistrationContextV1" as const,
+        tenantReference: authoringId(1),
+        brandReference: authoringScope.brandReference,
+        storeReference: authoringScope.storeReference,
+        actorReference: authoringId(4),
+        action: "Create" as const,
+        observedAt: serverTime,
+        validUntil: "2026-07-29T12:00:05.000Z",
+      })),
+      resolve: vi.fn(async () => ({
+        profile: "CatalogSellingUnitRegistrationResolutionResultV1" as const,
+        storeReference: authoringScope.storeReference,
+        resolution: buildCatalogSellingUnitRegistrationResolution({
+          outcome: "Abandoned",
+          command: {
+            profile: "CatalogSellingUnitRegistrationResolutionCommandV1",
+            tenantReference: authoringId(1),
+            brandReference: authoringScope.brandReference,
+            actorReference: authoringId(4),
+            action: "Create",
+            operationReference: authoringId(5),
+            expectedRegistryVersion: 0,
+          },
+          registryReference: null,
+          versionReference: null,
+          registryVersion: null,
+          originalIntentDigest: null,
+          snapshotDigest: null,
+          recordedAt: serverTime,
+        }),
+      })),
+      inspect: vi.fn(async () => ({
+        profile: "CatalogProductSellingUnitRegistryViewV1" as const,
+        brandReference: authoringScope.brandReference,
+        storeReference: authoringScope.storeReference,
+        presence: "Absent" as const,
+        registryVersion: 0,
+        defaultLocale: null,
+        units: [],
+        assignedHistory: [],
+        historyDigest: "sha256:" + "a".repeat(64),
+        definitionsDigest: null,
+        inspectionDigest: "sha256:" + "b".repeat(64),
+        observedAt: serverTime,
+        validUntil: "2026-07-29T12:00:05.000Z",
+      })),
+      register: vi.fn(async () => ({
+        profile: "CatalogProductSellingUnitRegistryResultV1" as const,
+        status: "Applied" as const,
+        operationReference: authoringId(5),
+        registryVersion: 1,
+        snapshotDigest: "sha256:" + "c".repeat(64),
+      })),
+    };
+    const root = await serveAuthoring({ productSellingUnitRegistry: registry }),
+      path = "/merchant/catalog/products/selling-units/" + mode,
+      body = { action: "Create" },
+      handler = registry[mode];
+    const result = await request(root, path, {
+      method: "POST",
+      headers: authoringHeaders,
+      body: JSON.stringify(body),
+    });
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(handler).toHaveBeenCalledExactlyOnceWith({
+      sessionCookie,
+      csrf,
+      command: body,
+      expectedScope: authoringScope,
+    });
+    for (const headers of [
+      { ...authoringHeaders, "X-BOP-CSRF": "invalid" },
+      { ...authoringHeaders, Origin: "https://foreign.invalid" },
+      { ...authoringHeaders, "X-BOP-Catalog-Scope": "invalid" },
+    ]) {
+      expect(
+        (await request(root, path, { method: "POST", headers, body: JSON.stringify(body) })).status,
+      ).toBe(403);
+    }
+    expect(
+      (
+        await request(root, path + "?actor=untrusted", {
+          method: "POST",
+          headers: authoringHeaders,
+          body: JSON.stringify(body),
+        })
+      ).status,
+    ).toBe(403);
+    expect(handler).toHaveBeenCalledTimes(1);
+    for (const [code, status] of [
+      ["CATALOG_INPUT_INVALID", 400],
+      ["CATALOG_PERMISSION_DENIED", 403],
+      ["CATALOG_VERSION_CONFLICT", 409],
+      ["CATALOG_IDEMPOTENCY_CONFLICT", 409],
+      ["CATALOG_DEPENDENCY_UNAVAILABLE", 503],
+    ] as const) {
+      vi.mocked(handler).mockRejectedValueOnce(new CatalogError(code));
+      const failure = await request(root, path, {
+        method: "POST",
+        headers: authoringHeaders,
+        body: JSON.stringify(body),
+      });
+      expect(failure.status).toBe(status);
+      expect(failure.headers.get("cache-control")).toBe("no-store");
+      expect(await failure.text()).not.toContain(code);
+    }
+    const unconfigured = await serveAuthoring({});
+    expect(
+      (
+        await request(unconfigured, path, {
+          method: "POST",
+          headers: authoringHeaders,
+          body: JSON.stringify(body),
+        })
+      ).status,
+    ).toBe(503);
+  },
+);
+
+it("admits only canonical Option List navigation in the server workspace", () => {
+  const item = {
+    screenId: "CAT-OPTIONSET-LIST",
+    label: "Option sets",
+    href: "/app/commerce/option-sets",
+    permission: "catalog.manage",
+  };
+  expect(parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [item] }).navigation).toEqual([
+    item,
+  ]);
+  for (const change of [
+    { href: "/app/commerce/products" },
+    { permission: "catalog.option_set.read" },
+    { screenId: "CAT-OPTION-SET-LIST" },
+  ])
+    expect(() =>
+      parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [{ ...item, ...change }] }),
+    ).toThrow("MERCHANT_WORKSPACE_DENIED");
+});
+
+it("Option publication Context HTTP protects current scope, bounded errors and explicit unavailability", async () => {
+  let failure: Error | undefined;
+  const command = {
+      optionSetReference: authoringId(6),
+      expectedAggregateVersion: null,
+      action: "Inspect",
+    },
+    rootContent = optionHttpPrepared.content.sourceAggregate,
+    view: Awaited<
+      ReturnType<NonNullable<MerchantBffRouterOptions["optionSetPublicationContext"]>>
+    > = {
+      profile: "CatalogOptionSetPublicationContextV1",
+      action: "Inspect",
+      tenantReference: authoringId(1),
+      brandReference: authoringScope.brandReference,
+      storeReference: authoringScope.storeReference,
+      actorReference: authoringId(4),
+      observedAt: serverTime,
+      validUntil: new Date(Date.parse(serverTime) + 5000).toISOString(),
+      draft: {
+        optionSetReference: rootContent.optionSetReference,
+        versionReference: rootContent.draft.versionReference,
+        aggregateVersion: rootContent.aggregateVersion,
+        sourceOperationReference: authoringId(7),
+        sourceDigest: optionHttpPrepared.sourceDigest,
+        contentDigest: optionHttpPrepared.contentDigest,
+        configurationDigest: optionHttpPrepared.configurationDigest,
+        sourceSnapshotTuple: {
+          tenantReference: parseCatalogReference(authoringId(1)),
+          brandReference: rootContent.brandReference,
+          optionSetReference: rootContent.optionSetReference,
+          versionReference: rootContent.draft.versionReference,
+          aggregateVersion: rootContent.aggregateVersion,
+          sourceDigest: optionHttpPrepared.sourceDigest,
+          contentDigest: optionHttpPrepared.contentDigest,
+          configurationDigest: optionHttpPrepared.configurationDigest,
+        },
+      },
+      review: { kind: "AbsentForCurrentDraft" },
+    },
+    endpoint = vi.fn<NonNullable<MerchantBffRouterOptions["optionSetPublicationContext"]>>(
+      async () => {
+        if (failure) throw failure;
+        return view;
+      },
+    ),
+    root = await serveAuthoring({ optionSetPublicationContext: endpoint }),
+    path = "/merchant/catalog/option-sets/publication/context",
+    send = (headers: Record<string, string> = authoringHeaders, suffix = "") =>
+      request(root, path + suffix, { method: "POST", headers, body: JSON.stringify(command) });
+  const actual = await send();
+  expect(actual.status).toBe(200);
+  expect(await actual.json()).toEqual(view);
+  expect(actual.headers.get("cache-control")).toBe("no-store");
+  expect(endpoint).toHaveBeenCalledExactlyOnceWith({
+    sessionCookie,
+    csrf,
+    command,
+    expectedScope: authoringScope,
+  });
+  for (const headers of [
+    { ...authoringHeaders, "X-BOP-CSRF": "invalid" },
+    { ...authoringHeaders, Origin: "https://foreign.invalid" },
+    { ...authoringHeaders, "X-BOP-Catalog-Scope": "invalid" },
+    { ...authoringHeaders, Cookie: "" },
+  ])
+    expect((await send(headers)).status).toBe(403);
+  expect((await send(authoringHeaders, "?actor=untrusted")).status).toBe(403);
+  expect(endpoint).toHaveBeenCalledTimes(1);
+  for (const [error, status, code] of [
+    [new CatalogError("CATALOG_INPUT_INVALID"), 400, "option_set_publication_context_invalid"],
+    [new CatalogError("CATALOG_PERMISSION_DENIED"), 403, "request_denied"],
+    [new CatalogError("CATALOG_VERSION_CONFLICT"), 409, "option_set_publication_context_conflict"],
+    [new MerchantProductWriteFeatureDisabled(), 409, "option_set_publication_feature_disabled"],
+    [
+      new Error("private context dependency detail"),
+      503,
+      "option_set_publication_context_unavailable",
+    ],
+  ] as const) {
+    failure = error;
+    const result = await send();
+    expect(result.status).toBe(status);
+    expect(await result.json()).toEqual({ error: code });
+  }
+  const unavailable = await serveAuthoring({});
+  const absent = await request(unavailable, path, {
+    method: "POST",
+    headers: authoringHeaders,
+    body: JSON.stringify(command),
+  });
+  expect(absent.status).toBe(503);
+  expect(await absent.json()).toEqual({ error: "option_set_publication_context_unavailable" });
+});
+it("Option publication Context HTTP retains the small authenticated app JSON budget", async () => {
+  const endpoint = vi.fn(async () => {
+      throw new CatalogError("CATALOG_INPUT_INVALID");
+    }),
+    root = await serveAuthoring({ optionSetPublicationContext: endpoint }, true),
+    path = "/merchant/catalog/option-sets/publication/context";
+  const tooLarge = await request(root, path, {
+    method: "POST",
+    headers: authoringHeaders,
+    body: JSON.stringify({ padding: "x".repeat(9000) }),
+  });
+  expect(tooLarge.status).toBe(413);
+  expect(await tooLarge.json()).toEqual({ error: "option_set_publication_context_invalid" });
+  expect(endpoint).not.toHaveBeenCalled();
+  const invalid = await request(root, path, {
+    method: "POST",
+    headers: authoringHeaders,
+    body: "{broken",
+  });
+  expect(invalid.status).toBe(400);
+  expect(await invalid.json()).toEqual({ error: "option_set_publication_context_invalid" });
+  expect(endpoint).not.toHaveBeenCalled();
+});
+
+it("Option publication write HTTP exposes compact originals and protects both command and Resolve admission", async () => {
+  const command = parsePublishingOptionSetPublicationOperation({
+      profile: "PublishingOptionSetPublicationOperationV1",
+      tenantReference: authoringId(1),
+      brandReference: authoringScope.brandReference,
+      selectedStoreReference: authoringScope.storeReference,
+      actorReference: authoringId(4),
+      reasonCode: "PUBLISHING_REVIEW_SUBMITTED",
+      action: "SubmitReview",
+      operationReference: authoringId(70),
+      optionSetReference: authoringId(6),
+      versionReference: authoringId(7),
+      expectedAggregateVersion: 1,
+      sourceDigest: optionHttpPrepared.sourceDigest,
+      contentDigest: optionHttpPrepared.contentDigest,
+      configurationDigest: optionHttpPrepared.configurationDigest,
+      expectedReview: null,
+      expectedLifecycle: null,
+    }),
+    resolution = {
+      outcome: "Abandoned" as const,
+      command,
+      recordedAt: parsePublishingInstant(serverTime),
+      auditReference: parsePublishingReference(authoringId(71)),
+    };
+  const commandEndpoint = vi.fn<
+    NonNullable<MerchantBffRouterOptions["optionSetPublicationCommand"]>
+  >(async () => ({
+    profile: "CatalogOptionSetPublicationCommandResultV1",
+    storeReference: authoringScope.storeReference,
+    resolution,
+  }));
+  const resolveEndpoint = vi.fn<
+    NonNullable<MerchantBffRouterOptions["optionSetPublicationResolution"]>
+  >(async () => ({
+    profile: "CatalogOptionSetPublicationResolutionResultV1",
+    storeReference: authoringScope.storeReference,
+    resolution,
+  }));
+  const root = await serveAuthoring({
+    optionSetPublicationCommand: commandEndpoint,
+    optionSetPublicationResolution: resolveEndpoint,
+  });
+  for (const [mode, endpoint] of [
+    ["command", commandEndpoint],
+    ["resolve", resolveEndpoint],
+  ] as const) {
+    const path = "/merchant/catalog/option-sets/publication/" + mode,
+      body = { action: command.action, operationReference: command.operationReference };
+    const send = (
+      headers: Record<string, string> = authoringHeaders,
+      suffix = "",
+      original = body,
+    ) => request(root, path + suffix, { method: "POST", headers, body: JSON.stringify(original) });
+    const actual = await send();
+    expect(actual.status).toBe(200);
+    expect(actual.headers.get("cache-control")).toBe("no-store");
+    expect(await actual.json()).toEqual({
+      profile: "CatalogOptionSetPublicationReceiptV1",
+      storeReference: authoringScope.storeReference,
+      operationReference: command.operationReference,
+      action: "SubmitReview",
+      outcome: "Abandoned",
+      recordedAt: serverTime,
+    });
+    expect(endpoint).toHaveBeenCalledExactlyOnceWith({
+      sessionCookie,
+      csrf,
+      command: body,
+      expectedScope: authoringScope,
+    });
+    for (const headers of [
+      { ...authoringHeaders, Cookie: "" },
+      { ...authoringHeaders, Origin: "https://foreign.invalid" },
+      { ...authoringHeaders, "X-BOP-CSRF": "invalid" },
+      { ...authoringHeaders, "X-BOP-Catalog-Scope": "invalid" },
+    ])
+      expect((await send(headers)).status).toBe(403);
+    expect((await send(authoringHeaders, "?actor=untrusted")).status).toBe(403);
+    expect(endpoint).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        await send(authoringHeaders, "", {
+          ...body,
+          operationReference: parsePublishingReference(authoringId(72)),
+        })
+      ).status,
+    ).toBe(503);
+    endpoint.mockRejectedValueOnce(new CatalogError("CATALOG_PERMISSION_DENIED"));
+    expect((await send()).status).toBe(403);
+    endpoint.mockRejectedValueOnce(new MerchantProductWriteFeatureDisabled());
+    const disabled = await send();
+    expect(disabled.status).toBe(409);
+    expect(await disabled.json()).toEqual({ error: "option_set_publication_feature_disabled" });
+    endpoint.mockRejectedValueOnce(new Error("private original detail"));
+    expect(await (await send()).json()).toEqual({ error: "option_set_publication_unavailable" });
+  }
+});
+it("Option publication Validate HTTP preserves the bounded report and future activation without an authority grant", async () => {
+  const validation = {
+    checks: optionContentReviewValidationCodes.map((code) => ({ code, outcome: "Pass" as const })),
+    findings: [],
+    decision: "Pass" as const,
+    observedAt: parseCatalogInstant(serverTime),
+    qualifiedActivationAt: parseCatalogInstant("2026-07-30T12:00:00.000Z"),
+    independentApproval: "NotEvaluated" as const,
+    saleEligibility: "NotEvaluated" as const,
+  };
+  const endpoint = vi.fn<NonNullable<MerchantBffRouterOptions["optionSetPublicationCommand"]>>(
+    async () => ({
+      profile: "CatalogOptionSetPublicationCommandResultV1",
+      storeReference: authoringScope.storeReference,
+      outcome: "Validated",
+      validation,
+    }),
+  );
+  const root = await serveAuthoring({ optionSetPublicationCommand: endpoint });
+  const send = (action: string) =>
+    request(root, "/merchant/catalog/option-sets/publication/command", {
+      method: "POST",
+      headers: authoringHeaders,
+      body: JSON.stringify({ action }),
+    });
+  const result = await send("Validate");
+  expect(result.status).toBe(200);
+  expect(result.headers.get("cache-control")).toBe("no-store");
+  expect(await result.json()).toEqual({
+    profile: "CatalogOptionSetPublicationCommandResultV1",
+    storeReference: authoringScope.storeReference,
+    outcome: "Validated",
+    validation,
+  });
+  const mismatched = await send("SubmitReview");
+  expect(mismatched.status).toBe(503);
+  expect(await mismatched.json()).toEqual({ error: "option_set_publication_unavailable" });
+});
+it("Option publication write HTTP keeps unconfigured routes unavailable and their app body budget bounded", async () => {
+  const endpoint = vi.fn(async () => {
+      throw new CatalogError("CATALOG_INPUT_INVALID");
+    }),
+    root = await serveAuthoring(
+      { optionSetPublicationCommand: endpoint, optionSetPublicationResolution: endpoint },
+      true,
+    ),
+    absent = await serveAuthoring({});
+  for (const mode of ["command", "resolve"]) {
+    const path = "/merchant/catalog/option-sets/publication/" + mode;
+    const result = await request(absent, path, {
+      method: "POST",
+      headers: authoringHeaders,
+      body: "{}",
+    });
+    expect(result.status).toBe(503);
+    expect(await result.json()).toEqual({ error: "option_set_publication_unavailable" });
+    const oversized = await request(root, path, {
+      method: "POST",
+      headers: authoringHeaders,
+      body: JSON.stringify({ filler: "x".repeat(9000) }),
+    });
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toEqual({ error: "option_set_publication_invalid" });
+  }
+  expect(endpoint).not.toHaveBeenCalled();
+});
+
+it("ordinary Option history HTTP enforces origin, scoped Session, bounded body and explicit failure states", async () => {
+  let failure: Error | undefined;
+  const command = {
+    action: "List",
+    command: {
+      optionSetReference: authoringId(6),
+      expectedAggregateVersion: null,
+      before: null,
+      limit: 20,
+    },
+  };
+  const view = parseCatalogOptionSetHistoryResult(
+    {
+      profile: "CatalogOptionSetHistoryV1",
+      tenantReference: authoringId(1),
+      brandReference: authoringScope.brandReference,
+      optionSetReference: authoringId(6),
+      currentAggregateVersion: 1,
+      entries: [],
+      nextBefore: null,
+      observedAt: serverTime,
+      validUntil: new Date(Date.parse(serverTime) + 5000).toISOString(),
+      publicationStatus: "NotEvaluated",
+    },
+    parseCatalogOptionSetHistoryRequest(command.command),
+  );
+  const read = vi.fn<NonNullable<MerchantBffRouterOptions["optionSetHistory"]>>(async () => {
+    if (failure) throw failure;
+    return {
+      profile: "CatalogOptionSetHistoryQueryResultV1",
+      action: "List",
+      storeReference: authoringScope.storeReference,
+      actorReference: authoringId(4),
+      view,
+    };
+  });
+  const root = await serveAuthoring({ optionSetHistory: read }, true);
+  const send = (
+    headers: Record<string, string> = authoringHeaders,
+    body = JSON.stringify(command),
+    suffix = "",
+  ) =>
+    request(root, "/merchant/catalog/option-sets/history" + suffix, {
+      method: "POST",
+      headers,
+      body,
+    });
+  const response = await send();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toContain("no-store");
+  expect(await response.json()).toMatchObject({ action: "List", view: { entries: [] } });
+  expect(read).toHaveBeenCalledExactlyOnceWith({
+    sessionCookie,
+    csrf,
+    command,
+    expectedScope: authoringScope,
+  });
+  read.mockClear();
+  for (const headers of [
+    { ...authoringHeaders, Origin: "https://foreign.invalid" },
+    { ...authoringHeaders, Cookie: "" },
+    { ...authoringHeaders, "X-BOP-CSRF": "" },
+    { ...authoringHeaders, "X-BOP-Catalog-Scope": "invalid" },
+  ])
+    expect((await send(headers)).status).toBe(403);
+  expect((await send(authoringHeaders, JSON.stringify(command), "?actor=untrusted")).status).toBe(
+    403,
+  );
+  expect((await send(authoringHeaders, "{")).status).toBe(400);
+  expect((await send(authoringHeaders, JSON.stringify({ extra: "a".repeat(8192) }))).status).toBe(
+    413,
+  );
+  expect(read).not.toHaveBeenCalled();
+  for (const [error, status, code] of [
+    [new CatalogError("CATALOG_PERMISSION_DENIED"), 403, "request_denied"],
+    [new CatalogError("CATALOG_INPUT_INVALID"), 400, "option_set_history_invalid"],
+    [new CatalogError("CATALOG_VERSION_CONFLICT"), 409, "option_set_history_conflict"],
+    [new MerchantProductWriteFeatureDisabled(), 409, "option_set_history_feature_disabled"],
+    [new Error("private synthetic diagnostic"), 503, "option_set_history_unavailable"],
+  ] as const) {
+    failure = error;
+    const failed = await send();
+    expect(failed.status).toBe(status);
+    expect(await failed.json()).toEqual({ error: code });
+  }
+  const absent = await serveAuthoring({}, true);
+  const unavailable = await request(absent, "/merchant/catalog/option-sets/history", {
+    method: "POST",
+    headers: authoringHeaders,
+    body: JSON.stringify(command),
+  });
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.json()).toEqual({ error: "option_set_history_unavailable" });
+});
+
+it("ordinary Option current Published HTTP is independent from history and bounds read controls", async () => {
+  let failure: Error | undefined;
+  const view = {
+    profile: "CatalogOptionSetCurrentPublicationResultV1",
+    tenantReference: authoringId(1),
+    brandReference: authoringScope.brandReference,
+    actorReference: authoringId(4),
+    storeReference: authoringScope.storeReference,
+    optionSetReference: authoringId(6),
+    currentAggregateVersion: 1,
+    publicationState: "Absent",
+    currentLifecycleReference: null,
+    lastReleaseReference: null,
+    release: null,
+    published: null,
+    observedAt: serverTime,
+    validUntil: new Date(Date.parse(serverTime) + 5000).toISOString(),
+  } as const;
+  const endpoint = vi.fn<NonNullable<MerchantBffRouterOptions["optionSetCurrentPublication"]>>(
+    async () => {
+      if (failure) throw failure;
+      return view;
+    },
+  );
+  const root = await serveAuthoring({ optionSetCurrentPublication: endpoint }, true);
+  const body = { optionSetReference: authoringId(6), expectedAggregateVersion: null };
+  const send = (
+    headers: Record<string, string> = authoringHeaders,
+    text = JSON.stringify(body),
+    suffix = "",
+  ) =>
+    request(root, "/merchant/catalog/option-sets/current-published" + suffix, {
+      method: "POST",
+      headers,
+      body: text,
+    });
+  const reply = await send();
+  expect(reply.status).toBe(200);
+  expect(reply.headers.get("cache-control")).toBe("no-store");
+  expect(await reply.json()).toEqual(view);
+  expect(endpoint).toHaveBeenCalledExactlyOnceWith({
+    sessionCookie,
+    csrf,
+    command: body,
+    expectedScope: authoringScope,
+  });
+  endpoint.mockClear();
+  for (const headers of [
+    { ...authoringHeaders, Origin: "https://foreign.invalid" },
+    { ...authoringHeaders, Cookie: "" },
+    { ...authoringHeaders, "X-BOP-CSRF": "" },
+    { ...authoringHeaders, "X-BOP-Catalog-Scope": "invalid" },
+  ])
+    expect((await send(headers)).status).toBe(403);
+  expect((await send(authoringHeaders, JSON.stringify(body), "?family=untrusted")).status).toBe(
+    403,
+  );
+  expect((await send(authoringHeaders, "{")).status).toBe(400);
+  expect((await send(authoringHeaders, JSON.stringify({ content: "x".repeat(9000) }))).status).toBe(
+    413,
+  );
+  expect(endpoint).not.toHaveBeenCalled();
+  for (const [error, status, code] of [
+    [new CatalogError("CATALOG_PERMISSION_DENIED"), 403, "request_denied"],
+    [new CatalogError("CATALOG_VERSION_CONFLICT"), 409, "option_set_current_publication_conflict"],
+    [
+      new MerchantProductWriteFeatureDisabled(),
+      409,
+      "option_set_current_publication_feature_disabled",
+    ],
+    [
+      new Error("private synthetic source diagnostic"),
+      503,
+      "option_set_current_publication_unavailable",
+    ],
+  ] as const) {
+    failure = error;
+    const failed = await send();
+    expect(failed.status).toBe(status);
+    expect(await failed.json()).toEqual({ error: code });
+  }
+  const absent = await serveAuthoring({}, true);
+  const unavailable = await request(absent, "/merchant/catalog/option-sets/current-published", {
+    method: "POST",
+    headers: authoringHeaders,
+    body: JSON.stringify(body),
+  });
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.json()).toEqual({ error: "option_set_current_publication_unavailable" });
+});
+
+it("ordinary Product Option picker HTTP preserves scoped origin and bounded source failures", async () => {
+  let failure: Error = new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+  const endpoint = vi.fn<NonNullable<MerchantBffRouterOptions["productOptionPicker"]>>(async () => {
+    throw failure;
+  });
+  const root = await serveAuthoring({ productOptionPicker: endpoint }, true),
+    body = { optionSetReference: authoringId(6), versionReference: null };
+  const send = (
+    headers: Record<string, string> = authoringHeaders,
+    text = JSON.stringify(body),
+    suffix = "",
+  ) =>
+    request(root, "/merchant/catalog/products/option-binding-picker" + suffix, {
+      method: "POST",
+      headers,
+      body: text,
+    });
+  const first = await send();
+  expect(first.status).toBe(503);
+  expect(first.headers.get("cache-control")).toBe("no-store");
+  expect(endpoint).toHaveBeenCalledExactlyOnceWith({
+    sessionCookie,
+    csrf,
+    command: body,
+    expectedScope: authoringScope,
+  });
+  endpoint.mockClear();
+  for (const headers of [
+    { ...authoringHeaders, Origin: "https://foreign.invalid" },
+    { ...authoringHeaders, Cookie: "" },
+    { ...authoringHeaders, "X-BOP-CSRF": "" },
+    { ...authoringHeaders, "X-BOP-Catalog-Scope": "invalid" },
+  ])
+    expect((await send(headers)).status).toBe(403);
+  expect((await send(authoringHeaders, JSON.stringify(body), "?version=untrusted")).status).toBe(
+    403,
+  );
+  expect((await send(authoringHeaders, "{")).status).toBe(400);
+  expect((await send(authoringHeaders, JSON.stringify({ content: "x".repeat(9000) }))).status).toBe(
+    413,
+  );
+  expect(endpoint).not.toHaveBeenCalled();
+  for (const [error, status, code] of [
+    [new CatalogError("CATALOG_INPUT_INVALID"), 400, "product_option_picker_invalid"],
+    [new CatalogError("CATALOG_PERMISSION_DENIED"), 403, "request_denied"],
+    [new CatalogError("CATALOG_VERSION_CONFLICT"), 409, "product_option_picker_conflict"],
+    [new MerchantProductWriteFeatureDisabled(), 409, "product_option_picker_feature_disabled"],
+    [new Error("private synthetic source diagnostic"), 503, "product_option_picker_unavailable"],
+  ] as const) {
+    failure = error;
+    const reply = await send();
+    expect(reply.status).toBe(status);
+    expect(await reply.json()).toEqual({ error: code });
+  }
+  const absent = await serveAuthoring({}, true);
+  const unavailable = await request(absent, "/merchant/catalog/products/option-binding-picker", {
+    method: "POST",
+    headers: authoringHeaders,
+    body: JSON.stringify(body),
+  });
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.json()).toEqual({ error: "product_option_picker_unavailable" });
+});
+
+it("anchors Store Setup navigation to selected Store and canonical organization permission", () => {
+  const item = {
+    screenId: "STORE-SETUP",
+    label: "Store setup",
+    href: "/app/organization/stores/" + storeReference + "/setup",
+    permission: "organization.manage",
+  };
+  expect(parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [item] }).navigation).toEqual([
+    item,
+  ]);
+  for (const change of [
+    { href: "/app/organization/stores/018f7f9a-ad3e-7a11-8d01-000000000099/setup" },
+    { href: item.href + "?actor=x" },
+    { permission: "merchant.access" },
+  ])
+    expect(() =>
+      parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [{ ...item, ...change }] }),
+    ).toThrow("MERCHANT_WORKSPACE_DENIED");
+});
+
+it("accepts closed Brand navigation and rejects malformed authority paths without evaluating getters", () => {
+  const item = {
+    screenId: "ORG-BRAND-DETAIL",
+    label: "Brand administration",
+    href: "/app/organization/brands/018f7f9a-ad3e-7a11-8d01-000000000002",
+    permission: "organization.manage",
+  };
+  expect(parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [item] }).navigation).toEqual([
+    item,
+  ]);
+  for (const change of [
+    { href: item.href + "?scope=x" },
+    { href: item.href + "#fragment" },
+    { href: item.href + "/../x" },
+    { href: item.href.replace("brands/", "brands/%") },
+    { href: item.href.toUpperCase() },
+    { permission: "merchant.access" },
+    { extra: true },
+    { label: "" },
+  ])
+    expect(() =>
+      parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [{ ...item, ...change }] }),
+    ).toThrow("MERCHANT_WORKSPACE_DENIED");
+  expect(() => parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [item, item] })).toThrow(
+    "MERCHANT_WORKSPACE_DENIED",
+  );
+  const read = vi.fn(() => item.href);
+  const accessor = { ...item };
+  Object.defineProperty(accessor, "href", { enumerable: true, get: read });
+  expect(() => parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [accessor] })).toThrow(
+    "MERCHANT_WORKSPACE_DENIED",
+  );
+  expect(read).not.toHaveBeenCalled();
+});
+
+it("keeps unavailable Brand navigation distinct from rejected session authority", async () => {
+  const service = fakeService();
+  const root = await serve(service);
+  vi.mocked(service.bootstrap).mockRejectedValueOnce(
+    new BrandStoreTopologyError("BRAND_STORE_TOPOLOGY_DEPENDENCY_UNAVAILABLE"),
+  );
+  const missing = await request(root, "/merchant/session", {
+    headers: { ...safeHeaders, Cookie: `__Host-bop-merchant=${sessionCookie}` },
+  });
+  expect(missing.status).toBe(503);
+  expect(missing.headers.get("cache-control")).toBe("no-store");
+  expect(await missing.json()).toEqual({ error: "merchant_workspace_unavailable" });
+  vi.mocked(service.bootstrap).mockRejectedValueOnce(
+    new BrandStoreTopologyError("BRAND_STORE_TOPOLOGY_PERMISSION_DENIED"),
+  );
+  const denied = await request(root, "/merchant/session", {
+    headers: { ...safeHeaders, Cookie: `__Host-bop-merchant=${sessionCookie}` },
+  });
+  expect(denied.status).toBe(403);
+  expect(await denied.json()).toEqual({ error: "request_denied" });
 });

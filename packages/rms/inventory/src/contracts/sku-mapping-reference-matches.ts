@@ -1,3 +1,12 @@
+import {
+  parseInventoryProductPublicationReferenceRequestV2,
+  type InventoryProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
+import {
+  parseInventoryProductPublicationSkuMappingReferenceSnapshotV2,
+  type InventoryProductPublicationSkuMappingReferenceSnapshotV2,
+  type InventorySkuMappingReferenceSnapshot,
+} from "./sku-mapping-reference-source.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { InventoryItemError, parseInventoryReference } from "../domain/inventory-item.js";
 import {
@@ -73,16 +82,17 @@ function target(value: unknown): InventorySkuMappingReferenceTarget {
 /** Complete stored Set tuples are kept independently for every target graph.
  * A current mapping can point to a historical Item configuration or an older Catalog
  * graph. Neither state is converted into active stock or sale applicability. */
-export function matchInventorySkuMappingReferenceGraphs(input: {
-  readonly request: InventoryConfigurationReferenceRequest;
-  readonly targets: unknown;
-  readonly source: unknown;
-  readonly now: string;
-}) {
+function matchGraphs<
+  Request extends
+    InventoryConfigurationReferenceRequest | InventoryProductPublicationReferenceRequestV2,
+>(
+  request: Request,
+  source:
+    InventorySkuMappingReferenceSnapshot | InventoryProductPublicationSkuMappingReferenceSnapshotV2,
+  targetInput: unknown,
+) {
   try {
-    const request = parseInventoryConfigurationReferenceRequest(input.request),
-      source = parseInventorySkuMappingReferenceSnapshot(input.source, request, input.now),
-      targets = list(input.targets, 1000).map(target);
+    const targets = list(targetInput, 1000).map(target);
     if (targets.length === 0) return fail();
     let budget =
       source.mappings.length +
@@ -150,6 +160,44 @@ export function matchInventorySkuMappingReferenceGraphs(input: {
       });
     });
     return Object.freeze(results);
+  } catch {
+    return fail();
+  }
+}
+
+export function matchInventorySkuMappingReferenceGraphs(input: {
+  readonly request: InventoryConfigurationReferenceRequest;
+  readonly targets: unknown;
+  readonly source: unknown;
+  readonly now: string;
+}) {
+  try {
+    const request = parseInventoryConfigurationReferenceRequest(input.request),
+      source = parseInventorySkuMappingReferenceSnapshot(input.source, request, input.now);
+    return matchGraphs(request, source, input.targets);
+  } catch {
+    return fail();
+  }
+}
+/** Publication matching keeps historical and mismatched tuples as evidence;
+ * neither completeness nor a match grants current Inventory applicability. */
+export function matchInventoryProductPublicationSkuMappingReferenceGraphsV2(input: {
+  readonly request: InventoryProductPublicationReferenceRequestV2;
+  readonly targets: unknown;
+  readonly source: unknown;
+  readonly now: string;
+}) {
+  try {
+    const r = exact(input, ["request", "targets", "source", "now"]),
+      request = parseInventoryProductPublicationReferenceRequestV2(r.request),
+      source = parseInventoryProductPublicationSkuMappingReferenceSnapshotV2(
+        r.source,
+        request,
+        typeof r.now === "string" ? r.now : fail(),
+      );
+    const targets = list(r.targets, 1000).map(target);
+    if (targets.some((t) => t.productReference !== request.productReference)) return fail();
+    return matchGraphs(request, source, targets);
   } catch {
     return fail();
   }

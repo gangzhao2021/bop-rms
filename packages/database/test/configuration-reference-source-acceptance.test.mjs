@@ -585,6 +585,14 @@ it("holds all actual Pricing reference writers through COMMIT, preserving RLS, b
       );
       await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO " + role);
       await admin.query("GRANT UPDATE ON rms_pricing.option_price_rule TO " + role);
+      // The retained ordinary writer now uses the mandatory 007 original fence.
+      await admin.query(
+        "GRANT EXECUTE ON FUNCTION rms_catalog.option_set_authoring_operation_available(uuid) TO " +
+          role,
+      );
+      await admin.query(
+        "GRANT SELECT,INSERT ON rms_catalog.option_set_authoring_identity TO " + role,
+      );
       let next55 = 7000,
         readAllowed55 = true;
       const lease55 = (input) => ({

@@ -10,8 +10,8 @@ import {
   type WorkforceInvitation,
 } from "@bop/identity";
 import {
-  resolveActiveMembership,
-  resolveActiveStoreAssignment,
+  resolveWorkforceInvitationMembership,
+  resolveWorkforceInvitationStoreAssignments,
   type Membership,
   type MembershipAccessInvalidation,
   type StoreAssignment,
@@ -48,19 +48,17 @@ export class WorkforceIdentitySecurityComposition {
     readonly operation: SecurityOperationContext;
   }): Promise<Awaited<ReturnType<WorkforceIdentitySecurityService["issueInvitation"]>>> {
     try {
-      const membership = resolveActiveMembership(
+      const membership = resolveWorkforceInvitationMembership(
         input.memberships,
         input.actorReference,
         input.brandReference,
         input.observedAt,
       );
-      const assignments = input.storeReferences.map((storeReference) =>
-        resolveActiveStoreAssignment(
-          membership,
-          input.storeAssignments,
-          storeReference,
-          input.observedAt,
-        ),
+      const assignments = resolveWorkforceInvitationStoreAssignments(
+        membership,
+        input.storeAssignments,
+        input.storeReferences,
+        input.observedAt,
       );
       return await this.#service.issueInvitation({
         actorReference: input.actorReference,

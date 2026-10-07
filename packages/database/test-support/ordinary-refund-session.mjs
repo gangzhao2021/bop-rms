@@ -24,6 +24,7 @@ export async function seedOrdinaryRefundSession({
   at,
   referencePrefix = "01909971",
   policyCode = "WorkforceStandard",
+  sharedSessionAuthority,
 }) {
   const record = { actorReference: requester };
   const id = (n) => referencePrefix + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -41,8 +42,14 @@ export async function seedOrdinaryRefundSession({
   const cookie = randomBytes(32).toString("base64url"),
     csrf = randomBytes(32).toString("base64url");
   const policy = sessionPolicies[policyCode];
-  const key = randomBytes(32),
-    pepper = randomBytes(32);
+  // Optional isolated multi-Actor composition. The caller retains these
+  // ephemeral secrets in memory; ordinary existing fixtures stay independent.
+  const key = sharedSessionAuthority?.encryptionKey ?? randomBytes(32),
+    pepper = sharedSessionAuthority?.selectorPepper ?? randomBytes(32),
+    currentActor = sharedSessionAuthority?.currentActor ?? (async () => actor);
+  assert.equal(key.length, 32);
+  assert.equal(pepper.length, 32);
+  assert.equal(typeof currentActor, "function");
   const hasher = {
     hash: (value) => createHmac("sha256", pepper).update(value).digest("hex"),
     equals: (a, b) => timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex")),
@@ -94,7 +101,7 @@ export async function seedOrdinaryRefundSession({
     ...configuration,
     transactions: runner(),
     now: () => at,
-    currentActor: async () => actor,
+    currentActor,
   });
   const unavailable = async () => {
     throw new Error("unused synthetic login operation");
@@ -132,7 +139,7 @@ export async function seedOrdinaryRefundSession({
   const persistence = {
     transactions: runner(),
     identity,
-    currentActor: async () => actor,
+    currentActor,
     now: () => at,
     validateAssociation: async (_tx, session, selected) =>
       session.actor.actorReference === record.actorReference &&

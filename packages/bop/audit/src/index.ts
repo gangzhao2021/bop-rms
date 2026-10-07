@@ -50,3 +50,5 @@ export {
 } from "./infrastructure/persistence/append-audit-record.js";
 
 export * from "./infrastructure/persistence/verify-operation-binding.js";
+export * from "./contracts/platform-audit-record.js";
+export * from "./infrastructure/persistence/append-platform-audit-record.js";

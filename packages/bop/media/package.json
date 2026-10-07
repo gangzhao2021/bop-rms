@@ -6,19 +6,32 @@
   "exports": {
     ".": {
       "types": "./src/index.ts",
-      "import": "./src/index.ts"
+      "development": "./src/index.ts",
+      "default": "./dist/packages/bop/media/src/index.js"
+    },
+    "./worker": {
+      "types": "./src/worker.ts",
+      "development": "./src/worker.ts",
+      "default": "./dist/packages/bop/media/src/worker.js"
     }
   },
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "tsc --project tsconfig.build.json",
     "format:check": "prettier --check . --ignore-path ../../../.prettierignore",
     "lint": "eslint src",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-eventbridge": "3.1094.0",
+    "@aws-sdk/client-s3": "3.1094.0",
+    "@aws-sdk/client-sqs": "3.1094.0",
+    "@aws-sdk/client-sts": "3.1094.0",
+    "@aws-sdk/s3-presigned-post": "3.1094.0",
     "@bop/audit": "workspace:*",
     "@bop/permission": "workspace:*",
-    "@bop/tenant": "workspace:*"
+    "@bop/tenant": "workspace:*",
+    "sharp": "0.35.5",
+    "uuid": "14.0.1"
   }
 }

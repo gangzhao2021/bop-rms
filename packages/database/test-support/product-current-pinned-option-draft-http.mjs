@@ -585,7 +585,7 @@ export async function exerciseCurrentPinnedOptionProductDraft({
       const after = await counts();
       assert.equal(after.root, 11);
       assert.ok(optionHolds > 0);
-      assert.ok(historyRoots.has(10) && historyRoots.has(11));
+      assert.deepEqual([...historyRoots], [10]);
       for (const key of ["operations", "snapshots", "commits", "audit", "outbox"])
         assert.equal(after[key], initial[key] + 1);
       await admin.query(

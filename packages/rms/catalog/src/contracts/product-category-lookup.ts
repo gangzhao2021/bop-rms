@@ -236,3 +236,11 @@ export function deriveCatalogProductCategoryLookup(
     return fail();
   }
 }
+
+/** Catalog software policy V1 for ordinary Product Create/Draft authoring.
+ * Same-Brand Draft and Active Categories may be assigned; the existing owning
+ * classification validator rejects Inactive/Archived facts. This is neither a
+ * Brand-admin configuration nor a policy for publishing or sale qualification. */
+export const catalogProductDraftCategoryAssignmentPolicyV1 = parseProductCategoryLookupPolicy({
+  allowedLifecycles: ["Draft", "Active"],
+});

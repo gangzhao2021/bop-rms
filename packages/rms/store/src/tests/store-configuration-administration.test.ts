@@ -172,3 +172,77 @@ describe("WP-2192 Store configuration administration", () => {
     ).toThrow(StoreConfigurationAdministrationError);
   });
 });
+
+const setupBasis = () => ({
+  profile: "StoreSetupConfigurationBasisV2",
+  tenantReference: id(50),
+  setupDraftReference: id(51),
+  sourceRevision: 2,
+  sourceSnapshotDigest: `sha256:${"a".repeat(64)}`,
+  feeContexts: [
+    {
+      chargeType: "ServiceCharge",
+      state: "Enabled",
+      taxClassificationReference: id(52),
+      orderTypes: ["Pickup"],
+    },
+    { chargeType: "DeliveryFee", state: "Disabled" },
+    { chargeType: "Tip", state: "Disabled" },
+  ],
+});
+describe("complete configuration setup basis", () => {
+  it("preserves exact legacy shape and freezes the new source basis", () => {
+    expect(Object.keys(createStoreConfigurationVersion(published()))).toHaveLength(32);
+    const input = setupBasis();
+    const result = createStoreConfigurationVersion({ ...published(), setupBasis: input });
+    input.feeContexts.reverse();
+    expect(result.setupBasis?.feeContexts[0]).toMatchObject({ chargeType: "ServiceCharge" });
+    expect(Object.isFrozen(result.setupBasis)).toBe(true);
+    expect(Object.keys(result)).toHaveLength(33);
+  });
+  it("refuses missing source digest, incomplete fees and unsupported service modes", () => {
+    expect(() =>
+      createStoreConfigurationVersion({
+        ...published(),
+        setupBasis: { ...setupBasis(), sourceSnapshotDigest: "a".repeat(64) },
+      }),
+    ).toThrow();
+    expect(() =>
+      createStoreConfigurationVersion({
+        ...published(),
+        setupBasis: {
+          ...setupBasis(),
+          feeContexts: [
+            { chargeType: "ServiceCharge", state: "Unconfigured" },
+            ...setupBasis().feeContexts.slice(1),
+          ],
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      createStoreConfigurationVersion({
+        ...published(),
+        setupBasis: {
+          ...setupBasis(),
+          feeContexts: [
+            { ...setupBasis().feeContexts[0], orderTypes: ["Delivery"] },
+            ...setupBasis().feeContexts.slice(1),
+          ],
+        },
+      }),
+    ).toThrow();
+  });
+  it("rejects basis accessors without treating them as a source", () => {
+    const basis = setupBasis();
+    let called = false;
+    Object.defineProperty(basis, "sourceRevision", {
+      enumerable: true,
+      get() {
+        called = true;
+        return 2;
+      },
+    });
+    expect(() => createStoreConfigurationVersion({ ...published(), setupBasis: basis })).toThrow();
+    expect(called).toBe(false);
+  });
+});

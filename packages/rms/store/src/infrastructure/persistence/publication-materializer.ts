@@ -1,3 +1,7 @@
+import {
+  createStorePublicationSetupBasisVerifier,
+  type StorePublicationSetupSnapshotReferences,
+} from "./publication-setup-basis.js";
 import { parsePublishingCode } from "@bop/publishing";
 import { parseBrandReference, parseStoreReference } from "@bop/tenant";
 import {
@@ -19,6 +23,8 @@ const denied = (): never => {
  * hashContent uses the same canonical serialization as public publication readers.
  */
 export function createPostgresStorePublicationMaterializer(options: {
+  readonly tenantReference?: string;
+  readonly setupSnapshotReferences?: StorePublicationSetupSnapshotReferences;
   readonly brandReference: string;
   readonly storeReference: string;
   readonly publishingFamilyReference: string;
@@ -29,6 +35,7 @@ export function createPostgresStorePublicationMaterializer(options: {
   hashContent(value: unknown): string;
   authorize(tx: Transaction, input: Commit): Promise<boolean>;
 }) {
+  const verifySetupBasis = createStorePublicationSetupBasisVerifier(options);
   const brand = parseBrandReference(options.brandReference);
   const store = parseStoreReference(options.storeReference);
   const family = parseStoreAdministrationReference(options.publishingFamilyReference);
@@ -64,6 +71,7 @@ export function createPostgresStorePublicationMaterializer(options: {
       (await options.authorize(tx, input)) !== true
     )
       return denied();
+    await verifySetupBasis(tx, c, input.audit.occurredAt);
     const contentDigest = digest(c);
     await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
       brand,
@@ -163,5 +171,6 @@ export function createPostgresStorePublicationMaterializer(options: {
       ],
     );
     if ((await options.authorize(tx, input)) !== true) return denied();
+    await verifySetupBasis(tx, c, input.audit.occurredAt);
   };
 }

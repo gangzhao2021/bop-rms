@@ -122,6 +122,10 @@ export {
 export * from "./infrastructure/persistence/recipe-core-rebuild-state-store.js";
 
 export { matchOptionDraftRecipeConsumptionMetadata } from "./contracts/recipe-reference-source.js";
+export {
+  parseRecipeOptionPublicationOriginalClock,
+  type RecipeOptionPublicationOriginalClock,
+} from "./contracts/recipe-reference-source.js";
 
 export * from "./contracts/option-consumption-yield-source.js";
 export * from "./infrastructure/persistence/option-consumption-yield-source-store.js";
@@ -169,3 +173,37 @@ export {
   createPinnedPublishedRecipeMeasurementGraphSource,
   type PinnedPublishedRecipeMeasurementGraph,
 } from "./infrastructure/persistence/current-published-recipe-measurement-graph-source.js";
+
+export * from "./contracts/product-publication-reference-request-v2.js";
+export {
+  recipeProductPublicationReferenceSourceFieldsV2,
+  buildRecipeProductPublicationReferenceSnapshotV2,
+  parseRecipeProductPublicationReferenceSnapshotV2,
+  type RecipeProductPublicationReferenceSnapshotV2,
+} from "./contracts/recipe-reference-source.js";
+export {
+  recipeInventoryProductPublicationReferenceSourceFieldsV2,
+  buildRecipeInventoryProductPublicationReferenceSnapshotV2,
+  parseRecipeInventoryProductPublicationReferenceSnapshotV2,
+  type RecipeInventoryProductPublicationReferenceSnapshotV2,
+} from "./contracts/recipe-inventory-reference-source.js";
+export {
+  createPostgresRecipeProductPublicationReferenceSourceV2,
+  type RecipeProductPublicationReferenceSourceOptionsV2,
+} from "./infrastructure/persistence/recipe-reference-source-store.js";
+export {
+  createPostgresRecipeInventoryProductPublicationReferenceSourceV2,
+  type RecipeInventoryProductPublicationReferenceSourceOptionsV2,
+} from "./infrastructure/persistence/recipe-inventory-reference-source-store.js";
+export {
+  matchRecipeProductPublicationReferenceGraphsV2,
+  type RecipeProductPublicationReferenceTargetV2,
+} from "./contracts/recipe-catalog-reference-matches.js";
+export { matchRecipeInventoryProductPublicationReferenceRootsV2 } from "./contracts/recipe-inventory-reference-matches.js";
+
+export { createPostgresRecipeOptionConsumptionYieldSource } from "./infrastructure/persistence/option-consumption-yield-source-store.js";
+export {
+  parseRecipeOptionConsumptionPins,
+  recipeOptionConsumptionYieldFields,
+  assessRecipeOptionConsumptionYields,
+} from "./contracts/option-consumption-yield-source.js";

@@ -24,6 +24,15 @@ import {
   type ProductPublicationSourceSnapshot,
 } from "../../contracts/product-publication-source.js";
 import { holdProductSourceBarrier } from "./product-source-producer.js";
+import {
+  assertProductPublicationV1Compatible,
+  loadProductRetirementCoverage,
+} from "./product-scope-retirement-store.js";
+import {
+  parseProductPublicationVersionV2,
+  type ProductPublicationVersionV2,
+} from "../../contracts/product-publication-v2.js";
+import type { CatalogProductRetirementCoverage } from "../../contracts/product-publication-source-v2.js";
 import type { ProductLifecycleTransaction } from "./product-lifecycle-store.js";
 import {
   bindCatalogProductApprovalReceipt,
@@ -186,6 +195,12 @@ export function createPostgresProductPublicationSourceStore(options: {
         const mode = await tx.query("SHOW transaction_isolation", []);
         if (single(mode, "transaction_isolation") !== "read committed") return fail();
         await holdProductSourceBarrier(tx, brandReference);
+        await assertProductPublicationV1Compatible(
+          tx,
+          tenantReference,
+          brandReference,
+          request.productReference,
+        );
         const query = await tx.query(select, [
           tenantReference,
           brandReference,
@@ -308,6 +323,11 @@ export function createPostgresProductPublicationSourceStore(options: {
             });
           }),
         );
+        for (const product of new Set(
+          candidates.map((candidate) => candidate.publication.productReference),
+        )) {
+          await assertProductPublicationV1Compatible(tx, tenantReference, brandReference, product);
+        }
         await authorize();
         const ended = parseCatalogInstant(options.clock.now());
         if (ended < at || Date.parse(ended) - Date.parse(at) > 5000) return fail();
@@ -388,6 +408,12 @@ export function createPostgresProductPublicationSourceStore(options: {
             [tenantReference, brandReference],
           );
           await holdProductSourceBarrier(tx, brandReference);
+          await assertProductPublicationV1Compatible(
+            tx,
+            tenantReference,
+            brandReference,
+            c.productReference,
+          );
           const result = await tx.query<{ review: unknown; coherent: boolean }>(
             `
 SELECT r.snapshot_json review,
@@ -472,6 +498,12 @@ WHERE p.product_id=$3 AND p.brand_id=$2`,
             [tenantReference, brandReference],
           );
           await holdProductSourceBarrier(tx, brandReference);
+          await assertProductPublicationV1Compatible(
+            tx,
+            tenantReference,
+            brandReference,
+            request.productReference,
+          );
           const queried = await tx.query<{
             receipt: unknown;
             approved: unknown;
@@ -631,5 +663,241 @@ WHERE p.brand_id=$2 AND p.product_id=$3`,
     discoverDueSchedules,
     loadSnapshot: (input: ProductPublicationSourceRequest) => read(input, async (s) => s),
     withCurrentSnapshot: read,
+  });
+}
+
+export const productPublicationSourceFieldsV2 = Object.freeze([
+  ...productPublicationSourceFields,
+  "replacementIntent",
+  "scopeRetirementHeaders",
+  "scopeRetirements",
+  "completePublicationHistory",
+] as const);
+
+/** Owning recorded/current history only. Eligibility still needs the separately
+ * held current policy, topology, validation and approval in the actual writer.
+ * This explicit V2 surface never projects a V2 participant through a V1 source. */
+export function createPostgresProductPublicationSourceStoreV2(options: {
+  readonly tenantReference: string;
+  readonly brandReference: string;
+  readonly actorReference: string;
+  readonly actorKind: "User" | "System";
+  readonly clock: { now(): string };
+  readonly transactions: {
+    run<T>(work: (tx: ProductLifecycleTransaction) => Promise<T>): Promise<T>;
+  };
+  readonly authority: {
+    holdUntilTransactionCompletes(
+      tx: ProductLifecycleTransaction,
+      input: {
+        readonly tenantReference: string;
+        readonly brandReference: string;
+        readonly actorReference: string;
+        readonly actorKind: "User" | "System";
+        readonly productReference: string | null;
+        readonly purposeCode: "CATALOG_PRODUCT_PUBLICATION_SOURCE";
+        readonly permission: "catalog.manage";
+        readonly owningActions: readonly (
+          "catalog.product.history.read" | "catalog.product.publish"
+        )[];
+        readonly requiredFields: typeof productPublicationSourceFieldsV2;
+        readonly observedAt: string;
+      },
+    ): Promise<void>;
+  };
+}) {
+  const tenantReference = parseCatalogReference(options.tenantReference),
+    brandReference = parseCatalogReference(options.brandReference),
+    actorReference = parseCatalogReference(options.actorReference),
+    actorKind = options.actorKind;
+  if (
+    !["User", "System"].includes(actorKind) ||
+    typeof options.clock?.now !== "function" ||
+    typeof options.transactions?.run !== "function" ||
+    typeof options.authority?.holdUntilTransactionCompletes !== "function"
+  )
+    return fail();
+  const now = options.clock.now.bind(options.clock),
+    run = options.transactions.run.bind(options.transactions),
+    holdAuthority = options.authority.holdUntilTransactionCompletes.bind(options.authority);
+  const exact = (value: unknown, keys: readonly string[]) => {
+    const r = copyCategoryPersistenceValue(value);
+    if (
+      !r ||
+      typeof r !== "object" ||
+      Array.isArray(r) ||
+      Object.keys(r).length !== keys.length ||
+      keys.some((key) => !Object.hasOwn(r, key))
+    )
+      return fail();
+    return r as Record<string, unknown>;
+  };
+  async function read<T>(
+    productReference: string | null,
+    scheduled: boolean,
+    work: (tx: ProductLifecycleTransaction, observedAt: string, check: () => void) => Promise<T>,
+  ): Promise<T> {
+    const observedAt = parseCatalogInstant(now()),
+      deadline = Date.parse(observedAt) + 5000;
+    const check = () => {
+      const at = parseCatalogInstant(now());
+      if (at < observedAt || Date.parse(at) >= deadline) return fail();
+    };
+    let calls = 0,
+      completed: { value: T } | undefined;
+    try {
+      const answer = await run(async (tx) => {
+        if (++calls !== 1) return fail();
+        const hold = () =>
+          holdAuthority(tx, {
+            tenantReference,
+            brandReference,
+            actorReference,
+            actorKind,
+            productReference,
+            purposeCode: "CATALOG_PRODUCT_PUBLICATION_SOURCE",
+            permission: "catalog.manage",
+            owningActions: scheduled
+              ? ["catalog.product.history.read", "catalog.product.publish"]
+              : ["catalog.product.history.read"],
+            requiredFields: productPublicationSourceFieldsV2,
+            observedAt: parseCatalogInstant(now()),
+          });
+        await hold();
+        check();
+        await requireCategoryCurrentReads(tx);
+        await tx.query(
+          "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true),set_config('lock_timeout','5000',true),set_config('statement_timeout','60000',true)",
+          [tenantReference, brandReference],
+        );
+        await holdProductSourceBarrier(tx, brandReference);
+        check();
+        const value = await work(tx, observedAt, check);
+        check();
+        await hold();
+        check();
+        completed = Object.freeze({ value });
+        return completed;
+      });
+      if (calls !== 1 || !completed || answer !== completed) return fail();
+      check();
+      return completed.value;
+    } catch (error) {
+      if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED") throw error;
+      return fail();
+    }
+  }
+  return Object.freeze({
+    context: Object.freeze({ tenantReference, brandReference, actorReference, actorKind }),
+    async withCurrentCoverage<T>(
+      value: unknown,
+      work: (
+        coverage: CatalogProductRetirementCoverage,
+        tx: ProductLifecycleTransaction,
+      ) => Promise<T>,
+    ): Promise<T> {
+      const r = exact(value, ["productReference", "expectedAggregateVersion"]),
+        productReference = parseCatalogReference(r.productReference);
+      if (
+        !Number.isSafeInteger(r.expectedAggregateVersion) ||
+        (r.expectedAggregateVersion as number) < 1 ||
+        (r.expectedAggregateVersion as number) > 2147483647 ||
+        typeof work !== "function"
+      )
+        return fail();
+      return read(productReference, false, async (tx, observedAt, check) => {
+        const coverage = await loadProductRetirementCoverage(tx, {
+          tenantReference,
+          brandReference,
+          productReference,
+          expectedAggregateVersion: r.expectedAggregateVersion as number,
+          observedAt,
+        });
+        check();
+        return work(coverage, tx);
+      });
+    },
+    async discoverDueSchedules(value: unknown) {
+      const r = exact(value, ["afterVersionReference", "limit"]);
+      if (
+        actorKind !== "System" ||
+        !Number.isInteger(r.limit) ||
+        (r.limit as number) < 1 ||
+        (r.limit as number) > 100
+      )
+        return fail();
+      const after =
+          r.afterVersionReference === null ? null : parseCatalogReference(r.afterVersionReference),
+        limit = r.limit as number;
+      return read(null, true, async (tx, observedAt, check) => {
+        // This query locates candidates only. Every returned product is then read
+        // through complete native coverage before any candidate can be exposed.
+        const located = await tx.query<{
+          product_id: string;
+          product_version_id: string;
+          aggregate_version: number;
+        }>(
+          `WITH latest AS (SELECT DISTINCT ON(product_id,product_version_id) product_id,product_version_id,snapshot_json,state FROM rms_catalog.product_publication_revision WHERE tenant_id=$1 AND brand_id=$2 ORDER BY product_id,product_version_id,publication_version DESC)
+           SELECT l.product_id,l.product_version_id,p.aggregate_version FROM latest l JOIN rms_catalog.product p ON p.product_id=l.product_id AND p.brand_id=$2
+           JOIN rms_catalog.product_version v ON v.product_id=p.product_id AND v.brand_id=$2 AND v.product_version_id=l.product_version_id AND v.status='Draft'
+           WHERE l.state='Scheduled' AND l.snapshot_json ? 'profile' AND (l.snapshot_json#>>'{effectivePeriod,effectiveFrom,instant}')::timestamptz<=$3::timestamptz
+           AND ((l.snapshot_json#>>'{effectivePeriod,effectiveUntil,instant}') IS NULL OR (l.snapshot_json#>>'{effectivePeriod,effectiveUntil,instant}')::timestamptz>$3::timestamptz)
+           AND ($4::uuid IS NULL OR l.product_version_id>$4::uuid) ORDER BY l.product_version_id LIMIT $5`,
+          [tenantReference, brandReference, observedAt, after, limit],
+        );
+        if (located.rows.length > limit) return fail();
+        const candidates: {
+            readonly publication: ProductPublicationVersionV2;
+            readonly expectedAggregateVersion: number;
+          }[] = [],
+          coverageByProduct = new Map<string, CatalogProductRetirementCoverage>();
+        let previous = after;
+        for (const row of located.rows) {
+          const productReference = parseCatalogReference(row.product_id),
+            versionReference = parseCatalogReference(row.product_version_id);
+          if (
+            (previous !== null && versionReference <= previous) ||
+            !Number.isInteger(row.aggregate_version) ||
+            row.aggregate_version < 1 ||
+            row.aggregate_version >= 2147483647
+          )
+            return fail();
+          let coverage = coverageByProduct.get(productReference);
+          if (!coverage) {
+            coverage = await loadProductRetirementCoverage(tx, {
+              tenantReference,
+              brandReference,
+              productReference,
+              expectedAggregateVersion: row.aggregate_version,
+              observedAt,
+            });
+            coverageByProduct.set(productReference, coverage);
+          }
+          if (coverage.aggregateVersion !== row.aggregate_version) return fail();
+          const p = parseProductPublicationVersionV2(
+            coverage.latest.find(
+              (publication) => publication.versionReference === versionReference,
+            ),
+          );
+          if (
+            p.state !== "Scheduled" ||
+            p.scheduleReference === null ||
+            p.effectivePeriod.effectiveFrom.instant > observedAt ||
+            (p.effectivePeriod.effectiveUntil !== null &&
+              p.effectivePeriod.effectiveUntil.instant <= observedAt)
+          )
+            return fail();
+          candidates.push(
+            Object.freeze({ publication: p, expectedAggregateVersion: row.aggregate_version }),
+          );
+          previous = versionReference;
+          check();
+        }
+        return Object.freeze({
+          candidates: Object.freeze(candidates),
+          nextAfterVersionReference: candidates.length === limit ? previous : null,
+        });
+      });
+    },
   });
 }

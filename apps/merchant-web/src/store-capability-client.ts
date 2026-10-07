@@ -23,9 +23,39 @@ export const storeCapabilityChoices = Object.freeze(
       label: "Edit and publish products",
     },
     {
+      key: "catalog.cat_optionset_list",
+      control: "catalog.optionset.list",
+      label: "List option sets",
+    },
+    {
+      key: "catalog.cat_optionset_create",
+      control: "catalog.optionset.create",
+      label: "Create option sets",
+    },
+    {
+      key: "catalog.cat_optionset_detail",
+      control: "catalog.optionset.detail",
+      label: "View option set details",
+    },
+    {
+      key: "catalog.cat_optionset_edit",
+      control: "catalog.optionset.edit",
+      label: "Edit option sets",
+    },
+    {
       key: "organization.store_capability",
       control: "organization.store.capability",
       label: "Manage Store capabilities",
+    },
+    {
+      key: "pricing.price_book_list",
+      control: "pricing.pricebook.list",
+      label: "List prices",
+    },
+    {
+      key: "pricing.price_book_editor",
+      control: "pricing.pricebook.editor",
+      label: "Edit and publish prices",
     },
   ].map((choice) => Object.freeze(choice)),
 );

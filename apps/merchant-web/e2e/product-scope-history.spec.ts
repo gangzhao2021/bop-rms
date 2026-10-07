@@ -1,3 +1,25 @@
+import { canonicalizeRfc8785 } from "../../../packages/bop/audit/src/index.js";
+import {
+  materializeFullOptionSetCreation,
+  createCatalogFullOptionSetPublicationMaterialization,
+  parseCatalogInstant,
+  parseProductVersion as parseOwningProductVersion,
+  parseCatalogOptionSetEditorContent,
+} from "../../../packages/rms/catalog/src/index.js";
+import {
+  createPublishingReleaseRecord,
+  createPublishingScope,
+  parsePublishingReference,
+  parsePublishingCode,
+  parsePublishingDigest,
+  parsePublishingInstant,
+  parseReleaseSequence,
+} from "../../../packages/bop/publishing/src/index.js";
+import {
+  digest as publicationDigest,
+  seal as sealPublication,
+  none as noReplacement,
+} from "../src/product-publication-v2-test-fixtures.js";
 import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 const id = (n: number) => `01902439-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -12,14 +34,368 @@ type Mode =
   | "WrongRoot"
   | "Eligibility"
   | "Slow";
+const publicationRoots = new WeakMap<Page, () => number>();
+const publicationRecordCounts = new WeakMap<Page, () => number>();
+function nativeLocalDateTime(value: string) {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/u.exec(value);
+  if (!match?.[1]) throw Error("Synthetic local date-time must use the fixed supported shape");
+  const seconds = match[2] ?? "00",
+    fraction = (match[3] ?? "").replace(/0+$/u, "");
+  return (
+    match[1] +
+    (seconds === "00" && fraction === "" ? "" : `:${seconds}${fraction ? "." + fraction : ""}`)
+  );
+}
+// Browser API scopes and admissions below are controlled synthetic fixtures.
+// Actual public Catalog creation/seal and Publishing release constructors supply
+// all selected version/Option identities and digests; this is not native IAM/PG.
+function bindingOptionSources() {
+  const at = parseCatalogInstant(new Date(Date.now() - 1000).toISOString()),
+    created = materializeFullOptionSetCreation(
+      {
+        internalCode: "SYNTH_EXTRAS",
+        operationReference: id(500),
+        occurredAt: at,
+        reasonCode: "AUTHORIZED_OPERATION",
+        draft: {
+          defaultLocale: "en-CA",
+          localizedNames: { "en-CA": "Synthetic available extras" },
+          localizedDescriptions: {},
+          displayStyle: "MultiChoice",
+          minimumSelection: 0,
+          maximumSelection: 3,
+          allowRepeatedOption: true,
+          perOptionMaximumQuantity: 3,
+          maximumTotalQuantity: 3,
+          options: [
+            {
+              stableCode: "EXTRA",
+              lifecycle: "Active",
+              localizedNames: { "en-CA": "Synthetic extra" },
+              localizedDescriptions: {},
+              sortOrder: 0,
+              defaultEligible: true,
+              triggeredOptionSetReference: null,
+              conflictOptionCodes: [],
+            },
+            {
+              stableCode: "SECOND",
+              lifecycle: "Active",
+              localizedNames: { "en-CA": "Synthetic second extra" },
+              localizedDescriptions: {},
+              sortOrder: 1,
+              defaultEligible: false,
+              triggeredOptionSetReference: null,
+              conflictOptionCodes: [],
+            },
+          ],
+        },
+        additionalContent: {
+          profile: "CatalogOptionSetEditorContentV1",
+          optionDetails: ["EXTRA", "SECOND"].map((stableCode) => ({
+            stableCode,
+            quantityRule: { minimumQuantity: 0, maximumQuantity: 3 },
+            media: null,
+            pricingRule: null,
+            consumption: null,
+            triggeredOptionSetVersionReference: null,
+          })),
+          conditionalRules: [],
+          conflictRules: [],
+          scopeSet: [{ level: "Brand", reference: null, channelCodes: [], orderTypeCodes: [] }],
+          effectivePeriod: {
+            timeZone: "UTC",
+            effectiveFrom: { instant: at, localDateTime: at.slice(0, 23), utcOffsetMinutes: 0 },
+            effectiveUntil: null,
+          },
+        },
+      },
+      {
+        brandReference: id(2),
+        actorReference: id(5),
+        allocations: {
+          optionSetReference: id(43),
+          versionReference: id(44),
+          options: [
+            { stableCode: "EXTRA", optionReference: id(501) },
+            { stableCode: "SECOND", optionReference: id(502) },
+          ],
+        },
+      },
+    );
+  const seal = (full: typeof created, operation: number, nextVersion: number, clock: typeof at) => {
+    const { sourceAggregate, ...additional } = full.content;
+    return createCatalogFullOptionSetPublicationMaterialization(sourceAggregate, additional, {
+      tenantReference: id(1),
+      brandReference: id(2),
+      optionSetReference: sourceAggregate.optionSetReference,
+      versionReference: sourceAggregate.draft.versionReference,
+      sourceAggregateVersion: sourceAggregate.aggregateVersion,
+      publicationOperationReference: id(operation),
+      publicationIntentDigest:
+        "sha256:" +
+        createHash("sha256")
+          .update(canonicalizeRfc8785({ operation, sourceDigest: full.sourceDigest }))
+          .digest("hex"),
+      successorDraftVersionReference: id(nextVersion),
+      sealedAt: clock,
+      sourceDigest: full.sourceDigest,
+      contentDigest: full.contentDigest,
+      configurationDigest: full.configurationDigest,
+    });
+  };
+  const first = seal(created, 503, 504, at),
+    secondAt = parseCatalogInstant(new Date(Date.parse(at) + 1).toISOString()),
+    { sourceAggregate, ...additional } = first.successorEditorContent,
+    next = parseCatalogOptionSetEditorContent(sourceAggregate, additional);
+  // The second version is the genuine owner-generated successor, not a changed
+  // reference pasted into the first frozen snapshot.
+  const second = createCatalogFullOptionSetPublicationMaterialization(sourceAggregate, additional, {
+    tenantReference: id(1),
+    brandReference: id(2),
+    optionSetReference: id(43),
+    versionReference: sourceAggregate.draft.versionReference,
+    sourceAggregateVersion: sourceAggregate.aggregateVersion,
+    publicationOperationReference: id(505),
+    publicationIntentDigest:
+      "sha256:" +
+      createHash("sha256")
+        .update(canonicalizeRfc8785({ syntheticSecond: sourceAggregate }))
+        .digest("hex"),
+    successorDraftVersionReference: id(506),
+    sealedAt: secondAt,
+    sourceDigest: next.sourceDigest,
+    contentDigest: next.contentDigest,
+    configurationDigest: next.configurationDigest,
+  });
+  return { first, second };
+}
+async function productOptionPickerSources(page: Page) {
+  const fixture = bindingOptionSources(),
+    state = {
+      head: 0,
+      denied: false,
+      actor: id(5),
+      requests: [] as { optionSetReference: string; versionReference: string | null }[],
+      prepared: [] as { bindingReference: string; versionReference: string }[],
+      allocated: 550,
+    };
+  const versions = [fixture.first, fixture.second];
+  const reply = (route: import("@playwright/test").Route, body: unknown, status = 200) =>
+    route.fulfill({
+      status,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify(body),
+    });
+  await page.route("**/merchant/catalog/products/option-binding-picker", (route) => {
+    const command = route.request().postDataJSON();
+    state.requests.push(command);
+    expect(Object.keys(command).sort()).toEqual(["optionSetReference", "versionReference"].sort());
+    expect(route.request().headers()["x-bop-csrf"]).toBe("c".repeat(43));
+    if (state.denied) return reply(route, { error: "request_denied" }, 403);
+    const plan =
+      command.versionReference === null
+        ? versions[state.head]
+        : versions.find(
+            (v) => v.content.supportedContent.versionReference === command.versionReference,
+          );
+    if (!plan || command.optionSetReference !== id(43))
+      return reply(route, { error: "product_option_picker_unavailable" }, 503);
+    const content = plan.content,
+      root = content.editorContent.sourceAggregate,
+      d = root.draft,
+      at = new Date().toISOString();
+    const release = createPublishingReleaseRecord({
+      releaseId: parsePublishingReference(id(520 + state.head)),
+      familyReference: parsePublishingReference(id(43)),
+      configurationType: parsePublishingCode("CATALOG_OPTION_SET"),
+      purposeCode: parsePublishingCode("CATALOG_OPTION_SET_PUBLICATION"),
+      snapshotReference: parsePublishingReference(d.versionReference),
+      snapshotDigest: parsePublishingDigest(content.digest),
+      scope: createPublishingScope({ kind: "Brand", brandReference: id(2), storeReference: null }),
+      sequence: parseReleaseSequence(state.head + 1),
+      sourceLifecycleId: parsePublishingReference(id(530 + state.head)),
+      kind: "Publish",
+      previousReleaseId: state.head ? parsePublishingReference(id(520)) : null,
+      createdAt: parsePublishingInstant(content.supportedContent.sealedAt),
+    });
+    const bindingReference = id(++state.allocated);
+    state.prepared.push({ bindingReference, versionReference: d.versionReference });
+    return reply(route, {
+      profile: "CatalogProductOptionBindingPickerV1",
+      tenantReference: id(1),
+      brandReference: id(2),
+      storeReference: id(3),
+      actorReference: state.actor,
+      optionSetReference: id(43),
+      versionReference: d.versionReference,
+      bindingReference,
+      internalCode: root.internalCode,
+      defaultLocale: d.defaultLocale,
+      localizedNames: d.localizedNames,
+      rootSelectionRule: {
+        minimumSelection: d.minimumSelection,
+        maximumSelection: d.maximumSelection,
+        allowRepeatedOption: d.allowRepeatedOption,
+        perOptionMaximumQuantity: d.perOptionMaximumQuantity,
+        maximumTotalQuantity: d.maximumTotalQuantity,
+        displayStyle: d.displayStyle,
+      },
+      options: d.options.map((option) => {
+        const detail = content.editorContent.optionDetails.find(
+          (v) => v.optionReference === option.optionReference,
+        );
+        if (!detail) throw Error("synthetic actual Option detail absent");
+        return {
+          optionReference: option.optionReference,
+          stableCode: option.stableCode,
+          lifecycle: option.lifecycle,
+          localizedNames: option.localizedNames,
+          sortOrder: option.sortOrder,
+          defaultEligible: option.defaultEligible,
+          quantityRule: detail.quantityRule,
+          selectionDisabled: option.lifecycle === "Archived",
+          disabledReason: option.lifecycle === "Archived" ? "OptionArchived" : null,
+        };
+      }),
+      selectionDisabled: root.lifecycle === "Archived",
+      disabledReason: root.lifecycle === "Archived" ? "OptionSetArchived" : null,
+      originalRecordDigest: content.digest,
+      sourceDigest: content.sourceDigest,
+      contentDigest: content.contentDigest,
+      configurationDigest: content.configurationDigest,
+      sourceAuthority:
+        command.versionReference === null
+          ? "CurrentPublishingReleaseAndFrozenContent"
+          : "RecordedFrozen",
+      publicationReference: command.versionReference === null ? release.releaseId : null,
+      referenceEligibility: "NotEvaluated",
+      publishValidation: "Incomplete",
+      observedAt: at,
+      validUntil: new Date(Date.parse(at) + 5000).toISOString(),
+    });
+  });
+  await page.route("**/merchant/catalog/option-sets/list", (route) => {
+    const filters = route.request().postDataJSON(),
+      at = new Date().toISOString(),
+      plan = versions[state.head];
+    if (!plan) throw Error("synthetic selected actual version absent");
+    const r = plan.successorEditorContent.sourceAggregate,
+      d = r.draft;
+    const presence = { status: "Known", present: false };
+    return reply(route, {
+      projection: {
+        name: "catalog_option_set_search_v1",
+        version: 1,
+        asOfUtc: at,
+        stale: false,
+        partial: true,
+        sourceGeneration:
+          "sha256:" + createHash("sha256").update(canonicalizeRfc8785(r)).digest("hex"),
+      },
+      scope: {
+        tenantReference: id(1),
+        brandReference: id(2),
+        storeReference: id(3),
+        actorReference: state.actor,
+      },
+      locale: filters.locale,
+      items: [
+        {
+          optionSetReference: r.optionSetReference,
+          internalCode: r.internalCode,
+          lifecycle: r.lifecycle,
+          aggregateVersion: r.aggregateVersion,
+          draftVersionReference: d.versionReference,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+          name: d.localizedNames[d.defaultLocale],
+          nameLocale: d.defaultLocale,
+          localeFallback: false,
+          selectionRule: {
+            displayStyle: d.displayStyle,
+            minimumSelection: d.minimumSelection,
+            maximumSelection: d.maximumSelection,
+            allowRepeatedOption: d.allowRepeatedOption,
+            perOptionMaximumQuantity: d.perOptionMaximumQuantity,
+            maximumTotalQuantity: d.maximumTotalQuantity,
+          },
+          optionCount: d.options.length,
+          activeOptionCount: d.options.filter((o) => o.lifecycle === "Active").length,
+          productBindingCount: 0,
+          recordedPricingReference: presence,
+          recordedConsumptionReference: presence,
+          recordedConflict: presence,
+          publishingStatus: { status: "Unavailable" },
+          referenceEligibility: "NotEvaluated",
+        },
+      ],
+      hasMore: false,
+      nextCursor: null,
+    });
+  });
+  return state;
+}
+
 async function sources(page: Page) {
+  const picker = await productOptionPickerSources(page);
   const control = {
+    picker,
     mode: "Records" as Mode,
     disabled: false,
     journals: 0,
     scopes: [] as unknown[],
     release: undefined as undefined | (() => void),
+    relation: "IncomingSelectorPreferred" as
+      "IncomingSelectorPreferred" | "ExistingSelectorPreferred" | "EqualPrecedenceOverlap",
   };
+  await page.route("**/merchant/catalog/products/selling-units/context", async (route) => {
+    const request = route.request().postDataJSON() as { action: string };
+    const at = new Date().toISOString();
+    await route.fulfill({
+      status: control.disabled ? 403 : 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify(
+        control.disabled
+          ? { error: "request_denied" }
+          : {
+              profile: "CatalogSellingUnitRegistrationContextV1",
+              action: request.action,
+              tenantReference: id(1),
+              brandReference: id(2),
+              storeReference: id(3),
+              actorReference: id(5),
+              observedAt: at,
+              validUntil: new Date(Date.parse(at) + 5000).toISOString(),
+            },
+      ),
+    });
+  });
+  await page.route("**/merchant/catalog/products/authoring-context", async (route) => {
+    const request = route.request().postDataJSON() as { action: string };
+    const at = new Date().toISOString();
+    await route.fulfill({
+      status: control.disabled ? 403 : 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify(
+        control.disabled
+          ? { error: "request_denied" }
+          : {
+              profile: "CatalogProductAuthoringContextV1",
+              action: request.action,
+              tenantReference: id(1),
+              brandReference: id(2),
+              storeReference: id(3),
+              actorReference: id(5),
+              observedAt: at,
+              validUntil: new Date(Date.parse(at) + 5000).toISOString(),
+            },
+      ),
+    });
+  });
   await page.route("**/merchant/session", async (route) =>
     route.fulfill({
       status: 200,
@@ -76,7 +452,7 @@ async function sources(page: Page) {
             localeFallback: false,
             productType: "PreparedFood",
             lifecycle: "Active",
-            aggregateVersion: 7,
+            aggregateVersion: publicationRoots.get(page)?.() ?? 7,
             updatedAt: at,
             createdAt: at,
             source: { productVersionReference: id(10), configuration: "Draft" },
@@ -122,6 +498,13 @@ async function sources(page: Page) {
   });
   await page.route("**/merchant/catalog/products/publication/scope-journals", async (route) => {
     control.journals++;
+    if (publicationRoots.has(page))
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        headers: { "cache-control": "no-store" },
+        body: JSON.stringify({ error: "product_scope_journal_unavailable" }),
+      });
     expect(route.request().method()).toBe("POST");
     expect(new URL(route.request().url()).search).toBe("");
     expect(route.request().headers()["x-bop-csrf"]).toBe("c".repeat(43));
@@ -200,7 +583,7 @@ async function sources(page: Page) {
                               orderTypeCodes: ["PICKUP"],
                               effectiveFrom: "2026-09-29T12:00:00.000Z",
                               effectiveUntil: null,
-                              relation: "IncomingSelectorPreferred",
+                              relation: control.relation,
                             },
                           ],
                   },
@@ -237,7 +620,24 @@ async function enter(page: Page) {
     .getByRole("link", { name: "Publication history", exact: true })
     .filter({ visible: true })
     .click();
-  await expect(page.getByText("3 version records loaded.")).toBeVisible();
+  const root = publicationRoots.get(page),
+    count = publicationRecordCounts.get(page);
+  if (root && count) {
+    await expect(page.locator("#publication-request-result")).toContainText(
+      `Current publication records loaded · Revision ${root()}.`,
+    );
+    const history = page.getByRole("region", { name: "Publication scope history", exact: true });
+    await expect(history.getByRole("status")).toHaveText(
+      `Recorded publication history · Revision ${root()}. Current sale eligibility has not been evaluated.`,
+    );
+    await expect(history.getByRole("heading", { name: /^Version record /u })).toHaveCount(count());
+    if (count() === 0)
+      await expect(
+        history.getByText("No publication history is recorded for this revision.", { exact: true }),
+      ).toBeVisible();
+  } else {
+    await expect(page.getByText("3 version records loaded.")).toBeVisible();
+  }
 }
 test("@production ordinary Product history entry, keyboard, responsive records and expiry recovery", async ({
   page,
@@ -258,6 +658,13 @@ test("@production ordinary Product history entry, keyboard, responsive records a
   await summary.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByText(/against version record 2/)).toBeVisible();
+  await expect(
+    page.getByText(
+      "Scope entry 2 in this version: this entry was preferred against version record 2, scope entry 1.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("Recorded intersection:", { exact: true })).toBeVisible();
   await page.getByRole("textbox", { name: "Product revision", exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(refresh(page)).toBeFocused();
@@ -302,6 +709,82 @@ test("@production ordinary Product history entry, keyboard, responsive records a
       (v) => JSON.stringify(v) === JSON.stringify({ brandReference: id(2), storeReference: id(3) }),
     ),
   ).toBe(true);
+});
+test("@production recorded overlap phone touch preserves exact scope entries and unresolved equal priority", async ({
+  browser,
+  baseURL,
+}) => {
+  if (!baseURL) throw new Error("Production fixture URL is required");
+  const context = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  try {
+    const page = await context.newPage(),
+      control = await sources(page),
+      errors: string[] = [];
+    let mutations = 0;
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/merchant/catalog/products/publication") mutations++;
+    });
+    await enter(page);
+    expect(await page.evaluate(() => navigator.maxTouchPoints)).toBeGreaterThan(0);
+    for (const [relation, copy, width] of [
+      ["IncomingSelectorPreferred", "this entry was preferred", 390],
+      ["ExistingSelectorPreferred", "the previous entry was preferred", 320],
+      ["EqualPrecedenceOverlap", "equal priority overlap was recorded", 320],
+    ] as const) {
+      control.relation = relation;
+      await page.setViewportSize({ width, height: 844 });
+      if (relation === "EqualPrecedenceOverlap")
+        await page.evaluate(() => (document.documentElement.style.fontSize = "200%"));
+      await refresh(page).tap();
+      await expect(page.getByText("3 version records loaded.")).toBeVisible();
+      const summary = page.locator("summary");
+      expect((await summary.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await summary.tap();
+      await expect(
+        page.getByText(
+          `Scope entry 2 in this version: ${copy} against version record 2, scope entry 1.`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(
+        page.getByText(
+          "Recorded intersection: Selected Store · Channels: All · Order types: PICKUP",
+          {
+            exact: true,
+          },
+        ),
+      ).toBeVisible();
+      await expect(
+        page.getByText(/This intersection does not describe either version's remaining scope/),
+      ).toBeVisible();
+      if (relation === "EqualPrecedenceOverlap")
+        await expect(
+          page.getByText("No replacement decision is recorded in this relationship.", {
+            exact: true,
+          }),
+        ).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      const text = await page.locator("body").innerText();
+      for (const privateValue of [id(1), id(2), id(3), id(4), id(10), id(11), id(12), id(13), hash])
+        expect(text).not.toContain(privateValue);
+      await page.screenshot({
+        path: `/private/tmp/wp2421-m129-recorded-overlap-${relation}-${width}.png`,
+        fullPage: true,
+      });
+    }
+    expect(mutations).toBe(0);
+    expect(errors).toEqual([]);
+  } finally {
+    await context.close();
+  }
 });
 test("@production current permission and source failures clear Product records; disabled capability hides entry", async ({
   page,
@@ -759,7 +1242,12 @@ async function completeDraftSources(page: Page, initial?: "EmptySku") {
     mode: "Current",
     revision: 7,
     draft: null as null | Record<string, unknown>,
+    baseline: null as null | ReturnType<typeof currentEditorFixture>["aggregate"]["draft"],
     bodies: [] as string[],
+    originals: new Map<
+      string,
+      { body: string; draft: Record<string, unknown>; aggregateVersion: number }
+    >(),
   };
   await page.route("**/merchant/catalog/products/editor", async (route) => {
     const raw = currentEditorFixture(createdAt);
@@ -770,6 +1258,7 @@ async function completeDraftSources(page: Page, initial?: "EmptySku") {
         raw.aggregate.draft.editorContent.variantCombinations = [];
       }
     }
+    if (control.baseline === null) control.baseline = structuredClone(raw.aggregate.draft);
     raw.observedAt = new Date().toISOString();
     raw.validUntil = new Date(Date.parse(raw.observedAt) + 5000).toISOString();
     raw.aggregate.updatedAt =
@@ -804,7 +1293,11 @@ async function completeDraftSources(page: Page, initial?: "EmptySku") {
     expect(new URL(route.request().url()).search).toBe("");
     expect(route.request().headers()["x-bop-csrf"]).toBe("c".repeat(43));
     expect(command.productReference).toBe(id(4));
-    expect(command.expectedAggregateVersion).toBe(7);
+    const prior = control.originals.get(command.operationReference);
+    expect(command.expectedAggregateVersion).toBe(
+      prior ? prior.aggregateVersion - 1 : control.revision,
+    );
+    if (prior) expect(text).toBe(prior.body);
     if (control.mode === "Denied") {
       await route.fulfill({
         status: 403,
@@ -814,8 +1307,20 @@ async function completeDraftSources(page: Page, initial?: "EmptySku") {
       });
       return;
     }
-    control.draft = { ...command.draft, updatedAt: new Date().toISOString() };
-    control.revision = 8;
+    if (!prior) {
+      const next = { ...command.draft, updatedAt: new Date().toISOString() };
+      // Actual public Product contract verifies the complete retained candidate.
+      parseOwningProductVersion(next);
+      control.draft = next;
+      control.revision = command.expectedAggregateVersion + 1;
+      control.originals.set(command.operationReference, {
+        body: text,
+        draft: next,
+        aggregateVersion: control.revision,
+      });
+    }
+    const receipt = control.originals.get(command.operationReference);
+    if (!receipt) throw Error("synthetic original Product receipt absent");
     if (control.mode === "Unknown") {
       control.mode = "Current";
       await route.abort("failed");
@@ -826,12 +1331,12 @@ async function completeDraftSources(page: Page, initial?: "EmptySku") {
       contentType: "application/json",
       headers: { "cache-control": "no-store" },
       body: JSON.stringify({
-        status: control.bodies.length > 1 ? "AlreadyApplied" : "Applied",
+        status: prior ? "AlreadyApplied" : "Applied",
         scope: { brandReference: id(2), storeReference: id(3) },
         productReference: id(4),
         operationReference: command.operationReference,
-        aggregateVersion: 8,
-        draft: control.draft,
+        aggregateVersion: receipt.aggregateVersion,
+        draft: receipt.draft,
       }),
     });
   });
@@ -840,6 +1345,9 @@ async function completeDraftSources(page: Page, initial?: "EmptySku") {
   await expect(
     page.getByRole("textbox", { name: "Product name · en-CA", exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Product Option bindings", exact: true }),
+  ).toContainText("Option binding intent is ready for server revalidation.");
   return Object.assign(control, { gate });
 }
 test("@production complete Draft ordinary text save preserves all tuples, keyboard/mobile and post-save current read", async ({
@@ -962,13 +1470,74 @@ test("@production complete Draft conflict and denial refuse confirmation; offlin
   control.mode = "Denied";
   await page.getByRole("button", { name: "Save recorded Draft", exact: true }).click();
   await expect(
-    page.getByText("Draft save not confirmed: Denied. Refresh or discard local edits to recover.", {
-      exact: true,
-    }),
+    page.getByText(
+      "Draft save not confirmed: Denied. Resolve the stored original before editing or publishing.",
+      {
+        exact: true,
+      },
+    ),
   ).toBeVisible();
   await expect(name).toHaveCount(0);
+  expect(control.bodies).toHaveLength(1);
+  await expect(
+    page.getByRole("button", { name: "Discard local edits and reload", exact: true }),
+  ).toBeDisabled();
+  const original = JSON.parse(control.bodies[0] ?? "null") as {
+    operationReference: string;
+    expectedAggregateVersion: number;
+  };
+  let resolutions = 0;
+  await page.route("**/merchant/catalog/products/authoring-resolution", async (route) => {
+    const request = route.request().postDataJSON() as {
+      operationReference: string;
+      expectedAggregateVersion: number;
+    };
+    expect(request.operationReference).toBe(original.operationReference);
+    expect(request.expectedAggregateVersion).toBe(original.expectedAggregateVersion);
+    resolutions += 1;
+    const resolution = sealPublication({
+      profile: "CatalogProductAuthoringResolutionV1",
+      outcome: "Abandoned",
+      command: {
+        profile: "CatalogProductAuthoringResolutionCommandV1",
+        tenantReference: id(1),
+        brandReference: id(2),
+        actorReference: id(5),
+        action: "ReplaceDraft",
+        operationReference: original.operationReference,
+        productReference: id(4),
+        expectedAggregateVersion: original.expectedAggregateVersion,
+      },
+      productReference: id(4),
+      versionReference: null,
+      aggregateVersion: null,
+      originalIntentDigest: null,
+      recordedAt: new Date().toISOString(),
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify({
+        profile: "CatalogProductAuthoringResolutionResultV1",
+        storeReference: id(3),
+        resolution,
+      }),
+    });
+  });
   control.mode = "Current";
-  await page.getByRole("button", { name: "Discard local edits and reload", exact: true }).click();
+  await page.getByRole("button", { name: "Resolve stored Draft save", exact: true }).click();
+  await expect(
+    page.getByText(
+      "The original Draft save was permanently ended without applying. Reopen the current Product to edit.",
+      { exact: false },
+    ),
+  ).toBeVisible();
+  expect(resolutions).toBe(1);
+  expect(control.bodies).toHaveLength(1);
+  await enter(page);
+  await page.getByRole("button", { name: "Open Draft editor", exact: true }).click();
+  await expect(name).toBeVisible();
   await context.setOffline(true);
   await expect(name).toHaveCount(0);
   await expect(
@@ -995,8 +1564,9 @@ test("@production complete Draft recorded SKU Variant Option configuration prese
   await expect(field("SKU 1 name · en-CA")).toBeFocused();
   await field("SKU 1 code").fill("SYNTH_RECORDED");
   await field("SKU 1 name · en-CA").fill("Synthetic recorded SKU edit");
-  await field("SKU 1 unit quantity").fill("0.25");
-  await page.getByLabel("SKU 1 Draft lifecycle", { exact: true }).selectOption("Suspended");
+  await expect(field("SKU 1 unit quantity")).toHaveAttribute("readonly", "");
+  await expect(field("SKU 1 unit quantity")).toHaveValue("1");
+  await expect(page.getByLabel("SKU 1 Draft lifecycle", { exact: true })).toBeDisabled();
   await field("Dimension 1 code").fill("PORTION_SIZE");
   await field("Dimension 1 name · en-CA").fill("Synthetic recorded dimension");
   await field("Dimension 1 value 1 code").fill("RECORDED_SMALL");
@@ -1044,8 +1614,8 @@ test("@production complete Draft recorded SKU Variant Option configuration prese
       ...sku,
       skuCode: "SYNTH_RECORDED",
       localizedNames: { "en-CA": "Synthetic recorded SKU edit" },
-      unitQuantity: "0.25",
-      lifecycle: "Suspended",
+      unitQuantity: sku.unitQuantity,
+      lifecycle: sku.lifecycle,
     })),
   );
   expect(command.draft.editorContent.variantDimensions).toEqual(
@@ -1145,7 +1715,7 @@ test("@production complete Draft invalid integer survives offline refresh and or
 // Milestone95: real Chromium/ordinary entry, explicitly synthetic owning projection and native-shaped receipts.
 async function publicationSources(page: Page) {
   type Command =
-    import("../src/product-publication-command-client.js").ProductPublicationUserCommand;
+    import("../src/product-publication-command-client-v2.js").ProductPublicationUserCommandV2;
   const control = {
     root: 7,
     draft: id(14),
@@ -1153,39 +1723,122 @@ async function publicationSources(page: Page) {
     mode: "Current",
     loseNext: false,
     commandDenied: false,
+    denyReadsAfterCommit: false,
     bodies: [] as string[],
     scopes: [] as string[],
     release: undefined as undefined | (() => void),
   };
-  const future = new Date(Date.now() + 3600000).toISOString();
+  publicationRoots.set(page, () => control.root);
+  const future = new Date(Date.now() + 3600000).toISOString(),
+    now = new Date().toISOString(),
+    replacementIntent = noReplacement();
   const period = {
     timeZone: "UTC",
     effectiveFrom: { instant: future, localDateTime: future.slice(0, -1), utcOffsetMinutes: 0 },
     effectiveUntil: null,
   };
+  const initialScopes = [
+    {
+      level: "Store",
+      reference: id(3) as string | null,
+      channelCodes: [] as string[],
+      orderTypeCodes: [] as string[],
+    },
+  ];
   const row = {
+    profile: "CatalogProductPublicationVersionV2",
+    tenantReference: id(1),
+    brandReference: id(2),
+    productReference: id(4),
     versionReference: id(14),
     publicationVersion: 1,
+    productAggregateVersion: 6,
     state: "Draft",
     contentDigest: hash,
     configurationDigest: hash,
-    scopeSet: [
-      {
-        level: "Store",
-        reference: id(3),
-        channelCodes: [] as string[],
-        orderTypeCodes: [] as string[],
-      },
-    ],
-    effectivePeriod: period,
+    scopeSet: initialScopes,
+    scopeDigest: publicationDigest(initialScopes),
+    effectivePeriod: period as Command["effectivePeriod"],
+    periodDigest: publicationDigest(period),
+    validationEvidenceReference: id(40),
+    validationDecision: "ApprovalPending",
+    policyReference: id(41),
+    policyVersion: 1,
+    approvalPolicy: "Required",
+    reviewReference: null as string | null,
+    reviewVersion: null as number | null,
+    submittedByActorReference: null as string | null,
+    approvalEvidenceReference: null as string | null,
     scheduleReference: null as string | null,
     scheduleVersion: 0,
-    recordedAt: new Date().toISOString(),
+    publishedAt: null as string | null,
+    supersededAt: null as string | null,
+    supersededByVersionReference: null as string | null,
+    successorDraftVersionReference: null as string | null,
+    operationReference: id(42),
+    intentDigest: hash,
+    actorReference: id(43),
+    actorKind: "User",
+    occurredAt: now,
+    reasonCode: "USER_REQUEST",
+    replacementIntent,
+    replacementIntentDigest: replacementIntent.digest,
   };
   type Row = typeof row;
   const rows = new Map<string, Row>([[row.versionReference, row]]),
+    history: { publicationAction: string; publication: Row }[] = [
+      { publicationAction: "Validate", publication: row },
+    ],
     ledger = new Map<string, Record<string, unknown>>();
-  await page.route("**/merchant/catalog/products/publication/management", async (route) => {
+  publicationRecordCounts.set(page, () => rows.size);
+  const header = (publicationAction: string, publication: Row) =>
+    sealPublication({
+      profile: "CatalogProductScopeRetirementHeaderV1",
+      tenantReference: id(1),
+      brandReference: id(2),
+      productReference: id(4),
+      operationReference: publication.operationReference,
+      versionReference: publication.versionReference,
+      publicationVersion: publication.publicationVersion,
+      publicationAction,
+      sourceAggregateVersion: publication.productAggregateVersion,
+      resultAggregateVersion: publication.productAggregateVersion + 1,
+      publicationIntentDigest: publication.intentDigest,
+      publicationSnapshotDigest: publicationDigest(publication),
+      observedSourceRevision: String(publication.productAggregateVersion),
+      observedSourceHeadDigest: hash,
+      recordedAt: publication.occurredAt,
+      retirements: [],
+    });
+  // The ordinary page must refresh the editor using the receipt root, including after recovery.
+  await page.route("**/merchant/catalog/products/editor", async (route) => {
+    if (control.denyReadsAfterCommit && control.root > 7)
+      return route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        headers: { "cache-control": "no-store" },
+        body: JSON.stringify({ error: "request_denied" }),
+      });
+    const raw = currentEditorFixture(new Date().toISOString());
+    const expected = route.request().postDataJSON().expectedAggregateVersion as number;
+    if (expected !== control.root)
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        headers: { "cache-control": "no-store" },
+        body: JSON.stringify({ error: "product_editor_unavailable" }),
+      });
+    raw.aggregateVersion = control.root;
+    raw.aggregate.aggregateVersion = control.root;
+    raw.aggregate.draft.versionReference = control.draft;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify(sealPublication(raw)),
+    });
+  });
+  await page.route("**/merchant/catalog/products/publication/management/v2", async (route) => {
     control.reads++;
     expect(route.request().postDataJSON()).toEqual({
       productReference: id(4),
@@ -1197,23 +1850,46 @@ async function publicationSources(page: Page) {
       await new Promise<void>((resolve) => {
         control.release = resolve;
       });
-    if (control.mode === "Denied")
+    if (control.mode === "Denied" || (control.denyReadsAfterCommit && control.root > 7))
       return route.fulfill({
         status: 403,
         contentType: "application/json",
         headers: { "cache-control": "no-store" },
         body: JSON.stringify({ error: "request_denied" }),
       });
-    const at = new Date().toISOString();
-    const body = {
-      profile: "CatalogProductPublicationManagementV1",
+    const observedAt = new Date().toISOString(),
+      versions = [...rows.values()].sort((a, b) =>
+        a.versionReference.localeCompare(b.versionReference),
+      ),
+      headers = history.map((e) => header(e.publicationAction, e.publication));
+    const coverage = {
+      profile: "CatalogProductRetirementCoverageV1",
+      coverage: "CompleteRecordedPublicationRetirements",
+      sourceAuthority: "NotEvaluated",
+      eligibility: "NotEvaluated",
+      tenantReference: id(1),
+      brandReference: id(2),
+      productReference: id(4),
+      aggregateVersion: control.root,
+      sourceRevision: String(control.root),
+      observedAt,
+      history,
+      headers,
+      latest: versions,
+    };
+    const body = sealPublication({
+      profile: "CatalogProductPublicationManagementV2",
       tenantReference: id(1),
       brandReference: id(2),
       storeReference: id(3),
       productReference: id(4),
       aggregateVersion: control.root,
-      observedAt: at,
-      validUntil: new Date(Date.parse(at) + 5000).toISOString(),
+      observedAt,
+      editorObservedAt: observedAt,
+      sourceObservedAt: observedAt,
+      validUntil: new Date(Date.parse(observedAt) + 5000).toISOString(),
+      sourceRevision: String(control.root),
+      sourceDigest: publicationDigest(coverage),
       coverage: "CompleteRecordedPublicationManagement",
       eligibility: "NotEvaluated",
       publishValidation: "Incomplete",
@@ -1223,26 +1899,30 @@ async function publicationSources(page: Page) {
         configurationDigest: hash,
         contentStatus: "Present",
       },
-      versions: [...rows.values()],
-    };
+      versions,
+      history,
+      scopeRetirementHeaders: headers,
+      noReplacementIntent: noReplacement(),
+      replacementTargets: [],
+    });
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       headers: { "cache-control": "no-store" },
-      body: JSON.stringify({
-        ...body,
-        digest: "sha256:" + createHash("sha256").update(editorCanonical(body)).digest("hex"),
-      }),
+      body: JSON.stringify(body),
     });
   });
-  await page.route("**/merchant/catalog/products/publication", async (route) => {
+  await page.route("**/merchant/catalog/products/publication/v2", async (route) => {
     const text = route.request().postData() ?? "",
       command = JSON.parse(text) as Command;
     control.bodies.push(text);
     control.scopes.push(route.request().headers()["x-bop-catalog-scope"] ?? "");
     expect(route.request().headers()["x-bop-csrf"]).toBe("c".repeat(43));
     expect(command.productReference).toBe(id(4));
-    expect(Object.keys(command)).toHaveLength(15);
+    expect(Object.keys(command)).toHaveLength(18);
+    expect(command.profile).toBe("CatalogProductPublicationCommandV2");
+    expect(command.replacementIntent).toEqual(noReplacement());
+    expect(command.replacementIntentDigest).toBe(noReplacement().digest);
     expect(command.contentDigest).toBe(hash);
     expect(command.configurationDigest).toBe(hash);
     if (control.commandDenied)
@@ -1273,29 +1953,53 @@ async function publicationSources(page: Page) {
       ReschedulePublish: "Scheduled",
       CancelScheduledPublish: "Draft",
     };
-    const next = {
+    const state = states[command.action],
+      occurredAt = new Date().toISOString(),
+      resetting = state === "Draft";
+    const next: Row = {
+      ...row,
+      ...before,
       versionReference: command.versionReference,
       publicationVersion: command.expectedPublicationVersion + 1,
-      state: states[command.action],
+      productAggregateVersion: control.root,
+      state,
       contentDigest: command.contentDigest,
       configurationDigest: command.configurationDigest,
-      scopeSet: command.scopeSet.map((s) => ({
-        ...s,
-        channelCodes: [...s.channelCodes],
-        orderTypeCodes: [...s.orderTypeCodes],
+      scopeSet: command.scopeSet.map((selector) => ({
+        ...selector,
+        channelCodes: [...selector.channelCodes],
+        orderTypeCodes: [...selector.orderTypeCodes],
       })),
+      scopeDigest: publicationDigest(command.scopeSet),
       effectivePeriod: command.effectivePeriod,
+      periodDigest: publicationDigest(command.effectivePeriod),
+      reviewReference: resetting ? null : (before?.reviewReference ?? id(44)),
+      reviewVersion: resetting
+        ? null
+        : (before?.reviewVersion ?? command.expectedPublicationVersion + 1),
+      submittedByActorReference: resetting ? null : id(43),
+      approvalEvidenceReference: resetting || state === "InReview" ? null : id(45),
+      validationDecision: resetting || state === "InReview" ? "ApprovalPending" : "Pass",
       scheduleReference: command.scheduleReference ?? before?.scheduleReference ?? null,
       scheduleVersion: command.scheduleReference
         ? (before?.scheduleVersion ?? 0) + 1
         : (before?.scheduleVersion ?? 0),
-      recordedAt: command.occurredAt,
+      publishedAt: state === "Published" ? occurredAt : null,
+      successorDraftVersionReference: command.successorDraftVersionReference,
+      operationReference: command.operationReference,
+      intentDigest: publicationDigest(command),
+      occurredAt,
+      replacementIntent: command.replacementIntent,
+      replacementIntentDigest: command.replacementIntentDigest,
     };
-    rows.set(command.versionReference, next as Row);
+    rows.set(command.versionReference, next);
+    history.push({ publicationAction: command.action, publication: next });
     control.root++;
     if (command.successorDraftVersionReference)
       control.draft = command.successorDraftVersionReference;
     const receipt = {
+      profile: "CatalogProductPublicationCommandResultV2",
+      replacementIntentDigest: command.replacementIntentDigest,
       status: "Applied",
       operationReference: command.operationReference,
       productReference: command.productReference,
@@ -1320,25 +2024,33 @@ async function publicationSources(page: Page) {
     });
   });
   return Object.assign(control, {
-    clearHistory: () => rows.clear(),
+    clearHistory: () => {
+      rows.clear();
+      history.splice(0);
+    },
     setRecordedScopes: (scopes: Row["scopeSet"]) => {
       row.scopeSet = scopes;
+      row.scopeDigest = publicationDigest(scopes);
     },
   });
 }
 async function openPublication(page: Page) {
-  await page.getByRole("button", { name: "Open publication requests", exact: true }).click();
   await expect(page.getByText(/Current publication records loaded/)).toBeVisible();
 }
 async function publicationAction(page: Page, name: string) {
+  const status = page.locator("#publication-request-result"),
+    before = await status.innerText(),
+    match = /Revision ([0-9]+)/u.exec(before);
+  if (!match?.[1]) throw new Error("Current publication revision must be visible before acting");
   await page.getByRole("button", { name, exact: true }).click();
-  await expect(
-    page.getByText("Publication request confirmed. Refresh to read current recorded state.", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Refresh publication records", exact: true }).click();
-  await expect(page.getByText(/Current publication records loaded/)).toBeVisible();
+  await expect(status).toContainText(`Revision ${Number(match[1]) + 1}.`);
+}
+async function reenterCurrentPublication(page: Page) {
+  await page.getByRole("link", { name: "Back to products", exact: true }).click();
+  await page
+    .getByRole("link", { name: "Publication history", exact: true })
+    .filter({ visible: true })
+    .click();
 }
 test("@production publication ordinary requests validate review independent approval reject and publish now", async ({
   page,
@@ -1373,6 +2085,46 @@ test("@production publication ordinary requests validate review independent appr
   expect(new Set(control.bodies.map((text) => JSON.parse(text).operationReference)).size).toBe(6);
   expect(errors).toEqual([]);
 });
+test("@production publication acknowledged write stays confirmed when automatic current reads are denied", async ({
+  page,
+}) => {
+  await sources(page);
+  await currentContentSource(page);
+  const control = await publicationSources(page);
+  await enter(page);
+  await openPublication(page);
+  control.denyReadsAfterCommit = true;
+  await page.getByRole("button", { name: "Validate publication", exact: true }).click();
+  await expect(page.locator("#publication-request-result")).toHaveText(
+    "Publication confirmed at revision 8. Current records unavailable: Denied. Refresh publication records to continue.",
+  );
+  await expect(
+    page.getByText("Product change confirmed · Revision 8.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Current content permission denied", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry original publication request", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByText(/Current publication records loaded/)).toHaveCount(0);
+  await expect(page.getByText(/Publication request not confirmed/)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Submit publication review", exact: true }),
+  ).toHaveCount(0);
+  expect(control.root).toBe(8);
+  expect(control.bodies).toHaveLength(1);
+  expect(await pendingPublicationRecords(page)).toEqual([]);
+  control.denyReadsAfterCommit = false;
+  await page.getByRole("button", { name: "Refresh publication records", exact: true }).click();
+  await expect(page.locator("#publication-request-result")).toContainText(
+    "Current publication records loaded · Revision 8.",
+  );
+  await expect(
+    page.getByText("Product change confirmed · Revision 8.", { exact: true }),
+  ).toBeVisible();
+  expect(control.bodies).toHaveLength(1);
+});
 test("@production publication schedule reschedule cancel keyboard mobile narrow and zoom", async ({
   page,
 }) => {
@@ -1394,15 +2146,35 @@ test("@production publication schedule reschedule cancel keyboard mobile narrow 
   nextFrom.setUTCMilliseconds(0);
   await page
     .getByLabel("Effective from local time", { exact: true })
-    .fill(nextFrom.toISOString().slice(0, 19));
+    .fill(nativeLocalDateTime(nextFrom.toISOString().slice(0, -1)));
   await page.getByLabel("Effective from UTC offset minutes", { exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(
     page.getByLabel("Effective until local time (optional)", { exact: true }),
   ).toBeFocused();
-  await publicationAction(page, "Reschedule publication");
-  const rescheduled = JSON.parse(control.bodies[3] ?? "null");
-  expect(rescheduled.scheduleReference).toBe(original.scheduleReference);
+  await expect(
+    page.getByRole("button", { name: "Reschedule publication", exact: true }),
+  ).toHaveCount(0);
+  // Cancel sends the recorded period; the new period is validated only after cancellation.
+  await page
+    .getByLabel("Effective from local time", { exact: true })
+    .fill(nativeLocalDateTime(original.effectivePeriod.effectiveFrom.localDateTime));
+  await publicationAction(page, "Cancel scheduled publication");
+  await page
+    .getByLabel("Effective from local time", { exact: true })
+    .fill(nativeLocalDateTime(nextFrom.toISOString().slice(0, -1)));
+  for (const action of [
+    "Validate publication",
+    "Submit publication review",
+    "Request independent approval",
+    "Schedule publication",
+  ])
+    await publicationAction(page, action);
+  const rescheduled = JSON.parse(control.bodies[7] ?? "null");
+  expect(JSON.parse(control.bodies[3] ?? "null").scheduleReference).toBe(
+    original.scheduleReference,
+  );
+  expect(rescheduled.scheduleReference).not.toBe(original.scheduleReference);
   expect(rescheduled.effectivePeriod.effectiveFrom.instant).toBe(nextFrom.toISOString());
   expect(rescheduled.effectivePeriod.effectiveFrom.instant).not.toBe(
     original.effectivePeriod.effectiveFrom.instant,
@@ -1430,8 +2202,8 @@ test("@production publication schedule reschedule cancel keyboard mobile narrow 
     el.style.fontSize = "";
   });
   await publicationAction(page, "Cancel scheduled publication");
-  expect(JSON.parse(control.bodies[4] ?? "null").scheduleReference).toBe(
-    original.scheduleReference,
+  expect(JSON.parse(control.bodies[8] ?? "null").scheduleReference).toBe(
+    rescheduled.scheduleReference,
   );
   const text = await page
     .getByRole("region", { name: "Publication requests", exact: true })
@@ -1473,15 +2245,11 @@ test("@production publication unknown offline expiry denied original replay and 
   await page
     .getByRole("button", { name: "Retry original publication request", exact: true })
     .click();
-  await expect(
-    page.getByText("Publication request confirmed. Refresh to read current recorded state.", {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await expect(page.getByText(/Current publication records loaded/)).toBeVisible();
   expect(control.bodies).toHaveLength(2);
   expect(control.bodies[1]).toBe(control.bodies[0]);
   expect(control.scopes[1]).toBe(control.scopes[0]);
-  expect(control.reads).toBe(reads);
+  expect(control.reads).toBe(reads + 1);
   await page.getByRole("button", { name: "Refresh publication records", exact: true }).click();
   await expect(page.getByText(/Current publication records loaded/)).toBeVisible();
   await expect(page.getByText(/Current publication records unavailable: Stale/)).toBeVisible({
@@ -1528,11 +2296,10 @@ test("@production publication initial scope proposal and invalid local period re
   await zone.fill("America/Toronto");
   await page.getByLabel("Effective from UTC offset minutes", { exact: true }).fill("-240");
   await page.getByRole("button", { name: "Validate publication", exact: true }).click();
-  await expect(
-    page.getByText("Publication request confirmed. Refresh to read current recorded state.", {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await expect.poll(() => control.bodies.length).toBe(1);
+  await expect(page.locator("#publication-request-result")).toContainText(
+    "Current publication records loaded · Revision 8.",
+  );
   const command = JSON.parse(control.bodies[0] ?? "null");
   expect(command.expectedPublicationVersion).toBe(0);
   expect(command.scopeSet).toEqual([
@@ -1607,7 +2374,7 @@ test("@production publication durable original survives reload navigation curren
   expect(JSON.stringify(records)).not.toContain("c".repeat(43));
   page.on("dialog", (dialog) => void dialog.accept());
   await page.reload();
-  await page.getByRole("button", { name: "Open publication requests", exact: true }).click();
+  await reenterCurrentPublication(page);
   await expect(page.getByText(/Original Validate request is unconfirmed/)).toBeVisible();
   expect(control.reads).toBe(reads);
   expect(control.bodies).toHaveLength(1);
@@ -1616,7 +2383,6 @@ test("@production publication durable original survives reload navigation curren
     .getByRole("link", { name: "Publication history", exact: true })
     .filter({ visible: true })
     .click();
-  await page.getByRole("button", { name: "Open publication requests", exact: true }).click();
   await expect(page.getByText(/Original Validate request is unconfirmed/)).toBeVisible();
   await context.setOffline(true);
   await expect(
@@ -1634,14 +2400,10 @@ test("@production publication durable original survives reload navigation curren
     .getByRole("button", { name: "Retry original publication request", exact: true })
     .focus();
   await page.keyboard.press("Enter");
-  await expect(
-    page.getByText("Publication request confirmed. Refresh to read current recorded state.", {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await expect(page.getByText(/Current publication records loaded/)).toBeVisible();
   expect(control.bodies).toEqual([original, original, original]);
   expect(new Set(control.scopes).size).toBe(1);
-  expect(control.reads).toBe(reads);
+  expect(control.reads).toBe(reads + 1);
   expect(await pendingPublicationRecords(page)).toEqual([]);
 });
 test("@production publication explicit Brand scope requires validation and keeps recorded filtered scopes", async ({
@@ -1751,7 +2513,7 @@ test("@production publication Brand proposal survives stale offline denial and e
   expect(records[0]?.body).toBe(original);
   page.on("dialog", (dialog) => void dialog.accept());
   await page.reload();
-  await page.getByRole("button", { name: "Open publication requests", exact: true }).click();
+  await reenterCurrentPublication(page);
   await expect(page.getByText(/Original Validate request is unconfirmed/)).toBeVisible();
   control.commandDenied = true;
   await page
@@ -1764,13 +2526,9 @@ test("@production publication Brand proposal survives stale offline denial and e
     .getByRole("button", { name: "Retry original publication request", exact: true })
     .focus();
   await page.keyboard.press("Enter");
-  await expect(
-    page.getByText("Publication request confirmed. Refresh to read current recorded state.", {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await expect(page.getByText(/Current publication records loaded/)).toBeVisible();
   expect(control.bodies).toEqual([original, original, original]);
-  expect(control.reads).toBe(reads);
+  expect(control.reads).toBe(reads + 1);
   expect(await pendingPublicationRecords(page)).toEqual([]);
 });
 test("@production publication phone touch Brand proposal keeps current scope and narrow reflow", async ({
@@ -1790,7 +2548,7 @@ test("@production publication phone touch Brand proposal keeps current scope and
     await currentContentSource(page);
     const control = await publicationSources(page);
     await enter(page);
-    await page.getByRole("button", { name: "Open publication requests", exact: true }).tap();
+    await openPublication(page);
     const scope = page.getByLabel("Publication scope", { exact: true });
     await scope.selectOption("Brand");
     expect(await page.evaluate(() => navigator.maxTouchPoints > 0)).toBe(true);
@@ -1805,11 +2563,7 @@ test("@production publication phone touch Brand proposal keeps current scope and
       });
     }
     await page.getByRole("button", { name: "Validate publication", exact: true }).tap();
-    await expect(
-      page.getByText("Publication request confirmed. Refresh to read current recorded state.", {
-        exact: true,
-      }),
-    ).toBeVisible();
+    await expect(page.locator("#publication-request-result")).toContainText("Revision 8.");
     expect(JSON.parse(control.bodies[0] ?? "null").scopeSet).toEqual([
       { level: "Brand", reference: null, channelCodes: [], orderTypeCodes: [] },
     ]);
@@ -1859,7 +2613,7 @@ test("@production publication corrupt or unavailable native journal refuses disp
   page.on("dialog", (dialog) => void dialog.accept());
   const reads = control.reads;
   await page.reload();
-  await page.getByRole("button", { name: "Open publication requests", exact: true }).click();
+  await reenterCurrentPublication(page);
   await expect(page.getByText(/Publication request not confirmed: Unavailable/)).toBeVisible();
   expect(control.bodies).toHaveLength(1);
   expect(control.reads).toBe(reads);
@@ -1867,7 +2621,7 @@ test("@production publication corrupt or unavailable native journal refuses disp
     Object.defineProperty(globalThis, "indexedDB", { value: undefined }),
   );
   await page.reload();
-  await page.getByRole("button", { name: "Open publication requests", exact: true }).click();
+  await reenterCurrentPublication(page);
   await expect(page.getByText(/Publication request not confirmed: Unavailable/)).toBeVisible();
   expect(control.bodies).toHaveLength(1);
   expect(control.reads).toBe(reads);
@@ -2916,4 +3670,1025 @@ test("@production classified Draft Category departed late lookup never restores 
   ).toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: foodCategory, exact: true })).toHaveCount(0);
   expect(control.bodies).toHaveLength(0);
+});
+
+test("@production initial Product creation durable identity survives reload and resolves original receipt", async ({
+  page,
+}) => {
+  const { control } = await initialCreation(page);
+  let resolved = 0;
+  await page.route("**/merchant/catalog/products/authoring-resolution", async (route) => {
+    const request = route.request().postDataJSON() as {
+      tenantReference: string;
+      action: string;
+      operationReference: string;
+      productReference: null;
+      expectedAggregateVersion: null;
+    };
+    expect(new URL(route.request().url()).search).toBe("");
+    const original = JSON.parse(control.bodies[0] ?? "null") as {
+      operationReference: string;
+    } | null;
+    expect(request.operationReference).toBe(original?.operationReference);
+    resolved++;
+    const command = {
+        profile: "CatalogProductAuthoringResolutionCommandV1",
+        tenantReference: id(1),
+        brandReference: id(2),
+        actorReference: id(5),
+        action: "Create",
+        operationReference: request.operationReference,
+        productReference: null,
+        expectedAggregateVersion: null,
+      },
+      resolution = sealPublication({
+        profile: "CatalogProductAuthoringResolutionV1",
+        outcome: "Committed",
+        command,
+        productReference: id(4),
+        versionReference: id(10),
+        aggregateVersion: 1,
+        originalIntentDigest: hash,
+        recordedAt: new Date().toISOString(),
+      });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify({
+        profile: "CatalogProductAuthoringResolutionResultV1",
+        storeReference: id(3),
+        resolution,
+      }),
+    });
+  });
+  await enterCreation(page);
+  await fillCreation(page);
+  control.mode = "Lost";
+  await page.getByRole("button", { name: "Create initial Draft", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Retry original creation", exact: true }),
+  ).toBeVisible();
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Resolve stored creation", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Internal code", exact: true })).toHaveValue("");
+  await expect(
+    page.getByRole("button", { name: "Create initial Draft", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Resolve stored creation", exact: true }).click();
+  await expect(
+    page.getByText(
+      "Original creation confirmed. Return to Products and reopen its current revision.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  expect(control.bodies).toHaveLength(1);
+  expect(resolved).toBe(1);
+  const retained = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open("bop-product-authoring-pending-v1", 1);
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(Error("Synthetic IndexedDB read failed"));
+    });
+    try {
+      return await new Promise<number>((resolve, reject) => {
+        const tx = db.transaction("originals", "readonly"),
+          count = tx.objectStore("originals").count();
+        count.onsuccess = () => resolve(count.result);
+        count.onerror = () => reject(Error("Synthetic count failed"));
+      });
+    } finally {
+      db.close();
+    }
+  });
+  expect(retained).toBe(0);
+});
+
+test("@production complete Draft durable original recovery from current list revision", async ({
+  page,
+}) => {
+  const control = await completeDraftSources(page);
+  await page
+    .getByRole("textbox", { name: "Product name · en-CA", exact: true })
+    .fill("Synthetic recovery text not cached");
+  control.mode = "Unknown";
+  await page.getByRole("button", { name: "Save recorded Draft", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Resolve stored Draft save", exact: true }),
+  ).toBeVisible();
+  const original = JSON.parse(control.bodies[0] ?? "null") as {
+    operationReference: string;
+    expectedAggregateVersion: number;
+  };
+  publicationRoots.set(page, () => control.revision);
+  await page.route("**/merchant/catalog/products/authoring-resolution", async (route) => {
+    const request = route.request().postDataJSON() as {
+      operationReference: string;
+      expectedAggregateVersion: number;
+    };
+    expect(request.operationReference).toBe(original.operationReference);
+    expect(request.expectedAggregateVersion).toBe(7);
+    const command = {
+        profile: "CatalogProductAuthoringResolutionCommandV1",
+        tenantReference: id(1),
+        brandReference: id(2),
+        actorReference: id(5),
+        action: "ReplaceDraft",
+        operationReference: original.operationReference,
+        productReference: id(4),
+        expectedAggregateVersion: 7,
+      },
+      resolution = sealPublication({
+        profile: "CatalogProductAuthoringResolutionV1",
+        outcome: "Committed",
+        command,
+        productReference: id(4),
+        versionReference: id(10),
+        aggregateVersion: 8,
+        originalIntentDigest: hash,
+        recordedAt: new Date().toISOString(),
+      });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify({
+        profile: "CatalogProductAuthoringResolutionResultV1",
+        storeReference: id(3),
+        resolution,
+      }),
+    });
+  });
+  // Reopen from the actual current list row; a stale root7 reload is not a
+  // manufactured current editor. Native server receipt coverage stays separate.
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.goto("/app/commerce/products");
+  await page
+    .getByRole("link", { name: "Publication history", exact: true })
+    .filter({ visible: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Resolve stored Draft save", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: "Product name · en-CA", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Resolve stored Draft save", exact: true }).click();
+  await expect(
+    page.getByText("Original Draft save confirmed. Reopen the current Product before editing.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  expect(control.bodies).toHaveLength(1);
+});
+
+// Synthetic owner HTTP records exercise the rendered ordinary entry and actual client/controller.
+// They are not evidence of native IAM, persisted registry transactions or reload recovery.
+async function sellingUnitAuthoringSources(page: Page) {
+  const control = {
+    inspections: 0,
+    bodies: [] as string[],
+    resolutions: [] as string[],
+    lost: false,
+    commit: true,
+    denyResolution: false,
+    version: 0,
+  };
+  let units: {
+    unitReference: string;
+    code: string;
+    semanticDefinition: string;
+    quantityDecimalPlaces: number;
+    localizedNames: Record<string, string>;
+    lifecycle: string;
+  }[] = [];
+  await page.route("**/merchant/catalog/products/selling-units/inspect", async (route) => {
+    control.inspections++;
+    const at = new Date().toISOString();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify({
+        profile: "CatalogProductSellingUnitRegistryViewV1",
+        brandReference: id(2),
+        storeReference: id(3),
+        presence: control.version ? "Present" : "Absent",
+        registryVersion: control.version,
+        defaultLocale: control.version ? "en-CA" : null,
+        units,
+        assignedHistory: [],
+        historyDigest: hash,
+        definitionsDigest: control.version ? hash : null,
+        inspectionDigest: hash,
+        observedAt: at,
+        validUntil: new Date(Date.parse(at) + 5000).toISOString(),
+      }),
+    });
+  });
+  await page.route("**/merchant/catalog/products/selling-units/register", async (route) => {
+    const text = route.request().postData() ?? "";
+    control.bodies.push(text);
+    const body = route.request().postDataJSON() as {
+      operationReference: string;
+      expectedRegistryVersion: number;
+      units: typeof units;
+    };
+    expect(route.request().headers()["x-bop-csrf"]).toBe("c".repeat(43));
+    expect(body.expectedRegistryVersion).toBe(0);
+    expect(body.units[0]?.unitReference).toBeNull();
+    if (control.bodies.length === 1) {
+      if (control.commit) {
+        units = body.units.map((unit, i) => ({ ...unit, unitReference: id(140 + i) }));
+        control.version = 1;
+      }
+      if (control.lost) return route.abort("failed");
+    } else expect(text).toBe(control.bodies[0]);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify({
+        profile: "CatalogProductSellingUnitRegistryResultV1",
+        status: control.bodies.length > 1 ? "Replayed" : "Applied",
+        operationReference: body.operationReference,
+        registryVersion: 1,
+        snapshotDigest: hash,
+      }),
+    });
+  });
+  await page.route("**/merchant/catalog/products/selling-units/resolve", async (route) => {
+    control.resolutions.push(route.request().postData() ?? "");
+    if (control.denyResolution)
+      return route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        headers: { "cache-control": "no-store" },
+        body: JSON.stringify({ error: "request_denied" }),
+      });
+    const request = route.request().postDataJSON() as {
+      profile: string;
+      tenantReference: string;
+      actorReference: string;
+      action: string;
+      operationReference: string;
+      expectedRegistryVersion: number;
+    };
+    const original = JSON.parse(control.bodies[0] ?? "{}");
+    expect(request).toEqual({
+      profile: "CatalogSellingUnitRegistrationResolutionRequestV1",
+      tenantReference: id(1),
+      actorReference: id(5),
+      action: original.action,
+      operationReference: original.operationReference,
+      expectedRegistryVersion: original.expectedRegistryVersion,
+    });
+    const resolution = {
+      profile: "CatalogSellingUnitRegistrationResolutionV1",
+      outcome: control.commit ? "Committed" : "Abandoned",
+      command: {
+        profile: "CatalogSellingUnitRegistrationResolutionCommandV1",
+        tenantReference: id(1),
+        brandReference: id(2),
+        actorReference: id(5),
+        action: request.action,
+        operationReference: request.operationReference,
+        expectedRegistryVersion: request.expectedRegistryVersion,
+      },
+      registryReference: control.commit ? id(180) : null,
+      versionReference: control.commit ? id(181) : null,
+      registryVersion: control.commit ? 1 : null,
+      originalIntentDigest: control.commit ? hash : null,
+      snapshotDigest: control.commit ? hash : null,
+      recordedAt: new Date().toISOString(),
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify({
+        profile: "CatalogSellingUnitRegistrationResolutionResultV1",
+        storeReference: id(3),
+        resolution: {
+          ...resolution,
+          digest:
+            "sha256:" + createHash("sha256").update(editorCanonical(resolution)).digest("hex"),
+        },
+      }),
+    });
+  });
+  return control;
+}
+async function registerSyntheticUnit(page: Page, refreshAccess?: () => Promise<void>) {
+  const units = page.getByRole("region", { name: "Registered selling units", exact: true });
+  if (refreshAccess) await refreshAccess();
+  await units
+    .getByRole("button", { name: "Refresh registered selling units", exact: true })
+    .click();
+  await units.getByRole("button", { name: "Add unit definition", exact: true }).click();
+  await units.getByRole("textbox", { name: "New unit 1 code", exact: true }).fill("PACK");
+  await units
+    .getByRole("textbox", { name: "New unit 1 name", exact: true })
+    .fill("Synthetic package");
+  await units
+    .getByRole("textbox", { name: "New unit 1 meaning", exact: true })
+    .fill("One synthetic package");
+  await units.getByRole("textbox", { name: "New unit 1 decimal places", exact: true }).fill("2");
+  if (refreshAccess) await refreshAccess();
+  await units
+    .getByRole("button", { name: "Refresh registered selling units", exact: true })
+    .click();
+  await expect(units.getByRole("textbox", { name: "New unit 1 meaning", exact: true })).toHaveValue(
+    "One synthetic package",
+  );
+  await expect(
+    units.getByRole("textbox", { name: "New unit 1 decimal places", exact: true }),
+  ).toHaveValue("2");
+  await units.getByRole("button", { name: "Register unit definitions", exact: true }).click();
+}
+async function fillSyntheticNewSku(page: Page) {
+  await page.getByRole("button", { name: "Add new Draft SKU", exact: true }).click();
+  await page.getByRole("textbox", { name: "New SKU 1 code", exact: true }).fill("SYNTH_PACK");
+  await page
+    .getByRole("textbox", { name: "New SKU 1 name · en-CA", exact: true })
+    .fill("Synthetic package SKU");
+  await page
+    .getByRole("combobox", { name: "New SKU 1 selling unit", exact: true })
+    .selectOption("PACK");
+  await page.getByRole("textbox", { name: "New SKU 1 unit quantity", exact: true }).fill("0.001");
+}
+test("@production selling unit registration retains entered rows on refresh, exact unknown retry and ordinary new-SKU Create", async ({
+  page,
+}) => {
+  const { control } = await initialCreation(page);
+  const registry = await sellingUnitAuthoringSources(page);
+  registry.lost = true;
+  await page.route("**/merchant/catalog/products", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const body = route.request().postDataJSON() as {
+      internalCode?: string;
+      operationReference: string;
+      skus: { skuCode: string }[];
+    };
+    if (!body?.internalCode) return route.fallback();
+    control.bodies.push(route.request().postData() ?? "");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify({
+        status: "Applied",
+        scope: { brandReference: id(2), storeReference: id(3) },
+        operationReference: body.operationReference,
+        productReference: id(4),
+        versionReference: id(10),
+        aggregateVersion: 1,
+        lifecycle: "Draft",
+        skus: body.skus.map((sku, i) => ({
+          skuReference: id(150 + i),
+          skuCode: sku.skuCode,
+          lifecycle: "Draft",
+        })),
+      }),
+    });
+  });
+  await enterCreation(page);
+  await fillCreation(page);
+  const refreshAccess = async () => {
+    await page
+      .getByRole("button", { name: "Refresh current creation access", exact: true })
+      .click();
+    await expect(
+      page.getByText("Current creation access loaded. Review the proposed initial Draft."),
+    ).toBeVisible();
+  };
+  await registerSyntheticUnit(page, refreshAccess);
+  await expect(
+    page.getByText("Unit registration outcome is unknown.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Create initial Draft", exact: true }),
+  ).toBeDisabled();
+  const beforeRetry = registry.inspections;
+  await page.getByRole("button", { name: "Retry original unit registration", exact: true }).click();
+  await expect(
+    page.getByText("Original unit registration confirmed.", { exact: false }),
+  ).toBeVisible();
+  expect(registry.bodies).toHaveLength(2);
+  expect(registry.bodies[1]).toBe(registry.bodies[0]);
+  expect(registry.inspections).toBe(beforeRetry);
+  await refreshAccess();
+  await page.getByRole("button", { name: "Refresh registered selling units", exact: true }).click();
+  await expect(
+    page.getByText(/Synthetic package · PACK · Active · up to 2 decimal places/),
+  ).toBeVisible();
+  await fillSyntheticNewSku(page);
+  await expect(
+    page.getByRole("button", { name: "Create initial Draft", exact: true }),
+  ).toBeDisabled();
+  expect(control.bodies).toHaveLength(0);
+  await page.getByRole("textbox", { name: "New SKU 1 unit quantity", exact: true }).fill("0.25");
+  await refreshAccess();
+  await page.getByRole("button", { name: "Create initial Draft", exact: true }).click();
+  await expect(
+    page.getByText(
+      "Original creation confirmed. New SKUs remain Draft; the Product is not published.",
+    ),
+  ).toBeVisible();
+  expect(control.bodies).toHaveLength(1);
+  expect(JSON.parse(control.bodies[0] ?? "").skus).toEqual([
+    {
+      skuCode: "SYNTH_PACK",
+      localizedNames: { "en-CA": "Synthetic package SKU" },
+      variantSelections: [],
+      unitOfSale: "PACK",
+      unitQuantity: "0.25",
+    },
+  ]);
+});
+test("@production selling unit registration and first Draft SKU save followed by current owner read", async ({
+  page,
+}) => {
+  const control = await completeDraftSources(page, "EmptySku");
+  const registry = await sellingUnitAuthoringSources(page);
+  const refresh = async () => {
+    await page.getByRole("button", { name: "Refresh editable Draft", exact: true }).click();
+    await expect(
+      page.getByRole("textbox", { name: "Product name · en-CA", exact: true }),
+    ).toBeVisible();
+  };
+  await registerSyntheticUnit(page, refresh);
+  await expect(
+    page.getByText("Original unit registration confirmed.", { exact: false }),
+  ).toBeVisible();
+  await refresh();
+  await page.getByRole("button", { name: "Refresh registered selling units", exact: true }).click();
+  await fillSyntheticNewSku(page);
+  await expect(
+    page.getByRole("button", { name: "Save recorded Draft", exact: true }),
+  ).toBeDisabled();
+  expect(control.bodies).toHaveLength(0);
+  await page.getByRole("textbox", { name: "New SKU 1 unit quantity", exact: true }).fill("0.25");
+  await refresh();
+  await page.getByRole("button", { name: "Save recorded Draft", exact: true }).click();
+  await expect(
+    page.getByText("Original save confirmed. Refresh to read the current Draft."),
+  ).toBeVisible();
+  expect(registry.bodies).toHaveLength(1);
+  expect(control.bodies).toHaveLength(1);
+  const saved = JSON.parse(control.bodies[0] ?? "").draft.skus;
+  expect(saved).toHaveLength(1);
+  expect(saved[0]).toMatchObject({
+    productReference: id(4),
+    brandReference: id(2),
+    skuCode: "SYNTH_PACK",
+    lifecycle: "Draft",
+    unitOfSale: "PACK",
+    unitQuantity: "0.25",
+    variantSelections: [],
+  });
+  await refresh();
+  await expect(page.getByRole("textbox", { name: "SKU 1 unit quantity", exact: true })).toHaveValue(
+    "0.25",
+  );
+  await expect(
+    page.getByRole("textbox", { name: "SKU 1 unit quantity", exact: true }),
+  ).toHaveAttribute("readonly", "");
+});
+test("@production new Draft SKU explicitly selects an unused owner-recorded variant combination and retains existing SKU identities", async ({
+  page,
+}) => {
+  const control = await completeDraftSources(page);
+  await sellingUnitAuthoringSources(page);
+  // This additional synthetic owner record is observed through the current editor endpoint.
+  // The UI may choose its explicit NotGenerated combination; it cannot create Variant values.
+  const at = new Date().toISOString();
+  const seeded = currentEditorFixture(at);
+  const details = seeded.aggregate.draft.editorContent;
+  if (!details || !details.variantDimensions[0])
+    throw Error("Synthetic editor fixture missing recorded Variant dimension");
+  details.variantDimensions[0].values.push({
+    valueReference: id(160),
+    code: "PACK",
+    localizedNames: { "en-CA": "Synthetic package size" },
+    sortOrder: 1,
+    attributeReference: null,
+    mediaReference: null,
+  });
+  Object.assign(details, {
+    variantCombinations: [
+      ...details.variantCombinations,
+      {
+        selections: [{ dimensionReference: id(36), valueReference: id(160) }],
+        disposition: "NotGenerated",
+        skuReference: null,
+      },
+    ],
+  });
+  await page.route("**/merchant/catalog/products/editor", async (route) => {
+    const raw = structuredClone(seeded);
+    raw.aggregateVersion = control.revision;
+    raw.aggregate.aggregateVersion = control.revision;
+    if (control.draft) Object.assign(raw.aggregate.draft, control.draft);
+    raw.aggregate.updatedAt =
+      typeof control.draft?.updatedAt === "string" ? control.draft.updatedAt : at;
+    raw.observedAt = new Date().toISOString();
+    raw.validUntil = new Date(Date.parse(raw.observedAt) + 5000).toISOString();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify({
+        ...raw,
+        digest: "sha256:" + createHash("sha256").update(editorCanonical(raw)).digest("hex"),
+      }),
+    });
+  });
+  const refresh = async () => {
+    await page.getByRole("button", { name: "Refresh editable Draft", exact: true }).click();
+    await expect(
+      page.getByRole("textbox", { name: "Product name · en-CA", exact: true }),
+    ).toBeVisible();
+  };
+  await registerSyntheticUnit(page, refresh);
+  await expect(
+    page.getByText("Original unit registration confirmed.", { exact: false }),
+  ).toBeVisible();
+  await refresh();
+  await page.getByRole("button", { name: "Refresh registered selling units", exact: true }).click();
+  await fillSyntheticNewSku(page);
+  const combinations = page.getByRole("combobox", {
+    name: "New SKU 1 recorded combination",
+    exact: true,
+  });
+  await expect(combinations).toHaveValue("");
+  await expect(
+    page.getByRole("button", { name: "Save recorded Draft", exact: true }),
+  ).toBeDisabled();
+  await expect(combinations.locator("option")).toHaveCount(2);
+  await combinations.selectOption("1");
+  await page.getByRole("textbox", { name: "New SKU 1 unit quantity", exact: true }).fill("0.25");
+  await refresh();
+  await page.getByRole("button", { name: "Save recorded Draft", exact: true }).click();
+  await expect(
+    page.getByText("Original save confirmed. Refresh to read the current Draft."),
+  ).toBeVisible();
+  expect(control.bodies).toHaveLength(1);
+  const saved = JSON.parse(control.bodies[0] ?? "").draft;
+  expect(saved.skus[0]).toEqual(seeded.aggregate.draft.skus[0]);
+  expect(saved.skus[1]).toMatchObject({
+    skuCode: "SYNTH_PACK",
+    variantSelections: [{ dimensionReference: id(36), valueReference: id(160) }],
+    unitOfSale: "PACK",
+    unitQuantity: "0.25",
+  });
+  expect(saved.editorContent.variantCombinations[0]).toEqual(details.variantCombinations[0]);
+  expect(saved.editorContent.variantCombinations[1]).toEqual({
+    selections: [{ dimensionReference: id(36), valueReference: id(160) }],
+    disposition: "Valid",
+    skuReference: saved.skus[1].skuReference,
+  });
+  await refresh();
+  await expect(page.getByRole("textbox", { name: "SKU 2 unit quantity", exact: true })).toHaveValue(
+    "0.25",
+  );
+});
+test("@production late selling unit observation cannot populate a replacement ordinary entry", async ({
+  page,
+}) => {
+  await initialCreation(page);
+  await sellingUnitAuthoringSources(page);
+  let release: (() => void) | undefined;
+  const captured = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let first = true;
+  let admitted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    admitted = resolve;
+  });
+  await page.route("**/merchant/catalog/products/selling-units/inspect", async (route) => {
+    if (!first) return route.fallback();
+    first = false;
+    admitted?.();
+    await captured;
+    const at = new Date().toISOString();
+    try {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "cache-control": "no-store" },
+        body: JSON.stringify({
+          profile: "CatalogProductSellingUnitRegistryViewV1",
+          brandReference: id(2),
+          storeReference: id(3),
+          presence: "Present",
+          registryVersion: 1,
+          defaultLocale: "en-CA",
+          units: [
+            {
+              unitReference: id(170),
+              code: "OLD",
+              semanticDefinition: "Synthetic old scope meaning",
+              quantityDecimalPlaces: 2,
+              localizedNames: { "en-CA": "Synthetic late old unit" },
+              lifecycle: "Active",
+            },
+          ],
+          assignedHistory: [],
+          historyDigest: hash,
+          definitionsDigest: hash,
+          inspectionDigest: hash,
+          observedAt: at,
+          validUntil: new Date(Date.parse(at) + 5000).toISOString(),
+        }),
+      });
+    } catch {
+      /* The owning component may already have aborted its old request. */
+    }
+  });
+  await enterCreation(page);
+  await page.getByRole("button", { name: "Refresh registered selling units", exact: true }).click();
+  await started;
+  await page.getByRole("link", { name: "Back to products", exact: true }).click();
+  await page.getByRole("link", { name: "Create product", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Create product", exact: true })).toBeVisible();
+  release?.();
+  await expect(page.getByText("Synthetic late old unit", { exact: false })).toHaveCount(0);
+  await page.getByRole("button", { name: "Refresh registered selling units", exact: true }).click();
+  await expect(page.getByText("No registered unit dictionary.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Synthetic late old unit", { exact: false })).toHaveCount(0);
+});
+async function storedSellingUnitCursors(page: Page) {
+  return page.evaluate(
+    () =>
+      new Promise<unknown[]>((resolve, reject) => {
+        const open = indexedDB.open("bop-selling-unit-registration-pending-v1", 1);
+        open.onerror = () => reject(Error("Synthetic browser cursor read failed"));
+        open.onsuccess = () => {
+          const db = open.result,
+            tx = db.transaction("originals", "readonly"),
+            request = tx.objectStore("originals").getAll();
+          tx.oncomplete = () => {
+            db.close();
+            resolve(request.result as unknown[]);
+          };
+          tx.onerror = tx.onabort = () => {
+            db.close();
+            reject(Error("Synthetic browser cursor transaction failed"));
+          };
+        };
+      }),
+  );
+}
+for (const outcome of ["Committed", "Abandoned"] as const)
+  test(`@production unit registration durable reload ${outcome} retains identity-only barrier until exact original resolution`, async ({
+    page,
+  }) => {
+    await initialCreation(page);
+    const registry = await sellingUnitAuthoringSources(page);
+    registry.lost = true;
+    registry.commit = outcome === "Committed";
+    await enterCreation(page);
+    await fillCreation(page);
+    const refreshAccess = async () => {
+      await page
+        .getByRole("button", { name: "Refresh current creation access", exact: true })
+        .click();
+      await expect(
+        page.getByText("Current creation access loaded. Review the proposed initial Draft."),
+      ).toBeVisible();
+    };
+    await registerSyntheticUnit(page, refreshAccess);
+    await expect(
+      page.getByText("Unit registration outcome is unknown.", { exact: false }),
+    ).toBeVisible();
+    const cursors = await storedSellingUnitCursors(page);
+    expect(cursors).toHaveLength(1);
+    expect(cursors[0]).toEqual({
+      profile: "CatalogSellingUnitRegistrationCursorV1",
+      scope: {
+        tenantReference: id(1),
+        brandReference: id(2),
+        storeReference: id(3),
+        actorReference: id(5),
+      },
+      action: "Create",
+      operationReference: JSON.parse(registry.bodies[0] ?? "{}").operationReference,
+      expectedRegistryVersion: 0,
+    });
+    expect(JSON.stringify(cursors)).not.toContain("synthetic package");
+    page.on("dialog", (dialog) => dialog.accept());
+    if (outcome === "Committed") await page.reload();
+    else await completeDraftSources(page, "EmptySku");
+    await expect(
+      page.getByRole("button", { name: "Resolve stored unit registration", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Retry original unit registration", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Refresh registered selling units", exact: true }),
+    ).toBeDisabled();
+    if (outcome === "Committed")
+      await expect(
+        page.getByRole("button", { name: "Create initial Draft", exact: true }),
+      ).toBeDisabled();
+    else
+      await expect(
+        page.getByRole("button", { name: "Save recorded Draft", exact: true }),
+      ).toBeDisabled();
+    registry.denyResolution = true;
+    await page
+      .getByRole("button", { name: "Resolve stored unit registration", exact: true })
+      .click();
+    await expect(
+      page.getByText("Unit registration not confirmed: Denied.", { exact: false }),
+    ).toBeVisible();
+    expect(await storedSellingUnitCursors(page)).toEqual(cursors);
+    expect(registry.bodies).toHaveLength(1);
+    registry.denyResolution = false;
+    await page
+      .getByRole("button", { name: "Resolve stored unit registration", exact: true })
+      .click();
+    await expect(
+      page.getByText(
+        outcome === "Committed"
+          ? "Original unit registration confirmed by its recorded receipt."
+          : "The original unit registration was permanently ended without applying.",
+        { exact: false },
+      ),
+    ).toBeVisible();
+    expect(await storedSellingUnitCursors(page)).toEqual([]);
+    expect(registry.bodies).toHaveLength(1);
+    expect(registry.resolutions).toHaveLength(2);
+    if (outcome === "Committed") await refreshAccess();
+    else {
+      await page.getByRole("button", { name: "Refresh editable Draft", exact: true }).click();
+      await expect(
+        page.getByRole("textbox", { name: "Product name · en-CA", exact: true }),
+      ).toBeVisible();
+    }
+    await page
+      .getByRole("button", { name: "Refresh registered selling units", exact: true })
+      .click();
+    if (outcome === "Committed")
+      await expect(
+        page.getByText(/Synthetic package · PACK · Active · up to 2 decimal places/),
+      ).toBeVisible();
+    else
+      await expect(
+        page.getByRole("button", { name: "Add unit definition", exact: true }),
+      ).toBeEnabled();
+  });
+
+const bindingPanel = (page: Page) =>
+  page.getByRole("region", { name: "Product Option bindings", exact: true });
+async function chooseExtraBinding(page: Page) {
+  const panel = bindingPanel(page);
+  await panel
+    .getByRole("textbox", { name: "Search Option Sets", exact: true })
+    .fill("SYNTH_EXTRAS");
+  await panel
+    .getByRole("button", { name: "Select Synthetic available extras", exact: true })
+    .click();
+  const group = panel.getByRole("group", { name: "Option binding 2", exact: true });
+  await group
+    .getByRole("textbox", { name: "Option binding 2 purpose", exact: true })
+    .fill("EXTRAS");
+  await group.getByRole("checkbox", { name: "Enable Synthetic extra", exact: true }).check();
+  await group.getByRole("checkbox", { name: "Default EXTRA", exact: true }).check();
+  await group.getByRole("textbox", { name: "Default EXTRA quantity", exact: true }).fill("2");
+  await group
+    .getByRole("textbox", { name: "Option binding 2 minimum override", exact: true })
+    .fill("0");
+  await group
+    .getByRole("textbox", { name: "Option binding 2 maximum override", exact: true })
+    .fill("3");
+  await group.getByRole("combobox", { name: /Synthetic small SKU/u }).selectOption("Include");
+  await group
+    .getByRole("textbox", { name: "Option binding 2 channel codes (comma separated)", exact: true })
+    .fill("WEB,POS");
+  await group
+    .getByRole("checkbox", { name: "Option binding 2 allow Store override", exact: true })
+    .check();
+  await expect(panel).toContainText("Option binding intent is ready for server revalidation.");
+}
+test("@production Product binding ordinary picker Add/configure/order/save/current-refresh/remove retains complete existing rules", async ({
+  page,
+}) => {
+  const control = await completeDraftSources(page),
+    before = control.baseline,
+    panel = bindingPanel(page);
+  if (!before) throw Error("actual initial editable Product response baseline absent");
+  await chooseExtraBinding(page);
+  const prepared = control.gate.picker.prepared.at(-1);
+  if (!prepared) throw Error("actual controlled picker prepared identity absent");
+  await panel.getByRole("button", { name: "Move binding 2 up", exact: true }).click();
+  await page.getByRole("button", { name: "Save recorded Draft", exact: true }).click();
+  await expect(
+    page.getByText("Original save confirmed. Refresh to read the current Draft.", { exact: true }),
+  ).toBeVisible();
+  const first = JSON.parse(control.bodies[0] ?? "{}").draft,
+    binding = first.optionBindings.find((b: { purpose: string }) => b.purpose === "EXTRAS");
+  expect(binding).toMatchObject({
+    bindingReference: prepared.bindingReference,
+    optionSetReference: id(43),
+    optionSetVersionReference: id(44),
+    purpose: "EXTRAS",
+    sortOrder: 0,
+    enabledOptionReferences: [id(501)],
+    defaultSelections: [{ optionReference: id(501), quantity: 2 }],
+    minimumSelectionOverride: 0,
+    maximumSelectionOverride: 3,
+    includedSkuReferences: [id(38)],
+    excludedSkuReferences: [],
+    channelCodes: ["WEB", "POS"],
+    storeOverrideAllowed: true,
+  });
+  expect(
+    first.editorContent.optionRules.find(
+      (r: { bindingReference: string }) => r.bindingReference === id(39),
+    ),
+  ).toEqual(before.editorContent?.optionRules[0]);
+  expect(
+    first.editorContent.optionRules.find(
+      (r: { bindingReference: string }) => r.bindingReference === prepared.bindingReference,
+    ),
+  ).toMatchObject({
+    versionResolution: "CurrentPublished",
+    pricingRule: null,
+    conditionalRule: null,
+    conflictRule: null,
+    variantCondition: [],
+  });
+  expect(first.editorContent.nutritionProfile).toEqual(before.editorContent?.nutritionProfile);
+  expect(first.skus).toEqual(before.skus);
+  await page.getByRole("button", { name: "Refresh editable Draft", exact: true }).click();
+  const group = panel.getByRole("group", { name: "Option binding 1", exact: true });
+  await expect(
+    group.getByRole("textbox", { name: "Default EXTRA quantity", exact: true }),
+  ).toHaveValue("2");
+  await group.getByRole("button", { name: "Remove binding 1", exact: true }).click();
+  await expect(group).toContainText("Recorded history remains unchanged");
+  await group.getByRole("button", { name: "Confirm binding removal", exact: true }).click();
+  await page.getByRole("button", { name: "Save recorded Draft", exact: true }).click();
+  await expect(
+    page.getByText("Original save confirmed. Refresh to read the current Draft.", { exact: true }),
+  ).toBeVisible();
+  const removed = JSON.parse(control.bodies[1] ?? "{}").draft;
+  expect(removed.optionBindings).toHaveLength(1);
+  expect(removed.optionBindings[0].bindingReference).toBe(id(39));
+  expect(removed.editorContent.optionRules).toEqual(before.editorContent?.optionRules);
+  expect(removed.editorContent.nutritionProfile).toEqual(before.editorContent?.nutritionProfile);
+  expect(control.revision).toBe(9);
+  await page.getByRole("button", { name: "Refresh editable Draft", exact: true }).click();
+  await expect(panel.getByRole("group", { name: "Option binding 2", exact: true })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const refresh = panel.getByRole("button", { name: "Refresh all Option choices", exact: true });
+  await refresh.focus();
+  await expect(refresh).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(panel).toContainText("Option binding intent is ready for server revalidation.");
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true);
+  // The current authoring context stays Actor 5; a foreign Actor in a selected
+  // source packet is not an identity change that may overwrite recorded fields.
+  control.gate.picker.actor = id(99);
+  await refresh.click();
+  await expect(panel.getByRole("alert").first()).toContainText(
+    "Your identity or selected scope changed",
+  );
+  await expect(
+    page.getByRole("button", { name: "Save recorded Draft", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    panel.getByRole("textbox", { name: "Option binding 1 purpose", exact: true }),
+  ).toHaveValue("SELECT");
+  expect(control.bodies).toHaveLength(2);
+  control.gate.picker.actor = id(5);
+  await refresh.click();
+  await expect(panel).toContainText("Option binding intent is ready for server revalidation.");
+});
+test("@production Product CurrentPublished binding head change refuses silent version upgrade until explicit replacement", async ({
+  page,
+}) => {
+  const control = await completeDraftSources(page),
+    panel = bindingPanel(page),
+    group = panel.getByRole("group", { name: "Option binding 1", exact: true });
+  await group
+    .getByRole("combobox", { name: "Option binding 1 version resolution", exact: true })
+    .selectOption("CurrentPublished");
+  control.gate.picker.head = 1;
+  await page.getByRole("button", { name: "Save recorded Draft", exact: true }).click();
+  await expect(panel.getByRole("alert").first()).toContainText("The selected version changed");
+  expect(control.bodies).toHaveLength(0);
+  await expect(group).toContainText("Synthetic available extras");
+  // Existing selection stays on the actual original Frozen version after its
+  // current Published head changes. The next request never silently replaces it.
+  expect(control.gate.picker.requests.filter((r) => r.versionReference === null)).toHaveLength(1);
+  await group
+    .getByRole("button", { name: "Choose replacement for binding 1", exact: true })
+    .click();
+  await panel
+    .getByRole("checkbox", {
+      name: "Replace this binding’s selected version and clear its enabled Options, defaults and overrides",
+      exact: true,
+    })
+    .check();
+  await panel
+    .getByRole("textbox", { name: "Search Option Sets", exact: true })
+    .fill("SYNTH_EXTRAS");
+  await panel
+    .getByRole("button", { name: "Select Synthetic available extras", exact: true })
+    .click();
+  await expect(panel).toContainText("Option binding intent is ready for server revalidation.");
+  await page.getByRole("button", { name: "Save recorded Draft", exact: true }).click();
+  await expect(
+    page.getByText("Original save confirmed. Refresh to read the current Draft.", { exact: true }),
+  ).toBeVisible();
+  const saved = JSON.parse(control.bodies[0] ?? "{}").draft;
+  expect(saved.optionBindings[0]).toMatchObject({
+    bindingReference: id(39),
+    optionSetVersionReference: id(504),
+    enabledOptionReferences: [],
+    defaultSelections: [],
+  });
+  expect(saved.editorContent.optionRules[0].versionResolution).toBe("CurrentPublished");
+});
+test("@production Product new binding Unknown exact original retries preserve server prepared reference and all configuration", async ({
+  page,
+}) => {
+  const control = await completeDraftSources(page);
+  await chooseExtraBinding(page);
+  control.mode = "Unknown";
+  await page.getByRole("button", { name: "Save recorded Draft", exact: true }).click();
+  await expect(
+    page.getByText(
+      "Save result is unknown. Retry the original request before editing or creating another save.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  const calls = control.gate.picker.requests.length,
+    original = control.bodies[0];
+  await page.getByRole("button", { name: "Retry original Draft save", exact: true }).click();
+  await expect(
+    page.getByText("Original save confirmed. Refresh to read the current Draft.", { exact: true }),
+  ).toBeVisible();
+  expect(control.bodies).toHaveLength(2);
+  expect(control.bodies[1]).toBe(original);
+  expect(control.gate.picker.requests).toHaveLength(calls);
+  expect(control.originals.size).toBe(1);
+  await page.getByRole("button", { name: "Refresh editable Draft", exact: true }).click();
+  await expect(
+    bindingPanel(page).getByRole("textbox", { name: "Option binding 2 purpose", exact: true }),
+  ).toHaveValue("EXTRAS");
+  await expect(
+    bindingPanel(page).getByRole("textbox", { name: "Default EXTRA quantity", exact: true }),
+  ).toHaveValue("2");
+});
+test("@production late Product Option selection after navigation cannot reattach an abandoned editor response", async ({
+  page,
+}) => {
+  const control = await completeDraftSources(page),
+    panel = bindingPanel(page);
+  let release: () => void = () => undefined,
+    entered = false,
+    delivered = false;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/merchant/catalog/products/option-binding-picker", async (route) => {
+    if (route.request().postDataJSON().versionReference !== null) return route.fallback();
+    entered = true;
+    await pending;
+    await route
+      .fulfill({
+        status: 403,
+        contentType: "application/json",
+        headers: { "cache-control": "no-store" },
+        body: JSON.stringify({ error: "request_denied" }),
+      })
+      .catch(() => undefined);
+    delivered = true;
+  });
+  await panel
+    .getByRole("textbox", { name: "Search Option Sets", exact: true })
+    .fill("SYNTH_EXTRAS");
+  await panel
+    .getByRole("button", { name: "Select Synthetic available extras", exact: true })
+    .click();
+  await expect.poll(() => entered).toBe(true);
+  await page.goto("/app/commerce/products");
+  await expect(
+    page.getByText("Synthetic tea", { exact: true }).filter({ visible: true }),
+  ).toBeVisible();
+  release();
+  await expect.poll(() => delivered).toBe(true);
+  await expect(bindingPanel(page)).toHaveCount(0);
+  expect(control.bodies).toEqual([]);
 });

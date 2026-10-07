@@ -224,6 +224,98 @@ async function prove(context) {
   }
 }
 
+async function proveOptionWorkflowActions(context) {
+  const client = new Client(context.clientConfig);
+  await client.connect();
+  try {
+    await client.query(
+      `INSERT INTO bop_permission.role_administration_version
+       (administration_reference,role_id,version,brand_id,store_id,role_code,
+        display_name,description,role_type,lifecycle,source_policy_version,
+        authored_by_reference,reason_code,changed_at,data_classification)
+       VALUES ($1,$2,1,$3,NULL,'synthetic_option_workflow','Synthetic option workflow',
+        'Isolated permission constraint fixture','Custom','Draft',1,$4,
+        'INTERNAL_TEST',now(),'ConfigurationMetadata')`,
+      [id("40"), id("04"), id("01"), id("09")],
+    );
+    const actions = [
+      "catalog.option_set.read",
+      "catalog.option_set.create",
+      "catalog.option_set.update",
+      "catalog.option_set.submit",
+      "catalog.option_set.publish",
+    ];
+    for (const [index, action] of actions.entries()) {
+      const permission = id(String(30 + index)),
+        selection = id(String(50 + index));
+      assert.equal(
+        (
+          await client.query(
+            `INSERT INTO bop_permission.permission_definition
+         (permission_id,action_code,lifecycle,version,created_at,updated_at)
+         VALUES ($1,$2,'Active',1,now(),now()) RETURNING action_code`,
+            [permission, action],
+          )
+        ).rows[0].action_code,
+        action,
+      );
+      assert.equal(
+        (
+          await client.query(
+            `INSERT INTO bop_permission.role_administration_permission
+         (selection_reference,brand_id,store_id,administration_reference,
+          administration_version,permission_id,action_code,group_code,high_risk,
+          dependency_actions,data_classification)
+         VALUES ($1,$2,NULL,$3,1,$4,$5,'catalog',true,'[]','ConfigurationMetadata')
+         RETURNING action_code`,
+            [selection, id("01"), id("40"), permission, action],
+          )
+        ).rows[0].action_code,
+        action,
+      );
+    }
+    for (const action of [
+      "catalog.option_set.submit.other",
+      "catalog.option_set.publish.other",
+      "catalog.option_set.submit.*",
+      "catalog.option_set.publish.*",
+      "catalog.option_set.Submit",
+      "catalog.option_set.Publish",
+      "catalog.option_set.submit\n",
+      "catalog.option_set.publish\n",
+      "catalog.option__set.submit",
+      "catalog.option__set.publish",
+      "catalog.option_set.approve",
+      "catalog.other_set.publish",
+    ]) {
+      await assert.rejects(
+        client.query(
+          `INSERT INTO bop_permission.permission_definition
+         (permission_id,action_code,lifecycle,version,created_at,updated_at)
+         VALUES ($1,$2,'Active',1,now(),now())`,
+          [id("70"), action],
+        ),
+        { code: "23514", constraint: "permission_definition_action_code_check" },
+      );
+      await assert.rejects(
+        client.query(
+          `INSERT INTO bop_permission.role_administration_permission
+         (selection_reference,brand_id,store_id,administration_reference,
+          administration_version,permission_id,action_code,group_code,high_risk,
+          dependency_actions,data_classification)
+         VALUES ($1,$2,NULL,$3,1,$4,$5,'catalog',true,'[]','ConfigurationMetadata')`,
+          [id("71"), id("01"), id("40"), id("30"), action],
+        ),
+        { code: "23514", constraint: "role_administration_permission_action_code_check" },
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
 it("proves Permission policy constraints, policy versioning, RLS and least privilege", async () => {
-  await withIsolatedDatabase({ caseId: "permission_policy", root }, prove);
+  await withIsolatedDatabase({ caseId: "permission_policy", root }, async (context) => {
+    await prove(context);
+    await proveOptionWorkflowActions(context);
+  });
 });

@@ -1,4 +1,12 @@
+import { exerciseProductAuthoringResolution } from "../test-support/product-authoring-resolution.mjs";
+import { exerciseSellingUnitRegistry } from "../test-support/selling-unit-registry.mjs";
+import { exerciseProductPublicationValidationReport } from "../test-support/product-publication-validation-report.mjs";
+import { exerciseProductPublicationResolution } from "../test-support/product-publication-resolution.mjs";
+import { exerciseProductPublicationCrossDomainReferencesV2 } from "../test-support/product-publication-cross-domain-references-v2.mjs";
 import { exerciseCurrentApprovalDecisionHttp } from "../test-support/product-current-approval-decision-http.mjs";
+import { exerciseProductScopeRetirement } from "../test-support/product-scope-retirement.mjs";
+import { exerciseProductTaxClassificationRegistry } from "../test-support/product-tax-classification-registry.mjs";
+import { exerciseProductPublicationReferenceSourcesV2 } from "../test-support/product-publication-reference-sources-v2.mjs";
 import { createPublicationNativeHttpClient } from "../test-support/product-publication-client-http.mjs";
 import { createCompleteDraftNativeHttpClient } from "../test-support/product-complete-draft-client-http.mjs";
 import { exerciseEmptyProductDraft } from "../test-support/product-empty-draft-client-http.mjs";
@@ -370,6 +378,9 @@ it("persists owning publication revisions, immutable content and controlled succ
         `GRANT USAGE ON SCHEMA rms_catalog,platform_helpers,platform_audit,platform_eventing TO ${role}`,
       );
       await admin.query(`GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ${role}`);
+      await admin.query(
+        `GRANT SELECT ON rms_catalog.product_publication_operation_abandonment TO ${role}`,
+      );
       await admin.query(
         `GRANT INSERT ON platform_audit.audit_record,platform_eventing.outbox_event TO ${role}`,
       );
@@ -2273,25 +2284,24 @@ it("persists owning publication revisions, immutable content and controlled succ
           ],
         }),
       );
-      // Actual current Draft/body binding precedes prospective scope acquisition.
-      const candidateScope = await storeOptions.transactions.run((tx) =>
-        candidateUniqueSource.withCurrentAssessment(
-          tx,
-          uniqueInput(passingScopeCommand),
-          async (a) => a,
+      // The actual legacy minimal Draft has no complete editor content. The
+      // combined candidate source must refuse before acquiring scope history.
+      const beforeLegacyCandidateHistory = uniqueHistoryCalls;
+      let legacyCandidateConsumerCalls = 0;
+      await assert.rejects(
+        storeOptions.transactions.run((tx) =>
+          candidateUniqueSource.withCurrentAssessment(
+            tx,
+            uniqueInput(passingScopeCommand),
+            async () => {
+              legacyCandidateConsumerCalls++;
+            },
+          ),
         ),
+        { code: "CATALOG_DEPENDENCY_UNAVAILABLE" },
       );
-      assert.equal(candidateScope.currentCandidate, "Bound");
-      assert.equal(candidateScope.versionReference, id(651));
-      assert.equal(candidateScope.aggregateVersion, 16);
-      assert.equal(candidateScope.contentDigest, currentIdentity.contentDigest);
-      assert.equal(candidateScope.configurationDigest, currentIdentity.configurationDigest);
-      assert.equal(candidateScope.completeContent, "Unavailable");
-      assert.equal(candidateScope.publishValidation, "Incomplete");
-      assert.equal(candidateScope.eligibility, "NotEvaluated");
-      assert.equal(candidateScope.check.outcome, "Pass");
-      assert.notEqual(candidateScope.digest, candidateScope.scopeAssessmentDigest);
-      assert(candidateScope.validUntil <= candidateScope.candidateValidUntil);
+      assert.equal(uniqueHistoryCalls, beforeLegacyCandidateHistory);
+      assert.equal(legacyCandidateConsumerCalls, 0);
       for (const override of [
         { versionReference: id(999) },
         { contentDigest: "sha256:" + "a".repeat(64) },
@@ -2328,7 +2338,10 @@ it("persists owning publication revisions, immutable content and controlled succ
           ...syntheticScopePolicy,
           async withHeldCurrentFacts(tx, input, work) {
             uniqueCalls++;
-            return candidateUniqueSource.withCurrentAssessment(
+            // Legacy minimal-Draft scope-only integration: acquire the actual
+            // independent scope owner; all remaining checks stay synthetic.
+            // This does not establish complete candidate/publication eligibility.
+            return uniqueSource.withCurrentAssessment(
               tx,
               uniqueInput(input.command),
               async (assessment) => {
@@ -2905,6 +2918,9 @@ it("round-trips complete editor content through owning create/replace/replay/pub
         `GRANT USAGE ON SCHEMA rms_catalog,platform_helpers,platform_audit,platform_eventing TO ${role}`,
       );
       await admin.query(`GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ${role}`);
+      await admin.query(
+        `GRANT SELECT ON rms_catalog.product_publication_operation_abandonment TO ${role}`,
+      );
       await admin.query(
         `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
       );
@@ -4762,6 +4778,7 @@ it("round-trips complete editor content through owning create/replace/replay/pub
         variantLastCode = "None",
         variantDiagnostic = "None";
       const variantHistoryRoots = new Set();
+      const variantObservedRoots = new Set();
       const liveVariantNow = () => variantClockOverride ?? new Date().toISOString();
       const fullVariantAuthority = createMerchantProductEditorRegisteredContentAuthority({
         clock: { now: liveVariantNow },
@@ -4794,7 +4811,17 @@ it("round-trips complete editor content through owning create/replace/replay/pub
                 )
               ).rows[0]?.aggregate_version;
               variantDiagnostic = "ActualRoot:" + (root ?? "Missing");
-              assert.equal(root, input.request.expectedAggregateVersion);
+              variantObservedRoots.add(root);
+              assert.equal(input.request.expectedAggregateVersion, 7);
+              assert.ok(root === 7 || root === 8);
+              if (root === 8) {
+                const own = await tx.query(
+                  "SELECT result_aggregate_version FROM rms_catalog.product_operation_record WHERE brand_id=$1 AND product_id=$2 AND operation_id=$3",
+                  [id(2), id(600), id(96520)],
+                );
+                assert.equal(own.rows.length, 1);
+                assert.equal(own.rows[0].result_aggregate_version, 8);
+              }
               if (variantMode === "late-history" && root === 8) {
                 variantRootObserved = root;
                 throw new CatalogError("CATALOG_PERMISSION_DENIED");
@@ -4941,8 +4968,8 @@ it("round-trips complete editor content through owning create/replace/replay/pub
           assert.equal(applied.body.status, "Applied");
           assert.equal(applied.body.aggregateVersion, 8);
           assert.deepEqual(applied.body.draft.editorContent, variantCommand.draft.editorContent);
-          assert(variantHistoryRoots.has(7));
-          assert(variantHistoryRoots.has(8));
+          assert.deepEqual([...variantHistoryRoots], [7]);
+          assert(variantObservedRoots.has(7) && variantObservedRoots.has(8));
           const afterVariantDraft = await counts();
           assert.equal(afterVariantDraft.root, 8);
           for (const key of ["operations", "snapshots", "commits", "audit", "outbox"])
@@ -6407,4 +6434,36 @@ it("records independent Product approval receipts and holds actual current origi
       await admin.end();
     }
   });
+});
+
+it("persists permanent exact Store-selector retirement with Required approval, late System activation and complete SQL coverage", async () => {
+  await exerciseProductScopeRetirement();
+});
+
+it("registers and resolves Catalog tax classifications with actual SQL, recovery and rollback", async () => {
+  await exerciseProductTaxClassificationRegistry();
+});
+
+it("reads publication V2 Catalog reference sources with held native history", async () => {
+  await exerciseProductPublicationReferenceSourcesV2();
+});
+
+it("composes publication V2 cross-domain stored references with native rollback", async () => {
+  await exerciseProductPublicationCrossDomainReferencesV2();
+});
+
+it("records immutable publication validation reports with actual SQL replay and rollback", async () => {
+  await exerciseProductPublicationValidationReport();
+});
+
+it("resolves or permanently abandons original publication requests with native races and rollback", async () => {
+  await exerciseProductPublicationResolution();
+});
+
+it("registers selling units and consumes actual original SKU proof with SQL/RLS/recovery/rollback", async () => {
+  await exerciseSellingUnitRegistry();
+});
+
+it("resolves original authoring operations and permanently fences absence with SQL/RLS/rollback", async () => {
+  await exerciseProductAuthoringResolution();
 });

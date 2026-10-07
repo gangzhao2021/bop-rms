@@ -127,10 +127,13 @@ const response = (value: unknown, status = 200) =>
     status,
     headers: { "cache-control": "no-store", "content-type": "application/json" },
   });
-function setup(classification?: {
-  categoryReferences: string[];
-  primaryCategoryReference: string | null;
-}) {
+function setup(
+  classification?: {
+    categoryReferences: string[];
+    primaryCategoryReference: string | null;
+  },
+  emptySkus = false,
+) {
   let time = Date.parse(at),
     context = 0;
   let denied = false,
@@ -142,6 +145,7 @@ function setup(classification?: {
   let revision = 7,
     reads = 0;
   const bodies: string[] = [];
+  let recordedDraft: ReturnType<typeof fixture>["aggregate"]["draft"] | null = null;
   const fetcher = vi.fn<typeof fetch>(async (url, init) => {
     if (url === "/merchant/store-capability") {
       if (denied) return response({ error: "request_denied" }, 403);
@@ -169,6 +173,8 @@ function setup(classification?: {
         });
       }
       const raw = fixture();
+      if (recordedDraft) raw.aggregate.draft = recordedDraft;
+      else if (emptySkus) raw.aggregate.draft.skus = [];
       if (classification)
         Object.assign(raw.aggregate.draft, { categoryClassification: classification });
       raw.observedAt = new Date(time).toISOString();
@@ -192,6 +198,7 @@ function setup(classification?: {
     if (serverDenied) return response({ error: "request_denied" }, 403);
     const command = JSON.parse(body);
     revision = command.expectedAggregateVersion + 1;
+    recordedDraft = command.draft;
     return response({
       status: bodies.length > 1 ? "AlreadyApplied" : "Applied",
       scope: { brandReference: id(2), storeReference: id(3) },
@@ -282,6 +289,55 @@ it("rereads whole current baseline and capability before save then requires actu
   await s.load();
   expect(s.editor.view()).toMatchObject({ status: "Ready", revision: 8 });
 });
+it("appends an explicitly proposed first Draft SKU and reads its persisted receipt on refresh", async () => {
+  const s = setup(undefined, true);
+  await s.load();
+  const baseline = required(s.editor.view().draft),
+    sku = {
+      skuReference: id(60),
+      productReference: id(4),
+      brandReference: id(2),
+      skuCode: "EXPLICIT_NEW",
+      lifecycle: "Draft",
+      localizedNames: { "en-CA": "Synthetic explicitly proposed SKU" },
+      variantSelections: [],
+      unitOfSale: "REGISTERED_PACK",
+      unitQuantity: "0.25",
+      createdAt: at,
+      createdByActorReference: id(5),
+    };
+  s.editor.edit({ ...baseline, skus: [sku] });
+  await expect(s.editor.save(id(90), s.csrf, s.signal)).resolves.toMatchObject({
+    aggregateVersion: 8,
+  });
+  expect(JSON.parse(required(s.bodies[0])).draft.skus).toEqual([sku]);
+  await s.load();
+  expect(s.editor.view().draft?.skus).toEqual([sku]);
+});
+it.each(["deleted", "unit", "quantity", "lifecycle", "createdActor", "createdAt"])(
+  "refuses recorded SKU %s changes before any save",
+  async (kind) => {
+    const s = setup();
+    await s.load();
+    const baseline = required(s.editor.view().draft),
+      old = required(baseline.skus[0]);
+    const changes =
+      kind === "unit"
+        ? { unitOfSale: "CHANGED" }
+        : kind === "quantity"
+          ? { unitQuantity: "0.25" }
+          : kind === "lifecycle"
+            ? { lifecycle: "Active" }
+            : kind === "createdActor"
+              ? { createdByActorReference: id(99) }
+              : { createdAt: "2026-09-30T22:00:01.000Z" };
+    expect(() =>
+      s.editor.edit({ ...baseline, skus: kind === "deleted" ? [] : [{ ...old, ...changes }] }),
+    ).toThrow();
+    expect(s.bodies).toEqual([]);
+    expect(s.editor.view().dirty).toBe(false);
+  },
+);
 it("locks every alternative while uncertain and retries original bytes after exclusive expiry without a new baseline", async () => {
   const s = setup();
   await s.load();

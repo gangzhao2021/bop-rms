@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createBrand, createStore, createTenantContext } from "@bop/tenant";
+import {
+  createBrand,
+  createStore,
+  createTenantContext,
+  createBrandAdministrationContext,
+} from "@bop/tenant";
 import {
   PermissionEvaluationContractError,
   evaluatePermission,
@@ -99,6 +104,31 @@ function request(
 }
 
 describe("Permission Evaluation Contract", () => {
+  it("requires the exact operational context discriminator and never runs context getters", () => {
+    const current = context(false),
+      original = request([], false);
+    for (const candidate of [
+      createBrandAdministrationContext(current.actor, current.brand, current.resolvedAt),
+      Object.freeze({ ...current, scopeKind: "Store" }),
+      Object.freeze({ ...current, profile: "Unexpected" }),
+    ])
+      expect(() => evaluatePermission({ ...original, tenantContext: candidate } as never)).toThrow(
+        PermissionEvaluationContractError,
+      );
+    let invoked = false;
+    const candidate = Object.freeze({
+      ...current,
+      get actor() {
+        invoked = true;
+        return current.actor;
+      },
+    });
+    expect(() => evaluatePermission({ ...original, tenantContext: candidate })).toThrow(
+      PermissionEvaluationContractError,
+    );
+    expect(invoked).toBe(false);
+    expect(evaluatePermission(original).reason).toBe("DEFAULT_DENY");
+  });
   it("defaults to a bounded denial without identifiers", () => {
     const result = evaluatePermission(request([]));
     expect(result).toEqual({

@@ -1,9 +1,27 @@
+import { parseStoreSetupFeeContexts } from "./store-setup-client.js";
 import {
   parseServiceIntervals,
   type ServiceMode,
   type ServiceInterval,
 } from "./service-control-client.js";
+export type StoreConfigurationFeeContext =
+  | Readonly<{ chargeType: "ServiceCharge" | "DeliveryFee" | "Tip"; state: "Disabled" }>
+  | Readonly<{
+      chargeType: "ServiceCharge" | "DeliveryFee" | "Tip";
+      state: "Enabled";
+      taxClassificationReference: string;
+      orderTypes: readonly ServiceMode[];
+    }>;
+export interface StoreSetupConfigurationBasis {
+  readonly profile: "StoreSetupConfigurationBasisV2";
+  readonly tenantReference: string;
+  readonly setupDraftReference: string;
+  readonly sourceRevision: number;
+  readonly sourceSnapshotDigest: string;
+  readonly feeContexts: readonly StoreConfigurationFeeContext[];
+}
 export interface StoreConfigurationSnapshot {
+  readonly setupBasis?: StoreSetupConfigurationBasis;
   readonly configurationReference: string;
   readonly brandReference: string;
   readonly storeReference: string;
@@ -75,11 +93,65 @@ function instant(v: unknown): string {
     return invalid();
   return v;
 }
+export function parseStoreSetupConfigurationBasis(raw: unknown): StoreSetupConfigurationBasis {
+  const v = exact(raw, [
+    "profile",
+    "tenantReference",
+    "setupDraftReference",
+    "sourceRevision",
+    "sourceSnapshotDigest",
+    "feeContexts",
+  ]);
+  if (
+    v.profile !== "StoreSetupConfigurationBasisV2" ||
+    typeof v.tenantReference !== "string" ||
+    !reference(v.tenantReference) ||
+    typeof v.setupDraftReference !== "string" ||
+    !reference(v.setupDraftReference) ||
+    typeof v.sourceRevision !== "number" ||
+    !Number.isSafeInteger(v.sourceRevision) ||
+    v.sourceRevision < 1 ||
+    v.sourceRevision > 2147483647 ||
+    typeof v.sourceSnapshotDigest !== "string" ||
+    !/^sha256:[a-f0-9]{64}$/u.test(v.sourceSnapshotDigest)
+  )
+    return invalid();
+  let fees: ReturnType<typeof parseStoreSetupFeeContexts>;
+  try {
+    fees = parseStoreSetupFeeContexts(v.feeContexts);
+  } catch {
+    return invalid();
+  }
+  const feeContexts = Object.freeze(
+    fees.map((entry): StoreConfigurationFeeContext => {
+      if (entry.state === "Unconfigured") return invalid();
+      if (entry.state === "Disabled")
+        return Object.freeze({ chargeType: entry.chargeType, state: "Disabled" });
+      if (entry.state !== "Enabled") return invalid();
+      return Object.freeze({
+        chargeType: entry.chargeType,
+        state: "Enabled",
+        taxClassificationReference: entry.taxClassificationReference,
+        orderTypes: entry.orderTypes,
+      });
+    }),
+  );
+  return Object.freeze({
+    profile: "StoreSetupConfigurationBasisV2",
+    tenantReference: v.tenantReference,
+    setupDraftReference: v.setupDraftReference,
+    sourceRevision: v.sourceRevision,
+    sourceSnapshotDigest: v.sourceSnapshotDigest,
+    feeContexts,
+  });
+}
 export function parseStoreConfigurationSnapshot(
   raw: unknown,
   store: string,
 ): StoreConfigurationSnapshot {
+  const hasBasis = raw !== null && typeof raw === "object" && Object.hasOwn(raw, "setupBasis");
   const v = exact(raw, [
+    ...(hasBasis ? ["setupBasis"] : []),
     "configurationReference",
     "brandReference",
     "storeReference",
@@ -184,6 +256,18 @@ export function parseStoreConfigurationSnapshot(
     v.exceptions.length > 366
   )
     return invalid();
+  const setupBasis = hasBasis ? parseStoreSetupConfigurationBasis(v.setupBasis) : undefined;
+  if (
+    setupBasis &&
+    setupBasis.feeContexts.some(
+      (entry) =>
+        entry.state === "Enabled" &&
+        entry.orderTypes.some(
+          (mode) => !Array.isArray(v.enabledServiceModes) || !v.enabledServiceModes.includes(mode),
+        ),
+    )
+  )
+    return invalid();
   const weeklySchedule = v.weeklySchedule.map((day, index) => {
     const d = exact(day, ["isoWeekday", "intervals"]);
     if (d.isoWeekday !== index + 1) return invalid();
@@ -206,6 +290,7 @@ export function parseStoreConfigurationSnapshot(
   });
   return Object.freeze({
     ...v,
+    ...(setupBasis ? { setupBasis } : {}),
     weeklySchedule: Object.freeze(weeklySchedule),
     exceptions: Object.freeze(exceptions),
   }) as unknown as StoreConfigurationSnapshot;

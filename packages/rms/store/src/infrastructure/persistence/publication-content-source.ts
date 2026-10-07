@@ -1,3 +1,7 @@
+import {
+  createStorePublicationSetupBasisVerifier,
+  type StorePublicationSetupSnapshotReferences,
+} from "./publication-setup-basis.js";
 import { parsePublishingCode } from "@bop/publishing";
 import { parseBrandReference, parseStoreReference, parseCanonicalInstant } from "@bop/tenant";
 import {
@@ -18,12 +22,15 @@ const code = parsePublishingCode;
  * Returns verified Store content, NOT proof of a current Publishing/Live Gate.
  */
 export function createPostgresStorePublicationContentSource(options: {
+  readonly tenantReference?: string;
+  readonly setupSnapshotReferences?: StorePublicationSetupSnapshotReferences;
   readonly brandReference: string;
   readonly storeReference: string;
   readonly configurationReference: string;
   authorize(tx: Transaction, at: string): Promise<boolean>;
   hashContent(configuration: StoreConfigurationVersion): string;
 }) {
+  const verifySetupBasis = createStorePublicationSetupBasisVerifier(options);
   const brand = parseBrandReference(options.brandReference);
   const store = parseStoreReference(options.storeReference);
   const reference = parseStoreAdministrationReference(options.configurationReference);
@@ -78,7 +85,7 @@ export function createPostgresStorePublicationContentSource(options: {
       };
       const times = new Set(["effectiveFrom", "effectiveUntil", "createdAt", "updatedAt"]);
       for (const [key, value] of Object.entries(configuration)) {
-        if (key === "weeklySchedule" || key === "exceptions") continue;
+        if (key === "weeklySchedule" || key === "exceptions" || key === "setupBasis") continue;
         const column =
           renamed[key] ?? key.replace(/[A-Z]/gu, (letter) => "_" + letter.toLowerCase());
         let stored = base[column];
@@ -88,6 +95,7 @@ export function createPostgresStorePublicationContentSource(options: {
         }
         if (JSON.stringify(stored) !== JSON.stringify(value)) return denied();
       }
+      await verifySetupBasis(tx, configuration, at);
       const source = row.business_day_start_source;
       if (source !== "PlatformDefault" && source !== "StoreOverride") return denied();
       if (source === "PlatformDefault" && configuration.businessDayStartLocalTime !== "04:00:00")

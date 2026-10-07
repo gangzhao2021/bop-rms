@@ -1,4 +1,5 @@
 import { parseBusinessAction } from "@bop/permission";
+import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   createPersistentStoreConfigurationAdministration,
   createPersistentStoreConfigurationReview,
@@ -6,6 +7,7 @@ import {
   createPersistentStoreConfigurationPublication,
   createPostgresStoreConfigurationAuthoringSource,
   createStoreConfigurationVersion,
+  createStoreConfigurationPublicationHash,
 } from "@rms/store";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { bindMerchantStoreConfigurationCommand } from "./merchant-store-configuration-command.js";
@@ -68,6 +70,9 @@ export function createMerchantStoreConfiguration(options: {
       );
       if (
         scope.selected.tenantReference !== selected.selected.tenantReference ||
+        (bound.input.configuration.setupBasis !== undefined &&
+          bound.input.configuration.setupBasis.tenantReference !==
+            scope.selected.tenantReference) ||
         scope.context.brand.brandReference !== bound.input.configuration.brandReference ||
         scope.store.storeReference !== bound.input.configuration.storeReference ||
         String(scope.actorReference) !== String(bound.input.actorReference) ||
@@ -75,6 +80,11 @@ export function createMerchantStoreConfiguration(options: {
       )
         throw new Error("STORE_CONFIGURATION_PERMISSION_DENIED");
       const configured = options.configure(tx, scope);
+      const setupSnapshotReferences = {
+        canonicalize: canonicalizeRfc8785,
+        hashIntent: (canonical: string) => "sha256:" + sha256Hex(canonical),
+      };
+      const v2PublicationHash = createStoreConfigurationPublicationHash(setupSnapshotReferences);
       const administrationOptions: AdministrationOptions = {
         ...configured,
         brandReference: scope.context.brand.brandReference,
@@ -84,6 +94,11 @@ export function createMerchantStoreConfiguration(options: {
         publication: {
           ...configured.publication,
           tenantReference: scope.selected.tenantReference,
+          setupSnapshotReferences,
+          hashContent: (value) =>
+            createStoreConfigurationVersion(value).setupBasis === undefined
+              ? configured.publication.hashContent(value)
+              : v2PublicationHash(value),
           authorize: async (transaction, at) =>
             (await scope.allowed()) && (await configured.publication.authorize(transaction, at)),
         },
@@ -101,7 +116,16 @@ export function createMerchantStoreConfiguration(options: {
         },
       };
       let result;
-      if (bound.method === "publish" && options.review) {
+      if (
+        bound.input.configuration.setupBasis !== undefined &&
+        ["submit", "approve", "publish"].includes(bound.method)
+      ) {
+        // V2's fresh-only owning preparation performs real Core transitions after
+        // original lookup/CAS. Legacy approval-time Submit is not a V2 path.
+        result = await createPersistentStoreConfigurationAdministration(administrationOptions)[
+          bound.method
+        ](bound.input);
+      } else if (bound.method === "publish" && options.review) {
         result = await createPersistentStoreConfigurationPublication({
           administration: administrationOptions,
           snapshotAudit: options.review.snapshotAudit,
@@ -200,6 +224,13 @@ export function createMerchantStoreConfiguration(options: {
         (current.lifecycle !== "Published" ||
           current.brandReference !== scope.context.brand.brandReference ||
           current.storeReference !== scope.store.storeReference)
+      )
+        throw new Error("STORE_CONFIGURATION_READ_UNAVAILABLE");
+      if (
+        (latest?.setupBasis !== undefined &&
+          latest.setupBasis.tenantReference !== scope.selected.tenantReference) ||
+        (current?.setupBasis !== undefined &&
+          current.setupBasis.tenantReference !== scope.selected.tenantReference)
       )
         throw new Error("STORE_CONFIGURATION_READ_UNAVAILABLE");
       if (!(await scope.allowed())) throw new Error("STORE_CONFIGURATION_PERMISSION_DENIED");

@@ -1,5 +1,10 @@
 import {
+  parseStoreCompleteFeeContexts,
+  type StoreCompleteFeeContext,
+} from "./store-fee-context.js";
+import {
   parseBrandReference,
+  parsePlatformTenantReference,
   parseCanonicalInstant,
   parseStoreReference,
   type BrandReference,
@@ -216,7 +221,48 @@ export function parseStoreServiceExceptions(value: unknown): readonly StoreServi
   return Object.freeze(result.toSorted((a, b) => a.localDate.localeCompare(b.localDate)));
 }
 
+export interface StoreSetupConfigurationBasisV2 {
+  readonly profile: "StoreSetupConfigurationBasisV2";
+  readonly tenantReference: string;
+  readonly setupDraftReference: StoreAdministrationReference;
+  readonly sourceRevision: number;
+  readonly sourceSnapshotDigest: string;
+  readonly feeContexts: readonly StoreCompleteFeeContext[];
+}
+function setupBasis(value: unknown): StoreSetupConfigurationBasisV2 {
+  const r = exact(value, [
+    "profile",
+    "tenantReference",
+    "setupDraftReference",
+    "sourceRevision",
+    "sourceSnapshotDigest",
+    "feeContexts",
+  ]);
+  if (
+    r.profile !== "StoreSetupConfigurationBasisV2" ||
+    typeof r.sourceRevision !== "number" ||
+    !Number.isSafeInteger(r.sourceRevision) ||
+    r.sourceRevision < 1 ||
+    r.sourceRevision > 2147483647 ||
+    typeof r.sourceSnapshotDigest !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/u.test(r.sourceSnapshotDigest)
+  )
+    return fail();
+  try {
+    return Object.freeze({
+      profile: "StoreSetupConfigurationBasisV2",
+      tenantReference: parsePlatformTenantReference(r.tenantReference),
+      setupDraftReference: parseStoreAdministrationReference(r.setupDraftReference),
+      sourceRevision: r.sourceRevision,
+      sourceSnapshotDigest: r.sourceSnapshotDigest,
+      feeContexts: parseStoreCompleteFeeContexts(r.feeContexts),
+    });
+  } catch {
+    return fail();
+  }
+}
 export interface StoreConfigurationVersion {
+  readonly setupBasis?: StoreSetupConfigurationBasisV2;
   readonly configurationReference: StoreAdministrationReference;
   readonly brandReference: BrandReference;
   readonly storeReference: StoreReference;
@@ -286,7 +332,18 @@ export function createStoreConfigurationVersion(value: unknown): StoreConfigurat
     "updatedAt",
     "dataClassification",
   ] as const;
-  const input = exact(value, fields);
+  const hasBasis =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "setupBasis");
+  const input = exact(value, hasBasis ? [...fields, "setupBasis"] : fields);
+  const basis = hasBasis ? setupBasis(input.setupBasis) : undefined;
+  const enabledModes = modes(input.enabledServiceModes);
+  if (
+    basis?.feeContexts.some(
+      (entry) =>
+        entry.state === "Enabled" && entry.orderTypes.some((mode) => !enabledModes.includes(mode)),
+    )
+  )
+    return fail("STORE_CONFIGURATION_STATE_INVALID");
   const configurationVersion = positiveInteger(
       input.configurationVersion,
     ) as StoreConfigurationVersionNumber,
@@ -320,6 +377,7 @@ export function createStoreConfigurationVersion(value: unknown): StoreConfigurat
   )
     return fail("STORE_CONFIGURATION_STATE_INVALID");
   return Object.freeze({
+    ...(basis === undefined ? {} : { setupBasis: basis }),
     configurationReference: parseStoreAdministrationReference(input.configurationReference),
     brandReference: parseBrandReference(input.brandReference),
     storeReference: parseStoreReference(input.storeReference),
@@ -339,7 +397,7 @@ export function createStoreConfigurationVersion(value: unknown): StoreConfigurat
       input.paymentConfigurationReference,
     ),
     capacityConfigurationReference: nullableReference(input.capacityConfigurationReference),
-    enabledServiceModes: modes(input.enabledServiceModes),
+    enabledServiceModes: enabledModes,
     weeklySchedule: parseStoreWeeklyServiceSchedule(input.weeklySchedule),
     exceptions: parseStoreServiceExceptions(input.exceptions),
     effectiveFrom,

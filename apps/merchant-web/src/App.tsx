@@ -1,3 +1,11 @@
+import { TaxConfigDraftPage } from "./TaxConfigDraftPage.js";
+import { StoreSetupDraftPage } from "./StoreSetupDraftPage.js";
+import { OptionSetListPage } from "./OptionSetListPage.js";
+import {
+  OptionSetCreatePage,
+  OptionSetDetailPage,
+  OptionSetEditPage,
+} from "./OptionSetAuthoringPages.js";
 import { ProductCreatePage } from "./ProductCreatePage.js";
 import { ProductEditPage } from "./ProductEditPage.js";
 import { CatalogProductListPage, ProductListState } from "./CatalogProductListPage.js";
@@ -108,12 +116,15 @@ import {
 } from "./ProviderIntegrationPages.js";
 import { ApiClientPage } from "./ApiClientPage.js";
 import { OperatingEntityDetailPage, OperatingEntityListPage } from "./OperatingEntityPages.js";
-import { BrandDetailPage, BrandListPage } from "./BrandAdminPages.js";
+import { BrandListPage } from "./BrandAdminPages.js";
+import { BrandAdministrationWorkspace } from "./BrandAdministrationWorkspace.js";
+import type { MerchantBrandWorkspaceClient } from "./merchant-brand-workspace.js";
 import { FeatureFlagListPage } from "./FeatureControlAdminPages.js";
 import { PlatformLiveGatePage, StoreLiveGatePage } from "./LiveGatePages.js";
 import { RoleEditorPage, RoleListPage } from "./RoleAdministrationPages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
-import { PlatformTenantDetailPage, PlatformTenantListPage } from "./PlatformTenantPages.js";
+import { PlatformTenantDetailPage } from "./PlatformTenantPages.js";
+import { PlatformTemplateWorkspace } from "./PlatformTemplateWorkspace.js";
 import { SupportCasePage } from "./SupportCasePages.js";
 import { MetricCatalogPage, MetricDetailPage } from "./MetricPages.js";
 import { DataQualityPage, ReconciliationPage } from "./DataQualityPages.js";
@@ -138,6 +149,7 @@ type WorkspaceState =
 
 export interface AppProps {
   readonly client?: MerchantWorkspaceClient;
+  readonly brandClient?: MerchantBrandWorkspaceClient;
   readonly demo?: MerchantDemoClients;
 }
 
@@ -162,7 +174,7 @@ function clientProps<T>(
   return client === undefined ? {} : { client };
 }
 
-export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {}) {
+export function App({ client: injectedClient, brandClient, demo: injectedDemo }: AppProps = {}) {
   const demo = injectedDemo ?? null;
   const DemoOverview = demo?.Overview;
   const client = useMemo(
@@ -219,6 +231,52 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
     }
   };
 
+  const optionPage = (
+    Page: ComponentType<{
+      brandReference: string | null;
+      storeReference: string | null;
+      brandLabel?: string;
+      storeLabel?: string;
+      csrf: string;
+    }>,
+    requireList = false,
+  ) =>
+    state.kind === "Ready" &&
+    !state.switching &&
+    (!requireList ||
+      state.workspace.navigation.some(
+        (item) =>
+          item.screenId === "CAT-OPTIONSET-LIST" &&
+          item.href === "/app/commerce/option-sets" &&
+          item.permission === "catalog.manage",
+      )) ? (
+      <Page
+        key={state.workspace.selectedScope.storeReference + state.csrf}
+        brandReference={null}
+        storeReference={state.workspace.selectedScope.storeReference}
+        brandLabel={state.workspace.selectedScope.brandLabel}
+        storeLabel={state.workspace.selectedScope.storeLabel}
+        csrf={state.csrf}
+      />
+    ) : (
+      <StatePanel
+        heading={
+          state.kind === "Loading"
+            ? "Loading option sets"
+            : state.kind === "Offline"
+              ? "Option sets offline"
+              : "Option sets unavailable"
+        }
+        status
+      >
+        <p>
+          {state.kind === "Ready" && !state.switching
+            ? "Option Set access is unavailable for this session and scope."
+            : "A current merchant session and selected Store are required."}
+        </p>
+      </StatePanel>
+    );
+
   return (
     <Routes>
       <Route
@@ -269,7 +327,19 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
         path="/app/organization/stores/:id/setup"
         element={
           <LocalDemoRoute notice={demo?.Notice ?? null}>
-            <StoreSetupPage {...clientProps(demo?.storeAdmin)} />
+            {demo !== null ? (
+              <StoreSetupPage {...clientProps(demo.storeAdmin)} />
+            ) : state.kind === "Ready" && !state.switching ? (
+              <StoreSetupDraftPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                storeReference={state.workspace.selectedScope.storeReference}
+                csrf={state.csrf}
+              />
+            ) : (
+              <StatePanel heading="Store setup unavailable" status>
+                <p>A current merchant session and selected Store are required.</p>
+              </StatePanel>
+            )}
           </LocalDemoRoute>
         }
       />
@@ -323,7 +393,7 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
       <Route path="/app/organization/roles" element={<RoleListPage />} />
       <Route path="/app/organization/roles/:id" element={<RoleEditorPage />} />
       <Route path="/platform/live-gates" element={<PlatformLiveGatePage />} />
-      <Route path="/platform/tenants" element={<PlatformTenantListPage />} />
+      <Route path="/platform/tenants" element={<PlatformTemplateWorkspace />} />
       <Route path="/platform/tenants/:id" element={<PlatformTenantDetailPage />} />
       <Route
         path="/platform/support-cases"
@@ -334,6 +404,16 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
         }
       />
       <Route path="/app/exports" element={<ExportJobListPage />} />
+      <Route path="/app/commerce/option-sets" element={optionPage(OptionSetListPage, true)} />
+      <Route path="/app/commerce/option-sets/new" element={optionPage(OptionSetCreatePage)} />
+      <Route
+        path="/app/commerce/option-sets/:optionSetId/edit"
+        element={optionPage(OptionSetEditPage)}
+      />
+      <Route
+        path="/app/commerce/option-sets/:optionSetId"
+        element={optionPage(OptionSetDetailPage)}
+      />
       <Route
         path="/app/commerce/products"
         element={
@@ -452,7 +532,24 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
       <Route path="/app/commerce/availability" element={<AvailabilityWorkbenchPage />} />
       <Route path="/app/commerce/pricing" element={<PriceBookListPage />} />
       <Route path="/app/commerce/pricing/:id" element={<PriceBookEditorPage />} />
-      <Route path="/app/commerce/tax" element={<TaxConfigPage />} />
+      <Route
+        path="/app/commerce/tax"
+        element={
+          demo !== null ? (
+            <TaxConfigPage />
+          ) : state.kind === "Ready" && !state.switching ? (
+            <TaxConfigDraftPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              storeReference={state.workspace.selectedScope.storeReference}
+              csrf={state.csrf}
+            />
+          ) : (
+            <StatePanel heading="Tax Configuration unavailable" status>
+              <p>A current merchant session and selected Store are required.</p>
+            </StatePanel>
+          )
+        }
+      />
       <Route path="/app/commerce/promotions" element={<PromotionListPage />} />
       <Route path="/app/commerce/promotions/:id/edit" element={<PromotionEditorPage />} />
       <Route path="/app/commerce/recipes" element={<RecipeListPage />} />
@@ -542,7 +639,20 @@ export function App({ client: injectedClient, demo: injectedDemo }: AppProps = {
       <Route path="/app/organization/entities" element={<OperatingEntityListPage />} />
       <Route path="/app/organization/entities/:id" element={<OperatingEntityDetailPage />} />
       <Route path="/app/organization/brands" element={<BrandListPage />} />
-      <Route path="/app/organization/brands/:id" element={<BrandDetailPage />} />
+      <Route
+        path="/app/organization/brands/:id"
+        element={
+          <BrandAdministrationWorkspace
+            {...(brandClient === undefined ? {} : { client: brandClient })}
+            {...(state.kind === "Ready" && !state.switching
+              ? {
+                  topologyCsrf: state.csrf,
+                  topologyStoreReference: state.workspace.selectedScope.storeReference,
+                }
+              : {})}
+          />
+        }
+      />
       <Route path="/app/customers" element={<CustomerListPage />} />
       <Route path="/app/customers/loyalty-programs" element={<LoyaltyProgramListPage />} />
       <Route path="/app/customers/loyalty-programs/:id" element={<LoyaltyProgramEditorPage />} />

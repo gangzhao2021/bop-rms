@@ -8,6 +8,7 @@ import { createInternalKitchenCommand } from "./pilot-kitchen-command.mjs";
 import { createInternalMerchantAcceptance } from "./pilot-merchant-acceptance.mjs";
 import { createInternalMerchantSession } from "./pilot-merchant-session.mjs";
 import { createInternalMerchant } from "./pilot-merchant.mjs";
+import { createInternalMerchantProduct } from "./pilot-merchant-product.mjs";
 import { createInternalDiningCredentialLoaders } from "./pilot-dining-credentials.mjs";
 import { createInternalCredentialLoaders } from "./pilot-credentials.mjs";
 import { refreshInternalOrderReceiptObservations } from "./pilot-receipt-observations.mjs";
@@ -21,6 +22,7 @@ const factories = {
   createInternalMerchantAcceptance,
   createInternalMerchantSession,
   createInternalMerchant,
+  createInternalMerchantProduct,
   createInternalDiningCredentialLoaders,
   createInternalCredentialLoaders,
   refreshInternalOrderReceiptObservations,
@@ -49,6 +51,22 @@ export function composeMerchantDependencies(
     ...account,
     expectedDatabaseName: installation.database,
     roleMapping: config.roleMapping,
+    ...(config.product?.optionPriceSources?.currencyMetadata === undefined
+      ? {}
+      : {
+          taxConfigCurrencyMetadata: config.product.optionPriceSources.currencyMetadata,
+        }),
+    ...(config.product === undefined
+      ? {}
+      : {
+          createInternalMerchantProduct: (resources, persistence, authentication) =>
+            f.createInternalMerchantProduct(resources, {
+              persistence,
+              authentication,
+              configuration: { scope: config.scope, product: config.product },
+              createCursorKey: credentials.createInternalCatalogCursorKey,
+            }),
+        }),
     loadTaskQueue: installation.loadTaskQueue,
     createInternalRefundPreparation: f.createInternalRefundPreparation,
     createInternalRefundSend: (options) =>

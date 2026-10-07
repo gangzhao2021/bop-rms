@@ -1,10 +1,16 @@
 import { expect, it, vi } from "vitest";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { parseProductAggregate } from "../contracts/product.js";
+import { CatalogError, type ProductLifecycleTransaction } from "../index.js";
+import { createPostgresProductVariantIdentityHistorySource } from "../infrastructure/persistence/product-reference-history-source-store.js";
 import {
   buildProductVariantIdentityHistory,
   parseProductVariantIdentityHistorySnapshot,
   assertProductVariantIdentityHistory,
+  parseProductVariantCreationRequest,
+  buildProductVariantCreationAbsence,
+  parseProductVariantCreationAbsence,
+  assertProductVariantCreationAbsence,
 } from "../contracts/product-variant-identity-history.js";
 const id = (n: number) => `019a2421-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-09-30T03:00:00.000Z";
@@ -106,6 +112,151 @@ function fixture(full = true) {
   };
   return { aggregate, request, source };
 }
+it.each(["ClosedCatalogError", "UnknownDriverError"] as const)(
+  "actual variant history consumer preserves only closed dependency errors: %s",
+  async (kind) => {
+    const f = fixture(),
+      original =
+        kind === "ClosedCatalogError"
+          ? new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE")
+          : new Error("Synthetic private callback detail"),
+      query = vi.fn(async (sql: string) =>
+        sql.includes("transaction_isolation")
+          ? { rows: [{ isolation: "read committed" }] }
+          : sql.includes("set_config") || sql.includes("pg_advisory_xact_lock")
+            ? { rows: [] }
+            : { rows: [{ source: f.source }] },
+      ),
+      tx: ProductLifecycleTransaction = { query: query as ProductLifecycleTransaction["query"] },
+      hold = vi.fn(async () => undefined),
+      store = createPostgresProductVariantIdentityHistorySource({
+        tenantReference: id(20),
+        brandReference: id(2),
+        actorReference: id(3),
+        clock: { now: () => at },
+        transactions: { run: async (work) => work(tx) },
+        authority: { holdUntilTransactionCompletes: hold },
+      }),
+      work = vi.fn(async () => {
+        throw original;
+      });
+    let caught: unknown;
+    try {
+      await store.withCurrentSnapshot(f.request, work);
+    } catch (error) {
+      caught = error;
+    }
+    expect(work).toHaveBeenCalledOnce();
+    expect(hold).toHaveBeenCalledTimes(2);
+    expect(caught).toBeInstanceOf(CatalogError);
+    expect(caught).toMatchObject({
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+      message: "catalog is unavailable",
+    });
+    if (kind === "ClosedCatalogError") expect(caught).toBe(original);
+    else expect(caught).not.toBe(original);
+  },
+);
+function creation() {
+  const old = candidate(),
+    content = old.draft.editorContent;
+  if (!content) throw Error("Missing synthetic content");
+  const aggregate = parseProductAggregate({
+    ...old,
+    draft: {
+      ...old.draft,
+      skus: [],
+      editorContent: {
+        ...content,
+        variantCombinations: [
+          {
+            selections: [{ dimensionReference: id(6), valueReference: id(7) }],
+            disposition: "NotGenerated",
+            skuReference: null,
+          },
+        ],
+      },
+    },
+  });
+  return {
+    profile: "CatalogProductVariantCreationRequestV1" as const,
+    operationReference: id(9),
+    aggregate,
+    originalIntentDigest: hash("actual Create intent"),
+    observedAt: at,
+    validUntil: "2026-09-30T03:00:05.000Z",
+  };
+}
+it("keeps nonempty initial Variant definitions as a distinct absent-history proof, never V1 history", () => {
+  const raw = structuredClone(creation()),
+    request = parseProductVariantCreationRequest(raw),
+    proof = buildProductVariantCreationAbsence(
+      { productExists: false, operationExists: false, historyExists: false, observedAt: at },
+      request,
+    );
+  expect(request.aggregate.draft.editorContent?.variantDimensions).toHaveLength(1);
+  expect(request.aggregate.draft.editorContent?.variantCombinations[0]?.disposition).toBe(
+    "NotGenerated",
+  );
+  expect(proof.absence).toBe("NoRecordedProductOrOperation");
+  expect(proof.eligibility).toBe("NotEvaluated");
+  expect(Object.hasOwn(proof, "used")).toBe(false);
+  expect(Object.isFrozen(request)).toBe(true);
+  expect(Object.isFrozen(request.aggregate)).toBe(true);
+  expect(Object.isFrozen(proof)).toBe(true);
+  expect(parseProductVariantCreationAbsence(proof)).toEqual(proof);
+  expect(() => assertProductVariantCreationAbsence(request, proof)).not.toThrow();
+  expect(() => parseProductVariantIdentityHistorySnapshot(proof)).toThrow();
+  Object.assign(raw.aggregate, { internalCode: "CHANGED" });
+  expect(request.aggregate.internalCode).toBe("VARIANT_HISTORY");
+  expect(() => assertProductVariantCreationAbsence(raw, proof)).toThrow();
+});
+it.each(["productExists", "operationExists", "historyExists"])(
+  "refuses actual %s rather than treating it as empty history",
+  (field) => {
+    const raw = {
+      productExists: false,
+      operationExists: false,
+      historyExists: false,
+      observedAt: at,
+      [field]: true,
+    };
+    expect(() => buildProductVariantCreationAbsence(raw, creation())).toThrow();
+  },
+);
+it.each(["root", "actor-clock", "lease", "unknown", "missing-content", "base-version"])(
+  "rejects invalid initial Create %s",
+  (kind) => {
+    const r = structuredClone(creation());
+    if (kind === "root") Object.assign(r.aggregate, { aggregateVersion: 2 });
+    if (kind === "actor-clock")
+      Object.assign(r.aggregate, { createdAt: "2026-09-30T03:00:01.000Z" });
+    if (kind === "lease") r.validUntil = "2026-09-30T03:00:05.001Z";
+    if (kind === "unknown") Object.assign(r, { used: [] });
+    if (kind === "missing-content") Reflect.deleteProperty(r.aggregate.draft, "editorContent");
+    if (kind === "base-version") Object.assign(r.aggregate.draft, { baseVersionReference: id(50) });
+    expect(() => parseProductVariantCreationRequest(r)).toThrow();
+  },
+);
+it("refuses request getters, forged snapshot digests and a differently bound original operation", () => {
+  const request = creation(),
+    getter = vi.fn(() => request.aggregate),
+    raw: Record<string, unknown> = { ...request };
+  Object.defineProperty(raw, "aggregate", { enumerable: true, get: getter });
+  expect(() => parseProductVariantCreationRequest(raw)).toThrow();
+  expect(getter).not.toHaveBeenCalled();
+  const proof = buildProductVariantCreationAbsence(
+    { productExists: false, operationExists: false, historyExists: false, observedAt: at },
+    request,
+  );
+  expect(() => parseProductVariantCreationAbsence({ ...proof, digest: hash("other") })).toThrow();
+  const body = { ...proof, operationReference: id(99) };
+  const { digest: ignored, ...changed } = body;
+  void ignored;
+  expect(() =>
+    assertProductVariantCreationAbsence(request, { ...changed, digest: hash(changed) }),
+  ).toThrow();
+});
 it("derives complete minimal used identities without content prose or sale eligibility", () => {
   const f = fixture(),
     snapshot = buildProductVariantIdentityHistory(f.source, id(2), f.request);

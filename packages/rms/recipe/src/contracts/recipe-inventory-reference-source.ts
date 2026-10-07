@@ -1,3 +1,8 @@
+import {
+  recipeProductPublicationReferenceRequestFieldsV2,
+  parseRecipeInventoryProductPublicationReferenceRequestV2,
+  type RecipeInventoryProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { parseRecipeReference, parseRecipeDigest } from "../domain/recipe.js";
 import { RecipeWorkflowError } from "../application/recipe-service.js";
@@ -240,7 +245,20 @@ export function buildRecipeInventoryReferenceSnapshot(
 ): RecipeInventoryReferenceSnapshot {
   try {
     const request = parseRecipeInventoryReferenceRequest(input),
-      r = exact(value, ["generation", "counts", "observedAt", ...families]),
+      { observedAt, ...graph } = recipeInventoryReferenceGraph(value, request.brandReference, now),
+      body = { request, profile: "BrandRecipeInventoryStoredReferencesV1" as const, ...graph };
+    return Object.freeze({
+      ...body,
+      observedAt,
+      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
+    });
+  } catch {
+    return fail();
+  }
+}
+function recipeInventoryReferenceGraph(value: unknown, expectedBrand: string, now: string) {
+  try {
+    const r = exact(value, ["generation", "counts", "observedAt", ...families]),
       counts = exact(r.counts, families),
       raw = Object.fromEntries(families.map((k) => [k, list(r[k])])) as Record<
         (typeof families)[number],
@@ -266,7 +284,7 @@ export function buildRecipeInventoryReferenceSnapshot(
       return fail();
     const brand = (v: unknown) => {
         const b = ref(v);
-        return b === request.brandReference ? b : fail();
+        return b === expectedBrand ? b : fail();
       },
       past = (v: unknown) => {
         const t = instant(v);
@@ -482,8 +500,6 @@ export function buildRecipeInventoryReferenceSnapshot(
     }
     if (processed !== versions.length) return fail();
     const body = {
-      request,
-      profile: "BrandRecipeInventoryStoredReferencesV1" as const,
       coverage: "CompleteStoredReferences" as const,
       consistency: "StatementSnapshot" as const,
       applicability: "Unavailable" as const,
@@ -516,7 +532,6 @@ export function buildRecipeInventoryReferenceSnapshot(
     return Object.freeze({
       ...body,
       observedAt,
-      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
     });
   } catch {
     return fail();
@@ -573,6 +588,110 @@ export function parseRecipeInventoryReferenceSnapshot(
       ]),
     );
     const result = buildRecipeInventoryReferenceSnapshot(
+      {
+        ...raw,
+        generation: r.generation,
+        observedAt: r.observedAt,
+        counts: Object.fromEntries(families.map((k) => [k, String(list(r[k]).length)])),
+      },
+      request,
+      now,
+    );
+    if (result.digest !== parseRecipeDigest(r.digest)) return fail();
+    return result;
+  } catch {
+    return fail();
+  }
+}
+
+export const recipeInventoryProductPublicationReferenceSourceFieldsV2 = Object.freeze([
+  ...new Set([
+    ...recipeInventoryReferenceFields,
+    ...recipeProductPublicationReferenceRequestFieldsV2,
+  ]),
+] as const);
+export interface RecipeInventoryProductPublicationReferenceSnapshotV2 extends Omit<
+  RecipeInventoryReferenceSnapshot,
+  "request" | "profile"
+> {
+  readonly request: RecipeInventoryProductPublicationReferenceRequestV2;
+  readonly profile: "BrandRecipeInventoryStoredReferencesForPublicationV2";
+}
+export function buildRecipeInventoryProductPublicationReferenceSnapshotV2(
+  value: unknown,
+  input: RecipeInventoryProductPublicationReferenceRequestV2,
+  now: string,
+): RecipeInventoryProductPublicationReferenceSnapshotV2 {
+  try {
+    const request = parseRecipeInventoryProductPublicationReferenceRequestV2(input),
+      { observedAt, ...graph } = recipeInventoryReferenceGraph(value, request.brandReference, now);
+    if (now < request.observedAt || now >= request.validUntil || observedAt < request.observedAt)
+      return fail();
+    const body = {
+      request,
+      profile: "BrandRecipeInventoryStoredReferencesForPublicationV2" as const,
+      ...graph,
+      observedAt,
+    };
+    return Object.freeze({
+      ...body,
+      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
+    });
+  } catch {
+    return fail();
+  }
+}
+export function parseRecipeInventoryProductPublicationReferenceSnapshotV2(
+  value: unknown,
+  input: RecipeInventoryProductPublicationReferenceRequestV2,
+  now: string,
+): RecipeInventoryProductPublicationReferenceSnapshotV2 {
+  try {
+    const r = exact(value, [
+        "request",
+        "profile",
+        "coverage",
+        "consistency",
+        "applicability",
+        "removalResolution",
+        "conditionalApplicability",
+        "generation",
+        "observedAt",
+        "digest",
+        ...families,
+      ]),
+      request = parseRecipeInventoryProductPublicationReferenceRequestV2(input);
+    if (
+      canonicalizeRfc8785(parseRecipeInventoryProductPublicationReferenceRequestV2(r.request)) !==
+        canonicalizeRfc8785(request) ||
+      r.profile !== "BrandRecipeInventoryStoredReferencesForPublicationV2" ||
+      r.coverage !== "CompleteStoredReferences" ||
+      r.consistency !== "StatementSnapshot" ||
+      r.applicability !== "Unavailable" ||
+      r.removalResolution !== "Unavailable" ||
+      r.conditionalApplicability !== "Unavailable" ||
+      typeof r.generation !== "string"
+    )
+      return fail();
+    const keys = {
+      recipes: rootFields,
+      versions: versionFields,
+      ingredients: ingredientFields,
+      modifiers: modifierFields,
+    };
+    const raw = Object.fromEntries(
+      families.map((k) => [
+        k,
+        list(r[k]).map((v) => {
+          const fields = k === "changes" ? changeFields(v) : keys[k];
+          return {
+            ...exact(v, fields),
+            ...(k === "recipes" || k === "versions" || k === "modifiers" ? { precise: true } : {}),
+          };
+        }),
+      ]),
+    );
+    const result = buildRecipeInventoryProductPublicationReferenceSnapshotV2(
       {
         ...raw,
         generation: r.generation,

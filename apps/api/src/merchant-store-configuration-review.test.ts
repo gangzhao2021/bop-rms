@@ -1,6 +1,10 @@
 import { beforeEach, expect, it, vi } from "vitest";
+import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
-import type { createPersistentStoreConfigurationReview } from "@rms/store";
+import type {
+  createPersistentStoreConfigurationReview,
+  createPersistentStoreApprovalPreparation,
+} from "@rms/store";
 const mocks = vi.hoisted(() => ({
   resolve: vi.fn(),
   review: vi.fn(),
@@ -70,6 +74,7 @@ type ReviewOptions = Parameters<typeof createPersistentStoreConfigurationReview>
 type ReviewInput = Parameters<ReturnType<typeof createPersistentStoreConfigurationReview>>[0];
 beforeEach(() => vi.clearAllMocks());
 function setup() {
+  const legacyHash = vi.fn(() => "sha256:" + "b".repeat(64));
   const decision = Object.freeze({
     effect: "Allow" as "Allow" | "Deny",
     action: "publishing.review.approve",
@@ -116,7 +121,10 @@ function setup() {
       approve: "store.service.approve",
       publish: "store.service.publish",
     },
-    configure: () => ({ publication: { authorize: async () => true }, ports: () => ({}) }),
+    configure: () => ({
+      publication: { authorize: async () => true, hashContent: legacyHash },
+      ports: () => ({}),
+    }),
     review: { validate: async () => undefined, snapshotAudit: async () => undefined },
   } as unknown as Parameters<typeof createMerchantStoreConfiguration>[0]);
   const request = {
@@ -130,8 +138,42 @@ function setup() {
       configuration: configuration("Approved"),
     },
   };
-  return { service, request, scope, prepare, inputs };
+  return { service, request, scope, prepare, inputs, legacyHash };
 }
+it("preserves supplied V1 hashing and supplies owning V2 content and Setup digest ports", async () => {
+  const f = setup();
+  await f.service(f.request);
+  const ports = mocks.preparation.mock.calls[0]?.[0] as Parameters<
+    typeof createPersistentStoreApprovalPreparation
+  >[0];
+  const old = configuration("Approved");
+  expect(ports.hashContent(old as never)).toBe("sha256:" + "b".repeat(64));
+  expect(f.legacyHash).toHaveBeenCalledWith(old);
+  const basis = {
+    profile: "StoreSetupConfigurationBasisV2",
+    tenantReference: id(40),
+    setupDraftReference: id(41),
+    sourceRevision: 1,
+    sourceSnapshotDigest: "sha256:" + "a".repeat(64),
+    feeContexts: ["ServiceCharge", "DeliveryFee", "Tip"].map((chargeType) => ({
+      chargeType,
+      state: "Disabled",
+    })),
+  };
+  const modern = { ...old, setupBasis: basis };
+  const hash = ports.hashContent(modern as never);
+  expect(hash).toMatch(/^sha256:[0-9a-f]{64}$/u);
+  expect(
+    ports.hashContent({ ...modern, approvedByReference: id(91), updatedAt: at } as never),
+  ).toBe(hash);
+  expect(f.legacyHash).toHaveBeenCalledTimes(1);
+  // These ports go to the actual owning materializer/authority, not browser bytes.
+  const preparation = mocks.review.mock.calls[0]?.[0] as ReviewOptions;
+  const references = preparation.administration.publication.setupSnapshotReferences;
+  expect(references?.hashIntent(references.canonicalize(modern))).toBe(
+    "sha256:" + sha256Hex(canonicalizeRfc8785(modern)),
+  );
+});
 it("routes approval through atomic workflow using server context and current Publishing decision", async () => {
   const f = setup();
   expect(await f.service(f.request)).toEqual({ status: "Applied", resultingVersion: 1 });
@@ -173,4 +215,67 @@ it("rejects tenant selection drift before preparing approval", async () => {
     });
   await expect(f.service(f.request)).rejects.toThrow("STORE_CONFIGURATION_PERMISSION_DENIED");
   expect(f.prepare).not.toHaveBeenCalled();
+});
+
+it("refuses a valid closed Setup basis from a foreign Tenant before allocating approval evidence", async () => {
+  const f = setup();
+  await expect(
+    f.service({
+      ...f.request,
+      command: {
+        ...f.request.command,
+        configuration: {
+          ...f.request.command.configuration,
+          setupBasis: {
+            profile: "StoreSetupConfigurationBasisV2",
+            tenantReference: id(99),
+            setupDraftReference: id(41),
+            sourceRevision: 1,
+            sourceSnapshotDigest: "sha256:" + "a".repeat(64),
+            feeContexts: [
+              { chargeType: "ServiceCharge", state: "Disabled" },
+              { chargeType: "DeliveryFee", state: "Disabled" },
+              { chargeType: "Tip", state: "Disabled" },
+            ],
+          },
+        },
+      },
+    }),
+  ).rejects.toThrow("STORE_CONFIGURATION_PERMISSION_DENIED");
+  expect(f.prepare).not.toHaveBeenCalled();
+  expect(mocks.review).not.toHaveBeenCalled();
+  expect(mocks.administration).not.toHaveBeenCalled();
+});
+
+it("routes V2 approval through owning fresh preparation instead of synthesizing a Submit", async () => {
+  const f = setup();
+  const approve = vi.fn<
+    (input: unknown) => Promise<{ status: string; operation: { resultingVersion: number } }>
+  >(async () => ({ status: "Applied", operation: { resultingVersion: 1 } }));
+  mocks.administration.mockReturnValue({ approve });
+  const modern = {
+    ...configuration("PendingApproval"),
+    setupBasis: {
+      profile: "StoreSetupConfigurationBasisV2",
+      tenantReference: id(40),
+      setupDraftReference: id(41),
+      sourceRevision: 1,
+      sourceSnapshotDigest: "sha256:" + "a".repeat(64),
+      feeContexts: ["ServiceCharge", "DeliveryFee", "Tip"].map((chargeType) => ({
+        chargeType,
+        state: "Disabled",
+      })),
+    },
+  };
+  await expect(
+    f.service({ ...f.request, command: { ...f.request.command, configuration: modern } }),
+  ).resolves.toEqual({ status: "Applied", resultingVersion: 1 });
+  expect(approve).toHaveBeenCalledTimes(1);
+  expect(approve.mock.calls[0]?.[0]).toMatchObject({
+    actorReference: id(11),
+    configuration: { setupBasis: modern.setupBasis },
+  });
+  expect(f.prepare).not.toHaveBeenCalled();
+  expect(mocks.preparation).not.toHaveBeenCalled();
+  expect(mocks.review).not.toHaveBeenCalled();
 });

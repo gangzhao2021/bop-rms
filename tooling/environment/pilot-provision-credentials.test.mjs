@@ -1,12 +1,13 @@
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
-import { mkdtemp, writeFile, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { provisionPilotCredentials } from "./pilot-provision-credentials.mjs";
+import { createInternalCredentialLoaders } from "./pilot-credentials.mjs";
 let directory;
 beforeEach(async () => {
   vi.stubEnv("NODE_ENV", "development");
-  directory = await mkdtemp(join(tmpdir(), "bop-credential-bootstrap-"));
+  directory = await realpath(await mkdtemp(join(tmpdir(), "bop-credential-bootstrap-")));
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -43,5 +44,44 @@ test("mismatched profile refuses before generating credentials", async () => {
   await expect(
     provisionPilotCredentials({ directory, expectedDatabaseName: "other" }),
   ).rejects.toThrow("PILOT_CREDENTIAL_BOOTSTRAP_UNAVAILABLE");
+  expect(await readdir(directory)).toEqual(["internal-test-profile.json"]);
+});
+
+test("Catalog cursors use a stable purpose-separated key without changing persisted keys", async () => {
+  await profile();
+  await provisionPilotCredentials({ directory, expectedDatabaseName: "isolated_test" });
+  const file = join(directory, "internal-test-keys.json"),
+    before = await readFile(file),
+    options = {
+      file,
+      expectedDatabaseName: "isolated_test",
+      loadProfile: async () => ({ environment: "InternalTest", database: "isolated_test" }),
+    },
+    first = await createInternalCredentialLoaders(options).createInternalCatalogCursorKey(),
+    restarted = await createInternalCredentialLoaders(options).createInternalCatalogCursorKey();
+  expect(first.byteLength).toBe(32);
+  expect(first.equals(restarted)).toBe(true);
+  const saved = JSON.parse(before.toString("utf8"));
+  expect(first.toString("hex") === saved.keys.merchantEncryption).toBe(false);
+  expect(first.toString("hex") === saved.keys.merchantSelector).toBe(false);
+  first.fill(0);
+  expect(
+    (await createInternalCredentialLoaders(options).createInternalCatalogCursorKey()).equals(
+      restarted,
+    ),
+  ).toBe(true);
+  expect((await readFile(file)).equals(before)).toBe(true);
+});
+
+test("a missing Catalog cursor key source never provisions a new credential", async () => {
+  await profile();
+  const file = join(directory, "internal-test-keys.json");
+  await expect(
+    createInternalCredentialLoaders({
+      file,
+      expectedDatabaseName: "isolated_test",
+      loadProfile: async () => ({ environment: "InternalTest", database: "isolated_test" }),
+    }).createInternalCatalogCursorKey(),
+  ).rejects.toThrow();
   expect(await readdir(directory)).toEqual(["internal-test-profile.json"]);
 });

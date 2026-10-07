@@ -7,7 +7,10 @@ import {
   parseInventoryReference,
 } from "../domain/inventory-item.js";
 import { parseInventoryUnitConversion } from "../domain/inventory-item-snapshot.js";
-import { parseInventoryConfigurationReferenceRequest } from "./configuration-reference-source.js";
+import {
+  parseInventoryConfigurationReferenceRequest,
+  parseInventoryOptionPublicationOriginalClock,
+} from "./configuration-reference-source.js";
 import { unitRecord, unitList } from "./option-consumption-unit-source.js";
 import {
   parseRecipeIngredientUnitPins,
@@ -48,7 +51,7 @@ const measurementFields = [
   "conversionDenominator",
 ] as const;
 function measurements(value: unknown) {
-  const rows = unitList(value, 1000).map((v) => unitRecord(v, measurementFields));
+  const rows = unitList(value, 4096).map((v) => unitRecord(v, measurementFields));
   const pins = parseRecipeIngredientUnitPins(
     rows.map((r) => Object.fromEntries(pinFields.map((k) => [k, r[k]]))),
   );
@@ -103,6 +106,7 @@ export function readRecipeIngredientAssessmentFacts(
   expectedPins: unknown,
   nowInput: string,
   activationInput: string,
+  originalPublicationClockInput?: unknown,
 ) {
   const now = parseInventoryInstant(nowInput),
     activationAt = parseInventoryInstant(activationInput);
@@ -132,11 +136,15 @@ export function readRecipeIngredientAssessmentFacts(
     raw.eligibility !== "NotEvaluated" ||
     Date.parse(expiry) - Date.parse(observed) !== 5000 ||
     now < observed ||
-    now >= expiry ||
-    activationAt < now
+    now >= expiry
   )
     return fail();
-  const request = parseInventoryConfigurationReferenceRequest(raw.request);
+  const request = parseInventoryConfigurationReferenceRequest(raw.request),
+    originalPublicationClock =
+      originalPublicationClockInput === undefined
+        ? undefined
+        : parseInventoryOptionPublicationOriginalClock(originalPublicationClockInput, request, now);
+  if (activationAt < (originalPublicationClock?.observedAt ?? now)) return fail();
   if (
     typeof raw.ownerSourceDigest !== "string" ||
     !/^sha256:[a-f0-9]{64}$/.test(raw.ownerSourceDigest) ||
@@ -147,7 +155,7 @@ export function readRecipeIngredientAssessmentFacts(
   const pins = parseRecipeIngredientUnitPins(raw.pins);
   const expected = parseRecipeIngredientUnitPins(expectedPins);
   if (canonicalizeRfc8785(pins) !== canonicalizeRfc8785(expected)) return fail();
-  const units = unitList(raw.units, 1000).map((v) => {
+  const units = unitList(raw.units, 4096).map((v) => {
     const r = unitRecord(v, [
       "itemReference",
       "itemVersion",
@@ -202,7 +210,7 @@ export function readRecipeIngredientAssessmentFacts(
     return fail();
   // Every nested object has now been inspected through data descriptors before hashing.
   if (digest !== "sha256:" + sha256Hex(canonicalizeRfc8785(body))) return fail();
-  return { now, activationAt, request, pins, units, observed, expiry };
+  return { now, activationAt, request, pins, units, observed, expiry, originalPublicationClock };
 }
 /** Pure owning rule comparison, not provenance or permission authority.
  * Invoke inside the owning withCurrentUnits callback; holder must complete before admitting any write. */
@@ -211,15 +219,17 @@ export function assessRecipeIngredientUnits(
   facts: HeldFacts,
   nowInput: string,
   activationInput: string,
+  originalPublicationClockInput?: unknown,
 ) {
   try {
     const rows = measurements(value);
-    const { now, activationAt, request, units, observed, expiry } =
+    const { now, activationAt, request, units, observed, expiry, originalPublicationClock } =
       readRecipeIngredientAssessmentFacts(
         facts,
         rows.map((r) => Object.fromEntries(pinFields.map((k) => [k, r[k]]))),
         nowInput,
         activationInput,
+        originalPublicationClockInput,
       );
     const matches = rows.map((r) => {
       const u = units.find(
@@ -314,6 +324,7 @@ export function assessRecipeIngredientUnits(
       validUntil: expiry,
       assessedAt: now,
       activationAt,
+      ...(originalPublicationClock ? { originalPublicationClock } : {}),
       matches: Object.freeze(matches),
       unitArithmetic: matches.every((m) => m.status === "ExactBaseQuantity")
         ? ("Pass" as const)

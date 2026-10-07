@@ -14,6 +14,7 @@ import {
   createAuthorizationTransaction,
   createBrowserSessionRecord,
   createIdentityActor,
+  IdentityContractError,
   merchantSessionCookie,
   parseRawBrowserCredential,
   sessionPolicies,
@@ -291,7 +292,7 @@ class SyntheticProvider implements OidcProviderPort {
   }
 }
 
-function fixture() {
+function fixture(now: () => unknown = () => AT) {
   const store = new SyntheticStore();
   const provider = new SyntheticProvider();
   const credentials = new SyntheticCredentials();
@@ -314,12 +315,156 @@ function fixture() {
         return createHash("sha256").update(verifier).digest("base64url");
       },
     },
-    now: () => AT,
+    now,
   });
   return { service, store, provider };
 }
 
+async function signedInFixture(now: () => unknown = () => AT) {
+  const result = fixture(now);
+  const start = await result.service.start("/");
+  const callback = await result.service.callback({
+    code: Buffer.alloc(32, 96).toString("base64url"),
+    state: required(result.provider.authorizationRequest).state,
+    authCookie: start.cookie.value,
+  });
+  const sessionCookie = required(callback.cookies[1]).value;
+  const bootstrap = await result.service.bootstrap(sessionCookie);
+  const record = required(
+    result.store.sessions.get(hasher.hash(parseRawBrowserCredential(sessionCookie))),
+  );
+  return { ...result, sessionCookie, csrf: bootstrap.csrf, record };
+}
+
+function refusedRecord(record: BrowserSessionRecord, status: "Revoked" | "Expired") {
+  const { policy, ...fields } = record.session;
+  const session = createAuthenticationSession({
+    ...fields,
+    policyCode: policy.code,
+    maxActiveSessions: policy.maxActiveSessions,
+    idleTimeoutMinutes: policy.idleTimeoutMinutes,
+    absoluteTimeoutMinutes: policy.absoluteTimeoutMinutes,
+    version: record.session.version + 1,
+    status,
+    revocationReason: status === "Revoked" ? "Administrative" : null,
+    revokedAt: status === "Revoked" ? AT : null,
+  });
+  return createBrowserSessionRecord({ ...record, session });
+}
+
 describe("browser Session and same-origin BFF Domain orchestration", () => {
+  it.each(["Revoked", "Expired"] as const)(
+    "refuses actual %s Session at all browser service entries",
+    async (status) => {
+      const { service, store, provider, sessionCookie, csrf, record } = await signedInFixture();
+      store.sessions.set(record.sessionSelectorHash, refusedRecord(record, status));
+      await expect(service.bootstrap(sessionCookie)).rejects.toMatchObject({
+        code: "BROWSER_SESSION_DENIED",
+      });
+      await expect(service.authorize({ sessionCookie, csrf })).rejects.toMatchObject({
+        code: "BROWSER_SESSION_DENIED",
+      });
+      await expect(service.rotate(sessionCookie, "RiskChange")).rejects.toMatchObject({
+        code: "BROWSER_SESSION_DENIED",
+      });
+      expect(store.sessions.size).toBe(1);
+      expect(required(store.sessions.get(record.sessionSelectorHash)).session.status).toBe(status);
+      expect(provider.revokedBundles).toEqual([]);
+    },
+  );
+
+  it.each(["idleExpiresAt", "absoluteExpiresAt"] as const)(
+    "refuses the exact %s boundary without rotating Session",
+    async (boundary) => {
+      let observedAt = AT;
+      const { service, store, sessionCookie, csrf, record } = await signedInFixture(
+        () => observedAt,
+      );
+      let current = record;
+      if (boundary === "absoluteExpiresAt") {
+        // A lawful last-seen refresh makes idle expiry coincide with absolute expiry,
+        // so this case reaches the absolute boundary independently of old idle expiry.
+        const { policy, ...fields } = record.session;
+        current = createBrowserSessionRecord({
+          ...record,
+          session: createAuthenticationSession({
+            ...fields,
+            policyCode: policy.code,
+            maxActiveSessions: policy.maxActiveSessions,
+            idleTimeoutMinutes: policy.idleTimeoutMinutes,
+            absoluteTimeoutMinutes: policy.absoluteTimeoutMinutes,
+            lastSeenAt: new Date(
+              Date.parse(record.session.absoluteExpiresAt) - policy.idleTimeoutMinutes * 60_000,
+            ).toISOString(),
+            idleExpiresAt: record.session.absoluteExpiresAt,
+          }),
+        });
+        store.sessions.set(record.sessionSelectorHash, current);
+      }
+      observedAt = new Date(Date.parse(current.session[boundary]) - 1).toISOString();
+      await expect(service.bootstrap(sessionCookie)).resolves.toMatchObject({
+        session: { status: "Active" },
+      });
+      await expect(service.authorize({ sessionCookie, csrf })).resolves.toBe(current.session);
+      observedAt = current.session[boundary];
+      await expect(service.bootstrap(sessionCookie)).rejects.toMatchObject({
+        code: "BROWSER_SESSION_DENIED",
+      });
+      await expect(service.authorize({ sessionCookie, csrf })).rejects.toMatchObject({
+        code: "BROWSER_SESSION_DENIED",
+      });
+      await expect(service.rotate(sessionCookie, "RiskChange")).rejects.toMatchObject({
+        code: "BROWSER_SESSION_DENIED",
+      });
+      expect(store.sessions.get(record.sessionSelectorHash)).toBe(current);
+    },
+  );
+
+  it.each(["Revoked", "Expired"] as const)(
+    "refuses %s on authorize's second fresh Session read",
+    async (status) => {
+      const { service, store, sessionCookie, csrf, record } = await signedInFixture();
+      let reads = 0;
+      store.resolveSession = async () => {
+        reads += 1;
+        return reads === 1 ? record : refusedRecord(record, status);
+      };
+      await expect(service.authorize({ sessionCookie, csrf })).rejects.toMatchObject({
+        code: "BROWSER_SESSION_DENIED",
+      });
+      expect(reads).toBe(2);
+    },
+  );
+
+  it("rechecks the exact deadline after bootstrap in authorize", async () => {
+    let observedAt = AT;
+    const { service, store, sessionCookie, csrf, record } = await signedInFixture(() => observedAt);
+    let reads = 0;
+    store.resolveSession = async () => {
+      reads += 1;
+      if (reads === 2) observedAt = record.session.idleExpiresAt;
+      return record;
+    };
+    await expect(service.authorize({ sessionCookie, csrf })).rejects.toMatchObject({
+      code: "BROWSER_SESSION_DENIED",
+    });
+    expect(reads).toBe(2);
+  });
+
+  it.each([
+    new Error("synthetic store unavailable"),
+    new IdentityContractError("SESSION_SHAPE_INVALID"),
+    Object.assign(new Error("not an owning Domain refusal"), { code: "SESSION_REVOKED" }),
+  ])("preserves unrelated or unavailable source errors", async (failure) => {
+    const { service, store, sessionCookie, csrf } = await signedInFixture();
+    store.resolveSession = async () => {
+      throw failure;
+    };
+    await expect(service.bootstrap(sessionCookie)).rejects.toBe(failure);
+    await expect(service.authorize({ sessionCookie, csrf })).rejects.toBe(failure);
+    await expect(service.rotate(sessionCookie, "RiskChange")).rejects.toBe(failure);
+  });
+
   it("creates a one-time PKCE transaction without persisting raw credentials", async () => {
     const { service, store, provider } = fixture();
     const result = await service.start("/orders");
@@ -383,7 +528,9 @@ describe("browser Session and same-origin BFF Domain orchestration", () => {
       value: "",
       clear: true,
     });
-    await expect(service.bootstrap(sessionCookie)).rejects.toBeDefined();
+    await expect(service.bootstrap(sessionCookie)).rejects.toMatchObject({
+      code: "BROWSER_SESSION_DENIED",
+    });
     expect(provider.revokedBundles).toEqual(["synthetic-token-bundle"]);
     await expect(service.logout(sessionCookie)).resolves.toMatchObject({ clear: true });
   });

@@ -1,4 +1,5 @@
 export { moduleManifest } from "./module.manifest.js";
+export * from "./contracts/selling-unit-registry.js";
 export * from "./contracts/product.js";
 export * from "./domain/product.js";
 export * from "./application/product-service.js";
@@ -10,6 +11,7 @@ export * from "./contracts/option-set.js";
 export * from "./contracts/option-set-publication-content.js";
 export * from "./contracts/option-set-editor-content.js";
 export * from "./contracts/option-set-rule-satisfiability.js";
+export * from "./application/product-publication-option-selection.js";
 export * from "./contracts/option-set-content-policy.js";
 export * from "./infrastructure/persistence/option-set-full-draft-store.js";
 export * from "./application/option-set-service.js";
@@ -89,6 +91,18 @@ export {
 } from "./infrastructure/persistence/menu-review-content-store.js";
 
 export { createPostgresAllergenReviewFactsStore } from "./infrastructure/persistence/allergen-review-facts-store.js";
+
+export {
+  parseProductEditorAllergenRegistryRequest,
+  buildProductEditorAllergenRegistrySnapshot,
+  productEditorAllergenRegistryFields,
+  type ProductEditorAllergenRegistryRequest,
+  type ProductEditorAllergenRegistrySnapshot,
+} from "./contracts/product-editor-allergen-registry.js";
+export {
+  createPostgresProductEditorAllergenRegistrySource,
+  type ProductEditorAllergenRegistryAuthority,
+} from "./infrastructure/persistence/product-editor-allergen-registry-source.js";
 
 export { createPostgresMenuReviewProductSource } from "./infrastructure/persistence/menu-review-product-source.js";
 
@@ -231,10 +245,19 @@ export * from "./infrastructure/persistence/product-bundle-source-store.js";
 export * from "./contracts/product-menu-source.js";
 export * from "./infrastructure/persistence/product-menu-source-store.js";
 
-export * from "./contracts/product-pricing-binding-source.js";
+export {
+  productPricingBindingSourceMaximumRows,
+  productPricingBindingSourceFields,
+  productPricingBindingCurrentSourceFields,
+  buildProductPricingBindingSourceSnapshot,
+  parseProductPricingBindingSourceSnapshot,
+  type ProductPricingBindingReference,
+  type ProductPricingBindingSourceSnapshot,
+} from "./contracts/product-pricing-binding-source.js";
 export * from "./infrastructure/persistence/product-pricing-binding-source-store.js";
 
 export * from "./contracts/product-reference-history-source.js";
+export * from "./contracts/product-publication-reference-request-v2.js";
 export * from "./infrastructure/persistence/product-reference-history-source-store.js";
 
 export * from "./contracts/availability-reference-source.js";
@@ -256,6 +279,8 @@ export { createPostgresCatalogInventorySkuReferenceSourceStore } from "./infrast
 export type { CatalogInventorySkuReferenceOptions } from "./infrastructure/persistence/inventory-sku-reference-source-store.js";
 
 export * from "./contracts/product-publication.js";
+export * from "./contracts/product-scope-replacement-intent.js";
+export * from "./contracts/product-publication-v2.js";
 export * from "./contracts/product-publication-content.js";
 
 export * from "./contracts/product-publication-event.js";
@@ -272,7 +297,25 @@ export * from "./application/product-publication-scheduler.js";
 export * from "./contracts/product-editor-content.js";
 
 export * from "./application/product-editor-content-authority.js";
-export * from "./contracts/product-variant-identity-history.js";
+export {
+  productVariantHistoryFields,
+  buildProductVariantIdentityHistory,
+  parseProductVariantIdentityHistoryRequest,
+  parseProductVariantIdentityHistorySnapshot,
+  assertProductVariantIdentityHistory,
+  type ProductVariantIdentityHistoryRequest,
+  type ProductVariantIdentityHistorySnapshot,
+  productVariantCreationFields,
+  parseProductVariantCreationRequest,
+  buildProductVariantCreationAbsence,
+  parseProductVariantCreationAbsence,
+  assertProductVariantCreationAbsence,
+  type ProductVariantCreationRequest,
+  type ProductVariantCreationAbsence,
+} from "./contracts/product-variant-identity-history.js";
+export * from "./contracts/product-publication-reference-provenance.js";
+export * from "./application/product-publication-reference-coverage.js";
+export * from "./application/product-publication-catalog-reference-matches.js";
 export * from "./contracts/product-scope-overlap.js";
 
 export * from "./contracts/product-scope-journal.js";
@@ -287,9 +330,13 @@ export * from "./contracts/product-validation-candidate.js";
 export {
   createPostgresProductValidationCandidateSource,
   type ProductValidationCandidateAuthority,
+  createPostgresProductValidationCandidateSourceV2,
+  type ProductValidationCandidateAuthorityV2,
 } from "./infrastructure/persistence/product-draft-baseline-store.js";
 
 export * from "./contracts/product-unique-scope.js";
+export * from "./contracts/product-unique-scope-v2.js";
+export * from "./application/product-unique-scope-validation-v2.js";
 
 export * from "./contracts/option-set-full-create.js";
 export * from "./infrastructure/persistence/product-whole-scope-replacement-store.js";
@@ -300,6 +347,7 @@ export * from "./contracts/option-set-review-binding.js";
 export * from "./contracts/product-candidate-recipe-target.js";
 
 export * from "./contracts/product-publication-management.js";
+export * from "./contracts/product-publication-management-v2.js";
 
 export {
   applyCatalogProductUniqueScopeValidation,
@@ -309,3 +357,62 @@ export {
 export * from "./contracts/product-validation-policy.js";
 export * from "./application/product-candidate-validation.js";
 export * from "./application/product-content-policy-validation.js";
+
+export * from "./contracts/product-scope-retirement.js";
+export * from "./contracts/product-publication-source-v2.js";
+export * from "./contracts/product-approval-v2.js";
+export * from "./contracts/product-publication-validation-context-v2.js";
+export * from "./contracts/product-tax-classification-registry.js";
+export * from "./infrastructure/persistence/product-tax-classification-registry-store.js";
+
+export * from "./contracts/product-publication-validation-report.js";
+export * from "./contracts/product-publication-warning-acknowledgement.js";
+export * from "./contracts/product-publication-validation-report-query-v2.js";
+export * from "./infrastructure/persistence/product-publication-validation-report-source-store.js";
+
+export * from "./contracts/product-publication-warning-acknowledgement-event.js";
+export * from "./infrastructure/persistence/product-publication-warning-acknowledgement-store.js";
+export * from "./contracts/product-publication-qualification-context.js";
+export * from "./application/product-publication-validation-composition.js";
+export * from "./contracts/product-publication-scope-assessment.js";
+export * from "./contracts/product-warning-acknowledgement-reference-request.js";
+export * from "./contracts/product-publication-resolution.js";
+export * from "./application/product-publication-business-classification.js";
+export {
+  createPostgresProductPublicationResolutionStore,
+  productPublicationResolutionFields,
+  type ProductPublicationResolutionStoreOptions,
+  type ProductPublicationResolutionWriteResult,
+} from "./infrastructure/persistence/product-publication-resolution-store.js";
+export * from "./infrastructure/persistence/selling-unit-registry-store.js";
+export * from "./contracts/product-authoring-resolution.js";
+export * from "./infrastructure/persistence/product-authoring-resolution-store.js";
+export * from "./contracts/option-set-review-record.js";
+export * from "./infrastructure/persistence/option-set-review-content-store.js";
+
+export * from "./contracts/option-set-full-edit.js";
+
+export * from "./contracts/option-set-authoring-resolution.js";
+export * from "./infrastructure/persistence/option-set-authoring-resolution-store.js";
+export * from "./contracts/option-set-list.js";
+export * from "./infrastructure/persistence/option-set-list-query-store.js";
+
+export { assessCatalogOptionSetBrandScope } from "./contracts/option-set-brand-scope-assessment.js";
+
+export {
+  prepareCatalogOptionSetRecordedReviewQualification,
+  assertCatalogOptionSetRecordedReviewQualification,
+} from "./contracts/option-set-review-qualification.js";
+
+export * from "./contracts/option-set-history.js";
+export * from "./infrastructure/persistence/option-set-history-store.js";
+export * from "./contracts/option-set-content-comparison.js";
+
+export * from "./contracts/product-option-price-context-source.js";
+export * from "./infrastructure/persistence/product-option-price-context-source-store.js";
+export * from "./contracts/product-tax-coverage-source.js";
+export * from "./infrastructure/persistence/product-tax-coverage-source-store.js";
+
+export * from "./contracts/brand-catalog-source.js";
+
+export * from "./infrastructure/persistence/brand-catalog-source-store.js";

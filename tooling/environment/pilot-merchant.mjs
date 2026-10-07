@@ -1,3 +1,13 @@
+import { createMerchantTaxConfigAuthoring } from "../../apps/api/dist/merchant-tax-config-authoring.js";
+import { createMerchantReceiptTemplatePublished } from "../../apps/api/dist/merchant-receipt-template-published.js";
+import { createMerchantReceiptTemplateLifecycle } from "../../apps/api/dist/merchant-receipt-template-lifecycle.js";
+import { createMerchantReceiptTemplateReview } from "../../apps/api/dist/merchant-receipt-template-review.js";
+import { createMerchantReceiptTemplateSubmit } from "../../apps/api/dist/merchant-receipt-template-submit.js";
+import { createMerchantReceiptTemplateDraft } from "../../apps/api/dist/merchant-receipt-template-draft.js";
+import { createMerchantReceiptTemplateArtifacts } from "../../apps/api/dist/merchant-receipt-template-artifacts.js";
+import { createMerchantStorePaymentConfiguration } from "../../apps/api/dist/merchant-store-payment-configuration.js";
+import { createMerchantStoreSetupReferences } from "../../apps/api/dist/merchant-store-setup-references.js";
+import { createMerchantStoreSetup } from "../../apps/api/dist/merchant-store-setup.js";
 import { createMerchantReconciliationEvidenceQuery } from "../../apps/api/dist/merchant-reconciliation-evidence-query.js";
 import { createMerchantReconciliationFollowUpCommand } from "../../apps/api/dist/merchant-reconciliation-follow-up-command.js";
 import { createMerchantReconciliationFollowUpQuery } from "../../apps/api/dist/merchant-reconciliation-follow-up-query.js";
@@ -42,11 +52,13 @@ export async function createInternalMerchant(
     createInternalKitchenCommand,
     createInternalMerchantAcceptance,
     createInternalMerchantSession,
+    createInternalMerchantProduct,
     loadTaskQueue,
     expectedDatabaseName,
     providerAccountReference,
     exceptionPaymentMode,
     roleMapping,
+    taxConfigCurrencyMetadata,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -64,6 +76,9 @@ export async function createInternalMerchant(
   };
   const persistence = {
     ...session.persistence,
+    ...(createInternalMerchantProduct === undefined
+      ? {}
+      : { catalogProductNavigation: { currentRuntime: true } }),
     publication: {
       configurationType: "STORE_CONFIGURATION",
       purposeCode: "STORE_CONFIGURATION",
@@ -90,6 +105,32 @@ export async function createInternalMerchant(
       freshness: "Stale",
       dashboardAvailability: "UnavailableUntilWP1905",
       navigation: [
+        {
+          screenId: "STORE-SETUP",
+          label: "Store setup",
+          href: "/app/organization/stores/" + selected.storeReference + "/setup",
+          permission: "organization.manage",
+        },
+        ...(createInternalMerchantProduct === undefined
+          ? []
+          : [
+              {
+                screenId: "CAT-PRODUCT-LIST",
+                label: "Products",
+                href: "/app/commerce/products",
+                permission: "catalog.manage",
+              },
+            ]),
+        ...(typeof product.optionSetList === "function"
+          ? [
+              {
+                screenId: "CAT-OPTIONSET-LIST",
+                label: "Option sets",
+                href: "/app/commerce/option-sets",
+                permission: "catalog.manage",
+              },
+            ]
+          : []),
         {
           screenId: "OPS-ORDER-QUEUE",
           label: "Orders",
@@ -126,6 +167,10 @@ export async function createInternalMerchant(
     authorizeSource: createMerchantDiningTaskSource(persistence),
   });
   const service = createPersistentMerchantBffService(persistence);
+  const product =
+    createInternalMerchantProduct === undefined
+      ? {}
+      : await createInternalMerchantProduct(resources, persistence, service);
   const orderExceptions = createPersistentMerchantOrderExceptions({
     persistence: {
       ...persistence,
@@ -343,6 +388,7 @@ export async function createInternalMerchant(
     ordinaryRefundReconciliation,
     ordinaryRefundSend,
     issue: session.issue,
+    staffChoices: session.staffChoices,
     persistence,
     service,
     orderQueue,
@@ -353,6 +399,58 @@ export async function createInternalMerchant(
     pickupHandoff,
     orderAcceptance,
     bff: {
+      taxConfigAuthoring: createMerchantTaxConfigAuthoring({
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
+        ...(taxConfigCurrencyMetadata === undefined
+          ? {}
+          : { currencyMetadata: taxConfigCurrencyMetadata }),
+      }),
+      receiptTemplatePublished: createMerchantReceiptTemplatePublished({
+        persistence,
+        authentication: service,
+      }),
+      receiptTemplateReview: createMerchantReceiptTemplateReview({
+        persistence,
+        authentication: service,
+      }),
+      receiptTemplateLifecycle: createMerchantReceiptTemplateLifecycle({
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
+      }),
+      receiptTemplateSubmit: createMerchantReceiptTemplateSubmit({
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
+      }),
+      receiptTemplateDraft: createMerchantReceiptTemplateDraft({
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
+      }),
+      receiptTemplateArtifacts: createMerchantReceiptTemplateArtifacts({
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
+      }),
+      storePaymentConfiguration: createMerchantStorePaymentConfiguration({
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
+      }),
+      storeSetupReferences: createMerchantStoreSetupReferences({
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
+      }),
+      storeSetup: createMerchantStoreSetup({
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
+      }),
+      ...product,
       reconciliationEvidenceQuery,
       reconciliationFollowUp,
       reconciliationFollowUpQuery,

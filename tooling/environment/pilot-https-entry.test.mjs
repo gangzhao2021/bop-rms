@@ -135,3 +135,48 @@ it("accepts only an explicit safe installation", () => {
   for (const args of [[], ["../other"], [".local/pilot", "extra"], [null]])
     expect(() => parsePilotHttpsArguments(args)).toThrow();
 });
+it("opens Product credentials and handlers only through the explicitly configured composition", async () => {
+  const product = {
+      contentPolicy: {
+        configurationVersionReference: "configuration",
+        expectedBrandVersion: 2,
+        policyReference: "policy",
+        policyVersion: 3,
+      },
+      maximumApprovalValiditySeconds: 3600,
+    },
+    cursor = vi.fn(async () => new Uint8Array(32)),
+    createProduct = vi.fn(async (_resources, options) => {
+      await options.createCursorKey();
+      return { productList: "configured" };
+    }),
+    dependencies = composeMerchantDependencies(
+      "/synthetic",
+      installation,
+      { ...merchantConfig, product },
+      { providerAccountReference: "account" },
+      {},
+      {
+        implementations: {
+          createInternalCredentialLoaders: () => ({ createInternalCatalogCursorKey: cursor }),
+          createInternalDiningCredentialLoaders: () => ({}),
+          createInternalMerchantProduct: createProduct,
+        },
+      },
+    ),
+    resources = { actual: "resources" },
+    persistence = { actual: "persistence" },
+    authentication = { actual: "authentication" };
+  expect(createProduct).not.toHaveBeenCalled();
+  expect(cursor).not.toHaveBeenCalled();
+  expect(
+    await dependencies.createInternalMerchantProduct(resources, persistence, authentication),
+  ).toEqual({ productList: "configured" });
+  expect(createProduct).toHaveBeenCalledWith(resources, {
+    persistence,
+    authentication,
+    configuration: { scope, product },
+    createCursorKey: cursor,
+  });
+  expect(cursor).toHaveBeenCalledOnce();
+});

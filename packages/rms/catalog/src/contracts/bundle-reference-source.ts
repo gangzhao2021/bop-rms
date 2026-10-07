@@ -1,3 +1,12 @@
+import {
+  parseCatalogProductWarningAcknowledgementReferenceRequest,
+  productWarningAcknowledgementReferenceRequestFields,
+  type CatalogProductWarningAcknowledgementReferenceRequest,
+} from "./product-warning-acknowledgement-reference-request.js";
+import {
+  parseCatalogProductPublicationReferenceRequestV2,
+  type CatalogProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   CatalogError,
@@ -155,14 +164,9 @@ const groupFields = [
 const memberFields = [...groupFields, "sellableType", "sellableReference"] as const;
 /** Complete owning stored graph, including empty roots and all historical versions.
  * Validation of IDs/status/pointers never supplies current authority or sale approval. */
-export function buildBundleReferenceSourceSnapshot(
-  value: unknown,
-  input: BundleReferenceSourceRequest,
-  now: string,
-): BundleReferenceSourceSnapshot {
+function parseBundleStoredGraph(value: unknown, brandReference: string, now: string) {
   try {
-    const request = parseBundleReferenceSourceRequest(input),
-      r = exact(value, [
+    const r = exact(value, [
         "generation",
         "counts",
         "observedAt",
@@ -202,7 +206,7 @@ export function buildBundleReferenceSourceSnapshot(
       memberIds = new Set<string>();
     const brand = (v: unknown) => {
       const id = parseCatalogReference(v);
-      if (id !== request.brandReference) return fail();
+      if (id !== brandReference) return fail();
       return id;
     };
     const bundles = raw.bundles
@@ -323,7 +327,6 @@ export function buildBundleReferenceSourceSnapshot(
           a.sellableReference.localeCompare(b.sellableReference),
       );
     const body = {
-      request,
       generation,
       bundles: Object.freeze(bundles),
       versions: Object.freeze(versions),
@@ -332,16 +335,29 @@ export function buildBundleReferenceSourceSnapshot(
     };
     return Object.freeze({
       ...body,
-      profile: "BrandBundleStoredReferencesV1",
-      coverage: "CompleteStoredReferences",
-      consistency: "StatementSnapshot",
-      applicability: "Unavailable",
       observedAt,
-      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
     });
   } catch {
     return fail();
   }
+}
+export function buildBundleReferenceSourceSnapshot(
+  value: unknown,
+  input: BundleReferenceSourceRequest,
+  now: string,
+): BundleReferenceSourceSnapshot {
+  const request = parseBundleReferenceSourceRequest(input),
+    { observedAt, ...graph } = parseBundleStoredGraph(value, request.brandReference, now),
+    body = { request, ...graph };
+  return Object.freeze({
+    ...body,
+    profile: "BrandBundleStoredReferencesV1",
+    coverage: "CompleteStoredReferences",
+    consistency: "StatementSnapshot",
+    applicability: "Unavailable",
+    observedAt,
+    digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
+  });
 }
 export function parseBundleReferenceSourceSnapshot(
   value: unknown,
@@ -398,6 +414,224 @@ export function parseBundleReferenceSourceSnapshot(
     );
     if (result.digest !== hash(r.digest)) return fail();
     return result;
+  } catch {
+    return fail();
+  }
+}
+
+export const productPublicationBundleReferenceSourceFieldsV2 = Object.freeze([
+  ...bundleReferenceSourceFields,
+  "command",
+  "originalIntentDigest",
+  "replacementIntentDigest",
+  "aggregateSnapshotDigest",
+  "currentPublicationDigest",
+  "observedAt",
+  "validUntil",
+] as const);
+/** The fixed publication entry shares only the stored graph parser with V1.
+ * The complete request and original lease are hashed; no lifecycle request,
+ * current sale eligibility, or publication approval is manufactured. */
+export function buildProductPublicationBundleReferenceSourceSnapshotV2(
+  value: unknown,
+  input: CatalogProductPublicationReferenceRequestV2,
+  now: string,
+) {
+  try {
+    const request = parseCatalogProductPublicationReferenceRequestV2(input),
+      graph = parseBundleStoredGraph(value, request.command.brandReference, now),
+      at = parseCatalogInstant(now);
+    if (
+      graph.observedAt < request.observedAt ||
+      graph.observedAt >= request.validUntil ||
+      at >= request.validUntil
+    )
+      return fail();
+    const body = Object.freeze({
+      request,
+      profile: "BrandBundlePublicationReferencesV2" as const,
+      coverage: "CompleteStoredReferences" as const,
+      consistency: "StatementSnapshot" as const,
+      applicability: "Unavailable" as const,
+      ...graph,
+      validUntil: request.validUntil,
+    });
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+export type ProductPublicationBundleReferenceSourceSnapshotV2 = ReturnType<
+  typeof buildProductPublicationBundleReferenceSourceSnapshotV2
+>;
+export function parseProductPublicationBundleReferenceSourceSnapshotV2(
+  value: unknown,
+  input: CatalogProductPublicationReferenceRequestV2,
+  now: string,
+): ProductPublicationBundleReferenceSourceSnapshotV2 {
+  try {
+    const r = exact(value, [
+        "request",
+        "profile",
+        "coverage",
+        "consistency",
+        "applicability",
+        "generation",
+        "observedAt",
+        "validUntil",
+        "digest",
+        "bundles",
+        "versions",
+        "groups",
+        "members",
+      ]),
+      request = parseCatalogProductPublicationReferenceRequestV2(input),
+      actual = parseCatalogProductPublicationReferenceRequestV2(r.request);
+    if (
+      canonicalizeRfc8785(request) !== canonicalizeRfc8785(actual) ||
+      r.profile !== "BrandBundlePublicationReferencesV2" ||
+      r.coverage !== "CompleteStoredReferences" ||
+      r.consistency !== "StatementSnapshot" ||
+      r.applicability !== "Unavailable" ||
+      typeof r.generation !== "string" ||
+      r.validUntil !== request.validUntil
+    )
+      return fail();
+    const bundles = array(r.bundles).map((value) => ({
+        ...exact(value, rootFields),
+        precise: true,
+      })),
+      versions = array(r.versions).map((value) => ({
+        ...exact(value, versionFields),
+        precise: true,
+      })),
+      groups = array(r.groups).map((value) => exact(value, groupFields)),
+      members = array(r.members).map((value) => exact(value, memberFields));
+    const raw = {
+      generation: r.generation,
+      observedAt: r.observedAt,
+      counts: {
+        bundles: String(bundles.length),
+        versions: String(versions.length),
+        groups: String(groups.length),
+        members: String(members.length),
+      },
+      bundles,
+      versions,
+      groups,
+      members,
+    };
+    const rebuilt = buildProductPublicationBundleReferenceSourceSnapshotV2(raw, request, now);
+    if (canonicalizeRfc8785(rebuilt) !== canonicalizeRfc8785(r)) return fail();
+    return rebuilt;
+  } catch {
+    return fail();
+  }
+}
+
+export const productWarningAcknowledgementBundleReferenceSourceFields = Object.freeze([
+  ...bundleReferenceSourceFields,
+  ...productWarningAcknowledgementReferenceRequestFields,
+] as const);
+/** The fixed warning acknowledgement entry shares only the stored graph parser with V1.
+ * The actual Ack request and original lease are hashed; no lifecycle request,
+ * current sale eligibility, or publication approval is manufactured. */
+export function buildProductWarningAcknowledgementBundleReferenceSourceSnapshot(
+  value: unknown,
+  input: CatalogProductWarningAcknowledgementReferenceRequest,
+  now: string,
+) {
+  try {
+    const request = parseCatalogProductWarningAcknowledgementReferenceRequest(input),
+      graph = parseBundleStoredGraph(value, request.command.brandReference, now),
+      at = parseCatalogInstant(now);
+    if (
+      graph.observedAt < request.observedAt ||
+      graph.observedAt >= request.validUntil ||
+      at >= request.validUntil
+    )
+      return fail();
+    const body = Object.freeze({
+      request,
+      profile: "BrandBundleWarningAcknowledgementReferencesV1" as const,
+      coverage: "CompleteStoredReferences" as const,
+      consistency: "StatementSnapshot" as const,
+      applicability: "Unavailable" as const,
+      ...graph,
+      validUntil: request.validUntil,
+    });
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+export type ProductWarningAcknowledgementBundleReferenceSourceSnapshot = ReturnType<
+  typeof buildProductWarningAcknowledgementBundleReferenceSourceSnapshot
+>;
+export function parseProductWarningAcknowledgementBundleReferenceSourceSnapshot(
+  value: unknown,
+  input: CatalogProductWarningAcknowledgementReferenceRequest,
+  now: string,
+): ProductWarningAcknowledgementBundleReferenceSourceSnapshot {
+  try {
+    const r = exact(value, [
+        "request",
+        "profile",
+        "coverage",
+        "consistency",
+        "applicability",
+        "generation",
+        "observedAt",
+        "validUntil",
+        "digest",
+        "bundles",
+        "versions",
+        "groups",
+        "members",
+      ]),
+      request = parseCatalogProductWarningAcknowledgementReferenceRequest(input),
+      actual = parseCatalogProductWarningAcknowledgementReferenceRequest(r.request);
+    if (
+      canonicalizeRfc8785(request) !== canonicalizeRfc8785(actual) ||
+      r.profile !== "BrandBundleWarningAcknowledgementReferencesV1" ||
+      r.coverage !== "CompleteStoredReferences" ||
+      r.consistency !== "StatementSnapshot" ||
+      r.applicability !== "Unavailable" ||
+      typeof r.generation !== "string" ||
+      r.validUntil !== request.validUntil
+    )
+      return fail();
+    const bundles = array(r.bundles).map((value) => ({
+        ...exact(value, rootFields),
+        precise: true,
+      })),
+      versions = array(r.versions).map((value) => ({
+        ...exact(value, versionFields),
+        precise: true,
+      })),
+      groups = array(r.groups).map((value) => exact(value, groupFields)),
+      members = array(r.members).map((value) => exact(value, memberFields));
+    const raw = {
+      generation: r.generation,
+      observedAt: r.observedAt,
+      counts: {
+        bundles: String(bundles.length),
+        versions: String(versions.length),
+        groups: String(groups.length),
+        members: String(members.length),
+      },
+      bundles,
+      versions,
+      groups,
+      members,
+    };
+    const rebuilt = buildProductWarningAcknowledgementBundleReferenceSourceSnapshot(
+      raw,
+      request,
+      now,
+    );
+    if (canonicalizeRfc8785(rebuilt) !== canonicalizeRfc8785(r)) return fail();
+    return rebuilt;
   } catch {
     return fail();
   }

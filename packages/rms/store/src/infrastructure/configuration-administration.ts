@@ -3,6 +3,7 @@ import { createPostgresStoreConfigurationAdministration } from "./persistence/co
 import { createPostgresStorePublicationMaterializer } from "./persistence/publication-materializer.js";
 import {
   createPostgresStoreApprovalAuthorization,
+  createPostgresStoreV2ApprovalAuthorization,
   createPostgresStorePublicationAuthorization,
 } from "./current-publication-proof.js";
 
@@ -19,8 +20,8 @@ type Ports = ReturnType<RepositoryOptions["ports"]>;
 export function createPersistentStoreConfigurationAdministration(
   options: Omit<RepositoryOptions, "ports" | "materializePublication"> & {
     ports(tx: Transaction): Omit<Ports, "approval" | "publishing" | "liveGate">;
-    /** Trusted persisted review snapshot, never a browser-provided approval result. */
-    approvalSnapshot(
+    /** V1-only trusted persisted review snapshot. V2 uses actual Core independent history. */
+    approvalSnapshot?(
       tx: Transaction,
       configuration: Parameters<Ports["approval"]["validate"]>[0],
       observedAt: string,
@@ -36,6 +37,8 @@ export function createPersistentStoreConfigurationAdministration(
       | "configurationType"
       | "purposeCode"
       | "requiredLiveGateRequirementCodes"
+      | "requiredValidationCheckCodes"
+      | "setupSnapshotReferences"
       | "hashContent"
       | "authorize"
     >;
@@ -53,6 +56,11 @@ export function createPersistentStoreConfigurationAdministration(
         storeReference: options.storeReference,
       });
       const approvalAuthority = createPostgresStoreApprovalAuthorization({
+        ...options.publication,
+        brandReference: options.brandReference,
+        storeReference: options.storeReference,
+      });
+      const v2ApprovalAuthority = createPostgresStoreV2ApprovalAuthorization({
         ...options.publication,
         brandReference: options.brandReference,
         storeReference: options.storeReference,
@@ -92,6 +100,11 @@ export function createPersistentStoreConfigurationAdministration(
             approval: {
               validate: async (configuration) => {
                 try {
+                  if (configuration.setupBasis !== undefined) {
+                    await v2ApprovalAuthority(transaction, configuration, at);
+                    return true;
+                  }
+                  if (options.approvalSnapshot === undefined) return false;
                   const snapshot = await options.approvalSnapshot(transaction, configuration, at);
                   if (snapshot === null) return false;
                   await approvalAuthority(transaction, { ...snapshot, configuration }, at);

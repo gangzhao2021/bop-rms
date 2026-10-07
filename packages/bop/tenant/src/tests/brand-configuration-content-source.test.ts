@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   parseTenantBrandConfigurationContentRequest,
+  parseTenantOptionSetBrandConfigurationContentRequest,
+  createPostgresTenantOptionSetBrandConfigurationContentSource,
+  parseTenantStoreBrandConfigurationContentRequest,
+  createPostgresTenantStoreBrandConfigurationContentSource,
+  tenantBrandConfigurationRequiredFields,
   parseTenantRecordedBrandConfiguration,
   tenantBrandConfigurationContent,
   tenantBrandConfigurationContentDigest,
@@ -160,4 +165,309 @@ describe("Brand content query contract", () => {
     );
     expect(getter).not.toHaveBeenCalled();
   });
+});
+
+const optionRequest = {
+  ...request,
+  purposeCode: "CATALOG_OPTION_SET_PUBLICATION" as const,
+  optionSetReference: id(30),
+  versionReference: id(31),
+  expectedAggregateVersion: 2,
+  sourceDigest: "sha256:" + "b".repeat(64),
+  contentDigest: "sha256:" + "c".repeat(64),
+  configurationDigest: "sha256:" + "d".repeat(64),
+  graphDigest: "sha256:" + "e".repeat(64),
+  activationAt: at,
+  validUntil: "2026-09-11T10:00:05.000Z",
+};
+describe("fixed Option publication Brand content admission", () => {
+  it("detaches the complete original graph intent and preserves exact Option purpose", () => {
+    const parsed = parseTenantOptionSetBrandConfigurationContentRequest(optionRequest);
+    expect(parsed).toEqual(optionRequest);
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(() => parseTenantBrandConfigurationContentRequest(optionRequest)).toThrow();
+  });
+  it.each([
+    { purposeCode: "CATALOG_PRODUCT_CONTENT" },
+    { optionSetReference: "unrestricted" },
+    { versionReference: "unrestricted" },
+    { expectedAggregateVersion: 0 },
+    { sourceDigest: "bad" },
+    { contentDigest: "bad" },
+    { configurationDigest: "bad" },
+    { graphDigest: "bad" },
+    { originalIntentDigest: "bad" },
+    { activationAt: "invalid" },
+    { validUntil: "2026-09-11T10:00:05.001Z" },
+    { validUntil: at },
+    { extra: true },
+  ])("rejects an incomplete or substituted original intent %#", (patch) => {
+    expect(() =>
+      parseTenantOptionSetBrandConfigurationContentRequest({ ...optionRequest, ...patch }),
+    ).toThrow("TENANT_BRAND_CONFIGURATION_UNAVAILABLE");
+  });
+  it("rejects caller getters before reading any anchor", () => {
+    const getter = vi.fn(() => optionRequest.graphDigest);
+    const input = { ...optionRequest };
+    Object.defineProperty(input, "graphDigest", { get: getter, enumerable: true });
+    expect(() => parseTenantOptionSetBrandConfigurationContentRequest(input)).toThrow();
+    expect(getter).not.toHaveBeenCalled();
+  });
+  function fixture() {
+    let now = at,
+      allowed = true;
+    const configuration = shape({
+      lifecycle: "Published",
+      approvedByReference: id(21),
+      approvalEvidenceReference: id(22),
+      publicationReference: id(23),
+    });
+    const row: Record<string, unknown> = { precise: true };
+    const names: Record<string, string> = {
+      configurationVersionReference: "configuration_version_id",
+      brandReference: "brand_id",
+    };
+    for (const [key, value] of Object.entries(configuration)) {
+      row[names[key] ?? key.replace(/[A-Z]/g, (letter) => "_" + letter.toLowerCase())] =
+        key === "configurationVersion" ? String(value) : value;
+    }
+    const query = vi.fn(async (sql: string) => {
+      if (sql === "SHOW transaction_isolation")
+        return { rows: [{ transaction_isolation: "read committed" }] };
+      if (sql.includes("FROM bop_tenant.brand WHERE"))
+        return {
+          rows: [
+            { brand_id: id(2), lifecycle: "Active", version: "1", updated_at: at, precise: true },
+          ],
+        };
+      if (sql.includes("FROM bop_tenant.brand_configuration_version")) return { rows: [row] };
+      return { rows: [] };
+    });
+    const tx = { query };
+    const seen: unknown[] = [];
+    const source = createPostgresTenantOptionSetBrandConfigurationContentSource({
+      brandReference: id(2),
+      clock: () => now,
+      transactions: { run: (work) => work(tx) },
+      authority: {
+        async withCurrentContentRead(input, fields, work) {
+          seen.push(input, fields);
+          if (!allowed) throw new Error("DENIED");
+          const result = await work();
+          if (!allowed) throw new Error("DENIED");
+          return result;
+        },
+        async isCurrent(actual, input, fields) {
+          expect(actual).toBe(tx);
+          expect(input).toEqual(optionRequest);
+          expect(fields).toEqual(tenantBrandConfigurationRequiredFields);
+          return allowed;
+        },
+      },
+    });
+    return {
+      source,
+      tx,
+      query,
+      seen,
+      setNow: (value: string) => {
+        now = value;
+      },
+      revoke: () => {
+        allowed = false;
+      },
+    };
+  }
+  it("uses actual owning materialization under Option purpose without asserting current publication", async () => {
+    const f = fixture();
+    await f.source.withRecordedConfiguration(optionRequest, async (packet, actual) => {
+      expect(actual).toBe(f.tx);
+      expect(packet.configuration.configurationVersionReference).toBe(id(10));
+      expect(packet.configuration.lifecycle).toBe("Published");
+      expect(packet.currentPublication).toBe("NotEvaluated");
+      expect(packet.validUntil).toBe(optionRequest.validUntil);
+      expect(packet.contentDigest).toBe(
+        tenantBrandConfigurationContentDigest(packet.configuration),
+      );
+    });
+    expect(f.seen).toEqual([optionRequest, tenantBrandConfigurationRequiredFields]);
+  });
+  it.each(["denial", "expiry"])(
+    "refuses late %s before returning from the owner holder",
+    async (cause) => {
+      const f = fixture();
+      await expect(
+        f.source.withRecordedConfiguration(optionRequest, async () => {
+          if (cause === "denial") f.revoke();
+          else f.setNow(optionRequest.validUntil);
+        }),
+      ).rejects.toThrow("TENANT_BRAND_CONFIGURATION_UNAVAILABLE");
+    },
+  );
+  it("refuses purpose substitution before SQL or callback", async () => {
+    const f = fixture(),
+      work = vi.fn();
+    await expect(
+      f.source.withRecordedConfiguration(
+        {
+          ...optionRequest,
+          purposeCode: "CATALOG_PRODUCT_CONTENT",
+        } as unknown as typeof optionRequest,
+        work,
+      ),
+    ).rejects.toThrow();
+    expect(f.query).not.toHaveBeenCalled();
+    expect(work).not.toHaveBeenCalled();
+  });
+});
+
+const storeRequest = {
+  ...request,
+  purposeCode: "STORE_CONFIGURATION" as const,
+  validUntil: "2026-09-11T10:00:05.000Z",
+};
+describe("fixed Store configuration Brand content admission", () => {
+  function fixture(patch: Record<string, unknown> = {}) {
+    let now = at;
+    let allowed = true;
+    const configuration = shape({
+      lifecycle: "Published",
+      approvedByReference: id(21),
+      approvalEvidenceReference: id(22),
+      publicationReference: id(23),
+      ...patch,
+    });
+    const row: Record<string, unknown> = { precise: true };
+    const names: Record<string, string> = {
+      configurationVersionReference: "configuration_version_id",
+      brandReference: "brand_id",
+    };
+    for (const [key, value] of Object.entries(configuration)) {
+      row[names[key] ?? key.replace(/[A-Z]/g, (letter) => "_" + letter.toLowerCase())] =
+        key === "configurationVersion" ? String(value) : value;
+    }
+    const query = vi.fn(async (sql: string) => {
+      if (sql === "SHOW transaction_isolation")
+        return { rows: [{ transaction_isolation: "read committed" }] };
+      if (sql.includes("FROM bop_tenant.brand WHERE"))
+        return {
+          rows: [
+            { brand_id: id(2), lifecycle: "Active", version: "1", updated_at: at, precise: true },
+          ],
+        };
+      if (sql.includes("FROM bop_tenant.brand_configuration_version")) return { rows: [row] };
+      return { rows: [] };
+    });
+    const tx = { query };
+    const seen: unknown[] = [];
+    const source = createPostgresTenantStoreBrandConfigurationContentSource({
+      brandReference: id(2),
+      clock: () => now,
+      transactions: { run: (work) => work(tx) },
+      authority: {
+        async withCurrentContentRead(input, fields, work) {
+          seen.push(input, fields);
+          if (!allowed) throw new Error("DENIED");
+          return work();
+        },
+        async isCurrent(actual, input, fields) {
+          expect(actual).toBe(tx);
+          expect(input).toEqual(storeRequest);
+          expect(fields).toEqual(tenantBrandConfigurationRequiredFields);
+          return allowed;
+        },
+      },
+    });
+    return {
+      source,
+      query,
+      tx,
+      seen,
+      revoke: () => {
+        allowed = false;
+      },
+      expire: () => {
+        now = storeRequest.validUntil;
+      },
+    };
+  }
+  it("detaches the closed Store purpose and retains owning recorded metadata without release eligibility", async () => {
+    const input = { ...storeRequest };
+    const parsed = parseTenantStoreBrandConfigurationContentRequest(input);
+    expect(parsed).toEqual(storeRequest);
+    expect(Object.isFrozen(parsed)).toBe(true);
+    input.actorReference = id(25);
+    expect(parsed.actorReference).toBe(id(20));
+    const f = fixture();
+    await f.source.withRecordedConfiguration(parsed, async (packet, actual) => {
+      expect(actual).toBe(f.tx);
+      expect(packet.profile).toBe("TenantRecordedBrandConfigurationV1");
+      expect(packet.configuration.configurationVersionReference).toBe(id(10));
+      expect(packet.contentDigest).toBe(
+        tenantBrandConfigurationContentDigest(packet.configuration),
+      );
+      expect(packet.validUntil).toBe(storeRequest.validUntil);
+      expect(packet.currentPublication).toBe("NotEvaluated");
+    });
+    expect(f.seen).toEqual([storeRequest, tenantBrandConfigurationRequiredFields]);
+    expect(() => parseTenantBrandConfigurationContentRequest(storeRequest)).toThrow();
+    expect(() => parseTenantOptionSetBrandConfigurationContentRequest(storeRequest)).toThrow();
+  });
+  it.each([
+    { purposeCode: "CATALOG_PRODUCT_CONTENT" },
+    { purposeCode: "CATALOG_OPTION_SET_PUBLICATION" },
+    { validUntil: "2026-09-11T10:00:05.001Z" },
+    { validUntil: at },
+    { expectedBrandVersion: 0 },
+    { configurationVersionReference: "unrestricted" },
+    { originalIntentDigest: "a".repeat(64) },
+    { tenantReference: "unrestricted" },
+    { brandReference: id(3) },
+    { extra: true },
+  ])("refuses substituted Store admission before any SQL %#", async (patch) => {
+    const f = fixture();
+    const work = vi.fn();
+    await expect(
+      f.source.withRecordedConfiguration(
+        { ...storeRequest, ...patch } as typeof storeRequest,
+        work,
+      ),
+    ).rejects.toThrow("TENANT_BRAND_CONFIGURATION_UNAVAILABLE");
+    expect(f.query).not.toHaveBeenCalled();
+    expect(work).not.toHaveBeenCalled();
+  });
+  it("never executes a Store request getter", () => {
+    const getter = vi.fn(() => id(10));
+    const input = { ...storeRequest };
+    Object.defineProperty(input, "configurationVersionReference", {
+      get: getter,
+      enumerable: true,
+    });
+    expect(() => parseTenantStoreBrandConfigurationContentRequest(input)).toThrow();
+    expect(getter).not.toHaveBeenCalled();
+  });
+  it.each([{ configurationVersionReference: id(11) }, { brandReference: id(3) }])(
+    "refuses an immutable row with substituted configuration or scope %#",
+    async (patch) => {
+      const f = fixture(patch);
+      const work = vi.fn();
+      await expect(f.source.withRecordedConfiguration(storeRequest, work)).rejects.toThrow(
+        "TENANT_BRAND_CONFIGURATION_UNAVAILABLE",
+      );
+      expect(work).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["denial", "expiry", "callback failure"])(
+    "retains the finite owner boundary on late %s",
+    async (cause) => {
+      const f = fixture();
+      await expect(
+        f.source.withRecordedConfiguration(storeRequest, async () => {
+          if (cause === "denial") f.revoke();
+          else if (cause === "expiry") f.expire();
+          else throw new Error("untrusted callback failure");
+        }),
+      ).rejects.toThrow("TENANT_BRAND_CONFIGURATION_UNAVAILABLE");
+    },
+  );
 });

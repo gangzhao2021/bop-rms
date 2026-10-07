@@ -168,3 +168,82 @@ it("refuses an existing current version owned by a different existing Recipe", (
   pin.versionReference = id(33);
   expect(run(p, r).matches[0]?.status).toBe("WrongRecipe");
 });
+
+function originalClock(overrides: Record<string, unknown> = {}) {
+  return {
+    profile: "OptionPublicationOriginalClockV1",
+    operationReference: request.operationReference,
+    catalogIntentDigest: request.catalogIntentDigest,
+    observedAt: at,
+    validUntil: "2026-10-01T04:00:05.000Z",
+    ...overrides,
+  };
+}
+it("retains immediate original activation after real forward time while assessing current metadata", () => {
+  const now = "2026-10-01T04:00:02.000Z",
+    source = build(raw(), request, at),
+    clock = originalClock();
+  const result = assess(pins(), source, request, now, at, clock);
+  expect(result.decision).toBe("PassForMetadata");
+  expect(result.activationAt).toBe(at);
+  expect(result.assessedAt).toBe(now);
+  expect(result.originalPublicationClock).toEqual(clock);
+  expect(Object.isFrozen(result.originalPublicationClock)).toBe(true);
+  expect(result.referenceEligibility).toBe("NotEvaluated");
+  expect(() => assess(pins(), source, request, now, at)).toThrow();
+});
+it.each([
+  { operationReference: id(999) },
+  { catalogIntentDigest: "sha256:" + "b".repeat(64) },
+  { profile: "OtherClock" },
+  { validUntil: "2026-10-01T04:00:05.001Z" },
+  { validUntil: at },
+  { extra: true },
+  { observedAt: "2026-10-01T04:00:03.000Z" },
+])("rejects mismatched or malformed original Option clock %j", (change) => {
+  expect(() =>
+    assess(
+      pins(),
+      build(raw(), request, at),
+      request,
+      "2026-10-01T04:00:02.000Z",
+      at,
+      originalClock(change),
+    ),
+  ).toThrow();
+});
+it("rejects original clock expiry and activation before the immutable origin", () => {
+  const source = build(raw(), request, at);
+  expect(() =>
+    assess(pins(), source, request, "2026-10-01T04:00:05.000Z", at, originalClock()),
+  ).toThrow();
+  expect(() =>
+    assess(pins(), source, request, at, "2026-10-01T03:59:59.999Z", originalClock()),
+  ).toThrow();
+  expect(() => assess(pins(), source, request, at, at, null)).toThrow();
+});
+it("rejects original clock accessors without invoking them or replacing current time", () => {
+  const clock = originalClock(),
+    getter = vi.fn(() => request.operationReference);
+  Object.defineProperty(clock, "operationReference", { get: getter, enumerable: true });
+  expect(() =>
+    assess(pins(), build(raw(), request, at), request, "2026-10-01T04:00:02.000Z", at, clock),
+  ).toThrow();
+  expect(getter).not.toHaveBeenCalled();
+});
+it("checks Recipe expiry at actual current time even when original immediate activation is covered", () => {
+  const value = raw(),
+    current = value.versions[1];
+  if (!current) throw Error("fixture");
+  current.effectiveUntil = "2026-10-01T04:00:01.000Z";
+  const result = assess(
+    pins(),
+    build(value, request, at),
+    request,
+    "2026-10-01T04:00:02.000Z",
+    at,
+    originalClock(),
+  );
+  expect(result.decision).toBe("HardError");
+  expect(result.matches[0]?.status).toBe("InactiveObservedPeriod");
+});

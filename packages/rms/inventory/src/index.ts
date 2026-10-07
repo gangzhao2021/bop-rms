@@ -102,6 +102,8 @@ export {
   inventoryConfigurationReferenceMaximumRows,
   inventoryConfigurationReferencePermissions,
   parseInventoryConfigurationReferenceRequest,
+  parseInventoryOptionPublicationOriginalClock,
+  type InventoryOptionPublicationOriginalClock,
   buildInventoryConfigurationReferenceSnapshot,
   parseInventoryConfigurationReferenceSnapshot,
   type InventoryConfigurationReferenceRequest,
@@ -172,3 +174,20 @@ export {
 
 export * from "./contracts/recipe-ingredient-unit-assessment.js";
 export * from "./contracts/recipe-base-demand-assessment.js";
+
+export * from "./contracts/product-publication-reference-request-v2.js";
+export {
+  buildInventoryProductPublicationConfigurationReferenceSnapshotV2,
+  parseInventoryProductPublicationConfigurationReferenceSnapshotV2,
+  inventoryProductPublicationConfigurationReferenceFieldsV2,
+  type InventoryProductPublicationConfigurationReferenceSnapshotV2,
+} from "./contracts/configuration-reference-source.js";
+export {
+  createPostgresInventoryProductPublicationConfigurationReferenceSourceV2,
+  type InventoryProductPublicationConfigurationReferenceOptionsV2,
+} from "./infrastructure/persistence/configuration-reference-source-store.js";
+export {
+  createPostgresInventoryProductPublicationSkuMappingReferenceSourceV2,
+  type InventoryProductPublicationSkuMappingReferenceOptionsV2,
+} from "./infrastructure/persistence/sku-mapping-reference-source-store.js";
+export { matchInventoryProductPublicationSkuMappingReferenceGraphsV2 } from "./contracts/sku-mapping-reference-matches.js";

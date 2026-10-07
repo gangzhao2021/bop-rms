@@ -7,6 +7,7 @@ import {
   parseCatalogInstant,
   parseCatalogReference,
   parseProductAggregate,
+  type ProductAggregate,
 } from "./product.js";
 
 export const productVariantHistoryFields = Object.freeze([
@@ -70,13 +71,22 @@ export function parseProductVariantIdentityHistoryRequest(
     originalIntentDigest: parsePublishingDigest(r.originalIntentDigest),
   });
 }
-/** Owner-only derivation. Every root revision and its full committed snapshot is
- * verified before reducing it to used identities; no note/media payload escapes. */
+/** Owner-only derivation. Public legacy bytes are unchanged. */
 export function buildProductVariantIdentityHistory(
   value: unknown,
   brandValue: string,
   requestValue: ProductVariantIdentityHistoryRequest,
 ): ProductVariantIdentityHistorySnapshot {
+  return buildVerifiedProductVariantIdentityHistory(value, brandValue, requestValue).variantHistory;
+}
+/** Catalog-internal shared verification. Full aggregates never leave an owning
+ * source; the qualification companion derives only hashes and reference graphs.
+ * Do not export this kernel from the module public index. */
+export function buildVerifiedProductVariantIdentityHistory(
+  value: unknown,
+  brandValue: string,
+  requestValue: ProductVariantIdentityHistoryRequest,
+) {
   const request = parseProductVariantIdentityHistoryRequest(requestValue),
     brandReference = parseCatalogReference(brandValue),
     r = exact(value, ["aggregateVersion", "observedAt", "history"]),
@@ -95,6 +105,11 @@ export function buildProductVariantIdentityHistory(
     createdAt = "",
     encodedSize = 0;
   const dimensionCodes = new Map<string, string>();
+  const verified: {
+    readonly aggregate: ProductAggregate;
+    readonly operationReference: string;
+    readonly snapshotDigest: string;
+  }[] = [];
   for (let i = 0; i < r.history.length; i++) {
     const d = descriptors[String(i)];
     if (!d || !("value" in d)) return fail();
@@ -115,6 +130,9 @@ export function buildProductVariantIdentityHistory(
       (i > 0 && aggregate.createdAt !== createdAt)
     )
       return fail();
+    verified.push(
+      Object.freeze({ aggregate, operationReference: operation, snapshotDigest: hash(aggregate) }),
+    );
     operations.add(operation);
     priorTime = aggregate.updatedAt;
     createdAt = aggregate.createdAt;
@@ -163,7 +181,10 @@ export function buildProductVariantIdentityHistory(
       ),
     ),
   };
-  return Object.freeze({ ...body, digest: hash(body) });
+  return Object.freeze({
+    variantHistory: Object.freeze({ ...body, digest: hash(body) }),
+    operations: Object.freeze(verified),
+  });
 }
 export function parseProductVariantIdentityHistorySnapshot(
   value: unknown,
@@ -245,4 +266,189 @@ export function assertProductVariantIdentityHistory(
     )
       return fail();
   }
+}
+
+/** Creation is a separate proof: no recorded Product exists yet. It is never
+ * represented as an empty existing-version history or publication readiness. */
+export interface ProductVariantCreationRequest {
+  readonly profile: "CatalogProductVariantCreationRequestV1";
+  readonly operationReference: string;
+  readonly aggregate: ProductAggregate;
+  readonly originalIntentDigest: string;
+  readonly observedAt: string;
+  readonly validUntil: string;
+}
+export const productVariantCreationFields = Object.freeze([
+  "productReference",
+  "versionReference",
+  "aggregateSnapshotDigest",
+  "operationReference",
+  "priorProductIdentity",
+  "priorOperationIdentity",
+  "priorIdentityHistory",
+  "editorContent.variantDimensions.identity",
+  "editorContent.variantDimensions.code",
+] as const);
+export interface ProductVariantCreationAbsence {
+  readonly profile: "CatalogProductVariantCreationAbsenceV1";
+  readonly brandReference: string;
+  readonly productReference: string;
+  readonly versionReference: string;
+  readonly operationReference: string;
+  readonly aggregateSnapshotDigest: string;
+  readonly originalIntentDigest: string;
+  readonly absence: "NoRecordedProductOrOperation";
+  readonly eligibility: "NotEvaluated";
+  readonly observedAt: string;
+  readonly validUntil: string;
+  readonly digest: string;
+}
+export function parseProductVariantCreationRequest(value: unknown): ProductVariantCreationRequest {
+  try {
+    const r = exact(copyCategoryPersistenceValue(value), [
+        "profile",
+        "operationReference",
+        "aggregate",
+        "originalIntentDigest",
+        "observedAt",
+        "validUntil",
+      ]),
+      aggregate = parseProductAggregate(r.aggregate),
+      observedAt = parseCatalogInstant(r.observedAt),
+      validUntil = parseCatalogInstant(r.validUntil);
+    if (
+      r.profile !== "CatalogProductVariantCreationRequestV1" ||
+      aggregate.aggregateVersion !== 1 ||
+      aggregate.lifecycle !== "Draft" ||
+      aggregate.draft.status !== "Draft" ||
+      aggregate.draft.baseVersionReference !== null ||
+      aggregate.createdAt !== aggregate.updatedAt ||
+      aggregate.createdAt > observedAt ||
+      aggregate.draft.createdAt !== aggregate.createdAt ||
+      aggregate.draft.updatedAt !== aggregate.createdAt ||
+      aggregate.draft.editorContent === undefined ||
+      aggregate.draft.skus.length > 1 ||
+      aggregate.draft.skus.some(
+        (sku) =>
+          sku.variantSelections.length !== 0 ||
+          sku.lifecycle !== "Draft" ||
+          sku.createdAt !== aggregate.createdAt ||
+          sku.createdByActorReference !== aggregate.createdByActorReference,
+      ) ||
+      (aggregate.draft.skus.length !== 0 &&
+        (aggregate.draft.editorContent.variantDimensions.length !== 0 ||
+          aggregate.draft.editorContent.variantCombinations.length !== 0)) ||
+      aggregate.draft.optionBindings.length !== 0 ||
+      validUntil <= observedAt ||
+      Date.parse(validUntil) - Date.parse(observedAt) > 5000 ||
+      new TextEncoder().encode(canonicalizeRfc8785(aggregate)).byteLength > 8 * 1024 * 1024
+    )
+      return fail();
+    return Object.freeze({
+      profile: "CatalogProductVariantCreationRequestV1",
+      operationReference: parseCatalogReference(r.operationReference),
+      aggregate,
+      originalIntentDigest: parsePublishingDigest(r.originalIntentDigest),
+      observedAt,
+      validUntil,
+    });
+  } catch {
+    return fail();
+  }
+}
+/** Structural derivation only. Only the owning held SQL callback establishes
+ * that these absence observations were actually made under the writer locks. */
+export function buildProductVariantCreationAbsence(
+  value: unknown,
+  requestValue: unknown,
+): ProductVariantCreationAbsence {
+  const request = parseProductVariantCreationRequest(requestValue),
+    r = exact(copyCategoryPersistenceValue(value), [
+      "productExists",
+      "operationExists",
+      "historyExists",
+      "observedAt",
+    ]),
+    observedAt = parseCatalogInstant(r.observedAt);
+  if (
+    r.productExists !== false ||
+    r.operationExists !== false ||
+    r.historyExists !== false ||
+    observedAt < request.observedAt ||
+    observedAt >= request.validUntil
+  )
+    return fail();
+  const body = Object.freeze({
+    profile: "CatalogProductVariantCreationAbsenceV1" as const,
+    brandReference: request.aggregate.brandReference,
+    productReference: request.aggregate.productReference,
+    versionReference: request.aggregate.draft.versionReference,
+    operationReference: request.operationReference,
+    aggregateSnapshotDigest: hash(request.aggregate),
+    originalIntentDigest: request.originalIntentDigest,
+    absence: "NoRecordedProductOrOperation" as const,
+    eligibility: "NotEvaluated" as const,
+    observedAt,
+    validUntil: request.validUntil,
+  });
+  return Object.freeze({ ...body, digest: hash(body) });
+}
+export function parseProductVariantCreationAbsence(value: unknown): ProductVariantCreationAbsence {
+  try {
+    const r = exact(copyCategoryPersistenceValue(value), [
+        "profile",
+        "brandReference",
+        "productReference",
+        "versionReference",
+        "operationReference",
+        "aggregateSnapshotDigest",
+        "originalIntentDigest",
+        "absence",
+        "eligibility",
+        "observedAt",
+        "validUntil",
+        "digest",
+      ]),
+      observedAt = parseCatalogInstant(r.observedAt),
+      validUntil = parseCatalogInstant(r.validUntil);
+    if (
+      r.profile !== "CatalogProductVariantCreationAbsenceV1" ||
+      r.absence !== "NoRecordedProductOrOperation" ||
+      r.eligibility !== "NotEvaluated" ||
+      validUntil <= observedAt ||
+      Date.parse(validUntil) - Date.parse(observedAt) > 5000
+    )
+      return fail();
+    const body = Object.freeze({
+      profile: "CatalogProductVariantCreationAbsenceV1" as const,
+      brandReference: parseCatalogReference(r.brandReference),
+      productReference: parseCatalogReference(r.productReference),
+      versionReference: parseCatalogReference(r.versionReference),
+      operationReference: parseCatalogReference(r.operationReference),
+      aggregateSnapshotDigest: parsePublishingDigest(r.aggregateSnapshotDigest),
+      originalIntentDigest: parsePublishingDigest(r.originalIntentDigest),
+      absence: "NoRecordedProductOrOperation" as const,
+      eligibility: "NotEvaluated" as const,
+      observedAt,
+      validUntil,
+    });
+    if (r.digest !== hash(body)) return fail();
+    return Object.freeze({ ...body, digest: r.digest });
+  } catch {
+    return fail();
+  }
+}
+export function assertProductVariantCreationAbsence(requestValue: unknown, value: unknown): void {
+  const request = parseProductVariantCreationRequest(requestValue),
+    proof = parseProductVariantCreationAbsence(value),
+    expected = buildProductVariantCreationAbsence(
+      {
+        productExists: false,
+        operationExists: false,
+        historyExists: false,
+        observedAt: proof.observedAt,
+      },
+      request,
+    );
+  if (canonicalizeRfc8785(proof) !== canonicalizeRfc8785(expected)) return fail();
 }

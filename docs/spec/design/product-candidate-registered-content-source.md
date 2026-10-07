@@ -1,6 +1,6 @@
 # Current Product Draft and registered content preparation
 
-Implemented under [WP-2421](../work-packages/WP-2421.md#overnight-current-draft-and-registered-content-preparation--2026-09-30-continuation), using the existing owning [current candidate](./product-validation-candidate-source.md) and [Tag/Attribute registry](./product-content-registry.md). Accepted Product validation and complete-content rules are retained. This closes one repository preparation gap, not full reference validation or ordinary publishing.
+Implemented under [WP-2421](../work-packages/history-WP-2421-01.md#overnight-current-draft-and-registered-content-preparation--2026-09-30-continuation), using the existing owning [current candidate](./product-validation-candidate-source.md) and [Tag/Attribute registry](./product-content-registry.md). Accepted Product validation and complete-content rules are retained. This closes one repository preparation gap, not full reference validation or ordinary publishing.
 
 ## Source binding
 

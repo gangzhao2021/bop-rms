@@ -1,8 +1,47 @@
 # Whole-project delivery decision inputs
 
-This record organizes remaining inputs; it accepts no new business policy. The [scenario coverage](business-scenario-coverage.md) is the project status view, the [candidate register](../../runbooks/project-candidate-register.md) owns integration identity, and higher accepted Handoff Sections remain authoritative. Each disposition must identify source/version, accountable owner, affected contracts, accepted/rejected/deferred result, evidence and owning WP. Missing inputs remain `Decision required` or External Evidence.
+This record organizes remaining inputs and records explicitly accepted Owner decisions; unaccepted proposals do not establish business policy. The [scenario coverage](business-scenario-coverage.md) is the project status view, the [candidate register](../../runbooks/project-candidate-register.md) owns integration identity, and higher accepted Handoff Sections remain authoritative. Each disposition must identify source/version, accountable owner, affected contracts, accepted/rejected/deferred result, evidence and owning WP. Missing inputs remain `Decision required` or External Evidence.
 
 Owner-delegated design clarification (2026-09-29): software design choices, Figma/local interface baselines, rules, mappings and repository composition in this record are our delivery duties. They are not artifacts the Owner must supply. The [current design closure inventory](whole-project-design-closure.md) separates these tasks from unfinished implementation and actual operational/professional/release evidence. Accepted higher-authority rules and real evidence boundaries remain unchanged.
+
+## Accepted Product publication policy
+
+On 2026-10-03, the Owner answered the two policy questions in the coordinating chat: “允许回溯 7 天” and “显示具体警告，人工确认后可发布”. These accepted selections resolve the ordinary Product publication defaults under Handoff 68.3 and 70.10 / SKU-008; implementation and evidence belong to [WP-2421 Milestone133](../work-packages/history-WP-2421-01.md#milestone133-plan--ordinary-product-replacement-workflow-to-a-usable-local-end-state).
+
+- The earliest permitted `effectiveFrom` is the server's original qualification observation minus seven elapsed days (604,800,000 milliseconds), inclusive. Client-supplied occurrence time cannot move that boundary. Each new operation obtains its own original observation; exact recovery of an already completed operation retains the original outcome without fresh qualification.
+- Each Active SKU's missing Pricing, base Recipe, Inventory mapping or Menu configuration produces a specific Warning. The ordinary policy allows Warning override only after explicit confirmation by the applicable Actor against the current report. Superseded or explicitly removed configuration cannot supply current presence. Unresolved source coverage is unavailable, not proof of absence.
+
+The implementation uses the existing owning recorded-configuration contracts: current Recipe/PriceBook version entries, the current Inventory Set mapping (including a valid historical Item pin), and Menu placements in nonterminal immutable review configurations. The Menu contract does not expose unreviewed authoring changes, so this check cannot attest to those changes. These choices do not infer a price, recipe, stock balance, menu eligibility or permission. Configuration presence is distinct from sale readiness. HardErrors still block; current source authority, independent approval where required, original-operation recovery and append-only evidence remain mandatory. The selected policy must be held and versioned by the configured runtime; a static builder alone does not establish production authority or enable a production feature.
+
+## Provisional digital Receipt review validity
+
+For WP-2421 repository implementation, use a configurable development default of
+72 elapsed hours (259,200,000 milliseconds) for automated Receipt validation.
+This is an engineering assumption under the delegated design clarification above,
+not an Owner-confirmed business policy. The unanswered duration preference remains
+open; changing it must affect future submissions only. Each real Submit records its
+server-derived `checkedAt` and `validationValidUntil` in immutable evidence. The
+short current-authority transaction lease is separate and must never supply this
+business duration. Browser requests cannot select or extend either deadline.
+
+Approval and Publish must consume unexpired actual validation and approval facts;
+approval validity cannot extend beyond validation validity. Recovery returns the
+original recorded outcome without renewing it. Expiry does not cancel a Publishing
+lifecycle, delete history, or attest to professional/legal review. Any resubmission
+must use a new immutable Draft version and a new review lifecycle, retaining prior
+submission and approval records. Normal-entry implementation and native/browser
+evidence remain required before this workflow is called usable.
+
+For the ordinary independent Receipt approval implementation, use a separate
+configurable development default of 24 elapsed hours (86,400,000 milliseconds).
+The server records `approvedAt` and clamps `approvalValidUntil` to the earlier of
+`approvedAt + configured duration` and the immutable original validation deadline.
+This is an engineering assumption under the same delegated design authority,
+not an Owner-confirmed approval policy. It never extends validation, renews an
+original approval, changes recorded history, or supplies professional/legal review.
+An approval whose original validation has already expired must fail. Future policy
+changes affect future approvals only; original-operation recovery returns the
+recorded approval or publication without renewing either business deadline.
 
 ## Operating day and approval
 

@@ -7,6 +7,7 @@ import {
   timingSafeEqual,
   createCipheriv,
   createDecipheriv,
+  hkdfSync,
 } from "node:crypto";
 import {
   createGuestSessionCredentialProvider,
@@ -97,6 +98,20 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
     }
   }
 
+  /** Purpose-separated stable cursor key; startup never creates or rotates keys. */
+  async function createInternalCatalogCursorKey() {
+    const saved = await load();
+    return Buffer.from(
+      hkdfSync(
+        "sha256",
+        Buffer.from(saved.keys.merchantEncryption, "hex"),
+        Buffer.from(expectedDatabaseName, "utf8"),
+        Buffer.from("bop-rms/internal-test/catalog-product-cursor/v1", "utf8"),
+        32,
+      ),
+    );
+  }
+
   /** Stable InternalTest workforce crypto. Never substitutes for external authentication. */
   async function createInternalMerchantCredentials() {
     const saved = await load(),
@@ -151,5 +166,6 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
     provisionInternalTestCredentials,
     createInternalTestCredentials,
     createInternalMerchantCredentials,
+    createInternalCatalogCursorKey,
   };
 }

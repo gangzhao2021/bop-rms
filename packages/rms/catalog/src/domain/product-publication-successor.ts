@@ -4,7 +4,7 @@ import type { ProductPublicationVersion } from "./product-publication.js";
  * plan does not move relational SKU identities or claim publication eligibility. */
 export function planProductPublicationSuccessor(
   source: ProductAggregate,
-  publication: ProductPublicationVersion,
+  publication: Omit<ProductPublicationVersion, "validationDecision">,
 ): ProductAggregate {
   if (
     publication.state !== "Published" ||

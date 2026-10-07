@@ -115,7 +115,8 @@ export function createCurrentOptionSetContentPolicySource(options: Options) {
           check();
           const assessment = assessCatalogOptionSetContentPolicy(input.graph, source.content, {
             ...binding,
-            observedAt,
+            // Activation belongs to the original publication intent. A later
+            // genuine policy read must not move that boundary forward.
             validUntil: until,
           });
           if (
@@ -127,9 +128,11 @@ export function createCurrentOptionSetContentPolicySource(options: Options) {
             assessmentDigest: assessment.digest,
             originalObservedAt: binding.observedAt,
             currentPolicyPublicationReference,
+            currentPolicyObservedAt: observedAt,
           };
           const delivered = Object.freeze({
             ...assessment,
+            observedAt,
             originalObservedAt: binding.observedAt,
             currentPolicyPublicationReference,
             currentAssessmentDigest: "sha256:" + sha256Hex(canonicalizeRfc8785(provenance)),

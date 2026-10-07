@@ -1,8 +1,13 @@
+import { createEffectivePeriod } from "@bop/effective-period";
 import { describe, expect, it, vi } from "vitest";
 import {
   createMoney,
   parsePricingReference,
+  parsePricingCode,
+  parseCurrencyCode,
+  createCurrencyMetadataSnapshot,
   resolveOptionPrice,
+  assertOptionPricePublicationUnambiguous,
   createOptionPriceRuleSnapshot,
   type OptionPriceContext,
   type OptionPriceRuleSnapshot,
@@ -198,6 +203,118 @@ describe("versioned Option price rules", () => {
     expect(() => createOptionPriceRuleSnapshot(malformed)).toThrowError(
       expect.objectContaining({ code: "OPTION_PRICE_INPUT_INVALID" }),
     );
+    expect(getter).not.toHaveBeenCalled();
+  });
+});
+
+describe("Option price publication ambiguity", () => {
+  it("rejects SKU wildcard ties even with equal amounts", () => {
+    const { rule, context } = fixture();
+    const other = { ...rule, ruleReference: id(301), skuReference: context.skuReference };
+    expect(() => assertOptionPricePublicationUnambiguous(rule, [other])).toThrowError(
+      expect.objectContaining({ code: "OPTION_PRICE_CONFLICT" }),
+    );
+  });
+  it("checks channel-only versus order-only future intersections", () => {
+    const { rule } = fixture();
+    expect(() =>
+      assertOptionPricePublicationUnambiguous({ ...rule, channelCode: parsePricingCode("WEB") }, [
+        { ...rule, ruleReference: id(301), orderType: "Pickup" },
+      ]),
+    ).toThrowError(expect.objectContaining({ code: "OPTION_PRICE_CONFLICT" }));
+  });
+  it("allows priority overrides, disjoint channels, historical states and replacing its own head", () => {
+    const { rule, context } = fixture();
+    expect(() =>
+      assertOptionPricePublicationUnambiguous(rule, [
+        rule,
+        { ...rule, ruleReference: id(301), lifecycle: "Archived" },
+        {
+          ...rule,
+          ruleReference: id(302),
+          scopeKind: "Store",
+          scopeReference: context.storeReference,
+        },
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      assertOptionPricePublicationUnambiguous({ ...rule, channelCode: parsePricingCode("WEB") }, [
+        { ...rule, ruleReference: id(303), channelCode: parsePricingCode("POS") },
+      ]),
+    ).not.toThrow();
+  });
+  it.each(["brandReference", "bindingReference", "optionReference"] as const)(
+    "allows a different %s",
+    (field) => {
+      const { rule } = fixture();
+      expect(() =>
+        assertOptionPricePublicationUnambiguous(rule, [
+          { ...rule, ruleReference: id(301), [field]: id(302) },
+        ]),
+      ).not.toThrow();
+    },
+  );
+  it("allows adjacent periods but rejects even future half-open overlap", () => {
+    const { rule } = fixture();
+    const boundary = {
+      instant: "2026-09-01T04:00:00.000Z" as never,
+      localDateTime: "2026-09-01T00:00:00.000",
+      utcOffsetMinutes: -240,
+    };
+    const ended = {
+      ...rule,
+      effectivePeriod: createEffectivePeriod({
+        ...rule.effectivePeriod,
+        effectiveUntil: boundary,
+      }),
+    };
+    const future = {
+      ...rule,
+      ruleReference: id(301),
+      effectivePeriod: createEffectivePeriod({
+        ...rule.effectivePeriod,
+        effectiveFrom: boundary,
+      }),
+    };
+    expect(() => assertOptionPricePublicationUnambiguous(ended, [future])).not.toThrow();
+    expect(() => assertOptionPricePublicationUnambiguous(rule, [future])).toThrowError(
+      expect.objectContaining({ code: "OPTION_PRICE_CONFLICT" }),
+    );
+  });
+  it("cannot hide a contextual tie behind different currency metadata", () => {
+    const { rule } = fixture();
+    const currency = parseCurrencyCode("USD");
+    const other = {
+      ...rule,
+      ruleReference: id(301),
+      currencyMetadata: createCurrencyMetadataSnapshot({
+        ...rule.currencyMetadata,
+        currencyCode: currency,
+      }),
+      unitAmount: createMoney({ amountMinor: 125n, currencyCode: currency }),
+    };
+    expect(() => assertOptionPricePublicationUnambiguous(rule, [other])).toThrowError(
+      expect.objectContaining({ code: "OPTION_PRICE_CONFLICT" }),
+    );
+  });
+  it("rejects duplicate current roots and requires a Published candidate", () => {
+    const { rule } = fixture();
+    expect(() => assertOptionPricePublicationUnambiguous(rule, [rule, rule])).toThrowError(
+      expect.objectContaining({ code: "OPTION_PRICE_CONFLICT" }),
+    );
+    expect(() =>
+      assertOptionPricePublicationUnambiguous({ ...rule, lifecycle: "Draft" }, []),
+    ).toThrowError(expect.objectContaining({ code: "OPTION_PRICE_INPUT_INVALID" }));
+  });
+  it("rejects sparse, accessor and oversized head collections without invoking getters", () => {
+    const { rule } = fixture();
+    const getter = vi.fn(() => rule),
+      accessor: OptionPriceRuleSnapshot[] = [];
+    Object.defineProperty(accessor, "0", { enumerable: true, get: getter });
+    for (const values of [new Array<OptionPriceRuleSnapshot>(1), accessor, Array(1001).fill(rule)])
+      expect(() => assertOptionPricePublicationUnambiguous(rule, values)).toThrowError(
+        expect.objectContaining({ code: "OPTION_PRICE_INPUT_INVALID" }),
+      );
     expect(getter).not.toHaveBeenCalled();
   });
 });

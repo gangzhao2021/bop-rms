@@ -3,6 +3,10 @@ import { createMembership, createStoreAssignment, parseMembershipVersion } from 
 import { createBrand, createStore, createTenantContext } from "@bop/tenant";
 import { describe, expect, it } from "vitest";
 import {
+  createBrandAdministrationPolicyState,
+  createBrandAdministrationPermissionRole,
+} from "../domain/permission-policy.js";
+import {
   PermissionPolicyContractError,
   advancePolicyState,
   createPermissionDefinition,
@@ -284,6 +288,36 @@ function materialization(overrides: Readonly<Record<string, unknown>> = {}) {
 }
 
 describe("Role, Permission Grant and Explicit Deny / Allow policy", () => {
+  it.each(["Draft", "Suspended", "Archived"] as const)(
+    "reconstructs %s administrative Brand facts without weakening operational constructors",
+    (lifecycle) => {
+      const administrativeBrand = createBrand({ ...brand, lifecycle });
+      expect(createBrandAdministrationPolicyState(policyState, administrativeBrand)).toEqual(
+        policyState,
+      );
+      expect(createBrandAdministrationPermissionRole(brandRole, administrativeBrand)).toEqual(
+        brandRole,
+      );
+      expect(() => createPolicyState(policyState, administrativeBrand)).toThrow(
+        PermissionPolicyContractError,
+      );
+      expect(() => createPermissionRole(brandRole, administrativeBrand, null)).toThrow(
+        PermissionPolicyContractError,
+      );
+      expect(() => createBrandAdministrationPermissionRole(storeRole, administrativeBrand)).toThrow(
+        PermissionPolicyContractError,
+      );
+      expect(() =>
+        createBrandAdministrationPolicyState(
+          { ...policyState, brandReference: OTHER_BRAND },
+          administrativeBrand,
+        ),
+      ).toThrow(PermissionPolicyContractError);
+      expect(() =>
+        createBrandAdministrationPermissionRole({ ...brandRole, version: 0 }, administrativeBrand),
+      ).toThrow(PermissionPolicyContractError);
+    },
+  );
   it("creates frozen exact-action, Brand and Store policy facts", () => {
     expect(Object.isFrozen(permission)).toBe(true);
     expect(Object.isFrozen(brandRole)).toBe(true);

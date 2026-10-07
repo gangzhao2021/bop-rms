@@ -6,11 +6,18 @@ import { createMerchantBffRouter } from "../src/merchant-bff.ts";
 /** Actual BFF/HTTP; caller supplies the isolated encrypted session and real
  * normal command factory. No login, permission, validation or phase is supplied
  * by this transport fixture. Credentials never enter outputs or artifacts. */
-export async function withProductPublicationHttp(command, session, scope, work, signals = {}) {
+export async function withProductPublicationHttp(
+  command,
+  session,
+  scope,
+  work,
+  signals = {},
+  routerFactory = createMerchantBffRouter,
+) {
   const app = express();
   app.use(
     "/merchant",
-    createMerchantBffRouter({
+    routerFactory({
       service: {},
       productPublication: command,
       ...signals,

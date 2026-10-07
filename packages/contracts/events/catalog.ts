@@ -292,6 +292,11 @@ const contentRegistryPayload = z.strictObject({
   snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
 });
 
+const optionReviewReleasePayload = z.strictObject({
+  operationReference: z.string().regex(canonicalUuidV7),
+  recordDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+});
+
 const productSourcePayload = z.strictObject({
   productReference: z.string().regex(canonicalUuidV7),
   productVersionReference: z.string().regex(canonicalUuidV7),
@@ -355,6 +360,19 @@ const priceBookPayload = z.strictObject({
   occurredAt: z.iso.datetime({ offset: false }),
 });
 
+const optionPricePayload = z.strictObject({
+  ruleReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  brandReference: z.string().regex(canonicalUuidV7),
+  bindingReference: z.string().regex(canonicalUuidV7),
+  optionReference: z.string().regex(canonicalUuidV7),
+  aggregateVersion: z.int().positive().max(Number.MAX_SAFE_INTEGER),
+  lifecycle: z.enum(["Draft", "Published", "Archived"]),
+  currencyCode: z.string().regex(/^[A-Z]{3}$/u),
+  snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  occurredAt: z.iso.datetime({ precision: 3, offset: false }),
+});
+
 const taxConfigPayload = z.strictObject({
   configurationReference: z.string().regex(canonicalUuidV7),
   versionReference: z.string().regex(canonicalUuidV7),
@@ -363,6 +381,22 @@ const taxConfigPayload = z.strictObject({
   jurisdictionCode: z.string().regex(/^[A-Z][A-Z0-9_-]{0,63}$/u),
   snapshotDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
   occurredAt: z.iso.datetime({ offset: false }),
+});
+
+const taxConfigCandidatePayload = z.strictObject({
+  configurationReference: z.string().regex(canonicalUuidV7),
+  targetVersionReference: z.string().regex(canonicalUuidV7),
+  contentDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  preparedAt: z.iso.datetime({ precision: 3, offset: false }),
+});
+
+const taxConfigMaterialPayload = z.strictObject({
+  materialReference: z.string().regex(canonicalUuidV7),
+  versionReference: z.string().regex(canonicalUuidV7),
+  materialKind: z.enum(["RegistrationApplicability", "ProfessionalReport", "FixtureSuite"]),
+  revision: z.int().positive().max(2147483647),
+  contentDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  recordedAt: z.iso.datetime({ precision: 3, offset: false }),
 });
 
 const promotionPayload = z.strictObject({
@@ -1085,6 +1119,38 @@ export const eventCatalog = defineEventCatalog([
     replacement: null,
     payloadSchema: promotionPayload,
   })),
+  {
+    eventType: "TaxConfigCandidatePrepared",
+    schemaVersion: 1,
+    ownerModule: "@rms/pricing",
+    producerModule: "@rms/pricing",
+    stability: "stable",
+    consumers: ["pricing.tax-config-candidate-history:v1"],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: taxConfigCandidatePayload,
+  },
+  ...["TaxConfigMaterialCreated", "TaxConfigMaterialReplaced"].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/pricing" as const,
+    producerModule: "@rms/pricing" as const,
+    stability: "stable" as const,
+    consumers: ["pricing.tax-config-material-history:v1"],
+    tenantScope: "store" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: taxConfigMaterialPayload,
+  })),
   ...["TaxConfigDraftCreated", "TaxConfigDraftReplaced", "TaxConfigPublished"].map((eventType) => ({
     eventType,
     schemaVersion: 1,
@@ -1121,6 +1187,29 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: priceBookPayload,
+  })),
+  ...(
+    [
+      ["OptionPriceDraftCreated", "Draft"],
+      ["OptionPriceDraftReplaced", "Draft"],
+      ["OptionPriceVersionPublished", "Published"],
+      ["OptionPriceArchived", "Archived"],
+    ] as const
+  ).map(([eventType, lifecycle]) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/pricing" as const,
+    producerModule: "@rms/pricing" as const,
+    stability: "experimental" as const,
+    consumers: ["pricing.option-price-authoring-history:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: optionPricePayload.extend({ lifecycle: z.literal(lifecycle) }),
   })),
   {
     eventType: "OptionSetDraftCreated",
@@ -1189,6 +1278,98 @@ export const eventCatalog = defineEventCatalog([
     replacement: null,
     payloadSchema: contentRegistryPayload,
   },
+  {
+    eventType: "ProductPublicationWarningsAcknowledged",
+    schemaVersion: 1,
+    ownerModule: "@rms/catalog",
+    producerModule: "@rms/catalog",
+    stability: "experimental",
+    consumers: ["catalog.product-publication-warning-acknowledgement:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: z.strictObject({
+      tenantReference: z.string().regex(canonicalUuidV7),
+      productReference: z.string().regex(canonicalUuidV7),
+      productVersionReference: z.string().regex(canonicalUuidV7),
+      operationReference: z.string().regex(canonicalUuidV7),
+      productAggregateVersion: z.int().min(1).max(2147483647),
+      reportOperationReference: z.string().regex(canonicalUuidV7),
+      reportDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+      warningBindingDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+      receiptDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+      warningCodes: z
+        .array(
+          z.enum([
+            "DefaultLocaleName",
+            "InternalCode",
+            "PublishableSku",
+            "VariantMapping",
+            "OptionSelection",
+            "MediaReady",
+            "TaxResolution",
+            "UniqueScope",
+            "EffectivePeriod",
+            "ChangeImpact",
+            "ApprovalPolicy",
+          ]),
+        )
+        .min(1)
+        .max(11),
+    }),
+  },
+  {
+    eventType: "ProductTaxClassificationRegistryVersionRecorded",
+    schemaVersion: 1,
+    ownerModule: "@rms/catalog",
+    producerModule: "@rms/catalog",
+    stability: "experimental",
+    consumers: ["catalog.tax-classification-registry-current:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: contentRegistryPayload,
+  },
+  {
+    eventType: "SellingUnitRegistryVersionRecorded",
+    schemaVersion: 1,
+    ownerModule: "@rms/catalog",
+    producerModule: "@rms/catalog",
+    stability: "experimental",
+    consumers: ["catalog.selling-unit-registry-current:v1"],
+    tenantScope: "brand",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: contentRegistryPayload,
+  },
+  ...["OptionSetReviewContentRecorded", "OptionSetPublicationReleaseRecorded"].map((eventType) => ({
+    eventType,
+    schemaVersion: 1,
+    ownerModule: "@rms/catalog" as const,
+    producerModule: "@rms/catalog" as const,
+    stability: "experimental" as const,
+    consumers: ["catalog.option-set-record-history:v1"],
+    tenantScope: "brand" as const,
+    dataClassification: "indirect_identifier" as const,
+    compatibility: "additive" as const,
+    retentionCategory: "business_record" as const,
+    replaySemantics: "idempotent" as const,
+    deprecated: false,
+    replacement: null,
+    payloadSchema: optionReviewReleasePayload,
+  })),
   ...[
     "ProductCreated",
     "ProductDraftUpdated",

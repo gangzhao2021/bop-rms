@@ -44,8 +44,8 @@ const earlierEnd = (...values: (string | null)[]) => {
 /** Selector-pair metadata only. Current context resolution of the complete union
  * remains authoritative; this plan never globally supersedes an old version. */
 export function planProductSelectorOverlaps(input: {
-  readonly incoming: ProductPublicationVersion;
-  readonly existing: readonly ProductPublicationVersion[];
+  readonly incoming: Omit<ProductPublicationVersion, "validationDecision">;
+  readonly existing: readonly Omit<ProductPublicationVersion, "validationDecision">[];
   readonly scopeOrder: readonly ProductPublicationScopeLevel[];
   readonly observedAt: string;
 }) {

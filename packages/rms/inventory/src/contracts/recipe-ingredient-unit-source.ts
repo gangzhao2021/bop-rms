@@ -28,7 +28,7 @@ export function parseRecipeIngredientUnitPins(value: unknown) {
     "itemReference",
     "operationReference",
   ] as const;
-  const pins = unitList(value, 1000)
+  const pins = unitList(value, 4096)
     .map((value) => {
       const raw = unitRecord(value, fields);
       return Object.freeze({
@@ -65,7 +65,7 @@ export function buildCurrentRecipeIngredientUnitFacts(
     source = parseInventoryConfigurationReferenceSnapshot(metadata, request, now),
     pins = parseRecipeIngredientUnitPins(value),
     expected = new Map(pins.map((p) => [p.itemReference, p.operationReference])),
-    rows = unitList(raw, 1000);
+    rows = unitList(raw, 4096);
   if (Date.parse(now) - Date.parse(source.observedAt) >= 5000 || rows.length !== expected.size)
     return fail();
   const units = rows

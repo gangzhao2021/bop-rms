@@ -1,4 +1,11 @@
+import { exerciseBrandInitialProvisioning } from "../test-support/brand-initial-provisioning.mjs";
+import { exerciseBrandStoreTopologyRuntimeHttp } from "../test-support/brand-store-topology-runtime-http.mjs";
 import { exerciseBrandLifecycle } from "../test-support/brand-lifecycle-persistence.mjs";
+import { exerciseBrandStoreTopologyDraft } from "../test-support/brand-store-topology-draft-persistence.mjs";
+import { exerciseBrandConfigurationAuthoringPersistence } from "../test-support/brand-configuration-authoring-persistence.mjs";
+import { exerciseBrandCatalogSourcePersistence } from "../test-support/brand-catalog-source-persistence.mjs";
+import { exerciseBrandAdministrationSession } from "../test-support/brand-administration-session.mjs";
+import { exercisePlatformBrandTemplatePersistence } from "../test-support/platform-brand-template-persistence.mjs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -208,6 +215,8 @@ async function prove(context) {
     );
     assert.equal(await resolve(later), null);
     await exerciseBrandLifecycle({ context, admin, role, id, at });
+    await exerciseBrandStoreTopologyDraft({ context, admin, role, id, at });
+    await exerciseBrandStoreTopologyRuntimeHttp(context);
   } finally {
     try {
       await admin.query("ROLLBACK");
@@ -221,4 +230,42 @@ async function prove(context) {
 }
 it("enforces immutable Brand configuration, membership sequence, revision and Brand RLS", async () => {
   await withIsolatedDatabase({ caseId: "brand_admin", root }, prove);
+}, 120_000);
+it("persists Brand configuration authoring", async () => {
+  await withIsolatedDatabase(
+    { caseId: "brand_config_write", root },
+    exerciseBrandConfigurationAuthoringPersistence,
+  );
+}, 120_000);
+it("persists Brand catalogue source identity", async () => {
+  await withIsolatedDatabase(
+    { caseId: "brand_catalog_source", root },
+    exerciseBrandCatalogSourcePersistence,
+  );
+}, 120_000);
+it("composes Brand administration with real noStore Session and current IAM", async () => {
+  await withIsolatedDatabase(
+    { caseId: "brand_admin_session", root },
+    exerciseBrandAdministrationSession,
+  );
+}, 120_000);
+it("composes Draft Brand administration with real noStore Session and current IAM", async () => {
+  await withIsolatedDatabase({ caseId: "brand_draft_session", root }, (context) =>
+    exerciseBrandAdministrationSession(context, { administrativeDraft: true }),
+  );
+}, 120_000);
+it("registers Brand catalogue through actual noStore runtime and HTTP", async () => {
+  await withIsolatedDatabase({ caseId: "brand_catalog_http", root }, (context) =>
+    exerciseBrandAdministrationSession(context, { catalogHttp: true }),
+  );
+}, 120_000);
+it("persists global Platform Brand templates with real Audit and minimum privileges", async () => {
+  await withIsolatedDatabase(
+    { caseId: "platform_template", root },
+    exercisePlatformBrandTemplatePersistence,
+  );
+}, 120_000);
+
+it("initializes a Draft Brand with independently signed approval and atomic actual owner persistence", async () => {
+  await withIsolatedDatabase({ caseId: "brand_initial", root }, exerciseBrandInitialProvisioning);
 }, 120_000);

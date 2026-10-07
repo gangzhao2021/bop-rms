@@ -90,7 +90,10 @@ export function inspectMigrationPermissions(migrations) {
         diagnostic("RLS_POLICY_MISSING", file, table, "tenant table requires an explicit policy"),
       );
     else {
-      if (table === "bop_identity.browser_session_selection") {
+      if (
+        table === "bop_identity.browser_session_selection" ||
+        table === "bop_identity.browser_brand_session_selection"
+      ) {
         // Pre-Tenant Identity child: selected Brand/Store cannot authorize their own lookup.
         // This is a closed contract, not an Identity-wide exemption from forced RLS.
         const predicate =

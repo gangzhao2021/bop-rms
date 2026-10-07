@@ -1,3 +1,12 @@
+import {
+  parsePricingProductPublicationReferenceRequestV2,
+  type PricingProductPublicationReferenceRequestV2,
+} from "../../contracts/product-publication-reference-request-v2.js";
+import {
+  buildProductPublicationPriceBookReferenceSourceSnapshotV2,
+  productPublicationPriceBookReferenceSourceFieldsV2,
+  type ProductPublicationPriceBookReferenceSourceSnapshotV2,
+} from "../../contracts/price-book-reference-source.js";
 import { parsePricingReference } from "../../domain/money-tax-contract.js";
 import { parseEffectivePeriodInstant } from "@bop/effective-period";
 import {
@@ -116,6 +125,241 @@ export function createPostgresPriceBookReferenceSourceStore(options: {
           return fail();
         return selected;
       } catch {
+        return fail();
+      }
+    },
+  });
+}
+
+function publicationRow(value: unknown, fields: readonly string[]): Record<string, unknown> {
+  if (!value || typeof value !== "object") return fail();
+  const d = Object.getOwnPropertyDescriptor(value, "rows");
+  if (
+    !d ||
+    !("value" in d) ||
+    !Array.isArray(d.value) ||
+    Object.getPrototypeOf(d.value) !== Array.prototype ||
+    d.value.length !== 1 ||
+    Reflect.ownKeys(d.value).length !== 2
+  )
+    return fail();
+  const item = Object.getOwnPropertyDescriptor(d.value, "0");
+  if (
+    !item?.enumerable ||
+    !("value" in item) ||
+    !item.value ||
+    Object.getPrototypeOf(item.value) !== Object.prototype ||
+    Reflect.ownKeys(item.value).length !== fields.length
+  )
+    return fail();
+  const result: Record<string, unknown> = {};
+  for (const field of fields) {
+    const v = Object.getOwnPropertyDescriptor(item.value, field);
+    if (!v?.enumerable || !("value" in v)) return fail();
+    result[field] = v.value;
+  }
+  return result;
+}
+
+export interface ProductPublicationPriceBookReferenceSourceOptionsV2 {
+  readonly tenantReference: string;
+  readonly brandReference: string;
+  readonly actorReference: string;
+  readonly actorKind: "User" | "System";
+  readonly clock: { now(): string };
+  readonly transactions: {
+    run<T>(work: (tx: PriceQuoteQueryTransaction) => Promise<T>): Promise<T>;
+  };
+  readonly registerBeforeCommit: (
+    tx: PriceQuoteQueryTransaction,
+    guard: () => Promise<void>,
+    finalAssert: () => void,
+  ) => void | Promise<void>;
+  readonly authority: {
+    holdUntilTransactionCompletes(
+      tx: PriceQuoteQueryTransaction,
+      input: {
+        readonly tenantReference: string;
+        readonly actorKind: "User" | "System";
+        readonly request: PricingProductPublicationReferenceRequestV2;
+        readonly purposeCode: "CATALOG_PRODUCT_PUBLICATION_PRICING_SOURCE_READ";
+        readonly permission: "pricing.price-book.manage";
+        readonly requiredScope: "FullBrandScope";
+        readonly requiredFields: typeof productPublicationPriceBookReferenceSourceFieldsV2;
+        readonly observedAt: string;
+      },
+    ): Promise<void>;
+  };
+}
+/** A leased statement snapshot. Only the composite source holds all Pricing configuration writers. */
+export function createPostgresProductPublicationPriceBookReferenceSourceV2(
+  options: ProductPublicationPriceBookReferenceSourceOptionsV2,
+) {
+  const tenant = parsePricingReference(options.tenantReference),
+    brand = parsePricingReference(options.brandReference),
+    actor = parsePricingReference(options.actorReference),
+    kind = options.actorKind;
+  if (
+    (kind !== "User" && kind !== "System") ||
+    typeof options.clock?.now !== "function" ||
+    typeof options.transactions?.run !== "function" ||
+    typeof options.authority?.holdUntilTransactionCompletes !== "function" ||
+    typeof options.registerBeforeCommit !== "function"
+  )
+    return fail();
+  const now = options.clock.now.bind(options.clock),
+    run = options.transactions.run.bind(options.transactions),
+    hold = options.authority.holdUntilTransactionCompletes.bind(options.authority),
+    register = options.registerBeforeCommit.bind(options),
+    active = new WeakSet<object>(),
+    failed = new WeakSet<object>();
+  return Object.freeze({
+    async loadSnapshot(
+      input: PricingProductPublicationReferenceRequestV2,
+    ): Promise<ProductPublicationPriceBookReferenceSourceSnapshotV2> {
+      let calls = 0,
+        transaction: PriceQuoteQueryTransaction | undefined,
+        selected: ProductPublicationPriceBookReferenceSourceSnapshotV2 | undefined,
+        poisoned = false,
+        finalCheck: (() => void) | undefined;
+      const poison = (): never => {
+        poisoned = true;
+        if (transaction) failed.add(transaction);
+        return fail();
+      };
+      try {
+        const request = parsePricingProductPublicationReferenceRequestV2(input);
+        if (
+          request.tenantReference !== tenant ||
+          request.brandReference !== brand ||
+          request.actorReference !== actor ||
+          request.actorKind !== kind
+        )
+          return poison();
+        const result = await run(async (tx) => {
+          if (++calls !== 1 || !tx || typeof tx !== "object" || typeof tx.query !== "function")
+            return poison();
+          transaction = tx;
+          if (active.has(tx) || failed.has(tx)) return poison();
+          active.add(tx);
+          const originalQuery = tx.query,
+            queryPort = originalQuery.bind(tx);
+          let latest = request.observedAt,
+            ready = false,
+            guardCalls = 0;
+          const check = () => {
+            let at: string;
+            try {
+              at = parseEffectivePeriodInstant(now());
+            } catch {
+              return poison();
+            }
+            if (
+              poisoned ||
+              failed.has(tx) ||
+              tx.query !== originalQuery ||
+              at < latest ||
+              at >= request.validUntil
+            )
+              return poison();
+            latest = at;
+            return at;
+          };
+          const assertFinal = () => {
+            if (!ready || !selected) return poison();
+            check();
+          };
+          finalCheck = assertFinal;
+          const query: PriceQuoteQueryTransaction["query"] = async (sql, values) => {
+            check();
+            const result = await queryPort(sql, values);
+            check();
+            return result;
+          };
+          const authorize = async () => {
+            const observedAt = check();
+            if (
+              (await hold(
+                tx,
+                Object.freeze({
+                  tenantReference: tenant,
+                  actorKind: kind,
+                  request,
+                  purposeCode: "CATALOG_PRODUCT_PUBLICATION_PRICING_SOURCE_READ",
+                  permission: "pricing.price-book.manage",
+                  requiredScope: "FullBrandScope",
+                  requiredFields: productPublicationPriceBookReferenceSourceFieldsV2,
+                  observedAt,
+                }),
+              )) !== undefined
+            )
+              return poison();
+            check();
+          };
+          try {
+            if (
+              (await register(
+                tx,
+                async () => {
+                  try {
+                    if (++guardCalls !== 1) return poison();
+                    assertFinal();
+                    await authorize();
+                    assertFinal();
+                  } catch (error) {
+                    failed.add(tx);
+                    poisoned = true;
+                    throw error;
+                  }
+                },
+                assertFinal,
+              )) !== undefined
+            )
+              return poison();
+            check();
+            await authorize();
+            if (
+              publicationRow(
+                await query("SELECT current_setting('transaction_isolation') isolation", []),
+                ["isolation"],
+              ).isolation !== "read committed"
+            )
+              return poison();
+            await query(
+              "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true),set_config('statement_timeout','60000',true)",
+              [tenant, brand],
+            );
+            selected = buildProductPublicationPriceBookReferenceSourceSnapshotV2(
+              publicationRow(await query(select, [brand]), ["source"]).source,
+              request,
+              check(),
+            );
+            await authorize();
+            check();
+            ready = true;
+            return selected;
+          } catch (error) {
+            failed.add(tx);
+            poisoned = true;
+            throw error;
+          } finally {
+            active.delete(tx);
+          }
+        });
+        if (
+          poisoned ||
+          calls !== 1 ||
+          !selected ||
+          result !== selected ||
+          !transaction ||
+          failed.has(transaction) ||
+          !finalCheck
+        )
+          return poison();
+        finalCheck();
+        return selected;
+      } catch {
+        if (transaction) failed.add(transaction);
         return fail();
       }
     },

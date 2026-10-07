@@ -196,3 +196,22 @@ describe("current direct Recipe Ingredient Item configuration", () => {
     );
   });
 });
+
+it("qualifies all4096 complete graph requirements and rejects4097", () => {
+  const original = targets()[0];
+  if (!original) throw Error("fixture");
+  const pins = Array.from({ length: 4096 }, (_, i) => ({
+    ...original,
+    requirementReference: id(i + 1000),
+  }));
+  expect(assess(pins, source(), request, at, activation).resolutions).toHaveLength(4096);
+  expect(() =>
+    assess(
+      [...pins, { ...original, requirementReference: id(6000) }],
+      source(),
+      request,
+      at,
+      activation,
+    ),
+  ).toThrow();
+});

@@ -1,10 +1,16 @@
 import { createIdentityActor, parseOpaqueUuidV7, type IdentityActor } from "@bop/identity";
-import { createTenantContext, type TenantContext } from "@bop/tenant";
+import {
+  createTenantContext,
+  parseBrandAdministrationContext,
+  type BrandAdministrationContext,
+  type TenantContext,
+} from "@bop/tenant";
 import type { MembershipPort } from "../../application/ports/membership-port.js";
 import {
   MembershipContractError,
   createMembership,
   createStoreAssignment,
+  parseMembershipInstant,
   resolveActiveMembership,
   resolveActiveStoreAssignment,
 } from "../../domain/membership.js";
@@ -16,6 +22,7 @@ export type CurrentMembershipReadPort = Pick<
   MembershipPort,
   "findMemberships" | "findStoreAssignments"
 >;
+export type CurrentBrandMembershipReadPort = Pick<MembershipPort, "findMemberships">;
 const unavailable = (): never => {
   throw new MembershipContractError("MEMBERSHIP_INPUT_INVALID");
 };
@@ -30,6 +37,216 @@ function rows(value: unknown): readonly Record<string, unknown>[] {
 function instant(value: unknown): string {
   if (!(value instanceof Date) || !Number.isFinite(value.getTime())) return unavailable();
   return value.toISOString();
+}
+function membership(
+  row: Record<string, unknown>,
+  context: Pick<TenantContext, "actor" | "brand" | "resolvedAt">,
+  readInstant: (value: unknown) => string,
+) {
+  if (
+    row.actor_id !== context.actor.actorReference ||
+    row.brand_id !== context.brand.brandReference
+  )
+    return unavailable();
+  const result = createMembership(
+    {
+      membershipReference: row.membership_id,
+      actorReference: row.actor_id,
+      brandReference: row.brand_id,
+      workforceRelationshipReference: row.workforce_relationship_reference,
+      lifecycle: row.lifecycle,
+      effectiveFrom: readInstant(row.effective_from),
+      effectiveUntil: row.effective_until === null ? null : readInstant(row.effective_until),
+      version: row.version,
+      createdAt: readInstant(row.created_at),
+      updatedAt: readInstant(row.updated_at),
+    },
+    context.actor,
+  );
+  if (Date.parse(result.updatedAt) > Date.parse(context.resolvedAt)) return unavailable();
+  return result;
+}
+
+function brandMembershipRows(value: unknown): readonly Record<string, unknown>[] {
+  const result = rows(value);
+  if (
+    Object.getPrototypeOf(result) !== Array.prototype ||
+    Reflect.ownKeys(result).length !== result.length + 1
+  )
+    return unavailable();
+  const keys = [
+    "membership_id",
+    "actor_id",
+    "brand_id",
+    "workforce_relationship_reference",
+    "lifecycle",
+    "effective_from",
+    "effective_until",
+    "version",
+    "created_at",
+    "updated_at",
+    "precise",
+  ];
+  return Array.from({ length: result.length }, (_, index) => {
+    const entry = Object.getOwnPropertyDescriptor(result, String(index));
+    if (!entry?.enumerable || !("value" in entry)) return unavailable();
+    const row: unknown = entry.value;
+    if (
+      !row ||
+      typeof row !== "object" ||
+      Object.getPrototypeOf(row) !== Object.prototype ||
+      Reflect.ownKeys(row).length !== keys.length
+    )
+      return unavailable();
+    const copy: Record<string, unknown> = {};
+    for (const key of keys) {
+      const field = Object.getOwnPropertyDescriptor(row, key);
+      if (!field?.enumerable || !("value" in field)) return unavailable();
+      copy[key] = field.value;
+    }
+    if (copy.precise !== true) return unavailable();
+    return copy;
+  });
+}
+
+/** Internal Brand-only owner reader. The outer transaction must hold actual
+ * current Identity/Tenant facts and final IAM authority. Membership rows prove
+ * neither authentication, Tenant association nor permission. Requires the own
+ * internal role; no Store assignment is inferred or read. */
+export function createPostgresCurrentBrandMembershipSource(
+  tx: MembershipReadTransaction,
+  input: TenantContext,
+): CurrentBrandMembershipReadPort {
+  let context: TenantContext;
+  try {
+    const keys = ["actor", "brand", "store", "scopeKind", "resolvedAt"];
+    if (
+      !input ||
+      Object.getPrototypeOf(input) !== Object.prototype ||
+      !Object.isFrozen(input) ||
+      Reflect.ownKeys(input).length !== keys.length ||
+      keys.some((key) => {
+        const field = Object.getOwnPropertyDescriptor(input, key);
+        return !field?.enumerable || !("value" in field);
+      }) ||
+      input.store !== null ||
+      input.scopeKind !== "Brand"
+    )
+      return unavailable();
+    context = createTenantContext(input.actor, input.brand, input.store, input.resolvedAt);
+  } catch {
+    return unavailable();
+  }
+  return brandMembershipSource(tx, context, false);
+}
+
+/** Administrative Membership facts only. Tenant validates the real Brand
+ * lifecycle and Workforce Actor; Identity and IAM retain authority in the same
+ * transaction. This reader grants no permission and never reads a Store. */
+export function createPostgresBrandAdministrationMembershipSource(
+  tx: MembershipReadTransaction,
+  input: BrandAdministrationContext,
+): CurrentBrandMembershipReadPort {
+  return administrativeMembershipSource(tx, input, false);
+}
+
+/** Admission for the actual intended Workforce Actor's onboarding activation.
+ * Take the owning write-compatible table fence before any Membership SHARE/read,
+ * so different Brands cannot both retain SHARE and then upgrade for UPDATE.
+ * The returned Pending receipt is inert; the activation writer owns the exact
+ * successor and final guard. Identity/Brand/approval remain actual outer facts. */
+export function createPostgresBrandAdministrationMembershipActivationSource(
+  tx: MembershipReadTransaction,
+  input: BrandAdministrationContext,
+): CurrentBrandMembershipReadPort {
+  return administrativeMembershipSource(tx, input, true);
+}
+
+function administrativeMembershipSource(
+  tx: MembershipReadTransaction,
+  input: BrandAdministrationContext,
+  activation: boolean,
+): CurrentBrandMembershipReadPort {
+  let context: BrandAdministrationContext;
+  try {
+    context = parseBrandAdministrationContext(input);
+  } catch {
+    return unavailable();
+  }
+  return brandMembershipSource(tx, context, true, activation);
+}
+
+function brandMembershipSource(
+  tx: MembershipReadTransaction,
+  context: Pick<TenantContext, "actor" | "brand" | "resolvedAt">,
+  administrative: boolean,
+  activation = false,
+): CurrentBrandMembershipReadPort {
+  const actor = context.actor.actorReference;
+  const brand = context.brand.brandReference;
+  const queryPort = tx.query;
+  if (actor === null || typeof queryPort !== "function") return unavailable();
+  let active = false,
+    poisoned = false;
+  const check = () => {
+    if (poisoned || tx.query !== queryPort) {
+      poisoned = true;
+      return unavailable();
+    }
+  };
+  const query = async (sql: string, values: readonly unknown[]) => {
+    check();
+    const result = await queryPort.call(tx, sql, values);
+    check();
+    return result;
+  };
+  return Object.freeze({
+    async findMemberships(actorReference, brandReference) {
+      try {
+        if (active || actorReference !== actor || brandReference !== brand) return unavailable();
+        active = true;
+        await query(
+          administrative
+            ? "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)"
+            : "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [brand, ""],
+        );
+        if (activation)
+          await query("LOCK TABLE bop_membership.membership IN SHARE ROW EXCLUSIVE MODE", []);
+        await query("LOCK TABLE bop_membership.membership IN SHARE MODE", []);
+        const records = brandMembershipRows(
+          await query(
+            `SELECT membership_id,actor_id,brand_id,workforce_relationship_reference,lifecycle,version,
+              to_char(effective_from AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS effective_from,
+              to_char(effective_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS effective_until,
+              to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
+              to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at,
+              effective_from=date_trunc('milliseconds',effective_from)
+                AND (effective_until IS NULL OR effective_until=date_trunc('milliseconds',effective_until))
+                AND created_at=date_trunc('milliseconds',created_at)
+                AND updated_at=date_trunc('milliseconds',updated_at) AS precise
+              FROM bop_membership.membership WHERE actor_id=$1 AND brand_id=$2
+              ORDER BY membership_id LIMIT 1025`,
+            [actor, brand],
+          ),
+        );
+        let previous = "";
+        const memberships = records.map((row) => {
+          const result = membership(row, context, parseMembershipInstant);
+          if (result.membershipReference <= previous) return unavailable();
+          previous = result.membershipReference;
+          return result;
+        });
+        check();
+        return Object.freeze(memberships);
+      } catch {
+        poisoned = true;
+        return unavailable();
+      } finally {
+        active = false;
+      }
+    },
+  });
 }
 
 /** Internal owner reader. Identity/Tenant must fence their current facts in this
@@ -55,26 +272,6 @@ export function createPostgresCurrentMembershipSource(
       [],
     );
   }
-  function membership(row: Record<string, unknown>) {
-    if (row.actor_id !== actor || row.brand_id !== brand) return unavailable();
-    const result = createMembership(
-      {
-        membershipReference: row.membership_id,
-        actorReference: row.actor_id,
-        brandReference: row.brand_id,
-        workforceRelationshipReference: row.workforce_relationship_reference,
-        lifecycle: row.lifecycle,
-        effectiveFrom: instant(row.effective_from),
-        effectiveUntil: row.effective_until === null ? null : instant(row.effective_until),
-        version: row.version,
-        createdAt: instant(row.created_at),
-        updatedAt: instant(row.updated_at),
-      },
-      context.actor,
-    );
-    if (Date.parse(result.updatedAt) > Date.parse(context.resolvedAt)) return unavailable();
-    return result;
-  }
   return Object.freeze({
     async findMemberships(actorReference, brandReference) {
       try {
@@ -86,7 +283,7 @@ export function createPostgresCurrentMembershipSource(
               "SELECT * FROM bop_membership.membership WHERE actor_id=$1 AND brand_id=$2 ORDER BY membership_id LIMIT 1025",
               [actor, brand],
             ),
-          ).map(membership),
+          ).map((row) => membership(row, context, instant)),
         );
       } catch {
         return unavailable();
@@ -105,7 +302,7 @@ export function createPostgresCurrentMembershipSource(
         if (candidates.length !== 1) return unavailable();
         const row = candidates[0];
         if (!row || row.membership_id !== membershipReference) return unavailable();
-        const parent = membership(row);
+        const parent = membership(row, context, instant);
         return Object.freeze(
           rows(
             await tx.query(

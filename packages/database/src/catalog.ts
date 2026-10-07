@@ -57,6 +57,7 @@ const platformOwners = new Map([
 const businessOwners = new Map([
   ["bop_feature_control", "@bop/feature-control"],
   ["bop_publishing", "@bop/publishing"],
+  ["bop_media", "@bop/media"],
   ["bop_task", "@bop/task"],
   ["bop_identity", "@bop/identity"],
   ["bop_membership", "@bop/membership"],
@@ -375,12 +376,76 @@ function validateSql(
     if (
       match[1] !== metadata.schema &&
       !(
+        ((file ===
+          "migrations/0200-bop-identity-tenancy/0200_030_create_brand_template_reference_read.sql" &&
+          metadata.owner === "@bop/tenant" &&
+          metadata.schema === "bop_tenant") ||
+          (file ===
+            "migrations/0200-bop-identity-tenancy/0200_031_create_membership_brand_discovery_read.sql" &&
+            metadata.owner === "@bop/membership" &&
+            metadata.schema === "bop_membership") ||
+          (file ===
+            "migrations/0400-bop-operations/0400_019_create_brand_template_publication_read.sql" &&
+            metadata.owner === "@bop/publishing" &&
+            metadata.schema === "bop_publishing")) &&
+        match[1] === "platform_helpers" &&
+        match[2] === "is_uuid_v7" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        file ===
+          "migrations/0400-bop-operations/0400_018_create_platform_publishing_mutation.sql" &&
+        metadata.owner === "@bop/publishing" &&
+        metadata.schema === "bop_publishing" &&
+        match[1] === "platform_audit" &&
+        match[2] === "matches_platform_template_publishing_audit" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        file ===
+          "migrations/0200-bop-identity-tenancy/0200_027_create_platform_actor_directory.sql" &&
+        metadata.owner === "@bop/identity" &&
+        metadata.schema === "bop_identity" &&
+        match[1] === "platform_audit" &&
+        match[2] === "matches_platform_actor_directory_audit" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        [
+          "migrations/0200-bop-identity-tenancy/0200_028_create_workforce_account_binding.sql",
+          "migrations/0200-bop-identity-tenancy/0200_033_alter_workforce_account_binding_acceptance.sql",
+        ].includes(file) &&
+        metadata.owner === "@bop/identity" &&
+        metadata.schema === "bop_identity" &&
+        match[1] === "platform_audit" &&
+        match[2] === "matches_workforce_account_binding_audit" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        file ===
+          "migrations/0200-bop-identity-tenancy/0200_032_create_workforce_onboarding_operation.sql" &&
+        metadata.owner === "@bop/identity" &&
+        metadata.schema === "bop_identity" &&
+        match[1] === "platform_audit" &&
+        match[2] === "matches_workforce_onboarding_operation_audit" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        file === "migrations/0300-bop-governance/0300_010_create_platform_permission.sql" &&
+        metadata.owner === "@bop/permission" &&
+        metadata.schema === "bop_permission" &&
+        match[1] === "platform_audit" &&
+        match[2] === "matches_platform_permission_audit" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
         [
           "platform_projection",
           "platform_audit",
           "platform_eventing",
           "bop_feature_control",
           "bop_publishing",
+          "bop_media",
           "bop_task",
           "bop_identity",
           "bop_membership",

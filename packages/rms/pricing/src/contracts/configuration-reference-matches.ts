@@ -1,3 +1,10 @@
+import {
+  parsePricingProductPublicationReferenceRequestV2,
+  type PricingProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
+import { parseProductPublicationPriceBookReferenceSourceSnapshotV2 } from "./price-book-reference-source.js";
+import { parseProductPublicationOptionPriceReferenceSourceSnapshotV2 } from "./option-price-reference-source.js";
+import { parseProductPublicationPromotionReferenceSourceSnapshotV2 } from "./promotion-reference-source.js";
 import { parseEffectivePeriodInstant } from "@bop/effective-period";
 import { parseConfigurationReferenceSourceSnapshot } from "./configuration-reference-source.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
@@ -184,9 +191,9 @@ type ReferenceFacts = Pick<
 >;
 function matchConfiguration(
   target: PricingReferenceTarget,
-  priceBooks: PriceBookReferenceSourceSnapshot,
-  optionPrices: OptionPriceReferenceSourceSnapshot,
-  promotions: PromotionReferenceSourceSnapshot,
+  priceBooks: Pick<PriceBookReferenceSourceSnapshot, "references">,
+  optionPrices: Pick<OptionPriceReferenceSourceSnapshot, "roots" | "versions">,
+  promotions: Pick<PromotionReferenceSourceSnapshot, "versions">,
 ): ReferenceFacts {
   const { productReference, skuReference, skuReferences, categoryReferences, bindings } = target;
   const targetSkus = skuReference === null ? skuReferences : [skuReference],
@@ -370,6 +377,145 @@ export interface RecordedPricingConfigurationReferenceMatches {
   readonly digest: string;
 }
 /** Keep original recorded memberships separate; no inferred publication, future schedule, eligibility or approval. */
+function matchRecordedConfiguration<
+  R extends PriceBookReferenceSourceRequest | PricingProductPublicationReferenceRequestV2,
+>(
+  request: R,
+  targetValue: unknown,
+  priceBooks: Pick<PriceBookReferenceSourceSnapshot, "references" | "digest">,
+  optionPrices: Pick<OptionPriceReferenceSourceSnapshot, "roots" | "versions" | "digest">,
+  promotions: Pick<PromotionReferenceSourceSnapshot, "versions" | "digest">,
+) {
+  const raw = exact(targetValue, [
+    "mappingProfile",
+    "catalogSourceDigest",
+    "productReference",
+    "skuReference",
+    "configurations",
+  ]);
+  if (raw.mappingProfile !== "RecordedDraftConfigurations") return fail();
+  const catalogSourceDigest = parsePricingDigest(raw.catalogSourceDigest),
+    productReference = parsePricingReference(raw.productReference),
+    skuReference = raw.skuReference === null ? null : parsePricingReference(raw.skuReference);
+  let inputBudget = 100000;
+  const configurations = items(raw.configurations).map((v) => {
+    const c = exact(v, [
+        "catalogConfigurationDigest",
+        "versionReference",
+        "skuReferences",
+        "categoryReferences",
+        "bindings",
+      ]),
+      catalogConfigurationDigest = parsePricingDigest(c.catalogConfigurationDigest),
+      versionReference = parsePricingReference(c.versionReference);
+    const target = parseTarget({
+      mappingProfile: "CurrentDraftBindings",
+      catalogSourceDigest,
+      productReference,
+      skuReference: null,
+      skuReferences: c.skuReferences,
+      categoryReferences: c.categoryReferences,
+      bindings: c.bindings,
+    });
+    inputBudget -=
+      1 +
+      target.skuReferences.length +
+      (target.categoryReferences?.length ?? 0) +
+      target.bindings.reduce(
+        (n, b) =>
+          n +
+          1 +
+          b.enabledOptionReferences.length +
+          b.includedSkuReferences.length +
+          b.excludedSkuReferences.length +
+          b.channelCodes.length,
+        0,
+      );
+    if (inputBudget < 0) return fail();
+    return { catalogConfigurationDigest, versionReference, target };
+  });
+  if (
+    configurations.length === 0 ||
+    new Set(configurations.map((c) => c.catalogConfigurationDigest)).size !==
+      configurations.length ||
+    (skuReference !== null &&
+      !configurations.some((c) => c.target.skuReferences.includes(skuReference)))
+  )
+    return fail();
+  let outputBudget = 10000;
+  const matched = Object.freeze(
+    configurations
+      .sort((a, b) => a.catalogConfigurationDigest.localeCompare(b.catalogConfigurationDigest))
+      .map((c) => {
+        if (skuReference !== null && !c.target.skuReferences.includes(skuReference))
+          return Object.freeze({
+            catalogConfigurationDigest: c.catalogConfigurationDigest,
+            versionReference: c.versionReference,
+            membership: "SkuAbsent" as const,
+            matches: null,
+          });
+        const facts = matchConfiguration(
+          { ...c.target, skuReference },
+          priceBooks,
+          optionPrices,
+          promotions,
+        );
+        outputBudget -=
+          facts.priceEntries.length +
+          facts.optionRoots.length +
+          facts.optionVersions.reduce(
+            (n, r) => n + 1 + r.matchedSkuReferences.length + r.bindingChannelCodes.length,
+            0,
+          ) +
+          facts.promotions.reduce(
+            (n, r) => n + 1 + r.reference.eligibility.length + r.matchedBy.length,
+            0,
+          ) +
+          facts.unresolvedOptionRoots.reduce((n, r) => n + 1 + r.versions.length, 0) +
+          facts.unresolvedOptionVersions.length;
+        if (outputBudget < 0) return fail();
+        const matches: RecordedReferenceFacts = Object.freeze({
+          ...facts,
+          unresolvedOptionRoots: Object.freeze(
+            facts.unresolvedOptionRoots.map((r) =>
+              Object.freeze({
+                ...r,
+                reason:
+                  r.reason === "BindingNotInCurrentDraft"
+                    ? ("BindingNotInRecordedConfiguration" as const)
+                    : ("OptionNotEnabledInRecordedConfiguration" as const),
+              }),
+            ),
+          ),
+          unresolvedOptionVersions: Object.freeze(
+            facts.unresolvedOptionVersions.map((r) =>
+              Object.freeze({ ...r, reason: "SkuNotInRecordedConfiguration" as const }),
+            ),
+          ),
+        });
+        return Object.freeze({
+          catalogConfigurationDigest: c.catalogConfigurationDigest,
+          versionReference: c.versionReference,
+          membership: "Included" as const,
+          matches,
+        });
+      }),
+  );
+  const result = {
+    request,
+    coverage: "RecordedDraftHistoryOnly" as const,
+    publicationCoverage: "Unavailable" as const,
+    futureScheduleCoverage: "Unavailable" as const,
+    catalogSourceDigest,
+    sourceDigests: Object.freeze({
+      priceBooks: priceBooks.digest,
+      optionPrices: optionPrices.digest,
+      promotions: promotions.digest,
+    }),
+    configurations: matched,
+  };
+  return Object.freeze({ ...result, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(result)) });
+}
 export function matchRecordedPricingConfigurationReferences(input: {
   readonly request: PriceBookReferenceSourceRequest;
   readonly target: RecordedPricingReferenceTarget;
@@ -379,143 +525,14 @@ export function matchRecordedPricingConfigurationReferences(input: {
   readonly now: string;
 }): RecordedPricingConfigurationReferenceMatches {
   try {
-    const request = parsePriceBookReferenceSourceRequest(input.request),
-      raw = exact(input.target, [
-        "mappingProfile",
-        "catalogSourceDigest",
-        "productReference",
-        "skuReference",
-        "configurations",
-      ]);
-    if (raw.mappingProfile !== "RecordedDraftConfigurations") return fail();
-    const catalogSourceDigest = parsePricingDigest(raw.catalogSourceDigest),
-      productReference = parsePricingReference(raw.productReference),
-      skuReference = raw.skuReference === null ? null : parsePricingReference(raw.skuReference);
-    let inputBudget = 100000;
-    const configurations = items(raw.configurations).map((v) => {
-      const c = exact(v, [
-          "catalogConfigurationDigest",
-          "versionReference",
-          "skuReferences",
-          "categoryReferences",
-          "bindings",
-        ]),
-        catalogConfigurationDigest = parsePricingDigest(c.catalogConfigurationDigest),
-        versionReference = parsePricingReference(c.versionReference);
-      const target = parseTarget({
-        mappingProfile: "CurrentDraftBindings",
-        catalogSourceDigest,
-        productReference,
-        skuReference: null,
-        skuReferences: c.skuReferences,
-        categoryReferences: c.categoryReferences,
-        bindings: c.bindings,
-      });
-      inputBudget -=
-        1 +
-        target.skuReferences.length +
-        (target.categoryReferences?.length ?? 0) +
-        target.bindings.reduce(
-          (n, b) =>
-            n +
-            1 +
-            b.enabledOptionReferences.length +
-            b.includedSkuReferences.length +
-            b.excludedSkuReferences.length +
-            b.channelCodes.length,
-          0,
-        );
-      if (inputBudget < 0) return fail();
-      return { catalogConfigurationDigest, versionReference, target };
-    });
-    if (
-      configurations.length === 0 ||
-      new Set(configurations.map((c) => c.catalogConfigurationDigest)).size !==
-        configurations.length ||
-      (skuReference !== null &&
-        !configurations.some((c) => c.target.skuReferences.includes(skuReference)))
-    )
-      return fail();
-    const priceBooks = parsePriceBookReferenceSourceSnapshot(input.priceBooks, request, input.now),
-      optionPrices = parseOptionPriceReferenceSourceSnapshot(
-        input.optionPrices,
-        request,
-        input.now,
-      ),
-      promotions = parsePromotionReferenceSourceSnapshot(input.promotions, request, input.now);
-    let outputBudget = 10000;
-    const matched = Object.freeze(
-      configurations
-        .sort((a, b) => a.catalogConfigurationDigest.localeCompare(b.catalogConfigurationDigest))
-        .map((c) => {
-          if (skuReference !== null && !c.target.skuReferences.includes(skuReference))
-            return Object.freeze({
-              catalogConfigurationDigest: c.catalogConfigurationDigest,
-              versionReference: c.versionReference,
-              membership: "SkuAbsent" as const,
-              matches: null,
-            });
-          const facts = matchConfiguration(
-            { ...c.target, skuReference },
-            priceBooks,
-            optionPrices,
-            promotions,
-          );
-          outputBudget -=
-            facts.priceEntries.length +
-            facts.optionRoots.length +
-            facts.optionVersions.reduce(
-              (n, r) => n + 1 + r.matchedSkuReferences.length + r.bindingChannelCodes.length,
-              0,
-            ) +
-            facts.promotions.reduce(
-              (n, r) => n + 1 + r.reference.eligibility.length + r.matchedBy.length,
-              0,
-            ) +
-            facts.unresolvedOptionRoots.reduce((n, r) => n + 1 + r.versions.length, 0) +
-            facts.unresolvedOptionVersions.length;
-          if (outputBudget < 0) return fail();
-          const matches: RecordedReferenceFacts = Object.freeze({
-            ...facts,
-            unresolvedOptionRoots: Object.freeze(
-              facts.unresolvedOptionRoots.map((r) =>
-                Object.freeze({
-                  ...r,
-                  reason:
-                    r.reason === "BindingNotInCurrentDraft"
-                      ? ("BindingNotInRecordedConfiguration" as const)
-                      : ("OptionNotEnabledInRecordedConfiguration" as const),
-                }),
-              ),
-            ),
-            unresolvedOptionVersions: Object.freeze(
-              facts.unresolvedOptionVersions.map((r) =>
-                Object.freeze({ ...r, reason: "SkuNotInRecordedConfiguration" as const }),
-              ),
-            ),
-          });
-          return Object.freeze({
-            catalogConfigurationDigest: c.catalogConfigurationDigest,
-            versionReference: c.versionReference,
-            membership: "Included" as const,
-            matches,
-          });
-        }),
-    );
-    const result = {
+    const request = parsePriceBookReferenceSourceRequest(input.request);
+    return matchRecordedConfiguration(
       request,
-      coverage: "RecordedDraftHistoryOnly" as const,
-      publicationCoverage: "Unavailable" as const,
-      futureScheduleCoverage: "Unavailable" as const,
-      catalogSourceDigest,
-      sourceDigests: Object.freeze({
-        priceBooks: priceBooks.digest,
-        optionPrices: optionPrices.digest,
-        promotions: promotions.digest,
-      }),
-      configurations: matched,
-    };
-    return Object.freeze({ ...result, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(result)) });
+      input.target,
+      parsePriceBookReferenceSourceSnapshot(input.priceBooks, request, input.now),
+      parseOptionPriceReferenceSourceSnapshot(input.optionPrices, request, input.now),
+      parsePromotionReferenceSourceSnapshot(input.promotions, request, input.now),
+    );
   } catch {
     return fail();
   }
@@ -524,12 +541,49 @@ export function matchRecordedPricingConfigurationReferences(input: {
 /** Metadata only: exact Option identities/pins are supplied by the owning current
  * Catalog source. Binding/SKU/scope membership, price amounts and qualification
  * are deliberately not inferred from a stored Published label. */
+/** Original Option publication observation only; current source/effective checks
+ * still use the actual supplied current instant. Never a general backdate. */
+function optionPublicationClock(
+  value: unknown,
+  request: PriceBookReferenceSourceRequest,
+  now: string,
+) {
+  const r = exact(value, [
+      "profile",
+      "operationReference",
+      "catalogIntentDigest",
+      "observedAt",
+      "validUntil",
+    ]),
+    observedAt = parseEffectivePeriodInstant(r.observedAt),
+    validUntil = parseEffectivePeriodInstant(r.validUntil),
+    operationReference = parsePricingReference(r.operationReference),
+    catalogIntentDigest = parsePricingDigest(r.catalogIntentDigest);
+  if (
+    r.profile !== "OptionPublicationOriginalClockV1" ||
+    operationReference !== request.operationReference ||
+    catalogIntentDigest !== request.catalogIntentDigest ||
+    validUntil <= observedAt ||
+    Date.parse(validUntil) - Date.parse(observedAt) > 5000 ||
+    now < observedAt ||
+    now >= validUntil
+  )
+    return fail();
+  return Object.freeze({
+    profile: "OptionPublicationOriginalClockV1" as const,
+    operationReference,
+    catalogIntentDigest,
+    observedAt,
+    validUntil,
+  });
+}
 export function matchOptionDraftPriceReferenceMetadata(
   targetValue: unknown,
   sourceValue: unknown,
   requestValue: PriceBookReferenceSourceRequest,
   nowValue: string,
   activationValue: string,
+  originalPublicationClockInput?: unknown,
 ) {
   try {
     const request = parsePriceBookReferenceSourceRequest(requestValue),
@@ -545,11 +599,15 @@ export function matchOptionDraftPriceReferenceMetadata(
         "optionPins",
       ]),
       activationAt = parseEffectivePeriodInstant(activationValue),
-      now = parseEffectivePeriodInstant(nowValue);
+      now = parseEffectivePeriodInstant(nowValue),
+      originalPublicationClock =
+        originalPublicationClockInput === undefined
+          ? undefined
+          : optionPublicationClock(originalPublicationClockInput, request, now);
     if (
       target.profile !== "CurrentFullOptionDraftPricePinsV1" ||
       target.brandReference !== request.brandReference ||
-      activationAt < now
+      activationAt < (originalPublicationClock?.observedAt ?? now)
     )
       return fail();
     const pins = items(target.optionPins);
@@ -589,6 +647,7 @@ export function matchOptionDraftPriceReferenceMetadata(
       .sort((a, b) => a.optionReference.localeCompare(b.optionReference));
     const result = {
       profile: "OptionDraftPriceReferenceMetadataV1" as const,
+      ...(originalPublicationClock ? { originalPublicationClock } : {}),
       request,
       brandReference: parsePricingReference(target.brandReference),
       optionSetReference: parsePricingReference(target.optionSetReference),
@@ -612,6 +671,131 @@ export function matchOptionDraftPriceReferenceMetadata(
       referenceEligibility: "NotEvaluated" as const,
       publishValidation: "Incomplete" as const,
       eligibility: "NotEvaluated" as const,
+    };
+    return Object.freeze({ ...result, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(result)) });
+  } catch {
+    return fail();
+  }
+}
+
+export interface ProductPublicationPricingConfigurationReferenceMatchesV2 extends Omit<
+  PricingConfigurationReferenceMatches,
+  "request"
+> {
+  readonly profile: "ProductPublicationPricingConfigurationReferenceMatchesV2";
+  readonly request: PricingProductPublicationReferenceRequestV2;
+  readonly validUntil: string;
+}
+export interface ProductPublicationRecordedPricingConfigurationReferenceMatchesV2 extends Omit<
+  RecordedPricingConfigurationReferenceMatches,
+  "request"
+> {
+  readonly profile: "ProductPublicationRecordedPricingConfigurationReferenceMatchesV2";
+  readonly request: PricingProductPublicationReferenceRequestV2;
+  readonly validUntil: string;
+}
+/** Source matching only. Full context authenticity and publication/schedule coverage remain with their owners. */
+export function matchProductPublicationPricingConfigurationReferencesV2(input: {
+  readonly request: PricingProductPublicationReferenceRequestV2;
+  readonly target: PricingReferenceTarget;
+  readonly priceBooks: unknown;
+  readonly optionPrices: unknown;
+  readonly promotions: unknown;
+  readonly now: string;
+}): ProductPublicationPricingConfigurationReferenceMatchesV2 {
+  try {
+    const raw = exact(input, [
+        "request",
+        "target",
+        "priceBooks",
+        "optionPrices",
+        "promotions",
+        "now",
+      ]),
+      request = parsePricingProductPublicationReferenceRequestV2(raw.request),
+      target = parseTarget(raw.target),
+      now = parseEffectivePeriodInstant(raw.now),
+      priceBooks = parseProductPublicationPriceBookReferenceSourceSnapshotV2(
+        raw.priceBooks,
+        request,
+        now,
+      ),
+      optionPrices = parseProductPublicationOptionPriceReferenceSourceSnapshotV2(
+        raw.optionPrices,
+        request,
+        now,
+      ),
+      promotions = parseProductPublicationPromotionReferenceSourceSnapshotV2(
+        raw.promotions,
+        request,
+        now,
+      );
+    if (target.productReference !== request.productReference) return fail();
+    const result = {
+      profile: "ProductPublicationPricingConfigurationReferenceMatchesV2" as const,
+      request,
+      coverage: "CurrentDraftOnly" as const,
+      historicalMembershipCoverage: "Unavailable" as const,
+      catalogSourceDigest: target.catalogSourceDigest,
+      sourceDigests: Object.freeze({
+        priceBooks: priceBooks.digest,
+        optionPrices: optionPrices.digest,
+        promotions: promotions.digest,
+      }),
+      ...matchConfiguration(target, priceBooks, optionPrices, promotions),
+      validUntil: request.validUntil,
+    };
+    return Object.freeze({ ...result, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(result)) });
+  } catch {
+    return fail();
+  }
+}
+export function matchProductPublicationRecordedPricingConfigurationReferencesV2(input: {
+  readonly request: PricingProductPublicationReferenceRequestV2;
+  readonly target: RecordedPricingReferenceTarget;
+  readonly priceBooks: unknown;
+  readonly optionPrices: unknown;
+  readonly promotions: unknown;
+  readonly now: string;
+}): ProductPublicationRecordedPricingConfigurationReferenceMatchesV2 {
+  try {
+    const raw = exact(input, [
+        "request",
+        "target",
+        "priceBooks",
+        "optionPrices",
+        "promotions",
+        "now",
+      ]),
+      request = parsePricingProductPublicationReferenceRequestV2(raw.request),
+      now = parseEffectivePeriodInstant(raw.now),
+      target = exact(raw.target, [
+        "mappingProfile",
+        "catalogSourceDigest",
+        "productReference",
+        "skuReference",
+        "configurations",
+      ]);
+    if (target.productReference !== request.productReference) return fail();
+    const matched = matchRecordedConfiguration(
+      request,
+      target,
+      parseProductPublicationPriceBookReferenceSourceSnapshotV2(raw.priceBooks, request, now),
+      parseProductPublicationOptionPriceReferenceSourceSnapshotV2(raw.optionPrices, request, now),
+      parseProductPublicationPromotionReferenceSourceSnapshotV2(raw.promotions, request, now),
+    );
+    if (!matched.configurations.some((c) => c.versionReference === request.versionReference))
+      return fail();
+    const result = {
+      profile: "ProductPublicationRecordedPricingConfigurationReferenceMatchesV2" as const,
+      request,
+      coverage: matched.coverage,
+      publicationCoverage: matched.publicationCoverage,
+      futureScheduleCoverage: matched.futureScheduleCoverage,
+      catalogSourceDigest: matched.catalogSourceDigest,
+      sourceDigests: matched.sourceDigests,
+      configurations: matched.configurations,
+      validUntil: request.validUntil,
     };
     return Object.freeze({ ...result, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(result)) });
   } catch {

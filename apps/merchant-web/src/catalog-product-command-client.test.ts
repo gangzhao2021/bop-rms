@@ -595,3 +595,90 @@ it("refuses a structurally valid complete multilingual payload beyond UTF8 ceili
   expect(() => createProductCommandClient(fetcher).prepareDraft(command, scope)).toThrow();
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+function completeBaseCreation() {
+  return {
+    ...create(),
+    editorContent: {
+      profile: "CatalogProductEditorContentV1",
+      localizedShortDescriptions: {},
+      localizedDescriptions: { "en-CA": "Synthetic initial base SKU content" },
+      preparationNotes: {},
+      tagReferences: [],
+      attributeValues: [],
+      media: [],
+      variantDimensions: [],
+      variantCombinations: [],
+      optionRules: [],
+      allergenReferences: [],
+      nutritionProfile: null,
+    },
+  };
+}
+it("complete Create with one explicit base SKU sends no guessed identity and retains exact content/quantity across unknown retry", async () => {
+  const command = completeBaseCreation();
+  required(command.skus[0]).unitOfSale = "PACK";
+  required(command.skus[0]).unitQuantity = "0.25";
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockRejectedValueOnce(new TypeError("Synthetic initial base SKU reply lost"))
+    .mockResolvedValueOnce(response({ ...created(), status: "AlreadyApplied" }));
+  const prepared = createProductCommandClient(fetcher).prepareCreate(command, scope);
+  required(command.skus[0]).unitQuantity = "2";
+  command.editorContent.localizedDescriptions["en-CA"] = "Changed after preparation";
+  await expect(prepared.execute(csrf)).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  const receipt = await prepared.execute(csrf);
+  expect(receipt.skus).toEqual([{ skuReference: id(6), skuCode: "SKU", lifecycle: "Draft" }]);
+  expect(fetcher.mock.calls[1]?.[1]?.body).toBe(fetcher.mock.calls[0]?.[1]?.body);
+  const sent = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
+  expect(sent.skus).toEqual([
+    {
+      skuCode: "SKU",
+      localizedNames: { "en-CA": "Synthetic SKU" },
+      variantSelections: [],
+      unitOfSale: "PACK",
+      unitQuantity: "0.25",
+    },
+  ]);
+  expect(sent.editorContent.localizedDescriptions).toEqual({
+    "en-CA": "Synthetic initial base SKU content",
+  });
+  expect(Object.keys(sent.skus[0])).not.toContain("skuReference");
+});
+it.each(["nonbase", "multipleBase", "dimension", "combination"])(
+  "refuses complete initial %s graph before transport",
+  (kind) => {
+    const command = completeBaseCreation(),
+      fetcher = vi.fn<typeof fetch>();
+    if (kind === "nonbase")
+      Object.assign(required(command.skus[0]), {
+        variantSelections: [{ dimensionReference: id(11), valueReference: id(12) }],
+      });
+    if (kind === "multipleBase")
+      command.skus.push({ ...required(command.skus[0]), skuCode: "SECOND_BASE" });
+    if (kind === "dimension")
+      Object.assign(command.editorContent, {
+        variantDimensions: fullSave().draft.editorContent.variantDimensions,
+      });
+    if (kind === "combination")
+      Object.assign(command.editorContent, {
+        variantCombinations: [{ selections: [], disposition: "Valid", skuReference: id(99) }],
+      });
+    expect(() => createProductCommandClient(fetcher).prepareCreate(command, scope)).toThrow();
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);
+it.each(["missing", "code", "lifecycle"])(
+  "complete base Create does not acknowledge %s rebound SKU receipt",
+  async (kind) => {
+    const receipt = created();
+    if (kind === "missing") receipt.skus = [];
+    if (kind === "code") required(receipt.skus[0]).skuCode = "OTHER";
+    if (kind === "lifecycle") required(receipt.skus[0]).lifecycle = "Active";
+    await expect(
+      createProductCommandClient(async () => response(receipt))
+        .prepareCreate(completeBaseCreation(), scope)
+        .execute(csrf),
+    ).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  },
+);

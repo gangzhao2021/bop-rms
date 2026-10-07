@@ -1,4 +1,5 @@
 import { registerInternalDiningEntry } from "./pilot-dining-launcher.mjs";
+import { installInternalStaffLogin } from "./pilot-staff-login.mjs";
 import process from "node:process";
 import { URL } from "node:url";
 import { CustomerPaymentResultHandler } from "../../apps/api/dist/customer-payment-result.js";
@@ -85,43 +86,7 @@ export async function startInternalCustomerServer({
     );
     const terminal = createInternalPaymentTerminal(resources, checkout, intents, simulator);
     const merchant = await createInternalMerchant(resources);
-    app.get("/internal-test/staff", (_req, res) =>
-      res
-        .set("Cache-Control", "no-store")
-        .set("Referrer-Policy", "same-origin")
-        .type("html")
-        .send(
-          '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DEMO Staff</title><main><h1>DEMO Store staff</h1><p>Local internal testing only. This account can operate demonstration orders.</p><form method="post" action="/merchant/internal-test/login"><button name="confirmation" value="DEMO_STAFF_LOGIN" type="submit">Enter DEMO staff workspace</button></form></main></html>',
-        ),
-    );
-    app.post(
-      "/merchant/internal-test/login",
-      express.urlencoded({ extended: false, limit: "1kb" }),
-      async (req, res) => {
-        res.set("Cache-Control", "no-store");
-        if (
-          req.headers.origin !== "https://127.0.0.1:4443" ||
-          req.headers["sec-fetch-site"] !== "same-origin" ||
-          Object.keys(req.query).length !== 0 ||
-          !req.body ||
-          Object.keys(req.body).length !== 1 ||
-          req.body.confirmation !== "DEMO_STAFF_LOGIN"
-        )
-          return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
-        try {
-          const credentials = await merchant.issue();
-          res.set(
-            "Set-Cookie",
-            "__Host-bop-merchant=" +
-              credentials.sessionCookie +
-              "; Path=/; Secure; HttpOnly; SameSite=Strict",
-          );
-          res.redirect(303, "/operations/orders");
-        } catch {
-          res.status(503).json({ code: "INTERNAL_STAFF_LOGIN_UNAVAILABLE" });
-        }
-      },
-    );
+    installInternalStaffLogin(app, merchant);
     app.use("/merchant", createMerchantBffRouter(merchant.bff));
 
     app.post(

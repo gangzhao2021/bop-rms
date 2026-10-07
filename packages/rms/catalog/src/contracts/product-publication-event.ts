@@ -12,6 +12,7 @@ import {
   productPublicationActions,
   type ProductPublicationAction,
 } from "./product-publication.js";
+import { parseProductPublicationVersionV2 } from "./product-publication-v2.js";
 export const catalogProductPublicationEventTypes = Object.freeze({
   Validate: "ProductValidationCompleted",
   SubmitReview: "ProductReviewSubmitted",
@@ -37,10 +38,45 @@ export function buildCatalogProductPublicationEvent(
   auditValue: unknown,
   sourceRevision: string,
 ): { readonly envelope: DomainEventEnvelope; readonly audit: AppendAuditRecordInput } {
+  return buildPublicationEvent(
+    publicationValue,
+    aggregateValue,
+    action,
+    auditValue,
+    sourceRevision,
+    parseProductPublicationVersion,
+  );
+}
+/** The existing event schema reports the common publication transition only.
+ * Retirement facts remain in their owning V2 source and immutable header. */
+export function buildCatalogProductPublicationEventV2(
+  publicationValue: unknown,
+  aggregateValue: unknown,
+  action: ProductPublicationAction,
+  auditValue: unknown,
+  sourceRevision: string,
+): { readonly envelope: DomainEventEnvelope; readonly audit: AppendAuditRecordInput } {
+  return buildPublicationEvent(
+    publicationValue,
+    aggregateValue,
+    action,
+    auditValue,
+    sourceRevision,
+    parseProductPublicationVersionV2,
+  );
+}
+function buildPublicationEvent(
+  publicationValue: unknown,
+  aggregateValue: unknown,
+  action: ProductPublicationAction,
+  auditValue: unknown,
+  sourceRevision: string,
+  parsePublication: typeof parseProductPublicationVersion | typeof parseProductPublicationVersionV2,
+): { readonly envelope: DomainEventEnvelope; readonly audit: AppendAuditRecordInput } {
   const fail = (): never => {
     throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
   };
-  const p = parseProductPublicationVersion(publicationValue),
+  const p = parsePublication(publicationValue),
     aggregate = parseProductAggregate(copyCategoryPersistenceValue(aggregateValue));
   let audit: AppendAuditRecordInput;
   try {

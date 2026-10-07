@@ -1,3 +1,12 @@
+import {
+  parseRecipeInventoryProductPublicationReferenceRequestV2,
+  type RecipeInventoryProductPublicationReferenceRequestV2,
+} from "../../contracts/product-publication-reference-request-v2.js";
+import {
+  buildRecipeInventoryProductPublicationReferenceSnapshotV2,
+  recipeInventoryProductPublicationReferenceSourceFieldsV2,
+  type RecipeInventoryProductPublicationReferenceSnapshotV2,
+} from "../../contracts/recipe-inventory-reference-source.js";
 import { RecipeWorkflowError } from "../../application/recipe-service.js";
 import { parseRecipeReference } from "../../domain/recipe.js";
 import { parseRecipeReferenceSourceInstant } from "../../contracts/recipe-reference-source.js";
@@ -156,6 +165,247 @@ export function createPostgresRecipeInventoryReferenceSourceStore(
         if (calls !== 1 || !completed || result !== completed) return fail();
         return completed.value;
       } catch (error) {
+        if (error instanceof RecipeWorkflowError && error.code === "RECIPE_PERMISSION_DENIED")
+          throw error;
+        return fail();
+      }
+    },
+  });
+}
+
+export interface RecipeInventoryProductPublicationReferenceSourceOptionsV2 extends Omit<
+  RecipeInventoryReferenceOptions,
+  "authority"
+> {
+  readonly actorKind: "User" | "System";
+  readonly registerBeforeCommit: (
+    tx: RecipeInventoryReferenceTransaction,
+    guard: () => Promise<void>,
+    finalAssert: () => void,
+  ) => Promise<void>;
+  readonly authority: {
+    holdUntilTransactionCompletes(
+      tx: RecipeInventoryReferenceTransaction,
+      input: {
+        readonly tenantReference: string;
+        readonly actorKind: "User" | "System";
+        readonly request: RecipeInventoryProductPublicationReferenceRequestV2;
+        readonly purposeCode: "CATALOG_PRODUCT_PUBLICATION_RECIPE_INVENTORY_SOURCE_READ";
+        readonly permission: "recipe.manage";
+        readonly requiredScope: "FullBrandScope";
+        readonly requiredFields: typeof recipeInventoryProductPublicationReferenceSourceFieldsV2;
+        readonly observedAt: string;
+      },
+    ): Promise<void>;
+  };
+}
+/** Independent publication protocol over the existing Brand-only Recipe SQL and
+ * barrier. Current authority must prove Tenant/Brand membership and full fields;
+ * setting Tenant context does not pretend these tables contain a Tenant column. */
+export function createPostgresRecipeInventoryProductPublicationReferenceSourceV2(
+  options: RecipeInventoryProductPublicationReferenceSourceOptionsV2,
+) {
+  const tenant = parseRecipeReference(options.tenantReference),
+    brand = parseRecipeReference(options.brandReference),
+    actor = parseRecipeReference(options.actorReference),
+    kind = options.actorKind;
+  if (
+    (kind !== "User" && kind !== "System") ||
+    typeof options.clock?.now !== "function" ||
+    typeof options.transactions?.run !== "function" ||
+    typeof options.authority?.holdUntilTransactionCompletes !== "function" ||
+    typeof options.registerBeforeCommit !== "function"
+  )
+    return fail();
+  const now = options.clock.now.bind(options.clock),
+    run = options.transactions.run.bind(options.transactions),
+    authority = options.authority.holdUntilTransactionCompletes.bind(options.authority),
+    register = options.registerBeforeCommit.bind(options),
+    active = new WeakSet<object>(),
+    failed = new WeakSet<object>();
+  return Object.freeze({
+    async withCurrentSnapshot<T>(
+      input: RecipeInventoryProductPublicationReferenceRequestV2,
+      work: (
+        snapshot: RecipeInventoryProductPublicationReferenceSnapshotV2,
+        tx: RecipeInventoryReferenceTransaction,
+      ) => Promise<T>,
+    ): Promise<T> {
+      let calls = 0,
+        completed: { readonly value: T } | undefined,
+        transaction: RecipeInventoryReferenceTransaction | undefined,
+        poisoned = false,
+        finalCheck: (() => void) | undefined;
+      const poison = (): never => {
+        poisoned = true;
+        if (transaction) failed.add(transaction);
+        return fail();
+      };
+      try {
+        const request = parseRecipeInventoryProductPublicationReferenceRequestV2(input);
+        if (
+          typeof work !== "function" ||
+          request.tenantReference !== tenant ||
+          request.brandReference !== brand ||
+          request.actorReference !== actor ||
+          request.actorKind !== kind
+        )
+          return fail();
+        const result = await run(async (tx) => {
+          if (!tx || typeof tx !== "object" || typeof tx.query !== "function") return poison();
+          transaction = tx;
+          // A caught nested refusal must taint this actual enclosing transaction.
+          if (++calls !== 1 || active.has(tx) || failed.has(tx)) return poison();
+          active.add(tx);
+          const originalQuery = tx.query,
+            queryPort = originalQuery.bind(tx);
+          let latest = request.observedAt,
+            ready = false,
+            guardCalls = 0,
+            source: RecipeInventoryProductPublicationReferenceSnapshotV2 | undefined;
+          const check = () => {
+            let at: string;
+            try {
+              at = parseRecipeReferenceSourceInstant(now());
+            } catch {
+              return poison();
+            }
+            if (
+              poisoned ||
+              failed.has(tx) ||
+              tx.query !== originalQuery ||
+              at < latest ||
+              at >= request.validUntil
+            )
+              return poison();
+            latest = at;
+            return at;
+          };
+          const assertFinal = () => {
+            if (!ready || !source) return poison();
+            check();
+          };
+          finalCheck = assertFinal;
+          const query: RecipeInventoryReferenceTransaction["query"] = async <
+            R extends Record<string, unknown>,
+          >(
+            sql: string,
+            values: readonly unknown[],
+          ) => {
+            check();
+            const result = await queryPort<R>(sql, values);
+            check();
+            return result;
+          };
+          const authorize = async () => {
+            const observedAt = check();
+            if (
+              (await authority(
+                tx,
+                Object.freeze({
+                  tenantReference: tenant,
+                  actorKind: kind,
+                  request,
+                  purposeCode: "CATALOG_PRODUCT_PUBLICATION_RECIPE_INVENTORY_SOURCE_READ",
+                  permission: "recipe.manage",
+                  requiredScope: "FullBrandScope",
+                  requiredFields: recipeInventoryProductPublicationReferenceSourceFieldsV2,
+                  observedAt,
+                }),
+              )) !== undefined
+            )
+              return poison();
+            check();
+          };
+          const context = () =>
+            query(
+              "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true),set_config('statement_timeout','60000',true)",
+              [tenant, brand],
+            );
+          const verifyGeneration = async () => {
+            if (!source) return poison();
+            await context();
+            const current = row(
+              await query(
+                "SELECT COALESCE((SELECT generation::text FROM rms_recipe.recipe_reference_generation WHERE brand_id=$1),'0') AS generation",
+                [brand],
+              ),
+              "generation",
+            );
+            if (current !== source.generation) return poison();
+          };
+          try {
+            // Install before the first holder/read/clock check: a swallowed
+            // early failure must still poison the enclosing transaction.
+            if (
+              (await register(
+                tx,
+                async () => {
+                  try {
+                    if (++guardCalls !== 1) return poison();
+                    assertFinal();
+                    await authorize();
+                    await verifyGeneration();
+                    assertFinal();
+                  } catch (error) {
+                    poisoned = true;
+                    failed.add(tx);
+                    throw error;
+                  }
+                },
+                assertFinal,
+              )) !== undefined
+            )
+              return poison();
+            check();
+            await authorize();
+            if (
+              row(
+                await query("SELECT current_setting('transaction_isolation') AS isolation", []),
+                "isolation",
+              ) !== "read committed"
+            )
+              return poison();
+            await context();
+            await query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+              "RecipeCatalogReferenceV1:" + brand,
+            ]);
+            source = buildRecipeInventoryProductPublicationReferenceSnapshotV2(
+              row(await query(select, [brand]), "source"),
+              request,
+              check(),
+            );
+            await authorize();
+            const value = await work(source, tx);
+            check();
+            await authorize();
+            await verifyGeneration();
+            check();
+            ready = true;
+            completed = Object.freeze({ value });
+            return completed;
+          } catch (error) {
+            poisoned = true;
+            failed.add(tx);
+            throw error;
+          } finally {
+            active.delete(tx);
+          }
+        });
+        if (
+          poisoned ||
+          calls !== 1 ||
+          !completed ||
+          result !== completed ||
+          !transaction ||
+          failed.has(transaction) ||
+          !finalCheck
+        )
+          return poison();
+        finalCheck();
+        return completed.value;
+      } catch (error) {
+        if (transaction) failed.add(transaction);
         if (error instanceof RecipeWorkflowError && error.code === "RECIPE_PERMISSION_DENIED")
           throw error;
         return fail();

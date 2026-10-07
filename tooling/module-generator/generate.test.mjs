@@ -68,7 +68,15 @@ describe("BOP-RMS Module Generator", () => {
 
     expect(result.target).toBe(join(root, "packages/bop/synthetic-kernel"));
     const tree = await snapshotTree(result.target);
-    expect(tree.filter((entry) => entry.startsWith("file:"))).toHaveLength(5);
+    expect(tree.filter((entry) => entry.startsWith("file:"))).toHaveLength(6);
+    expect(tree.some((entry) => entry.startsWith("file:tsconfig.build.json:"))).toBe(true);
+    const packageJson = JSON.parse(await readFile(join(result.target, "package.json"), "utf8"));
+    expect(packageJson.exports["."]).toEqual({
+      types: "./src/index.ts",
+      development: "./src/index.ts",
+      default: "./dist/packages/bop/synthetic-kernel/src/index.js",
+    });
+    expect(packageJson.scripts.build).toBe("tsc --project tsconfig.build.json");
     expect(tree).toEqual(
       expect.arrayContaining([
         "directory:src/domain/policies",
@@ -151,7 +159,7 @@ describe("BOP-RMS Module Generator", () => {
     expect(result.target).toBe(join(root, "packages/bop/synthetic-kernel"));
     expect(await realpath(result.target)).toBe(result.target);
     const tree = await snapshotTree(result.target);
-    expect(tree.filter((entry) => entry.startsWith("file:"))).toHaveLength(5);
+    expect(tree.filter((entry) => entry.startsWith("file:"))).toHaveLength(6);
     expect(await readFile(join(result.target, "package.json"), "utf8")).toContain(
       "@bop/synthetic-kernel",
     );

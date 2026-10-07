@@ -3,6 +3,7 @@ import { createPostgresPublishedStoreOperatingStatusReader } from "../../rms/sto
 import { createMerchantOrdinaryRefundBusinessDate } from "../../../apps/api/src/merchant-ordinary-refund-business-date.ts";
 import { verifyStoreAuthoringRepository } from "../test-support/store-authoring-repository.mjs";
 import { verifyStoreAuthoringHistory } from "../test-support/store-authoring-history.mjs";
+import { verifyStoreSetupSchema } from "../test-support/store-setup-schema-acceptance.mjs";
 import { verifyStoreServiceControl } from "../test-support/store-service-control.mjs";
 import { seedStorePublication } from "../test-support/store-publication-seed.mjs";
 import {
@@ -874,4 +875,8 @@ async function prove(context) {
 
 it("enforces append-only Store configuration, unique exceptions and forced Store RLS", async () => {
   await withIsolatedDatabase({ caseId: "store_configuration", root }, prove);
+}, 120_000);
+
+it("enforces Store Setup immutable schema, original cooccurrence and exact scope", async () => {
+  await withIsolatedDatabase({ caseId: "store_setup_schema", root }, verifyStoreSetupSchema);
 }, 120_000);

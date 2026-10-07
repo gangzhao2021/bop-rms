@@ -379,6 +379,217 @@ it("loads exact merchant mapping and workstation without adding authority and bi
   await expect(installation.loadTaskQueue()).rejects.toThrow("PILOT_INSTALLATION_UNAVAILABLE");
 });
 
+it("loads explicit Product v2 selectors without defaults and retains the original v1 mapping", async () => {
+  const id = (n) => "0190fa30-0000-7000-8000-" + String(n).padStart(12, "0"),
+    scope = { tenantReference: id(1), brandReference: id(2), storeReference: id(3) },
+    product = {
+      contentPolicy: {
+        configurationVersionReference: id(4),
+        expectedBrandVersion: 2,
+        policyReference: id(5),
+        policyVersion: 3,
+      },
+      maximumApprovalValiditySeconds: 3600,
+    },
+    value = {
+      schemaVersion: 2,
+      environment: "InternalTest",
+      database: "synthetic_pilot",
+      scope,
+      roleMapping: { Manager: ["synthetic_manager"], Owner: [], Finance: [] },
+      workstation: { deviceReference: id(6), pickupLocationReference: id(7) },
+      product,
+    };
+  await save("internal-test-profile.json", {
+    environment: "InternalTest",
+    database: "synthetic_pilot",
+    binding: scope,
+  });
+  const installation = await loadPilotInstallation(directory);
+  await save("merchant-runtime.json", value);
+  const loaded = await installation.loadMerchantRuntime();
+  expect(loaded).toEqual(value);
+  expect(Object.isFrozen(loaded.product)).toBe(true);
+  expect(Object.isFrozen(loaded.product.contentPolicy)).toBe(true);
+  for (const changed of [
+    { ...value, schemaVersion: 1 },
+    { ...value, schemaVersion: 3 },
+    { ...value, product: null },
+    { ...value, product: { ...product, credentials: {} } },
+    { ...value, product: { ...product, maximumApprovalValiditySeconds: 0 } },
+    { ...value, product: { ...product, maximumApprovalValiditySeconds: 86401 } },
+    { ...value, product: { ...product, maximumApprovalValiditySeconds: 1.5 } },
+    { ...value, product: { ...product, maximumApprovalValiditySeconds: "3600" } },
+    { ...value, product: { contentPolicy: product.contentPolicy } },
+    {
+      ...value,
+      product: { ...product, contentPolicy: { ...product.contentPolicy, tenantReference: id(1) } },
+    },
+    {
+      ...value,
+      product: { ...product, contentPolicy: { ...product.contentPolicy, expectedBrandVersion: 0 } },
+    },
+    {
+      ...value,
+      product: {
+        ...product,
+        contentPolicy: { ...product.contentPolicy, policyVersion: 2147483648 },
+      },
+    },
+    {
+      ...value,
+      product: { ...product, contentPolicy: { ...product.contentPolicy, policyReference: "bad" } },
+    },
+    {
+      ...value,
+      product: {
+        ...product,
+        contentPolicy: { ...product.contentPolicy, configurationVersionReference: {} },
+      },
+    },
+    { ...value, scope: { ...scope, brandReference: id(9) } },
+  ]) {
+    await save("merchant-runtime.json", changed);
+    await expect(installation.loadMerchantRuntime()).rejects.toThrow(
+      /^PILOT_INSTALLATION_UNAVAILABLE$/,
+    );
+  }
+  const { product: omitted, ...legacy } = value;
+  expect(omitted).toBe(product);
+  await save("merchant-runtime.json", { ...legacy, schemaVersion: 1 });
+  expect(await installation.loadMerchantRuntime()).toEqual({ ...legacy, schemaVersion: 1 });
+  await save("merchant-runtime.json", legacy);
+  await expect(installation.loadMerchantRuntime()).rejects.toThrow(
+    /^PILOT_INSTALLATION_UNAVAILABLE$/,
+  );
+});
+
+function authoringMerchantFixture() {
+  const id = (n) => "0190fa30-0000-7000-8000-" + String(n).padStart(12, "0"),
+    scope = { tenantReference: id(1), brandReference: id(2), storeReference: id(3) },
+    authoringSources = {
+      configurationVersionReference: id(8),
+      expectedBrandVersion: 1,
+      policyReference: id(9),
+      policyVersion: 2147483647,
+      allergenRegistryVersionReference: null,
+    },
+    value = {
+      schemaVersion: 2,
+      environment: "InternalTest",
+      database: "synthetic_pilot",
+      scope,
+      roleMapping: { Manager: ["synthetic_manager"], Owner: [], Finance: [] },
+      workstation: { deviceReference: id(6), pickupLocationReference: id(7) },
+      product: {
+        contentPolicy: {
+          configurationVersionReference: id(4),
+          expectedBrandVersion: 2,
+          policyReference: id(5),
+          policyVersion: 3,
+        },
+        maximumApprovalValiditySeconds: 3600,
+        authoringSources,
+      },
+    };
+  return { id, scope, value, authoringSources };
+}
+it.each([null, "0190fa30-0000-7000-8000-000000000010"])(
+  "loads explicit optional authoring selectors with allergen pin %s and freezes the detached selection",
+  async (pin) => {
+    const { scope, value } = authoringMerchantFixture();
+    value.product.authoringSources.allergenRegistryVersionReference = pin;
+    await save("internal-test-profile.json", {
+      environment: "InternalTest",
+      database: "synthetic_pilot",
+      binding: scope,
+    });
+    await save("merchant-runtime.json", value);
+    const installation = await loadPilotInstallation(directory);
+    const loaded = await installation.loadMerchantRuntime();
+    expect(loaded).toEqual(value);
+    expect(Object.isFrozen(loaded.product.authoringSources)).toBe(true);
+    expect(Object.isFrozen(loaded.product.contentPolicy)).toBe(true);
+    value.product.authoringSources.policyVersion = 2;
+    expect(loaded.product.authoringSources.policyVersion).toBe(2147483647);
+    expect(() => {
+      loaded.product.authoringSources.expectedBrandVersion = 2;
+    }).toThrow(TypeError);
+  },
+);
+it("omitting authoringSources keeps the original publication-only v2 shape without defaults", async () => {
+  const { scope, value } = authoringMerchantFixture();
+  delete value.product.authoringSources;
+  await save("internal-test-profile.json", {
+    environment: "InternalTest",
+    database: "synthetic_pilot",
+    binding: scope,
+  });
+  await save("merchant-runtime.json", value);
+  const loaded = await (await loadPilotInstallation(directory)).loadMerchantRuntime();
+  expect(loaded).toEqual(value);
+  expect(Object.hasOwn(loaded.product, "authoringSources")).toBe(false);
+});
+it("refuses partial, malformed and mixed authoring source keys rather than filling defaults", async () => {
+  const { id, scope, value, authoringSources } = authoringMerchantFixture();
+  await save("internal-test-profile.json", {
+    environment: "InternalTest",
+    database: "synthetic_pilot",
+    binding: scope,
+  });
+  const installation = await loadPilotInstallation(directory);
+  const invalid = [
+    null,
+    [],
+    false,
+    "configuration",
+    {},
+    ...Object.keys(authoringSources).map((key) =>
+      Object.fromEntries(Object.entries(authoringSources).filter(([name]) => name !== key)),
+    ),
+    { ...authoringSources, credentials: {} },
+    { ...authoringSources, contentPolicy: value.product.contentPolicy },
+    { ...authoringSources, maximumApprovalValiditySeconds: 3600 },
+    { ...authoringSources, tenantReference: id(1) },
+    { ...authoringSources, enabled: true },
+    ...["configurationVersionReference", "policyReference"].flatMap((key) =>
+      [null, 1, {}, "bad", id(10).replace("-7000-", "-4000-"), id(10).toUpperCase()].map(
+        (reference) => ({ ...authoringSources, [key]: reference }),
+      ),
+    ),
+    ...["expectedBrandVersion", "policyVersion"].flatMap((key) =>
+      [0, -1, 2147483648, 1.5, "1", null].map((version) => ({
+        ...authoringSources,
+        [key]: version,
+      })),
+    ),
+    ...[false, {}, 1, "bad", id(10).replace("-7000-", "-4000-")].map((pin) => ({
+      ...authoringSources,
+      allergenRegistryVersionReference: pin,
+    })),
+  ];
+  for (const sources of invalid) {
+    await save("merchant-runtime.json", {
+      ...value,
+      product: { ...value.product, authoringSources: sources },
+    });
+    await expect(installation.loadMerchantRuntime()).rejects.toThrow(
+      "PILOT_INSTALLATION_UNAVAILABLE",
+    );
+  }
+  for (const changed of [
+    { ...value, schemaVersion: 1 },
+    { ...value, schemaVersion: 3 },
+    { ...value, authoringSources },
+    { ...value, product: { ...value.product, authoringSources, enableAuthoring: true } },
+  ]) {
+    await save("merchant-runtime.json", changed);
+    await expect(installation.loadMerchantRuntime()).rejects.toThrow(
+      "PILOT_INSTALLATION_UNAVAILABLE",
+    );
+  }
+});
+
 it("binds daily coverage to the installation and owner window authority", async () => {
   const id = (n) => "0198a107-0000-7000-8000-" + String(n).padStart(12, "0");
   const scope = { tenantReference: id(1), brandReference: id(2), storeReference: id(3) };
@@ -418,4 +629,232 @@ it("binds daily coverage to the installation and owner window authority", async 
     await save("daily-settlement-coverage.json", { ...coverage, ...patch });
     await expect(i.loadDailySettlementCoverage()).rejects.toThrow();
   }
+});
+
+function optionPublicationFixture() {
+  const f = authoringMerchantFixture();
+  const sources = {
+    brandConfigurationVersionReference: f.id(21),
+    expectedBrandVersion: 1,
+    policyReference: f.id(22),
+    policyVersion: 2147483647,
+    optionSetPolicyFamilyReference: f.id(23),
+    mediaScope: { kind: "Brand", brandReference: f.scope.brandReference, storeReference: null },
+  };
+  return {
+    ...f,
+    sources,
+    value: { ...f.value, product: { ...f.value.product, optionSetPublicationSources: sources } },
+  };
+}
+it.each(["Brand", "Store"])(
+  "loads independent Option publication selectors and freezes %s Media scope",
+  async (kind) => {
+    const { scope, value, sources } = optionPublicationFixture();
+    sources.mediaScope = {
+      kind,
+      brandReference: scope.brandReference,
+      storeReference: kind === "Store" ? scope.storeReference : null,
+    };
+    await save("internal-test-profile.json", {
+      environment: "InternalTest",
+      database: "synthetic_pilot",
+      binding: scope,
+    });
+    await save("merchant-runtime.json", value);
+    const loaded = await (await loadPilotInstallation(directory)).loadMerchantRuntime();
+    expect(loaded.product.optionSetPublicationSources).toEqual(sources);
+    expect(loaded.product.optionSetPublicationSources.policyReference).not.toBe(
+      loaded.product.contentPolicy.policyReference,
+    );
+    expect(Object.isFrozen(loaded.product.optionSetPublicationSources)).toBe(true);
+    expect(Object.isFrozen(loaded.product.optionSetPublicationSources.mediaScope)).toBe(true);
+    expect(() => {
+      loaded.product.optionSetPublicationSources.mediaScope.brandReference = "bad";
+    }).toThrow(TypeError);
+  },
+);
+it("refuses malformed, partial and cross-scope Option publication configuration", async () => {
+  const { id, scope, value, sources } = optionPublicationFixture();
+  await save("internal-test-profile.json", {
+    environment: "InternalTest",
+    database: "synthetic_pilot",
+    binding: scope,
+  });
+  const installation = await loadPilotInstallation(directory);
+  const invalid = [
+    null,
+    {},
+    { ...sources, extra: true },
+    ...[
+      "brandConfigurationVersionReference",
+      "policyReference",
+      "optionSetPolicyFamilyReference",
+    ].map((key) => ({ ...sources, [key]: "bad" })),
+    ...[0, 2147483648, 1.5, "1"].flatMap((n) =>
+      ["policyVersion", "expectedBrandVersion"].map((key) => ({ ...sources, [key]: n })),
+    ),
+    { ...sources, mediaScope: { ...sources.mediaScope, extra: true } },
+    { ...sources, mediaScope: { kind: "Brand", brandReference: id(99), storeReference: null } },
+    {
+      ...sources,
+      mediaScope: {
+        kind: "Brand",
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+      },
+    },
+    {
+      ...sources,
+      mediaScope: { kind: "Store", brandReference: scope.brandReference, storeReference: null },
+    },
+    {
+      ...sources,
+      mediaScope: { kind: "Store", brandReference: scope.brandReference, storeReference: id(99) },
+    },
+    {
+      ...sources,
+      mediaScope: { kind: "Unknown", brandReference: scope.brandReference, storeReference: null },
+    },
+  ];
+  for (const selection of invalid) {
+    await save("merchant-runtime.json", {
+      ...value,
+      product: { ...value.product, optionSetPublicationSources: selection },
+    });
+    await expect(installation.loadMerchantRuntime()).rejects.toThrow(
+      /^PILOT_INSTALLATION_UNAVAILABLE$/,
+    );
+  }
+});
+it("omitted Option selectors preserve both existing Product selectors without a default Option source", async () => {
+  const { scope, value } = authoringMerchantFixture();
+  await save("internal-test-profile.json", {
+    environment: "InternalTest",
+    database: "synthetic_pilot",
+    binding: scope,
+  });
+  await save("merchant-runtime.json", value);
+  const loaded = await (await loadPilotInstallation(directory)).loadMerchantRuntime();
+  expect(loaded.product).toEqual(value.product);
+  expect(loaded.product).not.toHaveProperty("optionSetPublicationSources");
+});
+function optionPriceFixture() {
+  const f = authoringMerchantFixture(),
+    sources = {
+      currencyMetadata: {
+        currencyCode: "CAD",
+        minorUnitExponent: 2,
+        metadataVersion: 1,
+        metadataVersionReference: f.id(30),
+        metadataDigest: "sha256:" + "a".repeat(64),
+      },
+      publicationPolicyFamilyReference: f.id(31),
+    };
+  return {
+    ...f,
+    sources,
+    value: { ...f.value, product: { ...f.value.product, optionPriceSources: sources } },
+  };
+}
+it.each([0, 6])(
+  "loads exact public currency exponent %s with explicit independent policy and freezes detached metadata",
+  async (exponent) => {
+    const { scope, value, sources } = optionPriceFixture();
+    sources.currencyMetadata.minorUnitExponent = exponent;
+    sources.currencyMetadata.metadataVersion = Number.MAX_SAFE_INTEGER;
+    await save("internal-test-profile.json", {
+      environment: "InternalTest",
+      database: "synthetic_pilot",
+      binding: scope,
+    });
+    await save("merchant-runtime.json", value);
+    const loaded = await (await loadPilotInstallation(directory)).loadMerchantRuntime();
+    expect(loaded.product.optionPriceSources).toEqual(sources);
+    expect(Object.isFrozen(loaded.product.optionPriceSources)).toBe(true);
+    expect(Object.isFrozen(loaded.product.optionPriceSources.currencyMetadata)).toBe(true);
+    expect(loaded.product.optionPriceSources.publicationPolicyFamilyReference).not.toBe(
+      loaded.product.contentPolicy.policyReference,
+    );
+    sources.currencyMetadata.currencyCode = "USD";
+    expect(loaded.product.optionPriceSources.currencyMetadata.currencyCode).toBe("CAD");
+    expect(() => {
+      loaded.product.optionPriceSources.currencyMetadata.minorUnitExponent = 9;
+    }).toThrow(TypeError);
+  },
+);
+it("refuses incomplete, malformed, authority-bearing or token-bearing OptionPrice selectors using actual public constructors", async () => {
+  const { scope, value, sources } = optionPriceFixture();
+  await save("internal-test-profile.json", {
+    environment: "InternalTest",
+    database: "synthetic_pilot",
+    binding: scope,
+  });
+  const installation = await loadPilotInstallation(directory),
+    metadata = sources.currencyMetadata;
+  const invalid = [
+    null,
+    {},
+    { currencyMetadata: metadata },
+    { publicationPolicyFamilyReference: sources.publicationPolicyFamilyReference },
+    { ...sources, authority: {} },
+    { ...sources, enabled: true },
+    { ...sources, credentials: { token: "private" } },
+    { ...sources, publicationPolicyFamilyReference: "private-token" },
+    ...Object.keys(metadata).map((key) => ({
+      ...sources,
+      currencyMetadata: Object.fromEntries(
+        Object.entries(metadata).filter(([field]) => field !== key),
+      ),
+    })),
+    ...[-1, 7, 1.5, "2"].map((value) => ({
+      ...sources,
+      currencyMetadata: { ...metadata, minorUnitExponent: value },
+    })),
+    ...[0, -1, 1.5, "1", Number.MAX_SAFE_INTEGER + 1].map((value) => ({
+      ...sources,
+      currencyMetadata: { ...metadata, metadataVersion: value },
+    })),
+    ...["cad", "CAD-token", ""].map((value) => ({
+      ...sources,
+      currencyMetadata: { ...metadata, currencyCode: value },
+    })),
+    { ...sources, currencyMetadata: { ...metadata, metadataVersionReference: "private-token" } },
+    { ...sources, currencyMetadata: { ...metadata, metadataDigest: "sha256:" + "A".repeat(64) } },
+    { ...sources, currencyMetadata: { ...metadata, secret: "private" } },
+    { ...sources, currencyMetadata: null },
+  ];
+  for (const selection of invalid) {
+    await save("merchant-runtime.json", {
+      ...value,
+      product: { ...value.product, optionPriceSources: selection },
+    });
+    await expect(installation.loadMerchantRuntime()).rejects.toThrow(
+      /^PILOT_INSTALLATION_UNAVAILABLE$/,
+    );
+  }
+});
+it("omitted OptionPrice sources preserve existing v2 selectors with no default currency or governing family", async () => {
+  const { scope, value } = authoringMerchantFixture();
+  await save("internal-test-profile.json", {
+    environment: "InternalTest",
+    database: "synthetic_pilot",
+    binding: scope,
+  });
+  await save("merchant-runtime.json", value);
+  const loaded = await (await loadPilotInstallation(directory)).loadMerchantRuntime();
+  expect(loaded.product).toEqual(value.product);
+  expect(loaded.product).not.toHaveProperty("optionPriceSources");
+});
+it("OptionPrice selectors cannot bypass the real pilot Tenant Brand Store profile binding", async () => {
+  const { id, scope, value } = optionPriceFixture();
+  await save("internal-test-profile.json", {
+    environment: "InternalTest",
+    database: "synthetic_pilot",
+    binding: scope,
+  });
+  await save("merchant-runtime.json", { ...value, scope: { ...scope, brandReference: id(99) } });
+  await expect((await loadPilotInstallation(directory)).loadMerchantRuntime()).rejects.toThrow(
+    /^PILOT_INSTALLATION_UNAVAILABLE$/,
+  );
 });

@@ -61,8 +61,10 @@ export function ProductRecordedConfigurationFields({
   onChange,
   integerInputs,
   onIntegerInput,
+  showOptionBindings = true,
 }: {
   draft: ProductVersion;
+  showOptionBindings?: boolean;
   onChange: (draft: ProductVersion) => void;
   integerInputs: Readonly<Record<string, { readonly text: string; readonly valid: boolean }>>;
   onIntegerInput: (key: string, text: string, valid: boolean) => void;
@@ -134,6 +136,7 @@ export function ProductRecordedConfigurationFields({
             <select
               value={sku.lifecycle}
               aria-label={`SKU ${index + 1} Draft lifecycle`}
+              disabled
               onChange={(e) =>
                 changeSku(index, { lifecycle: e.currentTarget.value as ProductLifecycle })
               }
@@ -153,8 +156,8 @@ export function ProductRecordedConfigurationFields({
               inputMode="decimal"
               maxLength={64}
               required
+              readOnly
               aria-describedby="complete-draft-validation"
-              onChange={(e) => changeSku(index, { unitQuantity: e.currentTarget.value })}
             />
           </label>
         </div>
@@ -256,112 +259,116 @@ export function ProductRecordedConfigurationFields({
           ))}
         </div>
       ))}
-      <h4>Recorded Option configuration</h4>
-      <p>
-        Existing Option identities and pricing, condition and conflict references remain recorded.
-        Resolution policy is a Draft intent, not proof of a current published version.
-      </p>
-      {draft.optionBindings.map((binding, index) => (
-        <div key={binding.bindingReference}>
-          <h5>Option binding {index + 1}</h5>
-          <label>
-            Option binding {index + 1} purpose
-            <input
-              value={binding.purpose}
-              maxLength={64}
-              required
-              onChange={(e) => changeBinding(index, { purpose: e.currentTarget.value })}
-            />
-          </label>
-          <IntegerField
-            id={`recorded-option-${index}-min`}
-            label={`Option binding ${index + 1} minimum override`}
-            nullable
-            onChange={(value) => changeBinding(index, { minimumSelectionOverride: value })}
-            text={
-              integerInputs[`${index}-min`]?.text ??
-              (binding.minimumSelectionOverride === null
-                ? ""
-                : String(binding.minimumSelectionOverride))
-            }
-            onInput={(text, valid) => onIntegerInput(`${index}-min`, text, valid)}
-          />
-          <IntegerField
-            id={`recorded-option-${index}-max`}
-            label={`Option binding ${index + 1} maximum override`}
-            nullable
-            onChange={(value) => changeBinding(index, { maximumSelectionOverride: value })}
-            text={
-              integerInputs[`${index}-max`]?.text ??
-              (binding.maximumSelectionOverride === null
-                ? ""
-                : String(binding.maximumSelectionOverride))
-            }
-            onInput={(text, valid) => onIntegerInput(`${index}-max`, text, valid)}
-          />
-          {binding.defaultSelections.map((selection, si) => (
-            <IntegerField
-              key={selection.optionReference}
-              id={`recorded-option-${index}-default-${si}`}
-              label={`Option binding ${index + 1} default ${si + 1} quantity`}
-              positive
-              onChange={(value) => {
-                if (value !== null)
-                  changeBinding(index, {
-                    defaultSelections: binding.defaultSelections.map((s, i) =>
-                      i === si ? { ...s, quantity: value } : s,
-                    ),
-                  });
-              }}
-              text={integerInputs[`${index}-default-${si}`]?.text ?? String(selection.quantity)}
-              onInput={(text, valid) => onIntegerInput(`${index}-default-${si}`, text, valid)}
-            />
-          ))}
-          <label>
-            Option binding {index + 1} allow Store override
-            <input
-              type="checkbox"
-              checked={binding.storeOverrideAllowed}
-              onChange={(e) =>
-                changeBinding(index, { storeOverrideAllowed: e.currentTarget.checked })
-              }
-            />
-          </label>
-          {content.optionRules
-            .filter((rule) => rule.bindingReference === binding.bindingReference)
-            .map((rule) => (
-              <label key={rule.bindingReference}>
-                Option binding {index + 1} version resolution
-                <select
-                  value={rule.versionResolution}
-                  aria-label={`Option binding ${index + 1} version resolution`}
-                  onChange={(e) =>
-                    onChange({
-                      ...draft,
-                      editorContent: {
-                        ...content,
-                        optionRules: content.optionRules.map((r) =>
-                          r.bindingReference === binding.bindingReference
-                            ? {
-                                ...r,
-                                versionResolution:
-                                  e.currentTarget.value === "Pinned"
-                                    ? "Pinned"
-                                    : "CurrentPublished",
-                              }
-                            : r,
-                        ),
-                      },
-                    })
-                  }
-                >
-                  <option>Pinned</option>
-                  <option>CurrentPublished</option>
-                </select>
+      {showOptionBindings && (
+        <>
+          <h4>Recorded Option configuration</h4>
+          <p>
+            Existing Option identities and pricing, condition and conflict references remain
+            recorded. Resolution policy is a Draft intent, not proof of a current published version.
+          </p>
+          {draft.optionBindings.map((binding, index) => (
+            <div key={binding.bindingReference}>
+              <h5>Option binding {index + 1}</h5>
+              <label>
+                Option binding {index + 1} purpose
+                <input
+                  value={binding.purpose}
+                  maxLength={64}
+                  required
+                  onChange={(e) => changeBinding(index, { purpose: e.currentTarget.value })}
+                />
               </label>
-            ))}
-        </div>
-      ))}
+              <IntegerField
+                id={`recorded-option-${index}-min`}
+                label={`Option binding ${index + 1} minimum override`}
+                nullable
+                onChange={(value) => changeBinding(index, { minimumSelectionOverride: value })}
+                text={
+                  integerInputs[`${index}-min`]?.text ??
+                  (binding.minimumSelectionOverride === null
+                    ? ""
+                    : String(binding.minimumSelectionOverride))
+                }
+                onInput={(text, valid) => onIntegerInput(`${index}-min`, text, valid)}
+              />
+              <IntegerField
+                id={`recorded-option-${index}-max`}
+                label={`Option binding ${index + 1} maximum override`}
+                nullable
+                onChange={(value) => changeBinding(index, { maximumSelectionOverride: value })}
+                text={
+                  integerInputs[`${index}-max`]?.text ??
+                  (binding.maximumSelectionOverride === null
+                    ? ""
+                    : String(binding.maximumSelectionOverride))
+                }
+                onInput={(text, valid) => onIntegerInput(`${index}-max`, text, valid)}
+              />
+              {binding.defaultSelections.map((selection, si) => (
+                <IntegerField
+                  key={selection.optionReference}
+                  id={`recorded-option-${index}-default-${si}`}
+                  label={`Option binding ${index + 1} default ${si + 1} quantity`}
+                  positive
+                  onChange={(value) => {
+                    if (value !== null)
+                      changeBinding(index, {
+                        defaultSelections: binding.defaultSelections.map((s, i) =>
+                          i === si ? { ...s, quantity: value } : s,
+                        ),
+                      });
+                  }}
+                  text={integerInputs[`${index}-default-${si}`]?.text ?? String(selection.quantity)}
+                  onInput={(text, valid) => onIntegerInput(`${index}-default-${si}`, text, valid)}
+                />
+              ))}
+              <label>
+                Option binding {index + 1} allow Store override
+                <input
+                  type="checkbox"
+                  checked={binding.storeOverrideAllowed}
+                  onChange={(e) =>
+                    changeBinding(index, { storeOverrideAllowed: e.currentTarget.checked })
+                  }
+                />
+              </label>
+              {content.optionRules
+                .filter((rule) => rule.bindingReference === binding.bindingReference)
+                .map((rule) => (
+                  <label key={rule.bindingReference}>
+                    Option binding {index + 1} version resolution
+                    <select
+                      value={rule.versionResolution}
+                      aria-label={`Option binding ${index + 1} version resolution`}
+                      onChange={(e) =>
+                        onChange({
+                          ...draft,
+                          editorContent: {
+                            ...content,
+                            optionRules: content.optionRules.map((r) =>
+                              r.bindingReference === binding.bindingReference
+                                ? {
+                                    ...r,
+                                    versionResolution:
+                                      e.currentTarget.value === "Pinned"
+                                        ? "Pinned"
+                                        : "CurrentPublished",
+                                  }
+                                : r,
+                            ),
+                          },
+                        })
+                      }
+                    >
+                      <option>Pinned</option>
+                      <option>CurrentPublished</option>
+                    </select>
+                  </label>
+                ))}
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

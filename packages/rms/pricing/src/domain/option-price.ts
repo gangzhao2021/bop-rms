@@ -294,3 +294,58 @@ export function resolveOptionPrice(
     return invalid();
   }
 }
+
+/** Checks all current Published heads before a new head is installed. The owning
+ * writer supplies a complete serialized read; this pure check is not authority. */
+export function assertOptionPricePublicationUnambiguous(
+  candidateValue: OptionPriceRuleSnapshot,
+  currentValues: readonly OptionPriceRuleSnapshot[],
+): void {
+  try {
+    const candidate = createOptionPriceRuleSnapshot(candidateValue);
+    if (candidate.lifecycle !== "Published") return invalid();
+    if (
+      !Array.isArray(currentValues) ||
+      Object.getPrototypeOf(currentValues) !== Array.prototype ||
+      currentValues.length > 1000 ||
+      Reflect.ownKeys(currentValues).length !== currentValues.length + 1
+    )
+      return invalid();
+    const priority = (rule: OptionPriceRuleSnapshot) =>
+      ({ Store: 1, StoreGroup: 3, Region: 5, Brand: 7 })[rule.scopeKind] +
+      (rule.channelCode === null && rule.orderType === null ? 1 : 0);
+    const overlap = (a: string | null, b: string | null) => a === null || b === null || a === b;
+    const ids = new Set<string>();
+    for (let index = 0; index < currentValues.length; index++) {
+      const descriptor = Object.getOwnPropertyDescriptor(currentValues, String(index));
+      if (!descriptor?.enumerable || !("value" in descriptor)) return invalid();
+      const current = createOptionPriceRuleSnapshot(descriptor.value);
+      if (ids.has(current.ruleReference)) throw new OptionPriceError("OPTION_PRICE_CONFLICT");
+      ids.add(current.ruleReference);
+      if (
+        current.lifecycle !== "Published" ||
+        current.ruleReference === candidate.ruleReference ||
+        current.brandReference !== candidate.brandReference ||
+        current.bindingReference !== candidate.bindingReference ||
+        current.optionReference !== candidate.optionReference ||
+        current.scopeKind !== candidate.scopeKind ||
+        current.scopeReference !== candidate.scopeReference ||
+        priority(current) !== priority(candidate) ||
+        !overlap(current.skuReference, candidate.skuReference) ||
+        !overlap(current.channelCode, candidate.channelCode) ||
+        !overlap(current.orderType, candidate.orderType)
+      )
+        continue;
+      const a = candidate.effectivePeriod,
+        b = current.effectivePeriod;
+      if (
+        (a.effectiveUntil === null || b.effectiveFrom.instant < a.effectiveUntil.instant) &&
+        (b.effectiveUntil === null || a.effectiveFrom.instant < b.effectiveUntil.instant)
+      )
+        throw new OptionPriceError("OPTION_PRICE_CONFLICT");
+    }
+  } catch (error) {
+    if (error instanceof OptionPriceError) throw error;
+    return invalid();
+  }
+}

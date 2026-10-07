@@ -1,7 +1,11 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { CatalogError, parseProductAggregate, productEditorContentFields } from "@rms/catalog";
-import { createMerchantProductEditorPinnedOptionAuthority as create } from "./merchant-product-editor-pinned-option-authority.js";
+import {
+  createMerchantProductEditorPinnedOptionAuthority as create,
+  type CurrentPublishedProductOptionBindingPort,
+  type CurrentPublishedProductOptionBindingAssessment,
+} from "./merchant-product-editor-pinned-option-authority.js";
 import { remainingProductEditorVariantReferenceChecks } from "./merchant-product-editor-variant-content-authority.js";
 const mock = vi.hoisted(() => ({ run: vi.fn(), options: vi.fn() }));
 vi.mock("./frozen-full-option-binding-rule-source.js", () => ({
@@ -96,7 +100,13 @@ function fixture(count = 2) {
     remainingAuthority: remaining,
     optionAuthority: { holdUntilTransactionCompletes: held },
   };
-  const sourceFor = (binding: (typeof bindings)[number]) => ({
+  const sourceFor = (
+    binding: Readonly<{
+      bindingReference: string;
+      optionSetReference: string;
+      optionSetVersionReference: string;
+    }>,
+  ) => ({
     profile: "FrozenFullOptionBindingRuleAssessmentV1" as const,
     tenantReference: id(10),
     brandReference: id(2),
@@ -193,7 +203,7 @@ it("Read retains fields without historical source acquisition or qualification",
     expect.objectContaining({ requiredReferenceChecks: [] }),
   );
 });
-it("CurrentPublished refuses before frozen acquisition", async () => {
+it("CurrentPublished without its actual source refuses before frozen acquisition", async () => {
   const f = fixture();
   const value = f.write();
   const editor = f.aggregate.draft.editorContent;
@@ -217,6 +227,172 @@ it("CurrentPublished refuses before frozen acquisition", async () => {
     }),
   ).rejects.toMatchObject(unavailable);
   expect(mock.run).not.toHaveBeenCalled();
+});
+
+function currentInput(f: ReturnType<typeof fixture>, indices: readonly number[]) {
+  const editor = f.aggregate.draft.editorContent;
+  if (!editor) throw new Error("synthetic complete editor required");
+  return {
+    ...f.write(),
+    aggregate: parseProductAggregate({
+      ...f.aggregate,
+      draft: {
+        ...f.aggregate.draft,
+        editorContent: {
+          ...editor,
+          optionRules: editor.optionRules.map((rule, index) => ({
+            ...rule,
+            versionResolution: indices.includes(index) ? "CurrentPublished" : "Pinned",
+          })),
+        },
+      },
+    }),
+  };
+}
+function currentPort(
+  f: ReturnType<typeof fixture>,
+  transform: (
+    assessment: CurrentPublishedProductOptionBindingAssessment,
+  ) => CurrentPublishedProductOptionBindingAssessment = (value) => value,
+) {
+  const port: CurrentPublishedProductOptionBindingPort = {
+    async withBindingAssessment(tx, binding, work) {
+      expect(tx).toBe(f.tx);
+      f.order.push("current-enter" + binding.sortOrder);
+      const assessment: CurrentPublishedProductOptionBindingAssessment = {
+        ...f.sourceFor(binding),
+        profile: "CurrentPublishedProductOptionBindingAssessmentV1",
+        sourceAuthority: "CurrentPublishingReleaseAndFrozenContent",
+      };
+      const result = await work(transform(assessment));
+      f.order.push("current-exit" + binding.sortOrder);
+      return result;
+    },
+  };
+  return port;
+}
+it("dispatches each actual resolution mode around the same mandatory remaining holder", async () => {
+  const f = fixture();
+  const authority = create({ ...f.options, currentPublished: currentPort(f) });
+  await authority(f.tx, currentInput(f, [1]));
+  expect(f.order).toEqual(["enter0", "current-enter1", "remaining", "current-exit1", "exit0"]);
+  expect(mock.run).toHaveBeenCalledOnce();
+  expect(f.remaining).toHaveBeenCalledOnce();
+  expect(
+    f.remaining.mock.calls[0]?.[1].aggregate.draft.editorContent?.optionRules[1]?.versionResolution,
+  ).toBe("CurrentPublished");
+});
+it("CurrentPublished Read remains an authorized full-field read without reacquiring source qualification", async () => {
+  const f = fixture(1),
+    port = currentPort(f);
+  const spy = vi.spyOn(port, "withBindingAssessment");
+  const authority = create({ ...f.options, currentPublished: port });
+  await authority(f.tx, { ...currentInput(f, [0]), mode: "Read", requiredReferenceChecks: [] });
+  expect(spy).not.toHaveBeenCalled();
+  expect(mock.run).not.toHaveBeenCalled();
+  expect(f.remaining).toHaveBeenCalledOnce();
+});
+it.each(["version", "source", "profile", "lease", "getter"])(
+  "CurrentPublished %s mismatch cannot become a Frozen or silently upgraded proof",
+  async (mode) => {
+    const f = fixture(1);
+    const authority = create({
+      ...f.options,
+      currentPublished: currentPort(f, (assessment) => {
+        if (mode === "getter") {
+          const packet = { ...assessment };
+          Object.defineProperty(packet, "graphDigest", {
+            enumerable: true,
+            get: () => {
+              throw new Error("must not invoke");
+            },
+          });
+          return packet;
+        }
+        if (mode === "profile") {
+          const packet = { ...assessment };
+          Object.defineProperty(packet, "profile", {
+            enumerable: true,
+            value: "FrozenFullOptionBindingRuleAssessmentV1",
+          });
+          return packet;
+        }
+        if (mode === "source") {
+          const packet = { ...assessment };
+          Object.defineProperty(packet, "sourceAuthority", {
+            enumerable: true,
+            value: "CallerClaimed",
+          });
+          return packet;
+        }
+        return {
+          ...assessment,
+          ...(mode === "version" ? { rootVersionReference: id(999) } : {}),
+          ...(mode === "lease" ? { validUntil: plus(5001) } : {}),
+        };
+      }),
+    });
+    await expect(authority(f.tx, currentInput(f, [0]))).rejects.toMatchObject(unavailable);
+    expect(mock.run).not.toHaveBeenCalled();
+    expect(f.remaining).not.toHaveBeenCalled();
+  },
+);
+it("CurrentPublished shortened lease and remaining denial retain the original request barrier", async () => {
+  const f = fixture(1);
+  const authority = create({
+    ...f.options,
+    currentPublished: currentPort(f, (assessment) => ({ ...assessment, validUntil: plus(1000) })),
+  });
+  f.remaining.mockImplementation(async () => {
+    f.clock(plus(1000));
+  });
+  await expect(authority(f.tx, currentInput(f, [0]))).rejects.toMatchObject(unavailable);
+  const g = fixture(1);
+  const denied = create({ ...g.options, currentPublished: currentPort(g) });
+  g.remaining.mockImplementation(async () => {
+    throw new CatalogError("CATALOG_PERMISSION_DENIED");
+  });
+  await expect(denied(g.tx, currentInput(g, [0]))).rejects.toMatchObject({
+    code: "CATALOG_PERMISSION_DENIED",
+  });
+  expect(g.remaining).toHaveBeenCalledOnce();
+});
+it("CurrentPublished reentry poisons the outer invocation and changed query refuses", async () => {
+  const f = fixture(1),
+    port = currentPort(f);
+  const authority = create({ ...f.options, currentPublished: port });
+  f.remaining.mockImplementation(async () => {
+    await expect(authority(f.tx, currentInput(f, [0]))).rejects.toMatchObject(unavailable);
+  });
+  await expect(authority(f.tx, currentInput(f, [0]))).rejects.toMatchObject(unavailable);
+  const g = fixture(1),
+    changed = create({ ...g.options, currentPublished: currentPort(g) });
+  g.remaining.mockImplementation(async () => {
+    g.tx.query = vi.fn(async () => ({ rows: [] }));
+  });
+  await expect(changed(g.tx, currentInput(g, [0]))).rejects.toMatchObject(unavailable);
+});
+it("CurrentPublished port replacement refuses and late owner denial cannot be mistaken for success", async () => {
+  const f = fixture(1),
+    port = currentPort(f);
+  const authority = create({ ...f.options, currentPublished: port });
+  port.withBindingAssessment = async () => {
+    throw new Error("rebound source must not run");
+  };
+  await expect(authority(f.tx, currentInput(f, [0]))).rejects.toMatchObject(unavailable);
+  expect(f.remaining).not.toHaveBeenCalled();
+  const g = fixture(1),
+    late = currentPort(g),
+    original = late.withBindingAssessment.bind(late);
+  late.withBindingAssessment = async (tx, binding, work) => {
+    await original(tx, binding, work);
+    throw new CatalogError("CATALOG_PERMISSION_DENIED");
+  };
+  const denied = create({ ...g.options, currentPublished: late });
+  await expect(denied(g.tx, currentInput(g, [0]))).rejects.toMatchObject({
+    code: "CATALOG_PERMISSION_DENIED",
+  });
+  expect(g.remaining).toHaveBeenCalledOnce();
 });
 it("33 Bindings refuse without truncation", async () => {
   const f = fixture(33);
@@ -369,4 +545,52 @@ it("accessor input refuses without invoking supplied getter", async () => {
   Object.defineProperty(value, "aggregate", { enumerable: true, get: getter });
   await expect(f.authority(f.tx, value)).rejects.toMatchObject({ code: "CATALOG_INPUT_INVALID" });
   expect(getter).not.toHaveBeenCalled();
+});
+
+it("Create keeps explicit original purpose through actual owning content and remaining holder", async () => {
+  const f = fixture(),
+    input = {
+      ...f.write(),
+      purposeCode: "CATALOG_PRODUCT_CREATE" as const,
+      aggregate: parseProductAggregate({
+        ...f.aggregate,
+        aggregateVersion: 1,
+        draft: {
+          ...f.aggregate.draft,
+          optionBindings: [],
+          editorContent: { ...f.aggregate.draft.editorContent, optionRules: [] },
+        },
+      }),
+    };
+  await f.authority(f.tx, input);
+  expect(f.remaining).toHaveBeenCalledWith(
+    f.tx,
+    expect.objectContaining({
+      purposeCode: "CATALOG_PRODUCT_CREATE",
+      mode: "DraftWrite",
+      aggregate: input.aggregate,
+    }),
+  );
+});
+it.each(["Read", "root"])("Create refuses %s without new source admission", async (kind) => {
+  const f = fixture(),
+    input = {
+      ...f.write(),
+      purposeCode: "CATALOG_PRODUCT_CREATE" as const,
+      aggregate: parseProductAggregate({
+        ...f.aggregate,
+        aggregateVersion: 1,
+        draft: {
+          ...f.aggregate.draft,
+          optionBindings: [],
+          editorContent: { ...f.aggregate.draft.editorContent, optionRules: [] },
+        },
+      }),
+    };
+  const invalid =
+    kind === "Read"
+      ? { ...input, mode: "Read" as const, requiredReferenceChecks: [] }
+      : { ...input, aggregate: parseProductAggregate({ ...input.aggregate, aggregateVersion: 2 }) };
+  await expect(f.authority(f.tx, invalid)).rejects.toMatchObject(unavailable);
+  expect(f.remaining).not.toHaveBeenCalled();
 });

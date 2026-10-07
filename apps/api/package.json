@@ -30,6 +30,7 @@
     "@bop/eventing": "workspace:*",
     "@bop/feature-control": "workspace:*",
     "@bop/identity": "workspace:*",
+    "@bop/media": "workspace:*",
     "@bop/membership": "workspace:*",
     "@bop/operating-entity": "workspace:*",
     "@bop/permission": "workspace:*",

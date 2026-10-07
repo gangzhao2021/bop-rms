@@ -7,21 +7,41 @@ import {
   parseCatalogReference,
   parseProductAggregate,
   productEditorContentFields,
+  type ProductOptionBinding,
 } from "@rms/catalog";
-import { createFrozenFullOptionBindingRuleSource } from "./frozen-full-option-binding-rule-source.js";
+import {
+  createFrozenFullOptionBindingRuleSource,
+  type FrozenFullOptionBindingRuleAssessment,
+} from "./frozen-full-option-binding-rule-source.js";
 import {
   remainingProductEditorVariantReferenceChecks,
   type MerchantProductEditorVariantRemainingAuthority,
 } from "./merchant-product-editor-variant-content-authority.js";
 type OptionOptions = Parameters<typeof createFrozenFullOptionBindingRuleSource>[0];
-/** Pinned historical mechanical rules only; current Published and the remaining
- * complete field/reference checks remain independent mandatory owning holders. */
+export interface CurrentPublishedProductOptionBindingAssessment extends Omit<
+  FrozenFullOptionBindingRuleAssessment,
+  "profile"
+> {
+  readonly profile: "CurrentPublishedProductOptionBindingAssessmentV1";
+  readonly sourceAuthority: "CurrentPublishingReleaseAndFrozenContent";
+}
+export interface CurrentPublishedProductOptionBindingPort {
+  withBindingAssessment<T>(
+    tx: Parameters<OptionOptions["authority"]["holdUntilTransactionCompletes"]>[0],
+    binding: ProductOptionBinding,
+    work: (assessment: CurrentPublishedProductOptionBindingAssessment) => Promise<T>,
+  ): Promise<T>;
+}
+/** Resolve each original binding through its selected owning source. Pinned
+ * history and actual Current Published retain distinct provenance; complete
+ * fields and remaining reference checks stay independently mandatory. */
 export function createMerchantProductEditorPinnedOptionAuthority(options: {
   readonly tenantReference: string;
   readonly brandReference: string;
   readonly actorReference: string;
   readonly optionAuthority: OptionOptions["authority"];
   readonly remainingAuthority: MerchantProductEditorVariantRemainingAuthority;
+  readonly currentPublished?: CurrentPublishedProductOptionBindingPort;
   readonly clock: { now(): string };
 }): MerchantProductEditorVariantRemainingAuthority {
   const fail = (): never => {
@@ -30,7 +50,9 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
   if (
     typeof options.optionAuthority?.holdUntilTransactionCompletes !== "function" ||
     typeof options.remainingAuthority !== "function" ||
-    typeof options.clock?.now !== "function"
+    typeof options.clock?.now !== "function" ||
+    (options.currentPublished !== undefined &&
+      typeof options.currentPublished?.withBindingAssessment !== "function")
   )
     return fail();
   const tenantReference = parseCatalogReference(options.tenantReference),
@@ -41,11 +63,25 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
       options.optionAuthority,
     ),
     remainingHold = options.remainingAuthority,
+    currentPublishedPort = options.currentPublished?.withBindingAssessment,
+    currentPublished = currentPublishedPort?.bind(options.currentPublished),
+    active = new WeakSet<object>(),
+    queries = new WeakMap<object, unknown>(),
     failed = new WeakSet<object>();
   return async (tx, value) => {
     try {
-      if (!tx || typeof tx !== "object" || typeof tx.query !== "function" || failed.has(tx))
+      if (
+        !tx ||
+        typeof tx !== "object" ||
+        typeof tx.query !== "function" ||
+        failed.has(tx) ||
+        active.has(tx)
+      )
         return fail();
+      const query = tx.query;
+      if (queries.has(tx) && queries.get(tx) !== query) return fail();
+      queries.set(tx, query);
+      active.add(tx);
       const raw = readClosedRecord(copyCategoryPersistenceValue(value), [
           "tenantReference",
           "brandReference",
@@ -74,7 +110,13 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
         raw.actorReference !== actorReference ||
         raw.permission !== "catalog.manage" ||
         raw.owningAction !== "catalog.product.manage" ||
-        raw.purposeCode !== "CATALOG_PRODUCT_DRAFT_REPLACE" ||
+        (raw.purposeCode !== "CATALOG_PRODUCT_DRAFT_REPLACE" &&
+          raw.purposeCode !== "CATALOG_PRODUCT_CREATE") ||
+        (raw.purposeCode === "CATALOG_PRODUCT_CREATE" &&
+          (raw.mode !== "DraftWrite" ||
+            aggregate.aggregateVersion !== 1 ||
+            aggregate.lifecycle !== "Draft" ||
+            aggregate.draft.status !== "Draft")) ||
         Date.parse(validUntil) - Date.parse(observedAt) !== 5000 ||
         JSON.stringify(raw.requiredFields) !== JSON.stringify(productEditorContentFields) ||
         JSON.stringify(raw.requiredReferenceChecks) !==
@@ -95,7 +137,7 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
         operationReference: parseCatalogReference(raw.operationReference),
         permission: "catalog.manage" as const,
         owningAction: "catalog.product.manage" as const,
-        purposeCode: "CATALOG_PRODUCT_DRAFT_REPLACE" as const,
+        purposeCode: raw.purposeCode as "CATALOG_PRODUCT_DRAFT_REPLACE" | "CATALOG_PRODUCT_CREATE",
         observedAt,
         validUntil,
         mode: raw.mode,
@@ -108,7 +150,14 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
         latest = observedAt;
       const check = () => {
         const at = parseCatalogInstant(now());
-        if (failed.has(tx) || at < latest || at >= deadline) return fail();
+        if (
+          failed.has(tx) ||
+          tx.query !== query ||
+          options.currentPublished?.withBindingAssessment !== currentPublishedPort ||
+          at < latest ||
+          at >= deadline
+        )
+          return fail();
       };
       const holdRemaining = async () => {
         check();
@@ -126,7 +175,7 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
           (binding) =>
             aggregate.draft.editorContent?.optionRules.find(
               (rule) => rule.bindingReference === binding.bindingReference,
-            )?.versionResolution !== "Pinned",
+            ) === undefined,
         )
       )
         return fail();
@@ -180,7 +229,56 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
           completed = true;
           return;
         }
-        const result = await source.withPinnedAssessment(tx, binding, async (assessment) => {
+        const rule = aggregate.draft.editorContent?.optionRules.find(
+          (candidate) => candidate.bindingReference === binding.bindingReference,
+        );
+        if (!rule) return fail();
+        const current = rule.versionResolution === "CurrentPublished";
+        if (current && currentPublished === undefined) return fail();
+        const work = async (
+          assessment:
+            FrozenFullOptionBindingRuleAssessment | CurrentPublishedProductOptionBindingAssessment,
+        ) => {
+          if (current) {
+            try {
+              const packet = readClosedRecord(copyCategoryPersistenceValue(assessment), [
+                "profile",
+                "tenantReference",
+                "brandReference",
+                "bindingReference",
+                "bindingDigest",
+                "rootOptionSetReference",
+                "rootVersionReference",
+                "graphDigest",
+                "sourceRecords",
+                "rules",
+                "observedAt",
+                "validUntil",
+                "publishValidation",
+                "referenceEligibility",
+                "eligibility",
+                "digest",
+                "sourceAuthority",
+              ]);
+              const rules = readClosedRecord(packet.rules, ["status", "reason", "searchNodes"]);
+              if (
+                !Array.isArray(packet.sourceRecords) ||
+                packet.sourceRecords.length > 32 ||
+                [packet.bindingDigest, packet.graphDigest, packet.digest].some(
+                  (digest) => typeof digest !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(digest),
+                ) ||
+                typeof rules.searchNodes !== "number" ||
+                !Number.isSafeInteger(rules.searchNodes) ||
+                rules.searchNodes < 0 ||
+                rules.searchNodes > 65536 ||
+                (rules.reason !== null &&
+                  (typeof rules.reason !== "string" || rules.reason.length > 4096))
+              )
+                return fail();
+            } catch {
+              return fail();
+            }
+          }
           calls[index] = (calls[index] ?? 0) + 1;
           const sourceAt = parseCatalogInstant(assessment.observedAt),
             sourceUntil = parseCatalogInstant(assessment.validUntil);
@@ -188,7 +286,13 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
           if (sourceAt < latest || sourceAt > parseCatalogInstant(now())) return fail();
           if (
             calls[index] !== 1 ||
-            assessment.profile !== "FrozenFullOptionBindingRuleAssessmentV1" ||
+            assessment.profile !==
+              (current
+                ? "CurrentPublishedProductOptionBindingAssessmentV1"
+                : "FrozenFullOptionBindingRuleAssessmentV1") ||
+            (current &&
+              (!("sourceAuthority" in assessment) ||
+                assessment.sourceAuthority !== "CurrentPublishingReleaseAndFrozenContent")) ||
             assessment.tenantReference !== tenantReference ||
             assessment.brandReference !== brandReference ||
             assessment.bindingReference !== binding.bindingReference ||
@@ -220,7 +324,12 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
           if (assessment.rules.status !== "Satisfiable") return fail();
           await acquire(index + 1);
           check();
-        });
+        };
+        const result = current
+          ? currentPublished === undefined
+            ? fail()
+            : await currentPublished(tx, binding, work)
+          : await source.withPinnedAssessment(tx, binding, work);
         if (calls[index] !== 1 || result !== undefined) return fail();
         check();
       };
@@ -238,6 +347,8 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
       if (tx && typeof tx === "object") failed.add(tx);
       if (error instanceof CatalogError) throw error;
       return fail();
+    } finally {
+      if (tx && typeof tx === "object") active.delete(tx);
     }
   };
 }

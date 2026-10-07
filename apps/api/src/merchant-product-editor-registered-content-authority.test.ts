@@ -366,7 +366,7 @@ it("captures configured collaborators before method rebound", async () => {
   await expect(f.authority(f.tx, f.input)).resolves.toBeUndefined();
   expect(f.registryHold).toHaveBeenCalledTimes(3);
 });
-it("outer complete guard rechecks actual registered definitions through final COMMIT hold", async () => {
+it("outer complete guard retains locked registry and rechecks current permission before COMMIT", async () => {
   const f = fixture(),
     checks: (() => Promise<void>)[] = [];
   const guard = createMerchantProductEditorContentAuthority({
@@ -398,7 +398,19 @@ it("outer complete guard rechecks actual registered definitions through final CO
   tag.lifecycle = "Inactive";
   const finish = checks[0];
   if (!finish) throw new Error("Missing synthetic final guard");
-  await expect(finish()).rejects.toMatchObject({ code: "CATALOG_LIFECYCLE_CONFLICT" });
+  const queryCount = f.query.mock.calls.length;
+  await expect(finish()).resolves.toBeUndefined();
+  expect(f.query).toHaveBeenCalledTimes(queryCount);
+  expect(f.registryHold).toHaveBeenLastCalledWith(
+    f.tx,
+    expect.objectContaining({
+      registry: expect.objectContaining({
+        tags: [expect.objectContaining({ lifecycle: "Active" })],
+      }),
+    }),
+  );
+  f.registryHold.mockRejectedValue(new CatalogError("CATALOG_PERMISSION_DENIED"));
+  await expect(finish()).rejects.toMatchObject({ code: "CATALOG_PERMISSION_DENIED" });
   expect(() => guard.assertCurrent()).toThrow(CatalogError);
 });
 
@@ -440,4 +452,102 @@ it("empty configured references still require an actual current registry", async
   });
   await expect(f.authority(f.tx, { ...f.input, aggregate })).rejects.toMatchObject(unavailable);
   expect(f.remaining).not.toHaveBeenCalled();
+});
+
+it("Create keeps explicit original purpose through actual owning content and remaining holder", async () => {
+  const f = fixture(),
+    input = {
+      ...f.input,
+      purposeCode: "CATALOG_PRODUCT_CREATE" as const,
+      aggregate: parseProductAggregate({ ...f.aggregate, aggregateVersion: 1 }),
+    };
+  await f.authority(f.tx, input);
+  expect(f.remaining).toHaveBeenCalledWith(
+    f.tx,
+    expect.objectContaining({
+      purposeCode: "CATALOG_PRODUCT_CREATE",
+      mode: "DraftWrite",
+      aggregate: input.aggregate,
+    }),
+  );
+});
+it.each(["Read", "root"])("Create refuses %s without new source admission", async (kind) => {
+  const f = fixture(),
+    input = {
+      ...f.input,
+      purposeCode: "CATALOG_PRODUCT_CREATE" as const,
+      aggregate: parseProductAggregate({ ...f.aggregate, aggregateVersion: 1 }),
+    };
+  const invalid =
+    kind === "Read"
+      ? { ...input, mode: "Read" as const, requiredReferenceChecks: [] }
+      : { ...input, aggregate: parseProductAggregate({ ...input.aggregate, aggregateVersion: 2 }) };
+  await expect(f.authority(f.tx, invalid)).rejects.toMatchObject(unavailable);
+  expect(f.remaining).not.toHaveBeenCalled();
+});
+
+it("exact repeated Write retains immutable owning proof without repeating history SQL", async () => {
+  const f = fixture();
+  await f.authority(f.tx, f.input);
+  const queryCount = f.query.mock.calls.length;
+  f.query.mockRejectedValue(new Error("History must not be read again"));
+  const tag = f.registry.tags[0];
+  if (!tag) throw new Error("Missing synthetic tag");
+  tag.lifecycle = "Inactive";
+  await expect(f.authority(f.tx, f.input)).resolves.toBeUndefined();
+  expect(f.query).toHaveBeenCalledTimes(queryCount);
+  expect(f.remaining).toHaveBeenCalledTimes(2);
+  expect(f.registryHold).toHaveBeenCalledTimes(5);
+  const request = f.registryHold.mock.calls.at(-1)?.[1];
+  expect(request?.registry?.tags[0]?.lifecycle).toBe("Active");
+  expect(Object.isFrozen(request?.registry)).toBe(true);
+});
+it.each(["operationReference", "sessionReference", "aggregate", "query"])(
+  "retained Write refuses changed %s before remaining acceptance",
+  async (field) => {
+    const f = fixture();
+    await f.authority(f.tx, f.input);
+    const candidate =
+      field === "aggregate"
+        ? {
+            ...f.input,
+            aggregate: parseProductAggregate({ ...f.aggregate, internalCode: "CHANGED" }),
+          }
+        : field === "query"
+          ? f.input
+          : { ...f.input, [field]: id(99) };
+    if (field === "query") f.tx.query = vi.fn(async () => ({ rows: [] })) as typeof f.tx.query;
+    await expect(f.authority(f.tx, candidate)).rejects.toMatchObject(unavailable);
+    expect(f.remaining).toHaveBeenCalledOnce();
+  },
+);
+it("retained source never caches remaining or registry permission grants", async () => {
+  const f = fixture();
+  await f.authority(f.tx, f.input);
+  f.remaining.mockRejectedValue(new CatalogError("CATALOG_PERMISSION_DENIED"));
+  await expect(f.authority(f.tx, f.input)).rejects.toMatchObject({
+    code: "CATALOG_PERMISSION_DENIED",
+  });
+  f.remaining.mockResolvedValue(undefined);
+  f.registryHold.mockResolvedValue("Allowed" as never);
+  await expect(f.authority(f.tx, f.input)).rejects.toMatchObject(unavailable);
+  expect(f.remaining).toHaveBeenCalledTimes(2);
+});
+it.each(["2026-09-30T22:59:59.999Z", "2026-09-30T23:00:05.000Z"])(
+  "retained Write preserves original exclusive deadline at %s",
+  async (clock) => {
+    const f = fixture();
+    await f.authority(f.tx, f.input);
+    f.clock(clock);
+    await expect(f.authority(f.tx, f.input)).rejects.toMatchObject(unavailable);
+    expect(f.remaining).toHaveBeenCalledOnce();
+  },
+);
+it("a different transaction must obtain its own actual Registry source lock", async () => {
+  const f = fixture();
+  await f.authority(f.tx, f.input);
+  const queryCount = f.query.mock.calls.length;
+  await expect(f.authority({ query: f.query } as typeof f.tx, f.input)).resolves.toBeUndefined();
+  expect(f.query.mock.calls.length).toBeGreaterThan(queryCount);
+  expect(f.registryHold).toHaveBeenCalledTimes(6);
 });

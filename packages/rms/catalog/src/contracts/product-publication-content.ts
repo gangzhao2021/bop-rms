@@ -11,6 +11,7 @@ import {
 } from "./product.js";
 import { copyCategoryPersistenceValue } from "./category-persistence.js";
 import { parseProductPublicationVersion } from "./product-publication.js";
+import { parseProductPublicationVersionV2 } from "./product-publication-v2.js";
 import { planProductPublicationSuccessor } from "../domain/product-publication-successor.js";
 import type { RecordedProductReferenceConfiguration } from "./product-reference-history-source.js";
 export interface CatalogProductPublicationContent {
@@ -79,8 +80,23 @@ export function createCatalogProductPublicationMaterialization(
   sourceValue: unknown,
   publicationValue: unknown,
 ): { readonly content: CatalogProductPublicationContent; readonly successor: ProductAggregate } {
+  return materializePublication(sourceValue, publicationValue, parseProductPublicationVersion);
+}
+/** Explicit V2 entry; the shared materializer retains the parsed execution time
+ * and full operation identity. It never invokes a V1 writer. */
+export function createCatalogProductPublicationMaterializationV2(
+  sourceValue: unknown,
+  publicationValue: unknown,
+): { readonly content: CatalogProductPublicationContent; readonly successor: ProductAggregate } {
+  return materializePublication(sourceValue, publicationValue, parseProductPublicationVersionV2);
+}
+function materializePublication(
+  sourceValue: unknown,
+  publicationValue: unknown,
+  parsePublication: typeof parseProductPublicationVersion | typeof parseProductPublicationVersionV2,
+): { readonly content: CatalogProductPublicationContent; readonly successor: ProductAggregate } {
   const source = parseProductAggregate(copyCategoryPersistenceValue(sourceValue)),
-    publication = parseProductPublicationVersion(publicationValue),
+    publication = parsePublication(publicationValue),
     identity = deriveCatalogProductPublicationContentIdentity(source);
   if (
     publication.contentDigest !== identity.contentDigest ||

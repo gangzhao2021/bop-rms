@@ -26,7 +26,7 @@ export function assessCurrentRecipeIngredientInventoryReferences(
     Date.parse(now) - Date.parse(source.observedAt) >= 5000 ||
     !Array.isArray(value) ||
     Object.getPrototypeOf(value) !== Array.prototype ||
-    value.length > 1000 ||
+    value.length > 4096 ||
     Reflect.ownKeys(value).length !== value.length + 1
   )
     return fail();

@@ -1,3 +1,8 @@
+import {
+  recipeProductPublicationReferenceRequestFieldsV2,
+  parseRecipeProductPublicationReferenceRequestV2,
+  type RecipeProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { parseRecipeReference, parseRecipeDigest } from "../domain/recipe.js";
 import { RecipeWorkflowError } from "../application/recipe-service.js";
@@ -64,6 +69,70 @@ export interface RecipeReferenceSourceRequest {
   readonly actorReference: string;
   readonly operationReference: string;
   readonly catalogIntentDigest: string;
+}
+/** Server-captured publication origin, never a replacement for the actual
+ * current owner clock, lease, permission or effective-period assessment. */
+export interface RecipeOptionPublicationOriginalClock {
+  readonly profile: "OptionPublicationOriginalClockV1";
+  readonly operationReference: string;
+  readonly catalogIntentDigest: string;
+  readonly observedAt: string;
+  readonly validUntil: string;
+}
+export function parseRecipeOptionPublicationOriginalClock(
+  value: unknown,
+): RecipeOptionPublicationOriginalClock {
+  try {
+    const r = exact(value, [
+      "profile",
+      "operationReference",
+      "catalogIntentDigest",
+      "observedAt",
+      "validUntil",
+    ]);
+    const observedAt = parseRecipeReferenceSourceInstant(r.observedAt),
+      validUntil = parseRecipeReferenceSourceInstant(r.validUntil);
+    if (
+      r.profile !== "OptionPublicationOriginalClockV1" ||
+      validUntil <= observedAt ||
+      Date.parse(validUntil) - Date.parse(observedAt) > 5000
+    )
+      return fail();
+    return Object.freeze({
+      profile: "OptionPublicationOriginalClockV1",
+      operationReference: parseRecipeReference(r.operationReference),
+      catalogIntentDigest: parseRecipeDigest(r.catalogIntentDigest),
+      observedAt,
+      validUntil,
+    });
+  } catch {
+    return fail();
+  }
+}
+/** Shared only by the fixed Option metadata/yield assessments. Other Recipe and
+ * legacy callers retain their future-only activation boundary. */
+export function validateRecipeOptionPublicationActivation(
+  request: RecipeReferenceSourceRequest,
+  now: string,
+  activationAt: string,
+  clockValue?: unknown,
+): RecipeOptionPublicationOriginalClock | undefined {
+  now = parseRecipeReferenceSourceInstant(now);
+  activationAt = parseRecipeReferenceSourceInstant(activationAt);
+  if (clockValue === undefined) {
+    if (activationAt < now) return fail();
+    return undefined;
+  }
+  const original = parseRecipeOptionPublicationOriginalClock(clockValue);
+  if (
+    original.operationReference !== request.operationReference ||
+    original.catalogIntentDigest !== request.catalogIntentDigest ||
+    now < original.observedAt ||
+    now >= original.validUntil ||
+    activationAt < original.observedAt
+  )
+    return fail();
+  return original;
 }
 export interface RecipeRootReference {
   readonly recipeReference: string;
@@ -218,7 +287,20 @@ export function buildRecipeReferenceSourceSnapshot(
 ): RecipeReferenceSourceSnapshot {
   try {
     const request = parseRecipeReferenceSourceRequest(input),
-      r = exact(value, ["generation", "bindingCount", "observedAt", "counts", ...families]),
+      { observedAt, ...graph } = recipeReferenceGraph(value, request.brandReference, now),
+      body = { request, profile: "BrandRecipeStoredReferencesV1" as const, ...graph };
+    return Object.freeze({
+      ...body,
+      observedAt,
+      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
+    });
+  } catch {
+    return fail();
+  }
+}
+function recipeReferenceGraph(value: unknown, expectedBrand: string, now: string) {
+  try {
+    const r = exact(value, ["generation", "bindingCount", "observedAt", "counts", ...families]),
       counts = exact(r.counts, families);
     const raw = Object.fromEntries(families.map((k) => [k, array(r[k])])) as Record<
       (typeof families)[number],
@@ -241,7 +323,7 @@ export function buildRecipeReferenceSourceSnapshot(
     const ref = parseRecipeReference,
       brand = (v: unknown) => {
         const b = ref(v);
-        return b === request.brandReference ? b : fail();
+        return b === expectedBrand ? b : fail();
       };
     const past = (v: unknown) => {
       const t = parseRecipeReferenceSourceInstant(v);
@@ -372,8 +454,6 @@ export function buildRecipeReferenceSourceSnapshot(
       }
     }
     const body = {
-      request,
-      profile: "BrandRecipeStoredReferencesV1" as const,
       coverage: "CompleteStoredReferences" as const,
       consistency: "StatementSnapshot" as const,
       applicability: "Unavailable" as const,
@@ -395,7 +475,6 @@ export function buildRecipeReferenceSourceSnapshot(
     return Object.freeze({
       ...body,
       observedAt,
-      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
     });
   } catch {
     return fail();
@@ -461,6 +540,7 @@ export function matchOptionDraftRecipeConsumptionMetadata(
   request: RecipeReferenceSourceRequest,
   nowInput: string,
   activationInput: string,
+  originalPublicationClockValue?: unknown,
 ) {
   try {
     const source = parseRecipeReferenceSourceSnapshot(rawSource, request, nowInput),
@@ -478,11 +558,16 @@ export function matchOptionDraftRecipeConsumptionMetadata(
       activationAt = parseRecipeReferenceSourceInstant(activationInput),
       brandReference = parseRecipeReference(r.brandReference),
       optionSetReference = parseRecipeReference(r.optionSetReference),
-      versionReference = parseRecipeReference(r.versionReference);
+      versionReference = parseRecipeReference(r.versionReference),
+      originalPublicationClock = validateRecipeOptionPublicationActivation(
+        request,
+        now,
+        activationAt,
+        originalPublicationClockValue,
+      );
     if (
       r.profile !== "CurrentFullOptionDraftConsumptionPinsV1" ||
-      brandReference !== request.brandReference ||
-      activationAt < now
+      brandReference !== request.brandReference
     )
       return fail();
     const pins = array(r.pins);
@@ -533,6 +618,7 @@ export function matchOptionDraftRecipeConsumptionMetadata(
       catalogIntentDigest: request.catalogIntentDigest,
       assessedAt: now,
       activationAt,
+      ...(originalPublicationClock === undefined ? {} : { originalPublicationClock }),
       matches: Object.freeze(matches),
       decision: matches.every((m) => m.status === "CurrentPublishedMetadata")
         ? ("PassForMetadata" as const)
@@ -545,6 +631,91 @@ export function matchOptionDraftRecipeConsumptionMetadata(
       eligibility: "NotEvaluated" as const,
     };
     return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+
+export const recipeProductPublicationReferenceSourceFieldsV2 = Object.freeze([
+  ...new Set([...recipeReferenceSourceFields, ...recipeProductPublicationReferenceRequestFieldsV2]),
+] as const);
+export interface RecipeProductPublicationReferenceSnapshotV2 extends Omit<
+  RecipeReferenceSourceSnapshot,
+  "request" | "profile"
+> {
+  readonly request: RecipeProductPublicationReferenceRequestV2;
+  readonly profile: "BrandRecipeStoredReferencesForPublicationV2";
+}
+export function buildRecipeProductPublicationReferenceSnapshotV2(
+  value: unknown,
+  input: RecipeProductPublicationReferenceRequestV2,
+  now: string,
+): RecipeProductPublicationReferenceSnapshotV2 {
+  try {
+    const request = parseRecipeProductPublicationReferenceRequestV2(input),
+      { observedAt, ...graph } = recipeReferenceGraph(value, request.brandReference, now);
+    if (now < request.observedAt || now >= request.validUntil || observedAt < request.observedAt)
+      return fail();
+    const body = {
+      request,
+      profile: "BrandRecipeStoredReferencesForPublicationV2" as const,
+      ...graph,
+      observedAt,
+    };
+    return Object.freeze({
+      ...body,
+      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
+    });
+  } catch {
+    return fail();
+  }
+}
+export function parseRecipeProductPublicationReferenceSnapshotV2(
+  value: unknown,
+  input: RecipeProductPublicationReferenceRequestV2,
+  now: string,
+): RecipeProductPublicationReferenceSnapshotV2 {
+  try {
+    const r = exact(value, [
+        "request",
+        "profile",
+        "coverage",
+        "consistency",
+        "applicability",
+        "generation",
+        "bindingCount",
+        "observedAt",
+        "digest",
+        ...families,
+      ]),
+      request = parseRecipeProductPublicationReferenceRequestV2(input);
+    if (
+      canonicalizeRfc8785(parseRecipeProductPublicationReferenceRequestV2(r.request)) !==
+        canonicalizeRfc8785(request) ||
+      r.profile !== "BrandRecipeStoredReferencesForPublicationV2" ||
+      r.coverage !== "CompleteStoredReferences" ||
+      r.consistency !== "StatementSnapshot" ||
+      r.applicability !== "Unavailable" ||
+      typeof r.generation !== "string" ||
+      typeof r.bindingCount !== "string"
+    )
+      return fail();
+    const raw = Object.fromEntries(
+      families.map((k) => [k, array(r[k]).map((v) => ({ ...exact(v, keys[k]), precise: true }))]),
+    );
+    const result = buildRecipeProductPublicationReferenceSnapshotV2(
+      {
+        ...raw,
+        generation: r.generation,
+        bindingCount: r.bindingCount,
+        observedAt: r.observedAt,
+        counts: Object.fromEntries(families.map((k) => [k, String(array(r[k]).length)])),
+      },
+      request,
+      now,
+    );
+    if (result.digest !== parseRecipeDigest(r.digest)) return fail();
+    return result;
   } catch {
     return fail();
   }

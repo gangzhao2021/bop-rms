@@ -76,6 +76,7 @@ export async function exerciseCurrentVariantProductDraft({
     historyHolds = 0;
   let originalDeadline;
   const historyRoots = new Set();
+  const observedRoots = new Set();
   const now = () => clockOverride ?? new Date().toISOString();
   const options = {
     ...runtimeOptions,
@@ -115,7 +116,17 @@ export async function exerciseCurrentVariantProductDraft({
                   [id(2), product],
                 )
               ).rows[0].aggregate_version;
-              assert.equal(root, input.request.expectedAggregateVersion);
+              observedRoots.add(root);
+              assert.equal(input.request.expectedAggregateVersion, 8);
+              assert.ok(root === 8 || root === 9);
+              if (root === 9) {
+                const own = await tx.query(
+                  "SELECT result_aggregate_version FROM rms_catalog.product_operation_record WHERE brand_id=$1 AND product_id=$2 AND operation_id=$3",
+                  [id(2), product, command.operationReference],
+                );
+                assert.equal(own.rows.length, 1);
+                assert.equal(own.rows[0].result_aggregate_version, 9);
+              }
               if (mode !== "normal" && !tentative && root === 9) {
                 tentative = true;
                 if (mode === "late-grant")
@@ -253,7 +264,8 @@ export async function exerciseCurrentVariantProductDraft({
       await assert.rejects(pending.execute(editorSession.csrf), { code: "OutcomeUnknown" });
       const after = await counts();
       assert.equal(after.root, 9);
-      assert.ok(historyRoots.has(8) && historyRoots.has(9));
+      assert.deepEqual([...historyRoots], [8]);
+      assert.ok(observedRoots.has(8) && observedRoots.has(9));
       for (const key of ["operations", "snapshots", "commits", "audit", "outbox"])
         assert.equal(after[key], initial[key] + 1);
       await admin.query(

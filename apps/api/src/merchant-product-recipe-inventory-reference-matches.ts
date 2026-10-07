@@ -128,123 +128,25 @@ export function composeMerchantProductRecipeInventoryReferenceMatches(input: {
         rootGroups: roots,
         now: input.now,
       });
-    const items = new Map(inventory.configuration.items.map((i) => [i.itemReference, i])),
-      operations = new Map(
-        inventory.configuration.operations.map((o) => [o.operationReference, o]),
-      ),
-      versions = new Map(
-        inventory.configuration.versions.map((v) => [v.itemReference + ":" + v.itemVersion, v]),
-      );
-    let budget =
-      bindings.recipes.length +
-      bindings.versions.length +
-      bindings.bindings.length +
-      bindings.modifiers.length +
-      recipe.recipes.length +
-      recipe.versions.length +
-      recipe.ingredients.length +
-      recipe.modifiers.length +
-      recipe.changes.length +
-      inventory.configuration.items.length +
-      inventory.configuration.versions.length +
-      inventory.configuration.operations.length +
-      inventory.mappings.length;
-    const consume = (n: number) => {
-      budget += n;
-      if (budget > 10000) return fail();
-    };
-    const join = (row: RecipeInventoryReachableRequirement) => {
-      if (row.kind === "ModifierRemove" || row.reference.sourceKind !== "InventoryItem")
-        return fail();
-      const item = items.get(row.reference.sourceReference),
-        operation = operations.get(row.reference.sourceVersionReference);
-      if (!item)
-        return Object.freeze({
-          state: "Unresolved" as const,
-          reason: "InventoryItemNotRecorded" as const,
-        });
-      if (!operation)
-        return Object.freeze({
-          state: "Unresolved" as const,
-          reason: "InventoryOperationNotRecorded" as const,
-        });
-      if (operation.itemReference !== item.itemReference)
-        return Object.freeze({
-          state: "Unresolved" as const,
-          reason: "InventoryOperationItemMismatch" as const,
-        });
-      const version = versions.get(item.itemReference + ":" + operation.itemVersion);
-      if (!version) return fail();
-      return Object.freeze({
-        state: "ResolvedStoredConfiguration" as const,
-        item,
-        operation,
-        version,
-        isCurrentItemConfiguration:
-          item.currentItemVersion === operation.itemVersion &&
-          item.currentOperationReference === operation.operationReference,
-      });
-    };
-    const graphs = catalogMatches.map((m, i) => {
-      const reachability = reachable[i];
-      if (!reachability) return fail();
-      consume(
-        m.expandedRows +
-          reachability.reachableVersions.length * 2 +
-          reachability.requirements.length * 2,
-      );
-      const rootContexts = Object.freeze(
-        roots[i]?.map((root) => {
-          const matched = m.references.find((c) => c.version.recipeVersionReference === root),
-            unresolved = m.unresolved.find((c) => c.version.recipeVersionReference === root);
-          const context = matched ?? unresolved;
-          if (!context) return fail();
-          return Object.freeze({
-            recipeReference: context.recipe.recipeReference,
-            recipeVersionReference: root,
-            isCurrentRecipeVersion: context.recipe.currentVersionReference === root,
-            matchedBindingReferences: Object.freeze(
-              matched?.bindings.map((b) => b.bindingReference) ?? [],
-            ),
-            matchedModifierRuleVersionReferences: Object.freeze(
-              matched?.modifiers.map((r) => r.reference.ruleVersionReference) ?? [],
-            ),
-            unresolvedBindings: Object.freeze(
-              unresolved?.bindings.map((b) =>
-                Object.freeze({ bindingReference: b.reference.bindingReference, reason: b.reason }),
-              ) ?? [],
-            ),
-            unresolvedModifiers: Object.freeze(
-              unresolved?.modifiers.map((r) =>
-                Object.freeze({
-                  ruleVersionReference: r.reference.ruleVersionReference,
-                  reason: r.reason,
-                }),
-              ) ?? [],
-            ),
-          });
-        }) ?? fail(),
-      );
-      const inventoryReferences = Object.freeze(
-        reachability.requirements
-          .filter(
-            (row) => row.kind !== "ModifierRemove" && row.reference.sourceKind === "InventoryItem",
-          )
-          .map((requirement) => {
-            const resolution = join(requirement);
-            consume(resolution.state === "ResolvedStoredConfiguration" ? 4 : 1);
-            return Object.freeze({ requirement, resolution });
-          }),
-      );
-      const { observedAt, ...stableReachability } = reachability;
-      void observedAt;
-      return Object.freeze({
-        catalogConfigurationDigest: m.target.catalogConfigurationDigest,
-        targetMembership: m.targetMembership,
-        rootContexts,
-        recipeReachability: Object.freeze(stableReachability),
-        inventoryReferences,
-      });
+    const graphs = joinMerchantRecipeInventoryReferenceGraphs({
+      inventory,
+      catalogMatches,
+      roots,
+      reachable,
+      initialBudget:
+        bindings.recipes.length +
+        bindings.versions.length +
+        bindings.bindings.length +
+        bindings.modifiers.length +
+        recipe.recipes.length +
+        recipe.versions.length +
+        recipe.ingredients.length +
+        recipe.modifiers.length +
+        recipe.changes.length +
+        inventory.configuration.items.length +
+        inventory.configuration.versions.length +
+        inventory.configuration.operations.length +
+        inventory.mappings.length,
     });
     const current = graphs[0];
     if (!current) return fail();
@@ -289,4 +191,136 @@ export function composeMerchantProductRecipeInventoryReferenceMatches(input: {
   } catch {
     return fail();
   }
+}
+
+/** Internal API composition kernel over already parsed owning graph facts.
+ * Request metadata remains generic; no legacy request is manufactured. */
+export function joinMerchantRecipeInventoryReferenceGraphs<Request>({
+  inventory,
+  catalogMatches,
+  roots,
+  reachable,
+  initialBudget,
+}: {
+  readonly inventory: {
+    readonly configuration: Pick<
+      ReturnType<typeof parseInventorySkuMappingReferenceSnapshot>["configuration"],
+      "items" | "versions" | "operations"
+    >;
+  };
+  readonly catalogMatches: readonly (Pick<
+    ReturnType<typeof matchRecipeCatalogReferenceGraphs>[number],
+    "targetMembership" | "references" | "unresolved" | "expandedRows"
+  > & { readonly target: { readonly catalogConfigurationDigest: string } })[];
+  readonly roots: readonly (readonly string[])[];
+  readonly reachable: readonly (Omit<
+    ReturnType<typeof matchRecipeInventoryReferenceRoots>[number],
+    "request"
+  > & { readonly request: Request })[];
+  readonly initialBudget: number;
+}) {
+  const items = new Map(inventory.configuration.items.map((i) => [i.itemReference, i])),
+    operations = new Map(inventory.configuration.operations.map((o) => [o.operationReference, o])),
+    versions = new Map(
+      inventory.configuration.versions.map((v) => [v.itemReference + ":" + v.itemVersion, v]),
+    );
+  let budget = initialBudget;
+  const consume = (n: number) => {
+    budget += n;
+    if (budget > 10000) return fail();
+  };
+  const join = (row: RecipeInventoryReachableRequirement) => {
+    if (row.kind === "ModifierRemove" || row.reference.sourceKind !== "InventoryItem")
+      return fail();
+    const item = items.get(row.reference.sourceReference),
+      operation = operations.get(row.reference.sourceVersionReference);
+    if (!item)
+      return Object.freeze({
+        state: "Unresolved" as const,
+        reason: "InventoryItemNotRecorded" as const,
+      });
+    if (!operation)
+      return Object.freeze({
+        state: "Unresolved" as const,
+        reason: "InventoryOperationNotRecorded" as const,
+      });
+    if (operation.itemReference !== item.itemReference)
+      return Object.freeze({
+        state: "Unresolved" as const,
+        reason: "InventoryOperationItemMismatch" as const,
+      });
+    const version = versions.get(item.itemReference + ":" + operation.itemVersion);
+    if (!version) return fail();
+    return Object.freeze({
+      state: "ResolvedStoredConfiguration" as const,
+      item,
+      operation,
+      version,
+      isCurrentItemConfiguration:
+        item.currentItemVersion === operation.itemVersion &&
+        item.currentOperationReference === operation.operationReference,
+    });
+  };
+  const graphs = catalogMatches.map((m, i) => {
+    const reachability = reachable[i];
+    if (!reachability) return fail();
+    consume(
+      m.expandedRows +
+        reachability.reachableVersions.length * 2 +
+        reachability.requirements.length * 2,
+    );
+    const rootContexts = Object.freeze(
+      roots[i]?.map((root) => {
+        const matched = m.references.find((c) => c.version.recipeVersionReference === root),
+          unresolved = m.unresolved.find((c) => c.version.recipeVersionReference === root);
+        const context = matched ?? unresolved;
+        if (!context) return fail();
+        return Object.freeze({
+          recipeReference: context.recipe.recipeReference,
+          recipeVersionReference: root,
+          isCurrentRecipeVersion: context.recipe.currentVersionReference === root,
+          matchedBindingReferences: Object.freeze(
+            matched?.bindings.map((b) => b.bindingReference) ?? [],
+          ),
+          matchedModifierRuleVersionReferences: Object.freeze(
+            matched?.modifiers.map((r) => r.reference.ruleVersionReference) ?? [],
+          ),
+          unresolvedBindings: Object.freeze(
+            unresolved?.bindings.map((b) =>
+              Object.freeze({ bindingReference: b.reference.bindingReference, reason: b.reason }),
+            ) ?? [],
+          ),
+          unresolvedModifiers: Object.freeze(
+            unresolved?.modifiers.map((r) =>
+              Object.freeze({
+                ruleVersionReference: r.reference.ruleVersionReference,
+                reason: r.reason,
+              }),
+            ) ?? [],
+          ),
+        });
+      }) ?? fail(),
+    );
+    const inventoryReferences = Object.freeze(
+      reachability.requirements
+        .filter(
+          (row) => row.kind !== "ModifierRemove" && row.reference.sourceKind === "InventoryItem",
+        )
+        .map((requirement) => {
+          const resolution = join(requirement);
+          consume(resolution.state === "ResolvedStoredConfiguration" ? 4 : 1);
+          return Object.freeze({ requirement, resolution });
+        }),
+    );
+    const { observedAt, ...stableReachability } = reachability;
+    void observedAt;
+    return Object.freeze({
+      catalogConfigurationDigest: m.target.catalogConfigurationDigest,
+      targetMembership: m.targetMembership,
+      rootContexts,
+      recipeReachability: Object.freeze(stableReachability),
+      inventoryReferences,
+    });
+  });
+  return Object.freeze(graphs);
 }

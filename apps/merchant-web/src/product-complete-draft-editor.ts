@@ -353,6 +353,7 @@ export function createCompleteProductDraftEditor(options: {
       fresh();
       if (status !== "Ready" || !baseline || !draft) return fail("Unavailable");
       const next = parseProductVersion(copyProductCommandValue(value));
+      const recorded = new Set(baseline.draft.skus.map((sku) => sku.skuReference));
       if (
         next.editorContent === undefined ||
         next.versionReference !== baseline.draft.versionReference ||
@@ -360,20 +361,39 @@ export function createCompleteProductDraftEditor(options: {
         next.createdAt !== baseline.draft.createdAt ||
         next.updatedAt !== baseline.draft.updatedAt ||
         !same(
-          next.skus.map((s) => [
-            s.skuReference,
-            s.productReference,
-            s.brandReference,
-            s.createdAt,
-            s.createdByActorReference,
-          ]),
+          next.skus
+            .filter((s) => recorded.has(s.skuReference))
+            .map((s) => [
+              s.skuReference,
+              s.productReference,
+              s.brandReference,
+              s.createdAt,
+              s.createdByActorReference,
+              s.unitOfSale,
+              s.unitQuantity,
+              s.lifecycle,
+            ]),
           baseline.draft.skus.map((s) => [
             s.skuReference,
             s.productReference,
             s.brandReference,
             s.createdAt,
             s.createdByActorReference,
+            s.unitOfSale,
+            s.unitQuantity,
+            s.lifecycle,
           ]),
+        ) ||
+        new Set(next.skus.map((s) => s.skuReference)).size !== next.skus.length ||
+        new Set(next.skus.map((s) => s.skuCode)).size !== next.skus.length ||
+        next.skus.some(
+          (s) =>
+            !recorded.has(s.skuReference) &&
+            (s.productReference !== selected.productReference ||
+              s.brandReference !== selected.brandReference ||
+              s.lifecycle !== "Draft" ||
+              !/^(?:0|[1-9]\d{0,13})(?:\.\d{1,6})?$/u.test(s.unitQuantity) ||
+              !/[1-9]/u.test(s.unitQuantity)),
         )
       )
         return fail("Invalid");

@@ -66,9 +66,15 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `MetricDefinitionPublished:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `MetricDefinitionReviewSubmitted:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `MetricDeprecated:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `OptionPriceArchived:v1` — owner `@rms/pricing`; experimental; brand; indirect_identifier
+- `OptionPriceDraftCreated:v1` — owner `@rms/pricing`; experimental; brand; indirect_identifier
+- `OptionPriceDraftReplaced:v1` — owner `@rms/pricing`; experimental; brand; indirect_identifier
+- `OptionPriceVersionPublished:v1` — owner `@rms/pricing`; experimental; brand; indirect_identifier
 - `OptionSetContentSealed:v1` — owner `@rms/catalog`; experimental; brand; indirect_identifier
 - `OptionSetDraftCreated:v1` — owner `@rms/catalog`; experimental; brand; indirect_identifier
 - `OptionSetDraftReplaced:v1` — owner `@rms/catalog`; experimental; brand; indirect_identifier
+- `OptionSetPublicationReleaseRecorded:v1` — owner `@rms/catalog`; experimental; brand; indirect_identifier
+- `OptionSetReviewContentRecorded:v1` — owner `@rms/catalog`; experimental; brand; indirect_identifier
 - `OrderAmended:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderConfirmed:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
 - `OrderCreated:v1` — owner `@rms/ordering`; stable; store; indirect_identifier
@@ -91,10 +97,12 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `ProductionBatchPlanned:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `ProductionBatchQuarantined:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `ProductionBatchStarted:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
+- `ProductPublicationWarningsAcknowledged:v1` — owner `@rms/catalog`; experimental; brand; indirect_identifier
 - `ProductRestored:v1` — owner `@rms/catalog`; stable; brand; indirect_identifier
 - `ProductResumed:v1` — owner `@rms/catalog`; stable; brand; indirect_identifier
 - `ProductReviewSubmitted:v1` — owner `@rms/catalog`; stable; brand; indirect_identifier
 - `ProductSuspended:v1` — owner `@rms/catalog`; stable; brand; indirect_identifier
+- `ProductTaxClassificationRegistryVersionRecorded:v1` — owner `@rms/catalog`; experimental; brand; indirect_identifier
 - `ProductValidationCompleted:v1` — owner `@rms/catalog`; stable; brand; indirect_identifier
 - `ProductVersionApproved:v1` — owner `@rms/catalog`; stable; brand; indirect_identifier
 - `ProductVersionPublished:v1` — owner `@rms/catalog`; stable; brand; indirect_identifier
@@ -128,8 +136,12 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `ReportRunQueued:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportRunStateRecorded:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
 - `ReportScheduleVersionRecorded:v1` — owner `@rms/business-intelligence`; stable; brand; indirect_identifier
+- `SellingUnitRegistryVersionRecorded:v1` — owner `@rms/catalog`; experimental; brand; indirect_identifier
+- `TaxConfigCandidatePrepared:v1` — owner `@rms/pricing`; stable; store; indirect_identifier
 - `TaxConfigDraftCreated:v1` — owner `@rms/pricing`; stable; store; none
 - `TaxConfigDraftReplaced:v1` — owner `@rms/pricing`; stable; store; none
+- `TaxConfigMaterialCreated:v1` — owner `@rms/pricing`; stable; store; indirect_identifier
+- `TaxConfigMaterialReplaced:v1` — owner `@rms/pricing`; stable; store; indirect_identifier
 - `TaxConfigPublished:v1` — owner `@rms/pricing`; stable; store; none
 - `TemperatureExcursionDetected:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier
 

@@ -132,3 +132,62 @@ describe("WP-2421 current Store capability transport", () => {
     expect(getter).not.toHaveBeenCalled();
   });
 });
+
+it.each(["list", "create", "detail", "edit"])(
+  "anchors actual Option %s capability without a Product mapping",
+  async (action) => {
+    const capabilityKey = "catalog.cat_optionset_" + action,
+      value = { ...fixture(), capabilityKey, controlKey: "catalog.optionset." + action };
+    const fetcher = vi.fn<typeof fetch>(async () => response(value));
+    const result = await createStoreCapabilityClient(fetcher, () => Date.parse(at)).load(
+      { scope: { storeReference: scope.storeReference }, capabilityKey, csrf: input.csrf },
+      new AbortController().signal,
+    );
+    expect(result.brandReference).toBe(scope.brandReference);
+    expect(result.reason).toBe("Disabled");
+    expect(JSON.parse(fetcher.mock.calls[0]?.[1]?.body as string)).toEqual({ capabilityKey });
+    expect(() =>
+      parseStoreCapabilityObservation(
+        { ...value, controlKey: "catalog.product.edit" },
+        scope,
+        capabilityKey,
+        Date.parse(at),
+      ),
+    ).toThrow();
+  },
+);
+
+it.each([
+  ["pricing.price_book_list", "pricing.pricebook.list"],
+  ["pricing.price_book_editor", "pricing.pricebook.editor"],
+])(
+  "reads actual Pricing capability %s without a Catalog control",
+  async (capabilityKey, controlKey) => {
+    const value = { ...fixture(), capabilityKey, controlKey };
+    const fetcher = vi.fn<typeof fetch>(async () => response(value));
+    const result = await createStoreCapabilityClient(fetcher, () => Date.parse(at)).load(
+      { scope: { storeReference: scope.storeReference }, capabilityKey, csrf: input.csrf },
+      new AbortController().signal,
+    );
+    expect(result.brandReference).toBe(scope.brandReference);
+    expect(result.backendExecution).toBe("Deny");
+    expect(JSON.parse(fetcher.mock.calls[0]?.[1]?.body as string)).toEqual({ capabilityKey });
+    for (const wrong of ["catalog.product.edit", controlKey.replace("pricebook", "price_book")])
+      expect(() =>
+        parseStoreCapabilityObservation(
+          { ...value, controlKey: wrong },
+          scope,
+          capabilityKey,
+          Date.parse(at),
+        ),
+      ).toThrow();
+    expect(() =>
+      parseStoreCapabilityObservation(
+        { ...value, storeReference: id(9) },
+        scope,
+        capabilityKey,
+        Date.parse(at),
+      ),
+    ).toThrow();
+  },
+);

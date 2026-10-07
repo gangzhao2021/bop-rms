@@ -152,3 +152,91 @@ export function parseTenantStoreReferenceSnapshot(value: unknown): TenantStoreRe
     return invalid();
   }
 }
+
+export interface TenantStoreLabelReference extends TenantStoreReference {
+  readonly code: string;
+  readonly displayName: string;
+}
+export interface TenantStoreLabelReferenceSnapshot extends Omit<
+  TenantStoreReferenceSnapshot,
+  "profile" | "references"
+> {
+  readonly profile: "TenantStoreLabelReferenceV1";
+  readonly references: readonly TenantStoreLabelReference[];
+}
+/** Owning Store labels attached to the same complete identity metadata; no eligibility inference. */
+export function parseTenantStoreLabelReferenceSnapshot(
+  value: unknown,
+): TenantStoreLabelReferenceSnapshot {
+  try {
+    const r = record(value, [
+      "profile",
+      "brandReference",
+      "brandLifecycle",
+      "brandVersion",
+      "generation",
+      "referenceCount",
+      "originalIntentDigest",
+      "observedAt",
+      "references",
+    ]);
+    if (
+      r.profile !== "TenantStoreLabelReferenceV1" ||
+      !Array.isArray(r.references) ||
+      Object.getPrototypeOf(r.references) !== Array.prototype ||
+      r.references.length > maximumTenantStoreReferences ||
+      Reflect.ownKeys(r.references).length !== r.references.length + 1
+    )
+      return invalid();
+    const rawReferences = r.references;
+    const labels = Array.from({ length: rawReferences.length }, (_, i) => {
+      const d = Object.getOwnPropertyDescriptor(rawReferences, String(i));
+      if (!d?.enumerable || !("value" in d)) return invalid();
+      const item = record(d.value, [
+        "storeReference",
+        "lifecycle",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "code",
+        "displayName",
+      ]);
+      // Exact owning Store code/display-name lexical limits, without invented defaults.
+      if (
+        typeof item.code !== "string" ||
+        !/^[A-Z][A-Z0-9_-]{0,62}$/u.test(item.code) ||
+        typeof item.displayName !== "string" ||
+        item.displayName.length < 1 ||
+        item.displayName.length > 160 ||
+        item.displayName.trim() !== item.displayName
+      )
+        return invalid();
+      return item;
+    });
+    const metadata = parseTenantStoreReferenceSnapshot({
+      ...r,
+      profile: "TenantStoreReferenceV1",
+      references: labels.map((item) => ({
+        storeReference: item.storeReference,
+        lifecycle: item.lifecycle,
+        version: item.version,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+      })),
+    });
+    return Object.freeze({
+      ...metadata,
+      profile: "TenantStoreLabelReferenceV1",
+      references: Object.freeze(
+        metadata.references.map((reference, i) => {
+          const label = labels[i];
+          if (!label || typeof label.code !== "string" || typeof label.displayName !== "string")
+            return invalid();
+          return Object.freeze({ ...reference, code: label.code, displayName: label.displayName });
+        }),
+      ),
+    });
+  } catch {
+    return invalid();
+  }
+}

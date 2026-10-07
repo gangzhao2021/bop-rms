@@ -1,4 +1,6 @@
 export { moduleManifest } from "./module.manifest.js";
+export * from "./contracts/store-payment-configuration.js";
+export * from "./infrastructure/persistence/store-payment-configuration-store.js";
 export * from "./contracts/payment-provider-adapter.js";
 export * from "./application/payment-provider-adapter.js";
 export * from "./contracts/payment-intent-creation.js";

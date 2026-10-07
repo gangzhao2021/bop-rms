@@ -1,3 +1,8 @@
+import {
+  parsePricingProductPublicationReferenceRequestV2,
+  pricingProductPublicationReferenceRequestFieldsV2,
+  type PricingProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { parseEffectivePeriodInstant } from "@bop/effective-period";
 import {
@@ -151,14 +156,9 @@ export interface PriceBookReferenceSourceSnapshot {
   readonly references: readonly PriceBookReference[];
 }
 /** Own configuration references only. Caller must resolve foreign targets through public owner contracts. */
-export function buildPriceBookReferenceSourceSnapshot(
-  value: unknown,
-  input: PriceBookReferenceSourceRequest,
-  now: string,
-): PriceBookReferenceSourceSnapshot {
+function parsePriceBookReferenceGraph(value: unknown, expectedBrandReference: string, now: string) {
   try {
-    const request = parsePriceBookReferenceSourceRequest(input),
-      r = exact(copy(value), ["observedAt", "references"]),
+    const r = exact(copy(value), ["observedAt", "references"]),
       observedAt = parseEffectivePeriodInstant(r.observedAt),
       at = parseEffectivePeriodInstant(now);
     if (
@@ -201,7 +201,7 @@ export function buildPriceBookReferenceSourceSnapshot(
           scopeReference =
             v.scopeReference === null ? null : parsePricingReference(v.scopeReference);
         if (
-          brandReference !== request.brandReference ||
+          brandReference !== expectedBrandReference ||
           updatedAt > observedAt ||
           createdAt > observedAt ||
           !["Draft", "Published", "Archived"].includes(v.lifecycle as string) ||
@@ -259,11 +259,23 @@ export function buildPriceBookReferenceSourceSnapshot(
         });
       })
       .sort((a, b) => a.entryReference.localeCompare(b.entryReference));
-    const source = {
-      request,
-      profile: "PriceBookEntries" as const,
+    return Object.freeze({
+      observedAt,
       references: Object.freeze(references),
-    };
+    });
+  } catch {
+    return fail();
+  }
+}
+export function buildPriceBookReferenceSourceSnapshot(
+  value: unknown,
+  input: PriceBookReferenceSourceRequest,
+  now: string,
+): PriceBookReferenceSourceSnapshot {
+  try {
+    const request = parsePriceBookReferenceSourceRequest(input),
+      { observedAt, references } = parsePriceBookReferenceGraph(value, request.brandReference, now);
+    const source = { request, profile: "PriceBookEntries" as const, references };
     return Object.freeze({
       ...source,
       coverage: "Complete",
@@ -305,6 +317,84 @@ export function parsePriceBookReferenceSourceSnapshot(
       };
     });
     const parsed = buildPriceBookReferenceSourceSnapshot(
+      { observedAt: raw.observedAt, references },
+      input,
+      now,
+    );
+    if (canonicalizeRfc8785(parsed) !== canonicalizeRfc8785(raw)) return fail();
+    return parsed;
+  } catch {
+    return fail();
+  }
+}
+
+export const productPublicationPriceBookReferenceSourceFieldsV2 = Object.freeze([
+  ...new Set([
+    ...priceBookReferenceSourceFields,
+    ...pricingProductPublicationReferenceRequestFieldsV2,
+  ]),
+] as const);
+export interface ProductPublicationPriceBookReferenceSourceSnapshotV2 extends Omit<
+  PriceBookReferenceSourceSnapshot,
+  "request" | "profile"
+> {
+  readonly request: PricingProductPublicationReferenceRequestV2;
+  readonly profile: "ProductPublicationPriceBookEntriesV2";
+  readonly validUntil: string;
+}
+/** Complete stored graph only; neither sale eligibility nor publication approval. */
+export function buildProductPublicationPriceBookReferenceSourceSnapshotV2(
+  value: unknown,
+  input: PricingProductPublicationReferenceRequestV2,
+  now: string,
+): ProductPublicationPriceBookReferenceSourceSnapshotV2 {
+  try {
+    const request = parsePricingProductPublicationReferenceRequestV2(input),
+      graph = parsePriceBookReferenceGraph(value, request.brandReference, now),
+      at = parseEffectivePeriodInstant(now);
+    if (graph.observedAt < request.observedAt || at >= request.validUntil) return fail();
+    const source = {
+      request,
+      profile: "ProductPublicationPriceBookEntriesV2" as const,
+      ...graph,
+      coverage: "Complete" as const,
+      consistency: "StatementSnapshot" as const,
+      validUntil: request.validUntil,
+    };
+    return Object.freeze({ ...source, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(source)) });
+  } catch {
+    return fail();
+  }
+}
+export function parseProductPublicationPriceBookReferenceSourceSnapshotV2(
+  value: unknown,
+  input: PricingProductPublicationReferenceRequestV2,
+  now: string,
+): ProductPublicationPriceBookReferenceSourceSnapshotV2 {
+  try {
+    const raw = exact(copy(value), [
+      "request",
+      "profile",
+      "consistency",
+      "coverage",
+      "observedAt",
+      "digest",
+      "validUntil",
+      "references",
+    ]);
+    if (!Array.isArray(raw.references)) return fail();
+    const references = raw.references.map((value) => {
+      const r = exact(value, [
+        ...priceBookReferenceSourceFields,
+        "isCurrentVersion",
+        "temporalStatus",
+      ]);
+      return {
+        reference: Object.fromEntries(priceBookReferenceSourceFields.map((k) => [k, r[k]])),
+        precise: true,
+      };
+    });
+    const parsed = buildProductPublicationPriceBookReferenceSourceSnapshotV2(
       { observedAt: raw.observedAt, references },
       input,
       now,

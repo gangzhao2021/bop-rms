@@ -28,6 +28,7 @@ catalogs:
     - workflow.operate
     - media.manage
     - catalog.manage
+    - pricing.price-book.manage
     - pricing.tax-config.manage
     - pricing.promotion.manage
     - recipe.manage
@@ -8456,7 +8457,7 @@ screens:
     roles:
       - Pricing Editor / Approver
       - four-eyes when policy
-    permission_ref: catalog.manage
+    permission_ref: pricing.price-book.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - identity、scope hierarchy、Sellable prices、effective period、rounding / tax category refs、conflict resolution、history
@@ -8508,7 +8509,7 @@ screens:
     feature_gate: phase_capability
     roles:
       - Pricing Manager
-    permission_ref: catalog.manage
+    permission_ref: pricing.price-book.manage
     scope: Tenant, Brand, Store, Actor, purpose and field permission
     mandatory_field_groups:
       - Price Record / book、scope、currency、source、status、effective period、conflict / coverage

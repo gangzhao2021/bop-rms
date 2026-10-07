@@ -165,3 +165,68 @@ describe("pre-Tenant Identity selection isolation", () => {
     expect(codes).toContain("RLS_STORE_SCOPE_MISSING");
   });
 });
+
+const brandIdentitySelection = identitySelection
+  .replaceAll("browser_session_selection", "browser_brand_session_selection")
+  .replace(", store_id uuid NOT NULL", "");
+describe("exact Brand-only pre-Tenant selection isolation", () => {
+  it("requires the current Session and Actor with the genuine parent binding", () => {
+    expect(inspectMigrationPermissions(migration(brandIdentitySelection))).toEqual([]);
+  });
+  it.each([
+    [
+      "session",
+      (s) =>
+        s.replaceAll(
+          "session_id = NULLIF(current_setting('bop.identity_session_id', true), '')::uuid",
+          "true",
+        ),
+    ],
+    [
+      "Actor",
+      (s) =>
+        s.replaceAll(
+          "actor_id = NULLIF(current_setting('bop.identity_actor_id', true), '')::uuid",
+          "true",
+        ),
+    ],
+    ["write", (s) => s.replace("WITH CHECK (" + identityPredicate + ")", "WITH CHECK (true)")],
+    [
+      "parent",
+      (s) =>
+        s.replace(
+          "REFERENCES bop_identity.authentication_session (session_id, actor_id)",
+          "REFERENCES bop_identity.authentication_session (session_id)",
+        ),
+    ],
+    [
+      "extra policy",
+      (s) =>
+        s + "\nCREATE POLICY another ON bop_identity.browser_brand_session_selection USING (true);",
+    ],
+  ])("rejects weakened %s isolation", (_name, mutate) => {
+    expect(
+      inspectMigrationPermissions(migration(mutate(brandIdentitySelection))).map((d) => d.code),
+    ).toContain("RLS_IDENTITY_SESSION_SCOPE_INVALID");
+  });
+  it.each([
+    [
+      "RLS_NOT_ENABLED",
+      "ALTER TABLE bop_identity.browser_brand_session_selection ENABLE ROW LEVEL SECURITY;",
+    ],
+    [
+      "RLS_NOT_FORCED",
+      "ALTER TABLE bop_identity.browser_brand_session_selection FORCE ROW LEVEL SECURITY;",
+    ],
+    [
+      "TABLE_PUBLIC_NOT_REVOKED",
+      "REVOKE ALL ON TABLE bop_identity.browser_brand_session_selection FROM PUBLIC;",
+    ],
+  ])("retains %s for Brand selection", (code, statement) => {
+    expect(
+      inspectMigrationPermissions(migration(brandIdentitySelection.replace(statement, ""))).map(
+        (d) => d.code,
+      ),
+    ).toContain(code);
+  });
+});

@@ -116,6 +116,91 @@ describe("Database Schema Ownership Architecture Test", () => {
     "valid",
     "owner",
     "schema",
+    "path",
+    "driver",
+    "product_operation_record",
+    "product_operation_snapshot",
+    "product_source_commit",
+    "product_authoring_operation_abandonment",
+  ])("bounds authoring resolution owner asset: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      [
+        "product_operation_record",
+        "product_operation_snapshot",
+        "product_source_commit",
+        "product_authoring_operation_abandonment",
+      ].filter((table) => table !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-authoring-store.ts" : "product-authoring-resolution-store.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export {pg};\n'
+        : "export const synthetic=true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "selling_unit_registry_record",
+    "selling_unit_registration_abandonment",
+    "sku",
+    "product_operation_record",
+    "product_operation_snapshot",
+    "product",
+  ])("bounds selling unit registry owner asset: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      [
+        "selling_unit_registry_record",
+        "selling_unit_registration_abandonment",
+        "sku",
+        "product",
+        "product_operation_record",
+        "product_operation_snapshot",
+      ].filter((table) => table !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-unit-store.ts" : "selling-unit-registry-store.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export {pg};\n'
+        : "export const synthetic=true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
     "driver",
     "path",
     "option_set",
@@ -156,34 +241,252 @@ describe("Database Schema Ownership Architecture Test", () => {
     if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
     else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
-  it.each(["valid", "owner", "schema", "path", "driver", "table"])(
-    "bounds WP-2421 content registry asset: %s",
-    async (changed) => {
-      const root = await fixture();
-      const context = await writeModule(
-        root,
-        "RMS",
-        changed === "owner" ? "other-owner" : "catalog",
-        changed === "schema" ? "rms_other" : "rms_catalog",
-        changed === "table" ? [] : ["product_content_registry_record"],
-      );
-      const asset = join(
-        context.moduleRoot,
-        "src/infrastructure/persistence/",
-        changed === "path" ? "other-registry-store.ts" : "product-content-registry-store.ts",
-      );
-      await mkdir(dirname(asset), { recursive: true });
-      await writeFile(
-        asset,
-        changed === "driver"
-          ? 'import pg from "pg"; export {pg};\n'
-          : "export const synthetic=true;\n",
-      );
-      const codes = await resultCodes(root);
-      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
-      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  for (const source of [
+    {
+      layer: "RMS",
+      owner: "catalog",
+      schema: "rms_catalog",
+      path: "option-set-history-store.ts",
+      tables: [
+        "option_set",
+        "option_set_version",
+        "option_set_operation_record",
+        "option_set_draft_content_snapshot",
+        "option_set_publication_content",
+      ],
+    },
+    {
+      layer: "BOP",
+      owner: "publishing",
+      schema: "bop_publishing",
+      path: "option-set-publication-history-store.ts",
+      tables: ["publishing_mutation_record"],
+    },
+  ]) {
+    it.each(["valid", "owner", "schema", "driver", "path", ...source.tables])(
+      "bounds exact history owning asset " + source.owner + ": %s",
+      async (changed) => {
+        const root = await fixture();
+        const context = await writeModule(
+          root,
+          source.layer,
+          changed === "owner" ? "other-owner" : source.owner,
+          changed === "schema" ? "other_schema" : source.schema,
+          source.tables.filter((table) => table !== changed),
+        );
+        const asset = join(
+          context.moduleRoot,
+          "src/infrastructure/persistence/",
+          changed === "path" ? "other-history.ts" : source.path,
+        );
+        await mkdir(dirname(asset), { recursive: true });
+        await writeFile(
+          asset,
+          changed === "driver"
+            ? 'import pg from "pg"; export {pg};\n'
+            : "export const synthetic=true;\n",
+        );
+        const codes = await resultCodes(root);
+        if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+        else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+      },
+    );
+  }
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "driver",
+    "path",
+    "option_set_review_content",
+    "option_set_publication_release",
+    "option_set_draft_content_snapshot",
+    "option_set_publication_content",
+  ])("bounds Option review/release owning asset: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      [
+        "option_set_review_content",
+        "option_set_publication_release",
+        "option_set_draft_content_snapshot",
+        "option_set_publication_content",
+      ].filter((table) => table !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-option-store.ts" : "option-set-review-content-store.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export {pg};\n'
+        : "export const synthetic=true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "driver",
+    "path",
+    "option_set",
+    "option_set_version",
+    "option",
+    "option_conflict",
+    "product_option_binding",
+  ])("bounds Option List owning reader asset: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      [
+        "option_set",
+        "option_set_version",
+        "option",
+        "option_conflict",
+        "product_option_binding",
+      ].filter((table) => table !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-option-list.ts" : "option-set-list-query-store.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export {pg};\n'
+        : "export const synthetic=true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  describe.each(["option-set-authoring-resolution-store.ts", "option-set-authoring-identity.ts"])(
+    "Option authoring source %s",
+    (assetName) => {
+      it.each([
+        "valid",
+        "owner",
+        "schema",
+        "driver",
+        "path",
+        "option_set_authoring_identity",
+        "option_set_authoring_abandonment",
+        "option_set_draft_content_snapshot",
+        "option_set_operation_record",
+      ])("bounds Option authoring recovery owning asset: %s", async (changed) => {
+        const root = await fixture();
+        const context = await writeModule(
+          root,
+          "RMS",
+          changed === "owner" ? "other-owner" : "catalog",
+          changed === "schema" ? "rms_other" : "rms_catalog",
+          [
+            "option_set_authoring_identity",
+            "option_set_authoring_abandonment",
+            "option_set_draft_content_snapshot",
+            "option_set_operation_record",
+          ].filter((table) => table !== changed),
+        );
+        const asset = join(
+          context.moduleRoot,
+          "src/infrastructure/persistence/",
+          changed === "path" ? "other-option-store.ts" : assetName,
+        );
+        await mkdir(dirname(asset), { recursive: true });
+        await writeFile(
+          asset,
+          changed === "driver"
+            ? 'import pg from "pg"; export {pg};\n'
+            : "export const synthetic=true;\n",
+        );
+        const codes = await resultCodes(root);
+        if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+        else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+      });
     },
   );
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "allergen_registry_version",
+    "allergen_registry_entry",
+  ])("bounds Product editor allergen reader admission: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      ["allergen_registry_version", "allergen_registry_entry"].filter((table) => table !== changed),
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path"
+        ? "other-editor-allergen-source.ts"
+        : "product-editor-allergen-registry-source.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export {pg};\n'
+        : "export const synthetic=true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each(
+    ["content", "tax-classification"].flatMap((kind) =>
+      ["valid", "owner", "schema", "path", "driver", "table"].map((changed) => [kind, changed]),
+    ),
+  )("bounds WP-2421 %s registry asset: %s", async (kind, changed) => {
+    const root = await fixture();
+    const table =
+      kind === "content"
+        ? "product_content_registry_record"
+        : "product_tax_classification_registry_record";
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "catalog",
+      changed === "schema" ? "rms_other" : "rms_catalog",
+      changed === "table" ? [] : [table],
+    );
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/",
+      changed === "path" ? "other-registry-store.ts" : `product-${kind}-registry-store.ts`,
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(
+      asset,
+      changed === "driver"
+        ? 'import pg from "pg"; export {pg};\n'
+        : "export const synthetic=true;\n",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
 
   it.each([
     "valid",
@@ -3297,6 +3600,53 @@ describe("Database Schema Ownership Architecture Test", () => {
       expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
     },
   );
+  it("admits only the Operating Entity TaxRegistrant owner adapter without a driver", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "BOP", "operating-entity", "bop_operating_entity", [
+      "store_operating_entity_assignment",
+      "operating_entity",
+      "operating_entity_profile_version",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/tax-registrant-source.ts",
+    );
+    await writeFile(asset, "export const synthetic = true;");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg"; export {pg};');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "owner",
+    "schema",
+    "path",
+    "store_operating_entity_assignment",
+    "operating_entity",
+    "operating_entity_profile_version",
+  ])("rejects Operating Entity TaxRegistrant adapter with changed %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "BOP",
+      changed === "owner" ? "other" : "operating-entity",
+      changed === "schema" ? "bop_other" : "bop_operating_entity",
+      [
+        "store_operating_entity_assignment",
+        "operating_entity",
+        "operating_entity_profile_version",
+      ].filter((t) => t !== changed),
+    );
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence/" +
+          (changed === "path" ? "other.ts" : "tax-registrant-source.ts"),
+      ),
+      "export const synthetic = true;",
+    );
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
   it("admits only the Tenant receipt Store identity adapter without a driver", async () => {
     const root = await fixture();
     const context = await writeModule(root, "BOP", "tenant", "bop_tenant", ["store"]);
@@ -3762,6 +4112,279 @@ describe("Database Schema Ownership Architecture Test", () => {
     );
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
+  it("admits only the owning Media upload storage adapter without a driver", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "BOP", "media", "bop_media", [
+      "upload_session",
+      "asset",
+      "asset_version",
+      "operation_record",
+    ]);
+    const file = join(context.moduleRoot, "src/infrastructure/persistence/media-upload-store.ts");
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, "export const synthetic = true;");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(file, 'import pg from "pg"; export { pg };');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "asset",
+    "asset_version",
+    "image_processing_intent",
+    "image_processing_completion",
+    "image_rendition",
+    "image_scan_admission",
+    "upload_object_binding",
+  ])("bounds the owning Media publication reader: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "BOP",
+      changed === "owner" ? "other" : "media",
+      changed === "schema" ? "bop_other" : "bop_media",
+      [
+        "asset",
+        "asset_version",
+        "image_processing_intent",
+        "image_processing_completion",
+        "image_rendition",
+        "image_scan_admission",
+        "upload_object_binding",
+      ].filter((table) => table !== changed),
+    );
+    const file = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/" +
+        (changed === "path" ? "other-publication-read.ts" : "media-publication-read-store.ts"),
+    );
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(
+      file,
+      changed === "driver"
+        ? 'import pg from "pg"; export { pg };'
+        : "export const synthetic = true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "image_scan_admission",
+    "image_processing_intent",
+  ])("bounds the owning Media scan admission store: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "BOP",
+      changed === "owner" ? "other" : "media",
+      changed === "schema" ? "bop_other" : "bop_media",
+      ["image_scan_admission", "image_processing_intent"].filter((table) => table !== changed),
+    );
+    const file = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/" +
+        (changed === "path" ? "other-scan-admission.ts" : "media-image-scan-admission-store.ts"),
+    );
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(
+      file,
+      changed === "driver"
+        ? 'import pg from "pg"; export { pg };'
+        : "export const synthetic = true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "path",
+    "driver",
+    "query",
+    "query-alias",
+    "computed-query",
+    "sql",
+    "image_scan_admission",
+    "image_processing_intent",
+    "image_processing_completion",
+  ])("bounds the SQL-free Media Worker composition: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "BOP",
+      changed === "owner" ? "other" : "media",
+      changed === "schema" ? "bop_other" : "bop_media",
+      ["image_scan_admission", "image_processing_intent", "image_processing_completion"].filter(
+        (table) => table !== changed,
+      ),
+    );
+    const file = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/" +
+        (changed === "path" ? "other-worker-runtime.ts" : "media-image-worker-runtime.ts"),
+    );
+    await mkdir(dirname(file), { recursive: true });
+    const mutations = {
+      driver: 'import pg from "pg"; export { pg };',
+      query: "export const run = (tx, text) => tx.query(text, []);",
+      "query-alias":
+        "export const run = (tx, text) => { const { query: send } = tx; return send(text, []); };",
+      "computed-query": 'export const run = (tx, text) => tx["query"](text, []);',
+      sql: 'export const sql = "SELECT * FROM bop_media.image_scan_admission";',
+    };
+    await writeFile(file, mutations[changed] ?? "export const synthetic = true;");
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each(
+    [
+      [
+        "store",
+        [
+          "asset",
+          "asset_version",
+          "image_processing_intent",
+          "image_processing_completion",
+          "image_rendition",
+        ],
+      ],
+      [
+        "source",
+        [
+          "upload_session",
+          "asset",
+          "asset_version",
+          "operation_record",
+          "upload_object_binding",
+          "finalized_object_binding",
+        ],
+      ],
+      [
+        "transaction",
+        ["image_processing_intent", "image_processing_completion", "image_rendition"],
+      ],
+    ].flatMap(([kind, tables]) =>
+      ["valid", "owner", "schema", "path", "driver", ...tables].map((changed) => [
+        kind,
+        tables,
+        changed,
+      ]),
+    ),
+  )("bounds owning Media image processing %s: %s %s", async (kind, tables, changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "BOP",
+      changed === "owner" ? "other" : "media",
+      changed === "schema" ? "bop_other" : "bop_media",
+      tables.filter((table) => table !== changed),
+    );
+    const file = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/" +
+        (changed === "path" ? "other-image-processing.ts" : `media-image-processing-${kind}.ts`),
+    );
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(
+      file,
+      changed === "driver"
+        ? 'import pg from "pg"; export { pg };'
+        : "export const synthetic = true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it("admits only the owning Media S3 object binding runtime without a driver", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "BOP", "media", "bop_media", [
+      "upload_session",
+      "operation_record",
+      "upload_object_binding",
+      "finalized_object_binding",
+    ]);
+    const file = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/s3-image-upload-runtime.ts",
+    );
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, "export const synthetic = true;");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(file, 'import pg from "pg"; export { pg };');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "owner",
+    "schema",
+    "path",
+    "upload_session",
+    "operation_record",
+    "upload_object_binding",
+    "finalized_object_binding",
+  ])("rejects Media object binding runtime with changed %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "BOP",
+      changed === "owner" ? "other" : "media",
+      changed === "schema" ? "bop_other" : "bop_media",
+      [
+        "upload_session",
+        "operation_record",
+        "upload_object_binding",
+        "finalized_object_binding",
+      ].filter((table) => table !== changed),
+    );
+    const file = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/" +
+        (changed === "path" ? "other.ts" : "s3-image-upload-runtime.ts"),
+    );
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, "export const synthetic = true;");
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "owner",
+    "schema",
+    "path",
+    "upload_session",
+    "asset",
+    "asset_version",
+    "operation_record",
+  ])("rejects Media upload storage with changed %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "BOP",
+      changed === "owner" ? "other" : "media",
+      changed === "schema" ? "bop_other" : "bop_media",
+      ["upload_session", "asset", "asset_version", "operation_record"].filter(
+        (table) => table !== changed,
+      ),
+    );
+    const file = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/" +
+        (changed === "path" ? "other.ts" : "media-upload-store.ts"),
+    );
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, "export const synthetic = true;");
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
   it("admits only the Payment compensation operation owner adapter without a driver", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "payment", "rms_payment", [
@@ -3881,6 +4504,78 @@ describe("Database Schema Ownership Architecture Test", () => {
       ["price_book", "price_book_version", "price_entry", "price_book_operation_record"],
     ],
     [
+      "product-publication-validation-report-source-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_version",
+        "sku",
+        "product_option_binding",
+        "product_option_binding_option",
+        "product_option_binding_sku_scope",
+        "product_option_binding_channel",
+        "product_version_category_assignment",
+        "product_publication_revision",
+        "product_publication_validation_report",
+        "product_publication_content",
+        "product_operation_record",
+        "product_operation_snapshot",
+        "product_source_commit",
+        "product_source_head",
+        "product_scope_retirement_header",
+        "product_scope_retirement",
+        "product_approval_receipt",
+      ],
+    ],
+    [
+      "product-publication-validation-report-store.ts",
+      "catalog",
+      ["product_publication_revision", "product_publication_validation_report"],
+    ],
+    [
+      "product-publication-warning-acknowledgement-record.ts",
+      "catalog",
+      ["product_publication_warning_acknowledgement"],
+    ],
+    [
+      "product-publication-resolution-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_operation_record",
+        "product_operation_snapshot",
+        "product_publication_revision",
+        "product_publication_operation_abandonment",
+      ],
+    ],
+    [
+      "product-publication-warning-acknowledgement-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_version",
+        "product_publication_revision",
+        "product_publication_validation_report",
+        "product_publication_warning_acknowledgement",
+      ],
+    ],
+    [
+      "product-scope-retirement-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_publication_revision",
+        "product_publication_content",
+        "product_operation_record",
+        "product_operation_snapshot",
+        "product_source_commit",
+        "product_source_head",
+        "product_scope_retirement_header",
+        "product_scope_retirement",
+        "product_approval_receipt",
+      ],
+    ],
+    [
       "merchant-order-item-labels.ts",
       "ordering",
       ["order_item", "order_batch", "order_submission_record", "additional_dining_batch_record"],
@@ -3946,6 +4641,7 @@ describe("Database Schema Ownership Architecture Test", () => {
       "catalog",
       [
         "product",
+        "product_version",
         "product_operation_record",
         "product_operation_snapshot",
         "product_publication_revision",
@@ -3995,6 +4691,36 @@ describe("Database Schema Ownership Architecture Test", () => {
       "option-price-reference-source-store.ts",
       "pricing",
       ["option_price_rule", "option_price_rule_version"],
+    ],
+    [
+      "tax-config-authoring-store.ts",
+      "pricing",
+      [
+        "tax_configuration",
+        "tax_configuration_version",
+        "tax_configuration_rule",
+        "tax_configuration_operation_record",
+        "tax_config_authoring_operation",
+      ],
+    ],
+    [
+      "tax-config-candidate-store.ts",
+      "pricing",
+      [
+        "tax_config_publication_candidate",
+        "tax_config_candidate_rule",
+        "tax_config_candidate_operation",
+      ],
+    ],
+    [
+      "tax-config-material-store.ts",
+      "pricing",
+      ["tax_config_material", "tax_config_material_version", "tax_config_material_operation"],
+    ],
+    [
+      "option-price-authoring-store.ts",
+      "pricing",
+      ["option_price_rule", "option_price_rule_version", "option_price_authoring_operation"],
     ],
     [
       "price-book-reference-source-store.ts",
@@ -4100,6 +4826,20 @@ describe("Database Schema Ownership Architecture Test", () => {
         "category_operation_snapshot",
         "category_source_head",
         "category_source_commit",
+      ],
+    ],
+    [
+      "product-option-price-context-source-store.ts",
+      "catalog",
+      [
+        "product",
+        "product_version",
+        "sku",
+        "product_option_binding",
+        "product_option_binding_option",
+        "product_option_binding_sku_scope",
+        "product_option_binding_channel",
+        "product_version_category_assignment",
       ],
     ],
     [
@@ -5783,6 +6523,207 @@ describe("Database Schema Ownership Architecture Test", () => {
     else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
 
+  for (const source of [
+    "workforce-account-binding-provisioner.ts",
+    "workforce-account-read-kernel.ts",
+    "current-workforce-account-source.ts",
+    "workforce-authentication-source.ts",
+  ]) {
+    it.each([
+      "valid",
+      "owner",
+      "schema",
+      "workforce_account_binding",
+      "workforce_invitation",
+      "driver",
+      "path",
+      "nested-path",
+    ])(`keeps Workforce account binding SQL admission exact for ${source}: %s`, async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "BOP",
+        changed === "owner" ? "other-owner" : "identity",
+        changed === "schema" ? "bop_other" : "bop_identity",
+        ["workforce_account_binding", "workforce_invitation"].filter((table) => table !== changed),
+      );
+      const directory = join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "nested-path" ? "unapproved" : "",
+      );
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        join(directory, changed === "path" ? "other-writer.ts" : source),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    });
+  }
+
+  for (const source of [
+    "platform-actor-directory-store.ts",
+    "platform-actor-directory-provisioner.ts",
+  ]) {
+    it.each([
+      "valid",
+      "owner",
+      "schema",
+      "platform_actor_directory_head",
+      "platform_actor_directory_revision",
+      "authentication_session",
+      "driver",
+      "path",
+    ])(`keeps Platform Actor Directory SQL admission exact for ${source}: %s`, async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "BOP",
+        changed === "owner" ? "other-owner" : "identity",
+        changed === "schema" ? "bop_other" : "bop_identity",
+        [
+          "platform_actor_directory_head",
+          "platform_actor_directory_revision",
+          "authentication_session",
+        ].filter((table) => table !== changed),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : source,
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    });
+  }
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "platform_template_publishing_head",
+    "platform_template_publishing_operation",
+    "driver",
+    "path",
+  ])("keeps Platform Template Publishing SQL admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "BOP",
+      changed === "owner" ? "other-owner" : "publishing",
+      changed === "schema" ? "bop_other" : "bop_publishing",
+      ["platform_template_publishing_head", "platform_template_publishing_operation"].filter(
+        (table) => table !== changed,
+      ),
+    );
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-writer.ts" : "platform-publishing-store.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  for (const source of ["platform-permission-store.ts", "platform-permission-provisioner.ts"]) {
+    it.each([
+      "valid",
+      "owner",
+      "schema",
+      "platform_permission_policy_head",
+      "platform_permission_policy_revision",
+      "driver",
+      "path",
+    ])(`keeps Platform Permission SQL admission exact for ${source}: %s`, async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "BOP",
+        changed === "owner" ? "other-owner" : "permission",
+        changed === "schema" ? "bop_other" : "bop_permission",
+        ["platform_permission_policy_head", "platform_permission_policy_revision"].filter(
+          (table) => table !== changed,
+        ),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : source,
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    });
+  }
+
+  for (const source of [
+    "system-media-image-promotion-authorization-store.ts",
+    "system-media-image-promotion-provisioner.ts",
+  ]) {
+    it.each([
+      "valid",
+      "owner",
+      "schema",
+      "system_media_image_promotion_authorization",
+      "system_media_image_promotion_authorization_decision",
+      "driver",
+      "path",
+    ])(
+      `keeps fixed System Media Permission SQL admission exact for ${source}: %s`,
+      async (changed) => {
+        const root = await fixture();
+        const context = await writeModule(
+          root,
+          "BOP",
+          changed === "owner" ? "other-owner" : "permission",
+          changed === "schema" ? "bop_other" : "bop_permission",
+          [
+            "system_media_image_promotion_authorization",
+            "system_media_image_promotion_authorization_decision",
+          ].filter((table) => table !== changed),
+        );
+        await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), {
+          recursive: true,
+        });
+        await writeFile(
+          join(
+            context.moduleRoot,
+            "src/infrastructure/persistence",
+            changed === "path" ? "other-writer.ts" : source,
+          ),
+          changed === "driver"
+            ? 'import pg from "pg"; export { pg };'
+            : "export const synthetic=true;",
+        );
+        const codes = await resultCodes(root);
+        if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+        else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+      },
+    );
+  }
+
   it.each([
     "valid",
     "owner",
@@ -5940,6 +6881,68 @@ describe("Database Schema Ownership Architecture Test", () => {
     },
   );
 
+  it.each(["valid", "owner", "schema", "mutation-table", "terminal-table", "driver", "path"])(
+    "keeps Option publication original operation SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "BOP",
+        changed === "owner" ? "other-owner" : "publishing",
+        changed === "schema" ? "bop_other" : "bop_publishing",
+        [
+          ...(changed === "mutation-table" ? [] : ["publishing_mutation_record"]),
+          ...(changed === "terminal-table" ? [] : ["option_set_publication_operation"]),
+        ],
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "option-set-publication-operation-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each(["valid", "owner", "schema", "mutation-table", "terminal-table", "driver", "path"])(
+    "keeps OptionPrice review original operation SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "BOP",
+        changed === "owner" ? "other-owner" : "publishing",
+        changed === "schema" ? "bop_other" : "bop_publishing",
+        [
+          ...(changed === "mutation-table" ? [] : ["publishing_mutation_record"]),
+          ...(changed === "terminal-table" ? [] : ["option_price_review_operation"]),
+        ],
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "option-price-review-operation-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
   it.each(["valid", "owner", "schema", "table", "driver", "path"])(
     "keeps Inventory final validation SQL admission exact: %s",
     async (changed) => {
@@ -5967,6 +6970,182 @@ describe("Database Schema Ownership Architecture Test", () => {
       else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
     },
   );
+
+  it.each(["valid", "owner", "schema", "revision", "operation", "brand", "driver", "path"])(
+    "keeps Tenant topology Draft SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const tables = [
+        "brand",
+        "brand_store_topology_draft_revision",
+        "brand_store_topology_draft_operation",
+      ].filter(
+        (table) =>
+          table !==
+          {
+            revision: "brand_store_topology_draft_revision",
+            operation: "brand_store_topology_draft_operation",
+            brand: "brand",
+          }[changed],
+      );
+      const context = await writeModule(
+        root,
+        "BOP",
+        changed === "owner" ? "other-owner" : "tenant",
+        changed === "schema" ? "bop_other" : "bop_tenant",
+        tables,
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "brand-store-topology-draft-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "revision",
+    "operation",
+    "brand",
+    "configuration",
+    "driver",
+    "path",
+  ])("keeps Tenant Brand configuration authoring SQL admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const tables = [
+      "brand",
+      "brand_configuration_version",
+      "brand_configuration_authoring_revision",
+      "brand_configuration_authoring_operation",
+    ].filter(
+      (table) =>
+        table !==
+        {
+          revision: "brand_configuration_authoring_revision",
+          operation: "brand_configuration_authoring_operation",
+          brand: "brand",
+          configuration: "brand_configuration_version",
+        }[changed],
+    );
+    const context = await writeModule(
+      root,
+      "BOP",
+      changed === "owner" ? "other-owner" : "tenant",
+      changed === "schema" ? "bop_other" : "bop_tenant",
+      tables,
+    );
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-writer.ts" : "brand-configuration-authoring-store.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
+  for (const spec of [
+    {
+      layer: "BOP",
+      module: "tenant",
+      schema: "bop_tenant",
+      tables: ["platform_brand_template_revision", "platform_brand_template_operation"],
+      file: "platform-brand-template-store.ts",
+    },
+    {
+      layer: "BOP",
+      module: "tenant",
+      schema: "bop_tenant",
+      tables: ["platform_brand_template_revision", "platform_brand_template_operation"],
+      file: "platform-brand-template-reference-source.ts",
+    },
+    {
+      layer: "BOP",
+      module: "tenant",
+      schema: "bop_tenant",
+      tables: ["platform_brand_template_revision", "platform_brand_template_operation"],
+      file: "platform-brand-template-read-kernel.ts",
+    },
+    {
+      layer: "BOP",
+      module: "publishing",
+      schema: "bop_publishing",
+      tables: ["platform_template_publishing_head", "platform_template_publishing_operation"],
+      file: "platform-template-brand-reference-source.ts",
+    },
+    {
+      layer: "BOP",
+      module: "publishing",
+      schema: "bop_publishing",
+      tables: ["platform_template_publishing_head", "platform_template_publishing_operation"],
+      file: "platform-publishing-read-kernel.ts",
+    },
+    {
+      layer: "RMS",
+      module: "catalog",
+      schema: "rms_catalog",
+      tables: ["brand_catalog_source", "brand_catalog_source_operation"],
+      file: "brand-catalog-source-store.ts",
+    },
+    {
+      layer: "BOP",
+      module: "identity",
+      schema: "bop_identity",
+      tables: ["authentication_session", "browser_brand_session_selection"],
+      file: "browser-brand-session-selection-store.ts",
+    },
+  ]) {
+    it.each(["valid", "owner", "schema", "first-table", "second-table", "driver", "path"])(
+      `keeps ${spec.file} SQL admission exact: %s`,
+      async (changed) => {
+        const root = await fixture();
+        const tables = spec.tables.filter(
+          (_, index) =>
+            !(changed === "first-table" && index === 0) &&
+            !(changed === "second-table" && index === 1),
+        );
+        const context = await writeModule(
+          root,
+          spec.layer,
+          changed === "owner" ? "other-owner" : spec.module,
+          changed === "schema" ? "other_schema" : spec.schema,
+          tables,
+        );
+        await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), {
+          recursive: true,
+        });
+        await writeFile(
+          join(
+            context.moduleRoot,
+            "src/infrastructure/persistence",
+            changed === "path" ? "other-writer.ts" : spec.file,
+          ),
+          changed === "driver"
+            ? 'import pg from "pg"; export { pg };'
+            : "export const synthetic=true;",
+        );
+        const codes = await resultCodes(root);
+        if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+        else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+      },
+    );
+  }
 
   it.each(["valid", "owner", "schema", "table", "driver", "path"])(
     "keeps merchant organization source SQL admission exact: %s",
@@ -6381,6 +7560,378 @@ describe("Database Schema Ownership Architecture Test", () => {
     },
   );
 
+  it.each(["valid", "owner", "schema", "sku-table", "retirement-table", "driver", "path"])(
+    "keeps Catalog complete Tax coverage source SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "catalog",
+        changed === "schema" ? "rms_other" : "rms_catalog",
+        [
+          "product",
+          "product_version",
+          "sku",
+          "product_option_binding",
+          "product_option_binding_option",
+          "product_option_binding_sku_scope",
+          "product_option_binding_channel",
+          "product_version_category_assignment",
+          "product_publication_revision",
+          "product_source_head",
+          "product_operation_record",
+          "product_operation_snapshot",
+          "product_source_commit",
+          "product_publication_content",
+          "product_scope_retirement_header",
+          "product_scope_retirement",
+        ].filter(
+          (table) =>
+            !(changed === "sku-table" && table === "sku") &&
+            !(changed === "retirement-table" && table === "product_scope_retirement"),
+        ),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "product-tax-coverage-source-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each(["valid", "owner", "schema", "authoring-table", "terminal-table", "driver", "path"])(
+    "keeps Store configuration original SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "store",
+        changed === "schema" ? "rms_other" : "rms_store",
+        [
+          "store_configuration_authoring_operation",
+          "store_configuration_original_operation",
+        ].filter(
+          (table) =>
+            !(
+              changed === "authoring-table" && table === "store_configuration_authoring_operation"
+            ) &&
+            !(changed === "terminal-table" && table === "store_configuration_original_operation"),
+        ),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "store-configuration-original-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+  it.each(
+    ["valid", "owner", "schema", "revision-table", "operation-table", "driver", "path"].flatMap(
+      (changed) =>
+        ["store-setup-draft-store.ts", "publication-setup-basis.ts"].map((filename) => [
+          changed,
+          filename,
+        ]),
+    ),
+  )("keeps Store immutable setup SQL admission exact: %s %s", async (changed, filename) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "store",
+      changed === "schema" ? "rms_other" : "rms_store",
+      ["store_setup_draft_revision", "store_setup_draft_operation"].filter(
+        (table) =>
+          !(changed === "revision-table" && table === "store_setup_draft_revision") &&
+          !(changed === "operation-table" && table === "store_setup_draft_operation"),
+      ),
+    );
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-writer.ts" : filename,
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each(["valid", "owner", "schema", "revision-table", "operation-table", "driver", "path"])(
+    "keeps Store setup reference SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "store",
+        changed === "schema" ? "rms_other" : "rms_store",
+        ["store_setup_reference_version", "store_setup_reference_operation"].filter(
+          (table) =>
+            !(changed === "revision-table" && table === "store_setup_reference_version") &&
+            !(changed === "operation-table" && table === "store_setup_reference_operation"),
+        ),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "store-setup-reference-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each(["valid", "owner", "schema", "revision-table", "operation-table", "driver", "path"])(
+    "keeps Store payment configuration SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "payment",
+        changed === "schema" ? "rms_other" : "rms_payment",
+        ["store_payment_configuration_version", "store_payment_configuration_operation"].filter(
+          (table) =>
+            !(changed === "revision-table" && table === "store_payment_configuration_version") &&
+            !(changed === "operation-table" && table === "store_payment_configuration_operation"),
+        ),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "store-payment-configuration-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each(["valid", "owner", "schema", "revision-table", "operation-table", "driver", "path"])(
+    "keeps Receipt Template artifact SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "printing-device",
+        changed === "schema" ? "rms_other" : "rms_device",
+        [
+          "digital_receipt_template_artifact_version",
+          "digital_receipt_template_artifact_operation",
+        ].filter(
+          (table) =>
+            !(
+              changed === "revision-table" && table === "digital_receipt_template_artifact_version"
+            ) &&
+            !(
+              changed === "operation-table" &&
+              table === "digital_receipt_template_artifact_operation"
+            ),
+        ),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "digital-receipt-template-artifact-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each(["valid", "owner", "schema", "revision-table", "operation-table", "driver", "path"])(
+    "keeps Receipt Template Draft SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "printing-device",
+        changed === "schema" ? "rms_other" : "rms_device",
+        [
+          "digital_receipt_template_draft_revision",
+          "digital_receipt_template_draft_operation",
+        ].filter(
+          (table) =>
+            !(
+              changed === "revision-table" && table === "digital_receipt_template_draft_revision"
+            ) &&
+            !(
+              changed === "operation-table" && table === "digital_receipt_template_draft_operation"
+            ),
+        ),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "digital-receipt-template-draft-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each(["valid", "owner", "schema", "revision-table", "submission-table", "driver", "path"])(
+    "keeps Receipt Template Submission SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "printing-device",
+        changed === "schema" ? "rms_other" : "rms_device",
+        ["digital_receipt_template_draft_revision", "digital_receipt_template_submission"].filter(
+          (table) =>
+            !(
+              changed === "revision-table" && table === "digital_receipt_template_draft_revision"
+            ) &&
+            !(changed === "submission-table" && table === "digital_receipt_template_submission"),
+        ),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "digital-receipt-template-submission-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each(["valid", "owner", "schema", "operation-table", "submission-table", "driver", "path"])(
+    "keeps Receipt Template Submit SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other-owner" : "printing-device",
+        changed === "schema" ? "rms_other" : "rms_device",
+        ["digital_receipt_template_submit_operation", "digital_receipt_template_submission"].filter(
+          (table) =>
+            !(
+              changed === "operation-table" && table === "digital_receipt_template_submit_operation"
+            ) &&
+            !(changed === "submission-table" && table === "digital_receipt_template_submission"),
+        ),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "digital-receipt-template-submit-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  it.each([
+    "valid",
+    "owner",
+    "schema",
+    "operation-table",
+    "submission-table",
+    "published-table",
+    "driver",
+    "path",
+  ])("keeps Receipt Template lifecycle SQL admission exact: %s", async (changed) => {
+    const root = await fixture();
+    const required = [
+      "digital_receipt_template_lifecycle_operation",
+      "digital_receipt_template_submission",
+      "digital_receipt_template_version",
+    ];
+    const omitted = {
+      "operation-table": required[0],
+      "submission-table": required[1],
+      "published-table": required[2],
+    };
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other-owner" : "printing-device",
+      changed === "schema" ? "rms_other" : "rms_device",
+      required.filter((table) => table !== omitted[changed]),
+    );
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence",
+        changed === "path" ? "other-writer.ts" : "digital-receipt-template-lifecycle-store.ts",
+      ),
+      changed === "driver" ? 'import pg from "pg"; export { pg };' : "export const synthetic=true;",
+    );
+    const codes = await resultCodes(root);
+    if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+
   it.each(["valid", "owner", "schema", "table", "driver", "path"])(
     "keeps Store configuration authoring SQL admission exact: %s",
     async (changed) => {
@@ -6564,33 +8115,40 @@ describe("Database Schema Ownership Architecture Test", () => {
     },
   );
 
-  it.each(["valid", "owner", "schema", "table", "driver", "path"])(
-    "keeps current browser session reader SQL admission exact: %s",
-    async (changed) => {
-      const root = await fixture();
-      const context = await writeModule(
-        root,
-        "BOP",
-        changed === "owner" ? "other-owner" : "identity",
-        changed === "schema" ? "bop_other" : "bop_identity",
-        changed === "table" ? [] : ["authentication_session"],
-      );
-      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
-      await writeFile(
-        join(
-          context.moduleRoot,
-          "src/infrastructure/persistence",
-          changed === "path" ? "other-writer.ts" : "current-browser-session-source.ts",
-        ),
-        changed === "driver"
-          ? 'import pg from "pg"; export { pg };'
-          : "export const synthetic=true;",
-      );
-      const codes = await resultCodes(root);
-      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
-      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
-    },
-  );
+  for (const source of [
+    "current-browser-session-source.ts",
+    "current-platform-browser-session-source.ts",
+  ]) {
+    it.each(["valid", "owner", "schema", "table", "driver", "path"])(
+      `keeps ${source} SQL admission exact: %s`,
+      async (changed) => {
+        const root = await fixture();
+        const context = await writeModule(
+          root,
+          "BOP",
+          changed === "owner" ? "other-owner" : "identity",
+          changed === "schema" ? "bop_other" : "bop_identity",
+          changed === "table" ? [] : ["authentication_session"],
+        );
+        await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), {
+          recursive: true,
+        });
+        await writeFile(
+          join(
+            context.moduleRoot,
+            "src/infrastructure/persistence",
+            changed === "path" ? "other-writer.ts" : source,
+          ),
+          changed === "driver"
+            ? 'import pg from "pg"; export { pg };'
+            : "export const synthetic=true;",
+        );
+        const codes = await resultCodes(root);
+        if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+        else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+      },
+    );
+  }
 
   it.each(["valid", "owner", "schema", "table", "driver", "path"])(
     "keeps current workforce MFA reader SQL admission exact: %s",
@@ -6619,6 +8177,202 @@ describe("Database Schema Ownership Architecture Test", () => {
       else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
     },
   );
+
+  for (const source of [
+    "current-workforce-invitation-source.ts",
+    "workforce-invitation-store.ts",
+  ]) {
+    it.each(["valid", "owner", "schema", "table", "driver", "orm", "path"])(
+      `keeps ${source} SQL admission exact: %s`,
+      async (changed) => {
+        const root = await fixture();
+        const context = await writeModule(
+          root,
+          "BOP",
+          changed === "owner" ? "other-owner" : "identity",
+          changed === "schema" ? "bop_other" : "bop_identity",
+          changed === "table" ? ["workforce_mfa_status"] : ["workforce_invitation"],
+        );
+        await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), {
+          recursive: true,
+        });
+        await writeFile(
+          join(
+            context.moduleRoot,
+            "src/infrastructure/persistence",
+            changed === "path" ? "other-reader.ts" : source,
+          ),
+          changed === "driver"
+            ? 'import pg from "pg"; export { pg };'
+            : changed === "orm"
+              ? 'import { sql } from "drizzle-orm"; export { sql };'
+              : "export const synthetic=true;",
+        );
+        const codes = await resultCodes(root);
+        if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+        else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+      },
+    );
+  }
+
+  for (const source of [
+    "workforce-onboarding-operation-store.ts",
+    "workforce-onboarding-invitation-source.ts",
+  ]) {
+    it.each(["valid", "owner", "schema", "operation", "invitation", "driver", "orm", "path"])(
+      `keeps ${source} Workforce onboarding SQL admission exact: %s`,
+      async (changed) => {
+        const root = await fixture();
+        const context = await writeModule(
+          root,
+          "BOP",
+          changed === "owner" ? "other-owner" : "identity",
+          changed === "schema" ? "bop_other" : "bop_identity",
+          changed === "operation"
+            ? ["workforce_invitation"]
+            : changed === "invitation"
+              ? ["workforce_onboarding_operation"]
+              : ["workforce_onboarding_operation", "workforce_invitation"],
+        );
+        await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), {
+          recursive: true,
+        });
+        await writeFile(
+          join(
+            context.moduleRoot,
+            "src/infrastructure/persistence",
+            changed === "path" ? "other-writer.ts" : source,
+          ),
+          changed === "driver"
+            ? 'import pg from "pg"; export { pg };'
+            : changed === "orm"
+              ? 'import { sql } from "drizzle-orm"; export { sql };'
+              : "export const synthetic=true;",
+        );
+        const codes = await resultCodes(root);
+        if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+        else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+      },
+    );
+  }
+
+  for (const source of [
+    "initial-brand-membership-store.ts",
+    "approved-workforce-membership-store.ts",
+  ]) {
+    it.each(["valid", "owner", "schema", "membership", "driver", "orm", "path"])(
+      `keeps ${source} Membership writer SQL admission exact: %s`,
+      async (changed) => {
+        const root = await fixture();
+        const context = await writeModule(
+          root,
+          "BOP",
+          changed === "owner" ? "other-owner" : "membership",
+          changed === "schema" ? "bop_other" : "bop_membership",
+          // Valid admission requires membership alone, never StoreAssignment.
+          changed === "membership" ? ["store_assignment"] : ["membership"],
+        );
+        await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), {
+          recursive: true,
+        });
+        await writeFile(
+          join(
+            context.moduleRoot,
+            "src/infrastructure/persistence",
+            changed === "path" ? "other-writer.ts" : source,
+          ),
+          changed === "driver"
+            ? 'import pg from "pg"; export { pg };'
+            : changed === "orm"
+              ? 'import { sql } from "drizzle-orm"; export { sql };'
+              : "export const synthetic=true;",
+        );
+        const codes = await resultCodes(root);
+        if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+        else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+      },
+    );
+  }
+
+  it.each(["valid", "owner", "schema", "membership", "driver", "orm", "path"])(
+    "keeps actor-bound Brand discovery reader SQL admission exact: %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "BOP",
+        changed === "owner" ? "other-owner" : "membership",
+        changed === "schema" ? "bop_other" : "bop_membership",
+        // Valid admission requires membership alone, never StoreAssignment.
+        changed === "membership" ? ["store_assignment"] : ["membership"],
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : "brand-discovery-store.ts",
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : changed === "orm"
+            ? 'import { sql } from "drizzle-orm"; export { sql };'
+            : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
+
+  for (const source of ["brand-initial-policy-store.ts", "approved-workforce-policy-store.ts"]) {
+    it.each([
+      "valid",
+      "owner",
+      "schema",
+      "policy_state",
+      "permission_definition",
+      "role",
+      "role_assignment",
+      "permission_grant",
+      "permission_override",
+      "driver",
+      "orm",
+      "path",
+    ])(`keeps ${source} Permission writer SQL admission exact: %s`, async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "BOP",
+        changed === "owner" ? "other-owner" : "permission",
+        changed === "schema" ? "bop_other" : "bop_permission",
+        [
+          "policy_state",
+          "permission_definition",
+          "role",
+          "role_assignment",
+          "permission_grant",
+          "permission_override",
+        ].filter((table) => table !== changed),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence",
+          changed === "path" ? "other-writer.ts" : source,
+        ),
+        changed === "driver"
+          ? 'import pg from "pg"; export { pg };'
+          : changed === "orm"
+            ? 'import { sql } from "drizzle-orm"; export { sql };'
+            : "export const synthetic=true;",
+      );
+      const codes = await resultCodes(root);
+      if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+      else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+    });
+  }
 
   it.each(["valid", "owner", "schema", "table", "driver", "path"])(
     "keeps current Membership reader SQL admission exact: %s",
@@ -8040,5 +9794,139 @@ it.each([
   );
   const codes = await resultCodes(root);
   if (kind === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+  else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
+});
+
+it.each([
+  "valid",
+  "actual-source",
+  "export-kernel",
+  "export-alias",
+  "default-export",
+  "kernel-alias",
+  "third-call",
+  "missing-v2",
+  "duplicate-v2",
+  "v2-v1-parser",
+  "v2-v1-binder",
+  "v2-v1-fields",
+  "dynamic-protocol",
+  "spread-protocol",
+  "duplicate-protocol",
+  "facade-extra-statement",
+  "wrong-options",
+  "facade-not-exported",
+  "kernel-default-protocol",
+  "query-other-function",
+  "sql-wrong-parameter",
+  "sql-changed",
+  "sql-alias",
+  "sql-element",
+  "sql-duplicate",
+])("admits only the fixed private current-candidate kernel: %s", async (kind) => {
+  const root = await fixture(),
+    context = await writeModule(root, "RMS", "catalog", "rms_catalog", [
+      "product",
+      "product_version",
+      "sku",
+      "product_version_category_assignment",
+      "product_option_binding",
+      "product_option_binding_option",
+      "product_option_binding_sku_scope",
+      "product_option_binding_channel",
+    ]);
+  const sql =
+      "SELECT EXISTS(SELECT 1 FROM rms_catalog.product WHERE brand_id=$1 AND product_id=$3 AND internal_code=$2) AS candidate_matches,NOT EXISTS(SELECT 1 FROM rms_catalog.product WHERE brand_id=$1 AND internal_code=$2 AND product_id<>$3) AS internal_code_unique",
+    query = `tx.query(${JSON.stringify(sql)},[brand,aggregate.internalCode,aggregate.productReference])`,
+    v1 =
+      "export function createPostgresProductValidationCandidateSource(options){return createCandidateSource(options,{parseCommand:parseProductPublicationCommand,bindCandidate:bindCatalogProductValidationCandidate,fields:productValidationCandidateFields});}",
+    v2 =
+      "export function createPostgresProductValidationCandidateSourceV2(options){return createCandidateSource(options,{parseCommand:parseProductPublicationCommandV2,bindCandidate:bindCatalogProductValidationCandidateV2,fields:productValidationCandidateFieldsV2});}",
+    kernel = `function createCandidateSource(options,protocol){return {withCurrentCandidate(value,work){const codeUnique=()=>${query};return codeUnique();}};}`,
+    original = `${v1}\n${v2}\n${kernel}`;
+  let source = original;
+  if (kind === "actual-source")
+    source = await readFile(
+      join(
+        toolRoot,
+        "../../packages/rms/catalog/src/infrastructure/persistence/product-draft-baseline-store.ts",
+      ),
+      "utf8",
+    );
+  if (kind === "export-kernel") source = source.replace(kernel, "export " + kernel);
+  if (kind === "export-alias") source += "\nexport {createCandidateSource as unsafeSource};";
+  if (kind === "default-export") source += "\nexport default createCandidateSource;";
+  if (kind === "kernel-alias") source += "\nconst unsafeSource=createCandidateSource;";
+  if (kind === "third-call")
+    source += "\nexport const unsafeSource=createCandidateSource(options,protocol);";
+  if (kind === "missing-v2") source = source.replace(v2, "");
+  if (kind === "duplicate-v2") source += "\n" + v2;
+  if (kind === "v2-v1-parser")
+    source = source.replace(
+      "parseCommand:parseProductPublicationCommandV2",
+      "parseCommand:parseProductPublicationCommand",
+    );
+  if (kind === "v2-v1-binder")
+    source = source.replace(
+      "bindCandidate:bindCatalogProductValidationCandidateV2",
+      "bindCandidate:bindCatalogProductValidationCandidate",
+    );
+  if (kind === "v2-v1-fields")
+    source = source.replace(
+      "fields:productValidationCandidateFieldsV2",
+      "fields:productValidationCandidateFields",
+    );
+  if (kind === "dynamic-protocol")
+    source = source.replace(
+      v2,
+      "export function createPostgresProductValidationCandidateSourceV2(options){return createCandidateSource(options,options.protocol);}",
+    );
+  if (kind === "spread-protocol")
+    source = source.replace(
+      "{parseCommand:parseProductPublicationCommandV2",
+      "{...options.protocol,parseCommand:parseProductPublicationCommandV2",
+    );
+  if (kind === "duplicate-protocol")
+    source = source.replace(
+      "fields:productValidationCandidateFieldsV2",
+      "parseCommand:parseProductPublicationCommandV2",
+    );
+  if (kind === "facade-extra-statement")
+    source = source.replace(v2, v2.replace("{return", "{options.protocol=unsafeProtocol;return"));
+  if (kind === "wrong-options")
+    source = source.replace(
+      v2,
+      v2.replace("createCandidateSource(options,", "createCandidateSource(other,"),
+    );
+  if (kind === "facade-not-exported") source = source.replace(v2, v2.replace("export ", ""));
+  if (kind === "kernel-default-protocol")
+    source = source.replace(
+      "function createCandidateSource(options,protocol)",
+      "function createCandidateSource(options,protocol=unsafeProtocol)",
+    );
+  if (kind === "query-other-function")
+    source = source.replace(query, "null") + `\nfunction other(){return ${query};}`;
+  if (kind === "sql-wrong-parameter")
+    source = source.replace(
+      "[brand,aggregate.internalCode,aggregate.productReference]",
+      "[tenant,aggregate.internalCode,aggregate.productReference]",
+    );
+  if (kind === "sql-changed")
+    source = source.replace("brand_id=$1 AND product_id=$3", "product_id=$3");
+  if (kind === "sql-alias")
+    source = source.replace(
+      query,
+      `(()=>{const q=tx.query;return q(${JSON.stringify(sql)},[brand,aggregate.internalCode,aggregate.productReference]);})()`,
+    );
+  if (kind === "sql-element") source = source.replace("tx.query(", 'tx["query"](');
+  if (kind === "sql-duplicate") source = source.replace(query, `(${query},${query})`);
+  if (kind !== "valid" && kind !== "actual-source") expect(source).not.toBe(original);
+  await writeFile(
+    join(context.moduleRoot, "src/infrastructure/persistence/product-draft-baseline-store.ts"),
+    source,
+  );
+  const codes = await resultCodes(root);
+  if (kind === "valid" || kind === "actual-source")
+    expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
   else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
 });

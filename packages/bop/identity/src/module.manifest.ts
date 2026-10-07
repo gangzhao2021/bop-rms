@@ -6,12 +6,17 @@ const moduleManifestInput = {
   layer: "BOP",
   lifecycle: "Phase 0",
   publicExports: ["."],
-  allowedSynchronousDependencies: [],
+  allowedSynchronousDependencies: [
+    { moduleName: "audit", packageName: "@bop/audit", layer: "BOP" },
+  ],
   consumedEvents: [],
   publishedEvents: ["identity.credential-compromised.v1", "identity.session-revoked.v1"],
   ownedDatabase: {
     schema: "bop_identity",
     tables: [
+      "platform_actor_directory_head",
+      "platform_actor_directory_revision",
+      "browser_brand_session_selection",
       "api_client",
       "api_client_access_version",
       "api_client_credential_metadata",
@@ -26,6 +31,8 @@ const moduleManifestInput = {
       "oidc_authorization_transaction",
       "session_revocation_request",
       "workforce_invitation",
+      "workforce_onboarding_operation",
+      "workforce_account_binding",
       "workforce_mfa_status",
       "workforce_recovery_case",
     ],

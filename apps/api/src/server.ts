@@ -9,6 +9,21 @@ import { loadApiProcessConfiguration } from "./process-configuration.js";
 import type { CustomerOrderSubmissionHandler } from "./customer-order-submission.js";
 import type { CustomerCheckoutDetailsHandler } from "./customer-checkout-details.js";
 import { createMerchantRuntime, type MerchantRuntimeOptions } from "./merchant-runtime.js";
+import {
+  createMerchantBrandAdministrationRuntime,
+  createCognitoMerchantBrandAdministrationRuntime,
+  type CognitoMerchantBrandAdministrationRuntimeOptions,
+  type MerchantBrandAdministrationRuntimeOptions,
+} from "./merchant-brand-administration-runtime.js";
+import type { MerchantBrandAdministrationHttpOptions } from "./merchant-brand-administration-http.js";
+import {
+  createPlatformAuthenticationRuntime,
+  createCognitoPlatformAuthenticationRuntime,
+  type CognitoPlatformAuthenticationRuntimeOptions,
+  type PlatformAuthenticationRuntimeOptions,
+} from "./platform-authentication-runtime.js";
+import type { PlatformAuthenticationHttpOptions } from "./platform-authentication-http.js";
+import type { PlatformTemplateAdministrationHttpOptions } from "./platform-template-administration-http.js";
 import { createCustomerReceiptRead } from "./customer-receipt-read.js";
 import { CustomerReceiptHandler } from "./customer-receipt.js";
 import { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
@@ -33,6 +48,8 @@ import type { CustomerDiningJoinHandler } from "./customer-dining-join.js";
 import type { CustomerDiningBindingHandler } from "./customer-dining-binding.js";
 import type { CustomerCartBindingHandler } from "./customer-cart-binding.js";
 import { createServer, type Server } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
+import type { RequestHandler } from "express";
 import { pathToFileURL } from "node:url";
 import {
   createCoreTelemetry,
@@ -122,6 +139,15 @@ export interface ApiServerRuntimeOptions {
   merchantCatalog?: MerchantCatalogRouterOptions;
   merchantBff?: MerchantBffRouterOptions;
   merchantRuntime?: MerchantRuntimeOptions;
+  brandAdministration?: MerchantBrandAdministrationHttpOptions;
+  brandApplication?: RequestHandler;
+  tls?: Readonly<{ key: string; cert: string }>;
+  brandAdministrationRuntime?: MerchantBrandAdministrationRuntimeOptions;
+  brandCognitoAdministrationRuntime?: CognitoMerchantBrandAdministrationRuntimeOptions;
+  platformAuthentication?: PlatformAuthenticationHttpOptions;
+  platformAuthenticationRuntime?: PlatformAuthenticationRuntimeOptions;
+  platformCognitoAuthenticationRuntime?: CognitoPlatformAuthenticationRuntimeOptions;
+  platformTemplateAdministration?: PlatformTemplateAdministrationHttpOptions;
   nodeTelemetry?: NodeTelemetryRuntime;
   nowMilliseconds?: () => number;
   port?: number;
@@ -182,6 +208,15 @@ export function createApiServerRuntime({
   merchantCatalog,
   merchantBff,
   merchantRuntime,
+  brandAdministration,
+  brandApplication,
+  tls,
+  brandAdministrationRuntime,
+  brandCognitoAdministrationRuntime,
+  platformAuthentication,
+  platformAuthenticationRuntime,
+  platformCognitoAuthenticationRuntime,
+  platformTemplateAdministration,
   nodeTelemetry = createNodeTelemetryRuntime({
     environment: runtimeEnvironment(),
     serviceName: "bop-rms-api",
@@ -194,78 +229,158 @@ export function createApiServerRuntime({
     throw new Error("port must be an integer from 0 to 65535");
   if (merchantBff !== undefined && merchantRuntime !== undefined)
     throw new Error("MERCHANT_RUNTIME_CONFIGURATION_CONFLICT");
+  if (
+    [brandAdministration, brandAdministrationRuntime, brandCognitoAdministrationRuntime].filter(
+      (value) => value !== undefined,
+    ).length > 1
+  )
+    throw new Error("BRAND_ADMINISTRATION_RUNTIME_CONFIGURATION_CONFLICT");
+  if (
+    [
+      platformAuthentication,
+      platformAuthenticationRuntime,
+      platformCognitoAuthenticationRuntime,
+    ].filter((value) => value !== undefined).length > 1
+  )
+    throw new Error("PLATFORM_AUTHENTICATION_RUNTIME_CONFIGURATION_CONFLICT");
+  if (
+    platformTemplateAdministration !== undefined &&
+    platformCognitoAuthenticationRuntime?.enableTemplateAdministration === true
+  )
+    throw new Error("PLATFORM_TEMPLATE_ADMINISTRATION_RUNTIME_CONFIGURATION_CONFLICT");
   if (customerPaymentIntent !== undefined && customerPaymentIntentHandler !== undefined)
     throw new Error("CUSTOMER_PAYMENT_INTENT_CONFIGURATION_CONFLICT");
+  if (
+    brandApplication !== undefined &&
+    (typeof brandApplication !== "function" ||
+      tls === undefined ||
+      [brandAdministration, brandAdministrationRuntime, brandCognitoAdministrationRuntime].every(
+        (value) => value === undefined,
+      ))
+  )
+    throw new Error("BRAND_APPLICATION_CONFIGURATION_INVALID");
+  if (
+    tls !== undefined &&
+    (tls === null ||
+      typeof tls !== "object" ||
+      typeof tls.key !== "string" ||
+      typeof tls.cert !== "string" ||
+      tls.key.length < 1 ||
+      tls.cert.length < 1 ||
+      tls.key.length > 65536 ||
+      tls.cert.length > 65536 ||
+      Object.keys(tls).sort().join(",") !== "cert,key")
+  )
+    throw new Error("API_TLS_CONFIGURATION_INVALID");
   const configuredMerchant =
     merchantRuntime === undefined ? merchantBff : createMerchantRuntime(merchantRuntime);
-  const server = createServer(
-    createApp({
-      ...(customerOrderSubmission === undefined ? {} : { customerOrderSubmission }),
-      ...(customerCheckoutDetails === undefined ? {} : { customerCheckoutDetails }),
-      ...(customerCart === undefined ? {} : { customerCart }),
-      ...(customerCartBinding === undefined ? {} : { customerCartBinding }),
-      ...(customerDiningJoin === undefined ? {} : { customerDiningJoin }),
-      ...(customerDiningBinding === undefined ? {} : { customerDiningBinding }),
-      ...(customerEntry === undefined ? {} : { customerEntry }),
-      healthReadiness,
-      ...(customerMenu === undefined ? {} : { customerMenu }),
-      ...(customerQuote === undefined ? {} : { customerQuote }),
-      ...(customerCheckoutSessions === undefined
+  const configuredBrand =
+    brandCognitoAdministrationRuntime !== undefined
+      ? createCognitoMerchantBrandAdministrationRuntime(brandCognitoAdministrationRuntime)
+      : brandAdministrationRuntime === undefined
+        ? brandAdministration
+        : createMerchantBrandAdministrationRuntime(brandAdministrationRuntime);
+  const concretePlatform =
+    platformCognitoAuthenticationRuntime === undefined
+      ? undefined
+      : createCognitoPlatformAuthenticationRuntime(platformCognitoAuthenticationRuntime);
+  const configuredPlatform =
+    concretePlatform !== undefined
+      ? concretePlatform
+      : platformAuthenticationRuntime === undefined
+        ? platformAuthentication
+        : createPlatformAuthenticationRuntime(platformAuthenticationRuntime);
+  const configuredPlatformTemplates =
+    concretePlatform?.templateAdministration === undefined
+      ? platformTemplateAdministration
+      : {
+          exactOrigin: concretePlatform.exactOrigin,
+          acceptedHost: concretePlatform.acceptedHost,
+          administration: concretePlatform.templateAdministration,
+        };
+  const application = createApp({
+    ...(configuredBrand === undefined ? {} : { brandAdministration: configuredBrand }),
+    ...(brandApplication === undefined ? {} : { brandApplication }),
+    ...(configuredPlatform === undefined ? {} : { platformAuthentication: configuredPlatform }),
+    ...(configuredPlatformTemplates === undefined
+      ? {}
+      : { platformTemplateAdministration: configuredPlatformTemplates }),
+    ...(customerOrderSubmission === undefined ? {} : { customerOrderSubmission }),
+    ...(customerCheckoutDetails === undefined ? {} : { customerCheckoutDetails }),
+    ...(customerCart === undefined ? {} : { customerCart }),
+    ...(customerCartBinding === undefined ? {} : { customerCartBinding }),
+    ...(customerDiningJoin === undefined ? {} : { customerDiningJoin }),
+    ...(customerDiningBinding === undefined ? {} : { customerDiningBinding }),
+    ...(customerEntry === undefined ? {} : { customerEntry }),
+    healthReadiness,
+    ...(customerMenu === undefined ? {} : { customerMenu }),
+    ...(customerQuote === undefined ? {} : { customerQuote }),
+    ...(customerCheckoutSessions === undefined
+      ? {}
+      : createCustomerCheckoutSessionHandlers(customerCheckoutSessions)),
+    ...(customerPaymentIntentHandler !== undefined
+      ? { customerPaymentIntent: customerPaymentIntentHandler }
+      : customerPaymentIntent === undefined
         ? {}
-        : createCustomerCheckoutSessionHandlers(customerCheckoutSessions)),
-      ...(customerPaymentIntentHandler !== undefined
-        ? { customerPaymentIntent: customerPaymentIntentHandler }
-        : customerPaymentIntent === undefined
-          ? {}
-          : { customerPaymentIntent: createCustomerPaymentIntentHandler(customerPaymentIntent) }),
-      ...(customerPaymentHandoff === undefined
-        ? {}
-        : { customerPaymentHandoff: createCustomerPaymentHandoffHandler(customerPaymentHandoff) }),
-      ...(customerReceipt === undefined
-        ? {}
-        : {
-            customerReceipt: new CustomerReceiptHandler({
-              allowedOrigin: customerReceipt.allowedOrigin,
-              port: createCustomerReceiptRead(customerReceipt),
-            }),
+        : { customerPaymentIntent: createCustomerPaymentIntentHandler(customerPaymentIntent) }),
+    ...(customerPaymentHandoff === undefined
+      ? {}
+      : { customerPaymentHandoff: createCustomerPaymentHandoffHandler(customerPaymentHandoff) }),
+    ...(customerReceipt === undefined
+      ? {}
+      : {
+          customerReceipt: new CustomerReceiptHandler({
+            allowedOrigin: customerReceipt.allowedOrigin,
+            port: createCustomerReceiptRead(customerReceipt),
           }),
-      ...(customerSessionBootstrap === undefined
-        ? {}
-        : {
-            customerSessionBootstrap: createCustomerSessionBootstrapHandler({
-              allowedOrigin: customerSessionBootstrap.allowedOrigin,
-              port: createCustomerSessionBootstrapRead(customerSessionBootstrap),
-            }),
+        }),
+    ...(customerSessionBootstrap === undefined
+      ? {}
+      : {
+          customerSessionBootstrap: createCustomerSessionBootstrapHandler({
+            allowedOrigin: customerSessionBootstrap.allowedOrigin,
+            port: createCustomerSessionBootstrapRead(customerSessionBootstrap),
           }),
-      ...(customerPickupCode === undefined
-        ? {}
-        : {
-            customerPickupCode: new CustomerPickupCodeHandler({
-              allowedOrigin: customerPickupCode.allowedOrigin,
-              port: createCustomerPickupCodeRead(customerPickupCode),
-            }),
+        }),
+    ...(customerPickupCode === undefined
+      ? {}
+      : {
+          customerPickupCode: new CustomerPickupCodeHandler({
+            allowedOrigin: customerPickupCode.allowedOrigin,
+            port: createCustomerPickupCodeRead(customerPickupCode),
           }),
-      ...(customerOrderStatus === undefined
-        ? {}
-        : {
-            customerOrderStatus: new CustomerOrderStatusHandler({
-              allowedOrigin: customerOrderStatus.allowedOrigin,
-              port: createCustomerOrderStatusRead(customerOrderStatus),
-            }),
+        }),
+    ...(customerOrderStatus === undefined
+      ? {}
+      : {
+          customerOrderStatus: new CustomerOrderStatusHandler({
+            allowedOrigin: customerOrderStatus.allowedOrigin,
+            port: createCustomerOrderStatusRead(customerOrderStatus),
           }),
-      ...(customerPaymentResult === undefined
-        ? {}
-        : { customerPaymentResult: createCustomerPaymentResultHandler(customerPaymentResult) }),
-      deploymentEnvironment: runtimeEnvironment(),
-      ...(merchantCatalog === undefined ? {} : { merchantCatalog }),
-      ...(configuredMerchant === undefined ? {} : { merchantBff: configuredMerchant }),
-      errorLogger: logger,
-      nowMilliseconds,
-      ...(realtime === undefined ? {} : { realtime }),
-      requestLogger: logger,
-      telemetry: coreTelemetry,
-    }),
-  );
+        }),
+    ...(customerPaymentResult === undefined
+      ? {}
+      : { customerPaymentResult: createCustomerPaymentResultHandler(customerPaymentResult) }),
+    deploymentEnvironment: runtimeEnvironment(),
+    ...(merchantCatalog === undefined ? {} : { merchantCatalog }),
+    ...(configuredMerchant === undefined ? {} : { merchantBff: configuredMerchant }),
+    errorLogger: logger,
+    nowMilliseconds,
+    ...(realtime === undefined ? {} : { realtime }),
+    requestLogger: logger,
+    telemetry: coreTelemetry,
+  });
+  const server = (() => {
+    if (tls === undefined) return createServer(application);
+    try {
+      return createHttpsServer(
+        { key: tls.key, cert: tls.cert, minVersion: "TLSv1.2" },
+        application,
+      );
+    } catch {
+      throw new Error("API_TLS_CONFIGURATION_INVALID");
+    }
+  })();
   server.requestTimeout = 15_000;
   server.headersTimeout = 10_000;
   server.keepAliveTimeout = 5_000;

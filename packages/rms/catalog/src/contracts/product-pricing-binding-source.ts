@@ -85,6 +85,82 @@ function list(
   return Object.freeze(values.sort());
 }
 const optional = (v: unknown) => (v === null ? null : parseCatalogReference(v));
+/** Internal fixed reference-configuration parser. It parses owning graph data
+ * only; closed Lifecycle and publication protocols bind their own requests. */
+export function parseProductReferenceConfiguration(value: unknown) {
+  const raw = exact(copyCategoryPersistenceValue(value), [
+    "versionReference",
+    "categoryClassificationKnown",
+    "categoryReferences",
+    "primaryCategoryReference",
+    "taxClassificationReference",
+    "skuReferences",
+    "bindings",
+  ]);
+  if (
+    typeof raw.categoryClassificationKnown !== "boolean" ||
+    !Array.isArray(raw.bindings) ||
+    raw.bindings.length > productPricingBindingSourceMaximumRows
+  )
+    return fail();
+  const versionReference = parseCatalogReference(raw.versionReference),
+    skuReferences = list(raw.skuReferences),
+    primaryCategoryReference = optional(raw.primaryCategoryReference),
+    taxClassificationReference = optional(raw.taxClassificationReference),
+    categoryReferences = raw.categoryClassificationKnown ? list(raw.categoryReferences) : null;
+  if (
+    (!raw.categoryClassificationKnown &&
+      (raw.categoryReferences !== null || primaryCategoryReference !== null)) ||
+    (primaryCategoryReference !== null && !categoryReferences?.includes(primaryCategoryReference))
+  )
+    return fail();
+  const seen = new Set<string>();
+  const bindings = raw.bindings
+    .map((value) => {
+      const b = exact(value, [
+          "bindingReference",
+          "optionSetReference",
+          "optionSetVersionReference",
+          "enabledOptionReferences",
+          "includedSkuReferences",
+          "excludedSkuReferences",
+          "channelCodes",
+        ]),
+        bindingReference = parseCatalogReference(b.bindingReference),
+        includedSkuReferences = list(b.includedSkuReferences),
+        excludedSkuReferences = list(b.excludedSkuReferences);
+      if (
+        seen.has(bindingReference) ||
+        [...includedSkuReferences, ...excludedSkuReferences].some(
+          (s) => !skuReferences.includes(s),
+        ) ||
+        includedSkuReferences.some((s) => excludedSkuReferences.includes(s))
+      )
+        return fail();
+      seen.add(bindingReference);
+      return Object.freeze({
+        bindingReference,
+        optionSetReference: parseCatalogReference(b.optionSetReference),
+        optionSetVersionReference: parseCatalogReference(b.optionSetVersionReference),
+        enabledOptionReferences: list(b.enabledOptionReferences),
+        includedSkuReferences,
+        excludedSkuReferences,
+        channelCodes: list(b.channelCodes, parseCatalogCode),
+      });
+    })
+    .sort((a, b) => a.bindingReference.localeCompare(b.bindingReference));
+  return Object.freeze({
+    versionReference,
+    skuReferences,
+    categoryCoverage: raw.categoryClassificationKnown
+      ? ("Known" as const)
+      : ("Unavailable" as const),
+    categoryReferences,
+    primaryCategoryReference,
+    taxClassificationReference,
+    bindings: Object.freeze(bindings),
+  });
+}
 /** Current persisted Draft reference facts only; unknown classification isn't absence, and membership isn't sale approval. */
 export function buildProductPricingBindingSourceSnapshot(
   value: unknown,
@@ -117,66 +193,24 @@ export function buildProductPricingBindingSourceSnapshot(
       raw.bindings.length > productPricingBindingSourceMaximumRows
     )
       return fail();
-    const versionReference = parseCatalogReference(raw.versionReference),
-      skuReferences = list(raw.skuReferences),
-      primaryCategoryReference = optional(raw.primaryCategoryReference),
-      taxClassificationReference = optional(raw.taxClassificationReference),
-      categoryReferences = raw.categoryClassificationKnown ? list(raw.categoryReferences) : null;
+    const graph = parseProductReferenceConfiguration({
+      versionReference: raw.versionReference,
+      categoryClassificationKnown: raw.categoryClassificationKnown,
+      categoryReferences: raw.categoryReferences,
+      primaryCategoryReference: raw.primaryCategoryReference,
+      taxClassificationReference: raw.taxClassificationReference,
+      skuReferences: raw.skuReferences,
+      bindings: raw.bindings,
+    });
     if (
-      versionReference !== request.originalProductVersionReference ||
-      (request.skuReference !== null && !skuReferences.includes(request.skuReference)) ||
-      (!raw.categoryClassificationKnown &&
-        (raw.categoryReferences !== null || primaryCategoryReference !== null)) ||
-      (primaryCategoryReference !== null && !categoryReferences?.includes(primaryCategoryReference))
+      graph.versionReference !== request.originalProductVersionReference ||
+      (request.skuReference !== null && !graph.skuReferences.includes(request.skuReference))
     )
       return fail();
-    const seen = new Set<string>();
-    const bindings = raw.bindings
-      .map((value) => {
-        const b = exact(value, [
-            "bindingReference",
-            "optionSetReference",
-            "optionSetVersionReference",
-            "enabledOptionReferences",
-            "includedSkuReferences",
-            "excludedSkuReferences",
-            "channelCodes",
-          ]),
-          bindingReference = parseCatalogReference(b.bindingReference),
-          includedSkuReferences = list(b.includedSkuReferences),
-          excludedSkuReferences = list(b.excludedSkuReferences);
-        if (
-          seen.has(bindingReference) ||
-          [...includedSkuReferences, ...excludedSkuReferences].some(
-            (s) => !skuReferences.includes(s),
-          ) ||
-          includedSkuReferences.some((s) => excludedSkuReferences.includes(s))
-        )
-          return fail();
-        seen.add(bindingReference);
-        return Object.freeze({
-          bindingReference,
-          optionSetReference: parseCatalogReference(b.optionSetReference),
-          optionSetVersionReference: parseCatalogReference(b.optionSetVersionReference),
-          enabledOptionReferences: list(b.enabledOptionReferences),
-          includedSkuReferences,
-          excludedSkuReferences,
-          channelCodes: list(b.channelCodes, parseCatalogCode),
-        });
-      })
-      .sort((a, b) => a.bindingReference.localeCompare(b.bindingReference));
     const source = {
       request,
       profile: "CurrentDraftBindings" as const,
-      versionReference,
-      skuReferences,
-      categoryCoverage: raw.categoryClassificationKnown
-        ? ("Known" as const)
-        : ("Unavailable" as const),
-      categoryReferences,
-      primaryCategoryReference,
-      taxClassificationReference,
-      bindings: Object.freeze(bindings),
+      ...graph,
     };
     return Object.freeze({
       ...source,

@@ -1,3 +1,11 @@
+import {
+  parseRecipeInventoryProductPublicationReferenceRequestV2,
+  type RecipeInventoryProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
+import {
+  parseRecipeInventoryProductPublicationReferenceSnapshotV2,
+  type RecipeInventoryReferenceSnapshot,
+} from "./recipe-inventory-reference-source.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { parseRecipeReference } from "../domain/recipe.js";
 import { RecipeWorkflowError } from "../application/recipe-service.js";
@@ -58,12 +66,36 @@ export function matchRecipeInventoryReferenceRoots(input: {
 }) {
   try {
     const request = parseRecipeInventoryReferenceRequest(input.request),
-      source = parseRecipeInventoryReferenceSnapshot(input.source, request, input.now),
-      groups = list(input.rootGroups, 1001).map((value) => {
-        const roots = list(value, 1000).map(parseRecipeReference);
-        if (new Set(roots).size !== roots.length) return fail();
-        return Object.freeze(roots.sort());
-      });
+      source = parseRecipeInventoryReferenceSnapshot(input.source, request, input.now);
+    return matchRoots(request, source, input.rootGroups);
+  } catch {
+    return fail();
+  }
+}
+function matchRoots<
+  Request extends
+    RecipeInventoryReferenceRequest | RecipeInventoryProductPublicationReferenceRequestV2,
+>(
+  request: Request,
+  source: Pick<
+    RecipeInventoryReferenceSnapshot,
+    | "recipes"
+    | "versions"
+    | "ingredients"
+    | "modifiers"
+    | "changes"
+    | "digest"
+    | "generation"
+    | "observedAt"
+  >,
+  rootGroups: unknown,
+) {
+  try {
+    const groups = list(rootGroups, 1001).map((value) => {
+      const roots = list(value, 1000).map(parseRecipeReference);
+      if (new Set(roots).size !== roots.length) return fail();
+      return Object.freeze(roots.sort());
+    });
     if (groups.length === 0) return fail();
     const versions = new Map(source.versions.map((v) => [v.recipeVersionReference, v])),
       recipes = new Map(source.recipes.map((r) => [r.recipeReference, r]));
@@ -199,6 +231,25 @@ export function matchRecipeInventoryReferenceRoots(input: {
         });
       }),
     );
+  } catch {
+    return fail();
+  }
+}
+
+export function matchRecipeInventoryProductPublicationReferenceRootsV2(input: {
+  readonly request: RecipeInventoryProductPublicationReferenceRequestV2;
+  readonly rootGroups: unknown;
+  readonly source: unknown;
+  readonly now: string;
+}) {
+  try {
+    const request = parseRecipeInventoryProductPublicationReferenceRequestV2(input.request),
+      source = parseRecipeInventoryProductPublicationReferenceSnapshotV2(
+        input.source,
+        request,
+        input.now,
+      );
+    return matchRoots(request, source, input.rootGroups);
   } catch {
     return fail();
   }

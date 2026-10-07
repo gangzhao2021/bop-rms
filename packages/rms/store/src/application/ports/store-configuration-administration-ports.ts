@@ -17,7 +17,24 @@ export interface StoreConfigurationOperation {
   readonly configuration: StoreConfigurationVersion;
 }
 
+export interface StoreConfigurationFreshPreparationInput {
+  readonly operationReference: StoreAdministrationReference;
+  readonly actorReference: StoreAdministrationReference;
+  readonly purposeCode: string;
+  readonly auditReference: StoreAdministrationReference;
+  readonly expectedVersion: number;
+  readonly occurredAt: CanonicalInstant;
+  readonly configuration: StoreConfigurationVersion;
+}
 export interface StoreConfigurationAdministrationPorts {
+  /** Fresh-only, after original arbitration and current CAS. Server metadata only;
+   * the immutable intent hash remains bound to the original input. */
+  readonly prepareFresh?: (
+    command: StoreConfigurationAdministrationCommand,
+    input: StoreConfigurationFreshPreparationInput,
+    current: StoreConfigurationVersion | null,
+  ) => Promise<StoreConfigurationVersion>;
+
   readonly authorization: {
     authorize(input: {
       readonly command: StoreConfigurationAdministrationCommand;
@@ -39,6 +56,8 @@ export interface StoreConfigurationAdministrationPorts {
     commit(input: {
       readonly operation: StoreConfigurationOperation;
       readonly expectedVersion: number;
+      /** Actual parsed input before fresh metadata preparation; never reconstructed from the result. */
+      readonly originalInput?: StoreConfigurationFreshPreparationInput;
       readonly audit: {
         readonly actorReference: StoreAdministrationReference;
         readonly auditReference: StoreAdministrationReference;

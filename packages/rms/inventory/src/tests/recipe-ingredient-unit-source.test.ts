@@ -320,3 +320,13 @@ it("empty selectors retain metadata/field authority without granting eligibility
   await create(f.options).withCurrentUnits(request, [], async (v) => expect(v.units).toEqual([]));
   expect(f.authorize).toHaveBeenCalled();
 });
+
+it("covers the complete4096 Recipe ingredient budget without partial source packets", () => {
+  const pins = Array.from({ length: 4096 }, (_, i) => ({
+    ...pin(),
+    requirementReference: id(i + 1000),
+  }));
+  expect(evaluate(pins).pins).toHaveLength(4096);
+  expect(evaluate(pins).units).toHaveLength(1);
+  expect(() => evaluate([...pins, { ...pin(), requirementReference: id(6000) }])).toThrow();
+});

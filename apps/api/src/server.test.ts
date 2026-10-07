@@ -1,7 +1,18 @@
 import type { AddressInfo } from "node:net";
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { authorizationCookie } from "@bop/identity";
+import {
+  authorizationCookie,
+  platformAuthorizationCookie,
+  workforceAuthorizationCookie,
+  parseRawBrowserCredential,
+} from "@bop/identity";
 import type {
   CoreTelemetry,
   NodeTelemetryRuntime,
@@ -12,20 +23,31 @@ import { CustomerEntryHandler } from "./customer-entry.js";
 import { CustomerQuoteHandler } from "./customer-quote.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { createApiRuntimeLogger, createApiServerRuntime } from "./server.js";
+import * as brandRuntime from "./merchant-brand-administration-runtime.js";
+import type { MerchantBrandAdministrationHttpOptions } from "./merchant-brand-administration-http.js";
 
 const runtimes: ReturnType<typeof createApiServerRuntime>[] = [];
 
-function merchantRequest(root: string, headers: Record<string, string> = {}) {
+function merchantRequest(
+  root: string,
+  headers: Record<string, string> = {},
+  path = "/merchant/login",
+  options: { method?: string; body?: string } = {},
+) {
   return new Promise<{ status: number; headers: IncomingHttpHeaders }>((resolve, reject) => {
-    const request = httpRequest(`${root}/merchant/login`, { headers }, (response) => {
-      response.on("error", reject);
-      response.resume();
-      response.on("end", () =>
-        resolve({ status: response.statusCode ?? 0, headers: response.headers }),
-      );
-    });
+    const request = httpRequest(
+      `${root}${path}`,
+      { headers, method: options.method ?? "GET" },
+      (response) => {
+        response.on("error", reject);
+        response.resume();
+        response.on("end", () =>
+          resolve({ status: response.statusCode ?? 0, headers: response.headers }),
+        );
+      },
+    );
     request.on("error", reject);
-    request.end();
+    request.end(options.body);
   });
 }
 
@@ -45,6 +67,127 @@ describe("WP-2207 runtime dependency wiring", () => {
   const guest = "g".repeat(43);
   const csrf = "c".repeat(43);
 
+  it("requires TLS and explicit Brand authentication before exposing the Brand application", () => {
+    expect(() =>
+      createApiServerRuntime({ brandApplication: (_request, _response, next) => next() }),
+    ).toThrow("BRAND_APPLICATION_CONFIGURATION_INVALID");
+    expect(() =>
+      createApiServerRuntime({
+        brandApplication: (_request, _response, next) => next(),
+        tls: { key: "controlled", cert: "controlled" },
+      }),
+    ).toThrow("BRAND_APPLICATION_CONFIGURATION_INVALID");
+    expect(() =>
+      createApiServerRuntime({ tls: { key: "controlled", cert: "controlled" } }),
+    ).toThrow("API_TLS_CONFIGURATION_INVALID");
+  });
+
+  it("serves the application and current API on one real TLS listener and drains it", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "bop-brand-tls-"));
+    const keyFile = join(directory, "key.pem"),
+      certificateFile = join(directory, "certificate.pem");
+    let runtime: ReturnType<typeof createApiServerRuntime> | undefined;
+    try {
+      // Ephemeral synthetic TLS material, never a provisioned user certificate.
+      await promisify(execFile)(
+        "openssl",
+        [
+          "req",
+          "-x509",
+          "-newkey",
+          "rsa:2048",
+          "-sha256",
+          "-nodes",
+          "-days",
+          "1",
+          "-subj",
+          "/CN=Controlled local test",
+          "-addext",
+          "subjectAltName=IP:127.0.0.1",
+          "-addext",
+          "basicConstraints=critical,CA:FALSE",
+          "-keyout",
+          keyFile,
+          "-out",
+          certificateFile,
+        ],
+        { timeout: 30000, maxBuffer: 65536 },
+      );
+      const unavailable = async (): Promise<never> => {
+        throw new Error("Controlled source unavailable");
+      };
+      const configured = {
+        brandReference: null,
+        exactOrigin: "https://127.0.0.1",
+        acceptedHost: "127.0.0.1",
+        authorizationOrigin: "https://identity.invalid",
+        logoutUrl:
+          "https://identity.invalid/logout?client_id=synthetic&logout_uri=https%3A%2F%2F127.0.0.1%2Fapp%2Forganization%2Fbrands",
+        clock: { now: () => new Date().toISOString() },
+        service: {
+          start: unavailable,
+          callback: unavailable,
+          bootstrap: unavailable,
+          authorize: unavailable,
+          logout: unavailable,
+          rotate: unavailable,
+        },
+      } as MerchantBrandAdministrationHttpOptions;
+      runtime = createApiServerRuntime({
+        port: 0,
+        logger: logger().logger,
+        tls: {
+          key: await readFile(keyFile, "utf8"),
+          cert: await readFile(certificateFile, "utf8"),
+        },
+        brandAdministration: configured,
+        brandApplication: (request, response, next) => {
+          if (request.path !== "/app/organization/brands") return next();
+          response.type("html").send("<!doctype html><title>Controlled Brand entry</title>");
+        },
+      });
+      runtimes.push(runtime);
+      await runtime.listen();
+      const address = runtime.server.address();
+      if (!address || typeof address === "string")
+        throw new Error("Missing controlled TLS address");
+      const get = (path: string) =>
+        new Promise<{ status: number; body: string; headers: IncomingHttpHeaders }>(
+          (resolve, reject) => {
+            // Verification bypass is limited to this generated local test certificate.
+            const request = httpsRequest(
+              { hostname: "127.0.0.1", port: address.port, path, rejectUnauthorized: false },
+              (response) => {
+                let body = "";
+                response.setEncoding("utf8");
+                response.on("data", (value) => {
+                  body += String(value);
+                });
+                response.on("end", () =>
+                  resolve({ status: response.statusCode ?? 0, body, headers: response.headers }),
+                );
+                response.on("error", reject);
+              },
+            );
+            request.on("error", reject);
+            request.end();
+          },
+        );
+      const page = await get("/app/organization/brands");
+      expect(page.status).toBe(200);
+      expect(page.body).toContain("Controlled Brand entry");
+      expect(page.headers["x-content-type-options"]).toBe("nosniff");
+      expect(page.headers["cache-control"]).toBe("no-store");
+      expect((await get("/health")).status).toBe(200);
+      expect((await get("/merchant/organization/brands/session")).status).toBe(403);
+      await runtime.shutdown("SIGTERM");
+      expect(runtime.server.listening).toBe(false);
+    } finally {
+      if (runtime?.server.listening) await runtime.shutdown("SIGTERM");
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects ambiguous Merchant runtime inputs before constructing either dependency", () => {
     expect(() =>
       createApiServerRuntime({
@@ -54,6 +197,272 @@ describe("WP-2207 runtime dependency wiring", () => {
       }),
     ).toThrow("MERCHANT_RUNTIME_CONFIGURATION_CONFLICT");
   });
+
+  it("rejects ambiguous Brand runtime inputs before constructing either dependency", () => {
+    expect(() =>
+      createApiServerRuntime({
+        port: 0,
+        brandAdministration: {} as never,
+        brandAdministrationRuntime: {} as never,
+      }),
+    ).toThrow("BRAND_ADMINISTRATION_RUNTIME_CONFIGURATION_CONFLICT");
+  });
+  it.each(["handler", "runtime"] as const)(
+    "rejects concrete Workforce combined with a supplied Brand %s",
+    (kind) => {
+      expect(() =>
+        createApiServerRuntime({
+          port: 0,
+          brandCognitoAdministrationRuntime: {} as never,
+          ...(kind === "handler"
+            ? { brandAdministration: {} as never }
+            : { brandAdministrationRuntime: {} as never }),
+        }),
+      ).toThrow("BRAND_ADMINISTRATION_RUNTIME_CONFIGURATION_CONFLICT");
+    },
+  );
+  it("rejects incomplete concrete Workforce startup before opening a server", () => {
+    expect(() =>
+      createApiServerRuntime({ port: 0, brandCognitoAdministrationRuntime: {} as never }),
+    ).toThrow("BRAND_ADMINISTRATION_RUNTIME_UNAVAILABLE");
+  });
+
+  it("rejects ambiguous Platform authentication inputs before constructing either dependency", () => {
+    expect(() =>
+      createApiServerRuntime({
+        port: 0,
+        platformAuthentication: {} as never,
+        platformAuthenticationRuntime: {} as never,
+      }),
+    ).toThrow("PLATFORM_AUTHENTICATION_RUNTIME_CONFIGURATION_CONFLICT");
+  });
+
+  it.each(["handler", "runtime"] as const)(
+    "rejects concrete Cognito combined with a supplied Platform %s",
+    (kind) => {
+      expect(() =>
+        createApiServerRuntime({
+          port: 0,
+          platformCognitoAuthenticationRuntime: {} as never,
+          ...(kind === "handler"
+            ? { platformAuthentication: {} as never }
+            : { platformAuthenticationRuntime: {} as never }),
+        }),
+      ).toThrow("PLATFORM_AUTHENTICATION_RUNTIME_CONFIGURATION_CONFLICT");
+    },
+  );
+
+  it("rejects incomplete concrete Cognito startup before opening a server", () => {
+    expect(() =>
+      createApiServerRuntime({ port: 0, platformCognitoAuthenticationRuntime: {} as never }),
+    ).toThrow("PLATFORM_AUTHENTICATION_RUNTIME_UNAVAILABLE");
+  });
+
+  it("rejects competing Template handlers before constructing concrete Identity", () => {
+    expect(() =>
+      createApiServerRuntime({
+        platformTemplateAdministration: {} as never,
+        platformCognitoAuthenticationRuntime: { enableTemplateAdministration: true } as never,
+      }),
+    ).toThrow("PLATFORM_TEMPLATE_ADMINISTRATION_RUNTIME_CONFIGURATION_CONFLICT");
+  });
+
+  it("mounts only explicitly configured Template transport with fixed purpose routes", async () => {
+    const query = vi.fn(async () => {
+      throw new Error("controlled unavailable source");
+    });
+    const command = vi.fn(async () => {
+      throw new Error("unexpected command");
+    });
+    const runtime = createApiServerRuntime({
+      port: 0,
+      logger: logger().logger,
+      platformTemplateAdministration: {
+        exactOrigin: "https://platform.invalid",
+        acceptedHost: "platform.invalid",
+        administration: { query, command },
+      },
+    });
+    runtimes.push(runtime);
+    await runtime.listen();
+    const headers = {
+      host: "platform.invalid",
+      origin: "https://platform.invalid",
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+      cookie: `__Host-bop-platform=${"p".repeat(43)}`,
+      "x-bop-csrf": "c".repeat(43),
+    };
+    const request = { action: "List", after: null, limit: 20 };
+    const result = await merchantRequest(origin(runtime), headers, "/platform/templates/query", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    expect(result.status).toBe(503);
+    expect(result.headers["cache-control"]).toBe("no-store");
+    expect(query).toHaveBeenCalledExactlyOnceWith({
+      sessionCookie: "p".repeat(43),
+      csrf: "c".repeat(43),
+      request,
+    });
+    expect(command).not.toHaveBeenCalled();
+    expect((await merchantRequest(origin(runtime), headers, "/platform/tenants")).status).toBe(404);
+    const unconfigured = createApiServerRuntime({ port: 0, logger: logger().logger });
+    runtimes.push(unconfigured);
+    await unconfigured.listen();
+    expect(
+      (
+        await merchantRequest(origin(unconfigured), headers, "/platform/templates/query", {
+          method: "POST",
+          body: JSON.stringify(request),
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("mounts isolated Platform authentication without granting a Tenant entry or Merchant session", async () => {
+    const start = vi.fn(async () => ({
+      authorizationUrl: "https://synthetic-platform-idp.invalid/authorize",
+      cookie: {
+        value: parseRawBrowserCredential("a".repeat(43)),
+        descriptor: platformAuthorizationCookie,
+        clear: false as const,
+      },
+    }));
+    const unexpected = async (): Promise<never> => {
+      throw new Error("unexpected controlled Platform service call");
+    };
+    const runtime = createApiServerRuntime({
+      port: 0,
+      logger: logger().logger,
+      platformAuthentication: {
+        exactOrigin: "https://platform.invalid",
+        acceptedHost: "platform.invalid",
+        authorizationOrigin: "https://synthetic-platform-idp.invalid",
+        logoutUrl:
+          "https://synthetic-platform-idp.invalid/logout?client_id=synthetic&logout_uri=https%3A%2F%2Fplatform.invalid%2Fplatform%2Ftenants",
+        clock: { now: () => "2026-10-06T12:00:00.000Z" },
+        service: {
+          start,
+          callback: unexpected,
+          bootstrap: unexpected,
+          startStepUp: unexpected,
+          logout: unexpected,
+        },
+      },
+    });
+    runtimes.push(runtime);
+    await runtime.listen();
+    const headers = {
+      host: "platform.invalid",
+      "sec-fetch-site": "same-origin",
+      origin: "https://platform.invalid",
+    };
+    const login = await merchantRequest(origin(runtime), headers, "/platform/auth/login");
+    expect(login.status).toBe(303);
+    expect(login.headers.location).toBe("https://synthetic-platform-idp.invalid/authorize");
+    expect(login.headers["cache-control"]).toBe("no-store");
+    expect(login.headers["set-cookie"]).toEqual([
+      expect.stringMatching(
+        /^__Host-bop-platform-auth=[a]+; Path=\/; Secure; HttpOnly; SameSite=Lax; Max-Age=600$/u,
+      ),
+    ]);
+    expect(start).toHaveBeenCalledExactlyOnceWith("/platform/tenants");
+    expect(
+      (
+        await merchantRequest(
+          origin(runtime),
+          { ...headers, host: "foreign.invalid" },
+          "/platform/auth/login",
+        )
+      ).status,
+    ).toBe(403);
+    for (const path of ["/platform/tenants", "/merchant/session"])
+      expect((await merchantRequest(origin(runtime), headers, path)).status).toBe(404);
+    expect(start).toHaveBeenCalledTimes(1);
+    const unconfigured = createApiServerRuntime({ port: 0, logger: logger().logger });
+    runtimes.push(unconfigured);
+    await unconfigured.listen();
+    expect(
+      (await merchantRequest(origin(unconfigured), headers, "/platform/auth/login")).status,
+    ).toBe(404);
+  });
+
+  it.each(["handler", "concrete"] as const)(
+    "mounts the noStore Brand entry through the %s server dependency without a Store runtime",
+    async (mode) => {
+      const brandReference = "018fc000-0000-7000-8000-000000000004";
+      const start = vi.fn(async () => ({
+        authorizationUrl: "https://synthetic-idp.invalid/authorize",
+        cookie: {
+          value: parseRawBrowserCredential("a".repeat(43)),
+          descriptor: workforceAuthorizationCookie,
+          clear: false,
+        },
+      }));
+      const unexpected = async (): Promise<never> => {
+        throw new Error("unexpected controlled service call");
+      };
+      const configured: MerchantBrandAdministrationHttpOptions = {
+          brandReference,
+          exactOrigin: syntheticOrigin,
+          acceptedHost: "merchant.invalid",
+          authorizationOrigin: "https://synthetic-idp.invalid",
+          logoutUrl:
+            "https://synthetic-idp.invalid/logout?client_id=synthetic&logout_uri=https%3A%2F%2Fmerchant.invalid%2Fapp%2Forganization%2Fbrands",
+          clock: { now: () => "2026-09-03T12:00:00.000Z" },
+          service: {
+            start,
+            callback: unexpected,
+            bootstrap: unexpected,
+            authorize: unexpected,
+            rotate: unexpected,
+            logout: unexpected,
+          },
+        },
+        // Server wiring seam only; concrete Identity is separately owner/native verified.
+        concreteInput = {} as brandRuntime.CognitoMerchantBrandAdministrationRuntimeOptions,
+        factory =
+          mode === "concrete"
+            ? vi
+                .spyOn(brandRuntime, "createCognitoMerchantBrandAdministrationRuntime")
+                .mockReturnValue(configured)
+            : null;
+      const runtime = createApiServerRuntime({
+        port: 0,
+        logger: logger().logger,
+        ...(mode === "handler"
+          ? { brandAdministration: configured }
+          : { brandCognitoAdministrationRuntime: concreteInput }),
+      });
+      if (factory) {
+        expect(factory).toHaveBeenCalledExactlyOnceWith(concreteInput);
+        factory.mockRestore();
+      }
+      runtimes.push(runtime);
+      await runtime.listen();
+      const result = await merchantRequest(
+        origin(runtime),
+        {
+          host: "merchant.invalid",
+          "sec-fetch-site": "same-origin",
+          origin: syntheticOrigin,
+        },
+        "/merchant/organization/brands/login",
+      );
+      expect(result.status).toBe(303);
+      expect(result.headers.location).toBe("https://synthetic-idp.invalid/authorize");
+      expect(result.headers["cache-control"]).toBe("no-store");
+      expect(start).toHaveBeenCalledExactlyOnceWith(`/app/organization/brands/${brandReference}`);
+      const denied = await merchantRequest(
+        origin(runtime),
+        { host: "foreign.invalid", "sec-fetch-site": "same-origin" },
+        "/merchant/organization/brands/login",
+      );
+      expect(denied.status).toBe(403);
+      expect(start).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("dispatches injected dependencies, preserves guards and isolates unconfigured runtimes", async () => {
     const establish = vi.fn(async () => ({ status: "EntryUnavailable" as const }));

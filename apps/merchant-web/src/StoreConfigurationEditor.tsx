@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router";
 import {
   createStoreConfigurationClient,
   type StoreConfigurationView,
@@ -58,6 +59,12 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
     command: "SaveDraft" | "Validate" | "Submit" | "Approve" | "Publish" = "SaveDraft",
   ) {
     if (running.current || !online || !view || !draft) return;
+    if (!pending.current && command === "SaveDraft" && draft.setupBasis) {
+      setMessage(
+        "Edit this recorded configuration in Store Setup, then materialize a new saved configuration.",
+      );
+      return;
+    }
     if (
       !pending.current &&
       command !== "SaveDraft" &&
@@ -191,194 +198,88 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
             {view.expectedVersion}
           </p>
           <p>Time zone: {draft.timeZone}</p>
+          <StoreConfigurationFeeBasisView configuration={draft} />
+          {view.current && view.current.configurationReference !== draft.configurationReference && (
+            <StoreConfigurationFeeBasisView configuration={view.current} />
+          )}
           <fieldset disabled={disabled}>
-            <legend>Hours and service timing</legend>
-            <label>
-              Business day starts
-              <input
-                type="time"
-                step="60"
-                required
-                value={draft.businessDayStartLocalTime.slice(0, 5)}
-                onChange={(event) =>
-                  setDraft({ ...draft, businessDayStartLocalTime: event.target.value + ":00" })
-                }
-              />
-            </label>
-            <label>
-              Effective from (UTC)
-              <input
-                type="datetime-local"
-                step="1"
-                required
-                value={draft.effectiveFrom.slice(0, 19)}
-                onChange={(event) =>
-                  setDraft({
-                    ...draft,
-                    effectiveFrom: event.target.value
-                      ? new Date(event.target.value + "Z").toISOString()
-                      : "",
-                  })
-                }
-              />
-            </label>
-            <label>
-              Effective until (UTC, optional)
-              <input
-                type="datetime-local"
-                step="1"
-                value={draft.effectiveUntil?.slice(0, 19) ?? ""}
-                onChange={(event) =>
-                  setDraft({
-                    ...draft,
-                    effectiveUntil: event.target.value
-                      ? new Date(event.target.value + "Z").toISOString()
-                      : null,
-                  })
-                }
-              />
-            </label>
-            <label>
-              Change reason code
-              <input
-                required
-                pattern="[A-Z][A-Z0-9_.:-]{0,63}"
-                maxLength={64}
-                value={draft.reasonCode}
-                onChange={(event) => setDraft({ ...draft, reasonCode: event.target.value })}
-              />
-            </label>
-            {draft.weeklySchedule.map((day, n) => (
-              <fieldset key={day.isoWeekday}>
-                <legend>{days[n]}</legend>
-                {day.intervals.length === 0 && <p>Closed</p>}
-                {day.intervals.map((interval, i) => (
-                  <IntervalEditor
-                    key={i}
-                    index={i}
-                    interval={interval}
-                    modes={draft.enabledServiceModes}
-                    onChange={(change) => updateInterval(n, i, change)}
-                    onRemove={() =>
-                      setDraft({
-                        ...draft,
-                        weeklySchedule: draft.weeklySchedule.map((d, j) =>
-                          j !== n
-                            ? d
-                            : {
-                                ...d,
-                                intervals: d.intervals.filter((_, k) => k !== i),
-                              },
-                        ),
-                      })
-                    }
-                  />
-                ))}
-                <button
-                  type="button"
-                  disabled={day.intervals.length >= 16}
-                  onClick={() =>
+            <StoreConfigurationEditingBoundary configuration={draft}>
+              <label>
+                Business day starts
+                <input
+                  type="time"
+                  step="60"
+                  required
+                  value={draft.businessDayStartLocalTime.slice(0, 5)}
+                  onChange={(event) =>
+                    setDraft({ ...draft, businessDayStartLocalTime: event.target.value + ":00" })
+                  }
+                />
+              </label>
+              <label>
+                Effective from (UTC)
+                <input
+                  type="datetime-local"
+                  step="1"
+                  required
+                  value={draft.effectiveFrom.slice(0, 19)}
+                  onChange={(event) =>
                     setDraft({
                       ...draft,
-                      weeklySchedule: draft.weeklySchedule.map((d, j) =>
-                        j !== n
-                          ? d
-                          : {
-                              ...d,
-                              intervals: [
-                                ...d.intervals,
-                                {
-                                  startLocalTime: "09:00:00",
-                                  endLocalTime: "17:00:00",
-                                  endsNextDay: false,
-                                  serviceModes: draft.enabledServiceModes,
-                                  orderCutoffSeconds: 0,
-                                  leadTimeSeconds: 0,
-                                },
-                              ],
-                            },
-                      ),
+                      effectiveFrom: event.target.value
+                        ? new Date(event.target.value + "Z").toISOString()
+                        : "",
                     })
                   }
-                >
-                  Add interval
-                </button>
-              </fieldset>
-            ))}
-
-            <fieldset>
-              <legend>Dated exceptions</legend>
-              <p>
-                Dates use {draft.timeZone}. An exception with no intervals is closed for that date.
-              </p>
-              {draft.exceptions.map((exception, n) => (
-                <fieldset key={n}>
-                  <legend>Exception {n + 1}</legend>
-                  <label>
-                    Exception date
-                    <input
-                      type="date"
-                      required
-                      value={exception.localDate}
-                      onChange={(event) =>
-                        setDraft({
-                          ...draft,
-                          exceptions: draft.exceptions.map((e, j) =>
-                            j === n ? { ...e, localDate: event.target.value } : e,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Exception kind
-                    <select
-                      value={exception.kind}
-                      onChange={(event) =>
-                        setDraft({
-                          ...draft,
-                          exceptions: draft.exceptions.map((e, j) =>
-                            j === n
-                              ? { ...e, kind: event.target.value as typeof exception.kind }
-                              : e,
-                          ),
-                        })
-                      }
-                    >
-                      <option value="Holiday">Holiday</option>
-                      <option value="TemporaryClosure">Temporary closure</option>
-                      <option value="Override">Override</option>
-                    </select>
-                  </label>
-                  {exception.intervals.length === 0 && <p>Closed</p>}
-                  {exception.intervals.map((interval, i) => (
+                />
+              </label>
+              <label>
+                Effective until (UTC, optional)
+                <input
+                  type="datetime-local"
+                  step="1"
+                  value={draft.effectiveUntil?.slice(0, 19) ?? ""}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      effectiveUntil: event.target.value
+                        ? new Date(event.target.value + "Z").toISOString()
+                        : null,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Change reason code
+                <input
+                  required
+                  pattern="[A-Z][A-Z0-9_.:-]{0,63}"
+                  maxLength={64}
+                  value={draft.reasonCode}
+                  onChange={(event) => setDraft({ ...draft, reasonCode: event.target.value })}
+                />
+              </label>
+              {draft.weeklySchedule.map((day, n) => (
+                <fieldset key={day.isoWeekday}>
+                  <legend>{days[n]}</legend>
+                  {day.intervals.length === 0 && <p>Closed</p>}
+                  {day.intervals.map((interval, i) => (
                     <IntervalEditor
                       key={i}
-                      interval={interval}
                       index={i}
+                      interval={interval}
                       modes={draft.enabledServiceModes}
-                      onChange={(change) =>
-                        setDraft({
-                          ...draft,
-                          exceptions: draft.exceptions.map((e, j) =>
-                            j !== n
-                              ? e
-                              : {
-                                  ...e,
-                                  intervals: e.intervals.map((v, k) =>
-                                    k === i ? { ...v, ...change } : v,
-                                  ),
-                                },
-                          ),
-                        })
-                      }
+                      onChange={(change) => updateInterval(n, i, change)}
                       onRemove={() =>
                         setDraft({
                           ...draft,
-                          exceptions: draft.exceptions.map((e, j) =>
+                          weeklySchedule: draft.weeklySchedule.map((d, j) =>
                             j !== n
-                              ? e
-                              : { ...e, intervals: e.intervals.filter((_, k) => k !== i) },
+                              ? d
+                              : {
+                                  ...d,
+                                  intervals: d.intervals.filter((_, k) => k !== i),
+                                },
                           ),
                         })
                       }
@@ -386,17 +287,17 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
                   ))}
                   <button
                     type="button"
-                    disabled={exception.intervals.length >= 16}
+                    disabled={day.intervals.length >= 16}
                     onClick={() =>
                       setDraft({
                         ...draft,
-                        exceptions: draft.exceptions.map((e, j) =>
+                        weeklySchedule: draft.weeklySchedule.map((d, j) =>
                           j !== n
-                            ? e
+                            ? d
                             : {
-                                ...e,
+                                ...d,
                                 intervals: [
-                                  ...e.intervals,
+                                  ...d.intervals,
                                   {
                                     startLocalTime: "09:00:00",
                                     endLocalTime: "17:00:00",
@@ -411,36 +312,152 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
                       })
                     }
                   >
-                    Add exception interval
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDraft({ ...draft, exceptions: draft.exceptions.filter((_, j) => j !== n) })
-                    }
-                  >
-                    Remove exception {n + 1}
+                    Add interval
                   </button>
                 </fieldset>
               ))}
-              <button
-                type="button"
-                disabled={draft.exceptions.length >= 366}
-                onClick={() =>
-                  setDraft({
-                    ...draft,
-                    exceptions: [
-                      ...draft.exceptions,
-                      { localDate: "", kind: "Holiday", intervals: [] },
-                    ],
-                  })
-                }
-              >
-                Add dated exception
-              </button>
-            </fieldset>
 
-            <button type="submit">Save hours draft</button>
+              <fieldset>
+                <legend>Dated exceptions</legend>
+                <p>
+                  Dates use {draft.timeZone}. An exception with no intervals is closed for that
+                  date.
+                </p>
+                {draft.exceptions.map((exception, n) => (
+                  <fieldset key={n}>
+                    <legend>Exception {n + 1}</legend>
+                    <label>
+                      Exception date
+                      <input
+                        type="date"
+                        required
+                        value={exception.localDate}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            exceptions: draft.exceptions.map((e, j) =>
+                              j === n ? { ...e, localDate: event.target.value } : e,
+                            ),
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Exception kind
+                      <select
+                        value={exception.kind}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            exceptions: draft.exceptions.map((e, j) =>
+                              j === n
+                                ? { ...e, kind: event.target.value as typeof exception.kind }
+                                : e,
+                            ),
+                          })
+                        }
+                      >
+                        <option value="Holiday">Holiday</option>
+                        <option value="TemporaryClosure">Temporary closure</option>
+                        <option value="Override">Override</option>
+                      </select>
+                    </label>
+                    {exception.intervals.length === 0 && <p>Closed</p>}
+                    {exception.intervals.map((interval, i) => (
+                      <IntervalEditor
+                        key={i}
+                        interval={interval}
+                        index={i}
+                        modes={draft.enabledServiceModes}
+                        onChange={(change) =>
+                          setDraft({
+                            ...draft,
+                            exceptions: draft.exceptions.map((e, j) =>
+                              j !== n
+                                ? e
+                                : {
+                                    ...e,
+                                    intervals: e.intervals.map((v, k) =>
+                                      k === i ? { ...v, ...change } : v,
+                                    ),
+                                  },
+                            ),
+                          })
+                        }
+                        onRemove={() =>
+                          setDraft({
+                            ...draft,
+                            exceptions: draft.exceptions.map((e, j) =>
+                              j !== n
+                                ? e
+                                : { ...e, intervals: e.intervals.filter((_, k) => k !== i) },
+                            ),
+                          })
+                        }
+                      />
+                    ))}
+                    <button
+                      type="button"
+                      disabled={exception.intervals.length >= 16}
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          exceptions: draft.exceptions.map((e, j) =>
+                            j !== n
+                              ? e
+                              : {
+                                  ...e,
+                                  intervals: [
+                                    ...e.intervals,
+                                    {
+                                      startLocalTime: "09:00:00",
+                                      endLocalTime: "17:00:00",
+                                      endsNextDay: false,
+                                      serviceModes: draft.enabledServiceModes,
+                                      orderCutoffSeconds: 0,
+                                      leadTimeSeconds: 0,
+                                    },
+                                  ],
+                                },
+                          ),
+                        })
+                      }
+                    >
+                      Add exception interval
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          exceptions: draft.exceptions.filter((_, j) => j !== n),
+                        })
+                      }
+                    >
+                      Remove exception {n + 1}
+                    </button>
+                  </fieldset>
+                ))}
+                <button
+                  type="button"
+                  disabled={draft.exceptions.length >= 366}
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      exceptions: [
+                        ...draft.exceptions,
+                        { localDate: "", kind: "Holiday", intervals: [] },
+                      ],
+                    })
+                  }
+                >
+                  Add dated exception
+                </button>
+              </fieldset>
+            </StoreConfigurationEditingBoundary>
+            <button type="submit" disabled={draft.setupBasis !== undefined}>
+              Save hours draft
+            </button>
             <p>Latest state: {view.latest?.lifecycle ?? "No draft"}</p>
             <button
               type="button"
@@ -591,6 +608,95 @@ function IntervalEditor({
       <button type="button" onClick={onRemove}>
         Remove interval {i + 1}
       </button>
+    </fieldset>
+  );
+}
+
+/** This display reports recorded content, not a new qualification or publication transition. */
+export function StoreConfigurationFeeBasisView({
+  configuration,
+}: {
+  readonly configuration: StoreConfigurationSnapshot;
+}) {
+  const basis = configuration.setupBasis;
+  return (
+    <section
+      aria-label={
+        configuration.lifecycle === "Published"
+          ? "Published fee configuration"
+          : "Recorded fee configuration"
+      }
+    >
+      <h3>
+        {configuration.lifecycle === "Published"
+          ? "Published configuration fee contexts"
+          : "Recorded configuration fee contexts"}
+      </h3>
+      <p>
+        Configuration state: {configuration.lifecycle}.{" "}
+        {configuration.lifecycle !== "Published" && "These settings do not change the live Store."}
+      </p>
+      {!basis ? (
+        <p>
+          This legacy configuration has no recorded Setup fee basis. Fee policy is not inferred.
+        </p>
+      ) : (
+        <>
+          <p>
+            This recorded configuration is bound to its immutable Setup source. Edit its fields in
+            Store Setup.
+          </p>
+          <Link to={`/app/organization/stores/${configuration.storeReference}/setup`}>
+            Edit in Store Setup
+          </Link>
+          <dl>
+            <dt>Setup draft source</dt>
+            <dd>{basis.setupDraftReference}</dd>
+            <dt>Setup source revision</dt>
+            <dd>{basis.sourceRevision}</dd>
+            <dt>Setup source fingerprint</dt>
+            <dd>{basis.sourceSnapshotDigest}</dd>
+          </dl>
+          <ul>
+            {basis.feeContexts.map((entry) => (
+              <li key={entry.chargeType}>
+                {entry.chargeType === "ServiceCharge"
+                  ? "Service charge"
+                  : entry.chargeType === "DeliveryFee"
+                    ? "Delivery fee"
+                    : "Tip"}
+                : {entry.state}
+                {entry.state === "Enabled" && (
+                  <>
+                    {" "}
+                    · order types {entry.orderTypes.join(", ")} · recorded tax classification
+                    selected
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p>
+            Recorded selections do not supply fee amounts, quotes or professional tax qualification.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Basis-bound full content is immutable here; lifecycle actions remain outside this boundary. */
+export function StoreConfigurationEditingBoundary({
+  configuration,
+  children,
+}: {
+  readonly configuration: StoreConfigurationSnapshot;
+  readonly children: ReactNode;
+}) {
+  return (
+    <fieldset disabled={configuration.setupBasis !== undefined}>
+      <legend>Hours and service timing</legend>
+      {children}
     </fieldset>
   );
 }

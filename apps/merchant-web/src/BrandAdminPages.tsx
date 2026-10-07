@@ -1,4 +1,7 @@
-import { StatePanel } from "@bop-rms/ui";
+import { useParams } from "react-router";
+import { BrandDiscoveryPage } from "./BrandDiscoveryPage.js";
+import { BrandStoreTopologyDraftPanel } from "./BrandStoreTopologyDraftPanel.js";
+import { StatePanel, AppFrame } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import {
   BrandAdminPageError,
@@ -164,5 +167,25 @@ export function BrandAdminPage({
     <BrandAdminState state={state.kind} />
   );
 }
-export const BrandListPage = BrandAdminPage,
-  BrandDetailPage = BrandAdminPage;
+export function BrandListPage({ client }: { readonly client?: BrandAdminPageClient }) {
+  return client === undefined ? <BrandDiscoveryPage /> : <BrandAdminPage client={client} />;
+}
+export function BrandDetailPage({
+  brandLabel,
+  csrf,
+}: {
+  readonly brandLabel?: string;
+  readonly csrf: string;
+}) {
+  const { id } = useParams();
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(id))
+    return <BrandAdminState state="NotFound" />;
+  return (
+    <AppFrame
+      title={brandLabel ?? "Brand administration"}
+      description="Manage saved Region and Store Group draft assignments."
+    >
+      <BrandStoreTopologyDraftPanel expectedBrandReference={id} csrf={csrf} />
+    </AppFrame>
+  );
+}

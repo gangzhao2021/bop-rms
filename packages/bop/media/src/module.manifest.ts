@@ -5,7 +5,7 @@ const moduleManifestInput = {
   packageName: "@bop/media",
   layer: "BOP",
   lifecycle: "Phase 1",
-  publicExports: ["."],
+  publicExports: [".", "./worker"],
   allowedSynchronousDependencies: [
     {
       moduleName: "audit",
@@ -25,7 +25,21 @@ const moduleManifestInput = {
   ],
   consumedEvents: [],
   publishedEvents: [],
-  ownedDatabase: { schema: null, tables: [] },
+  ownedDatabase: {
+    schema: "bop_media",
+    tables: [
+      "upload_session",
+      "asset",
+      "asset_version",
+      "operation_record",
+      "upload_object_binding",
+      "finalized_object_binding",
+      "image_processing_intent",
+      "image_processing_completion",
+      "image_rendition",
+      "image_scan_admission",
+    ],
+  },
   ownedJobs: [],
   featureFlags: [],
   killSwitches: [],

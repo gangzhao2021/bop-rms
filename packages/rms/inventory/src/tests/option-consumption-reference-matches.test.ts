@@ -157,3 +157,59 @@ it("refuses an existing operation owned by a different existing item", () => {
   pin.versionReference = id(33);
   expect(run(p, r).matches[0]?.status).toBe("WrongItem");
 });
+
+const originalClock = () => ({
+  profile: "OptionPublicationOriginalClockV1",
+  operationReference: request.operationReference,
+  catalogIntentDigest: request.catalogIntentDigest,
+  observedAt: at,
+  validUntil: "2026-10-01T04:00:05.000Z",
+});
+it("accepts original immediate activation after a forward current metadata read while retaining legacy refusal", () => {
+  const now = "2026-10-01T04:00:01.000Z",
+    source = build(raw(), request, at);
+  const value = assess(pins(), source, request, now, at, originalClock());
+  expect(value.decision).toBe("PassForMetadata");
+  expect(value.assessedAt).toBe(now);
+  expect(value.activationAt).toBe(at);
+  expect(value.originalPublicationClock).toEqual(originalClock());
+  expect(() => assess(pins(), source, request, now, at)).toThrow();
+});
+it.each([
+  { profile: "Other" },
+  { operationReference: id(99) },
+  { catalogIntentDigest: "sha256:" + "f".repeat(64) },
+  { observedAt: "2026-10-01T04:00:02.000Z" },
+  { validUntil: "2026-10-01T04:00:01.000Z" },
+  { validUntil: "2026-10-01T04:00:05.001Z" },
+  { extra: true },
+])("refuses rebound or invalid original Inventory metadata clock %#", (patch) => {
+  expect(() =>
+    assess(pins(), build(raw(), request, at), request, "2026-10-01T04:00:01.000Z", at, {
+      ...originalClock(),
+      ...patch,
+    }),
+  ).toThrow();
+});
+it("rejects accessors, activation before original observation and clock before original observation", () => {
+  const getter = vi.fn(() => at),
+    clock = Object.defineProperty(originalClock(), "observedAt", { enumerable: true, get: getter });
+  expect(() => assess(pins(), build(raw(), request, at), request, at, at, clock)).toThrow();
+  expect(getter).not.toHaveBeenCalled();
+  expect(() =>
+    assess(
+      pins(),
+      build(raw(), request, at),
+      request,
+      at,
+      "2026-10-01T03:59:59.999Z",
+      originalClock(),
+    ),
+  ).toThrow();
+  expect(() =>
+    assess(pins(), build(raw(), request, at), request, at, at, {
+      ...originalClock(),
+      observedAt: "2026-10-01T04:00:00.001Z",
+    }),
+  ).toThrow();
+});

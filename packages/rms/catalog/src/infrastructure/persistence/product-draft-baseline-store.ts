@@ -1,9 +1,18 @@
 import {
   bindCatalogProductValidationCandidate,
+  bindCatalogProductValidationCandidateV2,
   productValidationCandidateFields,
+  productValidationCandidateFieldsV2,
   type CatalogCurrentProductValidationCandidate,
+  type CatalogProductValidationCandidate,
+  type CatalogProductValidationCandidateV2,
 } from "../../contracts/product-validation-candidate.js";
-import { parseProductPublicationCommand } from "../../contracts/product-publication.js";
+import {
+  parseProductPublicationCommand,
+  type ProductPublicationCommand,
+} from "../../contracts/product-publication.js";
+import { parseProductPublicationCommandV2 } from "../../contracts/product-publication-v2.js";
+import { productEditorContentFields } from "../../application/product-editor-content-authority.js";
 import {
   CatalogError,
   parseCatalogReference,
@@ -165,7 +174,7 @@ export function createPostgresProductDraftBaselineStore(options: {
   });
 }
 
-export interface ProductValidationCandidateAuthority {
+interface CandidateAuthority<Fields extends readonly string[]> {
   /** Complete current fields/purpose and User Validate authority survive outer COMMIT. */
   holdUntilTransactionCompletes(
     tx: ProductLifecycleTransaction,
@@ -178,37 +187,83 @@ export interface ProductValidationCandidateAuthority {
       readonly purposeCode: "CATALOG_PRODUCT_VERSION_PUBLICATION";
       readonly permission: "catalog.manage";
       readonly owningAction: "catalog.product.validate";
-      readonly requiredFields: typeof productValidationCandidateFields;
+      readonly requiredFields: Fields;
       readonly observedAt: string;
     },
   ): Promise<void>;
 }
-/** Owning current Draft for Validate, not a client snapshot or recorded result.
- * Reuses the lifecycle reader's exact SQL and held Brand/Product source fence. */
-export function createPostgresProductValidationCandidateSource(options: {
+export type ProductValidationCandidateAuthority = CandidateAuthority<
+  typeof productValidationCandidateFields
+>;
+export type ProductValidationCandidateAuthorityV2 = CandidateAuthority<
+  typeof productValidationCandidateFieldsV2
+>;
+interface CandidateSourceOptions<Authority> {
   readonly tenantReference: string;
   readonly brandReference: string;
   readonly actorReference: string;
   readonly transactions: {
     run<T>(work: (tx: ProductLifecycleTransaction) => Promise<T>): Promise<T>;
   };
-  readonly authority: ProductValidationCandidateAuthority;
+  readonly authority: Authority;
   readonly categoryAssignments?: ProductCategoryAssignmentAuthority;
   readonly clock: { now(): string };
-}) {
+}
+/** Owning current Draft for Validate, not a client snapshot or recorded result.
+ * Reuses the lifecycle reader's exact SQL and held Brand/Product source fence. */
+export function createPostgresProductValidationCandidateSource(
+  options: CandidateSourceOptions<ProductValidationCandidateAuthority>,
+) {
+  return createCandidateSource(options, {
+    parseCommand: parseProductPublicationCommand,
+    bindCandidate: bindCatalogProductValidationCandidate,
+    fields: productValidationCandidateFields,
+  });
+}
+/** Closed V2 entry: full intent binding and explicit field authority, using the
+ * same owning current SQL as V1 without dispatching a projected V1 command. */
+export function createPostgresProductValidationCandidateSourceV2(
+  options: CandidateSourceOptions<ProductValidationCandidateAuthorityV2>,
+) {
+  return createCandidateSource(options, {
+    parseCommand: parseProductPublicationCommandV2,
+    bindCandidate: bindCatalogProductValidationCandidateV2,
+    fields: productValidationCandidateFieldsV2,
+  });
+}
+function createCandidateSource<
+  Command extends ProductPublicationCommand,
+  Candidate extends CatalogProductValidationCandidate | CatalogProductValidationCandidateV2,
+  Fields extends readonly string[],
+>(
+  options: CandidateSourceOptions<CandidateAuthority<Fields>>,
+  protocol: {
+    readonly parseCommand: (value: unknown) => Command;
+    readonly bindCandidate: (
+      command: Command,
+      aggregate: unknown,
+      observedAt: unknown,
+    ) => Candidate;
+    readonly fields: Fields;
+  },
+) {
   const tenant = parseCatalogReference(options.tenantReference),
     brand = parseCatalogReference(options.brandReference),
     actor = parseCatalogReference(options.actorReference);
   if (
     typeof options.transactions?.run !== "function" ||
     typeof options.authority?.holdUntilTransactionCompletes !== "function" ||
-    typeof options.clock?.now !== "function"
+    typeof options.clock?.now !== "function" ||
+    (options.categoryAssignments !== undefined &&
+      typeof options.categoryAssignments.holdUntilTransactionCompletes !== "function")
   )
     return fail();
   const run = options.transactions.run.bind(options.transactions),
     holdAuthority = options.authority.holdUntilTransactionCompletes.bind(options.authority),
     now = options.clock.now.bind(options.clock),
-    categories = options.categoryAssignments;
+    holdCategory = options.categoryAssignments?.holdUntilTransactionCompletes.bind(
+      options.categoryAssignments,
+    );
   return Object.freeze({
     context: Object.freeze({
       tenantReference: tenant,
@@ -219,30 +274,39 @@ export function createPostgresProductValidationCandidateSource(options: {
     async withCurrentCandidate<T>(
       value: unknown,
       work: (
-        source: CatalogCurrentProductValidationCandidate,
+        source: Candidate & {
+          readonly internalCodeCheck: CatalogCurrentProductValidationCandidate["internalCodeCheck"];
+        },
         tx: ProductLifecycleTransaction,
       ) => Promise<T>,
     ): Promise<T> {
       try {
-        const c = parseProductPublicationCommand(value);
+        const c = protocol.parseCommand(value);
         if (
           c.action !== "Validate" ||
           c.actorKind !== "User" ||
           c.tenantReference !== tenant ||
           c.brandReference !== brand ||
-          c.actorReference !== actor
+          c.actorReference !== actor ||
+          typeof work !== "function"
         )
           return fail();
         const observedAt = parseCatalogInstant(now()),
           validUntil = new Date(Date.parse(observedAt) + 30000).toISOString();
+        let latestObservedAt = observedAt;
+        const check = () => {
+          const current = parseCatalogInstant(now());
+          if (current < latestObservedAt || current >= validUntil) return fail();
+          latestObservedAt = current;
+          return current;
+        };
         let invocations = 0,
           finished = false,
           completed: T | undefined;
         const result = await run(async (tx) => {
           if (++invocations !== 1) return fail();
           const hold = async () => {
-            const current = parseCatalogInstant(now());
-            if (current < observedAt || current >= validUntil) return fail();
+            const current = check();
             await holdAuthority(
               tx,
               Object.freeze({
@@ -254,10 +318,11 @@ export function createPostgresProductValidationCandidateSource(options: {
                 purposeCode: "CATALOG_PRODUCT_VERSION_PUBLICATION" as const,
                 permission: "catalog.manage" as const,
                 owningAction: "catalog.product.validate" as const,
-                requiredFields: productValidationCandidateFields,
+                requiredFields: protocol.fields,
                 observedAt: current,
               }),
             );
+            check();
           };
           await hold();
           const isolation = await tx.query<{ isolation: string }>(
@@ -270,6 +335,24 @@ export function createPostgresProductValidationCandidateSource(options: {
             "SELECT set_config('lock_timeout','5000',true),set_config('statement_timeout','60000',true),set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
             [tenant, brand],
           );
+          const categoryAuthority: ProductCategoryAssignmentAuthority | undefined =
+            holdCategory === undefined
+              ? undefined
+              : {
+                  async holdUntilTransactionCompletes(actual, input) {
+                    if (
+                      actual !== tx ||
+                      input.mode !== "Read" ||
+                      input.aggregate.productReference !== c.productReference ||
+                      input.aggregate.brandReference !== brand ||
+                      input.aggregate.draft.categoryClassification === undefined
+                    )
+                      return fail();
+                    await hold();
+                    await holdCategory(actual, input);
+                    await hold();
+                  },
+                };
           const reader = createPostgresProductLifecycleStore({
             brandReference: brand,
             transactions: { run: async (callback) => callback(tx) },
@@ -283,7 +366,7 @@ export function createPostgresProductValidationCandidateSource(options: {
               await hold();
               return true;
             },
-            ...(categories === undefined ? {} : { categoryAssignments: categories }),
+            ...(categoryAuthority === undefined ? {} : { categoryAssignments: categoryAuthority }),
             editorContentAuthority: {
               async holdUntilTransactionCompletes(actual, input) {
                 if (
@@ -291,7 +374,11 @@ export function createPostgresProductValidationCandidateSource(options: {
                   input.mode !== "Read" ||
                   input.aggregate.productReference !== c.productReference ||
                   input.aggregate.brandReference !== brand ||
-                  input.requiredReferenceChecks.length !== 0
+                  input.requiredReferenceChecks.length !== 0 ||
+                  input.requiredFields.length !== productEditorContentFields.length ||
+                  input.requiredFields.some(
+                    (field, index) => field !== productEditorContentFields.at(index),
+                  )
                 )
                   return fail();
                 await hold();
@@ -300,7 +387,7 @@ export function createPostgresProductValidationCandidateSource(options: {
           });
           const aggregate = await reader.load(parseCatalogReference(c.productReference));
           if (aggregate === null) return fail();
-          const bound = bindCatalogProductValidationCandidate(c, aggregate, observedAt);
+          const bound = protocol.bindCandidate(c, aggregate, observedAt);
           // reader.load holds CatalogProductSource for this Brand before any
           // code/Product lock. Reuse that existing fence, never reverse its order.
           const codeUnique = async () => {
@@ -323,24 +410,28 @@ export function createPostgresProductValidationCandidateSource(options: {
             return row.internal_code_unique;
           };
           const unique = await codeUnique(),
-            candidate: CatalogCurrentProductValidationCandidate = Object.freeze({
+            candidate = {
               ...bound,
               internalCodeCheck: Object.freeze({
                 code: "InternalCode" as const,
                 outcome: unique ? ("Pass" as const) : ("HardError" as const),
               }),
-            });
+            };
+          Object.freeze(candidate);
           await hold();
           const value = await work(candidate, tx);
           await hold();
           if ((await codeUnique()) !== unique) return fail();
+          if (aggregate.draft.categoryClassification !== undefined) {
+            if (!categoryAuthority) return fail();
+            await categoryAuthority.holdUntilTransactionCompletes(tx, { mode: "Read", aggregate });
+          }
           finished = true;
           completed = value;
           return value;
         });
         if (invocations !== 1 || !finished || !Object.is(result, completed)) return fail();
-        const current = parseCatalogInstant(now());
-        if (current < observedAt || current >= validUntil) return fail();
+        check();
         return result;
       } catch (error) {
         if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")

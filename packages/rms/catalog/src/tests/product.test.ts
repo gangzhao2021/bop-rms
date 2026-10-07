@@ -229,6 +229,48 @@ describe("Product / SKU minimum aggregate", () => {
       }),
     ).rejects.toMatchObject({ code: "CATALOG_IDEMPOTENCY_CONFLICT" });
   });
+  it("allocates one complete base SKU and keeps its exact original intent", async () => {
+    const state = fixture(),
+      input = createInput(),
+      original = input.skus[0];
+    if (!original) throw Error("Missing base proposal");
+    const command = {
+      ...input,
+      skus: [{ ...original, variantSelections: [] }],
+      editorContent: initialDetails,
+    };
+    const result = await state.service.create(command),
+      sku = result.aggregate.draft.skus[0];
+    expect(sku).toMatchObject({
+      skuReference: ids.sku,
+      productReference: ids.product,
+      brandReference: ids.brand,
+      lifecycle: "Draft",
+      variantSelections: [],
+      unitOfSale: "EACH",
+      unitQuantity: "1",
+      createdAt: at,
+      createdByActorReference: ids.actor,
+    });
+    expect(result.aggregate.draft.editorContent).toEqual(initialDetails);
+    await expect(state.service.create(command)).resolves.toMatchObject({
+      status: "AlreadyApplied",
+      aggregate: result.aggregate,
+    });
+    for (const changed of [{ skuCode: "OTHER" }, { unitOfSale: "OTHER" }, { unitQuantity: "2" }]) {
+      await expect(
+        state.service.create({ ...command, skus: [{ ...command.skus[0], ...changed }] }),
+      ).rejects.toMatchObject({ code: "CATALOG_IDEMPOTENCY_CONFLICT" });
+    }
+    const second = fixture();
+    await expect(
+      second.service.create({
+        ...command,
+        skus: [command.skus[0], { ...command.skus[0], skuCode: "SECOND" }],
+      }),
+    ).rejects.toMatchObject({ code: "CATALOG_INPUT_INVALID" });
+    expect(second.current()).toBeNull();
+  });
   it("refuses unsupported initial full SKU mappings and getter content without writing", async () => {
     const state = fixture();
     await expect(
@@ -969,3 +1011,43 @@ it("bounds unknown owning Draft failures without echoing details or accepting a 
   expect(state.current()).toEqual(current);
   expect(await state.ports.repository.resolveOperation(parseCatalogReference(id(996)))).toBeNull();
 });
+it.each(["ClosedCatalogError", "UnknownDriverError"] as const)(
+  "preserves only a closed owning dependency failure through Draft replacement: %s",
+  async (kind) => {
+    const state = fixture();
+    await state.service.create(createInput());
+    const current = state.current();
+    if (!current) throw new Error("Missing synthetic Product");
+    const original =
+      kind === "ClosedCatalogError"
+        ? new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE")
+        : new Error("Synthetic private source detail");
+    state.ports.repository.commit = async () => {
+      throw original;
+    };
+    const request = {
+      productReference: ids.product,
+      expectedAggregateVersion: 1,
+      operationReference: id(997),
+      requestedAt: at,
+      draft: current.draft,
+    };
+    let caught: unknown;
+    try {
+      await state.service.replaceDraft(request);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(CatalogError);
+    expect(caught).toMatchObject({
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+      message: "catalog is unavailable",
+    });
+    if (kind === "ClosedCatalogError") expect(caught).toBe(original);
+    else expect(caught).not.toBe(original);
+    expect(state.current()).toEqual(current);
+    expect(
+      await state.ports.repository.resolveOperation(parseCatalogReference(id(997))),
+    ).toBeNull();
+  },
+);

@@ -3,6 +3,22 @@ const databaseAccessManifestInput = {
   module: { moduleName: "payment", packageName: "@rms/payment", layer: "RMS" },
   tables: [
     {
+      table: "store_payment_configuration_version",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "store_payment_configuration_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "reconciliation_follow_up_history",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },

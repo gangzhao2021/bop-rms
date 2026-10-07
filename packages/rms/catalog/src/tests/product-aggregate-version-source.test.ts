@@ -4,12 +4,15 @@ import {
   createPostgresProductDraftStore,
   CatalogError,
   parseProductAggregate,
+  parseCatalogReference,
+  parseCatalogHash,
+  parseProductPublicationVersionV2,
   type ProductLifecycleTransaction,
 } from "../index.js";
 const id = (n: number) => "01902409-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-09-28T12:00:00.000Z";
 const digest = (value: unknown) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
-function fixture() {
+function fixture(completeContent = false) {
   const aggregate = parseProductAggregate({
     productReference: id(1),
     brandReference: id(2),
@@ -31,6 +34,24 @@ function fixture() {
       updatedAt: at,
       skus: [],
       optionBindings: [],
+      ...(completeContent
+        ? {
+            editorContent: {
+              profile: "CatalogProductEditorContentV1",
+              localizedShortDescriptions: {},
+              localizedDescriptions: {},
+              preparationNotes: {},
+              tagReferences: [],
+              attributeValues: [],
+              media: [],
+              variantDimensions: [],
+              variantCombinations: [],
+              optionRules: [],
+              allergenReferences: [],
+              nutritionProfile: null,
+            },
+          }
+        : {}),
     },
   });
   const indexed: Record<string, unknown>[] = [{ operation_id: id(5) }];
@@ -66,10 +87,24 @@ function fixture() {
   });
   const tx = { query } as ProductLifecycleTransaction;
   const events: string[] = [];
-  const authorize = vi.fn(async () => true);
+  const authorize = vi.fn<Parameters<typeof createPostgresProductDraftStore>[0]["authorize"]>(
+    async (actual, request) => {
+      expect(actual).toBe(tx);
+      expect(request.productReference === null || request.productReference === id(1)).toBe(true);
+      return true;
+    },
+  );
+  const contentHold = vi.fn<
+    NonNullable<
+      Parameters<typeof createPostgresProductDraftStore>[0]["editorContentAuthority"]
+    >["holdUntilTransactionCompletes"]
+  >(async () => undefined);
   const store = createPostgresProductDraftStore({
     brandReference: id(2),
     authorize,
+    ...(completeContent
+      ? { editorContentAuthority: { holdUntilTransactionCompletes: contentHold } }
+      : {}),
     transactions: {
       async run(work) {
         events.push("BEGIN");
@@ -84,12 +119,12 @@ function fixture() {
       },
     },
   });
-  return { aggregate, indexed, receipt, query, authorize, events, store };
+  return { aggregate, indexed, receipt, query, authorize, contentHold, tx, events, store };
 }
 it("returns exact original owning snapshot without mutable Draft read", async () => {
   const f = fixture();
   expect(await f.store.loadAggregateVersion(id(1), 1)).toEqual(f.aggregate);
-  expect(f.authorize).toHaveBeenCalledTimes(3);
+  expect(f.authorize).toHaveBeenCalledTimes(4);
   expect(f.events).toEqual(["BEGIN", "COMMIT"]);
 });
 it("absent version evidence is null, never current data", async () => {
@@ -172,6 +207,8 @@ it.each(["product", "version"])(
       code: "CATALOG_DEPENDENCY_UNAVAILABLE",
     });
     expect(f.events).toEqual(["BEGIN", "ROLLBACK"]);
+    expect(f.authorize.mock.calls.some((call) => call[1].recordOrigin !== undefined)).toBe(false);
+    expect(f.contentHold).not.toHaveBeenCalled();
   },
 );
 it("legacy operation without a snapshot is unavailable", async () => {
@@ -296,6 +333,118 @@ it("reads the actual successor Draft identity from a Published receipt", async (
   });
   expect(await f.store.loadAggregateVersion(id(1), 2)).toEqual(successor);
 });
+function publicationFixtureV2(
+  action: "Validate" | "SubmitReview" | "Approve" | "Publish" = "Validate",
+) {
+  const f = publicationFixture(),
+    none = { profile: "CatalogProductNoReplacementIntentV1", mode: "None" },
+    aggregate =
+      action === "Publish"
+        ? parseProductAggregate({
+            ...f.aggregate,
+            draft: { ...f.aggregate.draft, versionReference: id(10), baseVersionReference: id(4) },
+          })
+        : f.aggregate;
+  const publication = {
+    ...parseProductPublicationVersionV2({
+      ...f.publication,
+      profile: "CatalogProductPublicationVersionV2",
+      replacementIntent: { ...none, digest: digest(none) },
+      replacementIntentDigest: digest(none),
+      ...(action === "Validate"
+        ? {}
+        : {
+            state:
+              action === "SubmitReview"
+                ? "InReview"
+                : action === "Approve"
+                  ? "Approved"
+                  : "Published",
+            publicationVersion: action === "SubmitReview" ? 2 : 3,
+            reviewReference: id(11),
+            reviewVersion: 2,
+            submittedByActorReference: id(3),
+            approvalPolicy: action === "Publish" ? "NotRequired" : "Required",
+            validationDecision: action === "SubmitReview" ? "ApprovalPending" : "Pass",
+            approvalEvidenceReference: action === "Approve" ? id(12) : null,
+            publishedAt: action === "Publish" ? at : null,
+            successorDraftVersionReference: action === "Publish" ? id(10) : null,
+          }),
+    }),
+  };
+  Object.assign(f.receipt, {
+    aggregate,
+    publication,
+    snapshot_digest: digest(aggregate),
+    action_code: action,
+    event_type: {
+      Validate: "ProductValidationCompleted",
+      SubmitReview: "ProductReviewSubmitted",
+      Approve: "ProductVersionApproved",
+      Publish: "ProductVersionPublished",
+    }[action],
+  });
+  return { ...f, aggregate, publication };
+}
+it.each(["Validate", "SubmitReview", "Approve", "Publish"] as const)(
+  "reads the exact V2 %s historical result without sending it through the legacy parser",
+  async (action) => {
+    const f = publicationFixtureV2(action);
+    expect(await f.store.loadAggregateVersion(id(1), 2)).toEqual(f.aggregate);
+    expect(f.events).toEqual(["BEGIN", "COMMIT"]);
+    if (action === "Publish") expect(f.aggregate.draft.versionReference).toBe(id(10));
+  },
+);
+it.each([
+  "unknown-profile",
+  "missing-intent",
+  "intent-digest",
+  "extra-field",
+  "profile-accessor",
+  "coherence",
+  "digest",
+  "tenant",
+  "product",
+  "brand",
+  "version",
+  "operation",
+  "event",
+  "time",
+  "intent",
+  "actor",
+  "successor",
+])("rejects malformed or incoherent V2 historical receipt: %s", async (kind) => {
+  const f = publicationFixtureV2("Publish");
+  if (kind === "unknown-profile")
+    Object.assign(f.publication, { profile: "CatalogProductPublicationVersionV3" });
+  if (kind === "missing-intent")
+    delete (f.receipt.publication as Record<string, unknown>).replacementIntent;
+  if (kind === "intent-digest")
+    Object.assign(f.publication, { replacementIntentDigest: digest("different intent") });
+  if (kind === "extra-field") Object.assign(f.publication, { unsupported: true });
+  if (kind === "profile-accessor")
+    Object.defineProperty(f.publication, "profile", {
+      enumerable: true,
+      get: () => "CatalogProductPublicationVersionV2",
+    });
+  if (kind === "coherence") f.receipt.coherent = false;
+  if (kind === "digest") f.receipt.snapshot_digest = digest("different aggregate");
+  if (kind === "tenant") f.receipt.tenant_id = id(99);
+  if (kind === "product") Object.assign(f.publication, { productReference: id(99) });
+  if (kind === "brand") Object.assign(f.publication, { brandReference: id(99) });
+  if (kind === "version") Object.assign(f.publication, { productAggregateVersion: 2 });
+  if (kind === "operation") Object.assign(f.publication, { operationReference: id(99) });
+  if (kind === "event") f.receipt.event_type = "ProductValidationCompleted";
+  if (kind === "time") f.receipt.publication_time = new Date(Date.parse(at) + 1);
+  if (kind === "intent") f.receipt.publication_intent = digest("different command");
+  if (kind === "actor") Object.assign(f.publication, { actorKind: "System" });
+  if (kind === "successor")
+    Object.assign(f.publication, { successorDraftVersionReference: id(99) });
+  await expect(f.store.loadAggregateVersion(id(1), 2)).rejects.toMatchObject({
+    code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+  });
+  expect(f.events).toEqual(["BEGIN", "ROLLBACK"]);
+});
 it.each([
   "coherence",
   "digest",
@@ -330,5 +479,129 @@ it.each([
   await expect(f.store.loadAggregateVersion(id(1), 2)).rejects.toMatchObject({
     code: "CATALOG_DEPENDENCY_UNAVAILABLE",
   });
+  expect(f.events).toEqual(["BEGIN", "ROLLBACK"]);
+});
+
+it("admits an exact stored ReplaceDraft receipt before its Read content holder", async () => {
+  const f = fixture(true);
+  const row = f.receipt[0];
+  if (!row) throw new Error("Missing synthetic receipt");
+  const original = parseProductAggregate({ ...f.aggregate, aggregateVersion: 2 });
+  row.action_code = "ReplaceDraft";
+  row.result_aggregate_version = 2;
+  row.snapshot_version = 2;
+  row.snapshot_json = original;
+  const events: string[] = [];
+  f.authorize.mockImplementation(async (tx, request) => {
+    expect(tx).toBe(f.tx);
+    if (request.recordOrigin === "StoredOperation") {
+      expect(request.record).toEqual({
+        action: "ReplaceDraft",
+        operationReference: id(5),
+        operationIntentHash: "a".repeat(64),
+        aggregate: original,
+      });
+      expect(Object.isFrozen(request.record)).toBe(true);
+      events.push("stored-authorized");
+    } else expect(request.record).toBeUndefined();
+    return true;
+  });
+  f.contentHold.mockImplementation(async (tx, input) => {
+    expect(tx).toBe(f.tx);
+    expect(input.mode).toBe("Read");
+    expect(input.aggregate).toEqual(original);
+    expect(events).toEqual(["stored-authorized"]);
+    events.push("original-read");
+  });
+  const result = await f.store.resolveOperation(parseCatalogReference(id(5)));
+  expect(result?.aggregate).toEqual(original);
+  expect(events).toEqual(["stored-authorized", "original-read"]);
+  expect(f.events).toEqual(["BEGIN", "COMMIT"]);
+});
+it("keeps original Create history as stored Read rather than requiring ReplaceDraft", async () => {
+  const f = fixture(true);
+  expect(await f.store.loadAggregateVersion(id(1), 1)).toEqual(f.aggregate);
+  const stored = f.authorize.mock.calls.filter(
+    (call) => call[1].recordOrigin === "StoredOperation",
+  );
+  expect(stored).toHaveLength(1);
+  expect(stored[0]?.[1].record?.action).toBe("Create");
+  expect(f.contentHold).toHaveBeenCalledWith(
+    f.tx,
+    expect.objectContaining({ mode: "Read", aggregate: f.aggregate }),
+  );
+});
+it.each(["brand", "product", "version", "time", "snapshot", "intent"])(
+  "does not label incoherent %s SQL evidence as a stored operation",
+  async (kind) => {
+    const f = fixture(true),
+      row = f.receipt[0];
+    if (!row) throw new Error("Missing synthetic receipt");
+    if (kind === "brand") row.snapshot_brand = id(90);
+    if (kind === "product") row.snapshot_product = id(90);
+    if (kind === "version") row.snapshot_version = 2;
+    if (kind === "time") row.snapshot_time = new Date(Date.parse(at) + 1);
+    if (kind === "snapshot") row.snapshot_json = null;
+    if (kind === "intent") row.intent_digest = "invalid";
+    await expect(f.store.resolveOperation(parseCatalogReference(id(5)))).rejects.toMatchObject({
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.authorize.mock.calls.some((call) => call[1].recordOrigin !== undefined)).toBe(false);
+    expect(f.contentHold).not.toHaveBeenCalled();
+    expect(f.events).toEqual(["BEGIN", "ROLLBACK"]);
+  },
+);
+it("rejects denied original record admission before reading complete content", async () => {
+  const f = fixture(true);
+  f.authorize.mockImplementation(async (tx, request) => {
+    expect(tx).toBe(f.tx);
+    return request.recordOrigin !== "StoredOperation";
+  });
+  await expect(f.store.resolveOperation(parseCatalogReference(id(5)))).rejects.toMatchObject({
+    code: "CATALOG_PERMISSION_DENIED",
+  });
+  expect(f.contentHold).not.toHaveBeenCalled();
+  expect(f.events).toEqual(["BEGIN", "ROLLBACK"]);
+});
+
+it("never labels a prospective ReplaceDraft write as a stored original", async () => {
+  const f = fixture(true),
+    aggregate = parseProductAggregate({ ...f.aggregate, aggregateVersion: 2 });
+  const operation = parseCatalogReference(id(6));
+  f.authorize.mockImplementation(async (tx, request) => {
+    expect(tx).toBe(f.tx);
+    expect(request.recordOrigin).toBeUndefined();
+    expect(request.record?.action).toBe("ReplaceDraft");
+    expect(request.record?.operationReference).toBe(operation);
+    return false;
+  });
+  await expect(
+    f.store.commit({
+      expectedAggregateVersion: 1,
+      record: {
+        action: "ReplaceDraft",
+        operationReference: operation,
+        operationIntentHash: parseCatalogHash("b".repeat(64)),
+        aggregate,
+      },
+      audit: {
+        auditId: id(7),
+        brandId: id(2),
+        actor: { type: "User", reference: id(3) },
+        actionCode: "CATALOG_PRODUCT_REPLACEDRAFT",
+        targetType: "CatalogProduct",
+        targetId: id(1),
+        reasonCode: "SYNTHETIC_OWNER_AUTHORIZATION",
+        correlationId: operation,
+        occurredAt: at,
+        sourceChannel: "API",
+        dataClassification: "Internal",
+        retentionPolicyCode: "CONFIGURATION_AUDIT",
+        retentionPolicyVersion: 1,
+      },
+    }),
+  ).rejects.toMatchObject({ code: "CATALOG_PERMISSION_DENIED" });
+  expect(f.authorize).toHaveBeenCalledTimes(1);
+  expect(f.contentHold).not.toHaveBeenCalled();
   expect(f.events).toEqual(["BEGIN", "ROLLBACK"]);
 });

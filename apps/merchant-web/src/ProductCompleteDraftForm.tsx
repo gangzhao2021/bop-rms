@@ -5,7 +5,12 @@ import {
   CompleteDraftEditorError,
   type CompleteProductDraftEditor,
 } from "./product-complete-draft-editor.js";
-import { createProductCommandClient } from "./catalog-product-command-client.js";
+import { Link } from "react-router";
+import { createProductAuthoringRecovery } from "./product-authoring-recovery.js";
+import {
+  ProductAuthoringRecoveryError,
+  type ProductAuthoringResolutionView,
+} from "./product-authoring-recovery-client.js";
 import { createProductEditorClient, type ProductEditorView } from "./product-editor-client.js";
 import {
   createStoreCapabilityClient,
@@ -14,6 +19,26 @@ import {
 import { serviceOperationReference } from "./service-control-client.js";
 import { ProductRecordedConfigurationFields } from "./ProductRecordedConfigurationFields.js";
 import type { ProductVersion } from "./catalog-product-command-values.js";
+import { ProductOptionPickerError } from "./product-option-picker-client.js";
+import {
+  ProductOptionBindings,
+  productOptionPickerSaveErrorCode,
+  productOptionBindingRawInputsValid,
+  type ProductOptionBindingRawInputs,
+} from "./ProductOptionBindings.js";
+import { ProductSellingUnits } from "./ProductSellingUnits.js";
+import {
+  ProductNewSkus,
+  newSkuRowsValid,
+  selectedSellingUnitsChanged,
+  type ProductNewSkuRow,
+} from "./ProductNewSkus.js";
+import {
+  createProductSellingUnitsClient,
+  ProductSellingUnitsError,
+  type ProductSellingUnitsView,
+} from "./product-selling-units-client.js";
+import { createProductAuthoringRecoveryClient } from "./product-authoring-recovery-client.js";
 type View = ReturnType<CompleteProductDraftEditor["view"]>;
 const descriptions = [
   "localizedShortDescriptions",
@@ -30,16 +55,32 @@ export function ProductCompleteDraftForm({
   productReference,
   storeReference,
   csrf,
+  blocked = false,
+  onBlockedChange,
+  onConfirmed,
 }: {
   readonly entry: ProductEditorView | null;
   readonly productReference: string;
   readonly storeReference: string;
   readonly csrf: string;
+  readonly blocked?: boolean;
+  readonly onBlockedChange?: (blocked: boolean) => void;
+  readonly onConfirmed?: (revision: number) => void;
 }) {
   const editor = useRef<CompleteProductDraftEditor | null>(null),
     pending = useRef<AbortController | null>(null),
     active = useRef(true),
     original = useRef<ProductVersion | null>(null);
+  const [recovery] = useState(() =>
+    createProductAuthoringRecovery({
+      action: "ReplaceDraft",
+      productReference,
+      currentContext: () => (active.current ? 0 : 1),
+    }),
+  );
+  const recoveryScope = useRef<{ brandReference: string; storeReference: string } | null>(null);
+  const [recoveryView, setRecoveryView] = useState(() => recovery.view()),
+    [resolved, setResolved] = useState<ProductAuthoringResolutionView | null>(null);
   const [view, setView] = useState<View | null>(null),
     [candidate, setCandidate] = useState<ProductVersion | null>(null),
     [dirty, setDirty] = useState(false),
@@ -52,9 +93,49 @@ export function ProductCompleteDraftForm({
     [offline, setOffline] = useState(!navigator.onLine),
     [background, setBackground] = useState(document.visibilityState === "hidden");
   const [brandReference, setBrandReference] = useState<string | null>(null);
+  const [units, setUnits] = useState<ProductSellingUnitsView | null>(null),
+    [unitError, setUnitError] = useState<string | null>(null),
+    [unitPending, setUnitPending] = useState(true),
+    [newSkus, setNewSkus] = useState<readonly ProductNewSkuRow[]>([]);
   const [categoryProposal, setCategoryProposal] = useState<InitialCategoryProposal | undefined>();
+  const [bindingRawInputs, setBindingRawInputs] = useState<ProductOptionBindingRawInputs>({});
+  const bindingRawInput = useCallback<
+    NonNullable<Parameters<typeof ProductOptionBindings>[0]["onRawInputsChange"]>
+  >((next) => {
+    setBindingRawInputs(next);
+    setDirty(true);
+  }, []);
   const [categoryReady, setCategoryReady] = useState(true);
-  const configurationValid = !Object.values(integerInputs).some((input) => !input.valid);
+  const [bindingPending, setBindingPending] = useState(true);
+  const bindingPrepare = useRef<((signal: AbortSignal) => Promise<void>) | null>(null);
+  const registerBindingPrepare = useCallback((prepare: (signal: AbortSignal) => Promise<void>) => {
+    bindingPrepare.current = prepare;
+  }, []);
+  const unitInspectionActive = Boolean(brandReference && candidate);
+  useEffect(() => {
+    onBlockedChange?.(
+      busy ||
+        dirty ||
+        (unitInspectionActive && (unitPending || bindingPending)) ||
+        Boolean(view?.pendingSave) ||
+        !recoveryView.checked ||
+        recoveryView.pending,
+    );
+  }, [
+    busy,
+    dirty,
+    unitPending,
+    unitInspectionActive,
+    bindingPending,
+    view?.pendingSave,
+    recoveryView.checked,
+    recoveryView.pending,
+    onBlockedChange,
+  ]);
+  useEffect(() => () => onBlockedChange?.(false), [onBlockedChange]);
+  const configurationValid =
+    !Object.values(integerInputs).some((input) => !input.valid) &&
+    productOptionBindingRawInputsValid(bindingRawInputs);
   const integerInput = useCallback((key: string, text: string, valid: boolean) => {
     setIntegerInputs((old) => ({ ...old, [key]: { text, valid } }));
     setDirty(true);
@@ -105,21 +186,99 @@ export function ProductCompleteDraftForm({
     }
   }, [busy, view]);
   useEffect(() => {
-    if (!dirty && !view?.pendingSave) return;
+    if (!dirty && !view?.pendingSave && !recoveryView.pending) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty, view?.pendingSave]);
-  async function run(action: "Open" | "Refresh" | "Discard" | "Save" | "Retry") {
-    if (busy || pending.current || offline || background) return;
+  }, [dirty, view?.pendingSave, recoveryView.pending]);
+  async function inspectRecovery() {
+    if (
+      pending.current ||
+      !active.current ||
+      !navigator.onLine ||
+      document.visibilityState === "hidden"
+    )
+      return;
+    const request = new AbortController();
+    pending.current = request;
+    setBusy(true);
+    setError(null);
+    try {
+      const gate = await createStoreCapabilityClient().load(
+        { scope: { storeReference }, capabilityKey: "catalog.cat_product_edit", csrf },
+        request.signal,
+      );
+      const scope = { brandReference: gate.brandReference, storeReference };
+      await recovery.inspect(scope, csrf, request.signal);
+      if (active.current) {
+        recoveryScope.current = scope;
+        setBrandReference(scope.brandReference);
+      }
+    } catch (value) {
+      if (active.current)
+        setError(
+          value instanceof ProductAuthoringRecoveryError ||
+            value instanceof StoreCapabilityClientError
+            ? value.code
+            : "Unavailable",
+        );
+    } finally {
+      if (pending.current === request) pending.current = null;
+      if (active.current) {
+        setRecoveryView(recovery.view());
+        setBusy(false);
+      }
+    }
+  }
+  useEffect(() => {
+    if (entry && !recovery.view().checked) void inspectRecovery();
+  }, [entry]);
+  async function run(action: "Open" | "Refresh" | "Discard" | "Save" | "Retry" | "Resolve") {
+    const readOnly = action === "Open" || action === "Refresh";
+    if (
+      busy ||
+      pending.current ||
+      (!readOnly &&
+        unitPending &&
+        (unitInspectionActive || action === "Save" || action === "Retry")) ||
+      (bindingPending && action === "Save") ||
+      offline ||
+      background ||
+      (blocked && !readOnly && action !== "Resolve") ||
+      (readOnly && (view?.pendingSave || recoveryView.pending || !recoveryView.checked))
+    )
+      return;
     const controller = new AbortController();
     pending.current = controller;
     setBusy(true);
     setError(null);
     focusSummary.current = true;
     try {
+      if (action === "Resolve") {
+        if (!recoveryScope.current) throw new ProductAuthoringRecoveryError("Unavailable");
+        const result = await recovery.resolve(recoveryScope.current, csrf, controller.signal);
+        if (!active.current) return;
+        setResolved(result);
+        // End the old mounted intent after a native terminal outcome. Reopen
+        // from a current source; never reuse its pre-write root as live state.
+        editor.current = null;
+        original.current = null;
+        setView(null);
+        setCandidate(null);
+        setDirty(false);
+        setRequiresRefresh(true);
+        setIntegerInputs({});
+        setBindingRawInputs({});
+        setCategoryProposal(undefined);
+        setCategoryReady(true);
+        if (result.outcome === "Committed" && result.aggregateVersion !== null)
+          onConfirmed?.(result.aggregateVersion);
+        return;
+      }
+      if ((!recovery.view().checked || recovery.view().pending) && action !== "Retry")
+        throw new ProductAuthoringRecoveryError("PendingOriginal");
       if (!editor.current) {
         if (!entry || entry.draft.editorContent === undefined)
           throw new CompleteDraftEditorError("Unavailable");
@@ -141,6 +300,7 @@ export function ProductCompleteDraftForm({
           productReference,
         };
         setBrandReference(gate.brandReference);
+        recoveryScope.current = { brandReference: gate.brandReference, storeReference };
         // Current owning Store capability resolves Brand independently of existing SKUs.
         editor.current = createCompleteProductDraftEditor({
           request: {
@@ -152,31 +312,117 @@ export function ProductCompleteDraftForm({
           now: Date.now,
           reads: createProductEditorClient(),
           capabilities: createStoreCapabilityClient(),
-          commands: createProductCommandClient(),
+          commands: recovery.commands,
         });
       }
       const current = editor.current;
       if (action === "Save") {
-        if (!candidate || !dirty || !configurationValid || !categoryReady)
+        if (
+          !candidate ||
+          !dirty ||
+          !configurationValid ||
+          !categoryReady ||
+          !newSkuRowsValid(newSkus, units, candidate.defaultLocale, candidate)
+        )
           throw new CompleteDraftEditorError("Invalid");
-        current.edit(candidate, categoryProposal?.source);
-        await current.save(serviceOperationReference(), csrf, controller.signal);
+        if (!bindingPrepare.current) throw new CompleteDraftEditorError("Unavailable");
+        await bindingPrepare.current(controller.signal);
+        if (!active.current || controller.signal.aborted) return;
+        let submitted = candidate;
+        if (newSkus.length) {
+          if (!brandReference || !units) throw new CompleteDraftEditorError("Unavailable");
+          const read = await createProductSellingUnitsClient().inspect(
+            "ReplaceDraft",
+            { brandReference, storeReference },
+            csrf,
+            controller.signal,
+          );
+          if (!active.current || controller.signal.aborted) return;
+          setUnits(read);
+          if (selectedSellingUnitsChanged(newSkus, units, read)) {
+            setNewSkus((old) => old.map((row) => ({ ...row, unit: "" })));
+            setUnitError(
+              "A selected unit definition changed. Refresh the Draft, review its current meaning and precision, and select it again.",
+            );
+            throw new CompleteDraftEditorError("Conflict");
+          }
+          setUnitError(null);
+          const actual = await createProductAuthoringRecoveryClient().context(
+            "ReplaceDraft",
+            { brandReference, storeReference },
+            csrf,
+            controller.signal,
+          );
+          if (!active.current || controller.signal.aborted) return;
+          submitted = {
+            ...candidate,
+            skus: [
+              ...candidate.skus,
+              ...newSkus.map((row) => {
+                const combo = candidate.editorContent?.variantDimensions.length
+                  ? candidate.editorContent.variantCombinations[Number(row.combination)]
+                  : null;
+                if (
+                  candidate.editorContent?.variantDimensions.length &&
+                  (!combo || combo.disposition !== "NotGenerated" || combo.skuReference !== null)
+                )
+                  throw new CompleteDraftEditorError("Conflict");
+                return {
+                  skuReference: row.reference,
+                  productReference,
+                  brandReference,
+                  skuCode: row.code,
+                  lifecycle: "Draft" as const,
+                  localizedNames: { [candidate.defaultLocale]: row.name },
+                  variantSelections: combo ? combo.selections : [],
+                  unitOfSale: row.unit,
+                  unitQuantity: row.quantity,
+                  createdAt: actual.observedAt,
+                  createdByActorReference: actual.actorReference,
+                };
+              }),
+            ],
+            ...(candidate.editorContent === undefined
+              ? {}
+              : {
+                  editorContent: {
+                    ...candidate.editorContent,
+                    variantCombinations: candidate.editorContent.variantCombinations.map(
+                      (combo, index) => {
+                        const row = newSkus.find((row) => row.combination === String(index));
+                        return row
+                          ? { ...combo, disposition: "Valid" as const, skuReference: row.reference }
+                          : combo;
+                      },
+                    ),
+                  },
+                }),
+          };
+        }
+        current.edit(submitted, categoryProposal?.source);
+        const receipt = await current.save(serviceOperationReference(), csrf, controller.signal);
+        onConfirmed?.(receipt.aggregateVersion);
         original.current = null;
         setRequiresRefresh(false);
         setCandidate(null);
         setCategoryProposal(undefined);
         setCategoryReady(true);
         setIntegerInputs({});
+        setBindingRawInputs({});
         setDirty(false);
+        setNewSkus([]);
       } else if (action === "Retry") {
-        await current.retry(csrf, controller.signal);
+        const receipt = await current.retry(csrf, controller.signal);
+        onConfirmed?.(receipt.aggregateVersion);
         original.current = null;
         setRequiresRefresh(false);
         setCandidate(null);
         setCategoryProposal(undefined);
         setCategoryReady(true);
         setIntegerInputs({});
+        setBindingRawInputs({});
         setDirty(false);
+        setNewSkus([]);
       } else {
         if (action === "Discard") await current.discardAndReload(csrf, controller.signal);
         else await current.refresh(csrf, controller.signal);
@@ -192,23 +438,39 @@ export function ProductCompleteDraftForm({
         original.current = next;
         setRequiresRefresh(false);
         if (action === "Discard" || !dirty) {
+          if (action === "Discard") setNewSkus([]);
+          if (!unitInspectionActive) {
+            setUnitPending(true);
+            setBindingPending(true);
+          }
           setCandidate(next);
           setCategoryProposal(undefined);
           setCategoryReady(true);
           setIntegerInputs({});
+          setBindingRawInputs({});
           setDirty(false);
         }
       }
     } catch (value) {
-      if (active.current)
+      if (active.current && value instanceof ProductSellingUnitsError) {
+        setUnitError(
+          `Selling unit verification failed: ${value.code}. Refresh current units before another Draft save.`,
+        );
+        setError(value.code === "Disabled" ? "FeatureDisabled" : value.code);
+      } else if (active.current)
         setError(
-          value instanceof CompleteDraftEditorError || value instanceof StoreCapabilityClientError
-            ? value.code
-            : "Unavailable",
+          value instanceof ProductOptionPickerError
+            ? productOptionPickerSaveErrorCode(value)
+            : value instanceof CompleteDraftEditorError ||
+                value instanceof StoreCapabilityClientError ||
+                value instanceof ProductAuthoringRecoveryError
+              ? value.code
+              : "Unavailable",
         );
     } finally {
       if (active.current) {
         if (editor.current) setView(editor.current.view());
+        setRecoveryView(recovery.view());
         setBusy(false);
       }
       if (pending.current === controller) pending.current = null;
@@ -217,6 +479,8 @@ export function ProductCompleteDraftForm({
   const current =
     view?.draft &&
     !view.pendingSave &&
+    recoveryView.checked &&
+    !recoveryView.pending &&
     !offline &&
     !background &&
     !requiresRefresh &&
@@ -277,11 +541,19 @@ export function ProductCompleteDraftForm({
       <h3 id="complete-draft-heading">Edit recorded Draft content</h3>
       <p>
         Update recorded content and current Categories while keeping other references and versions.
-        Current server checks govern every save. Validation and publication remain unavailable.
+        Current server checks govern every save. Use Publication requests for validation, review and
+        publication.
       </p>
       {!view ? (
         <button
-          disabled={busy || offline || background || !entry?.draft.editorContent}
+          disabled={
+            busy ||
+            offline ||
+            background ||
+            recoveryView.pending ||
+            !recoveryView.checked ||
+            !entry?.draft.editorContent
+          }
           onClick={() => void run("Open")}
         >
           Open Draft editor
@@ -289,54 +561,120 @@ export function ProductCompleteDraftForm({
       ) : (
         <div className="product-content-actions">
           <button
-            disabled={busy || offline || background || view.pendingSave}
+            disabled={
+              busy ||
+              offline ||
+              background ||
+              view.pendingSave ||
+              recoveryView.pending ||
+              !recoveryView.checked
+            }
             onClick={() => void run("Refresh")}
           >
             Refresh editable Draft
           </button>
           <button
-            disabled={busy || offline || background || view.pendingSave}
+            disabled={
+              blocked ||
+              busy ||
+              offline ||
+              background ||
+              (unitInspectionActive && (unitPending || bindingPending)) ||
+              view.pendingSave ||
+              recoveryView.pending ||
+              !recoveryView.checked
+            }
             onClick={() => void run("Discard")}
           >
             Discard local edits and reload
           </button>
           {view.pendingSave && (
-            <button disabled={busy || offline || background} onClick={() => void run("Retry")}>
+            <button
+              disabled={blocked || busy || offline || background}
+              onClick={() => void run("Retry")}
+            >
               Retry original Draft save
             </button>
           )}
         </div>
+      )}
+      {!recoveryView.checked && (
+        <button disabled={busy || offline || background} onClick={() => void inspectRecovery()}>
+          Check original Draft request
+        </button>
+      )}
+      {recoveryView.pending && (
+        <button disabled={busy || offline || background} onClick={() => void run("Resolve")}>
+          Resolve stored Draft save
+        </button>
+      )}
+      {resolved && (
+        <p role="status">
+          {resolved.outcome === "Committed"
+            ? "Original Draft save confirmed. Reopen the current Product before editing."
+            : "The original Draft save was permanently ended without applying. Reopen the current Product to edit."}{" "}
+          <Link to="/app/commerce/products">Return to Products</Link>
+        </p>
       )}
       <p ref={summary} tabIndex={-1} role="status" className="product-draft-result">
         {busy
           ? "Checking current Draft access…"
           : view?.pendingSave
             ? "Save result is unknown. Retry the original request before editing or creating another save."
-            : offline
-              ? "Draft editor offline. Reconnect and refresh before editing."
-              : background
-                ? "Draft editor paused. Return and refresh current access."
-                : requiresRefresh
-                  ? "Refresh current Draft access before editing."
-                  : error
-                    ? `Draft save not confirmed: ${error}. Refresh or discard local edits to recover.`
-                    : view?.status === "NeedsRefresh"
-                      ? "Original save confirmed. Refresh to read the current Draft."
-                      : view?.draft
-                        ? dirty
-                          ? "Local unsaved edits."
-                          : "Current Draft loaded."
-                        : view
-                          ? "Editable Draft observation expired or unavailable. Refresh current access."
-                          : "Open the current Draft to edit its recorded text."}
+            : recoveryView.pending
+              ? recoveryView.cleanupFailed
+                ? "Original save confirmed. Resolve the retained storage marker before another edit or publication."
+                : error
+                  ? `Draft save not confirmed: ${error}. Resolve the stored original before editing or publishing.`
+                  : "An original Draft request remains stored. Resolve it before another edit or publication. Only its operation identity is stored in this browser."
+              : !recoveryView.checked
+                ? "Check the original request storage before editing or publishing."
+                : offline
+                  ? "Draft editor offline. Reconnect and refresh before editing."
+                  : background
+                    ? "Draft editor paused. Return and refresh current access."
+                    : requiresRefresh
+                      ? "Refresh current Draft access before editing."
+                      : error
+                        ? error === "OptionSourceConflict"
+                          ? "The selected Option publication changed. Your recorded binding is retained. Refresh its choices and explicitly choose a replacement before saving."
+                          : `Draft save not confirmed: ${error}. Refresh or discard local edits to recover.`
+                        : view?.status === "NeedsRefresh"
+                          ? "Original save confirmed. Refresh to read the current Draft."
+                          : view?.draft
+                            ? dirty
+                              ? "Local unsaved edits."
+                              : "Current Draft loaded."
+                            : view
+                              ? "Editable Draft observation expired or unavailable. Refresh current access."
+                              : "Open the current Draft to edit its recorded text."}
       </p>
+      {brandReference && candidate && (
+        <ProductSellingUnits
+          action="ReplaceDraft"
+          brandReference={brandReference}
+          storeReference={storeReference}
+          csrf={csrf}
+          locale={candidate.defaultLocale}
+          locked={
+            blocked ||
+            busy ||
+            offline ||
+            background ||
+            !!recoveryView.pending ||
+            !recoveryView.checked
+          }
+          onView={setUnits}
+          onPending={setUnitPending}
+        />
+      )}
       {current?.editorContent && (
         <form
           onSubmit={submit}
           aria-label="Recorded Draft text form"
           className="product-complete-draft-fields"
         >
-          <fieldset disabled={busy}>
+          <fieldset disabled={blocked || busy}>
             <legend>Product text</legend>
             {Object.entries(current.localizedNames).map(([locale, text]) => (
               <label key={locale}>
@@ -384,7 +722,7 @@ export function ProductCompleteDraftForm({
             brandReference={brandReference}
             storeReference={storeReference}
             locale={current.defaultLocale}
-            locked={busy}
+            locked={blocked || busy}
             storedClassification={original.current?.categoryClassification}
             proposal={categoryProposal}
             onReadiness={setCategoryReady}
@@ -397,7 +735,7 @@ export function ProductCompleteDraftForm({
               setError(null);
             }}
           />
-          <fieldset disabled={busy}>
+          <fieldset disabled={blocked || busy}>
             <legend>Recorded attributes and Media text</legend>
             {current.editorContent.attributeValues.map((attribute, i) =>
               attribute.type === "Enum" ? (
@@ -450,6 +788,7 @@ export function ProductCompleteDraftForm({
             ))}
             <ProductRecordedConfigurationFields
               draft={current}
+              showOptionBindings={false}
               integerInputs={integerInputs}
               onIntegerInput={integerInput}
               onChange={(next) => {
@@ -458,14 +797,57 @@ export function ProductCompleteDraftForm({
                 setError(null);
               }}
             />
+            {brandReference && (
+              <ProductOptionBindings
+                draft={current}
+                brandReference={brandReference}
+                storeReference={storeReference}
+                csrf={csrf}
+                locked={blocked || busy || Boolean(view?.pendingSave) || recoveryView.pending}
+                onBlockedChange={setBindingPending}
+                registerBeforeSave={registerBindingPrepare}
+                rawInputs={bindingRawInputs}
+                onRawInputsChange={bindingRawInput}
+                onChange={(next) => {
+                  setCandidate(next);
+                  setDirty(true);
+                  setError(null);
+                }}
+              />
+            )}
+            <ProductNewSkus
+              rows={newSkus}
+              units={units}
+              locale={current.defaultLocale}
+              locked={blocked || busy || unitPending}
+              draft={current}
+              onChange={(rows) => {
+                setNewSkus(rows);
+                setDirty(true);
+                setError(null);
+              }}
+            />
+            {unitError && <p role="status">{unitError}</p>}
           </fieldset>
           <p id="complete-draft-validation">
             Plain text, decimal strings and whole-number selections only. Existing owning and
             foreign references are retained unless explicitly changed through current Category
-            choices. Other reference selection, new SKU/Variant generation and publication controls
-            remain unavailable.
+            choices and actual Option binding selections. New Draft SKUs use registered units. Other
+            reference selection, new Variant generation and publication controls remain unavailable.
           </p>
-          <button type="submit" disabled={busy || !dirty || !configurationValid || !categoryReady}>
+          <button
+            type="submit"
+            disabled={
+              blocked ||
+              busy ||
+              unitPending ||
+              bindingPending ||
+              !dirty ||
+              !configurationValid ||
+              !categoryReady ||
+              !newSkuRowsValid(newSkus, units, current.defaultLocale, current)
+            }
+          >
             Save recorded Draft
           </button>
         </form>

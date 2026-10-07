@@ -4122,6 +4122,314 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "OptionPriceArchivedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OptionPriceArchivedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "bindingReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "brandReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "currencyCode": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "const": "Archived",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
+              "type": "string"
+            },
+            "optionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "ruleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ruleReference",
+            "versionReference",
+            "brandReference",
+            "bindingReference",
+            "optionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "currencyCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "OptionPriceArchived v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.option-price-authoring-history:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OptionPriceArchived",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "OptionPriceDraftCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OptionPriceDraftCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "bindingReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "brandReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "currencyCode": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "const": "Draft",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
+              "type": "string"
+            },
+            "optionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "ruleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ruleReference",
+            "versionReference",
+            "brandReference",
+            "bindingReference",
+            "optionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "currencyCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "OptionPriceDraftCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.option-price-authoring-history:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OptionPriceDraftCreated",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "OptionPriceDraftReplacedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OptionPriceDraftReplacedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "bindingReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "brandReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "currencyCode": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "const": "Draft",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
+              "type": "string"
+            },
+            "optionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "ruleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ruleReference",
+            "versionReference",
+            "brandReference",
+            "bindingReference",
+            "optionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "currencyCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "OptionPriceDraftReplaced v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.option-price-authoring-history:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OptionPriceDraftReplaced",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "OptionPriceVersionPublishedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OptionPriceVersionPublishedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "aggregateVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "bindingReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "brandReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "currencyCode": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            "lifecycle": {
+              "const": "Published",
+              "type": "string"
+            },
+            "occurredAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
+              "type": "string"
+            },
+            "optionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "ruleReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ruleReference",
+            "versionReference",
+            "brandReference",
+            "bindingReference",
+            "optionReference",
+            "aggregateVersion",
+            "lifecycle",
+            "currencyCode",
+            "snapshotDigest",
+            "occurredAt"
+          ],
+          "type": "object"
+        },
+        "title": "OptionPriceVersionPublished v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.option-price-authoring-history:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OptionPriceVersionPublished",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "OptionSetContentSealedV1": {
         "contentType": "application/json",
         "deprecated": false,
@@ -4308,6 +4616,70 @@
         "x-bop-consumers": ["catalog.option-set-draft-current:v1"],
         "x-bop-data-classification": "indirect_identifier",
         "x-bop-event-type": "OptionSetDraftReplaced",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "OptionSetPublicationReleaseRecordedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OptionSetPublicationReleaseRecordedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "recordDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": ["operationReference", "recordDigest"],
+          "type": "object"
+        },
+        "title": "OptionSetPublicationReleaseRecorded v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.option-set-record-history:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OptionSetPublicationReleaseRecorded",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "OptionSetReviewContentRecordedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "OptionSetReviewContentRecordedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "recordDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": ["operationReference", "recordDigest"],
+          "type": "object"
+        },
+        "title": "OptionSetReviewContentRecorded v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.option-set-record-history:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "OptionSetReviewContentRecorded",
         "x-bop-owner-module": "@rms/catalog",
         "x-bop-producer-module": "@rms/catalog",
         "x-bop-replay-semantics": "idempotent",
@@ -5824,6 +6196,99 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "store"
       },
+      "ProductPublicationWarningsAcknowledgedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductPublicationWarningsAcknowledgedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productAggregateVersion": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "productReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "productVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "receiptDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "reportDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "reportOperationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "warningBindingDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "warningCodes": {
+              "items": {
+                "enum": [
+                  "DefaultLocaleName",
+                  "InternalCode",
+                  "PublishableSku",
+                  "VariantMapping",
+                  "OptionSelection",
+                  "MediaReady",
+                  "TaxResolution",
+                  "UniqueScope",
+                  "EffectivePeriod",
+                  "ChangeImpact",
+                  "ApprovalPolicy"
+                ],
+                "type": "string"
+              },
+              "maxItems": 11,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "tenantReference",
+            "productReference",
+            "productVersionReference",
+            "operationReference",
+            "productAggregateVersion",
+            "reportOperationReference",
+            "reportDigest",
+            "warningBindingDigest",
+            "receiptDigest",
+            "warningCodes"
+          ],
+          "type": "object"
+        },
+        "title": "ProductPublicationWarningsAcknowledged v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.product-publication-warning-acknowledgement:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductPublicationWarningsAcknowledged",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
       "ProductRestoredV1": {
         "contentType": "application/json",
         "deprecated": false,
@@ -6204,6 +6669,62 @@
         "x-bop-consumers": ["catalog.product-search-projection:v1"],
         "x-bop-data-classification": "indirect_identifier",
         "x-bop-event-type": "ProductSuspended",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "ProductTaxClassificationRegistryVersionRecordedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "ProductTaxClassificationRegistryVersionRecordedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "registryReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "registryVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tenantReference",
+            "registryReference",
+            "versionReference",
+            "registryVersion",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "ProductTaxClassificationRegistryVersionRecorded v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.tax-classification-registry-current:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "ProductTaxClassificationRegistryVersionRecorded",
         "x-bop-owner-module": "@rms/catalog",
         "x-bop-producer-module": "@rms/catalog",
         "x-bop-replay-semantics": "idempotent",
@@ -9175,6 +9696,103 @@
         "x-bop-schema-version": 1,
         "x-bop-tenant-scope": "brand"
       },
+      "SellingUnitRegistryVersionRecordedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "SellingUnitRegistryVersionRecordedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "operationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "registryReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "registryVersion": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "snapshotDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "tenantReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tenantReference",
+            "registryReference",
+            "versionReference",
+            "registryVersion",
+            "operationReference",
+            "snapshotDigest"
+          ],
+          "type": "object"
+        },
+        "title": "SellingUnitRegistryVersionRecorded v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["catalog.selling-unit-registry-current:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "SellingUnitRegistryVersionRecorded",
+        "x-bop-owner-module": "@rms/catalog",
+        "x-bop-producer-module": "@rms/catalog",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "brand"
+      },
+      "TaxConfigCandidatePreparedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "TaxConfigCandidatePreparedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "configurationReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "preparedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
+              "type": "string"
+            },
+            "targetVersionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": ["configurationReference", "targetVersionReference", "contentDigest", "preparedAt"],
+          "type": "object"
+        },
+        "title": "TaxConfigCandidatePrepared v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.tax-config-candidate-history:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "TaxConfigCandidatePrepared",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
       "TaxConfigDraftCreatedV1": {
         "contentType": "application/json",
         "deprecated": false,
@@ -9290,6 +9908,120 @@
         "x-bop-consumers": ["pricing.tax-config-admin-projection:v1"],
         "x-bop-data-classification": "none",
         "x-bop-event-type": "TaxConfigDraftReplaced",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "TaxConfigMaterialCreatedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "TaxConfigMaterialCreatedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "materialKind": {
+              "enum": ["RegistrationApplicability", "ProfessionalReport", "FixtureSuite"],
+              "type": "string"
+            },
+            "materialReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "recordedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
+              "type": "string"
+            },
+            "revision": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "materialReference",
+            "versionReference",
+            "materialKind",
+            "revision",
+            "contentDigest",
+            "recordedAt"
+          ],
+          "type": "object"
+        },
+        "title": "TaxConfigMaterialCreated v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.tax-config-material-history:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "TaxConfigMaterialCreated",
+        "x-bop-owner-module": "@rms/pricing",
+        "x-bop-producer-module": "@rms/pricing",
+        "x-bop-replay-semantics": "idempotent",
+        "x-bop-retention-category": "business_record",
+        "x-bop-schema-version": 1,
+        "x-bop-tenant-scope": "store"
+      },
+      "TaxConfigMaterialReplacedV1": {
+        "contentType": "application/json",
+        "deprecated": false,
+        "name": "TaxConfigMaterialReplacedV1",
+        "payload": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "contentDigest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "materialKind": {
+              "enum": ["RegistrationApplicability", "ProfessionalReport", "FixtureSuite"],
+              "type": "string"
+            },
+            "materialReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "recordedAt": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$",
+              "type": "string"
+            },
+            "revision": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "type": "integer"
+            },
+            "versionReference": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "materialReference",
+            "versionReference",
+            "materialKind",
+            "revision",
+            "contentDigest",
+            "recordedAt"
+          ],
+          "type": "object"
+        },
+        "title": "TaxConfigMaterialReplaced v1",
+        "x-bop-compatibility": "additive",
+        "x-bop-consumers": ["pricing.tax-config-material-history:v1"],
+        "x-bop-data-classification": "indirect_identifier",
+        "x-bop-event-type": "TaxConfigMaterialReplaced",
         "x-bop-owner-module": "@rms/pricing",
         "x-bop-producer-module": "@rms/pricing",
         "x-bop-replay-semantics": "idempotent",

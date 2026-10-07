@@ -116,28 +116,33 @@ export interface TenantBrandConfigurationContentRequest {
   readonly observedAt: string;
   readonly validUntil: string;
 }
-export function parseTenantBrandConfigurationContentRequest(
+const contentRequestFields = Object.freeze([
+  "tenantReference",
+  "brandReference",
+  "actorReference",
+  "purposeCode",
+  "configurationVersionReference",
+  "expectedBrandVersion",
+  "originalIntentDigest",
+  "observedAt",
+  "validUntil",
+]);
+function parseContentRequest<
+  P extends "CATALOG_PRODUCT_CONTENT" | "CATALOG_OPTION_SET_PUBLICATION" | "STORE_CONFIGURATION",
+>(
   value: unknown,
-): TenantBrandConfigurationContentRequest {
+  purpose: P,
+  maximumDuration: number,
+): Omit<TenantBrandConfigurationContentRequest, "purposeCode"> & { readonly purposeCode: P } {
   try {
-    const r = record(value, [
-      "tenantReference",
-      "brandReference",
-      "actorReference",
-      "purposeCode",
-      "configurationVersionReference",
-      "expectedBrandVersion",
-      "originalIntentDigest",
-      "observedAt",
-      "validUntil",
-    ]);
+    const r = record(value, contentRequestFields);
     const observedAt = parseCanonicalInstant(r.observedAt);
     const validUntil = parseCanonicalInstant(r.validUntil);
     const duration = Date.parse(validUntil) - Date.parse(observedAt);
     if (
       duration <= 0 ||
-      duration > 30_000 ||
-      r.purposeCode !== "CATALOG_PRODUCT_CONTENT" ||
+      duration > maximumDuration ||
+      r.purposeCode !== purpose ||
       typeof r.originalIntentDigest !== "string" ||
       !/^sha256:[0-9a-f]{64}$/.test(r.originalIntentDigest)
     )
@@ -146,7 +151,7 @@ export function parseTenantBrandConfigurationContentRequest(
       tenantReference: parseBrandAdministrationReference(r.tenantReference),
       brandReference: parseBrandReference(r.brandReference),
       actorReference: parseBrandAdministrationReference(r.actorReference),
-      purposeCode: "CATALOG_PRODUCT_CONTENT" as const,
+      purposeCode: purpose,
       configurationVersionReference: parseBrandAdministrationReference(
         r.configurationVersionReference,
       ),
@@ -154,6 +159,79 @@ export function parseTenantBrandConfigurationContentRequest(
       originalIntentDigest: r.originalIntentDigest,
       observedAt,
       validUntil,
+    });
+  } catch {
+    return unavailable();
+  }
+}
+
+export function parseTenantBrandConfigurationContentRequest(
+  value: unknown,
+): TenantBrandConfigurationContentRequest {
+  return parseContentRequest(value, "CATALOG_PRODUCT_CONTENT", 30_000);
+}
+/** Store configuration admission reads recorded Brand content, not release eligibility. */
+export interface TenantStoreBrandConfigurationContentRequest extends Omit<
+  TenantBrandConfigurationContentRequest,
+  "purposeCode"
+> {
+  readonly purposeCode: "STORE_CONFIGURATION";
+}
+export function parseTenantStoreBrandConfigurationContentRequest(
+  value: unknown,
+): TenantStoreBrandConfigurationContentRequest {
+  return parseContentRequest(value, "STORE_CONFIGURATION", 5000);
+}
+/** Fixed Option publication purpose and original full graph anchors. Recorded
+ * Brand metadata remains distinct from current Publishing release eligibility. */
+export interface TenantOptionSetBrandConfigurationContentRequest extends Omit<
+  TenantBrandConfigurationContentRequest,
+  "purposeCode"
+> {
+  readonly purposeCode: "CATALOG_OPTION_SET_PUBLICATION";
+  readonly optionSetReference: string;
+  readonly versionReference: string;
+  readonly expectedAggregateVersion: number;
+  readonly sourceDigest: string;
+  readonly contentDigest: string;
+  readonly configurationDigest: string;
+  readonly graphDigest: string;
+  readonly activationAt: string;
+}
+export function parseTenantOptionSetBrandConfigurationContentRequest(
+  value: unknown,
+): TenantOptionSetBrandConfigurationContentRequest {
+  try {
+    const r = record(value, [
+      ...contentRequestFields,
+      "optionSetReference",
+      "versionReference",
+      "expectedAggregateVersion",
+      "sourceDigest",
+      "contentDigest",
+      "configurationDigest",
+      "graphDigest",
+      "activationAt",
+    ]);
+    const base = parseContentRequest(
+      Object.fromEntries(contentRequestFields.map((field) => [field, r[field]])),
+      "CATALOG_OPTION_SET_PUBLICATION",
+      5000,
+    );
+    for (const field of ["sourceDigest", "contentDigest", "configurationDigest", "graphDigest"]) {
+      if (typeof r[field] !== "string" || !/^sha256:[0-9a-f]{64}$/.test(r[field]))
+        return unavailable();
+    }
+    return Object.freeze({
+      ...base,
+      optionSetReference: parseBrandAdministrationReference(r.optionSetReference),
+      versionReference: parseBrandAdministrationReference(r.versionReference),
+      expectedAggregateVersion: parseOrganizationVersion(r.expectedAggregateVersion),
+      sourceDigest: r.sourceDigest as string,
+      contentDigest: r.contentDigest as string,
+      configurationDigest: r.configurationDigest as string,
+      graphDigest: r.graphDigest as string,
+      activationAt: parseCanonicalInstant(r.activationAt),
     });
   } catch {
     return unavailable();

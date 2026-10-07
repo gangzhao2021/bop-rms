@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { verifyPlatformBrowserSession } from "../test-support/platform-browser-session.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -29,6 +30,7 @@ async function prove(context) {
       { table_name: "api_client_credential_metadata" },
       { table_name: "api_client_operation" },
       { table_name: "authentication_session" },
+      { table_name: "browser_brand_session_selection" },
       { table_name: "browser_session_selection" },
       { table_name: "guest_binding_preparation" },
       { table_name: "guest_dining_binding_preparation" },
@@ -36,6 +38,8 @@ async function prove(context) {
       { table_name: "guest_session" },
       { table_name: "guest_session_operation" },
       { table_name: "oidc_authorization_transaction" },
+      { table_name: "platform_actor_directory_head" },
+      { table_name: "platform_actor_directory_revision" },
       { table_name: "session_revocation_request" },
       { table_name: "workforce_invitation" },
       { table_name: "workforce_mfa_status" },
@@ -311,7 +315,7 @@ async function prove(context) {
        FROM pg_class
        WHERE relnamespace = 'bop_identity'::regnamespace AND relrowsecurity`,
     );
-    assert.deepEqual(rls.rows, [{ count: 10 }]);
+    assert.deepEqual(rls.rows, [{ count: 13 }]);
     const dynamicObjects = await client.query(
       `SELECT
          (SELECT count(*)::int FROM pg_proc
@@ -323,7 +327,7 @@ async function prove(context) {
             'bop_identity.guest_session'::regclass
           ) AND NOT tgisinternal) AS triggers`,
     );
-    assert.deepEqual(dynamicObjects.rows, [{ functions: 5, triggers: 0 }]);
+    assert.deepEqual(dynamicObjects.rows, [{ functions: 13, triggers: 0 }]);
 
     await client.query(
       `CREATE ROLE ${deniedRole} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`,
@@ -342,4 +346,8 @@ async function prove(context) {
 
 it("proves Identity session constraints, one-time consume and least privilege", async () => {
   await withIsolatedDatabase({ caseId: "identity_session", root }, prove);
+});
+
+it("persists privileged Platform Sessions with fresh same-session TOTP and atomic stepup", async () => {
+  await withIsolatedDatabase({ caseId: "platform_session", root }, verifyPlatformBrowserSession);
 });

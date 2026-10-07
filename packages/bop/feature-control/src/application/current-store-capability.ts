@@ -1,5 +1,11 @@
 import { revalidateTenantContext } from "@bop/permission";
-import { parseBrandReference, parseStoreReference, type TenantContext } from "@bop/tenant";
+import {
+  parseBrandReference,
+  parseStoreReference,
+  parseBrandAdministrationContext,
+  type BrandAdministrationContext,
+  type TenantContext,
+} from "@bop/tenant";
 import {
   createFeatureControlAdministrationDefinition,
   type FeatureControlAdministrationDefinition,
@@ -41,11 +47,11 @@ export interface StoreCapabilityBinding {
   readonly phase: "phase_0" | "phase_0_plus" | "phase_1" | "phase_1a" | "phase_2" | "phase_3";
   readonly commitment: "Committed";
 }
-export interface StoreCapabilityDecision {
+interface CapabilityDecision<S extends string | null> {
   readonly capabilityKey: string;
   readonly controlKey: string;
   readonly brandReference: string;
-  readonly storeReference: string;
+  readonly storeReference: S;
   readonly backendExecution: "Allow" | "Deny";
   readonly frontendVisibility: "Show" | "Hide";
   readonly reason: "Enabled" | "Disabled" | "Unavailable";
@@ -64,24 +70,24 @@ export interface StoreCapabilityDependencyEvidence {
   readonly observedAt: string;
   readonly validUntil: string;
 }
-export interface CurrentStoreCapabilityPorts {
+interface CurrentCapabilityPorts<S extends string | null, C = TenantContext> {
   readonly clock: { now(): string };
   readonly authority: {
-    withCurrentStoreScope<T>(
+    withCurrentScope<T>(
       input: {
         readonly brandReference: string;
-        readonly storeReference: string;
+        readonly storeReference: S;
         readonly capabilityKey: string;
         readonly observedAt: string;
       },
-      work: (context: TenantContext) => Promise<T>,
+      work: (context: C) => Promise<T>,
     ): Promise<T>;
   };
   readonly bindings: {
     withCurrentBinding<T>(
       input: {
         readonly brandReference: string;
-        readonly storeReference: string;
+        readonly storeReference: S;
         readonly capabilityKey: string;
         readonly observedAt: string;
       },
@@ -110,7 +116,7 @@ export interface CurrentStoreCapabilityPorts {
     withCurrentEvidence<T>(
       input: {
         readonly brandReference: string;
-        readonly storeReference: string;
+        readonly storeReference: S;
         readonly dependencies: readonly FeatureControlDependency[];
         readonly observedAt: string;
       },
@@ -118,6 +124,129 @@ export interface CurrentStoreCapabilityPorts {
     ): Promise<T>;
   };
 }
+export type StoreCapabilityDecision = CapabilityDecision<string>;
+export type BrandCapabilityDecision = CapabilityDecision<null>;
+export type CurrentStoreCapabilityPorts = Omit<CurrentCapabilityPorts<string>, "authority"> & {
+  readonly authority: {
+    withCurrentStoreScope: CurrentCapabilityPorts<string>["authority"]["withCurrentScope"];
+  };
+};
+export type CurrentBrandCapabilityPorts = Omit<CurrentCapabilityPorts<null>, "authority"> & {
+  readonly authority: {
+    withCurrentBrandScope: CurrentCapabilityPorts<null>["authority"]["withCurrentScope"];
+  };
+};
+export type BrandAdministrationCapabilityDecision = CapabilityDecision<null>;
+export type CurrentBrandAdministrationCapabilityPorts = Omit<
+  CurrentCapabilityPorts<null, BrandAdministrationContext>,
+  "authority"
+> & {
+  readonly authority: {
+    withCurrentBrandAdministrationScope: CurrentCapabilityPorts<
+      null,
+      BrandAdministrationContext
+    >["authority"]["withCurrentScope"];
+  };
+};
+export class BrandCapabilityUnavailableError extends Error {
+  readonly code = "BRAND_CAPABILITY_UNAVAILABLE";
+  constructor() {
+    super("current Brand capability is unavailable");
+    this.name = "BrandCapabilityUnavailableError";
+  }
+}
+
+/** Preserve the Store contract while sharing the same owning definition rules. */
+export function createCurrentStoreCapabilityService(
+  ports: CurrentStoreCapabilityPorts,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+) {
+  const storeReference = parseStoreReference(scope.storeReference);
+  return createCurrentCapabilityService(
+    {
+      ...ports,
+      authority: {
+        withCurrentScope: (input, work) => ports.authority.withCurrentStoreScope(input, work),
+      },
+    },
+    { brandReference: scope.brandReference, storeReference },
+    "STORE_CAPABILITY_EVALUATION",
+    operationalContext,
+  );
+}
+
+/** A genuine Brand context has no Store, and cannot inherit a Store override. */
+export function createCurrentBrandCapabilityService(
+  ports: CurrentBrandCapabilityPorts,
+  scope: { readonly brandReference: string },
+) {
+  const service = createCurrentCapabilityService(
+    {
+      ...ports,
+      authority: {
+        withCurrentScope: (input, work) => ports.authority.withCurrentBrandScope(input, work),
+      },
+    },
+    { brandReference: scope.brandReference, storeReference: null },
+    "BRAND_CAPABILITY_EVALUATION",
+    operationalContext,
+  );
+  return Object.freeze({
+    async withCurrentCapability<T>(
+      value: unknown,
+      work: (decision: BrandCapabilityDecision) => Promise<T>,
+    ): Promise<T> {
+      try {
+        return await service.withCurrentCapability(value, work);
+      } catch {
+        throw new BrandCapabilityUnavailableError();
+      }
+    },
+  });
+}
+
+/** Administrative observation retains the actual Brand lifecycle and grants no
+ * operational scope. Only the registered Brand list and detail capabilities are supported. */
+export function createCurrentBrandAdministrationCapabilityService(
+  ports: CurrentBrandAdministrationCapabilityPorts,
+  scope: { readonly brandReference: string },
+  screen: "List" | "Detail" = "Detail",
+) {
+  if (screen !== "List" && screen !== "Detail") throw new BrandCapabilityUnavailableError();
+  const service = createCurrentCapabilityService(
+    {
+      ...ports,
+      authority: {
+        withCurrentScope: (input, work) =>
+          ports.authority.withCurrentBrandAdministrationScope(input, work),
+      },
+    },
+    { brandReference: scope.brandReference, storeReference: null },
+    "BRAND_ADMINISTRATION",
+    (value) => parseBrandAdministrationContext(value),
+    screen === "List"
+      ? { capabilityKey: "organization.org_brand_list", controlKey: "organization.brand.list" }
+      : { capabilityKey: "organization.org_brand_detail", controlKey: "organization.brand.detail" },
+  );
+  return Object.freeze({
+    async withCurrentCapability<T>(
+      value: unknown,
+      work: (decision: BrandAdministrationCapabilityDecision) => Promise<T>,
+    ): Promise<T> {
+      try {
+        return await service.withCurrentCapability(value, work);
+      } catch {
+        throw new BrandCapabilityUnavailableError();
+      }
+    },
+  });
+}
+function operationalContext(value: TenantContext): TenantContext {
+  const context = revalidateTenantContext(value);
+  if (context.scopeKind !== (context.store === null ? "Brand" : "Store")) return fail();
+  return context;
+}
+
 function data(value: unknown): unknown {
   let budget = 10000;
   function copy(v: unknown, depth: number): unknown {
@@ -170,20 +299,28 @@ function exact(value: unknown, keys: readonly string[]): Record<string, unknown>
 /** A current decision is an observation, never a durable grant. New-work consumers
  * must stay inside this callback; all configured ports hold their source/authority
  * fences through it and COMMIT. No request carries identities, evidence or an allow. */
-export function createCurrentStoreCapabilityService(
-  ports: CurrentStoreCapabilityPorts,
-  scope: { readonly brandReference: string; readonly storeReference: string },
+function createCurrentCapabilityService<
+  S extends string | null,
+  C extends TenantContext | BrandAdministrationContext,
+>(
+  ports: CurrentCapabilityPorts<S, C>,
+  scope: { readonly brandReference: string; readonly storeReference: S },
+  purposeCode:
+    "STORE_CAPABILITY_EVALUATION" | "BRAND_CAPABILITY_EVALUATION" | "BRAND_ADMINISTRATION",
+  parseContext: (value: C) => C,
+  fixedBinding?: { readonly capabilityKey: string; readonly controlKey: string },
 ) {
   const brandReference = parseBrandReference(scope.brandReference),
-    storeReference = parseStoreReference(scope.storeReference);
+    storeReference = scope.storeReference;
   return Object.freeze({
     async withCurrentCapability<T>(
       value: unknown,
-      work: (decision: StoreCapabilityDecision) => Promise<T>,
+      work: (decision: CapabilityDecision<S>) => Promise<T>,
     ): Promise<T> {
       try {
         const capabilityKey = parseStoreCapabilityKey(value),
           startedAt = parseFeatureControlInstant(ports.clock.now());
+        if (fixedBinding && capabilityKey !== fixedBinding.capabilityKey) return fail();
         const input = Object.freeze({
           brandReference,
           storeReference,
@@ -195,12 +332,12 @@ export function createCurrentStoreCapabilityService(
           sourceCalls = 0,
           evidenceCalls = 0;
         let completed: { value: T } | undefined;
-        const output = await ports.authority.withCurrentStoreScope(input, async (rawContext) => {
+        const output = await ports.authority.withCurrentScope(input, async (rawContext) => {
           if (++authorityCalls !== 1) return fail();
-          const context = revalidateTenantContext(rawContext);
+          const context = parseContext(rawContext);
           if (
             context.brand.brandReference !== brandReference ||
-            context.store?.storeReference !== storeReference ||
+            (context.store?.storeReference ?? null) !== storeReference ||
             context.resolvedAt !== startedAt ||
             context.actor.actorReference === null
           )
@@ -226,10 +363,11 @@ export function createCurrentStoreCapabilityService(
             parseFeatureControlReference(b.mappingReference);
             parseFeatureControlVersion(b.mappingVersion);
             const controlKey = parseFeatureControlKey(b.controlKey);
+            if (fixedBinding && controlKey !== fixedBinding.controlKey) return fail();
             return ports.definitions.withCurrentDefinitions(
               {
                 actorReference: parseFeatureControlReference(context.actor.actorReference),
-                purposeCode: "STORE_CAPABILITY_EVALUATION",
+                purposeCode,
                 key: controlKey,
                 observedAt: startedAt,
               },
@@ -258,7 +396,8 @@ export function createCurrentStoreCapabilityService(
                   if (
                     d.key !== controlKey ||
                     d.scope.brandReference !== brandReference ||
-                    (d.scope.storeReference !== null && d.scope.storeReference !== storeReference)
+                    (d.scope.storeReference !== null &&
+                      String(d.scope.storeReference) !== String(storeReference))
                   )
                     return fail();
                   const old = latest.get(d.controlId);
@@ -275,7 +414,7 @@ export function createCurrentStoreCapabilityService(
                 const eligible = store.length > 0 ? store : brand;
                 const chosen = eligible.length === 1 ? eligible[0] : undefined;
                 const finish = async (
-                  reason: StoreCapabilityDecision["reason"],
+                  reason: CapabilityDecision<S>["reason"],
                 ): Promise<{ value: T }> => {
                   const before = parseFeatureControlInstant(ports.clock.now());
                   if (before < startedAt || Date.parse(before) - Date.parse(startedAt) > 5000)

@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { verifyWorkforceInvitationPersistence } from "../test-support/workforce-invitation-persistence.mjs";
+import { verifyApprovedWorkforceMembership } from "../test-support/approved-workforce-membership.mjs";
+import { verifyApprovedWorkforcePolicy } from "../test-support/approved-workforce-policy.mjs";
+import { verifyWorkforceOnboardingOperationPersistence } from "../test-support/workforce-onboarding-operation.mjs";
+import { verifyWorkforceOnboardingBrowser } from "../test-support/workforce-onboarding-browser.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -197,4 +202,36 @@ async function prove(context) {
 
 it("proves workforce identity security constraints, idempotency and least privilege", async () => {
   await withIsolatedDatabase({ caseId: "workforce_security", root }, prove);
+});
+
+it("persists Workforce invitations with minimum privileges and guarded single consumption", async () => {
+  await withIsolatedDatabase(
+    { caseId: "workforce_invite", root },
+    verifyWorkforceInvitationPersistence,
+  );
+});
+
+it("persists approved Pending Membership and guarded activation with minimum privileges", async () => {
+  await withIsolatedDatabase(
+    { caseId: "approved_membership", root },
+    verifyApprovedWorkforceMembership,
+  );
+});
+
+it("persists original Workforce onboarding and a single dispatch claim with actual Audit", async () => {
+  await withIsolatedDatabase(
+    { caseId: "workforce_onboarding", root },
+    verifyWorkforceOnboardingOperationPersistence,
+  );
+});
+
+it("prepares approved Workforce policy against actual Pending Membership with minimum privileges", async () => {
+  await withIsolatedDatabase({ caseId: "approved_policy", root }, verifyApprovedWorkforcePolicy);
+});
+
+it("completes invited Workforce onboarding callback atomically with actual owners", async () => {
+  await withIsolatedDatabase(
+    { caseId: "onboarding_browser", root },
+    verifyWorkforceOnboardingBrowser,
+  );
 });

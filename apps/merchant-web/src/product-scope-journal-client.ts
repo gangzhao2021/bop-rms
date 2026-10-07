@@ -238,12 +238,12 @@ export function parseProductScopeJournalView(
                   ]),
                   previousVersionReference = parseCatalogReference(p.previousVersionReference),
                   previousOperationReference = parseCatalogReference(p.previousOperationReference),
+                  previousSelectorIndex = integer(p.previousSelectorIndex, 0, 999),
+                  incomingSelectorIndex = integer(p.incomingSelectorIndex, 0, 999),
                   from = parseCatalogInstant(p.effectiveFrom),
                   until = p.effectiveUntil === null ? null : parseCatalogInstant(p.effectiveUntil);
                 digest(p.previousIntentDigest);
                 digest(p.previousScopeDigest);
-                integer(p.previousSelectorIndex, 0, 999);
-                integer(p.incomingSelectorIndex, 0, 999);
                 if (
                   previousVersionReference === versionReference ||
                   (until !== null && until <= from) ||
@@ -257,6 +257,8 @@ export function parseProductScopeJournalView(
                 return Object.freeze({
                   previousVersionReference,
                   previousOperationReference,
+                  previousSelectorIndex,
+                  incomingSelectorIndex,
                   storeReference:
                     p.storeReference === null ? null : parseCatalogReference(p.storeReference),
                   channelCodes: codes(p.channelCodes),

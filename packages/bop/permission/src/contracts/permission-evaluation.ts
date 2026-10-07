@@ -1,3 +1,4 @@
+import { readClosedRecord } from "@bop/identity";
 import {
   createTenantContext,
   parseCanonicalInstant,
@@ -111,7 +112,13 @@ export function parseBusinessAction(value: unknown): BusinessAction {
   if (
     typeof value !== "string" ||
     value.length > 128 ||
-    (value !== "catalog.option_set.read" && !actionPattern.test(value))
+    (value !== "catalog.option_set.read" &&
+      value !== "catalog.option_set.create" &&
+      value !== "catalog.option_set.update" &&
+      value !== "catalog.option_set.submit" &&
+      value !== "catalog.option_set.publish" &&
+      value !== "catalog.option_set.history.read" &&
+      !actionPattern.test(value))
   )
     throw new PermissionEvaluationContractError("PERMISSION_REQUEST_INVALID");
   return value as BusinessAction;
@@ -135,7 +142,11 @@ export function revalidateTenantContext(value: TenantContext): TenantContext {
   try {
     if (!Object.isFrozen(value))
       throw new PermissionEvaluationContractError("PERMISSION_CONTEXT_INVALID");
-    return createTenantContext(value.actor, value.brand, value.store, value.resolvedAt);
+    const record = readClosedRecord(value, ["actor", "brand", "store", "scopeKind", "resolvedAt"]);
+    const context = createTenantContext(value.actor, value.brand, value.store, value.resolvedAt);
+    if (record.scopeKind !== context.scopeKind)
+      throw new PermissionEvaluationContractError("PERMISSION_CONTEXT_INVALID");
+    return context;
   } catch {
     throw new PermissionEvaluationContractError("PERMISSION_CONTEXT_INVALID");
   }

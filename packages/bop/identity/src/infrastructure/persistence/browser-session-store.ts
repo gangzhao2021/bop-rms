@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { canonicalizeRfc8785 } from "@bop/audit";
 import {
   assertSessionUsable,
   createAuthenticationSession,
@@ -24,8 +25,26 @@ import {
 import type { BrowserSessionStorePort } from "../../application/ports/browser-session-store-port.js";
 import {
   createPostgresOidcAuthorizationStore,
+  createPostgresPlatformOidcAuthorizationStore,
   type OidcAuthorizationTransaction,
 } from "./oidc-authorization-store.js";
+
+import {
+  assertPlatformSessionCurrent,
+  parsePlatformSessionSecrets,
+  type PlatformBrowserSessionStorePort,
+  type ReplacePlatformSessionCommand,
+} from "../../contracts/platform-browser-session.js";
+import {
+  assertWorkforceSessionCurrent,
+  parseWorkforceSessionSecrets,
+  type WorkforceBrowserSessionStorePort,
+  type ReplaceWorkforceSessionCommand,
+} from "../../contracts/workforce-browser-session.js";
+import type {
+  BrowserCredentialHasherPort,
+  SessionEnvelopeCryptoPort,
+} from "../../application/ports/session-credential-ports.js";
 
 const denied = (): never => {
   throw new BrowserSessionError("BROWSER_SESSION_DENIED");
@@ -45,7 +64,7 @@ function bytes(value: unknown, min: number, max: number): Buffer {
     return denied();
   return Buffer.from(value);
 }
-export function createPostgresBrowserSessionStore(options: {
+interface Options {
   transactions: { run<T>(work: (tx: OidcAuthorizationTransaction) => Promise<T>): Promise<T> };
   environment: string;
   redirectUri: string;
@@ -58,9 +77,72 @@ export function createPostgresBrowserSessionStore(options: {
     authenticatedAt: CanonicalInstant,
     observedAt: CanonicalInstant,
   ): Promise<IdentityActor>;
-}): BrowserSessionStorePort {
-  const oidc = createPostgresOidcAuthorizationStore(options);
+}
+type PlatformOptions = Options & {
+  issuer: string;
+  clientId: string;
+  envelopes: SessionEnvelopeCryptoPort;
+  hasher: BrowserCredentialHasherPort;
+};
+type Profile =
+  | { readonly kind: "Workforce"; readonly options?: PlatformOptions }
+  | { readonly kind: "Platform"; readonly options: PlatformOptions };
+export function createPostgresBrowserSessionStore(options: Options): BrowserSessionStorePort {
+  const store = createStore(options, { kind: "Workforce" });
+  return Object.freeze({
+    createAuthorizationTransaction: store.createAuthorizationTransaction,
+    consumeAuthorizationTransaction: store.consumeAuthorizationTransaction,
+    createSession: store.createSession,
+    resolveSession: store.resolveSession,
+    rotateSession: store.rotateSession,
+    revokeSession: store.revokeSession,
+  });
+}
+export function createPostgresPlatformBrowserSessionStore(
+  options: PlatformOptions,
+): PlatformBrowserSessionStorePort {
+  const store = createStore(options, { kind: "Platform", options });
+  return Object.freeze({
+    createAuthorizationTransaction: store.createAuthorizationTransaction,
+    consumeAuthorizationTransaction: store.consumeAuthorizationTransaction,
+    createSession: store.createSession,
+    resolveSession: store.resolveSession,
+    replaceAfterStepUp: store.replaceAfterStepUp,
+    revokeSession: store.revokeSession,
+  });
+}
+export function createPostgresWorkforceBrowserSessionStore(
+  options: PlatformOptions,
+): WorkforceBrowserSessionStorePort {
+  const store = createStore(options, { kind: "Workforce", options });
+  return Object.freeze({
+    createAuthorizationTransaction: store.createAuthorizationTransaction,
+    consumeAuthorizationTransaction: store.consumeAuthorizationTransaction,
+    createSession: store.createSession,
+    resolveSession: store.resolveSession,
+    replaceAfterStepUp: store.replaceAfterStepUp,
+    revokeSession: store.revokeSession,
+  });
+}
+function createStore(options: Options, profile: Profile) {
+  const strong = profile.options !== undefined;
+  const assertStrongCurrent =
+    profile.kind === "Platform" ? assertPlatformSessionCurrent : assertWorkforceSessionCurrent;
+  const oidc =
+    profile.kind === "Platform"
+      ? createPostgresPlatformOidcAuthorizationStore(options)
+      : createPostgresOidcAuthorizationStore(options);
   const environment = options.environment;
+  const strongIssuer = profile.options?.issuer,
+    strongClientId = profile.options?.clientId;
+  const actorPort = options.currentActor,
+    nowPort = options.now,
+    createdPort = options.onSessionCreated;
+  const platformCrypto = profile.options?.envelopes ?? null;
+  const platformDecrypt = platformCrypto?.decrypt;
+  const platformHasher = profile.options?.hasher ?? null;
+  const platformHash = platformHasher?.hash,
+    platformEquals = platformHasher?.equals;
   function envelope(input: EncryptedSecretEnvelope, session: AuthenticationSession) {
     if (
       !input ||
@@ -68,7 +150,11 @@ export function createPostgresBrowserSessionStore(options: {
       typeof input.keyReference !== "string" ||
       !/^[\x21-\x7e]{1,255}$/u.test(input.keyReference) ||
       input.encryptionContext !==
-        environment + ":session:" + session.sessionReference + ":" + session.actor.actorReference ||
+        environment +
+          (profile.kind === "Platform" ? ":platform-session:" : ":session:") +
+          session.sessionReference +
+          ":" +
+          session.actor.actorReference ||
       typeof input.ciphertext !== "string" ||
       !/^[A-Za-z0-9_-]+$/u.test(input.ciphertext)
     )
@@ -84,17 +170,26 @@ export function createPostgresBrowserSessionStore(options: {
     observedAt: CanonicalInstant,
   ) {
     const result = createIdentityActor(
-      await options.currentActor(tx, reference, authenticatedAt, observedAt),
+      await (strong
+        ? actorPort.call(options, tx, reference, authenticatedAt, observedAt)
+        : options.currentActor(tx, reference, authenticatedAt, observedAt)),
     );
     if (
       result.actorReference !== reference ||
       result.authenticatedAt !== authenticatedAt ||
       result.actorType !== "User" ||
-      result.accountKind !== "Workforce" ||
-      result.authenticationMethod !== "Oidc"
+      result.accountKind !== profile.kind ||
+      result.authenticationMethod !== "Oidc" ||
+      (strong &&
+        profile.kind === "Workforce" &&
+        (result.verificationLevel !== "SingleFactor" || result.recentMfaAt !== null))
     )
       return denied();
-    return result;
+    // Directory MFA metadata is not proof about this Session. The encrypted
+    // Platform proof is returned separately after its exact Session binding is checked.
+    return strong
+      ? createIdentityActor({ ...result, verificationLevel: "SingleFactor", recentMfaAt: null })
+      : result;
   }
   async function decode(
     tx: OidcAuthorizationTransaction,
@@ -103,7 +198,7 @@ export function createPostgresBrowserSessionStore(options: {
   ) {
     if (typeof row.actor_id !== "string") return denied();
     const policy = Object.values(sessionPolicies).find((p) => p.code === row.policy_code);
-    if (!policy) return denied();
+    if (!policy || (strong && policy.code !== "Privileged")) return denied();
     const authenticatedAt = parseCanonicalInstant(at(row.authenticated_at));
     const current = await actor(tx, row.actor_id, authenticatedAt, observedAt);
     const session = createAuthenticationSession({
@@ -134,12 +229,96 @@ export function createPostgresBrowserSessionStore(options: {
       } as EncryptedSecretEnvelope,
       session,
     );
-    return createBrowserSessionRecord({
+    const record = createBrowserSessionRecord({
       session,
       encryptedSecrets,
       sessionSelectorHash: bytes(row.session_selector_hash, 32, 32).toString("hex"),
       csrfSelectorHash: bytes(row.csrf_selector_hash, 32, 32).toString("hex"),
     });
+    await platformSecrets(record);
+    return record;
+  }
+  async function platformSecrets(record: BrowserSessionRecord) {
+    if (!strong || !profile.options) return null;
+    const p = profile.options;
+    if (
+      !platformCrypto ||
+      !platformDecrypt ||
+      !platformHasher ||
+      !platformHash ||
+      !platformEquals ||
+      (profile.kind === "Workforce" &&
+        (p.issuer !== strongIssuer ||
+          p.clientId !== strongClientId ||
+          options.environment !== environment)) ||
+      p.envelopes !== platformCrypto ||
+      platformCrypto.decrypt !== platformDecrypt ||
+      p.hasher !== platformHasher ||
+      platformHasher.hash !== platformHash ||
+      platformHasher.equals !== platformEquals
+    )
+      return denied();
+    const plaintext = await platformDecrypt.call(
+      platformCrypto,
+      record.encryptedSecrets,
+      record.encryptedSecrets.encryptionContext,
+    );
+    if (
+      profile.kind === "Workforce" &&
+      (p.issuer !== strongIssuer ||
+        p.clientId !== strongClientId ||
+        options.environment !== environment ||
+        p.envelopes !== platformCrypto ||
+        platformCrypto.decrypt !== platformDecrypt ||
+        p.hasher !== platformHasher ||
+        platformHasher.hash !== platformHash ||
+        platformHasher.equals !== platformEquals)
+    )
+      return denied();
+    if (plaintext.length > 16_384) return denied();
+    const value: unknown = JSON.parse(plaintext);
+    const secrets =
+      profile.kind === "Platform"
+        ? parsePlatformSessionSecrets(value, p, record.session)
+        : parseWorkforceSessionSecrets(value, p, record.session);
+    if (
+      !platformEquals.call(
+        platformHasher,
+        platformHash.call(platformHasher, secrets.csrf),
+        record.csrfSelectorHash,
+      )
+    )
+      return denied();
+    return secrets;
+  }
+  async function platformFinal(
+    tx: OidcAuthorizationTransaction,
+    record: BrowserSessionRecord,
+    startedAt: CanonicalInstant,
+    query: OidcAuthorizationTransaction["query"],
+  ) {
+    if (!strong) return;
+    const s = record.session;
+    if (s.actor.actorReference === null) return denied();
+    const held = await load(
+      tx,
+      record.sessionSelectorHash,
+      parseCanonicalInstant(options.now()),
+      true,
+    );
+    // Both records were reconstructed by owning parsers. JSON property insertion
+    // order is transport representation; every actual value must still match.
+    if (!held || canonicalizeRfc8785(held) !== canonicalizeRfc8785(record)) return denied();
+    const secrets = await platformSecrets(held);
+    const now = parseCanonicalInstant(options.now());
+    if (
+      !secrets ||
+      tx.query !== query ||
+      now < startedAt ||
+      Date.parse(now) >= Date.parse(startedAt) + 5000
+    )
+      return denied();
+    assertStrongCurrent(s, secrets.mfa, now);
   }
   async function load(
     tx: OidcAuthorizationTransaction,
@@ -151,6 +330,9 @@ export function createPostgresBrowserSessionStore(options: {
     const found = rows(
       await tx.query(
         "SELECT * FROM bop_identity.authentication_session WHERE session_selector_hash=decode($1,'hex') " +
+          (strong
+            ? "AND authenticated_at=date_trunc('milliseconds',authenticated_at) AND created_at=date_trunc('milliseconds',created_at) AND last_seen_at=date_trunc('milliseconds',last_seen_at) AND idle_expires_at=date_trunc('milliseconds',idle_expires_at) AND absolute_expires_at=date_trunc('milliseconds',absolute_expires_at) AND (revoked_at IS NULL OR revoked_at=date_trunc('milliseconds',revoked_at)) "
+            : "") +
           (write ? "FOR UPDATE" : "FOR SHARE"),
         [selector],
       ),
@@ -174,7 +356,7 @@ export function createPostgresBrowserSessionStore(options: {
     rotatedFrom: string | null = null,
   ) {
     const policy = Object.values(sessionPolicies).find((p) => p.code === policyCode);
-    if (!policy) return denied();
+    if (!policy || (strong && policy.code !== "Privileged")) return denied();
     return createAuthenticationSession({
       sessionReference: parseSessionReference(reference),
       actor: current,
@@ -225,7 +407,23 @@ export function createPostgresBrowserSessionStore(options: {
   }
   async function safe<T>(work: (tx: OidcAuthorizationTransaction) => Promise<T>): Promise<T> {
     try {
-      return await options.transactions.run(work);
+      return await options.transactions.run(async (tx) => {
+        if (!strong) return work(tx);
+        const query = tx.query,
+          startedAt = parseCanonicalInstant(nowPort());
+        const result = await work(tx);
+        const at = parseCanonicalInstant(nowPort());
+        if (
+          tx.query !== query ||
+          options.currentActor !== actorPort ||
+          options.now !== nowPort ||
+          options.onSessionCreated !== createdPort ||
+          at < startedAt ||
+          Date.parse(at) >= Date.parse(startedAt) + 5000
+        )
+          return denied();
+        return result;
+      });
     } catch (error) {
       if (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_VERSION_CONFLICT")
         throw error;
@@ -237,8 +435,12 @@ export function createPostgresBrowserSessionStore(options: {
     async createSession(command: Parameters<BrowserSessionStorePort["createSession"]>[0]) {
       return safe(async (tx) => {
         const observedAt = parseCanonicalInstant(command.observedAt);
+        const originalQuery = tx.query;
         const supplied = createIdentityActor(command.actor);
         if (supplied.actorReference === null) return denied();
+        // Platform directory lifecycle changes lock Sessions before the Actor
+        // head. Take the same order before currentActor acquires that head.
+        if (strong) await lock(tx);
         const current = await actor(
           tx,
           supplied.actorReference,
@@ -257,14 +459,27 @@ export function createPostgresBrowserSessionStore(options: {
           csrfSelectorHash: command.csrfSelectorHash,
           encryptedSecrets: envelope(command.encryptedSecrets, session),
         });
-        await lock(tx);
+        const proof = await platformSecrets(record);
+        if (proof) assertStrongCurrent(record.session, proof.mfa, observedAt);
+        if (!strong) await lock(tx);
         const active = rows(
           await tx.query(
-            "SELECT session_id,created_at FROM bop_identity.authentication_session WHERE actor_id=$1 AND status='Active' AND idle_expires_at>$2 AND absolute_expires_at>$2 ORDER BY created_at,session_id LIMIT 1025 FOR UPDATE",
+            "SELECT session_id,created_at" +
+              (strong
+                ? ",created_at=date_trunc('milliseconds',created_at) AS exact_created_at"
+                : "") +
+              " FROM bop_identity.authentication_session WHERE actor_id=$1 AND status='Active' AND idle_expires_at>$2 AND absolute_expires_at>$2 ORDER BY created_at,session_id LIMIT 1025 FOR UPDATE",
             [current.actorReference, observedAt],
           ),
         );
         if (active.some((r) => at(r.created_at) > observedAt)) return denied();
+        if (strong) {
+          const references = active.map((r) => {
+            if (r.exact_created_at !== true) return denied();
+            return parseSessionReference(r.session_id);
+          });
+          if (new Set(references).size !== references.length) return denied();
+        }
         for (const oldest of active.slice(
           0,
           Math.max(0, active.length - session.policy.maxActiveSessions + 1),
@@ -276,6 +491,7 @@ export function createPostgresBrowserSessionStore(options: {
         }
         await insert(tx, record);
         await options.onSessionCreated?.(tx, record);
+        await platformFinal(tx, record, observedAt, originalQuery);
         return record;
       });
     },
@@ -283,6 +499,7 @@ export function createPostgresBrowserSessionStore(options: {
       return safe(async (tx) => load(tx, selectorHash, parseCanonicalInstant(options.now())));
     },
     async rotateSession(command: Parameters<BrowserSessionStorePort["rotateSession"]>[0]) {
+      if (strong) return denied();
       return safe(async (tx) => {
         const observedAt = parseCanonicalInstant(command.observedAt);
         if (
@@ -326,6 +543,74 @@ export function createPostgresBrowserSessionStore(options: {
         );
         await insert(tx, record);
         await options.onSessionCreated?.(tx, record);
+        return record;
+      });
+    },
+    async replaceAfterStepUp(
+      command: ReplacePlatformSessionCommand | ReplaceWorkforceSessionCommand,
+    ) {
+      if (!strong) return denied();
+      return safe(async (tx) => {
+        const observedAt = parseCanonicalInstant(command.observedAt),
+          originalQuery = tx.query;
+        await lock(tx);
+        const current = await load(tx, command.currentSelectorHash, observedAt, true);
+        if (
+          !current ||
+          current.session.sessionReference !== command.expectedSessionReference ||
+          current.session.version !== parseSessionVersion(command.expectedVersion)
+        )
+          throw new BrowserSessionError("BROWSER_SESSION_VERSION_CONFLICT");
+        const original = assertSessionUsable(current.session, observedAt);
+        const supplied = createIdentityActor(command.actor);
+        if (
+          supplied.actorReference === null ||
+          supplied.actorReference !== original.actor.actorReference ||
+          supplied.authenticatedAt < original.authenticatedAt
+        )
+          return denied();
+        const actual = await actor(
+          tx,
+          supplied.actorReference,
+          supplied.authenticatedAt,
+          observedAt,
+        );
+        const session = newSession(
+          command.nextSessionReference,
+          actual,
+          "Privileged",
+          observedAt,
+          original.version + 1,
+          original.sessionReference,
+        );
+        const record = createBrowserSessionRecord({
+          session,
+          sessionSelectorHash: command.nextSelectorHash,
+          csrfSelectorHash: command.nextCsrfSelectorHash,
+          encryptedSecrets: envelope(command.nextEncryptedSecrets, session),
+        });
+        const previous = await platformSecrets(current),
+          next = await platformSecrets(record);
+        if (
+          !previous ||
+          !next ||
+          session.sessionReference === original.sessionReference ||
+          record.sessionSelectorHash === current.sessionSelectorHash ||
+          record.csrfSelectorHash === current.csrfSelectorHash ||
+          next.mfa.authorizationTransactionReference ===
+            previous.mfa.authorizationTransactionReference ||
+          next.mfa.evidenceReference === previous.mfa.evidenceReference ||
+          next.mfa.verifiedAt < original.createdAt
+        )
+          return denied();
+        assertStrongCurrent(session, next.mfa, observedAt);
+        await tx.query(
+          "UPDATE bop_identity.authentication_session SET status='Revoked',revocation_reason='RiskChange',revoked_at=$2,version=version+1 WHERE session_id=$1",
+          [original.sessionReference, observedAt],
+        );
+        await insert(tx, record);
+        await options.onSessionCreated?.(tx, record);
+        await platformFinal(tx, record, observedAt, originalQuery);
         return record;
       });
     },

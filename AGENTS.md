@@ -29,6 +29,15 @@
 - Add or update tests with behavior. Do not bypass type, lint, architecture, contract, migration, permission, accessibility, or security checks.
 - Use only commands and scripts that exist in the current repository. If a required command is missing, treat that as a WP defect instead of inventing a successful result.
 
+## Delivery and execution
+
+- Use a complete usable business workflow as the delivery unit: ordinary entry, current reads, authorized commands, persistence, post-write refresh and error/retry recovery, with rendered UI where applicable. A contract, adapter, passing suite or internal checkpoint is implementation progress, not a completed feature.
+- Plan the smallest implementation that completes that workflow. Split independent implementation/review work across agents, but keep one coordinator, one acceptance inventory and one workflow closeout. Internal subtasks do not require separate milestone plans or completion reports.
+- Prioritize the path that makes the workflow usable. Reuse existing owners, sources and components; add a layer, profile or abstraction only for an identified requirement or incompatibility that blocks the current delivery. Do not implement speculative extensions before the ordinary flow works.
+- Keep one concise current plan, remaining-work list and check inventory in the owning WP. Update current planning/status in place; preserve original evidence and historical records. Record each command/result once and link to it instead of copying the same evidence into multiple summaries.
+- A chat continuation or completed internal dependency does not require a new fingerprint checkpoint, repeated repository-wide inventory or documentation closeout. Record a reproducible source checkpoint at a real workflow handoff/delivery, or when needed to protect retained work or support evidence reuse.
+- Report progress in terms of usable behavior and specific unfinished work. Do not infer project completion percentages or dates from milestone counts or test counts; label unmeasured estimates as provisional. Separate repository-completable work from real external acceptance without treating missing software composition as an external gate.
+
 ## Verification and handoff
 
 - Run the current WP's required commands from the repository root unless the WP says otherwise. Cover frozen install plus every existing affected format, lint, typecheck, test, integration, architecture, contract, migration, build, and security check using fresh runs or valid recorded evidence under the rules below.

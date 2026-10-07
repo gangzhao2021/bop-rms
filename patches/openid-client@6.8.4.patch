@@ -1,0 +1,19 @@
+diff --git a/build/index.d.ts b/build/index.d.ts
+index 1b3a7bf21f6dda37f5dfbd339b3afc44a5258013..6a40791b40d45ca86e9fc382e8c13fee3268ca37 100644
+--- a/build/index.d.ts
++++ b/build/index.d.ts
+@@ -1021,12 +1021,12 @@ export interface ConfigurationProperties {
+      *
+      * @see {@link customFetch}
+      */
+-    [customFetch]?: CustomFetch;
++    [customFetch]?: CustomFetch | undefined;
+     /**
+      * Timeout (in seconds) for the HTTP Requests the client will be making.
+      * Default is `30` (seconds)
+      */
+-    timeout?: number;
++    timeout?: number | undefined;
+ }
+ /**
+  * Configuration is an abstraction over the

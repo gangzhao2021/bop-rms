@@ -51,6 +51,7 @@ export const mediaServiceErrorCodes = [
   "MEDIA_PERMISSION_DENIED",
   "MEDIA_UPLOAD_UNAVAILABLE",
   "MEDIA_COMMIT_FAILED",
+  "MEDIA_COMMIT_OUTCOME_UNKNOWN",
 ] as const;
 export type MediaServiceErrorCode = (typeof mediaServiceErrorCodes)[number];
 

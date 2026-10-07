@@ -1,3 +1,7 @@
+import {
+  createCurrencyMetadataSnapshot,
+  parsePricingReference,
+} from "../../packages/rms/pricing/src/index.ts";
 import { open, realpath, lstat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join, isAbsolute } from "node:path";
@@ -336,6 +340,25 @@ export async function loadPilotInstallation(directory) {
           const value = await load("merchant-runtime.json"),
             profile = await load("internal-test-profile.json");
           const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+          const product = value.schemaVersion === 2 ? value.product : undefined,
+            hasAuthoringSources =
+              product !== null &&
+              typeof product === "object" &&
+              Object.hasOwn(product, "authoringSources"),
+            authoringSources = hasAuthoringSources ? product.authoringSources : undefined,
+            hasOptionSetPublicationSources =
+              product !== null &&
+              typeof product === "object" &&
+              Object.hasOwn(product, "optionSetPublicationSources"),
+            optionSetPublicationSources = hasOptionSetPublicationSources
+              ? product.optionSetPublicationSources
+              : undefined,
+            hasOptionPriceSources =
+              product !== null &&
+              typeof product === "object" &&
+              Object.hasOwn(product, "optionPriceSources"),
+            optionPriceSources = hasOptionPriceSources ? product.optionPriceSources : undefined,
+            positiveVersion = (v) => Number.isSafeInteger(v) && v >= 1 && v <= 2147483647;
           if (
             !exact(value, [
               "schemaVersion",
@@ -344,8 +367,9 @@ export async function loadPilotInstallation(directory) {
               "scope",
               "roleMapping",
               "workstation",
+              ...(value.schemaVersion === 2 ? ["product"] : []),
             ]) ||
-            value.schemaVersion !== 1 ||
+            ![1, 2].includes(value.schemaVersion) ||
             !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
             Object.entries(value.scope).some(
               ([key, v]) => typeof v !== "string" || !ref.test(v) || profile.binding?.[key] !== v,
@@ -362,9 +386,102 @@ export async function loadPilotInstallation(directory) {
                   (code) =>
                     typeof code !== "string" || !/^[A-Za-z][A-Za-z0-9_]{0,127}$/u.test(code),
                 ),
-            )
+            ) ||
+            (value.schemaVersion === 2 &&
+              (!exact(product, [
+                "contentPolicy",
+                "maximumApprovalValiditySeconds",
+                ...(hasAuthoringSources ? ["authoringSources"] : []),
+                ...(hasOptionSetPublicationSources ? ["optionSetPublicationSources"] : []),
+                ...(hasOptionPriceSources ? ["optionPriceSources"] : []),
+              ]) ||
+                !exact(product.contentPolicy, [
+                  "configurationVersionReference",
+                  "expectedBrandVersion",
+                  "policyReference",
+                  "policyVersion",
+                ]) ||
+                typeof product.contentPolicy.configurationVersionReference !== "string" ||
+                !ref.test(product.contentPolicy.configurationVersionReference) ||
+                !positiveVersion(product.contentPolicy.expectedBrandVersion) ||
+                typeof product.contentPolicy.policyReference !== "string" ||
+                !ref.test(product.contentPolicy.policyReference) ||
+                !positiveVersion(product.contentPolicy.policyVersion) ||
+                (hasAuthoringSources &&
+                  (!exact(authoringSources, [
+                    "configurationVersionReference",
+                    "expectedBrandVersion",
+                    "policyReference",
+                    "policyVersion",
+                    "allergenRegistryVersionReference",
+                  ]) ||
+                    typeof authoringSources.configurationVersionReference !== "string" ||
+                    !ref.test(authoringSources.configurationVersionReference) ||
+                    !positiveVersion(authoringSources.expectedBrandVersion) ||
+                    typeof authoringSources.policyReference !== "string" ||
+                    !ref.test(authoringSources.policyReference) ||
+                    !positiveVersion(authoringSources.policyVersion) ||
+                    (authoringSources.allergenRegistryVersionReference !== null &&
+                      (typeof authoringSources.allergenRegistryVersionReference !== "string" ||
+                        !ref.test(authoringSources.allergenRegistryVersionReference))))) ||
+                (hasOptionSetPublicationSources &&
+                  (!exact(optionSetPublicationSources, [
+                    "brandConfigurationVersionReference",
+                    "expectedBrandVersion",
+                    "policyReference",
+                    "policyVersion",
+                    "optionSetPolicyFamilyReference",
+                    "mediaScope",
+                  ]) ||
+                    [
+                      "brandConfigurationVersionReference",
+                      "policyReference",
+                      "optionSetPolicyFamilyReference",
+                    ].some(
+                      (key) =>
+                        typeof optionSetPublicationSources[key] !== "string" ||
+                        !ref.test(optionSetPublicationSources[key]),
+                    ) ||
+                    !positiveVersion(optionSetPublicationSources.expectedBrandVersion) ||
+                    !positiveVersion(optionSetPublicationSources.policyVersion) ||
+                    !exact(optionSetPublicationSources.mediaScope, [
+                      "kind",
+                      "brandReference",
+                      "storeReference",
+                    ]) ||
+                    optionSetPublicationSources.mediaScope.brandReference !==
+                      value.scope.brandReference ||
+                    !(
+                      (optionSetPublicationSources.mediaScope.kind === "Brand" &&
+                        optionSetPublicationSources.mediaScope.storeReference === null) ||
+                      (optionSetPublicationSources.mediaScope.kind === "Store" &&
+                        optionSetPublicationSources.mediaScope.storeReference ===
+                          value.scope.storeReference)
+                    ))) ||
+                !Number.isSafeInteger(product.maximumApprovalValiditySeconds) ||
+                product.maximumApprovalValiditySeconds < 1 ||
+                product.maximumApprovalValiditySeconds > 86400))
           )
             return unavailable();
+          const selectedOptionPriceSources = hasOptionPriceSources
+            ? (() => {
+                if (
+                  !exact(optionPriceSources, [
+                    "currencyMetadata",
+                    "publicationPolicyFamilyReference",
+                  ])
+                )
+                  return unavailable();
+                return Object.freeze({
+                  currencyMetadata: createCurrencyMetadataSnapshot(
+                    optionPriceSources.currencyMetadata,
+                  ),
+                  publicationPolicyFamilyReference: parsePricingReference(
+                    optionPriceSources.publicationPolicyFamilyReference,
+                  ),
+                });
+              })()
+            : undefined;
           return Object.freeze({
             ...value,
             scope: Object.freeze({ ...value.scope }),
@@ -377,6 +494,30 @@ export async function loadPilotInstallation(directory) {
                 ]),
               ),
             ),
+            ...(product === undefined
+              ? {}
+              : {
+                  product: Object.freeze({
+                    ...product,
+                    contentPolicy: Object.freeze({ ...product.contentPolicy }),
+                    ...(hasOptionPriceSources
+                      ? { optionPriceSources: selectedOptionPriceSources }
+                      : {}),
+                    ...(hasAuthoringSources
+                      ? { authoringSources: Object.freeze({ ...authoringSources }) }
+                      : {}),
+                    ...(hasOptionSetPublicationSources
+                      ? {
+                          optionSetPublicationSources: Object.freeze({
+                            ...optionSetPublicationSources,
+                            mediaScope: Object.freeze({
+                              ...optionSetPublicationSources.mediaScope,
+                            }),
+                          }),
+                        }
+                      : {}),
+                  }),
+                }),
           });
         } catch {
           return unavailable();

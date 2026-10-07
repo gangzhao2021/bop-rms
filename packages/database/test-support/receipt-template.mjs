@@ -58,6 +58,9 @@ export async function exerciseReceiptTemplate({
   await admin.query(
     "GRANT SELECT,INSERT ON rms_device.digital_receipt_template_version TO " + role,
   );
+  await admin.query(
+    "GRANT SELECT ON rms_device.digital_receipt_template_lifecycle_operation TO " + role,
+  );
   const input = {
     version,
     operationReference: id(6),

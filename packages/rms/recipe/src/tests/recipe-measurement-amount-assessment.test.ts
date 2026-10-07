@@ -377,3 +377,47 @@ it.each([255, 256])(
     else expect(() => assess(c, snapshots, at, at)).toThrow();
   },
 );
+
+it("binds immediate Option activation to its original operation while retaining actual assessment time", () => {
+  const { value } = candidate(),
+    current = "2026-08-13T18:00:00.001Z";
+  const context = {
+    request: {
+      purposeCode: "CATALOG_LIFECYCLE_RECIPE_SOURCE_READ",
+      brandReference: id(10),
+      actorReference: id(11),
+      operationReference: id(12),
+      catalogIntentDigest: "sha256:" + "a".repeat(64),
+    },
+    originalPublicationClock: {
+      profile: "OptionPublicationOriginalClockV1",
+      operationReference: id(12),
+      catalogIntentDigest: "sha256:" + "a".repeat(64),
+      observedAt: at,
+      validUntil: "2026-08-13T18:00:05.000Z",
+    },
+  };
+  const run = (contextInput: unknown = context, now = current) =>
+    assess(complete(value), [], now, at, contextInput);
+  expect(run()).toMatchObject({
+    assessedAt: current,
+    activationAt: at,
+    optionPublicationContext: context,
+  });
+  expect(() => assess(complete(value), [], current, at)).toThrow();
+  expect(() =>
+    run({ ...context, request: { ...context.request, operationReference: id(13) } }),
+  ).toThrow();
+  expect(() =>
+    run({ ...context, request: { ...context.request, brandReference: id(14) } }),
+  ).toThrow();
+  expect(() => run(context, "2026-08-13T17:59:59.999Z")).toThrow();
+  expect(() => run(context, "2026-08-13T18:00:05.000Z")).toThrow();
+  const getter = Object.defineProperty({ request: context.request }, "originalPublicationClock", {
+    enumerable: true,
+    get() {
+      throw Error("must not invoke accessor");
+    },
+  });
+  expect(() => run(getter)).toThrow();
+});

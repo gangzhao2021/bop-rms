@@ -1,3 +1,8 @@
+import {
+  parsePricingProductPublicationReferenceRequestV2,
+  pricingProductPublicationReferenceRequestFieldsV2,
+  type PricingProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { parseEffectivePeriodInstant } from "@bop/effective-period";
 import { parsePricingReference, parsePricingDigest } from "../domain/money-tax-contract.js";
@@ -167,14 +172,9 @@ const positive = (v: unknown): number => {
 };
 const optional = (v: unknown) => (v === null ? null : parsePricingReference(v));
 /** Own complete qualifier history; mode describes source targeting, never actual eligibility or foreign membership. */
-export function buildPromotionReferenceSourceSnapshot(
-  value: unknown,
-  input: PriceBookReferenceSourceRequest,
-  now: string,
-): PromotionReferenceSourceSnapshot {
+function parsePromotionReferenceGraph(value: unknown, expectedBrandReference: string, now: string) {
   try {
-    const request = parsePriceBookReferenceSourceRequest(input),
-      raw = exact(copy(value), ["observedAt", "references"]),
+    const raw = exact(copy(value), ["observedAt", "references"]),
       observedAt = parseEffectivePeriodInstant(raw.observedAt),
       at = parseEffectivePeriodInstant(now);
     if (
@@ -201,7 +201,7 @@ export function buildPromotionReferenceSourceSnapshot(
           updatedAt: parseEffectivePeriodInstant(r.updatedAt),
         });
       if (
-        root.brandReference !== request.brandReference ||
+        root.brandReference !== expectedBrandReference ||
         root.rootCreatedAt > root.updatedAt ||
         root.updatedAt > observedAt
       )
@@ -302,9 +302,8 @@ export function buildPromotionReferenceSourceSnapshot(
         versions.get(r.currentVersionReference)?.promotionReference !== r.promotionReference
       )
         return fail();
-    const source = {
-      request,
-      profile: "PromotionEligibility" as const,
+    return Object.freeze({
+      observedAt,
       roots: Object.freeze(
         [...roots.values()].sort((a, b) =>
           a.promotionReference.localeCompare(b.promotionReference),
@@ -313,7 +312,24 @@ export function buildPromotionReferenceSourceSnapshot(
       versions: Object.freeze(
         [...versions.values()].sort((a, b) => a.versionReference.localeCompare(b.versionReference)),
       ),
-    };
+    });
+  } catch {
+    return fail();
+  }
+}
+export function buildPromotionReferenceSourceSnapshot(
+  value: unknown,
+  input: PriceBookReferenceSourceRequest,
+  now: string,
+): PromotionReferenceSourceSnapshot {
+  try {
+    const request = parsePriceBookReferenceSourceRequest(input),
+      { observedAt, roots, versions } = parsePromotionReferenceGraph(
+        value,
+        request.brandReference,
+        now,
+      );
+    const source = { request, profile: "PromotionEligibility" as const, roots, versions };
     return Object.freeze({
       ...source,
       coverage: "Complete",
@@ -367,6 +383,96 @@ export function parsePromotionReferenceSourceSnapshot(
         : [{ root, version: null, precise: true }];
     });
     const parsed = buildPromotionReferenceSourceSnapshot(
+      { observedAt: raw.observedAt, references },
+      input,
+      now,
+    );
+    if (canonicalizeRfc8785(parsed) !== canonicalizeRfc8785(raw)) return fail();
+    return parsed;
+  } catch {
+    return fail();
+  }
+}
+
+export const productPublicationPromotionReferenceSourceFieldsV2 = Object.freeze([
+  ...new Set([
+    ...promotionReferenceSourceFields,
+    ...pricingProductPublicationReferenceRequestFieldsV2,
+  ]),
+] as const);
+export interface ProductPublicationPromotionReferenceSourceSnapshotV2 extends Omit<
+  PromotionReferenceSourceSnapshot,
+  "request" | "profile"
+> {
+  readonly request: PricingProductPublicationReferenceRequestV2;
+  readonly profile: "ProductPublicationPromotionEligibilityV2";
+  readonly validUntil: string;
+}
+/** Complete stored graph only; neither sale eligibility nor publication approval. */
+export function buildProductPublicationPromotionReferenceSourceSnapshotV2(
+  value: unknown,
+  input: PricingProductPublicationReferenceRequestV2,
+  now: string,
+): ProductPublicationPromotionReferenceSourceSnapshotV2 {
+  try {
+    const request = parsePricingProductPublicationReferenceRequestV2(input),
+      graph = parsePromotionReferenceGraph(value, request.brandReference, now),
+      at = parseEffectivePeriodInstant(now);
+    if (graph.observedAt < request.observedAt || at >= request.validUntil) return fail();
+    const source = {
+      request,
+      profile: "ProductPublicationPromotionEligibilityV2" as const,
+      ...graph,
+      coverage: "Complete" as const,
+      consistency: "StatementSnapshot" as const,
+      validUntil: request.validUntil,
+    };
+    return Object.freeze({ ...source, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(source)) });
+  } catch {
+    return fail();
+  }
+}
+export function parseProductPublicationPromotionReferenceSourceSnapshotV2(
+  value: unknown,
+  input: PricingProductPublicationReferenceRequestV2,
+  now: string,
+): ProductPublicationPromotionReferenceSourceSnapshotV2 {
+  try {
+    const raw = exact(copy(value), [
+      "request",
+      "profile",
+      "coverage",
+      "consistency",
+      "observedAt",
+      "digest",
+      "validUntil",
+      "roots",
+      "versions",
+    ]);
+    if (!Array.isArray(raw.roots) || !Array.isArray(raw.versions)) return fail();
+    const roots = raw.roots.map((v) => exact(v, rootFields)),
+      versions = raw.versions.map((v) =>
+        exact(v, [
+          "promotionReference",
+          ...versionFields,
+          "catalogReferenceMode",
+          "isCurrentVersion",
+          "temporalStatus",
+        ]),
+      );
+    if (versions.some((v) => !roots.some((r) => r.promotionReference === v.promotionReference)))
+      return fail();
+    const references = roots.flatMap<unknown>((root) => {
+      const owned = versions.filter((v) => v.promotionReference === root.promotionReference);
+      return owned.length
+        ? owned.map((v) => ({
+            root,
+            version: Object.fromEntries(versionFields.map((k) => [k, v[k]])),
+            precise: true,
+          }))
+        : [{ root, version: null, precise: true }];
+    });
+    const parsed = buildProductPublicationPromotionReferenceSourceSnapshotV2(
       { observedAt: raw.observedAt, references },
       input,
       now,

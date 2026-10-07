@@ -3,6 +3,9 @@ import { RecipeWorkflowError } from "../../application/recipe-service.js";
 import {
   parseRecipeReferenceSourceInstant,
   parseRecipeReferenceSourceRequest,
+  parseRecipeOptionPublicationOriginalClock,
+  validateRecipeOptionPublicationActivation,
+  type RecipeOptionPublicationOriginalClock,
 } from "../../contracts/recipe-reference-source.js";
 import {
   assessRecipeOptionConsumptionYields,
@@ -19,6 +22,7 @@ import {
 type Request = ReturnType<typeof parseRecipeReferenceSourceRequest>;
 type Tx = RecipeReferenceTransaction;
 export interface RecipeOptionConsumptionYieldOptions extends RecipeReferenceSourceOptions {
+  readonly originalPublicationClock?: RecipeOptionPublicationOriginalClock;
   readonly yieldAuthority: {
     holdUntilTransactionCompletes(
       tx: Tx,
@@ -42,6 +46,16 @@ const fail = (): never => {
 export function createPostgresRecipeOptionConsumptionYieldSource(
   options: RecipeOptionConsumptionYieldOptions,
 ) {
+  const originalClockField = Object.getOwnPropertyDescriptor(options, "originalPublicationClock");
+  if (
+    ("originalPublicationClock" in options && !originalClockField) ||
+    (originalClockField && (!originalClockField.enumerable || !("value" in originalClockField)))
+  )
+    return fail();
+  const originalPublicationClock =
+    originalClockField?.value === undefined
+      ? undefined
+      : parseRecipeOptionPublicationOriginalClock(originalClockField.value);
   const now = options.clock.now.bind(options.clock),
     hold = options.yieldAuthority.holdUntilTransactionCompletes.bind(options.yieldAuthority),
     run = options.transactions.run.bind(options.transactions),
@@ -68,10 +82,16 @@ export function createPostgresRecipeOptionConsumptionYieldSource(
         const request = parseRecipeReferenceSourceRequest(input),
           pins = parseRecipeOptionConsumptionPins(value),
           activationAt = parseRecipeReferenceSourceInstant(activationInput);
+        validateRecipeOptionPublicationActivation(
+          request,
+          parseRecipeReferenceSourceInstant(now()),
+          activationAt,
+          originalPublicationClock,
+        );
         if (typeof work !== "function") return fail();
         let tx: Tx | undefined,
           query: Tx["query"] | undefined,
-          until: string | undefined,
+          until: string | undefined = originalPublicationClock?.validUntil,
           latest = parseRecipeReferenceSourceInstant(now()),
           entered = 0,
           completed = false,
@@ -114,7 +134,14 @@ export function createPostgresRecipeOptionConsumptionYieldSource(
           if (!tx || !query) return fail();
           const actual = tx,
             sql = query.bind(actual);
-          until = new Date(Date.parse(metadata.observedAt) + 5000).toISOString();
+          until = new Date(
+            Math.min(
+              Date.parse(metadata.observedAt) + 5000,
+              originalPublicationClock === undefined
+                ? Infinity
+                : Date.parse(originalPublicationClock.validUntil),
+            ),
+          ).toISOString();
           check();
           const versionReferences = Object.freeze(
             [...new Set(pins.map((p) => p.versionReference))].sort(),
@@ -158,6 +185,7 @@ FROM rms_recipe.recipe_version v WHERE v.brand_id=$1 AND v.recipe_version_id=ANY
               request,
               check(),
               activationAt,
+              originalPublicationClock,
             );
           };
           const assessed = await read();

@@ -1,4 +1,5 @@
 import { createMerchantBrandScope } from "../../../apps/api/src/merchant-brand-scope.ts";
+import { verifyProductListNavigationRuntime } from "./product-list-navigation-runtime.mjs";
 import { verifyMerchantConfigurationCommand } from "./merchant-configuration-command.mjs";
 import process from "node:process";
 import { createMerchantServiceControl } from "../../../apps/api/src/merchant-service-control.ts";
@@ -691,6 +692,23 @@ export async function verifyPersistentMerchantBff({
     readGrants.push(grant);
   }
   assert.equal(hasProduct(await service().bootstrap(cookie.value)), true);
+  await verifyProductListNavigationRuntime({
+    admin,
+    role,
+    options,
+    cookie: cookie.value,
+    clock,
+    targetReference,
+    readGrant: readGrants[1],
+    login: async (current) => {
+      const started = await current.start("/operations/order-exceptions");
+      return current.callback({
+        code: credentials.generate(),
+        state: authorization.state,
+        authCookie: started.cookie.value,
+      });
+    },
+  });
   for (const grant of readGrants) {
     await admin.query(
       "UPDATE bop_permission.permission_grant SET lifecycle='Revoked',version=version+1 WHERE grant_id=$1",

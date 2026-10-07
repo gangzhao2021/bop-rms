@@ -1,6 +1,6 @@
 # Current Product Draft and Variant identity preparation
 
-Implemented in [WP-2421](../work-packages/WP-2421.md#overnight-current-draft-variant-identity-preparation--2026-09-30-continuation), refining the existing accepted complete-content/immutable Variant identity contract. The [editor inventory](./product-editor-content-contract.md) records the existing actual owning history producer and its limits. No lifecycle, ownership, schema or permission decision changes.
+Implemented in [WP-2421](../work-packages/history-WP-2421-01.md#overnight-current-draft-variant-identity-preparation--2026-09-30-continuation), refining the existing accepted complete-content/immutable Variant identity contract. The [editor inventory](./product-editor-content-contract.md) records the existing actual owning history producer and its limits. No lifecycle, ownership, schema or permission decision changes.
 
 The [API composition](../../../apps/api/src/current-product-candidate-variant-identity.ts) instantiates actual public Catalog current-candidate and Variant-history factories in one caller transaction. Tenant/Brand/User and clock are captured from server configuration. The closed descriptor-safe input is an owning Validate command; supplied candidate or history content refuses. Current Validate/full candidate fields are required before reading the actual Draft/version/root/body/configuration, and complete content must be Present. History separately requires current Product history scope/purpose/fields; a validation action is not a history grant.
 

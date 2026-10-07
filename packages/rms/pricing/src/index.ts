@@ -59,3 +59,26 @@ export * from "./infrastructure/persistence/brand-tax-reference-source-store.js"
 
 export * from "./contracts/configuration-reference-source.js";
 export * from "./infrastructure/persistence/configuration-reference-source-store.js";
+
+export * from "./contracts/product-publication-reference-request-v2.js";
+export * from "./contracts/option-price-authoring.js";
+export * from "./infrastructure/persistence/option-price-authoring-store.js";
+export * from "./contracts/tax-config-authoring.js";
+export * from "./infrastructure/persistence/tax-config-authoring-store.js";
+
+export {
+  createTaxPublicationCandidate,
+  parseTaxPublicationCandidateContent,
+  parseTaxPublicationCandidate,
+  assertTaxPublicationCandidateDraft,
+  matchTaxPublicationCandidatePublishedSnapshot,
+  type TaxPublicationSourceRuleBinding,
+  type TaxPublicationRegistrationMaterial,
+  type TaxPublicationCandidateContent,
+  type TaxPublicationCandidate,
+} from "./contracts/tax-config-publication-candidate.js";
+export * from "./contracts/tax-config-material.js";
+export * from "./infrastructure/persistence/tax-config-material-store.js";
+export * from "./contracts/tax-config-candidate-authoring.js";
+export * from "./infrastructure/persistence/tax-config-candidate-store.js";
+export * from "./contracts/tax-config-candidate-fixture-comparison.js";

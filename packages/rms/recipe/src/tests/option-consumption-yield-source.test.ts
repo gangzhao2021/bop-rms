@@ -279,3 +279,103 @@ it("holds yield and complete fields even without pins", async () => {
   expect(v.matches).toEqual([]);
   expect(f.authorize.mock.calls.length).toBeGreaterThanOrEqual(6);
 });
+
+function originalClock() {
+  return {
+    profile: "OptionPublicationOriginalClockV1" as const,
+    operationReference: request.operationReference,
+    catalogIntentDigest: request.catalogIntentDigest,
+    observedAt: at,
+    validUntil: "2026-10-01T05:30:05.000Z",
+  };
+}
+it("assesses immediate original activation at real forward time without granting ingredient qualification", () => {
+  const source = build(rawMetadata(), request, at),
+    clock = originalClock();
+  const result = assess([pin()], rawYields(), source, request, later, at, clock);
+  expect(result.yieldArithmetic).toBe("Pass");
+  expect(result.assessedAt).toBe(later);
+  expect(result.activationAt).toBe(at);
+  expect(result.originalPublicationClock).toEqual(clock);
+  expect(result.ingredientEligibility).toBe("NotEvaluated");
+  expect(() => assess([pin()], rawYields(), source, request, later, at)).toThrow();
+});
+it.each([
+  { operationReference: id(999) },
+  { catalogIntentDigest: "sha256:" + "b".repeat(64) },
+  { profile: "OtherClock" },
+  { validUntil: "2026-10-01T05:30:05.001Z" },
+  { validUntil: at },
+  { extra: true },
+  { observedAt: "2026-10-01T05:30:03.000Z" },
+])("rejects malformed or mismatched yield publication clock %j", (change) => {
+  expect(() =>
+    assess([pin()], rawYields(), build(rawMetadata(), request, at), request, later, at, {
+      ...originalClock(),
+      ...change,
+    }),
+  ).toThrow();
+});
+it("retains the immutable origin and half-open expiry under actual yield assessment time", () => {
+  const source = build(rawMetadata(), request, at);
+  expect(() =>
+    assess([pin()], rawYields(), source, request, originalClock().validUntil, at, originalClock()),
+  ).toThrow();
+  expect(() =>
+    assess([pin()], rawYields(), source, request, at, "2026-10-01T05:29:59.999Z", originalClock()),
+  ).toThrow();
+  expect(() => assess([pin()], rawYields(), source, request, later, at, null)).toThrow();
+});
+it("rejects original-clock getters in assessment and factory without invoking them", () => {
+  const clock = originalClock(),
+    getter = vi.fn(() => at);
+  Object.defineProperty(clock, "observedAt", { get: getter, enumerable: true });
+  expect(() =>
+    assess([pin()], rawYields(), build(rawMetadata(), request, at), request, later, at, clock),
+  ).toThrow();
+  expect(() => create({ ...wire().options, originalPublicationClock: clock })).toThrow();
+  const options = { ...wire().options },
+    factoryGetter = vi.fn(originalClock);
+  Object.defineProperty(options, "originalPublicationClock", {
+    get: factoryGetter,
+    enumerable: true,
+  });
+  expect(() => create(options)).toThrow();
+  expect(getter).not.toHaveBeenCalled();
+  expect(factoryGetter).not.toHaveBeenCalled();
+});
+it("captures a detached original clock, forwards actual current time and never extends its held deadline", async () => {
+  const f = wire(),
+    clock = originalClock(),
+    source = create({ ...f.options, originalPublicationClock: clock });
+  clock.operationReference = id(999);
+  clock.validUntil = "2026-10-01T05:30:30.000Z";
+  f.setClock(later);
+  const result = await source.withCurrentYields(request, [pin()], at, async (packet) => packet);
+  expect(result.assessedAt).toBe(later);
+  expect(result.activationAt).toBe(at);
+  expect(result.yieldArithmetic).toBe("Pass");
+  expect(result.validUntil).toBe("2026-10-01T05:30:05.000Z");
+  expect(result.originalPublicationClock).toEqual(originalClock());
+  expect(f.authorize).toHaveBeenCalled();
+  f.setClock("2026-10-01T05:30:05.000Z");
+  await expect(
+    source.withCurrentYields(request, [pin()], at, async (packet) => packet),
+  ).rejects.toMatchObject({ code: "RECIPE_DEPENDENCY_UNAVAILABLE" });
+});
+it("does not let an original clock replace current yield source permission", async () => {
+  const f = wire(),
+    source = create({ ...f.options, originalPublicationClock: originalClock() });
+  f.setClock(later);
+  f.deny();
+  await expect(
+    source.withCurrentYields(request, [pin()], at, async (packet) => packet),
+  ).rejects.toMatchObject({ code: "RECIPE_DEPENDENCY_UNAVAILABLE" });
+});
+it("retains future-only activation for the legacy source without an original clock", async () => {
+  const f = wire();
+  f.setClock(later);
+  await expect(
+    create(f.options).withCurrentYields(request, [pin()], at, async (packet) => packet),
+  ).rejects.toMatchObject({ code: "RECIPE_DEPENDENCY_UNAVAILABLE" });
+});

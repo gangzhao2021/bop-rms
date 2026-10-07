@@ -121,6 +121,23 @@ describe("WP-2047 HTTP security baseline", () => {
     expect(conflictingFraming).not.toContain("raw-secret");
   });
 
+  it("preserves opaque query data while rejecting encoded separators and traversal in paths", async () => {
+    const root = await appUrl("development");
+    for (const query of ["code=synthetic%2Fcode%5Cvalue", "value=/%2e%2e/", "value=../%2Fprivate"])
+      expect((await fetch(`${root}/health?${query}`)).status).toBe(200);
+    for (const pathname of [
+      "/public/%5cprivate",
+      "/public/%2e%2e/private",
+      "/public/%2fprivate?code=allowed%2Fvalue",
+    ])
+      expect(
+        await rawRequest(
+          root,
+          `GET ${pathname} HTTP/1.1\r\nHost: local.invalid\r\nConnection: close\r\n\r\n`,
+        ),
+      ).toMatch(/^HTTP\/1\.1 400 /u);
+  });
+
   it("keeps the precached offline fallback free of executable inline content", async () => {
     const offline = await readFile(
       new URL("../../customer-pwa/public/offline.html", import.meta.url),

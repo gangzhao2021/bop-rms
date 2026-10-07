@@ -146,14 +146,23 @@ function createCommand(value: unknown): CreateProductCommand {
     return invalid();
   const completeContent = Object.hasOwn(raw, "editorContent")
     ? (() => {
-        if (skus.length !== 0) return invalid();
-        return {
-          editorContent: parseProductEditorContentDetails(raw.editorContent, {
-            defaultLocale,
-            skus: [],
-            optionBindings: [],
-          }),
-        };
+        // Initial owning SKU identities have not been allocated. Parse the
+        // proposal without guessed references; only one explicit base SKU may
+        // accompany complete content before the server builds the full graph.
+        const editorContent = parseProductEditorContentDetails(raw.editorContent, {
+          defaultLocale,
+          skus: [],
+          optionBindings: [],
+        });
+        if (
+          skus.length > 0 &&
+          (skus.length !== 1 ||
+            skus[0]?.variantSelections.length !== 0 ||
+            editorContent.variantDimensions.length !== 0 ||
+            editorContent.variantCombinations.length !== 0)
+        )
+          return invalid();
+        return { editorContent };
       })()
     : {};
   return Object.freeze({
@@ -448,26 +457,36 @@ export function createProductCommandClient(fetcher: typeof fetch = fetch) {
       },
     });
   }
+  function creation(value: unknown, scopeValue: unknown) {
+    const expectedScope = scope(scopeValue),
+      command = createCommand(value);
+    return prepared(
+      "/merchant/catalog/products",
+      command,
+      expectedScope,
+      (value) => createReceipt(value, command, expectedScope),
+      productCommandMaximumRequestBytes,
+    );
+  }
+  function draft(value: unknown, scopeValue: unknown) {
+    const expectedScope = scope(scopeValue),
+      command = saveCommand(value, expectedScope);
+    return prepared(
+      "/merchant/catalog/products/draft",
+      command,
+      expectedScope,
+      (value) => draftReceipt(value, command, expectedScope),
+      command.draft.editorContent === undefined
+        ? productCommandMaximumRequestBytes
+        : productCompleteDraftMaximumRequestBytes,
+    );
+  }
   return Object.freeze({
     prepareCreate(value: unknown, scopeValue: unknown) {
-      const expectedScope = scope(scopeValue),
-        command = createCommand(value);
-      return prepared("/merchant/catalog/products", command, expectedScope, (value) =>
-        createReceipt(value, command, expectedScope),
-      );
+      return creation(value, scopeValue);
     },
     prepareDraft(value: unknown, scopeValue: unknown) {
-      const expectedScope = scope(scopeValue),
-        command = saveCommand(value, expectedScope);
-      return prepared(
-        "/merchant/catalog/products/draft",
-        command,
-        expectedScope,
-        (value) => draftReceipt(value, command, expectedScope),
-        command.draft.editorContent === undefined
-          ? productCommandMaximumRequestBytes
-          : productCompleteDraftMaximumRequestBytes,
-      );
+      return draft(value, scopeValue);
     },
   });
 }

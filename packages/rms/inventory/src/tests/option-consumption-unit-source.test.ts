@@ -124,6 +124,23 @@ function wire() {
     setClock: (v: string) => (clock = v),
     deny: () => (denied = true),
     changeGeneration: () => (generation = "3"),
+    scheduleConversion: () => {
+      const row = first(units);
+      units = [
+        {
+          ...row,
+          unitConversions: [
+            ...row.unitConversions,
+            {
+              ...first(row.unitConversions),
+              conversionReference: id(41),
+              multiplier: "12",
+              effectiveFrom: "2026-10-01T05:00:01.000Z",
+            },
+          ],
+        },
+      ];
+    },
     changeUnits: () =>
       (units = [{ ...first(units), baseUnit: { ...first(units).baseUnit, ledgerPrecision: 1 } }]),
     clear: () => {
@@ -311,4 +328,162 @@ it("holds fields and complete metadata even without pins", async () => {
     expect(v.matches).toEqual([]),
   );
   expect(f.authorize).toHaveBeenCalled();
+});
+
+const originalClock = () => ({
+  profile: "OptionPublicationOriginalClockV1" as const,
+  operationReference: request.operationReference,
+  catalogIntentDigest: request.catalogIntentDigest,
+  observedAt: at,
+  validUntil: "2026-10-01T05:00:05.000Z",
+});
+it("assesses immediate original activation at the actual forward current instant", () => {
+  const value = assess(
+    [pin()],
+    rawUnits(),
+    build(rawMetadata(), request, later),
+    request,
+    later,
+    at,
+    originalClock(),
+  );
+  expect(first(value.matches).status).toBe("ExactBaseQuantity");
+  expect(value.assessedAt).toBe(later);
+  expect(value.activationAt).toBe(at);
+  expect(value.originalPublicationClock).toEqual(originalClock());
+  expect(() =>
+    assess([pin()], rawUnits(), build(rawMetadata(), request, later), request, later, at),
+  ).toThrow();
+});
+it("continues comparing actual current and original activation conversions", () => {
+  const row = first(rawUnits());
+  const units = [
+    {
+      ...row,
+      unitConversions: [
+        ...row.unitConversions,
+        {
+          ...first(row.unitConversions),
+          conversionReference: id(41),
+          multiplier: "12",
+          effectiveFrom: "2026-10-01T05:00:01.000Z",
+        },
+      ],
+    },
+  ];
+  const value = assess(
+    [pin()],
+    units,
+    build(rawMetadata(), request, later),
+    request,
+    later,
+    at,
+    originalClock(),
+  );
+  expect(first(value.matches).status).toBe("AmbiguousConversion");
+});
+it.each([
+  { profile: "Other" },
+  { operationReference: id(99) },
+  { catalogIntentDigest: "sha256:" + "f".repeat(64) },
+  { observedAt: "2026-10-01T05:00:03.000Z" },
+  { validUntil: later },
+  { validUntil: "2026-10-01T05:00:05.001Z" },
+  { extra: true },
+])("rejects rebound or invalid original unit assessment clock %#", (patch) => {
+  expect(() =>
+    assess([pin()], rawUnits(), build(rawMetadata(), request, later), request, later, at, {
+      ...originalClock(),
+      ...patch,
+    }),
+  ).toThrow();
+});
+it("rejects accessors and activation before original unit observation without reading getters", () => {
+  const getter = vi.fn(() => at),
+    value = Object.defineProperty(originalClock(), "observedAt", { enumerable: true, get: getter });
+  expect(() =>
+    assess([pin()], rawUnits(), build(rawMetadata(), request, at), request, at, at, value),
+  ).toThrow();
+  expect(getter).not.toHaveBeenCalled();
+  expect(() =>
+    assess(
+      [pin()],
+      rawUnits(),
+      build(rawMetadata(), request, at),
+      request,
+      at,
+      "2026-10-01T04:59:59.999Z",
+      originalClock(),
+    ),
+  ).toThrow();
+});
+it("captures immutable original factory clock and preserves its shortest exclusive lease under forward reads", async () => {
+  const f = wire(),
+    clock = originalClock(),
+    source = create({ ...f.options, originalPublicationClock: clock });
+  clock.observedAt = "2026-10-01T05:00:01.000Z";
+  f.setClock(later);
+  const value = await source.withCurrentUnits(request, [pin()], at, async (packet) => packet);
+  expect(value.originalPublicationClock).toEqual(originalClock());
+  expect(Object.isFrozen(value.originalPublicationClock)).toBe(true);
+  expect(value.validUntil).toBe(originalClock().validUntil);
+  expect(first(value.matches).status).toBe("ExactBaseQuantity");
+});
+it.each(["operation", "intent", "expiry", "activation"])(
+  "refuses factory original clock %s rebinding before owning SQL",
+  async (cause) => {
+    const f = wire(),
+      source = create({ ...f.options, originalPublicationClock: originalClock() });
+    if (cause === "expiry") f.setClock(originalClock().validUntil);
+    const changed = {
+      ...request,
+      ...(cause === "operation" ? { operationReference: id(99) } : {}),
+      ...(cause === "intent" ? { catalogIntentDigest: "sha256:" + "f".repeat(64) } : {}),
+    };
+    await expect(
+      source.withCurrentUnits(
+        changed,
+        [pin()],
+        cause === "activation" ? "2026-10-01T04:59:59.999Z" : at,
+        async () => undefined,
+      ),
+    ).rejects.toThrow();
+    expect(f.tx.query).not.toHaveBeenCalled();
+  },
+);
+it("refuses getter-bearing factory clock options without invoking the getter", () => {
+  const f = wire(),
+    getter = vi.fn(() => originalClock());
+  const options = Object.defineProperty({ ...f.options }, "originalPublicationClock", {
+    enumerable: true,
+    get: getter,
+  });
+  expect(() => create(options)).toThrow();
+  expect(getter).not.toHaveBeenCalled();
+});
+it("poisons late original clock expiry instead of renewing from a later metadata observation", async () => {
+  const f = wire(),
+    source = create({ ...f.options, originalPublicationClock: originalClock() });
+  f.setClock(later);
+  await expect(
+    source.withCurrentUnits(request, [pin()], at, async () => {
+      f.setClock(originalClock().validUntil);
+    }),
+  ).rejects.toThrow();
+  f.setClock(later);
+  await expect(
+    source.withCurrentUnits(request, [pin()], at, async () => undefined),
+  ).rejects.toThrow();
+});
+
+it("refuses a scheduled current conversion change during work despite identical locked source rows", async () => {
+  const f = wire();
+  f.scheduleConversion();
+  const source = create({ ...f.options, originalPublicationClock: originalClock() });
+  await expect(
+    source.withCurrentUnits(request, [pin()], at, async (packet) => {
+      expect(first(packet.matches).status).toBe("ExactBaseQuantity");
+      f.setClock(later);
+    }),
+  ).rejects.toThrow();
 });

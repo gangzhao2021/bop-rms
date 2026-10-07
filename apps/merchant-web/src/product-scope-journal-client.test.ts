@@ -73,6 +73,24 @@ function fixture() {
     ],
   };
 }
+function partialFixture() {
+  const f = fixture();
+  required(f.versions[0]?.journal).relations.push({
+    previousVersionReference: id(12),
+    previousOperationReference: id(13),
+    previousIntentDigest: hash,
+    previousScopeDigest: hash,
+    previousSelectorIndex: 0,
+    incomingSelectorIndex: 1,
+    storeReference: id(3),
+    channelCodes: [],
+    orderTypeCodes: ["PICKUP"],
+    effectiveFrom: at,
+    effectiveUntil: null,
+    relation: "IncomingSelectorPreferred",
+  });
+  return f;
+}
 const response = (value: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(value), {
     status,
@@ -94,27 +112,51 @@ it("keeps recorded empty, legacy absent and unpublished states distinct with his
   );
   expect(Object.isFrozen(value.versions)).toBe(true);
 });
-it("binds recorded partial preference to its actual previous original publication", () => {
-  const f = fixture();
-  f.versions[0]?.journal?.relations.push({
-    previousVersionReference: id(12),
-    previousOperationReference: id(13),
-    previousIntentDigest: hash,
-    previousScopeDigest: hash,
-    previousSelectorIndex: 0,
-    incomingSelectorIndex: 1,
-    storeReference: id(3),
-    channelCodes: [],
-    orderTypeCodes: ["PICKUP"],
-    effectiveFrom: at,
-    effectiveUntil: null,
-    relation: "IncomingSelectorPreferred",
-  });
-  const value = parseProductScopeJournalView(f, request, Date.parse(at));
-  expect(value.versions[0]?.journal?.relations[0]?.storeReference).toBe(id(3));
-  required(required(f.versions[0]?.journal).relations[0]).previousOperationReference = id(99);
-  expect(() => parseProductScopeJournalView(f, request, Date.parse(at))).toThrow();
-});
+it.each([
+  [0, 999],
+  [999, 0],
+])(
+  "binds recorded partial preference to its original publication and exact selectors %s/%s",
+  (previousSelectorIndex, incomingSelectorIndex) => {
+    const f = partialFixture(),
+      original = required(required(f.versions[0]?.journal).relations[0]);
+    original.previousSelectorIndex = previousSelectorIndex;
+    original.incomingSelectorIndex = incomingSelectorIndex;
+    const value = parseProductScopeJournalView(f, request, Date.parse(at)),
+      relations = required(value.versions[0]?.journal?.relations),
+      relation = required(relations[0]);
+    expect(relation).toMatchObject({
+      previousSelectorIndex,
+      incomingSelectorIndex,
+      storeReference: id(3),
+      orderTypeCodes: ["PICKUP"],
+    });
+    expect(Object.isFrozen(relations)).toBe(true);
+    expect(Object.isFrozen(relation)).toBe(true);
+    expect(Object.isFrozen(relation.orderTypeCodes)).toBe(true);
+    expect(relation).not.toBe(original);
+    original.previousSelectorIndex = 22;
+    original.incomingSelectorIndex = 33;
+    original.orderTypeCodes = ["DELIVERY"];
+    expect(relation).toMatchObject({
+      previousSelectorIndex,
+      incomingSelectorIndex,
+      orderTypeCodes: ["PICKUP"],
+    });
+    original.previousOperationReference = id(99);
+    expect(() => parseProductScopeJournalView(f, request, Date.parse(at))).toThrow();
+  },
+);
+it.each(["previousSelectorIndex", "incomingSelectorIndex"])(
+  "refuses out-of-range, fractional and non-number %s",
+  (key) => {
+    for (const invalid of [-1, 1000, 1.5, "1"]) {
+      const f = partialFixture();
+      required(required(f.versions[0]?.journal).relations[0])[key] = invalid;
+      expect(() => parseProductScopeJournalView(f, request, Date.parse(at))).toThrow();
+    }
+  },
+);
 it.each(["brandReference", "productReference"])("rejects changed owning %s", (key) => {
   expect(() =>
     parseProductScopeJournalView({ ...fixture(), [key]: id(99) }, request, Date.parse(at)),

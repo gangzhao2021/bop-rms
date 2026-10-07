@@ -13,7 +13,11 @@ import {
   parseProductAggregate,
 } from "./product.js";
 import { deriveCatalogProductPublicationContentIdentity } from "./product-publication-content.js";
-import { assessProductContentPolicyRules } from "../domain/product-content-policy.js";
+import {
+  assessProductContentPolicyRules,
+  assessProductDraftContentPolicyRules,
+} from "../domain/product-content-policy.js";
+import { parseProductPublicationCommandV2 } from "./product-publication-v2.js";
 const fail = (): never => {
   throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
 };
@@ -35,20 +39,38 @@ export interface CatalogProductContentPolicyBinding {
   readonly observedAt: string;
   readonly validUntil: string;
 }
+export interface CatalogProductContentPolicyBindingV2 extends CatalogProductContentPolicyBinding {
+  readonly profile: "CatalogProductContentPolicyBindingV2";
+  readonly replacementIntentDigest: string;
+}
+const bindingKeys = [
+  "tenantReference",
+  "productReference",
+  "versionReference",
+  "expectedAggregateVersion",
+  "contentDigest",
+  "configurationDigest",
+  "originalIntentDigest",
+  "observedAt",
+  "validUntil",
+] as const;
 export function parseCatalogProductContentPolicyBinding(
   value: unknown,
 ): CatalogProductContentPolicyBinding {
-  const r = record(value, [
-    "tenantReference",
-    "productReference",
-    "versionReference",
-    "expectedAggregateVersion",
-    "contentDigest",
-    "configurationDigest",
-    "originalIntentDigest",
-    "observedAt",
-    "validUntil",
-  ]);
+  return parseBinding(record(value, bindingKeys));
+}
+export function parseCatalogProductContentPolicyBindingV2(
+  value: unknown,
+): CatalogProductContentPolicyBindingV2 {
+  const r = record(value, [...bindingKeys, "profile", "replacementIntentDigest"]);
+  if (r.profile !== "CatalogProductContentPolicyBindingV2") return fail();
+  return Object.freeze({
+    ...parseBinding(r),
+    profile: "CatalogProductContentPolicyBindingV2",
+    replacementIntentDigest: parsePublishingDigest(r.replacementIntentDigest),
+  });
+}
+function parseBinding(r: Record<string, unknown>): CatalogProductContentPolicyBinding {
   if (
     !Number.isSafeInteger(r.expectedAggregateVersion) ||
     (r.expectedAggregateVersion as number) < 1 ||
@@ -80,6 +102,115 @@ export function assessCatalogProductContentPolicy(
   bindingValue: unknown,
 ) {
   try {
+    const body = {
+      profile: "CatalogProductContentPolicyAssessmentV1" as const,
+      ...assessContentPolicy(
+        aggregateValue,
+        brandValue,
+        policyValue,
+        parseCatalogProductContentPolicyBinding(bindingValue),
+      ),
+    };
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+/** A complete V2 command is retained in the original intent hash. This pure
+ * assessment cannot certify current acquisition, Media readiness or publishability. */
+export function assessCatalogProductContentPolicyV2(
+  commandValue: unknown,
+  aggregateValue: unknown,
+  brandValue: unknown,
+  policyValue: unknown,
+  bindingValue: unknown,
+) {
+  try {
+    const c = parseProductPublicationCommandV2(commandValue),
+      r = parseCatalogProductContentPolicyBindingV2(bindingValue);
+    if (
+      c.action !== "Validate" ||
+      c.actorKind !== "User" ||
+      c.occurredAt > r.observedAt ||
+      r.tenantReference !== c.tenantReference ||
+      r.productReference !== c.productReference ||
+      r.versionReference !== c.versionReference ||
+      r.expectedAggregateVersion !== c.expectedProductAggregateVersion ||
+      r.contentDigest !== c.contentDigest ||
+      r.configurationDigest !== c.configurationDigest ||
+      r.originalIntentDigest !== "sha256:" + sha256Hex(canonicalizeRfc8785(c)) ||
+      r.replacementIntentDigest !== c.replacementIntentDigest
+    )
+      return fail();
+    const assessed = assessContentPolicy(aggregateValue, brandValue, policyValue, r);
+    if (assessed.brandReference !== c.brandReference) return fail();
+    const body = {
+      profile: "CatalogProductContentPolicyAssessmentV2" as const,
+      ...assessed,
+      replacementIntentDigest: c.replacementIntentDigest,
+    };
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+export function assessCatalogProductDraftContentPolicy(
+  aggregateValue: unknown,
+  brandValue: unknown,
+  policyValue: unknown,
+  bindingValue: unknown,
+) {
+  try {
+    const bound = bindContentPolicy(
+        aggregateValue,
+        brandValue,
+        policyValue,
+        parseCatalogProductContentPolicyBinding(bindingValue),
+      ),
+      body = {
+        profile: "CatalogProductDraftContentPolicyAssessmentV1" as const,
+        ...bound.content,
+        ...assessProductDraftContentPolicyRules(bound.aggregate, bound.constraints),
+      };
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+function assessContentPolicy(
+  aggregateValue: unknown,
+  brandValue: unknown,
+  policyValue: unknown,
+  r: CatalogProductContentPolicyBinding,
+) {
+  const bound = bindContentPolicy(aggregateValue, brandValue, policyValue, r);
+  const {
+    sourceAuthority,
+    publishValidation,
+    mediaReadiness,
+    referenceEligibility,
+    brandFieldRequirements,
+    eligibility,
+    ...prefix
+  } = bound.content;
+  return Object.freeze({
+    ...prefix,
+    ...assessProductContentPolicyRules(bound.aggregate, bound.constraints),
+    sourceAuthority,
+    publishValidation,
+    mediaReadiness,
+    referenceEligibility,
+    brandFieldRequirements,
+    eligibility,
+  });
+}
+function bindContentPolicy(
+  aggregateValue: unknown,
+  brandValue: unknown,
+  policyValue: unknown,
+  r: CatalogProductContentPolicyBinding,
+) {
+  try {
     const aggregate = parseProductAggregate(copyCategoryPersistenceValue(aggregateValue)),
       policy = parsePublishingProductPublicationPolicy(policyValue),
       b = record(brandValue, [
@@ -94,7 +225,6 @@ export function assessCatalogProductContentPolicy(
         "validUntil",
         "originalIntentDigest",
       ]),
-      r = parseCatalogProductContentPolicyBinding(bindingValue),
       tenant = parseCatalogReference(r.tenantReference),
       observedAt = parseCatalogInstant(r.observedAt),
       validUntil = parseCatalogInstant(r.validUntil),
@@ -130,13 +260,12 @@ export function assessCatalogProductContentPolicy(
       return fail();
     const supportedLocales = b.supportedLocales.map(parseCatalogLocale);
     if (new Set(supportedLocales).size !== supportedLocales.length) return fail();
-    const rules = assessProductContentPolicyRules(aggregate, {
+    const constraints = Object.freeze({
       supportedLocales,
       requiredLocales: policy.requiredLocales,
       mediaRequirement: policy.mediaRequirement,
     });
     const content = Object.freeze({
-      profile: "CatalogProductContentPolicyAssessmentV1" as const,
       tenantReference: tenant,
       brandReference: aggregate.brandReference,
       productReference: aggregate.productReference,
@@ -157,7 +286,6 @@ export function assessCatalogProductContentPolicy(
       policyContentDigest: publishingProductPublicationPolicyDigest(policy),
       approvalPolicy: policy.approvalPolicy,
       warningOverrideAllowed: policy.warningOverrideAllowed,
-      ...rules,
       sourceAuthority: "NotEvaluated" as const,
       publishValidation: "Incomplete" as const,
       mediaReadiness: "NotEvaluated" as const,
@@ -168,14 +296,17 @@ export function assessCatalogProductContentPolicy(
     // The minimal assessment contains no content, names, media IDs or reference graph.
     const { referenceConfiguration, ...minimal } = content;
     void referenceConfiguration;
-    return Object.freeze({
-      ...minimal,
-      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(minimal)),
-    });
+    return Object.freeze({ aggregate, constraints, content: Object.freeze(minimal) });
   } catch {
     return fail();
   }
 }
 export type CatalogProductContentPolicyAssessment = ReturnType<
   typeof assessCatalogProductContentPolicy
+>;
+export type CatalogProductContentPolicyAssessmentV2 = ReturnType<
+  typeof assessCatalogProductContentPolicyV2
+>;
+export type CatalogProductDraftContentPolicyAssessment = ReturnType<
+  typeof assessCatalogProductDraftContentPolicy
 >;

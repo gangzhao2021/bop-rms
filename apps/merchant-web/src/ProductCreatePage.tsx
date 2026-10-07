@@ -5,11 +5,27 @@ import {
   createProductCreationController,
   ProductCreationError,
 } from "./product-creation-controller.js";
-import { createProductCommandClient } from "./catalog-product-command-client.js";
+import { createProductAuthoringRecovery } from "./product-authoring-recovery.js";
+import {
+  ProductAuthoringRecoveryError,
+  type ProductAuthoringResolutionView,
+} from "./product-authoring-recovery-client.js";
 import { createStoreCapabilityClient } from "./store-capability-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { ProductCategoryPicker, type InitialCategoryProposal } from "./ProductCategoryPicker.js";
 import type { ProductType } from "./catalog-product-command-values.js";
+import { ProductSellingUnits } from "./ProductSellingUnits.js";
+import {
+  ProductNewSkus,
+  newSkuRowsValid,
+  selectedSellingUnitsChanged,
+  type ProductNewSkuRow,
+} from "./ProductNewSkus.js";
+import {
+  createProductSellingUnitsClient,
+  ProductSellingUnitsError,
+  type ProductSellingUnitsView,
+} from "./product-selling-units-client.js";
 
 const messages = {
   Unavailable: "Product creation is unavailable. Refresh current access to try again.",
@@ -39,13 +55,23 @@ export function ProductCreatePage({
     pending = useRef<AbortController | null>(null),
     result = useRef<HTMLParagraphElement>(null),
     flight = useRef<"Refresh" | "Create" | "Retry" | null>(null);
+  const [recovery] = useState(() =>
+    createProductAuthoringRecovery({
+      action: "Create",
+      productReference: null,
+      currentContext: () => (active.current ? 0 : 1),
+    }),
+  );
+  const [recoveryView, setRecoveryView] = useState(() => recovery.view()),
+    [resolved, setResolved] = useState<ProductAuthoringResolutionView | null>(null),
+    [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [controller] = useState(() =>
     createProductCreationController({
       storeReference,
       currentContext: () => (active.current ? 0 : 1),
       now: Date.now,
       capabilities: createStoreCapabilityClient(),
-      commands: createProductCommandClient(),
+      commands: recovery.commands,
     }),
   );
   const [view, setView] = useState(() => controller.view()),
@@ -55,6 +81,10 @@ export function ProductCreatePage({
     [acknowledged, setAcknowledged] = useState(false),
     [category, setCategory] = useState<InitialCategoryProposal | undefined>(),
     [categoryReady, setCategoryReady] = useState(true),
+    [units, setUnits] = useState<ProductSellingUnitsView | null>(null),
+    [unitError, setUnitError] = useState<string | null>(null),
+    [unitPending, setUnitPending] = useState(true),
+    [newSkus, setNewSkus] = useState<readonly ProductNewSkuRow[]>([]),
     [fields, setFields] = useState({
       code: "",
       type: "",
@@ -67,6 +97,9 @@ export function ProductCreatePage({
   const locked =
     busy ||
     view.pending ||
+    recoveryView.pending ||
+    !recoveryView.checked ||
+    resolved?.outcome === "Committed" ||
     view.receipt !== null ||
     view.state !== "Ready" ||
     offline ||
@@ -83,11 +116,49 @@ export function ProductCreatePage({
     pending.current = request;
     flight.current = action;
     setBusy(true);
+    setRecoveryError(null);
     try {
-      if (action === "Refresh") await controller.refresh(csrf, request.signal);
-      else if (action === "Retry") await controller.retry(csrf, request.signal);
-      else {
-        if (!acknowledged) throw new ProductCreationError("Invalid");
+      if (action === "Refresh") {
+        await controller.refresh(csrf, request.signal);
+        const brandReference = controller.view().brandReference;
+        if (!brandReference) throw new ProductAuthoringRecoveryError("Unavailable");
+        await recovery.inspect({ brandReference, storeReference }, csrf, request.signal);
+      } else if (action === "Retry") {
+        if (controller.view().pending) await controller.retry(csrf, request.signal);
+        else {
+          const brandReference = controller.view().brandReference;
+          if (!brandReference) throw new ProductAuthoringRecoveryError("Unavailable");
+          const result = await recovery.resolve(
+            { brandReference, storeReference },
+            csrf,
+            request.signal,
+          );
+          if (active.current) setResolved(result);
+          if (result.outcome === "Abandoned") await controller.refresh(csrf, request.signal);
+        }
+      } else {
+        if (!acknowledged || unitPending || !newSkuRowsValid(newSkus, units, fields.locale))
+          throw new ProductCreationError("Invalid");
+        if (newSkus.length) {
+          const brandReference = controller.view().brandReference;
+          if (!brandReference || !units) throw new ProductCreationError("Invalid");
+          const read = await createProductSellingUnitsClient().inspect(
+            "Create",
+            { brandReference, storeReference },
+            csrf,
+            request.signal,
+          );
+          if (!active.current || request.signal.aborted) return;
+          setUnits(read);
+          if (selectedSellingUnitsChanged(newSkus, units, read)) {
+            setNewSkus((old) => old.map((row) => ({ ...row, unit: "" })));
+            setUnitError(
+              "A selected unit definition changed. Review its current meaning and precision and explicitly select it again.",
+            );
+            throw new ProductCreationError("Invalid");
+          }
+          setUnitError(null);
+        }
         const localized = (text: string) => (text ? { [fields.locale]: text } : {});
         await controller.create(
           {
@@ -98,7 +169,13 @@ export function ProductCreatePage({
             localizedNames: { [fields.locale]: fields.name },
             taxClassificationReference: null,
             operationReference: serviceOperationReference(),
-            skus: [],
+            skus: newSkus.map((row) => ({
+              skuCode: row.code,
+              localizedNames: { [fields.locale]: row.name },
+              variantSelections: [],
+              unitOfSale: row.unit,
+              unitQuantity: row.quantity,
+            })),
             editorContent: {
               profile: "CatalogProductEditorContentV1",
               localizedShortDescriptions: localized(fields.short),
@@ -122,7 +199,15 @@ export function ProductCreatePage({
       if (active.current) setView(controller.view());
     } catch (error) {
       if (active.current) {
+        if (error instanceof ProductAuthoringRecoveryError) setRecoveryError(error.code);
         const next = controller.view();
+        if (error instanceof ProductSellingUnitsError) {
+          setUnitError(
+            `Selling unit verification failed: ${error.code}. Refresh current units before another creation.`,
+          );
+          setView({ ...next, state: error.code });
+          return;
+        }
         setView(
           error instanceof ProductCreationError &&
             error.code === "Invalid" &&
@@ -138,6 +223,7 @@ export function ProductCreatePage({
       }
       if (active.current) {
         setBusy(false);
+        setRecoveryView(recovery.view());
         if (focus) result.current?.focus();
       }
     }
@@ -176,11 +262,11 @@ export function ProductCreatePage({
     return () => clearTimeout(timer);
   }, [controller, view.validUntil]);
   useEffect(() => {
-    if (!view.pending && !busy) return;
+    if (!view.pending && !recoveryView.pending && !busy) return;
     const warn = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [view.pending, busy]);
+  }, [view.pending, recoveryView.pending, busy]);
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!locked && categoryReady) void run("Create");
@@ -215,7 +301,7 @@ export function ProductCreatePage({
       description="CAT-PRODUCT-CREATE · Initial Draft"
       navigation={
         <>
-          {view.pending || (busy && flight.current !== "Refresh") ? (
+          {view.pending || recoveryView.pending || (busy && flight.current !== "Refresh") ? (
             <span>Resolve the original request before leaving.</span>
           ) : (
             <Link to="/app/commerce/products">Back to products</Link>
@@ -245,9 +331,35 @@ export function ProductCreatePage({
               ? "Offline. Creation and recovery require current access."
               : background
                 ? "Return to this page before continuing."
-                : messages[view.state]}
+                : recoveryError
+                  ? `Original request recovery is unavailable: ${recoveryError}. No stored operation was released.`
+                  : resolved?.outcome === "Committed"
+                    ? "Original creation confirmed. Return to Products and reopen its current revision."
+                    : view.pending || view.receipt
+                      ? view.state === "Confirmed" && view.receipt && view.receipt.skus.length > 0
+                        ? "Original creation confirmed. New SKUs remain Draft; the Product is not published."
+                        : messages[view.state]
+                      : recoveryView.pending
+                        ? "An original creation remains stored. Resolve it before starting another creation."
+                        : !recoveryView.checked
+                          ? view.state === "Ready"
+                            ? "Check current access and original request storage before creating."
+                            : messages[view.state]
+                          : messages[view.state]}
         </p>
         <form noValidate onSubmit={submit} className="product-complete-draft-fields">
+          {view.brandReference && (
+            <ProductSellingUnits
+              action="Create"
+              brandReference={view.brandReference}
+              storeReference={storeReference}
+              csrf={csrf}
+              locale={fields.locale}
+              locked={locked}
+              onView={setUnits}
+              onPending={setUnitPending}
+            />
+          )}
           <fieldset disabled={locked}>
             <legend>Initial Draft proposal</legend>
             {field("code", "Internal code", 64)}
@@ -279,6 +391,14 @@ export function ProductCreatePage({
               onChange={setCategory}
               onReadiness={setCategoryReady}
             />
+            <ProductNewSkus
+              rows={newSkus}
+              units={units}
+              locale={fields.locale}
+              locked={locked || unitPending}
+              onChange={setNewSkus}
+            />
+            {unitError && <p role="status">{unitError}</p>}
             <label>
               <input
                 type="checkbox"
@@ -287,16 +407,27 @@ export function ProductCreatePage({
                 aria-invalid={invalid}
                 aria-describedby={invalid ? "product-create-result" : "product-create-unconfigured"}
               />
-              Start without SKUs or other content reference assignments
+              {newSkus.length
+                ? "Other content reference assignments remain unconfigured"
+                : "Start without SKUs or other content reference assignments"}
             </label>
             <p id="product-create-unconfigured">
               Media, tags, attributes, variants, options, allergens, nutrition and tax are
               unconfigured. Empty fields do not establish safety, readiness or selling eligibility.
-              Other reference pickers and new SKU configuration are unavailable here.
+              New Draft SKUs use only explicitly registered selling units.
             </p>
           </fieldset>
           <div className="bop-actions">
-            <button type="submit" disabled={locked || !categoryReady || !acknowledged}>
+            <button
+              type="submit"
+              disabled={
+                locked ||
+                unitPending ||
+                !newSkuRowsValid(newSkus, units, fields.locale) ||
+                !categoryReady ||
+                !acknowledged
+              }
+            >
               Create initial Draft
             </button>
             <button
@@ -306,17 +437,20 @@ export function ProductCreatePage({
             >
               Refresh current creation access
             </button>
-            {view.pending && (
+            {(view.pending || recoveryView.pending) && (
               <button
                 type="button"
                 disabled={busy || offline || background}
                 onClick={() => void run("Retry")}
               >
-                Retry original creation
+                {view.pending ? "Retry original creation" : "Resolve stored creation"}
               </button>
             )}
           </div>
         </form>
+        {resolved?.outcome === "Committed" && (
+          <Link to="/app/commerce/products">Return to Products</Link>
+        )}
         {view.receipt && (
           <Link
             to={`/app/commerce/products/${view.receipt.productReference}/edit`}
@@ -328,10 +462,11 @@ export function ProductCreatePage({
             Open created Draft
           </Link>
         )}
-        {view.pending && (
+        {(view.pending || recoveryView.pending) && (
           <p>
-            This page retains the original request while open. Reload or leaving this workspace can
-            lose local recovery details; owning operation discovery is unavailable.
+            Only the original operation identity is stored. A reload can resolve its authoritative
+            outcome; draft text is not stored in this browser. A stored request is released only
+            after a confirmed receipt or a permanent server abandonment.
           </p>
         )}
       </section>

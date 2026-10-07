@@ -1,9 +1,15 @@
+import type { PublishingOptionPricePublicationPolicy } from "../../contracts/option-price-publication-policy.js";
+import type { PublishingOptionSetCurrentQualification } from "../../contracts/option-set-current-qualification.js";
+import type {
+  PublishingOptionSetReviewPolicy,
+  PublishingOptionSetApprovalWaiver,
+} from "../../contracts/option-set-approval-waiver.js";
 import type { PublishingOptionSetPublicationPolicy } from "../../contracts/option-set-publication-policy.js";
 import type { PublishingProductPublicationPolicy } from "../../contracts/product-publication-policy.js";
 import type { PublishingOperation } from "../../domain/evaluate-publishing-transition.js";
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { BusinessAction, PermissionDecision, PermissionResourceScope } from "@bop/permission";
-import type { TenantContext } from "@bop/tenant";
+import type { TenantContext, BrandAdministrationContext } from "@bop/tenant";
 import type {
   PublishingCode,
   PublishingApprovalEvidence,
@@ -28,7 +34,11 @@ export interface PublishingAuthorizationPort {
 }
 
 export interface CommitPublishingMutationInput {
+  readonly optionSetCurrentQualification?: PublishingOptionSetCurrentQualification;
+  readonly optionSetReviewPolicy?: PublishingOptionSetReviewPolicy;
+  readonly optionSetApprovalWaiver?: PublishingOptionSetApprovalWaiver;
   readonly optionSetPolicyContent?: PublishingOptionSetPublicationPolicy;
+  readonly optionPricePolicyContent?: PublishingOptionPricePublicationPolicy;
   readonly productPolicyContent?: PublishingProductPublicationPolicy;
   readonly operation: PublishingOperation;
   /** Validated detached evidence consumed by this mutation, never raw request payloads. */
@@ -60,5 +70,21 @@ export interface PublishingUnitOfWorkPort {
 
 export interface PublishingPorts {
   readonly authorization: PublishingAuthorizationPort;
+  readonly unitOfWork: PublishingUnitOfWorkPort;
+}
+
+export interface BrandAdministrationPublishingAuthorizationRequest extends Omit<
+  PublishingAuthorizationRequest,
+  "tenantContext"
+> {
+  readonly administrationContext: BrandAdministrationContext;
+}
+export interface BrandAdministrationPublishingAuthorizationPort {
+  authorize(
+    request: BrandAdministrationPublishingAuthorizationRequest,
+  ): Promise<PermissionDecision>;
+}
+export interface BrandAdministrationPublishingPorts {
+  readonly authorization: BrandAdministrationPublishingAuthorizationPort;
   readonly unitOfWork: PublishingUnitOfWorkPort;
 }

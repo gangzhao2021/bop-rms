@@ -58,7 +58,16 @@ function parseInput(value: unknown) {
   const keys = Reflect.ownKeys(value);
   if (
     keys.length !== fields.length ||
-    keys.some((key) => typeof key !== "string" || !fields.includes(key))
+    keys.some((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      return (
+        typeof key !== "string" ||
+        !fields.includes(key) ||
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        !descriptor.enumerable
+      );
+    })
   )
     return fail("STORE_CONFIGURATION_COMMAND_INVALID");
   const input = value as Record<string, unknown>;
@@ -93,6 +102,11 @@ function same(
   ignored: readonly (keyof StoreConfigurationVersion)[],
 ): boolean {
   const skip = new Set(ignored);
+  if (
+    Object.keys(left).length !== Object.keys(right).length ||
+    Object.keys(right).some((key) => !Object.hasOwn(left, key))
+  )
+    return false;
   return (Object.keys(left) as (keyof StoreConfigurationVersion)[]).every(
     (key) => skip.has(key) || JSON.stringify(left[key]) === JSON.stringify(right[key]),
   );
@@ -106,8 +120,9 @@ export function createStoreConfigurationAdministrationService(
     raw: unknown,
     validate: (input: Input, current: StoreConfigurationVersion | null) => Promise<void>,
   ) {
-    const input = parseInput(raw),
-      configuration = input.configuration;
+    let input = parseInput(raw);
+    const originalInput = input;
+    let configuration = input.configuration;
     if (
       !(await ports.authorization
         .authorize({
@@ -147,6 +162,30 @@ export function createStoreConfigurationAdministrationService(
       .catch(dependency);
     if ((current?.configurationVersion ?? 0) !== input.expectedVersion)
       return fail("STORE_CONFIGURATION_VERSION_CONFLICT");
+    if (
+      configuration.setupBasis !== undefined &&
+      ["Submit", "Approve", "Publish"].includes(command) &&
+      ports.prepareFresh === undefined
+    )
+      return fail("STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE");
+    if (ports.prepareFresh !== undefined) {
+      const prepared = await ports
+        .prepareFresh(command, input, current)
+        .then(createStoreConfigurationVersion)
+        .catch(dependency);
+      const mutable: readonly (keyof StoreConfigurationVersion)[] =
+        command === "Submit"
+          ? ["lifecycle", "updatedAt"]
+          : command === "Approve"
+            ? ["lifecycle", "approvedByReference", "approvalEvidenceReference", "updatedAt"]
+            : command === "Publish"
+              ? ["lifecycle", "publicationReference", "liveGateEvidenceReference", "updatedAt"]
+              : ["updatedAt"];
+      if (!same(configuration, prepared, mutable))
+        return fail("STORE_CONFIGURATION_COMMAND_INVALID");
+      configuration = prepared;
+      input = Object.freeze({ ...input, configuration });
+    }
     await validate(input, current);
     const operation: StoreConfigurationOperation = Object.freeze({
       command,
@@ -161,6 +200,7 @@ export function createStoreConfigurationAdministrationService(
       .commit({
         operation,
         expectedVersion: input.expectedVersion,
+        originalInput,
         audit: {
           actorReference: input.actorReference,
           auditReference: input.auditReference,
@@ -189,6 +229,8 @@ export function createStoreConfigurationAdministrationService(
   return Object.freeze({
     saveDraft: (raw: unknown) =>
       execute("SaveDraft", raw, async ({ configuration }, current) => {
+        if (current?.setupBasis !== undefined && configuration.setupBasis === undefined)
+          fail("STORE_CONFIGURATION_LIFECYCLE_CONFLICT");
         if (
           configuration.lifecycle !== "Draft" ||
           configuration.configurationVersion !== (current?.configurationVersion ?? 0) + 1 ||

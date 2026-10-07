@@ -219,6 +219,7 @@ export async function verifyMerchantConfigurationCommand({
   await admin.query(
     "GRANT SELECT,INSERT,UPDATE ON rms_store.store_configuration_authoring_operation TO " + role,
   );
+  await admin.query("GRANT SELECT ON rms_store.store_configuration_original_operation TO " + role);
 
   for (const [code, n] of [
     ["store.service.validate", 4004],

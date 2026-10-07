@@ -81,6 +81,7 @@ import {
 import { type CustomerMenuHandler, unavailableCustomerMenuHandler } from "./customer-menu.js";
 import { type CustomerQuoteHandler, unavailableCustomerQuoteHandler } from "./customer-quote.js";
 import { apiRouteTemplates } from "./http-route-templates.js";
+import { merchantBrandApplicationRoutes } from "./merchant-brand-application.js";
 import { HealthReadinessController } from "./health-readiness.js";
 import {
   createHttpRequestLimitMiddleware,
@@ -93,6 +94,18 @@ import {
   createMerchantCatalogRouter,
 } from "./merchant-catalog.js";
 import { createMerchantBffRouter, type MerchantBffRouterOptions } from "./merchant-bff.js";
+import {
+  createMerchantBrandAdministrationRouter,
+  type MerchantBrandAdministrationHttpOptions,
+} from "./merchant-brand-administration-http.js";
+import {
+  createPlatformAuthenticationRouter,
+  type PlatformAuthenticationHttpOptions,
+} from "./platform-authentication-http.js";
+import {
+  createPlatformTemplateAdministrationRouter,
+  type PlatformTemplateAdministrationHttpOptions,
+} from "./platform-template-administration-http.js";
 import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
 import {
   createRequestCorrelationMiddleware,
@@ -135,6 +148,10 @@ export interface AppOptions {
   healthReadiness?: HealthReadinessController;
   merchantCatalog?: MerchantCatalogRouterOptions;
   merchantBff?: MerchantBffRouterOptions;
+  brandAdministration?: MerchantBrandAdministrationHttpOptions;
+  brandApplication?: RequestHandler;
+  platformAuthentication?: PlatformAuthenticationHttpOptions;
+  platformTemplateAdministration?: PlatformTemplateAdministrationHttpOptions;
   now?: () => string;
   nowMilliseconds?: () => number;
   realtime?: RealtimeTransport;
@@ -205,6 +222,10 @@ export function createApp({
   healthReadiness,
   merchantCatalog,
   merchantBff,
+  brandAdministration,
+  brandApplication,
+  platformAuthentication,
+  platformTemplateAdministration,
   now = () => new Date().toISOString(),
   nowMilliseconds,
   realtime,
@@ -226,6 +247,18 @@ export function createApp({
   );
   app.use(...createHttpSecurityHeadersMiddleware(deploymentEnvironment));
   app.use(createHttpRequestLimitMiddleware());
+  if (platformAuthentication !== undefined)
+    app.use("/platform/auth", createPlatformAuthenticationRouter(platformAuthentication));
+  if (platformTemplateAdministration !== undefined)
+    app.use(
+      "/platform/templates",
+      createPlatformTemplateAdministrationRouter(platformTemplateAdministration),
+    );
+  if (brandAdministration !== undefined)
+    app.use(
+      "/merchant/organization/brands",
+      createMerchantBrandAdministrationRouter(brandAdministration),
+    );
   if (merchantBff !== undefined) app.use("/merchant", createMerchantBffRouter(merchantBff));
   app.use(express.json({ limit: "64kb", strict: true }));
   app.use((_request, response, next) => {
@@ -348,6 +381,10 @@ export function createApp({
   );
   if (correlationAcceptanceHandler !== undefined)
     app.post("/__acceptance/request-command-event", correlationAcceptanceHandler);
+  if (brandApplication !== undefined) {
+    for (const route of merchantBrandApplicationRoutes) app.all(route, brandApplication);
+    app.use(brandApplication);
+  }
   app.use((_request, response) =>
     response
       .status(404)

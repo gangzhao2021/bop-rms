@@ -533,7 +533,10 @@ export async function exerciseCurrentPolicyProductDraft({
       assert.equal((await post(command, {}, path)).status, 503);
       assert.deepEqual(await state(), before);
       policyAllowed = true;
-      for (const bad of [
+      // Incomplete Draft content is allowed to reach the owning tentative CAS.
+      // A deliberately withdrawn policy then exercises rollback without changing
+      // the fixture's root for the existing successor/recovery scenarios.
+      for (const incomplete of [
         {
           ...command,
           draft: { ...command.draft, localizedNames: { "en-CA": "Missing required translation" } },
@@ -542,6 +545,18 @@ export async function exerciseCurrentPolicyProductDraft({
           ...command,
           draft: { ...command.draft, editorContent: { ...command.draft.editorContent, media: [] } },
         },
+      ]) {
+        mode = "late-policy";
+        tentative = false;
+        policyAllowed = true;
+        before = await state();
+        assert.equal((await post(incomplete, {}, path)).status, 503);
+        assert.equal(tentative, true);
+        assert.deepEqual(await state(), before);
+      }
+      mode = "normal";
+      policyAllowed = true;
+      for (const bad of [
         {
           ...command,
           draft: {
@@ -604,7 +619,7 @@ export async function exerciseCurrentPolicyProductDraft({
       await assert.rejects(pending.execute(editorSession.csrf), { code: "OutcomeUnknown" });
       const after = await counts();
       assert.equal(after.root, 10);
-      assert.ok(historyRoots.has(9) && historyRoots.has(10));
+      assert.deepEqual([...historyRoots], [9]);
       for (const key of ["operations", "snapshots", "commits", "audit", "outbox"])
         assert.equal(after[key], initial[key] + 1);
       await admin.query(

@@ -230,7 +230,13 @@ function parseTimeZone(value: unknown): string {
   return timeZone;
 }
 
-function parseWebsite(value: unknown): string | null {
+export function parseStoreBusinessPhone(value: unknown): string | null {
+  if (value !== null && (typeof value !== "string" || !e164.test(value)))
+    return fail("STORE_PROFILE_INVALID");
+  return value;
+}
+
+export function parseStoreBusinessWebsite(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value !== "string" || value.length > 512 || value.trim() !== value)
     return fail("STORE_PROFILE_INVALID");
@@ -252,7 +258,7 @@ function parseWebsite(value: unknown): string | null {
   return value;
 }
 
-function parseAddress(value: unknown): PublicStoreAddress {
+export function parseStoreBusinessAddress(value: unknown): PublicStoreAddress {
   const input = readExactRecord(
     value,
     ["countryCode", "regionCode", "locality", "postalCode", "addressLines"],
@@ -433,11 +439,6 @@ export function parsePublicStoreProfileCandidateShape(value: unknown): PublicSto
   } catch {
     return fail("STORE_PROFILE_INVALID");
   }
-  if (
-    input.businessPhone !== null &&
-    (typeof input.businessPhone !== "string" || !e164.test(input.businessPhone))
-  )
-    return fail("STORE_PROFILE_INVALID");
   if (typeof input.contentDigest !== "string" || !digest.test(input.contentDigest))
     return fail("STORE_PROFILE_INVALID");
   return Object.freeze({
@@ -454,9 +455,9 @@ export function parsePublicStoreProfileCandidateShape(value: unknown): PublicSto
     localizedFields: parseLocalizedFields(input.localizedFields, supportedLocales),
     currencyCode: "CAD",
     timeZone: parseTimeZone(input.timeZone),
-    address: parseAddress(input.address),
-    businessPhone: input.businessPhone as string | null,
-    website: parseWebsite(input.website),
+    address: parseStoreBusinessAddress(input.address),
+    businessPhone: parseStoreBusinessPhone(input.businessPhone),
+    website: parseStoreBusinessWebsite(input.website),
     contentDigest: input.contentDigest as StoreContentDigest,
     publishingLifecycle: input.publishingLifecycle as PublishingLifecycleRecord,
     publishingRelease: input.publishingRelease as PublishingReleaseRecord,

@@ -1,6 +1,6 @@
 # Initial Store capability Draft persistence
 
-Implemented under [WP-2421](../work-packages/WP-2421.md#overnight-initial-capability-draft-creation--2026-09-30-continuation), following existing [WP-2193](../work-packages/WP-2193.md) Handoff48.3.15–18/56.23 and current Feature Control ownership. This is a bounded repository software decision within the accepted administration contract, not a new phase/default policy or external grant.
+Implemented under [WP-2421](../work-packages/history-WP-2421-01.md#overnight-initial-capability-draft-creation--2026-09-30-continuation), following existing [WP-2193](../work-packages/WP-2193.md) Handoff48.3.15–18/56.23 and current Feature Control ownership. This is a bounded repository software decision within the accepted administration contract, not a new phase/default policy or external grant.
 
 ## Creation and original recovery
 

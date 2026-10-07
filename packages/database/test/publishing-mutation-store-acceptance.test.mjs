@@ -1,3 +1,4 @@
+import { exerciseOptionSetApprovalWaiver } from "../test-support/option-set-approval-waiver.mjs";
 import {
   createCurrentOptionSetDraftApprovalSource,
   currentOptionSetApprovalFields,
@@ -48,10 +49,14 @@ import { it } from "vitest";
 import { createPostgresPublishingMutationStore } from "../../bop/publishing/src/index.ts";
 import {
   createPostgresTenantBrandConfigurationContentSource,
+  createPostgresTenantOptionSetBrandConfigurationContentSource,
   tenantBrandConfigurationContentDigest,
   tenantBrandConfigurationRequiredFields,
 } from "../../bop/tenant/src/index.ts";
-import { createCurrentBrandConfigurationContentSource } from "../../../apps/api/src/current-brand-configuration-content.ts";
+import {
+  createCurrentBrandConfigurationContentSource,
+  createCurrentOptionSetBrandConfigurationContentSource,
+} from "../../../apps/api/src/current-brand-configuration-content.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 const { Client } = pg;
 const id = (n) => "01909998-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -1116,6 +1121,77 @@ it("binds actual Tenant metadata to the current Publishing head in one held tran
       assert.equal(observed.eligibility, "NotEvaluated");
       assert.equal(Object.hasOwn(observed, "authoredByReference"), false);
       assert.equal(Object.hasOwn(observed, "approvedByReference"), false);
+      // Catalog intent and current Actor are controlled fixture inputs here;
+      // Tenant metadata, Publishing head, their SQL and held transaction are actual.
+      const optionRequest = Object.freeze({
+        ...request(),
+        purposeCode: "CATALOG_OPTION_SET_PUBLICATION",
+        optionSetReference: id(2800),
+        versionReference: id(2801),
+        expectedAggregateVersion: 1,
+        sourceDigest: "sha256:" + "1".repeat(64),
+        contentDigest: "sha256:" + "2".repeat(64),
+        configurationDigest: "sha256:" + "3".repeat(64),
+        graphDigest: "sha256:" + "4".repeat(64),
+        activationAt: at,
+        validUntil: "2026-09-11T10:00:05.000Z",
+      });
+      const optionContent = createCurrentOptionSetBrandConfigurationContentSource(
+        createPostgresTenantOptionSetBrandConfigurationContentSource({
+          brandReference: id(2),
+          clock: () => now,
+          transactions: runner,
+          authority: {
+            async withCurrentContentRead(input, fields, work) {
+              assert.deepEqual(input, optionRequest);
+              assert.deepEqual(fields, tenantBrandConfigurationRequiredFields);
+              if (!allowed) throw new Error("synthetic Option authority denied");
+              return work();
+            },
+            async isCurrent(_tx, input, fields) {
+              assert.deepEqual(input, optionRequest);
+              assert.deepEqual(fields, tenantBrandConfigurationRequiredFields);
+              return allowed;
+            },
+          },
+        }),
+      );
+      const beforeOptionRead = commits;
+      await optionContent.withCurrentContent(optionRequest, async (packet, tx) => {
+        assert.equal(typeof tx.query, "function");
+        assert.equal(packet.profile, "CurrentOptionSetBrandConfigurationContentV1");
+        assert.deepEqual(packet.publicationIntent, optionRequest);
+        assert.equal(Object.isFrozen(packet.publicationIntent), true);
+        assert.equal(packet.brandConfiguration.contentDigest, observed.contentDigest);
+        assert.equal(
+          packet.brandConfiguration.currentPublicationReference,
+          initial.release.releaseId,
+        );
+        assert.equal(
+          packet.brandConfiguration.originalPublicationReference,
+          first.publicationReference,
+        );
+        assert.equal(packet.brandConfiguration.validUntil, optionRequest.validUntil);
+        assert.equal(
+          packet.brandConfiguration.originalIntentDigest,
+          optionRequest.originalIntentDigest,
+        );
+        assert.equal(packet.eligibility, "NotEvaluated");
+        assert.equal(packet.brandConfiguration.eligibility, "NotEvaluated");
+      });
+      assert.equal(commits - beforeOptionRead, 1, "Option Brand read retains one actual outer UoW");
+      for (const failure of ["authority", "deadline"]) {
+        const beforeOptionFailure = commits;
+        await assert.rejects(
+          optionContent.withCurrentContent(optionRequest, async () => {
+            if (failure === "authority") allowed = false;
+            else now = optionRequest.validUntil;
+          }),
+        );
+        assert.equal(commits, beforeOptionFailure, "late Option source refusal cannot commit");
+        allowed = true;
+        now = at;
+      }
       // Actual two-owner content-policy acquisition; Catalog candidate and current Actor holders remain synthetic.
       const body = {
         profile: "PublishingProductPublicationPolicyV1",
@@ -1954,7 +2030,13 @@ it("binds actual Tenant metadata to the current Publishing head in one held tran
       assert(draftPolicyHolds > 0);
       assert(draftRemainingHolds > 0);
       assert.deepEqual(await candidateCounts(), policyCountsBefore);
-      for (const aggregate of [candidate, unsupported]) {
+      // Draft persistence permits incomplete publication fields; current
+      // structural rules and all remaining reference/field holders still apply.
+      const beforeIncompleteDraftHolds = draftRemainingHolds;
+      await runner.run((tx) => draftPolicy()(tx, draftPolicyInput(candidate)));
+      assert.equal(draftRemainingHolds, beforeIncompleteDraftHolds + 1);
+      assert.deepEqual(await candidateCounts(), policyCountsBefore);
+      for (const aggregate of [unsupported]) {
         const holdsBefore = draftRemainingHolds;
         await assert.rejects(
           runner.run((tx) => draftPolicy()(tx, draftPolicyInput(aggregate))),
@@ -3973,3 +4055,8 @@ it("persists typed Option policy content and resolves actual current governance 
     }
   });
 });
+
+it(
+  "persists actual Option policy-waived publication and original recovery with SQL refusal and governance rollback",
+  exerciseOptionSetApprovalWaiver,
+);

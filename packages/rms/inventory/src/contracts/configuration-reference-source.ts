@@ -1,3 +1,8 @@
+import {
+  parseInventoryProductPublicationReferenceRequestV2,
+  inventoryProductPublicationReferenceRequestFieldsV2,
+  type InventoryProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   InventoryItemError,
@@ -193,14 +198,13 @@ export function parseInventoryConfigurationReferenceRequest(
   }
 }
 const families = ["items", "versions", "operations"] as const;
-export function buildInventoryConfigurationReferenceSnapshot(
+function parseConfigurationGraph(
   value: unknown,
-  input: InventoryConfigurationReferenceRequest,
+  request: { readonly tenantReference: string; readonly brandReference: string },
   now: string,
-): InventoryConfigurationReferenceSnapshot {
+) {
   try {
-    const request = parseInventoryConfigurationReferenceRequest(input),
-      r = exact(value, ["generation", "counts", "observedAt", ...families]),
+    const r = exact(value, ["generation", "counts", "observedAt", ...families]),
       counts = exact(r.counts, families),
       raw = Object.fromEntries(families.map((k) => [k, list(r[k])])) as Record<
         (typeof families)[number],
@@ -329,13 +333,6 @@ export function buildInventoryConfigurationReferenceSnapshot(
       });
     });
     const body = {
-      request,
-      profile: "BrandInventoryConfigurationReferencesV1" as const,
-      coverage: "CompleteStoredConfigurationReferences" as const,
-      consistency: "StatementSnapshot" as const,
-      applicability: "Unavailable" as const,
-      directSkuMappingCoverage: "Unavailable" as const,
-      sourceVersionKind: "InventoryItemConfigurationOperation" as const,
       generation,
       items: Object.freeze(items.sort((a, b) => a.itemReference.localeCompare(b.itemReference))),
       versions: Object.freeze(
@@ -350,11 +347,33 @@ export function buildInventoryConfigurationReferenceSnapshot(
     return Object.freeze({
       ...body,
       observedAt,
-      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
     });
   } catch {
     return fail();
   }
+}
+export function buildInventoryConfigurationReferenceSnapshot(
+  value: unknown,
+  input: InventoryConfigurationReferenceRequest,
+  now: string,
+): InventoryConfigurationReferenceSnapshot {
+  const request = parseInventoryConfigurationReferenceRequest(input),
+    { observedAt, ...graph } = parseConfigurationGraph(value, request, now),
+    body = {
+      request,
+      profile: "BrandInventoryConfigurationReferencesV1" as const,
+      coverage: "CompleteStoredConfigurationReferences" as const,
+      consistency: "StatementSnapshot" as const,
+      applicability: "Unavailable" as const,
+      directSkuMappingCoverage: "Unavailable" as const,
+      sourceVersionKind: "InventoryItemConfigurationOperation" as const,
+      ...graph,
+    };
+  return Object.freeze({
+    ...body,
+    observedAt,
+    digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
+  });
 }
 export function parseInventoryConfigurationReferenceSnapshot(
   value: unknown,
@@ -450,12 +469,60 @@ export function parseInventoryConfigurationReferenceSnapshot(
 /** Actual-root-derived pins plus complete owning metadata only. UUID Inventory pins
  * identify configuration operations; Recipe pins identify actual RecipeVersion rows.
  * Unit/quantity/current Binding applicability and reference eligibility are unassessed. */
+export interface InventoryOptionPublicationOriginalClock {
+  readonly profile: "OptionPublicationOriginalClockV1";
+  readonly operationReference: string;
+  readonly catalogIntentDigest: string;
+  readonly observedAt: string;
+  readonly validUntil: string;
+}
+/** Fixed original Option publication clock, bound to the actual owner request.
+ * It changes only the activation lower bound, never current metadata time. */
+export function parseInventoryOptionPublicationOriginalClock(
+  value: unknown,
+  request: Pick<
+    InventoryConfigurationReferenceRequest,
+    "operationReference" | "catalogIntentDigest"
+  >,
+  nowInput: string,
+) {
+  const r = exact(value, [
+      "profile",
+      "operationReference",
+      "catalogIntentDigest",
+      "observedAt",
+      "validUntil",
+    ]),
+    observedAt = instant(r.observedAt),
+    validUntil = instant(r.validUntil),
+    now = instant(nowInput),
+    operationReference = ref(r.operationReference),
+    catalogIntentDigest = digest(r.catalogIntentDigest);
+  if (
+    r.profile !== "OptionPublicationOriginalClockV1" ||
+    operationReference !== request.operationReference ||
+    catalogIntentDigest !== request.catalogIntentDigest ||
+    validUntil <= observedAt ||
+    Date.parse(validUntil) - Date.parse(observedAt) > 5000 ||
+    now < observedAt ||
+    now >= validUntil
+  )
+    return fail();
+  return Object.freeze({
+    profile: "OptionPublicationOriginalClockV1" as const,
+    operationReference,
+    catalogIntentDigest,
+    observedAt,
+    validUntil,
+  });
+}
 export function matchOptionDraftInventoryConsumptionMetadata(
   value: unknown,
   rawSource: unknown,
   request: InventoryConfigurationReferenceRequest,
   nowInput: string,
   activationInput: string,
+  originalPublicationClockInput?: unknown,
 ) {
   try {
     const source = parseInventoryConfigurationReferenceSnapshot(rawSource, request, nowInput),
@@ -471,13 +538,21 @@ export function matchOptionDraftInventoryConsumptionMetadata(
       ]),
       now = parseInventoryInstant(nowInput),
       activationAt = parseInventoryInstant(activationInput),
+      originalPublicationClock =
+        originalPublicationClockInput === undefined
+          ? undefined
+          : parseInventoryOptionPublicationOriginalClock(
+              originalPublicationClockInput,
+              request,
+              nowInput,
+            ),
       brandReference = parseInventoryReference(r.brandReference),
       optionSetReference = parseInventoryReference(r.optionSetReference),
       versionReference = parseInventoryReference(r.versionReference);
     if (
       r.profile !== "CurrentFullOptionDraftConsumptionPinsV1" ||
       brandReference !== request.brandReference ||
-      activationAt < now
+      activationAt < (originalPublicationClock?.observedAt ?? now)
     )
       return fail();
     const pins = list(r.pins);
@@ -515,6 +590,7 @@ export function matchOptionDraftInventoryConsumptionMetadata(
     if (new Set(matches.map((m) => m.optionReference)).size !== matches.length) return fail();
     const body = {
       profile: "OptionDraftInventoryConsumptionMetadataV1" as const,
+      ...(originalPublicationClock ? { originalPublicationClock } : {}),
       brandReference,
       optionSetReference,
       versionReference,
@@ -540,6 +616,128 @@ export function matchOptionDraftInventoryConsumptionMetadata(
       eligibility: "NotEvaluated" as const,
     };
     return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+
+export const inventoryProductPublicationConfigurationReferenceFieldsV2 = Object.freeze([
+  ...new Set([
+    ...inventoryConfigurationReferenceFields,
+    ...inventoryProductPublicationReferenceRequestFieldsV2,
+  ]),
+]);
+export function buildInventoryProductPublicationConfigurationReferenceSnapshotV2(
+  value: unknown,
+  input: InventoryProductPublicationReferenceRequestV2,
+  now: string,
+) {
+  try {
+    const request = parseInventoryProductPublicationReferenceRequestV2(input),
+      graph = parseConfigurationGraph(value, request, now),
+      at = instant(now);
+    if (
+      graph.observedAt < request.observedAt ||
+      graph.observedAt >= request.validUntil ||
+      at >= request.validUntil
+    )
+      return fail();
+    const body = {
+      request,
+      profile: "BrandInventoryProductPublicationConfigurationReferencesV2" as const,
+      coverage: "CompleteStoredConfigurationReferences" as const,
+      consistency: "StatementSnapshot" as const,
+      applicability: "Unavailable" as const,
+      directSkuMappingCoverage: "Unavailable" as const,
+      sourceVersionKind: "InventoryItemConfigurationOperation" as const,
+      ...graph,
+      validUntil: request.validUntil,
+    };
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+export type InventoryProductPublicationConfigurationReferenceSnapshotV2 = ReturnType<
+  typeof buildInventoryProductPublicationConfigurationReferenceSnapshotV2
+>;
+export function parseInventoryProductPublicationConfigurationReferenceSnapshotV2(
+  value: unknown,
+  input: InventoryProductPublicationReferenceRequestV2,
+  now: string,
+): InventoryProductPublicationConfigurationReferenceSnapshotV2 {
+  try {
+    const r = exact(value, [
+      "request",
+      "profile",
+      "coverage",
+      "consistency",
+      "applicability",
+      "directSkuMappingCoverage",
+      "sourceVersionKind",
+      "generation",
+      "observedAt",
+      "validUntil",
+      "digest",
+      ...families,
+    ]);
+    const actualRequest = parseInventoryProductPublicationReferenceRequestV2(r.request),
+      expectedRequest = parseInventoryProductPublicationReferenceRequestV2(input);
+    if (
+      canonicalizeRfc8785(actualRequest) !== canonicalizeRfc8785(expectedRequest) ||
+      r.profile !== "BrandInventoryProductPublicationConfigurationReferencesV2" ||
+      r.coverage !== "CompleteStoredConfigurationReferences" ||
+      r.consistency !== "StatementSnapshot" ||
+      r.applicability !== "Unavailable" ||
+      r.directSkuMappingCoverage !== "Unavailable" ||
+      r.sourceVersionKind !== "InventoryItemConfigurationOperation" ||
+      r.validUntil !== expectedRequest.validUntil ||
+      typeof r.generation !== "string"
+    )
+      return fail();
+    digest(r.digest);
+    const items = list(r.items).map((value) => {
+      const e = exact(value, [...rootFields, "currentItemVersion", "currentOperationReference"]);
+      return Object.fromEntries([...rootFields.map((f) => [f, e[f]]), ["precise", true]]);
+    });
+    const versions = list(r.versions).map((value) => {
+      const e = exact(value, versionFields);
+      if (
+        typeof e.itemVersion !== "number" ||
+        !Number.isSafeInteger(e.itemVersion) ||
+        e.itemVersion < 1
+      )
+        return fail();
+      return { ...e, itemVersion: String(e.itemVersion), precise: true };
+    });
+    const operations = list(r.operations).map((value) => {
+      const e = exact(value, operationFields);
+      if (
+        typeof e.itemVersion !== "number" ||
+        !Number.isSafeInteger(e.itemVersion) ||
+        e.itemVersion < 1
+      )
+        return fail();
+      return { ...e, itemVersion: String(e.itemVersion) };
+    });
+    const source = buildInventoryProductPublicationConfigurationReferenceSnapshotV2(
+      {
+        generation: r.generation,
+        observedAt: r.observedAt,
+        counts: {
+          items: String(items.length),
+          versions: String(versions.length),
+          operations: String(operations.length),
+        },
+        items,
+        versions,
+        operations,
+      },
+      input,
+      now,
+    );
+    if (canonicalizeRfc8785(r) !== canonicalizeRfc8785(source)) return fail();
+    return source;
   } catch {
     return fail();
   }

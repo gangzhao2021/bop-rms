@@ -3,7 +3,11 @@ import {
   parseInventoryReference,
   InventoryItemError,
 } from "../../domain/inventory-item.js";
-import { parseInventoryConfigurationReferenceRequest } from "../../contracts/configuration-reference-source.js";
+import {
+  parseInventoryOptionPublicationOriginalClock,
+  type InventoryOptionPublicationOriginalClock,
+  parseInventoryConfigurationReferenceRequest,
+} from "../../contracts/configuration-reference-source.js";
 import {
   assessInventoryOptionConsumptionUnits,
   parseInventoryOptionConsumptionPins,
@@ -19,6 +23,7 @@ import {
 type Request = ReturnType<typeof parseInventoryConfigurationReferenceRequest>;
 type Tx = InventoryConfigurationReferenceTransaction;
 export interface InventoryOptionConsumptionUnitOptions extends InventoryConfigurationReferenceOptions {
+  readonly originalPublicationClock?: InventoryOptionPublicationOriginalClock;
   readonly unitAuthority: {
     holdUntilTransactionCompletes(
       tx: Tx,
@@ -53,6 +58,40 @@ export function createPostgresInventoryOptionConsumptionUnitSource(
     actorReference = parseInventoryReference(options.actorReference),
     active = new WeakSet<object>(),
     failed = new WeakSet<object>();
+  const originalClockDescriptor = Object.getOwnPropertyDescriptor(
+    options,
+    "originalPublicationClock",
+  );
+  if (
+    originalClockDescriptor &&
+    (!("value" in originalClockDescriptor) || !originalClockDescriptor.enumerable)
+  )
+    return fail();
+  const originalClockValue = originalClockDescriptor?.value;
+  const originalClockRecord =
+    originalClockValue === undefined
+      ? undefined
+      : unitRecord(originalClockValue, [
+          "profile",
+          "operationReference",
+          "catalogIntentDigest",
+          "observedAt",
+          "validUntil",
+        ]);
+  const originalClock =
+    originalClockRecord === undefined
+      ? undefined
+      : parseInventoryOptionPublicationOriginalClock(
+          originalClockValue,
+          {
+            operationReference: parseInventoryReference(originalClockRecord.operationReference),
+            catalogIntentDigest:
+              typeof originalClockRecord.catalogIntentDigest === "string"
+                ? originalClockRecord.catalogIntentDigest
+                : fail(),
+          },
+          now(),
+        );
   return Object.freeze({
     async withCurrentUnits<T>(
       input: Request,
@@ -71,6 +110,10 @@ export function createPostgresInventoryOptionConsumptionUnitSource(
           pins = parseInventoryOptionConsumptionPins(value),
           activationAt = parseInventoryInstant(activationInput);
         if (typeof work !== "function") return fail();
+        if (originalClock) {
+          parseInventoryOptionPublicationOriginalClock(originalClock, request, now());
+          if (activationAt < originalClock.observedAt) return fail();
+        }
         let tx: Tx | undefined,
           query: Tx["query"] | undefined,
           until: string | undefined,
@@ -80,6 +123,8 @@ export function createPostgresInventoryOptionConsumptionUnitSource(
           answer: T | undefined;
         const check = () => {
           const at = parseInventoryInstant(now());
+          if (originalClock)
+            parseInventoryOptionPublicationOriginalClock(originalClock, request, at);
           if (
             (tx && failed.has(tx)) ||
             at < latest ||
@@ -117,6 +162,7 @@ export function createPostgresInventoryOptionConsumptionUnitSource(
           const actual = tx,
             sql = query.bind(actual);
           until = new Date(Date.parse(metadata.observedAt) + 5000).toISOString();
+          if (originalClock && originalClock.validUntil < until) until = originalClock.validUntil;
           check();
           const itemReferences = Object.freeze([...new Set(pins.map((p) => p.reference))].sort());
           const authorize = async () => {
@@ -171,6 +217,7 @@ WHERE v.tenant_id=$1 AND v.brand_id=$2 AND v.item_id=ANY($3::uuid[]) AND o.opera
               request,
               check(),
               activationAt,
+              originalClock,
             );
           };
           const assessed = await read();
@@ -182,7 +229,10 @@ WHERE v.tenant_id=$1 AND v.brand_id=$2 AND v.item_id=ANY($3::uuid[]) AND o.opera
           const current = await read();
           if (
             current.unitSourceDigest !== assessed.unitSourceDigest ||
-            current.ownerSourceDigest !== assessed.ownerSourceDigest
+            current.ownerSourceDigest !== assessed.ownerSourceDigest ||
+            (originalClock !== undefined &&
+              (JSON.stringify(current.matches) !== JSON.stringify(assessed.matches) ||
+                current.unitArithmetic !== assessed.unitArithmetic))
           )
             return fail();
           check();

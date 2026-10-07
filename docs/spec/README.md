@@ -11,6 +11,10 @@
   The Owner-authorized sync at `03ad510` is now present in this Mac checkout;
   earlier local-source availability limitations are resolved.
 - Current execution coordinator: [WP-2421 — whole-project assembly](./work-packages/WP-2421.md). WP-2402 remains the retained pilot/history owner.
+- Scope direction (2026-10-06): [DEC-FOCUS-01 pilot mainline focus](./design/pilot-mainline-focus.md)
+  freezes peripheral Domains and unconnected Merchant pages and pauses Product/Option/Recipe
+  publication refinement. [WP-2422](./work-packages/WP-2422.md) owns the repository design remediation
+  (deployable composition root, reproducible runtime ACL, WP log size, test orchestration).
 
 The 2026-07-23 Owner decision established the composite baseline because no newer Library file was
 then confirmed available. Current local availability and formal acceptance are separate facts:
@@ -25,8 +29,23 @@ Never commit Library credentials, signed URLs, account identities or private acc
 Decision precedence follows Section 0: later numbered accepted sections supersede conflicting older text. Section 80 is the remediation baseline; Sections 86 and 87 close delegated and hardening decisions; Section 88 is authoritative for pages and functions; Sections 89–91 govern repository execution、Codex / Figma operation and GitHub Free solo governance; Sections 92–94 govern database ownership、Domain dependency enforcement and Migration Runner behavior; Section 95 is authoritative for WP-0021 foundation schema behavior；Section 96 is authoritative for WP-0022 helper objects、ownership、ACL、Tenant Context and verifier behavior；Section 97 is authoritative for WP-0024 reusable seed、fixture and parallel isolated-test-database behavior.
 
 Accepted scoped addenda remain effective within their recorded scope:
+[DEC-FOCUS-01](./design/pilot-mainline-focus.md) records the Owner's 2026-10-06 work-priority
+direction; it changes no accepted Section, ownership or Section 88 contract.
+[Brand configuration review validity](./design/brand-configuration-review-validity.md)
+records the explicit administrator-selected finite review expiry for WP-2421
+Brand submission; authorization leases do not define business review validity.
+[Initial Brand administration](./design/brand-initial-administration.md) distinguishes
+actual Draft Brand management from operational Active-Brand admission and retains
+independently approved initial provisioning as separate unfinished software work.
+[Tax publication candidate binding](./design/tax-publication-candidate-binding.md)
+defines the WP-2421 frozen candidate, nonrecursive content digest and external
+material composition without changing professional qualification gates or
+historical Draft bytes.
 [WP-2228](./work-packages/WP-2228.md) records DEC-H01/H02 product choices;
 [DEC-H03](./design/capacity-source-decision.md) is the accepted capacity topology addendum.
+[Product publication defaults](./design/project-delivery-decision-inputs.md#accepted-product-publication-policy)
+record the Owner's 2026-10-03 selection of a seven-day backdate window and explicit
+Warning confirmation for missing Pricing, Recipe, Inventory or Menu configuration.
 Do not reopen them because an implementation or acceptance test remains unfinished.
 [DEC-H03-DINING](./design/capacity-checkout-handoff.md#proposed-dine-in-interpretation-dec-h03-dining)
 is an accepted scoped interpretation (Owner approval on 2026-09-10).
@@ -96,6 +115,13 @@ is preserved for traceability. Archiving progress does not change the accepted h
 Money/time/Tenant boundaries, ACL, migrations or future business-table ownership.
 
 ## Verification and maintenance
+
+The Owner-authorized [delivery execution adjustment](./work-packages/history-WP-2421-01.md#owner-authorized-execution-requirement-adjustment--2026-10-02)
+uses a complete ordinary business workflow as the delivery unit. Contracts, source adapters and
+internal checkpoints remain subtasks until entry, commands, persistence, refresh and recovery work
+together. Follow root `AGENTS.md` for one concise workflow plan/check inventory, parallel subtasks,
+evidence reuse and closeout. A chat turn or subtask ending does not itself require a new checkpoint
+or duplicated documentation. Existing business invariants and acceptance evidence remain binding.
 
 For each bounded WP, identify the acceptance questions, affected files and existing checks before
 running them. Reuse valid evidence with its command, result, revision/diff and unchanged-input

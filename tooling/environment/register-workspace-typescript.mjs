@@ -4,9 +4,11 @@ import { URL, fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import ts from "typescript";
 
-// Local process entry only: workspace packages intentionally export source.
-// Type/lint gates remain separate; this supplies Node's missing .js -> .ts
-// resolution and TypeScript syntax transformation for those package sources.
+// Local process entry only: workspace packages export source under the
+// "development" condition and built dist otherwise. This hook selects source
+// for workspace package specifiers, then supplies Node's missing .js -> .ts
+// resolution and TypeScript syntax transformation. Type/lint gates remain separate.
+const workspaceScopes = ["@bop/", "@rms/", "@bop-rms/"];
 const packages = realpathSync(fileURLToPath(new URL("../../packages", import.meta.url)));
 const manifest = realpathSync(
   fileURLToPath(new URL("../module-manifest/module.manifest.ts", import.meta.url)),
@@ -27,6 +29,11 @@ function isWorkspaceSource(url) {
 }
 registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (
+      workspaceScopes.some((scope) => specifier.startsWith(scope)) &&
+      !context.conditions?.includes("development")
+    )
+      context = { ...context, conditions: [...(context.conditions ?? []), "development"] };
     try {
       return nextResolve(specifier, context);
     } catch (error) {

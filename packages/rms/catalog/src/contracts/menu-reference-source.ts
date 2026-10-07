@@ -1,3 +1,12 @@
+import {
+  parseCatalogProductWarningAcknowledgementReferenceRequest,
+  productWarningAcknowledgementReferenceRequestFields,
+  type CatalogProductWarningAcknowledgementReferenceRequest,
+} from "./product-warning-acknowledgement-reference-request.js";
+import {
+  parseCatalogProductPublicationReferenceRequestV2,
+  type CatalogProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   CatalogError,
@@ -214,14 +223,9 @@ const families = ["reviews", "placements", "revisions", "releases", "periods"] a
 const integer = (v: unknown) =>
   Number.isSafeInteger(v) && typeof v === "number" && v >= 1 && v <= 2147483647 ? v : fail();
 /** Stored publication reference graph only; current publication/sale/approval remains separate. */
-export function buildMenuReferenceSourceSnapshot(
-  value: unknown,
-  input: MenuReferenceSourceRequest,
-  now: string,
-): MenuReferenceSourceSnapshot {
+function parseMenuStoredGraph(value: unknown, brandReference: string, now: string) {
   try {
-    const request = parseMenuReferenceSourceRequest(input),
-      r = exact(value, ["generation", "counts", "observedAt", ...families]),
+    const r = exact(value, ["generation", "counts", "observedAt", ...families]),
       counts = exact(r.counts, families),
       observedAt = parseCatalogInstant(r.observedAt),
       at = parseCatalogInstant(now);
@@ -252,7 +256,7 @@ export function buildMenuReferenceSourceSnapshot(
     };
     const brand = (v: unknown) => {
       const b = ref(v);
-      return b === request.brandReference ? b : fail();
+      return b === brandReference ? b : fail();
     };
     const read = (v: unknown, keys: readonly string[]) => {
       const e = exact(v, [...keys, "precise"]);
@@ -434,11 +438,6 @@ export function buildMenuReferenceSourceSnapshot(
       });
     });
     const body = {
-      request,
-      profile: "BrandMenuStoredReferencesV1" as const,
-      coverage: "CompleteStoredReferences" as const,
-      consistency: "StatementSnapshot" as const,
-      applicability: "Unavailable" as const,
       generation,
       reviews: Object.freeze(
         reviews.sort((a, b) => a.reviewReference.localeCompare(b.reviewReference)),
@@ -467,11 +466,31 @@ export function buildMenuReferenceSourceSnapshot(
     return Object.freeze({
       ...body,
       observedAt,
-      digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
     });
   } catch {
     return fail();
   }
+}
+export function buildMenuReferenceSourceSnapshot(
+  value: unknown,
+  input: MenuReferenceSourceRequest,
+  now: string,
+): MenuReferenceSourceSnapshot {
+  const request = parseMenuReferenceSourceRequest(input),
+    { observedAt, ...graph } = parseMenuStoredGraph(value, request.brandReference, now),
+    body = {
+      request,
+      profile: "BrandMenuStoredReferencesV1" as const,
+      coverage: "CompleteStoredReferences" as const,
+      consistency: "StatementSnapshot" as const,
+      applicability: "Unavailable" as const,
+      ...graph,
+    };
+  return Object.freeze({
+    ...body,
+    observedAt,
+    digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)),
+  });
 }
 export function parseMenuReferenceSourceSnapshot(
   value: unknown,
@@ -529,6 +548,226 @@ export function parseMenuReferenceSourceSnapshot(
     );
     if (result.digest !== hash(r.digest)) return fail();
     return result;
+  } catch {
+    return fail();
+  }
+}
+
+export const productPublicationMenuReferenceSourceFieldsV2 = Object.freeze([
+  ...menuReferenceSourceFields,
+  "command",
+  "originalIntentDigest",
+  "replacementIntentDigest",
+  "aggregateSnapshotDigest",
+  "currentPublicationDigest",
+  "observedAt",
+  "validUntil",
+] as const);
+/** The fixed publication entry shares only the stored graph parser with V1.
+ * The complete request and original lease are hashed; no lifecycle request,
+ * current sale eligibility, or publication approval is manufactured. */
+export function buildProductPublicationMenuReferenceSourceSnapshotV2(
+  value: unknown,
+  input: CatalogProductPublicationReferenceRequestV2,
+  now: string,
+) {
+  try {
+    const request = parseCatalogProductPublicationReferenceRequestV2(input),
+      graph = parseMenuStoredGraph(value, request.command.brandReference, now),
+      at = parseCatalogInstant(now);
+    if (
+      graph.observedAt < request.observedAt ||
+      graph.observedAt >= request.validUntil ||
+      at >= request.validUntil
+    )
+      return fail();
+    const body = Object.freeze({
+      request,
+      profile: "BrandMenuPublicationReferencesV2" as const,
+      coverage: "CompleteStoredReferences" as const,
+      consistency: "StatementSnapshot" as const,
+      applicability: "Unavailable" as const,
+      ...graph,
+      validUntil: request.validUntil,
+    });
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+export type ProductPublicationMenuReferenceSourceSnapshotV2 = ReturnType<
+  typeof buildProductPublicationMenuReferenceSourceSnapshotV2
+>;
+export function parseProductPublicationMenuReferenceSourceSnapshotV2(
+  value: unknown,
+  input: CatalogProductPublicationReferenceRequestV2,
+  now: string,
+): ProductPublicationMenuReferenceSourceSnapshotV2 {
+  try {
+    const r = exact(value, [
+        "request",
+        "profile",
+        "coverage",
+        "consistency",
+        "applicability",
+        "generation",
+        "observedAt",
+        "validUntil",
+        "digest",
+        "reviews",
+        "placements",
+        "revisions",
+        "releases",
+        "periods",
+      ]),
+      request = parseCatalogProductPublicationReferenceRequestV2(input),
+      actual = parseCatalogProductPublicationReferenceRequestV2(r.request);
+    if (
+      canonicalizeRfc8785(request) !== canonicalizeRfc8785(actual) ||
+      r.profile !== "BrandMenuPublicationReferencesV2" ||
+      r.coverage !== "CompleteStoredReferences" ||
+      r.consistency !== "StatementSnapshot" ||
+      r.applicability !== "Unavailable" ||
+      typeof r.generation !== "string" ||
+      r.validUntil !== request.validUntil
+    )
+      return fail();
+    const keys = {
+      reviews: reviewFields,
+      placements: placementFields,
+      revisions: revisionFields,
+      releases: releaseFields,
+      periods: periodFields,
+    };
+    const values = Object.fromEntries(
+      families.map((family) => [
+        family,
+        array(r[family]).map((value) => ({
+          ...exact(value, keys[family]),
+          ...(family === "placements" ? {} : { precise: true }),
+        })),
+      ]),
+    );
+    const raw = {
+      generation: r.generation,
+      observedAt: r.observedAt,
+      counts: Object.fromEntries(
+        families.map((family) => [family, String(array(r[family]).length)]),
+      ),
+      ...values,
+    };
+    const rebuilt = buildProductPublicationMenuReferenceSourceSnapshotV2(raw, request, now);
+    if (canonicalizeRfc8785(rebuilt) !== canonicalizeRfc8785(r)) return fail();
+    return rebuilt;
+  } catch {
+    return fail();
+  }
+}
+
+export const productWarningAcknowledgementMenuReferenceSourceFields = Object.freeze([
+  ...menuReferenceSourceFields,
+  ...productWarningAcknowledgementReferenceRequestFields,
+] as const);
+/** The fixed warning acknowledgement entry shares only the stored graph parser with V1.
+ * The actual Ack request and original lease are hashed; no lifecycle request,
+ * current sale eligibility, or publication approval is manufactured. */
+export function buildProductWarningAcknowledgementMenuReferenceSourceSnapshot(
+  value: unknown,
+  input: CatalogProductWarningAcknowledgementReferenceRequest,
+  now: string,
+) {
+  try {
+    const request = parseCatalogProductWarningAcknowledgementReferenceRequest(input),
+      graph = parseMenuStoredGraph(value, request.command.brandReference, now),
+      at = parseCatalogInstant(now);
+    if (
+      graph.observedAt < request.observedAt ||
+      graph.observedAt >= request.validUntil ||
+      at >= request.validUntil
+    )
+      return fail();
+    const body = Object.freeze({
+      request,
+      profile: "BrandMenuWarningAcknowledgementReferencesV1" as const,
+      coverage: "CompleteStoredReferences" as const,
+      consistency: "StatementSnapshot" as const,
+      applicability: "Unavailable" as const,
+      ...graph,
+      validUntil: request.validUntil,
+    });
+    return Object.freeze({ ...body, digest: "sha256:" + sha256Hex(canonicalizeRfc8785(body)) });
+  } catch {
+    return fail();
+  }
+}
+export type ProductWarningAcknowledgementMenuReferenceSourceSnapshot = ReturnType<
+  typeof buildProductWarningAcknowledgementMenuReferenceSourceSnapshot
+>;
+export function parseProductWarningAcknowledgementMenuReferenceSourceSnapshot(
+  value: unknown,
+  input: CatalogProductWarningAcknowledgementReferenceRequest,
+  now: string,
+): ProductWarningAcknowledgementMenuReferenceSourceSnapshot {
+  try {
+    const r = exact(value, [
+        "request",
+        "profile",
+        "coverage",
+        "consistency",
+        "applicability",
+        "generation",
+        "observedAt",
+        "validUntil",
+        "digest",
+        "reviews",
+        "placements",
+        "revisions",
+        "releases",
+        "periods",
+      ]),
+      request = parseCatalogProductWarningAcknowledgementReferenceRequest(input),
+      actual = parseCatalogProductWarningAcknowledgementReferenceRequest(r.request);
+    if (
+      canonicalizeRfc8785(request) !== canonicalizeRfc8785(actual) ||
+      r.profile !== "BrandMenuWarningAcknowledgementReferencesV1" ||
+      r.coverage !== "CompleteStoredReferences" ||
+      r.consistency !== "StatementSnapshot" ||
+      r.applicability !== "Unavailable" ||
+      typeof r.generation !== "string" ||
+      r.validUntil !== request.validUntil
+    )
+      return fail();
+    const keys = {
+      reviews: reviewFields,
+      placements: placementFields,
+      revisions: revisionFields,
+      releases: releaseFields,
+      periods: periodFields,
+    };
+    const values = Object.fromEntries(
+      families.map((family) => [
+        family,
+        array(r[family]).map((value) => ({
+          ...exact(value, keys[family]),
+          ...(family === "placements" ? {} : { precise: true }),
+        })),
+      ]),
+    );
+    const raw = {
+      generation: r.generation,
+      observedAt: r.observedAt,
+      counts: Object.fromEntries(
+        families.map((family) => [family, String(array(r[family]).length)]),
+      ),
+      ...values,
+    };
+    const rebuilt = buildProductWarningAcknowledgementMenuReferenceSourceSnapshot(
+      raw,
+      request,
+      now,
+    );
+    if (canonicalizeRfc8785(rebuilt) !== canonicalizeRfc8785(r)) return fail();
+    return rebuilt;
   } catch {
     return fail();
   }

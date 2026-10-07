@@ -9,6 +9,7 @@ import { RecipeWorkflowError } from "../application/recipe-service.js";
 import {
   parseRecipeReferenceSourceSnapshot,
   parseRecipeReferenceSourceInstant,
+  validateRecipeOptionPublicationActivation,
   type RecipeReferenceSourceRequest,
 } from "./recipe-reference-source.js";
 const fail = (): never => {
@@ -90,14 +91,21 @@ export function assessRecipeOptionConsumptionYields(
   request: RecipeReferenceSourceRequest,
   nowInput: string,
   activationInput: string,
+  originalPublicationClockValue?: unknown,
 ) {
   const now = parseRecipeReferenceSourceInstant(nowInput),
     activationAt = parseRecipeReferenceSourceInstant(activationInput),
     source = parseRecipeReferenceSourceSnapshot(metadata, request, now),
     pins = parseRecipeOptionConsumptionPins(value),
-    rows = yieldList(raw);
+    rows = yieldList(raw),
+    originalPublicationClock = validateRecipeOptionPublicationActivation(
+      request,
+      now,
+      activationAt,
+      originalPublicationClockValue,
+    );
   const expected = new Map(pins.map((p) => [p.versionReference, p.reference]));
-  if (activationAt < now || rows.length !== expected.size) return fail();
+  if (rows.length !== expected.size) return fail();
   for (const p of pins) if (expected.get(p.versionReference) !== p.reference) return fail();
   const yields = rows
     .map((v) => {
@@ -197,6 +205,7 @@ export function assessRecipeOptionConsumptionYields(
     yieldSourceDigest: "sha256:" + sha256Hex(canonicalizeRfc8785(yields)),
     assessedAt: now,
     activationAt,
+    ...(originalPublicationClock === undefined ? {} : { originalPublicationClock }),
     matches: Object.freeze(matches),
     yieldArithmetic: matches.every((m) => m.status === "ExactYieldQuantity")
       ? ("Pass" as const)

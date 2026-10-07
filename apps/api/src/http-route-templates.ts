@@ -20,8 +20,13 @@ import { customerDiningBindingRoutes } from "./customer-dining-binding.js";
 import { customerCartBindingRoutes } from "./customer-cart-binding.js";
 import { customerCartRoutes } from "./customer-cart.js";
 import { merchantCatalogRoutes } from "./merchant-catalog.js";
+import { merchantBrandAdministrationRoutes } from "./merchant-brand-administration-http.js";
+import { platformAuthenticationRoutes } from "./platform-authentication-http.js";
+import { platformTemplateAdministrationRoutes } from "./platform-template-administration-http.js";
+import { merchantBrandApplicationRoutes } from "./merchant-brand-application.js";
 
 export const apiRouteTemplates = Object.freeze([
+  ...merchantBrandApplicationRoutes,
   customerSessionBootstrapRoute,
   customerPickupCodeRoute,
   customerReceiptRoute,
@@ -50,9 +55,39 @@ export const apiRouteTemplates = Object.freeze([
   customerCheckoutDetailsCurrentRoute,
   customerCheckoutPolicyRoute,
   ...Object.values(merchantCatalogRoutes),
+  ...merchantBrandAdministrationRoutes,
+  ...platformAuthenticationRoutes,
+  ...platformTemplateAdministrationRoutes,
   "/merchant/login",
   "/merchant/callback",
   "/merchant/session",
+  "/merchant/store-configuration/ordinary",
+  "/merchant/store-configuration/ordinary-command",
+  "/merchant/store-configuration/ordinary-state",
+  "/merchant/store-configuration/ordinary-history",
+  "/merchant/store-setup",
+  "/merchant/store-setup/fee-context-classifications",
+  "/merchant/organization/brands/topology/draft/workspace",
+  "/merchant/organization/brands/topology/draft/save",
+  "/merchant/organization/brands/topology/draft/resolve",
+  "/merchant/tax-config/authoring/scope",
+  "/merchant/tax-config/authoring/classifications",
+  "/merchant/tax-config/authoring/simulate",
+  "/merchant/tax-config/authoring/current",
+  "/merchant/tax-config/authoring/roster",
+  "/merchant/tax-config/authoring/commands",
+  "/merchant/tax-config/authoring/resolve-original",
+  "/merchant/tax-config/authoring/tax-registrant",
+  "/merchant/tax-config/authoring/candidates/current",
+  "/merchant/tax-config/authoring/candidates/roster",
+  "/merchant/tax-config/authoring/candidates/commands",
+  "/merchant/tax-config/authoring/candidates/resolve-original",
+  "/merchant/tax-config/authoring/materials/compare",
+  "/merchant/tax-config/authoring/materials/current",
+  "/merchant/tax-config/authoring/materials/version",
+  "/merchant/tax-config/authoring/materials/roster",
+  "/merchant/tax-config/authoring/materials/commands",
+  "/merchant/tax-config/authoring/materials/resolve-original",
   "/merchant/dining/item-service",
   "/merchant/dining/serve",
   "/merchant/dining/order-progress",

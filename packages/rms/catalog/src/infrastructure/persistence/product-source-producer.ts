@@ -1,4 +1,8 @@
-import { buildCatalogProductPublicationEvent } from "../../contracts/product-publication-event.js";
+import {
+  buildCatalogProductPublicationEvent,
+  buildCatalogProductPublicationEventV2,
+} from "../../contracts/product-publication-event.js";
+import { parseProductPublicationVersionV2 } from "../../contracts/product-publication-v2.js";
 import {
   parseProductPublicationVersion,
   type ProductPublicationAction,
@@ -189,23 +193,54 @@ export async function appendProductPublicationCommitArtifacts(
   action: ProductPublicationAction,
   auditValue: unknown,
 ): Promise<void> {
-  const p = parseProductPublicationVersion(publicationValue),
+  return appendPublicationCommitArtifacts(
+    tx,
+    publicationValue,
+    aggregateValue,
+    action,
+    auditValue,
+    parseProductPublicationVersion,
+    buildCatalogProductPublicationEvent,
+  );
+}
+/** V2 artifacts retain its original command digest and actual execution instant. */
+export async function appendProductPublicationCommitArtifactsV2(
+  tx: ProductLifecycleTransaction,
+  publicationValue: unknown,
+  aggregateValue: unknown,
+  action: ProductPublicationAction,
+  auditValue: unknown,
+): Promise<void> {
+  return appendPublicationCommitArtifacts(
+    tx,
+    publicationValue,
+    aggregateValue,
+    action,
+    auditValue,
+    parseProductPublicationVersionV2,
+    buildCatalogProductPublicationEventV2,
+  );
+}
+async function appendPublicationCommitArtifacts(
+  tx: ProductLifecycleTransaction,
+  publicationValue: unknown,
+  aggregateValue: unknown,
+  action: ProductPublicationAction,
+  auditValue: unknown,
+  parsePublication: typeof parseProductPublicationVersion | typeof parseProductPublicationVersionV2,
+  buildEvent: typeof buildCatalogProductPublicationEvent,
+): Promise<void> {
+  const p = parsePublication(publicationValue),
     aggregate = parseProductAggregate(copyCategoryPersistenceValue(aggregateValue));
   // Validate complete identity before even allocating a source generation.
-  buildCatalogProductPublicationEvent(p, aggregate, action, auditValue, "1");
+  buildEvent(p, aggregate, action, auditValue, "1");
   const next = await tx.query<{ revision: string }>(
     "INSERT INTO rms_catalog.product_source_head(brand_id,source_revision) VALUES($1,1) ON CONFLICT(brand_id) DO UPDATE SET source_revision=rms_catalog.product_source_head.source_revision+1 WHERE rms_catalog.product_source_head.source_revision<9223372036854775807 RETURNING source_revision::text revision",
     [p.brandReference],
   );
   if (next.rowCount !== 1 || next.rows.length !== 1 || typeof next.rows[0]?.revision !== "string")
     return fail();
-  const artifacts = buildCatalogProductPublicationEvent(
-      p,
-      aggregate,
-      action,
-      auditValue,
-      next.rows[0].revision,
-    ),
+  const artifacts = buildEvent(p, aggregate, action, auditValue, next.rows[0].revision),
     envelope = artifacts.envelope;
   const receipt = await tx.query(
     "INSERT INTO rms_catalog.product_source_commit(operation_id,brand_id,source_revision,product_id,result_aggregate_version,event_id,event_type,snapshot_digest,occurred_at,actor_id,correlation_id,event_digest) SELECT operation_id,brand_id,$3,product_id,result_aggregate_version,$6,$7,$8,occurred_at,$10,$11,$12 FROM rms_catalog.product_operation_record WHERE operation_id=$1 AND brand_id=$2 AND product_id=$4 AND result_aggregate_version=$5 AND occurred_at=$9 AND action_code='ProductPublication' AND intent_digest=$13",

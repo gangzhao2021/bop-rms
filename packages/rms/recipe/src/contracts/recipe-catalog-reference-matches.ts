@@ -1,3 +1,8 @@
+import {
+  parseRecipeProductPublicationReferenceRequestV2,
+  type RecipeProductPublicationReferenceRequestV2,
+} from "./product-publication-reference-request-v2.js";
+import { parseRecipeProductPublicationReferenceSnapshotV2 } from "./recipe-reference-source.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { parseRecipeReference, parseRecipeDigest } from "../domain/recipe.js";
 import { RecipeWorkflowError } from "../application/recipe-service.js";
@@ -64,7 +69,19 @@ function refs(v: unknown) {
   if (new Set(result).size !== result.length) return fail();
   return Object.freeze(result.sort());
 }
+export interface RecipeProductPublicationReferenceTargetV2 extends Omit<
+  RecipeCatalogReferenceTarget,
+  "mappingProfile"
+> {
+  readonly mappingProfile: "KnownProductConfigurationV2";
+}
 function target(value: unknown): RecipeCatalogReferenceTarget {
+  return targetGraph(value, "KnownDraftBindings");
+}
+function targetGraph<Profile extends "KnownDraftBindings" | "KnownProductConfigurationV2">(
+  value: unknown,
+  profile: Profile,
+): Omit<RecipeCatalogReferenceTarget, "mappingProfile"> & { readonly mappingProfile: Profile } {
   const r = exact(value, [
     "mappingProfile",
     "catalogConfigurationDigest",
@@ -74,7 +91,7 @@ function target(value: unknown): RecipeCatalogReferenceTarget {
     "skuReferences",
     "bindings",
   ]);
-  if (r.mappingProfile !== "KnownDraftBindings") return fail();
+  if (r.mappingProfile !== profile) return fail();
   const skuReferences = refs(r.skuReferences);
   const bindings = items(r.bindings).map((v) => {
     const b = exact(v, [
@@ -101,7 +118,7 @@ function target(value: unknown): RecipeCatalogReferenceTarget {
   });
   if (new Set(bindings.map((b) => b.bindingReference)).size !== bindings.length) return fail();
   return Object.freeze({
-    mappingProfile: r.mappingProfile,
+    mappingProfile: profile,
     catalogConfigurationDigest: parseRecipeDigest(r.catalogConfigurationDigest),
     productReference: parseRecipeReference(r.productReference),
     versionReference: parseRecipeReference(r.versionReference),
@@ -139,10 +156,18 @@ export interface RecipeCatalogUnresolvedContext {
 }
 /** Recipe owns stored SKU/Option reference semantics. Catalog supplies a validated individual
  * Draft graph through this closed public target; this function supplies no authorization or sale eligibility. */
-function matchGraph(
-  request: RecipeReferenceSourceRequest,
-  t: RecipeCatalogReferenceTarget,
-  source: RecipeReferenceSourceSnapshot,
+function matchGraph<
+  Request extends RecipeReferenceSourceRequest | RecipeProductPublicationReferenceRequestV2,
+  Target extends RecipeCatalogReferenceTarget | RecipeProductPublicationReferenceTargetV2,
+  Coverage extends "KnownDraftBindingGraph" | "KnownProductConfigurationGraph",
+>(
+  request: Request,
+  t: Target,
+  source: Pick<
+    RecipeReferenceSourceSnapshot,
+    "recipes" | "versions" | "bindings" | "modifiers" | "generation" | "digest" | "observedAt"
+  >,
+  coverage: Coverage,
 ) {
   const recipes = new Map(source.recipes.map((r) => [r.recipeReference, r])),
     versions = new Map(source.versions.map((v) => [v.recipeVersionReference, v])),
@@ -303,7 +328,7 @@ function matchGraph(
   const body = {
     request,
     target: t,
-    coverage: "KnownDraftBindingGraph" as const,
+    coverage,
     recipeReferenceCoverage: "CompleteStoredGraph" as const,
     applicability: "Unavailable" as const,
     recipeResolution: "Unavailable" as const,
@@ -342,7 +367,7 @@ export function matchRecipeCatalogReferenceGraphs(input: {
       Array.from({ length: input.targets.length }, (_, i) => {
         const d = Object.getOwnPropertyDescriptor(input.targets, String(i));
         if (!d?.enumerable || !("value" in d)) return fail();
-        const result = matchGraph(request, target(d.value), source);
+        const result = matchGraph(request, target(d.value), source, "KnownDraftBindingGraph");
         rows += result.expandedRows;
         if (rows > recipeCatalogReferenceMatchMaximumRows) return fail();
         return result;
@@ -360,4 +385,41 @@ export function matchRecipeCatalogReferences(input: {
 }) {
   const result = matchRecipeCatalogReferenceGraphs({ ...input, targets: [input.target] })[0];
   return result ?? fail();
+}
+
+/** Publication reference graph matching preserves the full incoming binding and
+ * every retained Recipe version; it does not resolve current consumption. */
+export function matchRecipeProductPublicationReferenceGraphsV2(input: {
+  readonly request: RecipeProductPublicationReferenceRequestV2;
+  readonly targets: unknown;
+  readonly source: unknown;
+  readonly now: string;
+}) {
+  try {
+    const request = parseRecipeProductPublicationReferenceRequestV2(input.request),
+      source = parseRecipeProductPublicationReferenceSnapshotV2(input.source, request, input.now);
+    if (
+      !Array.isArray(input.targets) ||
+      Object.getPrototypeOf(input.targets) !== Array.prototype ||
+      input.targets.length === 0 ||
+      input.targets.length > 1001 ||
+      Reflect.ownKeys(input.targets).length !== input.targets.length + 1
+    )
+      return fail();
+    let rows = 0;
+    return Object.freeze(
+      Array.from({ length: input.targets.length }, (_, i) => {
+        const descriptor = Object.getOwnPropertyDescriptor(input.targets, String(i));
+        if (!descriptor?.enumerable || !("value" in descriptor)) return fail();
+        const target = targetGraph(descriptor.value, "KnownProductConfigurationV2");
+        if (target.productReference !== request.productReference) return fail();
+        const result = matchGraph(request, target, source, "KnownProductConfigurationGraph");
+        rows += result.expandedRows;
+        if (rows > recipeCatalogReferenceMatchMaximumRows) return fail();
+        return result;
+      }),
+    );
+  } catch {
+    return fail();
+  }
 }

@@ -1,12 +1,16 @@
+import { createMerchantBrandNavigationRuntime } from "./merchant-brand-navigation-runtime.js";
 import {
   allowsProductListNavigation,
   type MerchantProductListNavigationAuthority,
 } from "./merchant-product-list-navigation.js";
+import { createMerchantProductListNavigationRuntime } from "./merchant-product-list-navigation-runtime.js";
+import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import { createMerchantServicePauseProof } from "./merchant-service-pause-proof.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   createPostgresCurrentStorePublicationProof,
   createPostgresStoreOperatingStatusReader,
+  createStoreConfigurationPublicationHash,
 } from "@rms/store";
 import { createPostgresCurrentPermissionPolicySource } from "@bop/permission";
 import {
@@ -16,6 +20,8 @@ import {
   type AuthenticationSession,
   type BrowserSessionSelection,
   type BrowserSessionServiceOptions,
+  parseCanonicalInstant,
+  readClosedRecord,
 } from "@bop/identity";
 import {
   createPostgresCurrentMembershipSource,
@@ -45,10 +51,15 @@ export interface PersistentMerchantBffOptions {
   readonly transactions: Persistence["transactions"];
   readonly currentActor: Persistence["currentActor"];
   readonly now: () => string;
-  readonly catalogProductNavigation?: MerchantProductListNavigationAuthority;
+  readonly currentBrandNavigation?: true;
+  readonly catalogProductNavigation?:
+    MerchantProductListNavigationAuthority | { readonly currentRuntime: true };
   readonly publication: Pick<
     Parameters<typeof createPostgresCurrentStorePublicationProof>[0],
-    "configurationType" | "purposeCode" | "requiredLiveGateRequirementCodes"
+    | "configurationType"
+    | "purposeCode"
+    | "requiredLiveGateRequirementCodes"
+    | "requiredValidationCheckCodes"
   >;
   readonly validateAssociation: Parameters<
     typeof createMerchantSessionSelection
@@ -67,17 +78,114 @@ export interface PersistentMerchantBffOptions {
 export function createPersistentMerchantBffService(
   options: PersistentMerchantBffOptions,
 ): MerchantBffService {
+  const now = options.now.bind(options),
+    currentActor = options.currentActor.bind(options),
+    validateAssociation = options.validateAssociation.bind(options),
+    navigation = options.catalogProductNavigation;
+  if (options.currentBrandNavigation !== undefined && options.currentBrandNavigation !== true)
+    throw new Error("MERCHANT_BFF_UNAVAILABLE");
+  const currentBrandNavigation = options.currentBrandNavigation === true;
+  let currentNavigation = false;
+  let legacyNavigation: MerchantProductListNavigationAuthority | undefined;
+  if (navigation !== undefined) {
+    if (Object.hasOwn(navigation, "currentRuntime")) {
+      const mode = readClosedRecord(navigation, ["currentRuntime"]);
+      if (mode.currentRuntime !== true) throw new Error("MERCHANT_BFF_UNAVAILABLE");
+      currentNavigation = true;
+    } else {
+      if (
+        !("holdUntilTransactionCompletes" in navigation) ||
+        typeof navigation.holdUntilTransactionCompletes !== "function"
+      )
+        throw new Error("MERCHANT_BFF_UNAVAILABLE");
+      legacyNavigation = Object.freeze({
+        holdUntilTransactionCompletes: navigation.holdUntilTransactionCompletes.bind(navigation),
+      });
+    }
+  }
   const configuration = options.identity.configuration;
   const selectedContext = createMerchantSelectedContext({
-    now: options.now,
-    validateSelection: async (...args) => (await options.validateAssociation(...args)) === true,
+    now,
+    validateSelection: async (...args) => (await validateAssociation(...args)) === true,
   });
   const currentSession = createPostgresCurrentBrowserSessionSource({
     hasher: options.identity.hasher,
     now: options.now,
     currentActor: options.currentActor,
   });
-  async function workspace(tx: Transaction, session: AuthenticationSession) {
+  interface WorkspaceHold {
+    readonly transaction: Parameters<
+      ReturnType<typeof createMerchantCategoryTransactions>["registerBeforeCommit"]
+    >[0];
+    readonly observedAt: string;
+    readonly validUntil: string;
+    readonly registerBeforeCommit: ReturnType<
+      typeof createMerchantCategoryTransactions
+    >["registerBeforeCommit"];
+    readonly finalizers: (() => void)[];
+  }
+  async function workspace(
+    tx: Transaction,
+    session: AuthenticationSession,
+    finalizers: (() => void)[] = [],
+  ) {
+    if (!currentNavigation && !currentBrandNavigation) return workspaceCurrent(tx, session);
+    const observedAt = parseCanonicalInstant(now()),
+      validUntil = new Date(Date.parse(observedAt) + 5000).toISOString(),
+      borrowed: PersistentMerchantBffOptions["transactions"] = {
+        async run(work) {
+          return work(tx);
+        },
+      },
+      host = createMerchantCategoryTransactions(borrowed);
+    return host.transactions.run(async (actual) => {
+      const query = actual.query;
+      let latest: string = observedAt,
+        failed = false,
+        ready = false;
+      const check = () => {
+        try {
+          const at = parseCanonicalInstant(now());
+          if (failed || actual.query !== query || at < latest || at >= validUntil)
+            throw new Error("MERCHANT_BFF_UNAVAILABLE");
+          latest = at;
+        } catch {
+          failed = true;
+          throw new Error("MERCHANT_BFF_UNAVAILABLE");
+        }
+      };
+      await host.registerBeforeCommit(
+        actual,
+        async () => {
+          if (!ready) throw new Error("MERCHANT_BFF_UNAVAILABLE");
+          check();
+        },
+        check,
+      );
+      try {
+        check();
+        finalizers.push(check);
+        const result = await workspaceCurrent(actual, session, {
+          transaction: actual,
+          observedAt,
+          validUntil,
+          registerBeforeCommit: host.registerBeforeCommit,
+          finalizers,
+        });
+        check();
+        ready = true;
+        return result;
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    });
+  }
+  async function workspaceCurrent(
+    tx: Transaction,
+    session: AuthenticationSession,
+    hold?: WorkspaceHold,
+  ) {
     const selected = await selectedContext(tx, session);
     const context = selected.context;
     const actor = context.actor.actorReference;
@@ -105,6 +213,11 @@ export function createPersistentMerchantBffService(
       | Awaited<ReturnType<ReturnType<typeof createPostgresCurrentStorePublicationProof>>>
       | undefined;
     const digest = (value: unknown) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
+    const setupSnapshotReferences = {
+      canonicalize: canonicalizeRfc8785,
+      hashIntent: (canonical: string) => "sha256:" + sha256Hex(canonical),
+    };
+    const publicationHash = createStoreConfigurationPublicationHash(setupSnapshotReferences);
     const equalContent = (a: unknown, b: unknown) =>
       canonicalizeRfc8785(a) === canonicalizeRfc8785(b);
     const operating = await createPostgresStoreOperatingStatusReader({
@@ -120,7 +233,8 @@ export function createPersistentMerchantBffService(
           storeReference: store.storeReference,
           configurationReference: candidate.configurationReference,
           authorize: async () => allowed("merchant.access"),
-          hashContent: digest,
+          hashContent: publicationHash,
+          setupSnapshotReferences,
         })(transaction, at);
         return {
           contentDigest: published.contentDigest,
@@ -157,20 +271,85 @@ export function createPersistentMerchantBffService(
       throw new Error("MERCHANT_BFF_UNAVAILABLE");
     const navigation = [];
     for (const item of result.navigation) {
-      if (item.screenId === "CAT-PRODUCT-LIST") {
+      if (item.screenId === "ORG-BRAND-DETAIL") {
+        if (item.href !== "/app/organization/brands/" + context.brand.brandReference)
+          throw new Error("MERCHANT_BFF_UNAVAILABLE");
+        // Only the current owning admission below may emit this entry.
+        continue;
+      }
+      if (item.screenId === "CAT-OPTIONSET-LIST") {
+        // This entry has no legacy authority fallback: actual Option IAM and
+        // owning Feature admission must remain held through this COMMIT.
         if (
-          await allowsProductListNavigation(
-            tx,
+          currentNavigation &&
+          hold &&
+          (await createMerchantProductListNavigationRuntime({
+            session,
             selected,
-            session.sessionReference,
-            options.catalogProductNavigation,
-          )
+            now,
+            currentActor,
+            validateAssociation,
+            ...hold,
+            target: "OptionSet",
+          }).allows())
         )
           navigation.push(item);
         continue;
       }
+      if (item.screenId === "CAT-PRODUCT-LIST") {
+        const show =
+          currentNavigation && hold
+            ? await createMerchantProductListNavigationRuntime({
+                session,
+                selected,
+                now,
+                currentActor,
+                validateAssociation,
+                ...hold,
+              }).allows()
+            : await allowsProductListNavigation(
+                tx,
+                selected,
+                session.sessionReference,
+                legacyNavigation,
+              );
+        if (show) navigation.push(item);
+        continue;
+      }
       if (item.permission === "merchant.access" || (await allowed(item.permission)))
         navigation.push(item);
+    }
+    if (currentBrandNavigation) {
+      if (!hold) throw new Error("MERCHANT_BFF_UNAVAILABLE");
+      const runtime = createMerchantBrandNavigationRuntime({
+        session,
+        selected,
+        now,
+        currentActor,
+        validateAssociation,
+        transaction: hold.transaction,
+        observedAt: hold.observedAt,
+        validUntil: hold.validUntil,
+        registerBeforeCommit: hold.registerBeforeCommit,
+      });
+      const entry = await runtime.read();
+      hold.finalizers.push(() => {
+        runtime.assertFinalized();
+      });
+      if (entry) {
+        if (
+          entry.screenId !== "ORG-BRAND-DETAIL" ||
+          entry.href !== "/app/organization/brands/" + context.brand.brandReference
+        )
+          throw new Error("MERCHANT_BFF_UNAVAILABLE");
+        navigation.push(
+          Object.freeze({
+            ...entry,
+            label: "Brand administration",
+            permission: "organization.manage",
+          }),
+        );
+      }
     }
     const selectedScope = Object.freeze({
       brandLabel: context.brand.displayName,
@@ -277,16 +456,19 @@ export function createPersistentMerchantBffService(
     logout: (cookie) => base.logout(cookie),
     async bootstrap(cookie) {
       const bootstrap = await base.bootstrap(cookie);
-      return options.transactions.run(async (tx) => {
+      const finalizers: (() => void)[] = [];
+      const result = await options.transactions.run(async (tx) => {
         const session = await currentSession(tx, cookie);
         if (session.sessionReference !== bootstrap.session.sessionReference)
           throw new Error("MERCHANT_BFF_UNAVAILABLE");
         return Object.freeze({
           session,
           csrf: bootstrap.csrf,
-          workspace: await workspace(tx, session),
+          workspace: await workspace(tx, session, finalizers),
         });
       });
+      for (const finalize of finalizers) finalize();
+      return result;
     },
     async switchStore(input) {
       try {
@@ -308,11 +490,13 @@ export function createPersistentMerchantBffService(
           validateAssociation: options.validateAssociation,
         });
         let nextWorkspace: MerchantWorkspaceSnapshot | undefined;
+        const finalizers: (() => void)[] = [];
         const rotation = service(async (tx, record) => {
           await bind(tx, record);
-          nextWorkspace = await workspace(tx, record.session);
+          nextWorkspace = await workspace(tx, record.session, finalizers);
         });
         const result = await rotation.rotate(input.sessionCookie, "StoreContextElevation");
+        for (const finalize of finalizers) finalize();
         if (!nextWorkspace) throw new Error("MERCHANT_BFF_UNAVAILABLE");
         return Object.freeze({ cookie: result.cookie, workspace: nextWorkspace });
       } catch {

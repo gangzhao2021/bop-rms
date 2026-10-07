@@ -409,6 +409,22 @@ export const eventConsumerContracts = defineEventConsumerContracts([
       "replace_promotion_admin_projection",
     ),
   ),
+  contract(
+    "pricing.tax-config-candidate-history",
+    "@rms/pricing",
+    "TaxConfigCandidatePrepared",
+    "store",
+    "observe_tax_config_candidate_history",
+  ),
+  ...["TaxConfigMaterialCreated", "TaxConfigMaterialReplaced"].map((eventType) =>
+    contract(
+      "pricing.tax-config-material-history",
+      "@rms/pricing",
+      eventType,
+      "store",
+      "observe_tax_config_material_history",
+    ),
+  ),
   ...["TaxConfigDraftCreated", "TaxConfigDraftReplaced", "TaxConfigPublished"].map((eventType) =>
     contract(
       "pricing.tax-config-admin-projection",
@@ -432,6 +448,20 @@ export const eventConsumerContracts = defineEventConsumerContracts([
       "replace_price_book_admin_projection",
     ),
   ),
+  ...[
+    "OptionPriceDraftCreated",
+    "OptionPriceDraftReplaced",
+    "OptionPriceVersionPublished",
+    "OptionPriceArchived",
+  ].map((eventType) =>
+    contract(
+      "pricing.option-price-authoring-history",
+      "@rms/pricing",
+      eventType,
+      "brand",
+      "observe_option_price_authoring_history",
+    ),
+  ),
   contract(
     "catalog.option-set-draft-current",
     "@rms/catalog",
@@ -453,12 +483,42 @@ export const eventConsumerContracts = defineEventConsumerContracts([
     "brand",
     "invalidate_option_set_draft_observation",
   ),
+  ...["OptionSetReviewContentRecorded", "OptionSetPublicationReleaseRecorded"].map((eventType) =>
+    contract(
+      "catalog.option-set-record-history",
+      "@rms/catalog",
+      eventType,
+      "brand",
+      "observe_option_set_record_history",
+    ),
+  ),
   contract(
     "catalog.content-registry-current",
     "@rms/catalog",
     "ProductContentRegistryVersionRecorded",
     "brand",
     "invalidate_content_registry_observation",
+  ),
+  contract(
+    "catalog.product-publication-warning-acknowledgement",
+    "@rms/catalog",
+    "ProductPublicationWarningsAcknowledged",
+    "brand",
+    "observe_independent_warning_acknowledgement",
+  ),
+  contract(
+    "catalog.tax-classification-registry-current",
+    "@rms/catalog",
+    "ProductTaxClassificationRegistryVersionRecorded",
+    "brand",
+    "invalidate_tax_classification_registry_observation",
+  ),
+  contract(
+    "catalog.selling-unit-registry-current",
+    "@rms/catalog",
+    "SellingUnitRegistryVersionRecorded",
+    "brand",
+    "invalidate_selling_unit_registry_observation",
   ),
   ...[
     "ProductCreated",

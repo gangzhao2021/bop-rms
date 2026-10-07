@@ -1,3 +1,17 @@
+import { parseInventoryReference } from "../../domain/inventory-item.js";
+import {
+  parseInventoryProductPublicationReferenceRequestV2,
+  type InventoryProductPublicationReferenceRequestV2,
+} from "../../contracts/product-publication-reference-request-v2.js";
+import {
+  buildInventoryProductPublicationSkuMappingReferenceSnapshotV2,
+  inventoryProductPublicationSkuMappingReferenceFieldsV2,
+  type InventoryProductPublicationSkuMappingReferenceSnapshotV2,
+} from "../../contracts/sku-mapping-reference-source.js";
+import {
+  createPostgresInventoryProductPublicationConfigurationReferenceSourceV2,
+  type InventoryProductPublicationConfigurationReferenceOptionsV2,
+} from "./configuration-reference-source-store.js";
 import { InventoryItemError, parseInventoryInstant } from "../../domain/inventory-item.js";
 import {
   inventoryConfigurationReferencePermissions,
@@ -120,6 +134,143 @@ export function createPostgresInventorySkuMappingReferenceSourceStore(
           throw error;
         return fail();
       }
+    },
+  });
+}
+
+export interface InventoryProductPublicationSkuMappingReferenceOptionsV2 extends Omit<
+  InventoryProductPublicationConfigurationReferenceOptionsV2,
+  "authority"
+> {
+  readonly authority: {
+    holdUntilTransactionCompletes(
+      tx: InventoryConfigurationReferenceTransaction,
+      input: {
+        readonly tenantReference: string;
+        readonly actorKind: "User" | "System";
+        readonly request: InventoryProductPublicationReferenceRequestV2;
+        readonly requiredPermissions: typeof inventoryConfigurationReferencePermissions;
+        readonly requiredScope: "FullBrandScope";
+        readonly requiredFields: typeof inventoryProductPublicationSkuMappingReferenceFieldsV2;
+        readonly observedAt: string;
+      },
+    ): Promise<void>;
+  };
+}
+/** The fixed V2 configuration holder supplies the same transaction, barrier,
+ * poison state and original commit deadline to the mapping extension. */
+export function createPostgresInventoryProductPublicationSkuMappingReferenceSourceV2(
+  options: InventoryProductPublicationSkuMappingReferenceOptionsV2,
+) {
+  const tenant = parseInventoryReference(options.tenantReference),
+    brand = parseInventoryReference(options.brandReference),
+    actor = parseInventoryReference(options.actorReference),
+    kind = options.actorKind;
+  if (
+    (kind !== "User" && kind !== "System") ||
+    typeof options.clock?.now !== "function" ||
+    typeof options.transactions?.run !== "function" ||
+    typeof options.authority?.holdUntilTransactionCompletes !== "function" ||
+    typeof options.registerBeforeCommit !== "function"
+  )
+    return fail();
+  const now = options.clock.now.bind(options.clock),
+    run = options.transactions.run.bind(options.transactions),
+    authority = options.authority.holdUntilTransactionCompletes.bind(options.authority),
+    register = options.registerBeforeCommit.bind(options);
+  const base = createPostgresInventoryProductPublicationConfigurationReferenceSourceV2({
+    tenantReference: tenant,
+    brandReference: brand,
+    actorReference: actor,
+    actorKind: kind,
+    clock: { now },
+    transactions: { run },
+    registerBeforeCommit: register,
+    authority: {
+      holdUntilTransactionCompletes: (tx, input) =>
+        authority(
+          tx,
+          Object.freeze({
+            ...input,
+            requiredFields: inventoryProductPublicationSkuMappingReferenceFieldsV2,
+          }),
+        ),
+    },
+  });
+  return Object.freeze({
+    async withCurrentSnapshot<T>(
+      input: InventoryProductPublicationReferenceRequestV2,
+      work: (
+        source: InventoryProductPublicationSkuMappingReferenceSnapshotV2,
+        tx: InventoryConfigurationReferenceTransaction,
+      ) => Promise<T>,
+    ): Promise<T> {
+      const request = parseInventoryProductPublicationReferenceRequestV2(input);
+      if (typeof work !== "function") return fail();
+      return base.withCurrentSnapshot(request, async (configuration, tx) => {
+        const originalQuery = tx.query,
+          query = originalQuery.bind(tx);
+        let latest = configuration.observedAt;
+        const check = () => {
+          const at = parseInventoryInstant(now());
+          if (tx.query !== originalQuery || at < latest || at >= request.validUntil) return fail();
+          latest = at;
+          return at;
+        };
+        const authorize = async () => {
+          if (
+            (await authority(
+              tx,
+              Object.freeze({
+                tenantReference: tenant,
+                actorKind: kind,
+                request,
+                requiredPermissions: inventoryConfigurationReferencePermissions,
+                requiredFields: inventoryProductPublicationSkuMappingReferenceFieldsV2,
+                requiredScope: "FullBrandScope",
+                observedAt: check(),
+              }),
+            )) !== undefined
+          )
+            return fail();
+          check();
+        };
+        check();
+        const result = await query(select, [tenant, brand]);
+        check();
+        const rows = Object.getOwnPropertyDescriptor(result, "rows");
+        if (
+          !rows ||
+          !("value" in rows) ||
+          !Array.isArray(rows.value) ||
+          Object.getPrototypeOf(rows.value) !== Array.prototype ||
+          rows.value.length !== 1 ||
+          Reflect.ownKeys(rows.value).length !== 2
+        )
+          return fail();
+        const entry = Object.getOwnPropertyDescriptor(rows.value, "0");
+        if (
+          !entry?.enumerable ||
+          !("value" in entry) ||
+          !entry.value ||
+          Object.getPrototypeOf(entry.value) !== Object.prototype ||
+          Reflect.ownKeys(entry.value).length !== 1
+        )
+          return fail();
+        const source = Object.getOwnPropertyDescriptor(entry.value, "source");
+        if (!source?.enumerable || !("value" in source)) return fail();
+        const snapshot = buildInventoryProductPublicationSkuMappingReferenceSnapshotV2(
+          source.value,
+          configuration,
+          request,
+          check(),
+        );
+        await authorize();
+        const value = await work(snapshot, tx);
+        check();
+        await authorize();
+        return value;
+      });
     },
   });
 }

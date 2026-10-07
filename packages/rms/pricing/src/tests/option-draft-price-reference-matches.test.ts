@@ -157,3 +157,54 @@ it("mutating delivered caller pins cannot change immutable output", () => {
   expect(r.references[0]?.optionReference).toBe(id(6));
   expect(Object.isFrozen(r.references[0])).toBe(true);
 });
+
+const originalClock = () => ({
+  profile: "OptionPublicationOriginalClockV1",
+  operationReference: request.operationReference,
+  catalogIntentDigest: request.catalogIntentDigest,
+  observedAt: at,
+  validUntil: "2026-09-29T12:00:05.000Z",
+});
+it("accepts immediate original activation during a forward current read without changing actual effective checks", () => {
+  const now = "2026-09-29T12:00:01.000Z";
+  const value = match(target(), snapshot(), request, now, at, originalClock());
+  expect(value.references[0]?.status).toBe("CurrentPublishedMetadata");
+  expect(value.originalPublicationClock).toEqual(originalClock());
+  expect(value.activationAt).toBe(at);
+  expect(() => match(target(), snapshot(), request, now, at)).toThrow();
+  const expired = snapshot([row({}, { effectiveUntil: "2026-09-29T12:00:00.500Z" })]);
+  expect(match(target(), expired, request, now, at, originalClock()).references[0]?.status).toBe(
+    "NotEffective",
+  );
+});
+it.each([
+  { profile: "Other" },
+  { operationReference: id(99) },
+  { catalogIntentDigest: "sha256:" + "f".repeat(64) },
+  { observedAt: "2026-09-29T12:00:02.000Z" },
+  { validUntil: "2026-09-29T12:00:01.000Z", observedAt: "2026-09-29T11:59:56.000Z" },
+  { validUntil: "2026-09-29T12:00:05.001Z" },
+  { extra: true },
+])("rejects rebound or invalid original publication clock %#", (patch) => {
+  expect(() =>
+    match(target(), snapshot(), request, "2026-09-29T12:00:01.000Z", at, {
+      ...originalClock(),
+      ...patch,
+    }),
+  ).toThrow();
+});
+it("refuses clock accessors without invoking them and keeps original expiry exclusive", () => {
+  const getter = vi.fn(() => at);
+  const clock = Object.defineProperty(originalClock(), "observedAt", {
+    enumerable: true,
+    get: getter,
+  });
+  expect(() => match(target(), snapshot(), request, at, at, clock)).toThrow();
+  expect(getter).not.toHaveBeenCalled();
+  expect(() =>
+    match(target(), snapshot(), request, "2026-09-29T12:00:05.000Z", at, originalClock()),
+  ).toThrow();
+  expect(() =>
+    match(target(), snapshot(), request, at, "2026-09-29T11:59:59.999Z", originalClock()),
+  ).toThrow();
+});

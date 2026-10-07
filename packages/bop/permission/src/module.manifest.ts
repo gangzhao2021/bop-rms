@@ -33,6 +33,10 @@ const moduleManifestInput = {
   ownedDatabase: {
     schema: "bop_permission",
     tables: [
+      "platform_permission_policy_head",
+      "platform_permission_policy_revision",
+      "system_media_image_promotion_authorization",
+      "system_media_image_promotion_authorization_decision",
       "role_administration_decision",
       "role_administration_operation",
       "role_administration_permission",

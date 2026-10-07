@@ -1,4 +1,6 @@
+import type { ProductPublicationManagementViewV2 } from "./product-publication-management-client-v2.js";
 import { ProductPublicationForm } from "./ProductPublicationForm.js";
+import { ProductOptionPrices } from "./ProductOptionPrices.js";
 import { ProductCompleteDraftForm } from "./ProductCompleteDraftForm.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useState, useRef, type FormEvent } from "react";
@@ -38,9 +40,20 @@ export function ProductCurrentContent({
   csrf,
   id,
   initialRevision,
-}: Props & { readonly id: string | undefined; readonly initialRevision: string }) {
+  onConfirmed,
+  onManagement,
+}: Props & {
+  readonly id: string | undefined;
+  readonly initialRevision: string;
+  readonly onConfirmed?: (revision: number) => void;
+  readonly onManagement?: (view: ProductPublicationManagementViewV2 | null) => void;
+}) {
   const client = useMemo(() => createProductEditorClient(), []),
     capability = useMemo(() => createStoreCapabilityClient(), []);
+  const [publicationRefresh, setPublicationRefresh] = useState(0);
+  const [confirmedRevision, setConfirmedRevision] = useState<number | null>(null);
+  const [publicationBlocked, setPublicationBlocked] = useState(false),
+    [draftBlocked, setDraftBlocked] = useState(false);
   const [revision, setRevision] = useState(initialRevision),
     [request, setRequest] = useState({ revision: initialRevision, refresh: 0 });
   const key = JSON.stringify([id, storeReference, csrf, request]),
@@ -134,6 +147,12 @@ export function ProductCurrentContent({
       window.removeEventListener("online", online);
     };
   }, [capability, client, csrf, id, key, request.revision, storeReference]);
+  const confirmed = (next: number, receiptRevision = next) => {
+    setConfirmedRevision(receiptRevision);
+    setRevision(String(next));
+    setRequest((previous) => ({ revision: String(next), refresh: previous.refresh + 1 }));
+    onConfirmed?.(next);
+  };
   const current = state.key === key ? state : { kind: "Loading" as const, key };
   const summary = useRef<HTMLDivElement>(null),
     focusResult = useRef(false);
@@ -176,11 +195,11 @@ export function ProductCurrentContent({
     ],
     Unavailable: [
       "Current content unavailable",
-      "Current records could not be read. Check the revision in Products and try again.",
+      "Current records could not be read. Return to Products and reopen this Product at its current revision; any original publication request is retained for retry.",
     ],
     Stale: [
       "Current content stale",
-      "This observation has expired or the Product revision changed. Refresh using the current revision.",
+      "This observation has expired or the Product revision changed. Return to Products and reopen the current revision to restore any original publication request.",
     ],
     ScopeChanged: [
       "Current content scope changed",
@@ -190,6 +209,9 @@ export function ProductCurrentContent({
   return (
     <section className="product-current-content" aria-labelledby="product-current-title">
       <h2 id="product-current-title">Current Product content</h2>
+      {confirmedRevision !== null && (
+        <p role="status">Product change confirmed · Revision {confirmedRevision}.</p>
+      )}
       <form className="product-history-tools" onSubmit={submit}>
         <label htmlFor="product-content-revision">Current content revision</label>
         <input
@@ -229,11 +251,35 @@ export function ProductCurrentContent({
           productReference={id}
           storeReference={storeReference}
           csrf={csrf}
+          blocked={draftBlocked}
+          onBlockedChange={setPublicationBlocked}
+          onConfirmed={(next, receiptRevision) => {
+            setPublicationRefresh((previous) => previous + 1);
+            confirmed(next, receiptRevision);
+          }}
+          onResolved={(next) => {
+            setConfirmedRevision(null);
+            setRevision(String(next));
+            setRequest((previous) => ({ revision: String(next), refresh: previous.refresh + 1 }));
+            setPublicationRefresh((previous) => previous + 1);
+          }}
+          {...(onManagement ? { onManagement } : {})}
         />
       )}
       {id && (
         <ProductCompleteDraftForm
-          key={JSON.stringify([id, storeReference, csrf])}
+          key={JSON.stringify([id, storeReference, csrf, publicationRefresh])}
+          entry={current.kind === "Found" ? current.view : null}
+          productReference={id}
+          storeReference={storeReference}
+          csrf={csrf}
+          blocked={publicationBlocked}
+          onBlockedChange={setDraftBlocked}
+          onConfirmed={confirmed}
+        />
+      )}
+      {id && (
+        <ProductOptionPrices
           entry={current.kind === "Found" ? current.view : null}
           productReference={id}
           storeReference={storeReference}

@@ -9,6 +9,7 @@ import {
 import { parseInventoryUnitConversion } from "../domain/inventory-item-snapshot.js";
 import {
   parseInventoryConfigurationReferenceSnapshot,
+  parseInventoryOptionPublicationOriginalClock,
   type InventoryConfigurationReferenceRequest,
 } from "./configuration-reference-source.js";
 const fail = (): never => {
@@ -97,14 +98,24 @@ export function assessInventoryOptionConsumptionUnits(
   request: InventoryConfigurationReferenceRequest,
   nowInput: string,
   activationInput: string,
+  originalPublicationClockInput?: unknown,
 ) {
   const now = parseInventoryInstant(nowInput),
     activationAt = parseInventoryInstant(activationInput),
+    originalPublicationClock =
+      originalPublicationClockInput === undefined
+        ? undefined
+        : parseInventoryOptionPublicationOriginalClock(
+            originalPublicationClockInput,
+            request,
+            nowInput,
+          ),
     source = parseInventoryConfigurationReferenceSnapshot(metadata, request, now),
     pins = parseInventoryOptionConsumptionPins(value),
     rows = unitList(raw),
     expected = new Map(pins.map((p) => [p.reference, p.versionReference]));
-  if (activationAt < now || rows.length !== expected.size) return fail();
+  if (activationAt < (originalPublicationClock?.observedAt ?? now) || rows.length !== expected.size)
+    return fail();
   for (const p of pins) if (expected.get(p.reference) !== p.versionReference) return fail();
   const units = rows.map((v) => {
     const r = unitRecord(v, [
@@ -232,6 +243,7 @@ export function assessInventoryOptionConsumptionUnits(
     profile: "InventoryOptionConsumptionUnitsV1" as const,
     tenantReference: request.tenantReference,
     brandReference: request.brandReference,
+    ...(originalPublicationClock ? { originalPublicationClock } : {}),
     operationReference: request.operationReference,
     catalogIntentDigest: request.catalogIntentDigest,
     ownerSourceDigest: source.digest,

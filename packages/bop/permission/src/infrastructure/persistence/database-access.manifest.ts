@@ -3,6 +3,38 @@ const databaseAccessManifestInput = {
   module: { moduleName: "permission", packageName: "@bop/permission", layer: "BOP" },
   tables: [
     {
+      table: "platform_permission_policy_head",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "platform_permission_policy_revision",
+      classification: "aggregate-child-entity",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "system_media_image_promotion_authorization",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "system_media_image_promotion_authorization_decision",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "role_administration_decision",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@bop/permission" },
@@ -83,7 +115,335 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "sensitive_personal"],
     },
   ],
-  accesses: [],
+  accesses: [
+    {
+      id: "approved-workforce-policy-store.read.policy_state",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "policy_state" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/approved-workforce-policy-store.ts",
+    },
+    {
+      id: "approved-workforce-policy-store.read.role",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/approved-workforce-policy-store.ts",
+    },
+    {
+      id: "approved-workforce-policy-store.read.role_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_assignment" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/approved-workforce-policy-store.ts",
+    },
+    {
+      id: "approved-workforce-policy-store.read.permission_grant",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_grant" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/approved-workforce-policy-store.ts",
+    },
+    {
+      id: "approved-workforce-policy-store.read.permission_override",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_override" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/approved-workforce-policy-store.ts",
+    },
+    {
+      id: "approved-workforce-policy-store.read.permission_definition",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_definition" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/approved-workforce-policy-store.ts",
+    },
+    {
+      id: "approved-workforce-policy-store.write.policy_state",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "policy_state" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/approved-workforce-policy-store.ts",
+    },
+    {
+      id: "approved-workforce-policy-store.write.role",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/approved-workforce-policy-store.ts",
+    },
+    {
+      id: "approved-workforce-policy-store.write.role_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_assignment" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/approved-workforce-policy-store.ts",
+    },
+    {
+      id: "approved-workforce-policy-store.write.permission_grant",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_grant" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/approved-workforce-policy-store.ts",
+    },
+    {
+      id: "brand-initial-policy-store.read.policy_state",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "policy_state" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-initial-policy-store.ts",
+    },
+    {
+      id: "brand-initial-policy-store.read.role",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-initial-policy-store.ts",
+    },
+    {
+      id: "brand-initial-policy-store.read.role_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_assignment" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-initial-policy-store.ts",
+    },
+    {
+      id: "brand-initial-policy-store.read.permission_grant",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_grant" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-initial-policy-store.ts",
+    },
+    {
+      id: "brand-initial-policy-store.read.permission_override",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_override" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-initial-policy-store.ts",
+    },
+    {
+      id: "brand-initial-policy-store.read.permission_definition",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_definition" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-initial-policy-store.ts",
+    },
+    {
+      id: "brand-initial-policy-store.write.policy_state",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "policy_state" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-initial-policy-store.ts",
+    },
+    {
+      id: "brand-initial-policy-store.write.role",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-initial-policy-store.ts",
+    },
+    {
+      id: "brand-initial-policy-store.write.role_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_assignment" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-initial-policy-store.ts",
+    },
+    {
+      id: "brand-initial-policy-store.write.permission_grant",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_grant" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/brand-initial-policy-store.ts",
+    },
+    {
+      id: "platform-permission-store.read.platform_permission_policy_head",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "platform_permission_policy_head" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source: "packages/bop/permission/src/infrastructure/persistence/platform-permission-store.ts",
+    },
+    {
+      id: "platform-permission-store.read.platform_permission_policy_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "platform_permission_policy_revision" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source: "packages/bop/permission/src/infrastructure/persistence/platform-permission-store.ts",
+    },
+    {
+      id: "platform-permission-provisioner.read.platform_permission_policy_head",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "platform_permission_policy_head" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/platform-permission-provisioner.ts",
+    },
+    {
+      id: "platform-permission-provisioner.read.platform_permission_policy_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "platform_permission_policy_revision" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/platform-permission-provisioner.ts",
+    },
+    {
+      id: "platform-permission-provisioner.write.platform_permission_policy_head",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "platform_permission_policy_head" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/platform-permission-provisioner.ts",
+    },
+    {
+      id: "platform-permission-provisioner.write.platform_permission_policy_revision",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "platform_permission_policy_revision" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/platform-permission-provisioner.ts",
+    },
+    {
+      id: "system-media-image-promotion-authorization-store.read.system_media_image_promotion_authorization",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "system_media_image_promotion_authorization" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/system-media-image-promotion-authorization-store.ts",
+    },
+    {
+      id: "system-media-image-promotion-authorization-store.read.system_media_image_promotion_authorization_decision",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "bop_permission",
+        table: "system_media_image_promotion_authorization_decision",
+      },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/system-media-image-promotion-authorization-store.ts",
+    },
+    {
+      id: "system-media-image-promotion-provisioner.read.system_media_image_promotion_authorization",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "system_media_image_promotion_authorization" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/system-media-image-promotion-provisioner.ts",
+    },
+    {
+      id: "system-media-image-promotion-provisioner.read.system_media_image_promotion_authorization_decision",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "bop_permission",
+        table: "system_media_image_promotion_authorization_decision",
+      },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/system-media-image-promotion-provisioner.ts",
+    },
+    {
+      id: "system-media-image-promotion-provisioner.write.system_media_image_promotion_authorization",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "system_media_image_promotion_authorization" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/system-media-image-promotion-provisioner.ts",
+    },
+    {
+      id: "system-media-image-promotion-provisioner.write.system_media_image_promotion_authorization_decision",
+      operation: "write",
+      mechanism: "repository",
+      target: {
+        schema: "bop_permission",
+        table: "system_media_image_promotion_authorization_decision",
+      },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/system-media-image-promotion-provisioner.ts",
+    },
+  ],
 } as const;
 
 export const databaseAccessManifest = databaseAccessManifestInput;

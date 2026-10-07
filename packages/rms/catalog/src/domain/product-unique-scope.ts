@@ -27,8 +27,11 @@ const intersect = (a: readonly string[], b: readonly string[]) =>
 /** Conservative structural conflict check. It does not choose newest, resolve
  * unavailable membership or authorize whole-version supersession. */
 export function assessProductUniqueScopeRules(input: {
-  readonly command: ProductPublicationCommand;
-  readonly latest: readonly ProductPublicationVersion[];
+  readonly command: Pick<
+    ProductPublicationCommand,
+    "versionReference" | "scopeSet" | "effectivePeriod"
+  >;
+  readonly latest: readonly Omit<ProductPublicationVersion, "validationDecision">[];
   readonly scopeOrder: readonly string[];
   readonly activeStores: ReadonlySet<string>;
   readonly brandActive: boolean;

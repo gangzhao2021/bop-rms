@@ -48,3 +48,42 @@ describe("referenced current release input", () => {
     expect(run).not.toHaveBeenCalled();
   });
 });
+
+describe("Option-only discriminated current source admission", () => {
+  it.each([
+    null,
+    {},
+    { familyReference: id(4), observedAt: query.observedAt, approvalPolicy: "NotRequired" },
+    { familyReference: "unrestricted", observedAt: query.observedAt },
+  ])("rejects caller policy flags and malformed identity before SQL (%#)", async (input) => {
+    const run = vi.fn(),
+      store = createPostgresPublishingMutationStore({ run }, id(1), scope);
+    await expect(
+      store.resolveCurrentOptionSetRelease(
+        input as { familyReference: string; observedAt: string },
+      ),
+    ).rejects.toMatchObject({ code: "PUBLISHING_INPUT_INVALID" });
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("denies Store scope and original-reference policy selectors without touching SQL", async () => {
+    const run = vi.fn(),
+      store = createPostgresPublishingMutationStore(
+        { run },
+        id(1),
+        createPublishingScope({ kind: "Store", brandReference: id(2), storeReference: id(3) }),
+      );
+    await expect(
+      store.resolveCurrentOptionSetRelease({
+        familyReference: id(4),
+        observedAt: query.observedAt,
+      }),
+    ).rejects.toMatchObject({ code: "PUBLISHING_INPUT_INVALID" });
+    await expect(
+      store.resolveCurrentOptionSetReleaseForReference({
+        publicationReference: id(22),
+        observedAt: query.observedAt,
+      }),
+    ).rejects.toMatchObject({ code: "PUBLISHING_INPUT_INVALID" });
+    expect(run).not.toHaveBeenCalled();
+  });
+});

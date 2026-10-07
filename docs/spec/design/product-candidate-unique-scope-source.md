@@ -22,7 +22,7 @@ Actual isolated SQL binds current Draft651/root16 and its content/configuration 
 
 This SQL scenario intentionally uses a legacy Draft without complete editor content. UniqueScope and its matching HardErrorsCleared summary derive from actual sources; the other ten individual checks remain explicit doubles. Actor/field/reference holders, Product/Store data and policy governance validation inputs are synthetic. This is genuine local SQL composition/rollback evidence, not a complete validation receipt, ordinary HTTP/browser workflow, real approval/UAT or release evidence.
 
-Full current Brand field/reference/twelve-check preparation, precise equal-rank disposition and normal editor/publishing runtime/pages remain open. Store administration follows the Product repository loop. Commands, initial portable-type failure and repair, evidence reuse and exact fingerprints are recorded in [WP-2421](../work-packages/WP-2421.md#overnight-actual-draftuniquescope-preparation--2026-09-30-continuation).
+Full current Brand field/reference/twelve-check preparation, precise equal-rank disposition and normal editor/publishing runtime/pages remain open. Store administration follows the Product repository loop. Commands, initial portable-type failure and repair, evidence reuse and exact fingerprints are recorded in [WP-2421](../work-packages/history-WP-2421-01.md#overnight-actual-draftuniquescope-preparation--2026-09-30-continuation).
 
 
 ## Ordinary Validate integration (WP-2421 milestone115)

@@ -38,6 +38,17 @@ const hash = (value: unknown) => "sha256:" + sha256Hex(canonicalizeRfc8785(value
 const fail = (): never => {
   throw new CatalogError("CATALOG_INPUT_INVALID");
 };
+// Frozen content carries the supported source and complete editor source twice.
+// Bound only this envelope; the owning Draft SQL budget remains one MiB.
+const fullPublicationEnvelopeMaximumBytes = 3_145_728;
+function boundedPublicationEnvelope<T>(value: T): T {
+  if (
+    new TextEncoder().encode(canonicalizeRfc8785(value)).byteLength >
+    fullPublicationEnvelopeMaximumBytes
+  )
+    return fail();
+  return value;
+}
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail();
   const r = value as Record<string, unknown>;
@@ -340,7 +351,7 @@ export function createCatalogFullOptionSetPublicationMaterialization(
     { sourceAggregate, ...additional } = prepared.content;
   void sourceAggregate;
   return Object.freeze({
-    content: Object.freeze({ ...base, digest: hash(base) }),
+    content: boundedPublicationEnvelope(Object.freeze({ ...base, digest: hash(base) })),
     successor: supported.successor,
     successorEditorContent: parseCatalogOptionSetEditorContent(supported.successor, additional)
       .content,
@@ -349,7 +360,7 @@ export function createCatalogFullOptionSetPublicationMaterialization(
 export function parseCatalogFullOptionSetPublicationContent(
   value: unknown,
 ): CatalogFullOptionSetPublicationContent {
-  const r = record(copyCategoryPersistenceValue(value), [
+  const r = record(boundedPublicationEnvelope(copyCategoryPersistenceValue(value)), [
       "profile",
       "supportedContent",
       "editorContent",
@@ -392,5 +403,5 @@ export function parseCatalogFullOptionSetPublicationContent(
     },
     digest = hash(base);
   if (r.digest !== digest) return fail();
-  return Object.freeze({ ...base, digest });
+  return boundedPublicationEnvelope(Object.freeze({ ...base, digest }));
 }

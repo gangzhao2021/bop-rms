@@ -352,3 +352,62 @@ it.each(["media", "borrowed-core", "operation", "eligibility", "legacy"])(
     expect(() => parseCatalogFullOptionSetPublicationContent(c)).toThrow();
   },
 );
+
+it("retains a legal near-one-MiB full Draft in its bounded Frozen envelope", () => {
+  const f = fixture(),
+    prototype = f.source.draft.options[0],
+    detail = f.details.optionDetails[0],
+    locales = ["en-CA", "fr-CA", "en-US", "fr-FR", "es-ES", "de-DE", "it-IT"];
+  if (!prototype || !detail) throw new Error("missing synthetic option");
+  f.source.draft.options = Array.from({ length: 100 }, (_, index) => ({
+    ...prototype,
+    optionReference: id(400 + index),
+    stableCode: "CHOICE_" + index,
+    sortOrder: index,
+    defaultEligible: false,
+    triggeredOptionSetReference: null,
+    conflictOptionReferences: [],
+    localizedDescriptions: Object.fromEntries(locales.map((locale) => [locale, "界".repeat(440)])),
+  }));
+  f.details.optionDetails = f.source.draft.options.map((option) => ({
+    ...detail,
+    optionReference: option.optionReference,
+    media: null,
+    pricingRule: null,
+    consumption: null,
+    triggeredOptionSetVersionReference: null,
+  }));
+  f.details.conditionalRules = [];
+  f.details.conflictRules = [];
+  const prepared = parseCatalogOptionSetEditorContent(f.source, f.details),
+    result = createCatalogFullOptionSetPublicationMaterialization(
+      f.source,
+      f.details,
+      transition(f),
+    ),
+    bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  expect(bytes(prepared.content)).toBeGreaterThan(950_000);
+  expect(bytes(prepared.content)).toBeLessThan(1_048_576);
+  expect(bytes(result.content)).toBeGreaterThan(1_048_576);
+  expect(bytes(result.content)).toBeLessThan(3_145_728);
+  expect(result.content.eligibility).toBe("NotEvaluated");
+  expect(result.content.editorContent).toEqual(prepared.content);
+  expect(
+    parseCatalogFullOptionSetPublicationContent(JSON.parse(JSON.stringify(result.content))),
+  ).toEqual(result.content);
+  const excessive = JSON.parse(JSON.stringify(result.content));
+  for (const option of excessive.supportedContent.sourceAggregate.draft.options) {
+    option.localizedDescriptions = Object.fromEntries(
+      locales.map((locale) => [locale, "界".repeat(1000)]),
+    );
+  }
+  for (const option of excessive.editorContent.sourceAggregate.draft.options) {
+    option.localizedDescriptions = Object.fromEntries(
+      locales.map((locale) => [locale, "界".repeat(1000)]),
+    );
+  }
+  expect(bytes(excessive)).toBeGreaterThan(3_145_728);
+  expect(() => parseCatalogFullOptionSetPublicationContent(excessive)).toThrowError(
+    expect.objectContaining({ code: "CATALOG_INPUT_INVALID" }),
+  );
+});

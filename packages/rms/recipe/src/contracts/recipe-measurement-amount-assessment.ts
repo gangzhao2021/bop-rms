@@ -7,7 +7,47 @@ import {
   type RecipeSnapshot,
 } from "../domain/recipe.js";
 import { requireRecipeMeasurementContentDigest } from "./recipe-measurement-content-digest.js";
-import { parseRecipeReferenceSourceInstant } from "./recipe-reference-source.js";
+import {
+  parseRecipeReferenceSourceInstant,
+  parseRecipeReferenceSourceRequest,
+  validateRecipeOptionPublicationActivation,
+} from "./recipe-reference-source.js";
+/** Optional fixed Option publication context; it supplies no source authority. */
+export function parseRecipeMeasurementOptionPublicationContext(
+  value: unknown,
+  brandReference: string,
+  now: string,
+  activationAt: string,
+) {
+  if (value === undefined) return undefined;
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    Reflect.ownKeys(value).length !== 2
+  )
+    return fail();
+  const requestDescriptor = Object.getOwnPropertyDescriptor(value, "request"),
+    clockDescriptor = Object.getOwnPropertyDescriptor(value, "originalPublicationClock");
+  if (
+    !requestDescriptor?.enumerable ||
+    !("value" in requestDescriptor) ||
+    !clockDescriptor?.enumerable ||
+    !("value" in clockDescriptor)
+  )
+    return fail();
+  const request = parseRecipeReferenceSourceRequest(requestDescriptor.value);
+  if (request.brandReference !== brandReference || clockDescriptor.value === undefined)
+    return fail();
+  const originalPublicationClock = validateRecipeOptionPublicationActivation(
+    request,
+    now,
+    activationAt,
+    clockDescriptor.value,
+  );
+  if (!originalPublicationClock) return fail();
+  return Object.freeze({ request, originalPublicationClock });
+}
 const fail = (): never => {
   throw new RecipeError("RECIPE_INPUT_INVALID");
 };
@@ -48,13 +88,20 @@ export function assessRecipeMeasurementAmounts(
   pinnedChildren: unknown,
   nowInput: string,
   activationInput: string,
+  optionPublicationContextInput?: unknown,
 ) {
   const content = requireRecipeMeasurementContentDigest(value),
     root = content.snapshot,
     now = parseRecipeReferenceSourceInstant(nowInput),
     activationAt = parseRecipeReferenceSourceInstant(activationInput),
     snapshots = children(pinnedChildren);
-  if (activationAt < now) return fail();
+  const optionPublicationContext = parseRecipeMeasurementOptionPublicationContext(
+    optionPublicationContextInput,
+    root.brandReference,
+    now,
+    activationAt,
+  );
+  if (optionPublicationContext === undefined && activationAt < now) return fail();
   if (root.ingredients.length + snapshots.reduce((n, s) => n + s.ingredients.length, 0) > 4096)
     return fail();
   parseRecipeYieldQuantityMicrounits(root.yieldQuantityMicrounits);
@@ -167,6 +214,7 @@ export function assessRecipeMeasurementAmounts(
     pinnedSnapshotDigest: "sha256:" + sha256Hex(canonicalizeRfc8785(snapshots)),
     assessedAt: now,
     activationAt,
+    ...(optionPublicationContext ? { optionPublicationContext } : {}),
     rootYieldQuantityMicrounits: root.yieldQuantityMicrounits,
     matches: Object.freeze(matches),
     quantityArithmetic: matches.every((m) => m.status === "ExactAmount")

@@ -8,6 +8,11 @@ const moduleManifestInput = {
   publicExports: ["."],
   allowedSynchronousDependencies: [
     {
+      moduleName: "identity",
+      packageName: "@bop/identity",
+      layer: "BOP",
+    },
+    {
       moduleName: "audit",
       packageName: "@bop/audit",
       layer: "BOP",
@@ -32,6 +37,10 @@ const moduleManifestInput = {
       "live_gate_requirement",
       "live_gate_operation",
       "publishing_mutation_record",
+      "option_set_publication_operation",
+      "option_price_review_operation",
+      "platform_template_publishing_head",
+      "platform_template_publishing_operation",
     ],
   },
   ownedJobs: [],

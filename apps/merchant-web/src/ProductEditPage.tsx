@@ -1,3 +1,4 @@
+import type { ProductPublicationManagementViewV2 } from "./product-publication-management-client-v2.js";
 import { ProductCurrentContent } from "./ProductCurrentContent.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
@@ -53,7 +54,7 @@ export function ProductEditPage(props: Props) {
     location = useLocation();
   return (
     <ProductHistoryWorkspace
-      key={JSON.stringify([id, location.key])}
+      key={JSON.stringify([id, location.key, props.storeReference, props.csrf])}
       {...props}
       id={id}
       initialRevision={navigationRevision(location.state, id)}
@@ -70,11 +71,14 @@ function ProductHistoryWorkspace({
 }: Props & { readonly id: string | undefined; readonly initialRevision: string }) {
   const client = useMemo(() => createProductScopeJournalClient(), []),
     capability = useMemo(() => createStoreCapabilityClient(), []);
+  const [management, setManagement] = useState<ProductPublicationManagementViewV2 | null>(null),
+    [v2History, setV2History] = useState(false);
   const [revision, setRevision] = useState(initialRevision),
     [request, setRequest] = useState({ revision: initialRevision, refresh: 0 });
   const key = JSON.stringify([id, storeReference, csrf, request]),
     [state, setState] = useState<State>({ key, kind: request.revision ? "Loading" : "Idle" });
   useEffect(() => {
+    if (v2History) return;
     const controller = new AbortController();
     let active = true,
       timer: ReturnType<typeof setTimeout> | undefined;
@@ -152,7 +156,10 @@ function ProductHistoryWorkspace({
       window.removeEventListener("offline", offline);
       window.removeEventListener("online", online);
     };
-  }, [capability, client, csrf, id, key, request.revision, storeReference]);
+  }, [capability, client, csrf, id, key, request.revision, storeReference, v2History]);
+  useEffect(() => {
+    if (management) setV2History(true);
+  }, [management]);
   const current = state.key === key ? state : { kind: "Loading" as const, key };
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -211,143 +218,246 @@ function ProductHistoryWorkspace({
         csrf={csrf}
         id={id}
         initialRevision={initialRevision}
+        onConfirmed={(next) => {
+          setV2History(true);
+          setManagement(null);
+          setRevision(String(next));
+          setRequest((previous) => ({ revision: String(next), refresh: previous.refresh + 1 }));
+        }}
+        onManagement={setManagement}
       />
-      <section className="product-history-tools" aria-labelledby="product-history-heading">
-        <h2 id="product-history-heading">Publication scope history</h2>
-        <form onSubmit={submit}>
-          <label htmlFor="product-history-revision">Product revision</label>
-          <input
-            id="product-history-revision"
-            inputMode="numeric"
-            value={revision}
-            maxLength={10}
-            aria-describedby="product-history-revision-help"
-            aria-invalid={current.kind === "Invalid" || undefined}
-            onChange={(e) => setRevision(e.currentTarget.value)}
-          />
-          <button type="submit" disabled={current.kind === "Loading" || current.kind === "Offline"}>
-            Refresh publication history
-          </button>
-          <p id="product-history-revision-help">
-            Use the current revision from Products. Reading records does not change a Product.
-          </p>
-        </form>
-      </section>
-      {current.kind === "Found" ? (
-        <section aria-label="Recorded publication scopes">
-          <p role="status">
-            {current.view.versions.length === 0
-              ? "No publication history is recorded for this revision."
-              : `${current.view.versions.length} version records loaded.`}
-          </p>
-          <p>
-            These are original publication records. Current sale eligibility and scope replacement
-            have not been checked.
-          </p>
-          <p>
-            Read at <time dateTime={current.view.observedAt}>{current.view.observedAt}</time>
-          </p>
-          <div className="product-history-records">
-            {current.view.versions.map((version, index) => (
-              <article key={version.versionReference}>
-                <h3>Version record {index + 1}</h3>
-                <p>
-                  {version.state} · Publication revision {version.publicationVersion}
-                </p>
-                {version.recordStatus === "NotRecorded" ? (
-                  <p>Original scope record was not recorded for this publication.</p>
-                ) : version.recordStatus === "NotApplicable" ? (
-                  <p>Scope recording is not applicable to this unpublished version.</p>
-                ) : version.journal ? (
-                  <>
-                    <p>Original scope record available.</p>
-                    <dl className="detail-list">
-                      <div>
-                        <dt>Recorded</dt>
-                        <dd>
-                          <time dateTime={version.journal.recordedAt}>
-                            {version.journal.recordedAt}
-                          </time>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Original evidence deadline</dt>
-                        <dd>
-                          <time dateTime={version.journal.originalEvidenceValidUntil}>
-                            {version.journal.originalEvidenceValidUntil}
-                          </time>{" "}
-                          · Historical evidence
-                        </dd>
-                      </div>
-                    </dl>
-                    {version.journal.relations.length === 0 ? (
-                      <p>No overlaps were recorded at publication.</p>
-                    ) : (
-                      <details>
-                        <summary>
-                          {version.journal.relations.length} recorded scope relationships
-                        </summary>
-                        <ul>
-                          {version.journal.relations.map((relation, n) => (
-                            <li key={n}>
-                              {relation.relation === "IncomingSelectorPreferred"
-                                ? "This version's selector was preferred"
-                                : relation.relation === "ExistingSelectorPreferred"
-                                  ? "The previous version's selector was preferred"
-                                  : "Equal priority overlap was recorded"}{" "}
-                              against version record{" "}
-                              {current.view.versions.findIndex(
-                                (v) => v.versionReference === relation.previousVersionReference,
-                              ) + 1}
-                              .
-                              <p>
-                                {relation.storeReference === null
-                                  ? "All matching Stores"
-                                  : relation.storeReference === storeReference
-                                    ? "Selected Store"
-                                    : "Another Store in this Brand"}{" "}
-                                · Channels: {relation.channelCodes.join(", ") || "All"} · Order
-                                types: {relation.orderTypeCodes.join(", ") || "All"}
-                              </p>
-                              <p>
-                                <time dateTime={relation.effectiveFrom}>
-                                  {relation.effectiveFrom}
-                                </time>{" "}
-                                to{" "}
-                                {relation.effectiveUntil === null ? (
-                                  "No recorded end"
-                                ) : (
-                                  <time dateTime={relation.effectiveUntil}>
-                                    {relation.effectiveUntil}
-                                  </time>
-                                )}
-                              </p>
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    )}
-                  </>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        </section>
+      {v2History ? (
+        <RecordedPublicationHistoryV2 view={management} storeReference={storeReference} />
       ) : (
-        <StatePanel
-          heading={copy[current.kind][0]}
-          tone={current.kind === "Denied" || current.kind === "Invalid" ? "error" : "neutral"}
-          status
-        >
-          <p>{copy[current.kind][1]}</p>
-        </StatePanel>
+        <>
+          <section className="product-history-tools" aria-labelledby="product-history-heading">
+            <h2 id="product-history-heading">Publication scope history</h2>
+            <form onSubmit={submit}>
+              <label htmlFor="product-history-revision">Product revision</label>
+              <input
+                id="product-history-revision"
+                inputMode="numeric"
+                value={revision}
+                maxLength={10}
+                aria-describedby="product-history-revision-help"
+                aria-invalid={current.kind === "Invalid" || undefined}
+                onChange={(e) => setRevision(e.currentTarget.value)}
+              />
+              <button
+                type="submit"
+                disabled={current.kind === "Loading" || current.kind === "Offline"}
+              >
+                Refresh publication history
+              </button>
+              <p id="product-history-revision-help">
+                Use the current revision from Products. Reading records does not change a Product.
+              </p>
+            </form>
+          </section>
+          {current.kind === "Found" ? (
+            <section aria-label="Recorded publication scopes">
+              <p role="status">
+                {current.view.versions.length === 0
+                  ? "No publication history is recorded for this revision."
+                  : `${current.view.versions.length} version records loaded.`}
+              </p>
+              <p>
+                These are original publication records. Current sale eligibility and scope
+                replacement have not been checked.
+              </p>
+              <p>
+                Read at <time dateTime={current.view.observedAt}>{current.view.observedAt}</time>
+              </p>
+              <div className="product-history-records">
+                {current.view.versions.map((version, index) => (
+                  <article key={version.versionReference}>
+                    <h3>Version record {index + 1}</h3>
+                    <p>
+                      {version.state} · Publication revision {version.publicationVersion}
+                    </p>
+                    {version.recordStatus === "NotRecorded" ? (
+                      <p>Original scope record was not recorded for this publication.</p>
+                    ) : version.recordStatus === "NotApplicable" ? (
+                      <p>Scope recording is not applicable to this unpublished version.</p>
+                    ) : version.journal ? (
+                      <>
+                        <p>Original scope record available.</p>
+                        <dl className="detail-list">
+                          <div>
+                            <dt>Recorded</dt>
+                            <dd>
+                              <time dateTime={version.journal.recordedAt}>
+                                {version.journal.recordedAt}
+                              </time>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Original evidence deadline</dt>
+                            <dd>
+                              <time dateTime={version.journal.originalEvidenceValidUntil}>
+                                {version.journal.originalEvidenceValidUntil}
+                              </time>{" "}
+                              · Historical evidence
+                            </dd>
+                          </div>
+                        </dl>
+                        {version.journal.relations.length === 0 ? (
+                          <p>No overlaps were recorded at publication.</p>
+                        ) : (
+                          <details>
+                            <summary>
+                              {version.journal.relations.length} recorded scope relationships
+                            </summary>
+                            <ul>
+                              {version.journal.relations.map((relation, n) => (
+                                <li key={n}>
+                                  <p>
+                                    Scope entry {relation.incomingSelectorIndex + 1} in this
+                                    version:{" "}
+                                    {relation.relation === "IncomingSelectorPreferred"
+                                      ? "this entry was preferred"
+                                      : relation.relation === "ExistingSelectorPreferred"
+                                        ? "the previous entry was preferred"
+                                        : "equal priority overlap was recorded"}{" "}
+                                    against version record{" "}
+                                    {current.view.versions.findIndex(
+                                      (v) =>
+                                        v.versionReference === relation.previousVersionReference,
+                                    ) + 1}
+                                    , scope entry {relation.previousSelectorIndex + 1}.
+                                  </p>
+                                  <p>
+                                    <strong>Recorded intersection:</strong>{" "}
+                                    {relation.storeReference === null
+                                      ? "All matching Stores"
+                                      : relation.storeReference === storeReference
+                                        ? "Selected Store"
+                                        : "Another Store in this Brand"}{" "}
+                                    · Channels: {relation.channelCodes.join(", ") || "All"} · Order
+                                    types: {relation.orderTypeCodes.join(", ") || "All"}
+                                  </p>
+                                  <p>
+                                    This intersection does not describe either version's remaining
+                                    scope. Current eligibility and replacement status are not
+                                    evaluated by this record.
+                                  </p>
+                                  {relation.relation === "EqualPrecedenceOverlap" ? (
+                                    <p>No replacement decision is recorded in this relationship.</p>
+                                  ) : null}
+                                  <p>
+                                    <time dateTime={relation.effectiveFrom}>
+                                      {relation.effectiveFrom}
+                                    </time>{" "}
+                                    to{" "}
+                                    {relation.effectiveUntil === null ? (
+                                      "No recorded end"
+                                    ) : (
+                                      <time dateTime={relation.effectiveUntil}>
+                                        {relation.effectiveUntil}
+                                      </time>
+                                    )}
+                                  </p>
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : (
+            <StatePanel
+              heading={copy[current.kind][0]}
+              tone={current.kind === "Denied" || current.kind === "Invalid" ? "error" : "neutral"}
+              status
+            >
+              <p>{copy[current.kind][1]}</p>
+            </StatePanel>
+          )}
+        </>
       )}
-      <StatePanel heading="Content editing and publication unavailable" tone="neutral">
-        <p>
-          Current reference validation and publication services must be available before editing,
-          review or publication can proceed.
-        </p>
-      </StatePanel>
     </AppFrame>
+  );
+}
+
+function RecordedPublicationHistoryV2({
+  view,
+  storeReference,
+}: {
+  readonly view: ProductPublicationManagementViewV2 | null;
+  readonly storeReference: string;
+}) {
+  return (
+    <section aria-labelledby="product-history-v2-heading">
+      <h2 id="product-history-v2-heading">Publication scope history</h2>
+      {!view ? (
+        <p role="status">Refresh publication records to read current scope history.</p>
+      ) : (
+        <>
+          <p role="status">
+            Recorded publication history · Revision {view.revision}. Current sale eligibility has
+            not been evaluated.
+          </p>
+          {view.versions.length === 0 ? (
+            <p>No publication history is recorded for this revision.</p>
+          ) : (
+            view.versions.map((version, index) => (
+              <article key={version.versionReference}>
+                <h3>
+                  Version record {index + 1} · {version.state}
+                </h3>
+                <p>
+                  Recorded <time dateTime={version.occurredAt}>{version.occurredAt}</time> ·
+                  Publication revision {version.publicationVersion}
+                </p>
+                <p>
+                  Effective{" "}
+                  <time dateTime={version.effectivePeriod.effectiveFrom.instant}>
+                    {version.effectivePeriod.effectiveFrom.instant}
+                  </time>{" "}
+                  to {version.effectivePeriod.effectiveUntil?.instant ?? "No recorded end"}
+                </p>
+                <ul>
+                  {version.scopeSet.map((selector, ordinal) => {
+                    const retired = view.retirements.find(
+                      (row) =>
+                        row.previousPublicationOperationReference === version.operationReference &&
+                        row.previousSelectorIndex === ordinal,
+                    );
+                    return (
+                      <li key={ordinal}>
+                        Original scope entry {ordinal + 1}: {selector.level}{" "}
+                        {selector.reference === storeReference ? "· Selected Store" : ""} ·
+                        Channels: {selector.channelCodes.join(", ") || "All"} · Order types:{" "}
+                        {selector.orderTypeCodes.join(", ") || "All"}.
+                        {retired ? (
+                          <p>
+                            Permanently retired at{" "}
+                            <time dateTime={retired.retiredAt}>{retired.retiredAt}</time> by version
+                            record{" "}
+                            {view.versions.findIndex(
+                              (v) => v.versionReference === retired.incomingVersionReference,
+                            ) + 1}
+                            . This coverage does not return when that publication expires.
+                          </p>
+                        ) : (
+                          <p>
+                            No selector retirement recorded. Current eligibility still requires
+                            server evaluation.
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </article>
+            ))
+          )}
+        </>
+      )}
+    </section>
   );
 }

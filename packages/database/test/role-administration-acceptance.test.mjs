@@ -30,6 +30,44 @@ async function prove(context) {
       [id(9), id(3), id(8), id(1)],
     );
     await admin.query(
+      "INSERT INTO bop_permission.permission_definition VALUES($1,'catalog.option_set.history.read','Active',1,$2,$2)",
+      [id(40), at],
+    );
+    await admin.query("BEGIN");
+    try {
+      await admin.query(
+        "INSERT INTO bop_permission.role_administration_permission VALUES($1,$2,NULL,$3,1,$4,$5,'role_admin',false,'[]','ConfigurationMetadata')",
+        [id(41), id(3), id(8), id(40), "catalog.option_set.history.read"],
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT action_code FROM bop_permission.role_administration_permission WHERE selection_reference=$1",
+            [id(41)],
+          )
+        ).rows[0].action_code,
+        "catalog.option_set.history.read",
+      );
+    } finally {
+      await admin.query("ROLLBACK");
+    }
+    for (const action of [
+      "catalog.option_set.history.write",
+      "catalog.option_set.history.read.extra",
+      "catalog.option_set.history_read",
+      "catalog.option_set.history.read\n",
+      "catalog.option_set.History.read",
+      "catalog.option_set.history.*",
+    ]) {
+      await assert.rejects(
+        admin.query(
+          "INSERT INTO bop_permission.role_administration_permission VALUES($1,$2,NULL,$3,1,$4,$5,'role_admin',false,'[]','ConfigurationMetadata')",
+          [id(41), id(3), id(8), id(40), action],
+        ),
+        { code: "23514" },
+      );
+    }
+    await admin.query(
       `INSERT INTO bop_permission.role_administration_decision VALUES($1,$2,NULL,$3,1,'Approved',$4,'ROLE_ADMIN_CHANGE',$5,$6,'ConfigurationMetadata')`,
       [id(10), id(3), id(8), id(6), id(7), at],
     );

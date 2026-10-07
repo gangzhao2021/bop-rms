@@ -4,7 +4,12 @@ import {
   type Membership,
   type StoreAssignment,
 } from "@bop/membership";
-import type { CanonicalInstant, TenantContext } from "@bop/tenant";
+import { readClosedRecord } from "@bop/identity";
+import type { BrandAdministrationContext, CanonicalInstant, TenantContext } from "@bop/tenant";
+import {
+  brandAdministrationPermissionActions,
+  revalidateBrandAdministrationPermissionContext,
+} from "../contracts/brand-administration-permission.js";
 import {
   parseBusinessAction,
   parseEvidenceReference,
@@ -50,6 +55,15 @@ export interface PermissionPolicyMaterialization {
   };
 }
 
+export interface BrandAdministrationPermissionPolicyMaterializationInput extends Omit<
+  PermissionPolicyMaterializationInput,
+  "tenantContext" | "storeAssignment"
+> {
+  readonly administrationContext: BrandAdministrationContext;
+  readonly storeAssignment: null;
+}
+type ContextFacts = Pick<TenantContext, "actor" | "brand" | "store" | "resolvedAt">;
+
 function fail(): never {
   throw new PermissionPolicyContractError("PERMISSION_POLICY_MATERIALIZATION_INVALID");
 }
@@ -70,7 +84,7 @@ function earliestUntil(values: readonly (CanonicalInstant | null)[]): CanonicalI
 function scopeMatches(
   brandReference: string,
   storeReference: string | null,
-  context: ReturnType<typeof revalidateTenantContext>,
+  context: ContextFacts,
 ): boolean {
   return (
     brandReference === context.brand.brandReference &&
@@ -79,7 +93,26 @@ function scopeMatches(
 }
 
 function frozenFacts(values: readonly unknown[]): void {
-  if (!Object.isFrozen(values) || values.some((value) => !Object.isFrozen(value))) fail();
+  if (
+    !Array.isArray(values) ||
+    Object.getPrototypeOf(values) !== Array.prototype ||
+    !Object.isFrozen(values) ||
+    Reflect.ownKeys(values).length !== values.length + 1
+  )
+    fail();
+  for (let i = 0; i < values.length; i++) {
+    const descriptor = Object.getOwnPropertyDescriptor(values, String(i));
+    if (!descriptor?.enumerable || !("value" in descriptor)) fail();
+    const value: unknown = descriptor.value;
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !Object.isFrozen(value) ||
+      Object.getPrototypeOf(value) !== Object.prototype
+    )
+      fail();
+    readClosedRecord(value, Object.keys(value));
+  }
 }
 
 function deduplicateAndSort(values: PermissionEvidence[]): readonly PermissionEvidence[] {
@@ -106,9 +139,41 @@ function deduplicateAndSort(values: PermissionEvidence[]): readonly PermissionEv
 export function materializePermissionEvidence(
   input: PermissionPolicyMaterializationInput,
 ): PermissionPolicyMaterialization {
+  return materialize(input, () => revalidateTenantContext(input.tenantContext), false);
+}
+
+export function materializeBrandAdministrationPermissionEvidence(
+  input: BrandAdministrationPermissionPolicyMaterializationInput,
+): PermissionPolicyMaterialization {
+  return materialize(
+    input,
+    () => {
+      readClosedRecord(input, [
+        "administrationContext",
+        "policyState",
+        "membership",
+        "storeAssignment",
+        "permissionDefinitions",
+        "roles",
+        "roleAssignments",
+        "permissionGrants",
+        "permissionOverrides",
+      ]);
+      return revalidateBrandAdministrationPermissionContext(input.administrationContext);
+    },
+    true,
+  );
+}
+
+function materialize(
+  input: Omit<PermissionPolicyMaterializationInput, "tenantContext">,
+  resolveContext: () => ContextFacts,
+  administrative: boolean,
+): PermissionPolicyMaterialization {
   try {
     if (!Object.isFrozen(input)) fail();
-    const context = revalidateTenantContext(input.tenantContext);
+    const context = resolveContext();
+    frozenFacts(Object.freeze([input.policyState]));
     if (
       !Object.isFrozen(input.policyState) ||
       input.policyState.brandReference !== context.brand.brandReference
@@ -238,7 +303,13 @@ export function materializePermissionEvidence(
       }
     }
 
-    const normalized = deduplicateAndSort(evidence);
+    const normalized = deduplicateAndSort(
+      administrative
+        ? evidence.filter((item) =>
+            brandAdministrationPermissionActions.some((action) => action === item.action),
+          )
+        : evidence,
+    );
     return Object.freeze({
       policySnapshotReference: parsePolicyReference(input.policyState.snapshotReference),
       policyVersion: parsePolicyVersion(input.policyState.version),

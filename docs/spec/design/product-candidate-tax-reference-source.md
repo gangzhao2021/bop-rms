@@ -1,6 +1,6 @@
 # Current Product Draft and registered tax-reference preparation
 
-Implemented under [WP-2421](../work-packages/WP-2421.md#current-product-candidate-and-actual-registered-tax-reference-preparation--2026-09-30-continuation). This uses the existing actual [Catalog validation candidate](./product-validation-candidate-source.md) and public Pricing Brand tax-reference source. It preserves accepted Product validation and Domain ownership; it prepares reference metadata without resolving tax applicability.
+Implemented under [WP-2421](../work-packages/history-WP-2421-01.md#current-product-candidate-and-actual-registered-tax-reference-preparation--2026-09-30-continuation). This uses the existing actual [Catalog validation candidate](./product-validation-candidate-source.md) and public Pricing Brand tax-reference source. It preserves accepted Product validation and Domain ownership; it prepares reference metadata without resolving tax applicability.
 
 ## Source and authority
 

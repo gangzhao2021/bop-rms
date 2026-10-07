@@ -7195,3 +7195,482 @@ body:has(.product-complete-draft) .bop-shell__header,
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+.store-setup-draft-page .bop-shell__main {
+  min-width: 0;
+}
+.store-setup-draft-page button,
+.store-setup-draft-page select,
+.store-setup-draft-page input:not([type="checkbox"]) {
+  min-height: 44px;
+  max-width: 100%;
+  padding: var(--bop-space-2) var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-text-default);
+  background: var(--bop-color-surface-default);
+  font: inherit;
+}
+.store-setup-draft-page button {
+  cursor: pointer;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.store-setup-draft-page button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.store-setup-draft-page :is(button, input, select, #setup-step-heading):focus-visible {
+  outline: 3px solid var(--bop-color-brand-primary);
+  outline-offset: 3px;
+}
+.store-setup-steps {
+  margin-block: var(--bop-space-6);
+}
+.store-setup-steps ol {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--bop-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.store-setup-steps button {
+  width: 100%;
+  height: 100%;
+}
+.store-setup-steps button[aria-current="step"] {
+  border-color: var(--bop-color-brand-primary);
+  background: color-mix(
+    in srgb,
+    var(--bop-color-brand-primary) 10%,
+    var(--bop-color-surface-default)
+  );
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.store-setup-step-content,
+.store-setup-recovery {
+  display: grid;
+  gap: var(--bop-space-4);
+  min-width: 0;
+  padding: clamp(16px, 3vw, 24px);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.store-setup-recovery {
+  margin-block: var(--bop-space-4);
+}
+.store-setup-step-content :is(h3, h4, p),
+.store-setup-recovery p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.store-setup-step-content h3 {
+  font-size: 1.25rem;
+  font-weight: 650;
+}
+.store-setup-step-content h4,
+.store-setup-step-content legend {
+  font-weight: 600;
+}
+.store-setup-step-content label {
+  display: grid;
+  gap: var(--bop-space-2);
+  max-width: 36rem;
+  font-weight: 500;
+}
+.store-setup-step-content label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  gap: var(--bop-space-3);
+  min-height: 44px;
+  padding: var(--bop-space-2);
+  cursor: pointer;
+}
+.store-setup-step-content input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--bop-color-brand-primary);
+}
+.store-setup-step-content fieldset {
+  display: grid;
+  gap: var(--bop-space-3);
+  min-width: 0;
+  margin: 0;
+  padding: var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+}
+.store-setup-step-content legend {
+  padding-inline: var(--bop-space-2);
+}
+.store-setup-interval {
+  display: grid;
+  gap: var(--bop-space-3);
+  padding-block: var(--bop-space-4);
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.store-setup-step-content dl {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(0, 2fr);
+  gap: var(--bop-space-2) var(--bop-space-4);
+  margin: 0;
+}
+.store-setup-step-content dt {
+  font-weight: 600;
+}
+.store-setup-step-content dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.store-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-3);
+  margin-top: var(--bop-space-6);
+}
+.store-setup-draft-page .store-setup-save {
+  border-color: var(--bop-color-brand-primary);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.store-setup-draft-page [role="alert"] {
+  margin-block: var(--bop-space-4);
+  padding: var(--bop-space-3);
+  border-left: 3px solid var(--bop-color-danger);
+}
+@media (max-width: 640px) {
+  .store-setup-steps ol {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .store-setup-actions button {
+    flex: 1 1 12rem;
+  }
+  .store-setup-step-content dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .store-setup-step-content dd + dt {
+    margin-top: var(--bop-space-2);
+  }
+}
+.store-setup-step-content :is(input, select):disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.store-setup-step-content [aria-invalid="true"] {
+  border-color: var(--bop-color-danger);
+}
+.store-setup-step-content ul {
+  display: grid;
+  gap: var(--bop-space-2);
+  margin: 0;
+  padding-left: var(--bop-space-6);
+  list-style: disc;
+}
+
+/* Embedded Tax material capture shares existing controls and touch-target floor. */
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  min-width: 0;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--bop-color-border-default);
+}
+:is(
+  .tax-config-material-panel,
+  .tax-config-candidate-panel,
+  .tax-config-evidence-material-panel
+)[hidden] {
+  display: none;
+}
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  section,
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  fieldset,
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+  min-width: 0;
+}
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  fieldset {
+  gap: 1rem;
+}
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  input,
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  select,
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  button {
+  min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: var(--bop-space-2) var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+}
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  input,
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  select {
+  width: 100%;
+}
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  dd {
+  overflow-wrap: anywhere;
+}
+
+/* Native selects must fit the Tax workspace at 320px, including the explicit
+   IANA option. Material text and actions reflow without clipping at text zoom. */
+[aria-label="Tax Draft workspace"] fieldset {
+  min-inline-size: 0;
+}
+[aria-label="Tax Draft workspace"] select {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel) {
+  overflow-wrap: anywhere;
+}
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  legend {
+  max-inline-size: 100%;
+}
+:is(.tax-config-material-panel, .tax-config-candidate-panel, .tax-config-evidence-material-panel)
+  button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tax-config-candidate-panel textarea {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  min-height: 8rem;
+  box-sizing: border-box;
+  font: inherit;
+  padding: var(--bop-space-2) var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+}
+
+/* Native text inputs otherwise retain their intrinsic 20-character width at
+   enlarged text sizes. Keep the whole Tax form inside its available column. */
+[aria-label="Tax Draft workspace"] :is(label, section, fieldset) {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+[aria-label="Tax Draft workspace"] :is(input:not([type="checkbox"]), select, textarea) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  box-sizing: border-box;
+}
+[aria-label="Tax Draft workspace"] button {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+[aria-label="Tax material workspace selection"] {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+[aria-label="Tax material workspace selection"] > label {
+  display: grid;
+  gap: var(--bop-space-2);
+}
+[aria-label="Tax material workspace selection"] > label > select {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  min-height: 44px;
+  font: inherit;
+}
+.tax-config-evidence-material-panel textarea {
+  min-inline-size: 0;
+  width: 100%;
+  max-width: 100%;
+  min-height: 8rem;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+:is(.bop-shell--brand-administration, .bop-shell--platform-template)
+  :is(section, form, fieldset, label) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  box-sizing: border-box;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template) :is(form, fieldset, label) {
+  display: grid;
+  gap: 0.5rem;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template) .bop-shell__main > section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: clamp(8px, 3vw, 16px);
+  margin-block-end: 1rem;
+  border: 1px solid #c4ceca;
+  border-radius: 0.5rem;
+  background: #fff;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template) :is(h2, h3, legend) {
+  font-weight: 650;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template) h2 {
+  font-size: 1.25rem;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template) fieldset {
+  padding: clamp(8px, 2vw, 12px);
+  border: 1px solid #c4ceca;
+  border-radius: 0.375rem;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template)
+  :is(input, select, textarea, button) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  min-block-size: 44px;
+  box-sizing: border-box;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid #77877f;
+  border-radius: 0.375rem;
+  color: #172d23;
+  background: #fff;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template) :is(input, select, textarea) {
+  inline-size: 100%;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template) button {
+  justify-self: start;
+  cursor: pointer;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template) button:hover:not(:disabled) {
+  background: #edf5f1;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template)
+  :is(input, select, textarea, button):disabled {
+  color: #5a665f;
+  border-color: #c4ceca;
+  background: #f1f4f2;
+  cursor: not-allowed;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template)
+  :is(h1, h2, h3, p, dt, dd, li, a, legend, label, button) {
+  overflow-wrap: anywhere;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template) legend {
+  max-inline-size: 100%;
+}
+:is(.bop-shell--brand-administration, .bop-shell--platform-template) :focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+.brand-store-topology-draft-panel {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+.brand-store-topology-draft-panel fieldset {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  margin: 0;
+}
+.brand-store-topology-draft-panel label {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 0;
+}
+.brand-store-topology-draft-panel :is(button, input, select) {
+  min-height: 44px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.brand-store-topology-draft-panel :is(input, select) {
+  width: 100%;
+  min-width: 0;
+}
+.brand-store-topology-draft-panel p {
+  overflow-wrap: anywhere;
+}
+.brand-store-topology-draft-panel :focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+/* Store setup controls must shrink inside nested fee/preset groups at text zoom. */
+.store-setup-draft-page .store-setup-step-content :is(section, fieldset, label) {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.store-setup-draft-page .store-setup-step-content :is(label, legend) {
+  overflow-wrap: anywhere;
+}
+.store-setup-draft-page .store-setup-step-content legend {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.store-setup-draft-page .store-setup-step-content select,
+.store-setup-draft-page .store-setup-step-content input:not([type="checkbox"]) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.store-setup-fee-contexts {
+  display: grid;
+  gap: var(--bop-space-4);
+  min-width: 0;
+}
+
+/* Receipt preview field names must wrap inside the Store setup grid at 200% text. */
+.store-setup-draft-page .store-setup-step-content ul {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr);
+}
+.store-setup-draft-page .store-setup-step-content ul > li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bop-shell--brand-administration .brand-configuration-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-block-size: 44px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.bop-shell--brand-administration .brand-configuration-checkbox input[type="checkbox"] {
+  inline-size: 20px;
+  block-size: 20px;
+  min-block-size: 20px;
+  flex: 0 0 20px;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--bop-color-brand-primary);
+}

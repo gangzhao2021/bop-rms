@@ -308,3 +308,26 @@ it("refuses stale policy/version, readiness extras and getters without execution
     fresh.provider.withCurrentAssessment(fresh.tx, { ...fresh.input, Ready: true }, async () => 1),
   ).rejects.toThrowError(refused);
 });
+
+it("retains original immediate activation when the actual current policy read takes time", async () => {
+  const f = fixture();
+  f.input.binding.activationAt = at;
+  state.at = state.observed = "2026-09-30T12:00:01.000Z";
+  state.until = "2026-09-30T12:00:05.000Z";
+  const result = await f.provider.withCurrentAssessment(f.tx, f.input, async (value) => value);
+  expect(result.decision).toBe("PassForAssessedRules");
+  expect(result.activationAt).toBe(at);
+  expect(result.originalObservedAt).toBe(at);
+  expect(result.observedAt).toBe(state.observed);
+  expect(result.validUntil).toBe(state.until);
+  expect(result.publishValidation).toBe("Incomplete");
+});
+it("still rejects activation before the original intent after a later genuine policy read", async () => {
+  const f = fixture();
+  f.input.binding.activationAt = "2026-09-30T11:59:59.999Z";
+  state.at = state.observed = "2026-09-30T12:00:01.000Z";
+  await expect(
+    f.provider.withCurrentAssessment(f.tx, f.input, async (value) => value),
+  ).rejects.toThrowError(refused);
+  expect(state.calls).toBe(0);
+});
