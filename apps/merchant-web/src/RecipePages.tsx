@@ -789,11 +789,14 @@ function Bindings({
   );
 }
 
-export function RecipeEditorPage({
-  client = unavailableRecipeClient,
-}: {
-  readonly client?: RecipeClient;
-}) {
+/** One editor instance per route: a new recipe, a revision of one, or an existing recipe. */
+export function RecipeEditorPage(props: { readonly client?: RecipeClient }) {
+  const params = useParams();
+  const [search] = useSearchParams();
+  return <RecipeEditor key={`${params.id ?? ""}?${search.toString()}`} {...props} />;
+}
+
+function RecipeEditor({ client = unavailableRecipeClient }: { readonly client?: RecipeClient }) {
   const params = useParams();
   const [search] = useSearchParams();
   const navigate = useNavigate();

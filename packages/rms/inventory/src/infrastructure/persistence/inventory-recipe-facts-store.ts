@@ -24,7 +24,7 @@ export interface InventoryRecipeIngredientFact {
 /**
  * WP-2423 / DEC-RECIPE-AUTHORING: Inventory owner's facts a Recipe ingredient line needs — each Item's
  * current base unit and lifecycle, the configuration operation it pins, and the latest unit cost
- * posted in the Store (receipts and the opening count). Caller authorizes and owns the transaction.
+ * posted in the Store (receipts and the opening count; voided receipt lines excluded). Caller authorizes and owns the transaction.
  */
 export async function listInventoryRecipeIngredientFacts(
   tx: InventoryRecipeFactsTransaction,
@@ -54,11 +54,15 @@ export async function listInventoryRecipeIngredientFacts(
   const costs = new Map(
     (
       await tx.query(
-        `SELECT DISTINCT ON (record_json->>'itemReference') record_json->>'itemReference' item,(record_json->>'unitCostMinor')::bigint cost
-         FROM rms_inventory.stock_movement
-         WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND movement_type IN ('Receive','OpeningBalance')
-           AND jsonb_typeof(record_json->'unitCostMinor')='number'
-         ORDER BY record_json->>'itemReference',occurred_at DESC,movement_id DESC`,
+        `SELECT DISTINCT ON (m.record_json->>'itemReference') m.record_json->>'itemReference' item,(m.record_json->>'unitCostMinor')::bigint cost
+         FROM rms_inventory.stock_movement m
+         WHERE m.tenant_id=$1 AND m.brand_id=$2 AND m.store_id=$3 AND m.movement_type IN ('Receive','OpeningBalance')
+           AND jsonb_typeof(m.record_json->'unitCostMinor')='number'
+           -- A voided receipt line (reversed by a Correction) does not set the cost.
+           AND NOT EXISTS (SELECT 1 FROM rms_inventory.stock_movement c WHERE c.tenant_id=m.tenant_id AND c.brand_id=m.brand_id
+             AND c.store_id=m.store_id AND c.movement_type='Correction'
+             AND c.record_json->>'correctsMovementReference'=m.movement_id::text)
+         ORDER BY m.record_json->>'itemReference',m.occurred_at DESC,m.movement_id DESC`,
         [scope.tenantReference, scope.brandReference, scope.storeReference],
       )
     ).rows.map((row) => [String(row.item), Number(row.cost)]),

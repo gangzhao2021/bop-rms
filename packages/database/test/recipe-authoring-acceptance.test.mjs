@@ -7,6 +7,7 @@ import {
   listInventoryRecipeIngredientFacts,
   parseStoreReceiptLines,
   postStoreReceipt,
+  voidStoreReceipt,
 } from "../../rms/inventory/src/index.ts";
 import {
   createPostgresKitchenRoutingConfigurationStore,
@@ -53,9 +54,10 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
     const [author, costReviewer, safetyReviewer, owner] = [id(4), id(5), id(6), id(7)];
     const sku = id(8),
       otherSku = id(9);
-    const tx = async (work) => {
+    const transaction = (role) => async (work) => {
       await admin.query("BEGIN");
       try {
+        if (role) await admin.query("SET LOCAL ROLE " + role);
         const value = await work(admin);
         await admin.query("COMMIT");
         return value;
@@ -64,6 +66,11 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
         throw error;
       }
     };
+    // Setup writes run as the owner; recipe authoring runs as a restricted, non-bypass role with the
+    // pilot API grants, so row-level security applies exactly as in the runtime.
+    const setupTx = transaction(null);
+    const role = "wp2423_recipe_" + context.runId;
+    const tx = transaction(role);
     try {
       await ensureSyntheticStockPlace(admin, {
         tenantId: scope.tenantReference,
@@ -73,12 +80,12 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
         locationId: id(11),
         at: "2026-10-07T09:00:00.000Z",
       });
-      const items = syntheticInventoryItems({ tx, scope, actor: owner, next, clock });
+      const items = syntheticInventoryItems({ tx: setupTx, scope, actor: owner, next, clock });
       const milk = await items.create("MILK", litre, "NoLot");
       const beans = await items.create("BEANS", kilogram, "NoLot");
       // The Store's latest received cost becomes the suggested standard cost.
       const receivedAt = clock();
-      await tx((t) =>
+      await setupTx((t) =>
         postStoreReceipt(t, scope, {
           operationReference: next(),
           receipt: createStoreReceipt({
@@ -104,6 +111,49 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
             receivedBy: owner,
             receivedAt,
           }),
+          auditReference: next(),
+          nextReference: next,
+        }),
+      );
+      // A later receipt that was voided does not set the suggested cost.
+      const voided = next();
+      await setupTx((t) =>
+        postStoreReceipt(t, scope, {
+          operationReference: next(),
+          receipt: createStoreReceipt({
+            receiptReference: voided,
+            ...scope,
+            supplierName: "Roaster",
+            supplierDocument: null,
+            lines: parseStoreReceiptLines([
+              {
+                lineReference: next(),
+                itemReference: beans,
+                locationReference: id(11),
+                lotCode: null,
+                expiryDate: null,
+                acceptedQuantity: "1",
+                rejectedQuantity: "0",
+                damagedQuantity: "0",
+                discrepancyReason: null,
+                unitCostMinor: 2600,
+                temperatureCelsius: null,
+              },
+            ]),
+            receivedBy: owner,
+            receivedAt: clock(),
+          }),
+          auditReference: next(),
+          nextReference: next,
+        }),
+      );
+      await setupTx((t) =>
+        voidStoreReceipt(t, scope, {
+          operationReference: next(),
+          receiptReference: voided,
+          reasonCode: "ENTERED_IN_ERROR",
+          actorReference: owner,
+          occurredAt: clock(),
           auditReference: next(),
           nextReference: next,
         }),
@@ -135,7 +185,7 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
       });
       const stationAt = clock();
       const capability = id(12);
-      await tx((t) =>
+      await setupTx((t) =>
         routing.commit({
           transaction: t,
           record: {
@@ -176,6 +226,23 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
         }),
       );
 
+      await admin.query(
+        "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+      );
+      for (const sql of [
+        "GRANT USAGE ON SCHEMA rms_recipe,rms_inventory,rms_kitchen,platform_audit,platform_eventing,platform_helpers TO ROLE_",
+        "GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ROLE_",
+        "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ROLE_",
+        "GRANT SELECT,INSERT,UPDATE ON rms_recipe.recipe,rms_recipe.recipe_scope_binding TO ROLE_",
+        "GRANT SELECT,INSERT,UPDATE ON rms_recipe.recipe_reference_generation TO ROLE_",
+        "GRANT SELECT,UPDATE ON rms_recipe.recipe_modifier_version TO ROLE_",
+        "GRANT SELECT,INSERT ON rms_recipe.recipe_version,rms_recipe.recipe_ingredient_requirement,rms_recipe.recipe_allergen_evidence,rms_recipe.recipe_preparation_step,rms_recipe.recipe_operation_record,rms_recipe.recipe_review_record,rms_recipe.recipe_preparation_content,rms_recipe.recipe_version_presentation,rms_recipe.recipe_authoring_review,rms_recipe.recipe_scope_binding_end,rms_recipe.recipe_reference_binding TO ROLE_",
+        "GRANT SELECT ON rms_inventory.inventory_item,rms_inventory.inventory_item_version,rms_inventory.inventory_item_operation,rms_inventory.stock_movement,rms_kitchen.kitchen_routing_configuration TO ROLE_",
+        "GRANT SELECT,INSERT ON platform_audit.audit_record TO ROLE_",
+        "GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ROLE_",
+        "GRANT INSERT ON platform_eventing.outbox_event TO ROLE_",
+      ])
+        await admin.query(sql.replaceAll("ROLE_", role));
       const facts = async () => {
         const inventory = await tx((t) => listInventoryRecipeIngredientFacts(t, scope));
         const stations = await tx((t) => listKitchenStationCapabilities(t, scope));

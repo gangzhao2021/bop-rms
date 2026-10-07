@@ -531,6 +531,15 @@
       "privilege": "UPDATE",
       "principal": "api",
       "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_generation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
     }
   ]
 }

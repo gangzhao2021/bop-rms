@@ -158,10 +158,13 @@ async function currentOf(
 }
 async function activeBindings(
   tx: RecipeAuthoringTransaction,
-  brand: string,
+  scope: RecipeAuthoringScope,
   at: string,
   filter: { readonly recipeReference?: string; readonly skuReference?: string } = {},
 ): Promise<(RecipeBindingView & { readonly recipeReference: string })[]> {
+  // Brand-wide bindings and those of the selected Store.
+  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  const brand = scope.brandReference;
   const rows = (
     await tx.query(
       `SELECT b.recipe_scope_binding_id::text binding,b.recipe_id::text recipe,b.recipe_version_id::text version,b.sku_id::text sku,
@@ -236,7 +239,7 @@ export async function listRecipes(
       [scope.brandReference],
     )
   ).rows;
-  const bindings = await activeBindings(tx, scope.brandReference, at);
+  const bindings = await activeBindings(tx, scope, at);
   const published = new Set(
     (
       await tx.query(
@@ -351,7 +354,7 @@ export async function loadRecipe(
     ...summaryOf(
       current,
       await preparationPublished(tx, scope.brandReference, s.versionReference),
-      await activeBindings(tx, scope.brandReference, at, { recipeReference }),
+      await activeBindings(tx, scope, at, { recipeReference }),
     ),
     snapshot: s,
     presentation: current.presentation,
@@ -430,6 +433,7 @@ async function commitVersion(
   },
 ) {
   const s = input.snapshot;
+  await tx.query(scopeSql, [brand, ""]);
   const repository = createPostgresRecipeStore(
     { run: (work) => work(tx as never) },
     brand,
@@ -524,6 +528,11 @@ async function replay(
     aggregateVersion: prior.aggregate.aggregateVersion,
   };
 }
+/** Brand-level audit records are written outside any Store scope. */
+async function appendBrandAudit(tx: RecipeAuthoringTransaction, record: AppendAuditRecordInput) {
+  await tx.query(scopeSql, [record.brandId, ""]);
+  await appendAuditRecordInTransaction(tx, record);
+}
 const intentOf = (value: unknown) => sha256(canonicalizeRfc8785(value));
 
 /** Creates a recipe (or a revision of a published one) or replaces the current draft. */
@@ -540,7 +549,7 @@ export async function saveRecipeDraft(
     readonly auditReference: string;
   },
 ) {
-  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  await tx.query(scopeSql, [scope.brandReference, ""]);
   const brand = scope.brandReference;
   const action = input.expectedAggregateVersion === null ? "CreateDraft" : "ReplaceDraft";
   const intent = intentOf({
@@ -646,7 +655,7 @@ export async function recordRecipeReview(
     readonly auditReference: string;
   },
 ) {
-  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  await tx.query(scopeSql, [scope.brandReference, ""]);
   const brand = scope.brandReference;
   const prior = (
     await tx.query(
@@ -716,7 +725,7 @@ export async function recordRecipeReview(
       input.auditReference,
     ],
   );
-  await appendAuditRecordInTransaction(
+  await appendBrandAudit(
     tx,
     auditInput({
       brand,
@@ -847,7 +856,7 @@ export async function publishRecipe(
     readonly auditReference: string;
   },
 ) {
-  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  await tx.query(scopeSql, [scope.brandReference, ""]);
   const brand = scope.brandReference;
   const intent = intentOf({
     action: "Publish",
@@ -929,7 +938,7 @@ export async function publishRecipePreparation(
     readonly auditReference: string;
   },
 ) {
-  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  await tx.query(scopeSql, [scope.brandReference, ""]);
   const brand = scope.brandReference;
   const current = await currentOf(tx, brand, input.recipeReference);
   if (current === null) return fail("RECIPE_AUTHORING_NOT_FOUND");
@@ -1052,7 +1061,7 @@ export async function bindRecipeToSku(
   if (s.yieldDimension !== "Count" || s.yieldUnitCode !== input.skuUnitOfSale)
     return fail("RECIPE_AUTHORING_INVALID");
   const same = (
-    await activeBindings(tx, brand, input.at, { skuReference: input.skuReference })
+    await activeBindings(tx, scope, input.at, { skuReference: input.skuReference })
   ).filter((binding) => binding.storeReference === input.storeReference);
   if (same.some((binding) => binding.recipeVersionReference === s.versionReference))
     return { status: "AlreadyApplied" as const };
@@ -1083,7 +1092,7 @@ export async function bindRecipeToSku(
       input.at,
     ],
   );
-  await appendAuditRecordInTransaction(
+  await appendBrandAudit(
     tx,
     auditInput({
       brand,
@@ -1127,7 +1136,7 @@ export async function endStoreRecipeBinding(
     if (ended.op !== input.operationReference) return fail("RECIPE_AUTHORING_CONFLICT");
     return { status: "AlreadyApplied" as const };
   }
-  const binding = (await activeBindings(tx, brand, input.at)).find(
+  const binding = (await activeBindings(tx, scope, input.at)).find(
     (item) => item.bindingReference === input.bindingReference,
   );
   if (binding === undefined) return fail("RECIPE_AUTHORING_NOT_FOUND");
@@ -1145,7 +1154,7 @@ export async function endStoreRecipeBinding(
       input.auditReference,
     ],
   );
-  await appendAuditRecordInTransaction(
+  await appendBrandAudit(
     tx,
     auditInput({
       brand,
@@ -1174,7 +1183,7 @@ export async function archiveRecipe(
     readonly auditReference: string;
   },
 ) {
-  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  await tx.query(scopeSql, [scope.brandReference, ""]);
   const brand = scope.brandReference;
   const intent = intentOf({
     action: "Archive",
@@ -1198,7 +1207,7 @@ export async function archiveRecipe(
      LIMIT 1`,
     [brand, input.recipeReference],
   );
-  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  await tx.query(scopeSql, [scope.brandReference, ""]);
   const used = await tx.query(
     `SELECT 1 FROM rms_recipe.recipe_ingredient_requirement q JOIN rms_recipe.recipe r ON r.current_version_id=q.recipe_version_id
        AND r.brand_id=q.brand_id
@@ -1245,7 +1254,7 @@ export async function listPublishedSubRecipes(
     readonly yieldUnitCode: string;
   }[]
 > {
-  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  await tx.query(scopeSql, [scope.brandReference, ""]);
   return (
     await tx.query(currentSql + " WHERE r.brand_id=$1 AND v.lifecycle='Published' LIMIT 1000", [
       scope.brandReference,
