@@ -192,6 +192,10 @@ import {
   type createMerchantRoleAdministration,
 } from "./merchant-role-administration.js";
 import {
+  MerchantOpeningCountError,
+  type createMerchantOpeningCount,
+} from "./merchant-opening-count.js";
+import {
   MerchantStockPlaceError,
   type createMerchantStockPlaces,
 } from "./merchant-stock-places.js";
@@ -272,6 +276,7 @@ const merchantNavigation = Object.freeze({
   "IAM-USER-LIST": ["/app/organization/users", "organization.staff.read"],
   "INV-ITEM-LIST": ["/app/supply/items", "inventory.item.read"],
   "INV-LOCATION-LIST": ["/app/supply/locations", "inventory.location.read"],
+  "INV-OPENING-COUNT": ["/app/supply/opening-count", "inventory.count.read"],
 } as const);
 
 export interface MerchantNavigationItem {
@@ -429,6 +434,7 @@ export interface MerchantBffRouterOptions {
   readonly staffAdministration?: ReturnType<typeof createMerchantStaffAdministration>;
   readonly inventoryItems?: ReturnType<typeof createMerchantInventoryItems>;
   readonly stockPlaces?: ReturnType<typeof createMerchantStockPlaces>;
+  readonly openingCount?: ReturnType<typeof createMerchantOpeningCount>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
   readonly ordinaryRefundSend?: ReturnType<typeof createMerchantOrdinaryRefundSendCommand>;
   readonly ordinaryRefundReconciliation?: ReturnType<
@@ -824,6 +830,25 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           .status(large ? 413 : 400)
           .set("Cache-Control", NO_STORE)
           .json({ error: "store_configuration_ordinary_invalid" });
+      });
+      return;
+    }
+    // WP-2423 / DEC-INV-OPENING: an opening count may carry up to 5000 lines.
+    if (request.method === "POST" && request.path === "/supply/opening-count/command") {
+      express.json({ limit: 1_048_576, strict: true })(request, response, (error?: unknown) => {
+        if (!error) {
+          next();
+          return;
+        }
+        const large =
+          typeof error === "object" &&
+          error !== null &&
+          "type" in error &&
+          error.type === "entity.too.large";
+        response
+          .status(large ? 413 : 400)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: "Invalid" });
       });
       return;
     }
@@ -4993,6 +5018,78 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         .then((result) => response.json(result))
         .catch((error: unknown) => stockPlaceFailure(response, error));
     });
+
+  // WP-2423 / DEC-INV-OPENING: INV-OPENING-COUNT reads and opening count commands.
+  const openingCountStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    AlreadyPosted: 409,
+    StockExists: 409,
+    LineInvalid: 422,
+    Invalid: 400,
+    Unavailable: 503,
+  } as const;
+  const openingCountFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantOpeningCountError)) {
+      denied(response);
+      return;
+    }
+    response
+      .status(openingCountStatus[error.code])
+      .json({ error: error.code, lineReference: error.lineReference });
+  };
+  router.post("/supply/opening-count/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { countReference?: unknown } | undefined;
+    const countReference = body?.countReference ?? null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).join(",") !== "countReference" ||
+      (countReference !== null &&
+        (typeof countReference !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            countReference,
+          )))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.openingCount) {
+      response.status(503).json({ error: "opening_count_unavailable" });
+      return;
+    }
+    void options.openingCount
+      .query({ sessionCookie, csrf, countReference })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => openingCountFailure(response, error));
+  });
+  router.post("/supply/opening-count/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.openingCount) {
+      response.status(503).json({ error: "opening_count_unavailable" });
+      return;
+    }
+    void options.openingCount
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => openingCountFailure(response, error));
+  });
 
   router.post("/kitchen/release", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");

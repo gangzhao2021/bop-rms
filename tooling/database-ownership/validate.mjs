@@ -1390,6 +1390,20 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/order-line-consumption-store.ts";
+        // WP-2423 / DEC-INV-OPENING: Store opening count posting to the ledger.
+        const acceptedOpeningCountAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          [
+            "opening_count",
+            "opening_count_version",
+            "opening_count_posting",
+            "stock_lot",
+            "stock_account",
+            "stock_balance",
+            "stock_movement",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/opening-count-store.ts";
         const acceptedStockPlaceAsset =
           module.packageName === "@rms/inventory" &&
           module.manifest.ownedDatabase?.schema === "rms_inventory" &&
@@ -3044,6 +3058,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedStockReservationAsset &&
           !acceptedOrderLineConsumptionAsset &&
           !acceptedStockPlaceAsset &&
+          !acceptedOpeningCountAsset &&
           !acceptedOrderItemInventoryLinkAsset &&
           !acceptedBrowserSessionSelectionAsset &&
           !acceptedBrowserBrandSessionSelectionAsset &&

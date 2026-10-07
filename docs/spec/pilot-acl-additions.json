@@ -288,6 +288,114 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_lot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_lot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count_posting",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count_posting",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_account",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_balance",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_movement",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_movement",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
     }
   ]
 }

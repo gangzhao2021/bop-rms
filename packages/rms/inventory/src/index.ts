@@ -213,3 +213,5 @@ export {
   type TemperatureZone,
 } from "./domain/stock-place.js";
 export { createPostgresStockPlaceStore } from "./infrastructure/persistence/stock-place-store.js";
+export * from "./domain/opening-count.js";
+export * from "./infrastructure/persistence/opening-count-store.js";

@@ -122,6 +122,8 @@ import { SupplyItemDetailPage, SupplyItemFormPage, SupplyItemListPage } from "./
 import { createSupplyItemClient } from "./supply-item-pages.js";
 import { StockLocationListPage } from "./StockLocationPages.js";
 import { createStockLocationClient } from "./stock-location-pages.js";
+import { OpeningCountPage } from "./OpeningCountPages.js";
+import { createOpeningCountClient } from "./opening-count-pages.js";
 import { createStaffPageClient } from "./staff-administration-pages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
 import { PlatformTenantDetailPage } from "./PlatformTenantPages.js";
@@ -637,6 +639,32 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route path="/operations/inventory/transfers/:id" element={<InventoryTransferDetailPage />} />
       <Route path="/operations/inventory/lots" element={<InventoryLotExpiryPage />} />
       <Route path="/operations/receiving/new" element={<GoodsReceiptPage />} />
+      <Route
+        path="/app/supply/opening-count"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <OpeningCountPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createOpeningCountClient(state.csrf)}
+            />
+          ) : (
+            <OpeningCountPage />
+          )
+        }
+      />
+      <Route
+        path="/app/supply/opening-count/:id"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <OpeningCountPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createOpeningCountClient(state.csrf)}
+            />
+          ) : (
+            <OpeningCountPage />
+          )
+        }
+      />
       <Route
         path="/app/supply/locations"
         element={
