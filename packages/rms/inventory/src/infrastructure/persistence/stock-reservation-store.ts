@@ -1000,6 +1000,9 @@ export function createPostgresStockReservationStore(
           if (!(await allowed())) return fail();
           return result(prior, "AlreadyApplied");
         }
+        // The transition keeps productionStartedAt, so it is set on a Consume only if production
+        // had started before this command.
+        const productionStarted = next.productionStartedAt !== null && action === "Consume";
         const movementReference =
           raw.movementReference === null ? null : parseInventoryReference(raw.movementReference);
         if ((action === "StartProduction") !== (movementReference === null)) return fail();
@@ -1031,10 +1034,13 @@ export function createPostgresStockReservationStore(
           item.updatedAt > next.updatedAt ||
           !item.trackingPolicy.stockTrackingEnabled ||
           canonicalizeRfc8785(item.baseUnit) !== canonicalizeRfc8785(next.unit) ||
-          // Starting production is a safety gate; Release and Consume record what already happened
-          // (WP-2423), so an Item deactivated after production started is still settled.
+          // Starting production is a safety gate. Release, and Consume of stock whose production
+          // already started (WP-2423), record what happened, so a later deactivation still settles.
           (item.lifecycle !== "Active" &&
-            !((action === "Release" || action === "Consume") && item.lifecycle === "Inactive"))
+            !(
+              (action === "Release" || (action === "Consume" && productionStarted)) &&
+              item.lifecycle === "Inactive"
+            ))
         )
           return fail("STOCK_RESERVATION_ITEM_INELIGIBLE");
         const accountRows = rows(
@@ -1071,8 +1077,13 @@ export function createPostgresStockReservationStore(
           (lotMode === "LotExpiryRequired" && account.expiry === null)
         )
           return fail("STOCK_RESERVATION_ITEM_INELIGIBLE");
-        // A quality hold blocks new Reserve/StartProduction, not the record of stock already used.
-        if (account.lot !== null && action !== "Release" && action !== "Consume") {
+        // A quality hold blocks Reserve, StartProduction and consuming unstarted stock; it does not
+        // block recording stock already used in production.
+        if (
+          account.lot !== null &&
+          action !== "Release" &&
+          !(action === "Consume" && productionStarted)
+        ) {
           const holds = rows(
             await tx.query(
               `SELECT record_json->'hold' AS hold,version::text AS version,

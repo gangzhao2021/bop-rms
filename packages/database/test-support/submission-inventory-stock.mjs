@@ -5,6 +5,7 @@ import {
   createPostgresInventoryItemStore,
   executeInventoryItemCommand,
 } from "../../rms/inventory/src/index.ts";
+import { ensureSyntheticStockPlace } from "./stock-place.mjs";
 /** Actual Item command/Audit and synthetic received-stock fixture in an isolated database. */
 export async function seedSubmissionInventoryStock({
   admin,
@@ -113,6 +114,14 @@ export async function seedSubmissionInventoryStock({
     },
     ports(),
   );
+  await ensureSyntheticStockPlace(admin, {
+    tenantId: id(1),
+    brandId: id(2),
+    storeId: id(300),
+    stockSiteId: id(301),
+    locationId: id(302),
+    at: now,
+  });
   await admin.query(
     "INSERT INTO rms_inventory.stock_account (tenant_id,brand_id,store_id,stock_site_id,location_id,account_id,item_id,item_version,unit_code,ledger_precision,created_at,lot_id,expiry_date) VALUES ($1,$2,$3,$4,$5,$6,$7,2,'KG',4,$8,$9,$10)",
     [

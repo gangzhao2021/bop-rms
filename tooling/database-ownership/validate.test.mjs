@@ -2473,6 +2473,51 @@ describe("Database Schema Ownership Architecture Test", () => {
       expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
     },
   );
+  it("admits only the Inventory stock place owner adapter without a driver", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "inventory", "rms_inventory", [
+      "stock_site",
+      "stock_site_version",
+      "storage_location",
+      "storage_location_version",
+      "stock_place_operation",
+    ]);
+    const asset = join(context.moduleRoot, "src/infrastructure/persistence/stock-place-store.ts");
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(asset, "export const synthetic = true;");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg"; export {pg};');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each(["owner", "schema", "path", "storage_location"])(
+    "rejects the Inventory stock place store with changed %s",
+    async (changed) => {
+      const root = await fixture();
+      const context = await writeModule(
+        root,
+        "RMS",
+        changed === "owner" ? "other" : "inventory",
+        changed === "schema" ? "rms_other" : "rms_inventory",
+        [
+          "stock_site",
+          "stock_site_version",
+          "storage_location",
+          "storage_location_version",
+          "stock_place_operation",
+        ].filter((v) => v !== changed),
+      );
+      await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+      await writeFile(
+        join(
+          context.moduleRoot,
+          "src/infrastructure/persistence/" +
+            (changed === "path" ? "other.ts" : "stock-place-store.ts"),
+        ),
+        "export const synthetic = true;",
+      );
+      expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+    },
+  );
   it("admits only the Inventory order-line consumption owner adapter without a driver", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "inventory", "rms_inventory", [

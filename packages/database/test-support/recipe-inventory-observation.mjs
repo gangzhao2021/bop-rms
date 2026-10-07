@@ -6,6 +6,7 @@ import {
   executeInventoryItemCommand,
 } from "../../rms/inventory/src/index.ts";
 import { createCustomerRecipeInventoryObservation } from "../../../apps/api/src/customer-recipe-inventory-observation.ts";
+import { ensureSyntheticStockPlace } from "./stock-place.mjs";
 
 /** Actual Catalog/Recipe/Inventory reads. Scope approval and starting stock are
  * explicitly synthetic isolated fixtures, not a real Store receipt or approval.
@@ -239,6 +240,14 @@ export async function seedSyntheticInventoryItems({
       location = next(),
       movement = next(),
       audit = next();
+    await ensureSyntheticStockPlace(admin, {
+      tenantId: scope.tenantReference,
+      brandId: scope.brandReference,
+      storeId: scope.storeReference,
+      stockSiteId: scope.stockSiteReference,
+      locationId: location,
+      at,
+    });
     await admin.query(
       "INSERT INTO rms_inventory.stock_account (tenant_id,brand_id,store_id,stock_site_id,location_id,account_id,item_id,item_version,unit_code,ledger_precision,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,2,'KG',4,$8)",
       [

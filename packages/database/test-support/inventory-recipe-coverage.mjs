@@ -7,6 +7,7 @@ import {
   createPostgresInventoryRecipeConfigurationSource,
 } from "../../rms/inventory/src/index.ts";
 import { parseRecipeSourceCoverage } from "../../rms/recipe/src/index.ts";
+import { ensureSyntheticStockPlace } from "./stock-place.mjs";
 /** Actual Inventory source/storage/locks; synthetic authority/item/received-stock facts only. */
 export async function exerciseInventoryRecipeCoverage({ admin, context, role, id, scope, at }) {
   await admin.query(`GRANT USAGE ON SCHEMA rms_inventory TO ${role}`);
@@ -242,6 +243,14 @@ export async function exerciseInventoryRecipeCoverage({ admin, context, role, id
       )?.digest,
       initial.coverage.dependencies[0].digest,
     );
+    await ensureSyntheticStockPlace(admin, {
+      tenantId: scope.tenantReference,
+      brandId: scope.brandReference,
+      storeId: id(30010),
+      stockSiteId: id(30011),
+      locationId: id(30012),
+      at,
+    });
     await admin.query(
       "INSERT INTO rms_inventory.stock_account(tenant_id,brand_id,store_id,stock_site_id,location_id,account_id,item_id,item_version,unit_code,ledger_precision,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,2,'KG',4,$8)",
       [

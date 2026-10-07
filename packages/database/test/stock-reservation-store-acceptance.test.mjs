@@ -15,6 +15,7 @@ import {
   parseInventoryReservationSet,
 } from "../../rms/inventory/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { ensureSyntheticStockPlace } from "../test-support/stock-place.mjs";
 const { Client } = pg;
 const id = (n) => "01909998-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-09-11T10:00:00.000Z";
@@ -38,6 +39,11 @@ it("commits reservation movement and Audit atomically and recovers original oper
       );
       await admin.query(
         "GRANT SELECT,INSERT,UPDATE,DELETE,TRUNCATE ON rms_inventory.stock_account,rms_inventory.stock_balance,rms_inventory.stock_movement,rms_inventory.stock_reservation_version TO " +
+          role,
+      );
+      // DEC-INV-LOCATIONS: opening an account checks the registered active location.
+      await admin.query(
+        "GRANT SELECT ON rms_inventory.stock_site_version,rms_inventory.storage_location_version TO " +
           role,
       );
       await admin.query("GRANT SELECT ON rms_inventory.stock_lot_hold_version TO " + role);
@@ -116,6 +122,14 @@ it("commits reservation movement and Audit atomically and recovers original oper
           await client.end();
         }
       }
+      await ensureSyntheticStockPlace(admin, {
+        tenantId: id(1),
+        brandId: id(2),
+        storeId: id(3),
+        stockSiteId: id(4),
+        locationId: id(5),
+        at,
+      });
       await scoped(async (client) => {
         await client.query(
           "INSERT INTO rms_inventory.stock_account (tenant_id,brand_id,store_id,stock_site_id,location_id,account_id,item_id,item_version,lot_id,expiry_date,unit_code,ledger_precision,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,1,NULL,NULL,'KG',6,$8)",
@@ -587,6 +601,14 @@ it("commits reservation movement and Audit atomically and recovers original oper
         "SELECT (SELECT count(*)::int FROM rms_inventory.stock_reservation_version) AS versions,(SELECT count(*)::int FROM rms_inventory.stock_movement) AS movements,(SELECT count(*)::int FROM platform_audit.audit_record) AS audits",
       );
       assert.deepEqual(counts.rows, [{ versions: 4, movements: 4, audits: 4 }]);
+      await ensureSyntheticStockPlace(admin, {
+        tenantId: id(1),
+        brandId: id(2),
+        storeId: id(3),
+        stockSiteId: id(4),
+        locationId: id(701),
+        at,
+      });
       await admin.query(
         "INSERT INTO rms_inventory.stock_account (tenant_id,brand_id,store_id,stock_site_id,location_id,account_id,item_id,item_version,unit_code,ledger_precision,created_at) SELECT $1::platform_helpers.uuid_v7,$2::platform_helpers.uuid_v7,$3::platform_helpers.uuid_v7,$4::platform_helpers.uuid_v7,$5::platform_helpers.uuid_v7,$6::platform_helpers.uuid_v7,$7::platform_helpers.uuid_v7,max(version),'KG',6,$8::timestamptz FROM rms_inventory.inventory_item_version WHERE tenant_id=$1 AND brand_id=$2 AND item_id=$7",
         [id(1), id(2), id(3), id(4), id(701), id(700), id(6), at],

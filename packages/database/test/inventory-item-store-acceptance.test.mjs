@@ -20,6 +20,7 @@ import {
   executeInventoryItemCommand,
 } from "../../rms/inventory/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { ensureSyntheticStockPlace } from "../test-support/stock-place.mjs";
 const { Client } = pg;
 const id = (n) => "01909998-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const scope = { tenantReference: id(1), brandReference: id(2) };
@@ -280,6 +281,14 @@ it("composes Inventory commands with original recovery, current version fencing 
         "GRANT SELECT,INSERT,UPDATE ON rms_inventory.stock_account,rms_inventory.stock_balance,rms_inventory.stock_movement TO " +
           role,
       );
+      await ensureSyntheticStockPlace(admin, {
+        tenantId: id(1),
+        brandId: id(2),
+        storeId: id(300),
+        stockSiteId: id(301),
+        locationId: id(302),
+        at: now,
+      });
       await admin.query(
         "INSERT INTO rms_inventory.stock_account (tenant_id,brand_id,store_id,stock_site_id,location_id,account_id,item_id,item_version,unit_code,ledger_precision,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,3,'KG',4,$8)",
         [id(1), id(2), id(300), id(301), id(302), id(303), recovered.item.itemReference, now],

@@ -1376,6 +1376,17 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/order-line-consumption-store.ts";
+        const acceptedStockPlaceAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          [
+            "stock_site",
+            "stock_site_version",
+            "storage_location",
+            "storage_location_version",
+            "stock_place_operation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/stock-place-store.ts";
         const acceptedStockCandidateAsset =
           module.packageName === "@rms/inventory" &&
           module.manifest.ownedDatabase?.schema === "rms_inventory" &&
@@ -2966,6 +2977,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedInventoryFinalValidationAsset &&
           !acceptedStockReservationAsset &&
           !acceptedOrderLineConsumptionAsset &&
+          !acceptedStockPlaceAsset &&
           !acceptedOrderItemInventoryLinkAsset &&
           !acceptedBrowserSessionSelectionAsset &&
           !acceptedBrowserBrandSessionSelectionAsset &&

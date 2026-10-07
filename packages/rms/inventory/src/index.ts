@@ -204,3 +204,12 @@ export {
   createPostgresOrderLineConsumptionStore,
   OrderLineConsumptionError,
 } from "./infrastructure/persistence/order-line-consumption-store.js";
+export {
+  applyStockPlaceCommand,
+  StockPlaceError,
+  type StockPlaceCommand,
+  type StockSite,
+  type StorageLocation,
+  type TemperatureZone,
+} from "./domain/stock-place.js";
+export { createPostgresStockPlaceStore } from "./infrastructure/persistence/stock-place-store.js";

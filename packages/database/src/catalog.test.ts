@@ -642,6 +642,7 @@ describe("migration catalog", () => {
       "1900_013_create_item_sku_mapping",
       "1900_014_alter_stock_reservation_order_line",
       "1900_015_alter_stock_movement_operations",
+      "1900_016_create_stock_site_location",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
