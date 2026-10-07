@@ -32,6 +32,7 @@ async function prove(context) {
       { table_name: "api_client_credential_metadata" },
       { table_name: "api_client_operation" },
       { table_name: "authentication_session" },
+      { table_name: "browser_brand_session_selection" },
       { table_name: "browser_session_selection" },
       { table_name: "guest_binding_preparation" },
       { table_name: "guest_dining_binding_preparation" },
@@ -39,9 +40,13 @@ async function prove(context) {
       { table_name: "guest_session" },
       { table_name: "guest_session_operation" },
       { table_name: "oidc_authorization_transaction" },
+      { table_name: "platform_actor_directory_head" },
+      { table_name: "platform_actor_directory_revision" },
       { table_name: "session_revocation_request" },
+      { table_name: "workforce_account_binding" },
       { table_name: "workforce_invitation" },
       { table_name: "workforce_mfa_status" },
+      { table_name: "workforce_onboarding_operation" },
       { table_name: "workforce_recovery_case" },
     ]);
 
@@ -170,19 +175,53 @@ async function prove(context) {
        WHERE relation.relnamespace='bop_identity'::regnamespace AND privilege.grantee=0`,
     );
     assert.deepEqual(acl.rows, [{ count: 0 }]);
-    const dynamic = await client.query(
-      `SELECT
-         (SELECT count(*)::int FROM pg_proc
-          WHERE pronamespace='bop_identity'::regnamespace) AS functions,
-         (SELECT count(*)::int FROM pg_trigger
-          WHERE tgrelid IN (
-            'bop_identity.workforce_invitation'::regclass,
-            'bop_identity.workforce_mfa_status'::regclass,
-            'bop_identity.workforce_recovery_case'::regclass,
-            'bop_identity.session_revocation_request'::regclass
-          ) AND NOT tgisinternal) AS triggers`,
+    const functions = await client.query(
+      `SELECT proname FROM pg_proc
+       WHERE pronamespace='bop_identity'::regnamespace ORDER BY proname`,
     );
-    assert.deepEqual(dynamic.rows, [{ functions: 5, triggers: 0 }]);
+    assert.deepEqual(
+      functions.rows.map(({ proname }) => proname),
+      [
+        "enforce_api_client_revision",
+        "platform_actor_directory_complete",
+        "platform_actor_directory_head_guard",
+        "platform_actor_directory_immutable",
+        "platform_actor_directory_import_admit",
+        "platform_actor_directory_import_capable",
+        "platform_actor_directory_read",
+        "platform_actor_directory_revision_guard",
+        "reject_api_client_history_update",
+        "reject_browser_brand_selection_mutation",
+        "reject_guest_session_operation_mutation",
+        "validate_guest_binding_preparation",
+        "validate_guest_dining_binding_preparation",
+        "workforce_account_binding_acceptance_admit",
+        "workforce_account_binding_complete",
+        "workforce_account_binding_guard",
+        "workforce_account_binding_immutable",
+        "workforce_account_binding_import_admit",
+        "workforce_account_binding_import_capable",
+        "workforce_account_binding_read",
+        "workforce_account_invitation_read",
+        "workforce_onboarding_instant",
+        "workforce_onboarding_invitation_read",
+        "workforce_onboarding_operation_admit",
+        "workforce_onboarding_operation_complete",
+        "workforce_onboarding_operation_guard",
+        "workforce_onboarding_operation_immutable",
+        "workforce_onboarding_scope",
+      ],
+    );
+    const dynamic = await client.query(
+      `SELECT count(*)::int AS triggers FROM pg_trigger
+       WHERE tgrelid IN (
+         'bop_identity.workforce_invitation'::regclass,
+         'bop_identity.workforce_mfa_status'::regclass,
+         'bop_identity.workforce_recovery_case'::regclass,
+         'bop_identity.session_revocation_request'::regclass
+       ) AND NOT tgisinternal`,
+    );
+    assert.deepEqual(dynamic.rows, [{ triggers: 0 }]);
 
     await client.query(
       `CREATE ROLE ${deniedRole} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`,
