@@ -28,10 +28,6 @@ export async function seedRecipeObservationInventory({
     storeReference: saleInput.storeReference,
     stockSiteReference: id(29991),
   };
-  const itemScope = {
-    tenantReference: scope.tenantReference,
-    brandReference: scope.brandReference,
-  };
   await admin.query("RESET ROLE");
   try {
     await admin.query("GRANT USAGE ON SCHEMA rms_inventory,platform_audit TO " + role);

@@ -1290,6 +1290,14 @@ async function scanUnsupported(root, module, diagnostics) {
             "src/infrastructure/persistence/brand-initial-policy-store.ts",
             "src/infrastructure/persistence/approved-workforce-policy-store.ts",
           ].includes(moduleRelative);
+        // WP-2423 / DEC-PERM-CATALOG: release-time Store permission catalog installation.
+        const acceptedPermissionCatalogAsset =
+          module.packageName === "@bop/permission" &&
+          module.manifest.ownedDatabase?.schema === "bop_permission" &&
+          ["permission_definition", "permission_catalog_revision"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/permission-catalog-synchronizer.ts";
         const acceptedPlatformPermissionAsset =
           module.packageName === "@bop/permission" &&
           module.manifest.ownedDatabase?.schema === "bop_permission" &&
@@ -3022,6 +3030,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedCurrentPermissionAsset &&
           !acceptedInitialBrandPermissionAsset &&
           !acceptedPlatformPermissionAsset &&
+          !acceptedPermissionCatalogAsset &&
           !acceptedSystemMediaPromotionPermissionAsset &&
           !acceptedWorkflowDefinitionAsset &&
           !acceptedCurrentLiveGateAsset &&

@@ -13,6 +13,7 @@
 - Current execution coordinator: [WP-2423 — single-store pilot track](./work-packages/WP-2423.md)
   (Owner-accepted 2026-10-06). WP-2421 whole-project assembly is paused; WP-2402 remains the retained
   pilot/history owner.
+- Migration order (2026-10-07): [DEC-MIGRATION-RELEASE-ORDER](./design/migration-release-order.md) — new migrations go into release namespaces (2000+); module namespaces are closed
 - Scope direction (2026-10-06): [DEC-FOCUS-01 pilot mainline focus](./design/pilot-mainline-focus.md)
   freezes peripheral Domains and unconnected Merchant pages and pauses Product/Option/Recipe
   publication refinement. [WP-2422](./work-packages/WP-2422.md) owns the repository design remediation

@@ -47,6 +47,7 @@ export * from "./infrastructure/brand-provisioning-approval-source.js";
 export * from "./infrastructure/brand-provisioning-approval-files.js";
 export * from "./contracts/brand-initial-policy.js";
 export * from "./infrastructure/persistence/brand-initial-policy-store.js";
+export * from "./infrastructure/persistence/permission-catalog-synchronizer.js";
 export * from "./contracts/brand-initial-provisioning-plan.js";
 export {
   legacyPermissionReplacements,

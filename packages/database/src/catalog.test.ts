@@ -417,7 +417,6 @@ describe("migration catalog", () => {
       "0300_008_alter_option_publication_action_identifier",
       "0300_009_alter_option_history_action_identifier",
       "0300_010_create_platform_permission",
-      "0300_011_alter_permission_catalog_identifiers",
       "0400_001_create_feature_control_administration",
       "0400_002_create_live_gate_workflow",
       "0400_003_create_support_case",
@@ -644,6 +643,8 @@ describe("migration catalog", () => {
       "1900_014_alter_stock_reservation_order_line",
       "1900_015_alter_stock_movement_operations",
       "1900_016_create_stock_site_location",
+      "2000_001_alter_permission_catalog_identifiers",
+      "2000_002_create_permission_catalog_revision",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -1787,7 +1788,10 @@ describe("migration catalog", () => {
 
   it("registers the exact WP-0101, WP-0102, WP-0105, WP-0107 and WP-0108 business migration authorities", async () => {
     const migrations = (await readMigrationCatalog(repositoryRoot)).migrations.filter(
-      (migration) => migration.namespace === 200 || migration.namespace === 300,
+      (migration) =>
+        migration.namespace === 200 ||
+        migration.namespace === 300 ||
+        migration.metadata.schema === "bop_permission",
     );
     expect(
       migrations.map((migration) => [
@@ -1852,7 +1856,8 @@ describe("migration catalog", () => {
       ["0300_008_alter_option_publication_action_identifier", "@bop/permission", "bop_permission"],
       ["0300_009_alter_option_history_action_identifier", "@bop/permission", "bop_permission"],
       ["0300_010_create_platform_permission", "@bop/permission", "bop_permission"],
-      ["0300_011_alter_permission_catalog_identifiers", "@bop/permission", "bop_permission"],
+      ["2000_001_alter_permission_catalog_identifiers", "@bop/permission", "bop_permission"],
+      ["2000_002_create_permission_catalog_revision", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",
@@ -2276,6 +2281,44 @@ $unsafe$;
     expect((await readMigrationCatalog(root)).diagnostics.map((item) => item.code)).toContain(
       "MIGRATION_SCHEMA_MISMATCH",
     );
+  });
+
+  it("closes module namespaces and admits later migrations only in the release namespace", async () => {
+    const root = await fixture();
+    const source = path.join(
+      root,
+      "migrations/2000-release-001/2000_002_create_permission_catalog_revision.sql",
+    );
+    const sql = (await readFile(source, "utf8")).replaceAll(
+      "permission_catalog_revision",
+      "permission_catalog_probe",
+    );
+    await writeFile(
+      path.join(
+        root,
+        "migrations/0300-bop-governance/0300_011_create_permission_catalog_probe.sql",
+      ),
+      sql,
+    );
+    expect(
+      (await readMigrationCatalog(root)).diagnostics.map((item) => [item.code, item.file]),
+    ).toContainEqual([
+      "MIGRATION_NAMESPACE_CLOSED",
+      "migrations/0300-bop-governance/0300_011_create_permission_catalog_probe.sql",
+    ]);
+    await rm(
+      path.join(
+        root,
+        "migrations/0300-bop-governance/0300_011_create_permission_catalog_probe.sql",
+      ),
+    );
+    await writeFile(
+      path.join(root, "migrations/2000-release-001/2000_003_create_permission_catalog_probe.sql"),
+      sql,
+    );
+    const catalog = await readMigrationCatalog(root);
+    expect(catalog.diagnostics).toEqual([]);
+    expect(catalog.migrations.at(-1)?.id).toBe("2000_003_create_permission_catalog_probe");
   });
 
   it("rejects a symbolic namespace registry", async () => {

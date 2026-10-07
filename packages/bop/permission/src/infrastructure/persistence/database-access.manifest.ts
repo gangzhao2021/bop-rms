@@ -83,6 +83,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["none"],
     },
     {
+      table: "permission_catalog_revision",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "role",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@bop/permission" },
@@ -442,6 +450,46 @@ const databaseAccessManifestInput = {
       readPattern: null,
       source:
         "packages/bop/permission/src/infrastructure/persistence/system-media-image-promotion-provisioner.ts",
+    },
+    {
+      id: "permission-catalog-synchronizer.read.permission_definition",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_definition" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/permission-catalog-synchronizer.ts",
+    },
+    {
+      id: "permission-catalog-synchronizer.write.permission_definition",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_definition" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/permission-catalog-synchronizer.ts",
+    },
+    {
+      id: "permission-catalog-synchronizer.read.permission_catalog_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_catalog_revision" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/permission-catalog-synchronizer.ts",
+    },
+    {
+      id: "permission-catalog-synchronizer.write.permission_catalog_revision",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_catalog_revision" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/permission-catalog-synchronizer.ts",
     },
   ],
 } as const;

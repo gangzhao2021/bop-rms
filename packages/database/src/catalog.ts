@@ -32,7 +32,41 @@ const expectedNamespaces = [
   ["1700", "1700-rms-fulfillment"],
   ["1800", "1800-rms-reporting"],
   ["1900", "1900-rms-inventory"],
+  ["2000", "2000-release-001"],
 ] as const;
+/**
+ * DEC-MIGRATION-RELEASE-ORDER: the module namespaces are closed at their last pre-release sequence.
+ * Every later migration, whatever its owner, goes into the current release namespace (2000 and up),
+ * so the global (namespace, sequence) order is the release order and an upgraded database never
+ * meets a pending migration below its applied high-water mark. Ownership still comes from the
+ * header owner and schema, never from the namespace.
+ */
+const closedModuleNamespaceCeilings = new Map<number, number>([
+  [0, 24],
+  [100, 0],
+  [200, 34],
+  [300, 10],
+  [400, 19],
+  [1000, 13],
+  [1001, 13],
+  [1100, 18],
+  [1101, 3],
+  [1102, 8],
+  [1103, 2],
+  [1104, 4],
+  [1105, 1],
+  [1106, 3],
+  [1107, 3],
+  [1200, 17],
+  [1250, 10],
+  [1300, 36],
+  [1400, 24],
+  [1500, 11],
+  [1600, 8],
+  [1700, 12],
+  [1800, 6],
+  [1900, 16],
+]);
 const namespaceByDirectory = new Map<string, string>(
   expectedNamespaces.map(([namespace, directory]) => [directory, namespace]),
 );
@@ -783,6 +817,17 @@ export async function readMigrationCatalog(root: string): Promise<MigrationCatal
       left.sequence - right.sequence ||
       left.relativePath.localeCompare(right.relativePath, "en"),
   );
+  for (const migration of migrations) {
+    const ceiling = closedModuleNamespaceCeilings.get(migration.namespace);
+    if (ceiling !== undefined && migration.sequence > ceiling)
+      diagnostics.push(
+        diagnostic(
+          "MIGRATION_NAMESPACE_CLOSED",
+          migration.relativePath,
+          "module namespaces are closed; add the migration to the current release namespace",
+        ),
+      );
+  }
   const orders = new Map<string, string>();
   for (const migration of migrations) {
     const order = `${migration.namespace}:${migration.sequence}`;

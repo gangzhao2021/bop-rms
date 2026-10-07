@@ -43,6 +43,7 @@ const moduleManifestInput = {
       "role_administration_version",
       "policy_state",
       "permission_definition",
+      "permission_catalog_revision",
       "role",
       "role_assignment",
       "permission_grant",
