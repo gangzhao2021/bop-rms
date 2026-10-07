@@ -1,0 +1,3733 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": "revocation_reason",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": "revoked_at",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": "status",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": "version",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "workforce_mfa_status",
+      "column": "actor_id",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "bop_operating_entity",
+      "object": "operating_entity",
+      "column": "version",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "bop_operating_entity",
+      "object": "store_operating_entity_assignment",
+      "column": "version",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "bop_tenant",
+      "object": "brand",
+      "column": "lifecycle",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "bop_tenant",
+      "object": "store",
+      "column": "lifecycle",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "bop_tenant",
+      "object": "store",
+      "column": "version",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "rms_dining",
+      "object": "dining_participant",
+      "column": "participant_id",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "rms_kitchen",
+      "object": "kitchen_ticket",
+      "column": "kitchen_ticket_id",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "rms_ordering",
+      "object": "order_batch",
+      "column": "order_batch_id",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "rms_ordering",
+      "object": "order_header",
+      "column": "order_id",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "rms_ordering",
+      "object": "order_item",
+      "column": "order_item_id",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "column",
+      "schema": "rms_ordering",
+      "object": "order_submission_record",
+      "column": "order_id",
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "routine",
+      "schema": "platform_helpers",
+      "object": "platform_helpers.current_brand_id()",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "api"
+    },
+    {
+      "type": "routine",
+      "schema": "platform_helpers",
+      "object": "platform_helpers.current_store_id()",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "api"
+    },
+    {
+      "type": "routine",
+      "schema": "platform_helpers",
+      "object": "platform_helpers.is_uuid_v7(uuid)",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "api"
+    },
+    {
+      "type": "routine",
+      "schema": "security",
+      "object": "security.consume_abuse_budget(text,bytea,timestamp with time zone,integer,integer,timestamp with time zone)",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_identity",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_membership",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_operating_entity",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_permission",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_publishing",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_task",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_tenant",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_workflow",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "platform_audit",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "platform_eventing",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "platform_helpers",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "platform_projection",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_catalog",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_device",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_dining",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_fulfillment",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_inventory",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_kitchen",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_ordering",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_payment",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_pricing",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_recipe",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_store",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "schema",
+      "schema": "security",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "authentication_session",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "authentication_session",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "authentication_session",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "browser_session_selection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "browser_session_selection",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_binding_preparation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_binding_preparation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_dining_binding_preparation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_dining_binding_preparation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_entry_admission",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_entry_admission",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_session_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "guest_session_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "workforce_mfa_status",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_membership",
+      "object": "membership",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_membership",
+      "object": "membership",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_membership",
+      "object": "store_assignment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_membership",
+      "object": "store_assignment",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_operating_entity",
+      "object": "brand_operating_entity_assignment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_operating_entity",
+      "object": "operating_entity",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_operating_entity",
+      "object": "store_operating_entity_assignment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_definition",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_definition",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_grant",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_grant",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_override",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_override",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "policy_state",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "policy_state",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_assignment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_assignment",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "live_gate_requirement",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "live_gate_requirement",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "live_gate_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "live_gate_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "publishing_mutation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "publishing_mutation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "publishing_mutation_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_task",
+      "object": "task_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_task",
+      "object": "task_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "brand",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "brand",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "store",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "store",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_workflow",
+      "object": "workflow_definition_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_workflow",
+      "object": "workflow_definition_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_workflow",
+      "object": "workflow_definition_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_audit",
+      "object": "audit_chain_head",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_audit",
+      "object": "audit_chain_head",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_audit",
+      "object": "audit_chain_head",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_audit",
+      "object": "audit_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_audit",
+      "object": "audit_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_audit",
+      "object": "audit_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "consumer_inbox",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "consumer_inbox",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "consumer_inbox",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "consumer_retry_schedule",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "consumer_retry_schedule",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "consumer_retry_schedule",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "dead_letter_action",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "dead_letter_action",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "dead_letter_item",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "dead_letter_item",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "dead_letter_item",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "delivery_attempt",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "delivery_attempt",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "manual_outbox_recovery",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "manual_outbox_recovery",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "manual_outbox_recovery_attempt",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "manual_outbox_recovery_attempt",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "manual_outbox_recovery_execution",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "manual_outbox_recovery_execution",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "manual_outbox_recovery_execution",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "manual_outbox_recovery_outcome",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "manual_outbox_recovery_outcome",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "outbox_event",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "outbox_event",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_eventing",
+      "object": "outbox_event",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_projection",
+      "object": "order_exception_source",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "platform_projection",
+      "object": "order_exception_source",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "category",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_release",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_revision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_release_effective_period",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_channel",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_order_type",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_store",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_conflict",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_channel",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_option",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_sku_scope",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_checkpoint",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_generation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_section",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_sellable",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sku",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_admission_consumption_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_admission_consumption_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_checkout_commitment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_checkout_commitment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_closing_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_closing_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_exception_task",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_exception_task",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_host_transfer_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_host_transfer_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_identity_admission",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_identity_admission",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_identity_admission",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_item_service_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_item_service_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_join_capability",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_join_capability",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_join_capability",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_join_regeneration_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_join_regeneration_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_participant",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_participant",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_join_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_join_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_start_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_start_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_table",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_table",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_table",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_table_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_table_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_table_release_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_table_release_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_allocation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_allocation_terminal",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_asap_commitment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_asap_commitment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_hold",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_hold_terminal",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_slot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_slot",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_slot_configuration",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_completion_publication",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_completion_publication",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_creation_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_creation_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_item",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_item",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_item_ready_result",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_item_ready_result",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_ready_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_ready_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_handoff_item",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_handoff_item",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_handoff_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_handoff_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_handoff_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_handoff_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_proof_generation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_proof_generation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_proof_invalidation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_proof_invalidation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_proof_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_proof_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_proof_verification",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_proof_verification",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "inventory_item",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "inventory_item",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "inventory_item",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "inventory_item_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "inventory_item_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "inventory_item_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "inventory_item_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_account",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_account",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_balance",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_balance",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_lot_hold_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_movement",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_movement",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_reservation_set",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_reservation_set",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_reservation_set",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_reservation_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_reservation_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_reservation_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "submission_final_validation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "submission_final_validation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_action_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_action_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_creation_record",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_creation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_creation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_creation_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_order_item_ready_result",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_order_item_ready_result",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_ready_publication",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_ready_publication",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_routing_configuration",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_routing_configuration",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_ticket",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_ticket",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_ticket",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_item",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_item",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_item",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_lifecycle_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_lifecycle_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_queue_projection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_queue_projection",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_queue_projection_generation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_queue_projection_generation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_queue_projection_generation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "additional_dining_batch_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "additional_dining_batch_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_binding_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_binding_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_binding_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_lifecycle_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_lifecycle_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_line",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_line",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_line",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_line",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_quote_attachment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_quote_attachment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_quote_attachment_line",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_quote_attachment_line",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_quote_expiry_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_quote_expiry_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_details_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_details_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_session_allocation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_session_allocation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_session_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_session_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "digital_receipt_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "digital_receipt_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_cart_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_cart_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_cart_replacement",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "dining_cart_replacement",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_acceptance_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_acceptance_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_amendment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_amendment",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_amendment_state_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_amendment_state_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_batch",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_batch",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_batch_checkout_cancellation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_batch_checkout_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_batch_checkout_expiry",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_batch_checkout_expiry",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_cancellation_request_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_capacity_link",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_capacity_link",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_checkout_details_link",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_checkout_details_link",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_closure_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_closure_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_fulfillment_completion_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_fulfillment_completion_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_header",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_header",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_number_allocation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_number_allocation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_number_counter",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_number_counter",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_number_counter",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_payment_acceptance_wait",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_payment_acceptance_wait",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_payment_disposition_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_payment_disposition_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_payment_failure_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_payment_failure_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_revision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_revision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_status_projection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_status_projection",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_status_projection",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_status_projection_generation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_status_projection_generation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_submission_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_submission_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_termination_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "order_settled_finality",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "order_settled_finality",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_dispatch",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_dispatch",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_observation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_observation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_request",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_request",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_attempt",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_attempt",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_action_history",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_action_history",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_case_history",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_case_history",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_lease_history",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_lease_history",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_operation_history",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_operation_history",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_operations",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_operations",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_refund",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_compensation_refund",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_intent",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_intent",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_intent_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_intent_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_provider_observation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_provider_observation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_reconciliation_exception",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_reconciliation_exception",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_reconciliation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_reconciliation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_reconciliation_run",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_reconciliation_run",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_status_projection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_status_projection",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_terminal_fact",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_terminal_fact",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_tip_selection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_tip_selection",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_capture_exception_evidence",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_capture_exception_evidence",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "reconciliation_follow_up_history",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "reconciliation_follow_up_history",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_entry",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_quote",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_quote",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_quote_line",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_quote_line",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_quote_request",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_quote_request",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_quote_tax_line",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_quote_tax_line",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "tax_configuration",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "tax_configuration_rule",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "tax_configuration_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_allergen_evidence",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_allergen_evidence",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_ingredient_requirement",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_ingredient_requirement",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_modifier_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_modifier_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_preparation_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_preparation_content",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_preparation_step",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_preparation_step",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_review_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_review_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_scope_binding",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_scope_binding",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "public_store_profile_timing",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "public_store_profile_timing",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "public_store_profile_timing",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "public_store_profile_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "public_store_profile_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "public_store_profile_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_authoring_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_authoring_operation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_operation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_publication_content",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_publication_content",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_content",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_content",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_interval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_interval",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_pause_content",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_pause_content",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_resume_content",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_resume_content",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_weekly_service_period",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_weekly_service_period",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api"
+    },
+    {
+      "type": "routine",
+      "schema": "security",
+      "object": "security.delete_expired_abuse_buckets(timestamp with time zone)",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "worker"
+    },
+    {
+      "type": "schema",
+      "schema": "security",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "worker"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_batch_checkout_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "worker"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_batch_checkout_expiry",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "worker"
+    }
+  ]
+}
