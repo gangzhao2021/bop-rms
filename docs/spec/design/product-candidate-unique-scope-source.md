@@ -24,7 +24,6 @@ This SQL scenario intentionally uses a legacy Draft without complete editor cont
 
 Full current Brand field/reference/twelve-check preparation, precise equal-rank disposition and normal editor/publishing runtime/pages remain open. Store administration follows the Product repository loop. Commands, initial portable-type failure and repair, evidence reuse and exact fingerprints are recorded in [WP-2421](../work-packages/history-WP-2421-01.md#overnight-actual-draftuniquescope-preparation--2026-09-30-continuation).
 
-
 ## Ordinary Validate integration (WP-2421 milestone115)
 
 Optional server `currentUniqueScope` captures mandatory current candidate, publication-history, Tenant roster and typed Publishing policy authority; remaining full facts remain mandatory. It binds the original authenticated User, Tenant, Brand, Product, command and transaction. Native `catalog.manage`, `catalog.product.validate`, `catalog.product.read`, `catalog.sku.read` and `catalog.product.history.read` surround source work and final commit. The original exclusive five-second monotonic bound, shorter owning expiry and failure latch apply; final guards reassert original held fields instead of rereading mutated Draft or renewing evidence. Current registered identities do not establish module, Provider, operational topology or sale eligibility.
@@ -33,13 +32,11 @@ Catalog owns the validation merge. The actual current bound `UniqueScope` replac
 
 Original replay checks current ordinary write authority and complete-content Read fields without acquiring new candidate, history, roster, policy or remaining validation. History read permission is required for new Validate source acquisition, not inferred for original replay. Owning System frozen-version activation validation, CAS, Audit/Outbox and barriers remain unchanged. The isolated HTTP/SQL evidence and separately synthetic remaining ten checks/independent fields/initial governance are recorded in [WP-2421](../work-packages/WP-2421.md). Full validation producers, timing approval, ordinary complete runtime/browser and Store administration remain incomplete.
 
-
 ## Held policy consistency (milestone116)
 
 The ordinary source consumer retains the actual current typed Publishing policy acquired by UniqueScope, with no second policy SQL acquisition. Before writer work it checks parsed Tenant/Brand/reference/version, current release identity, policy content digest, original observation and earlier expiry against the actual scope proof and full validation. The independent validation's approval requirement must match the actual current policy. A Required policy accompanied by supplied NotRequired facts refuses; valid actual NotRequired is accepted only with agreeing full validation. Malformed, ineffective, expired or missing callback data refuses.
 
 This is a consistency barrier. Section68.9 item11 requires required independent approval to have passed, so current policy presence never creates an ApprovalPolicy Pass or approval receipt. All ten other outcomes remain mandatory independent facts. Current field/native rights, original source lease/failure latch and final COMMIT rechecks stay in place; original replay acquires no fresh policy. Complete current validation and approval preparation, normal runtime/browser and Store administration remain pending.
-
 
 ## Warning policy binding (WP-2421 milestone117)
 

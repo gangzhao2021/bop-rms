@@ -269,17 +269,15 @@ describe("actual owning live Option authoring list", () => {
         localizedNames: { "en-CA": "Synthetic" },
       },
     ]);
-    const result = await f
-      .make()
-      .load({
-        ...request(),
-        hasPricingReference: true,
-        hasConsumptionReference: true,
-        hasConflict: true,
-        hasProductBinding: true,
-        selectionType: "MultiChoice",
-        missingTranslationLocale: "fr-CA",
-      });
+    const result = await f.make().load({
+      ...request(),
+      hasPricingReference: true,
+      hasConsumptionReference: true,
+      hasConflict: true,
+      hasProductBinding: true,
+      selectionType: "MultiChoice",
+      missingTranslationLocale: "fr-CA",
+    });
     expect(result.items).toHaveLength(1);
     expect(result.items[0]?.recordedPricingReference).toEqual({ status: "Known", present: true });
     expect((await f.make().load({ ...request(), hasPricingReference: false })).items).toHaveLength(
@@ -326,12 +324,10 @@ describe("actual owning live Option authoring list", () => {
     expect(cursor).toBeTruthy();
     if (!cursor) throw Error("missing cursor");
     await expect(
-      f
-        .make()
-        .load({
-          ...request(),
-          cursor: cursor.slice(0, 4) + (cursor[4] === "A" ? "B" : "A") + cursor.slice(5),
-        }),
+      f.make().load({
+        ...request(),
+        cursor: cursor.slice(0, 4) + (cursor[4] === "A" ? "B" : "A") + cursor.slice(5),
+      }),
     ).rejects.toMatchObject({ code: "Invalid" });
     for (const change of [
       { locale: "en-CA" },

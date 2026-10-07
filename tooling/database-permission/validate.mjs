@@ -111,6 +111,52 @@ export function inspectMigrationPermissions(migrations) {
               "selection requires the exact session-and-Actor policy and composite authentication-session binding",
             ),
           );
+      } else if (table === "bop_identity.workforce_onboarding_operation") {
+        // Platform-operated Workforce onboarding precedes any Brand Session. This closed contract
+        // binds operator, purpose, onboarding Actor, Brand, Membership and Provider client exactly,
+        // plus the invitee's read by high-entropy invitation selector hash before a Brand is known.
+        // It is not an Identity-wide exemption from Brand/Store isolation.
+        const compact = (value) => value.replace(/\s+/gu, "");
+        const call =
+          "bop_identity.workforce_onboarding_scope(operator_id,actor_id,brand_id,membership_id,environment,issuer,client_id)";
+        const scopeDefinitions = [
+          ...completeSql.matchAll(
+            /\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+bop_identity\.workforce_onboarding_scope\b[\s\S]*?\$\$[\s\S]*?\$\$/giu,
+          ),
+        ].map((item) => compact(item[0]));
+        const expectedScope = compact(`CREATE FUNCTION bop_identity.workforce_onboarding_scope(
+          p_operator uuid,p_actor uuid,p_brand uuid,p_member uuid,p_environment text,p_issuer text,p_client text
+        ) RETURNS boolean LANGUAGE sql STABLE SET search_path = pg_catalog AS $$
+          SELECT COALESCE(p_operator::text=current_setting('bop.platform_actor_id',true)
+          AND current_setting('bop.platform_purpose',true)='WORKFORCE_ONBOARDING'
+          AND p_actor::text=current_setting('bop.onboarding_actor_id',true)
+          AND p_brand::text=current_setting('bop.onboarding_brand_id',true)
+          AND p_member::text=current_setting('bop.onboarding_member_id',true)
+          AND p_environment=current_setting('bop.onboarding_environment',true)
+          AND p_issuer=current_setting('bop.onboarding_issuer',true)
+          AND p_client=current_setting('bop.onboarding_client_id',true),false); $$`);
+        if (
+          compact(policies) !==
+            compact(`FOR SELECT USING(${call}) FOR INSERT WITH CHECK(${call})
+              FOR SELECT USING (
+                current_setting('bop.onboarding_invitation_purpose',true)='WORKFORCE_ONBOARDING_INVITATION'
+                AND selector_hash=current_setting('bop.onboarding_invitation_selector_hash',true)
+                AND environment=current_setting('bop.onboarding_environment',true)
+                AND issuer=current_setting('bop.onboarding_issuer',true)
+                AND client_id=current_setting('bop.onboarding_client_id',true)
+              )`) ||
+          scopeDefinitions.length !== 1 ||
+          scopeDefinitions[0] !== expectedScope ||
+          /\bstore_id\b/iu.test(body)
+        )
+          diagnostics.push(
+            diagnostic(
+              "RLS_ONBOARDING_SCOPE_INVALID",
+              file,
+              table,
+              "onboarding requires the exact operator, purpose, Actor, Brand, Membership and client scope",
+            ),
+          );
       } else {
         if (!/platform_helpers\.current_brand_id\(\)/u.test(policies))
           diagnostics.push(

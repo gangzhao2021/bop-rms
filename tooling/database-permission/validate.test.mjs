@@ -230,3 +230,101 @@ describe("exact Brand-only pre-Tenant selection isolation", () => {
     ).toContain(code);
   });
 });
+
+const onboardingCall =
+  "bop_identity.workforce_onboarding_scope(operator_id,actor_id,brand_id,membership_id,environment,issuer,client_id)";
+const onboarding = `
+CREATE SCHEMA bop_identity;
+REVOKE ALL ON SCHEMA bop_identity FROM PUBLIC;
+CREATE TABLE bop_identity.workforce_onboarding_operation (
+ operation_id uuid NOT NULL,
+ operator_id uuid NOT NULL,
+ actor_id uuid NOT NULL,
+ brand_id uuid NOT NULL,
+ membership_id uuid NOT NULL,
+ environment text NOT NULL,
+ issuer text NOT NULL,
+ client_id text NOT NULL,
+ selector_hash text NOT NULL
+);
+CREATE FUNCTION bop_identity.workforce_onboarding_scope(p_operator uuid,p_actor uuid,p_brand uuid,p_member uuid,p_environment text,p_issuer text,p_client text) RETURNS boolean LANGUAGE sql STABLE
+SET search_path = pg_catalog
+AS $$
+ SELECT COALESCE(p_operator::text=current_setting('bop.platform_actor_id',true)
+ AND current_setting('bop.platform_purpose',true)='WORKFORCE_ONBOARDING'
+ AND p_actor::text=current_setting('bop.onboarding_actor_id',true)
+ AND p_brand::text=current_setting('bop.onboarding_brand_id',true)
+ AND p_member::text=current_setting('bop.onboarding_member_id',true)
+ AND p_environment=current_setting('bop.onboarding_environment',true)
+ AND p_issuer=current_setting('bop.onboarding_issuer',true)
+ AND p_client=current_setting('bop.onboarding_client_id',true),false);
+$$;
+REVOKE ALL ON FUNCTION bop_identity.workforce_onboarding_scope(uuid,uuid,uuid,uuid,text,text,text) FROM PUBLIC;
+ALTER TABLE bop_identity.workforce_onboarding_operation ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bop_identity.workforce_onboarding_operation FORCE ROW LEVEL SECURITY;
+CREATE POLICY workforce_onboarding_operation_read ON bop_identity.workforce_onboarding_operation FOR SELECT USING(${onboardingCall});
+CREATE POLICY workforce_onboarding_operation_insert ON bop_identity.workforce_onboarding_operation FOR INSERT WITH CHECK(${onboardingCall});
+CREATE POLICY workforce_onboarding_invitation_read ON bop_identity.workforce_onboarding_operation FOR SELECT USING (
+ current_setting('bop.onboarding_invitation_purpose',true)='WORKFORCE_ONBOARDING_INVITATION'
+ AND selector_hash=current_setting('bop.onboarding_invitation_selector_hash',true)
+ AND environment=current_setting('bop.onboarding_environment',true)
+ AND issuer=current_setting('bop.onboarding_issuer',true)
+ AND client_id=current_setting('bop.onboarding_client_id',true)
+);
+REVOKE ALL ON TABLE bop_identity.workforce_onboarding_operation FROM PUBLIC;
+`;
+describe("exact platform-operated Workforce onboarding isolation", () => {
+  it("accepts the closed operator, Actor, Brand, Membership and client scope", () => {
+    expect(inspectMigrationPermissions(migration(onboarding))).toEqual([]);
+  });
+  it.each([
+    [
+      "Brand binding",
+      (s) =>
+        s.replace("AND p_brand::text=current_setting('bop.onboarding_brand_id',true)", "AND true"),
+    ],
+    ["fail-closed default", (s) => s.replace(",false);", ",true);")],
+    [
+      "read policy",
+      (s) => s.replace(`FOR SELECT USING(${onboardingCall})`, "FOR SELECT USING(true)"),
+    ],
+    [
+      "extra policy",
+      (s) =>
+        s + "\nCREATE POLICY another ON bop_identity.workforce_onboarding_operation USING (true);",
+    ],
+    [
+      "scope redefinition",
+      (s) =>
+        s +
+        "\nCREATE OR REPLACE FUNCTION bop_identity.workforce_onboarding_scope(p_operator uuid,p_actor uuid,p_brand uuid,p_member uuid,p_environment text,p_issuer text,p_client text) RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT true; $$;",
+    ],
+    [
+      "Store column",
+      (s) =>
+        s.replace(
+          " selector_hash text NOT NULL\n",
+          " selector_hash text NOT NULL,\n store_id uuid\n",
+        ),
+    ],
+    [
+      "invitation selector binding",
+      (s) =>
+        s.replace(
+          "AND selector_hash=current_setting('bop.onboarding_invitation_selector_hash',true)",
+          "",
+        ),
+    ],
+  ])("rejects weakened %s", (_name, mutate) => {
+    expect(inspectMigrationPermissions(migration(mutate(onboarding))).map((d) => d.code)).toContain(
+      "RLS_ONBOARDING_SCOPE_INVALID",
+    );
+  });
+  it("does not extend the onboarding contract to other Identity tables", () => {
+    expect(
+      inspectMigrationPermissions(
+        migration(onboarding.replaceAll("workforce_onboarding_operation", "other_operation")),
+      ).map((d) => d.code),
+    ).toContain("RLS_BRAND_SCOPE_MISSING");
+  });
+});

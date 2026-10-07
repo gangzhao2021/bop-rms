@@ -247,22 +247,46 @@ describe("complete static Workforce onboarding plan", () => {
 });
 
 function firstOwnerInput() {
-  const base = input(), role = base.policy.roles[0];
+  const base = input(),
+    role = base.policy.roles[0];
   if (!role) throw new Error("Controlled owner role missing");
   return {
-    ...base, profile: "FirstOwnerCreationPlanV1", expectedPolicy: null,
+    ...base,
+    profile: "FirstOwnerCreationPlanV1",
+    expectedPolicy: null,
     policy: { ...base.policy, roles: [{ ...role, roleCode: "owner" }] },
     creation: {
-      brand: { brandReference: base.brandReference, code: "FIRST_OWNER", displayName: "Controlled first Brand", defaultLocale: "en-CA", currencyCode: "CAD" },
-      brandAuditReference: id(40), membershipAuditReference: id(41), policyAuditReference: id(42),
+      brand: {
+        brandReference: base.brandReference,
+        code: "FIRST_OWNER",
+        displayName: "Controlled first Brand",
+        defaultLocale: "en-CA",
+        currencyCode: "CAD",
+      },
+      brandAuditReference: id(40),
+      membershipAuditReference: id(41),
+      policyAuditReference: id(42),
     },
-    operatingEntityQualification: { operatingEntityReference: id(43), entityVersion: 1, entityDigest: `sha256:${"b".repeat(64)}`, entityEvidenceReference: id(44), reviewEvidenceReference: id(45), materialDigest: `sha256:${"c".repeat(64)}` },
-    corporateEmailQualification: { evidenceReference: id(46), operatingEntityReference: id(43), emailDigest: base.emailDigest, materialDigest: `sha256:${"d".repeat(64)}` },
+    operatingEntityQualification: {
+      operatingEntityReference: id(43),
+      entityVersion: 1,
+      entityDigest: `sha256:${"b".repeat(64)}`,
+      entityEvidenceReference: id(44),
+      reviewEvidenceReference: id(45),
+      materialDigest: `sha256:${"c".repeat(64)}`,
+    },
+    corporateEmailQualification: {
+      evidenceReference: id(46),
+      operatingEntityReference: id(43),
+      emailDigest: base.emailDigest,
+      materialDigest: `sha256:${"d".repeat(64)}`,
+    },
   };
 }
 describe("complete first Owner creation variant", () => {
   it("keeps the complete variant in one digest through approval, Pending, Policy and callback original", () => {
-    const raw = firstOwnerInput(), result = deriveWorkforceOnboardingPlan(raw);
+    const raw = firstOwnerInput(),
+      result = deriveWorkforceOnboardingPlan(raw);
     expect(result.plan).toEqual(raw);
     expect(result.planDigest).toBe(`sha256:${sha256Hex(canonicalizeRfc8785(raw))}`);
     expect(result.approvalExpected.planDigest).toBe(result.planDigest);
@@ -279,48 +303,174 @@ describe("complete first Owner creation variant", () => {
   it("preserves old V1 canonical bytes and rejects creation fields under its old profile", () => {
     const old = input();
     expect(canonicalizeRfc8785(parseWorkforceOnboardingPlan(old))).toBe(canonicalizeRfc8785(old));
-    expect(() => parseWorkforceOnboardingPlan({ ...firstOwnerInput(), profile: old.profile })).toThrow();
-    expect(() => parseWorkforceOnboardingPlan({ ...old, profile: "FirstOwnerCreationPlanV1" })).toThrow();
+    expect(() =>
+      parseWorkforceOnboardingPlan({ ...firstOwnerInput(), profile: old.profile }),
+    ).toThrow();
+    expect(() =>
+      parseWorkforceOnboardingPlan({ ...old, profile: "FirstOwnerCreationPlanV1" }),
+    ).toThrow();
   });
   it("binds every creation and material leaf including coherent entity/email changes", () => {
-    const raw = firstOwnerInput(), original = hashWorkforceOnboardingPlan(raw);
+    const raw = firstOwnerInput(),
+      original = hashWorkforceOnboardingPlan(raw);
     const changes = [
-      ...["code", "displayName", "defaultLocale"].map((key) => ({ ...raw, creation: { ...raw.creation, brand: { ...raw.creation.brand, [key]: key === "defaultLocale" ? "fr-CA" : "OTHER" } } })),
-      ...["brandAuditReference", "membershipAuditReference", "policyAuditReference"].map((key) => ({ ...raw, creation: { ...raw.creation, [key]: id(90) } })),
-      ...["entityDigest", "materialDigest"].map((key) => ({ ...raw, operatingEntityQualification: { ...raw.operatingEntityQualification, [key]: `sha256:${"e".repeat(64)}` } })),
-      ...["entityEvidenceReference", "reviewEvidenceReference"].map((key) => ({ ...raw, operatingEntityQualification: { ...raw.operatingEntityQualification, [key]: id(90) } })),
-      { ...raw, operatingEntityQualification: { ...raw.operatingEntityQualification, entityVersion: 2 } },
-      { ...raw, corporateEmailQualification: { ...raw.corporateEmailQualification, evidenceReference: id(90) } },
-      { ...raw, corporateEmailQualification: { ...raw.corporateEmailQualification, materialDigest: `sha256:${"e".repeat(64)}` } },
-      { ...raw, operatingEntityQualification: { ...raw.operatingEntityQualification, operatingEntityReference: id(90) }, corporateEmailQualification: { ...raw.corporateEmailQualification, operatingEntityReference: id(90) } },
-      { ...raw, emailDigest: "e".repeat(64), corporateEmailQualification: { ...raw.corporateEmailQualification, emailDigest: "e".repeat(64) } },
-      { ...raw, brandReference: id(90), policy: { ...raw.policy, brandReference: id(90) }, creation: { ...raw.creation, brand: { ...raw.creation.brand, brandReference: id(90) } } },
+      ...["code", "displayName", "defaultLocale"].map((key) => ({
+        ...raw,
+        creation: {
+          ...raw.creation,
+          brand: { ...raw.creation.brand, [key]: key === "defaultLocale" ? "fr-CA" : "OTHER" },
+        },
+      })),
+      ...["brandAuditReference", "membershipAuditReference", "policyAuditReference"].map((key) => ({
+        ...raw,
+        creation: { ...raw.creation, [key]: id(90) },
+      })),
+      ...["entityDigest", "materialDigest"].map((key) => ({
+        ...raw,
+        operatingEntityQualification: {
+          ...raw.operatingEntityQualification,
+          [key]: `sha256:${"e".repeat(64)}`,
+        },
+      })),
+      ...["entityEvidenceReference", "reviewEvidenceReference"].map((key) => ({
+        ...raw,
+        operatingEntityQualification: { ...raw.operatingEntityQualification, [key]: id(90) },
+      })),
+      {
+        ...raw,
+        operatingEntityQualification: { ...raw.operatingEntityQualification, entityVersion: 2 },
+      },
+      {
+        ...raw,
+        corporateEmailQualification: {
+          ...raw.corporateEmailQualification,
+          evidenceReference: id(90),
+        },
+      },
+      {
+        ...raw,
+        corporateEmailQualification: {
+          ...raw.corporateEmailQualification,
+          materialDigest: `sha256:${"e".repeat(64)}`,
+        },
+      },
+      {
+        ...raw,
+        operatingEntityQualification: {
+          ...raw.operatingEntityQualification,
+          operatingEntityReference: id(90),
+        },
+        corporateEmailQualification: {
+          ...raw.corporateEmailQualification,
+          operatingEntityReference: id(90),
+        },
+      },
+      {
+        ...raw,
+        emailDigest: "e".repeat(64),
+        corporateEmailQualification: {
+          ...raw.corporateEmailQualification,
+          emailDigest: "e".repeat(64),
+        },
+      },
+      {
+        ...raw,
+        brandReference: id(90),
+        policy: { ...raw.policy, brandReference: id(90) },
+        creation: { ...raw.creation, brand: { ...raw.creation.brand, brandReference: id(90) } },
+      },
     ];
     for (const changed of changes) expect(hashWorkforceOnboardingPlan(changed)).not.toBe(original);
   });
   it("rejects mismatched qualifications, old policy heads, non-owner/multiple roles and aliased Audit IDs", () => {
-    const raw = firstOwnerInput(), role = raw.policy.roles[0];
+    const raw = firstOwnerInput(),
+      role = raw.policy.roles[0];
     if (!role) throw new Error("Controlled owner role missing");
     for (const changed of [
-      { ...raw, creation: { ...raw.creation, brand: { ...raw.creation.brand, brandReference: id(90) } } },
-      { ...raw, creation: { ...raw.creation, brand: { ...raw.creation.brand, currencyCode: "USD" } } },
+      {
+        ...raw,
+        creation: { ...raw.creation, brand: { ...raw.creation.brand, brandReference: id(90) } },
+      },
+      {
+        ...raw,
+        creation: { ...raw.creation, brand: { ...raw.creation.brand, currencyCode: "USD" } },
+      },
       { ...raw, expectedPolicy: input().expectedPolicy },
       { ...raw, policy: { ...raw.policy, roles: [{ ...role, roleCode: "manager" }] } },
-      { ...raw, policy: { ...raw.policy, roles: [role, { ...role, roleReference: id(91), roleCode: "reviewer", assignment: { ...role.assignment, assignmentReference: id(92) }, grants: role.grants.map(g => ({ ...g, grantReference: id(93) })) }] } },
-      { ...raw, corporateEmailQualification: { ...raw.corporateEmailQualification, operatingEntityReference: id(90) } },
-      { ...raw, corporateEmailQualification: { ...raw.corporateEmailQualification, emailDigest: "e".repeat(64) } },
-      { ...raw, operatingEntityQualification: { ...raw.operatingEntityQualification, entityDigest: "raw material" } },
-      { ...raw, operatingEntityQualification: { ...raw.operatingEntityQualification, entityVersion: 0 } },
-      ...[raw.operationReference, raw.actorReference, role.roleReference, raw.creation.membershipAuditReference, raw.operatingEntityQualification.entityEvidenceReference].map(id => ({ ...raw, creation: { ...raw.creation, brandAuditReference: id } })),
+      {
+        ...raw,
+        policy: {
+          ...raw.policy,
+          roles: [
+            role,
+            {
+              ...role,
+              roleReference: id(91),
+              roleCode: "reviewer",
+              assignment: { ...role.assignment, assignmentReference: id(92) },
+              grants: role.grants.map((g) => ({ ...g, grantReference: id(93) })),
+            },
+          ],
+        },
+      },
+      {
+        ...raw,
+        corporateEmailQualification: {
+          ...raw.corporateEmailQualification,
+          operatingEntityReference: id(90),
+        },
+      },
+      {
+        ...raw,
+        corporateEmailQualification: {
+          ...raw.corporateEmailQualification,
+          emailDigest: "e".repeat(64),
+        },
+      },
+      {
+        ...raw,
+        operatingEntityQualification: {
+          ...raw.operatingEntityQualification,
+          entityDigest: "raw material",
+        },
+      },
+      {
+        ...raw,
+        operatingEntityQualification: { ...raw.operatingEntityQualification, entityVersion: 0 },
+      },
+      ...[
+        raw.operationReference,
+        raw.actorReference,
+        role.roleReference,
+        raw.creation.membershipAuditReference,
+        raw.operatingEntityQualification.entityEvidenceReference,
+      ].map((id) => ({ ...raw, creation: { ...raw.creation, brandAuditReference: id } })),
       { ...raw, creation: { ...raw.creation, proof: true } },
-      { ...raw, corporateEmailQualification: { ...raw.corporateEmailQualification, corporateEmail: "controlled@example.test" } },
-    ]) expect(() => parseWorkforceOnboardingPlan(changed)).toThrow();
+      {
+        ...raw,
+        corporateEmailQualification: {
+          ...raw.corporateEmailQualification,
+          corporateEmail: "controlled@example.test",
+        },
+      },
+    ])
+      expect(() => parseWorkforceOnboardingPlan(changed)).toThrow();
   });
   it("never executes a variant discriminator or material getter", () => {
     let calls = 0;
     for (const target of ["profile", "material"]) {
       const raw = firstOwnerInput();
-      Object.defineProperty(target === "profile" ? raw : raw.operatingEntityQualification, target === "profile" ? "profile" : "materialDigest", { enumerable: true, get: () => { calls++; return true; } });
+      Object.defineProperty(
+        target === "profile" ? raw : raw.operatingEntityQualification,
+        target === "profile" ? "profile" : "materialDigest",
+        {
+          enumerable: true,
+          get: () => {
+            calls++;
+            return true;
+          },
+        },
+      );
       expect(() => parseWorkforceOnboardingPlan(raw)).toThrow();
     }
     expect(calls).toBe(0);

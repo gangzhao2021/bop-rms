@@ -405,12 +405,10 @@ describe("controlled Platform Actor directory provisioner", () => {
       f.make().provision({ ...initial(), subject: "another-subject" }),
     ).rejects.toMatchObject({ code: "PLATFORM_ACTOR_DIRECTORY_INTENT_CONFLICT" });
     await expect(
-      f
-        .make()
-        .provision({
-          ...lifecycle(r, "Suspend", 10),
-          expectedHead: { revisionReference: id(99), version: 1, sourceDigest: r.sourceDigest },
-        }),
+      f.make().provision({
+        ...lifecycle(r, "Suspend", 10),
+        expectedHead: { revisionReference: id(99), version: 1, sourceDigest: r.sourceDigest },
+      }),
     ).rejects.toMatchObject({ code: "PLATFORM_ACTOR_DIRECTORY_VERSION_CONFLICT" });
     expect(f.allocated()).toBe(n);
   });

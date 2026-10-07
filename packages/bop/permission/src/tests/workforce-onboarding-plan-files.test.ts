@@ -98,22 +98,58 @@ describe("configured private Workforce onboarding plan content", () => {
     expect(Object.isFrozen(a.plan.configuration)).toBe(true);
   });
   it("keeps actual first Owner file content in the complete digest and pins its creation material", async () => {
-    const base = input(), role = base.policy.roles[0];
+    const base = input(),
+      role = base.policy.roles[0];
     if (!role) throw new Error("Controlled owner role missing");
     const first = {
-      ...base, profile: "FirstOwnerCreationPlanV1", expectedPolicy: null,
+      ...base,
+      profile: "FirstOwnerCreationPlanV1",
+      expectedPolicy: null,
       policy: { ...base.policy, roles: [{ ...role, roleCode: "owner" }] },
-      creation: { brand: { brandReference: base.brandReference, code: "FIRST", displayName: "Controlled first Brand", defaultLocale: "en-CA", currencyCode: "CAD" }, brandAuditReference: id(40), membershipAuditReference: id(41), policyAuditReference: id(42) },
-      operatingEntityQualification: { operatingEntityReference: id(43), entityVersion: 1, entityDigest: `sha256:${"b".repeat(64)}`, entityEvidenceReference: id(44), reviewEvidenceReference: id(45), materialDigest: `sha256:${"c".repeat(64)}` },
-      corporateEmailQualification: { evidenceReference: id(46), operatingEntityReference: id(43), emailDigest: base.emailDigest, materialDigest: `sha256:${"d".repeat(64)}` },
+      creation: {
+        brand: {
+          brandReference: base.brandReference,
+          code: "FIRST",
+          displayName: "Controlled first Brand",
+          defaultLocale: "en-CA",
+          currencyCode: "CAD",
+        },
+        brandAuditReference: id(40),
+        membershipAuditReference: id(41),
+        policyAuditReference: id(42),
+      },
+      operatingEntityQualification: {
+        operatingEntityReference: id(43),
+        entityVersion: 1,
+        entityDigest: `sha256:${"b".repeat(64)}`,
+        entityEvidenceReference: id(44),
+        reviewEvidenceReference: id(45),
+        materialDigest: `sha256:${"c".repeat(64)}`,
+      },
+      corporateEmailQualification: {
+        evidenceReference: id(46),
+        operatingEntityReference: id(43),
+        emailDigest: base.emailDigest,
+        materialDigest: `sha256:${"d".repeat(64)}`,
+      },
     };
     await writeFile(planPath, JSON.stringify(first));
-    const source = createFileWorkforceOnboardingPlanSource({ planPath }), packet = await source.read(expected());
+    const source = createFileWorkforceOnboardingPlanSource({ planPath }),
+      packet = await source.read(expected());
     expect(packet.plan).toEqual(first);
     expect(packet.planDigest).toBe(hashWorkforceOnboardingPlan(first));
     if (packet.plan.profile !== "FirstOwnerCreationPlanV1") throw new Error("Variant missing");
     expect(Object.isFrozen(packet.plan.creation.brand)).toBe(true);
-    await writeFile(planPath, JSON.stringify({ ...first, creation: { ...first.creation, brand: { ...first.creation.brand, displayName: "Replaced content" } } }));
+    await writeFile(
+      planPath,
+      JSON.stringify({
+        ...first,
+        creation: {
+          ...first.creation,
+          brand: { ...first.creation.brand, displayName: "Replaced content" },
+        },
+      }),
+    );
     await expect(source.read(expected())).rejects.toThrow();
     await writeFile(planPath, JSON.stringify(first));
     await expect(source.read(expected())).rejects.toThrow();

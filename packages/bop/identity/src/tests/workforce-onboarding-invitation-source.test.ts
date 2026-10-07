@@ -102,8 +102,8 @@ function fixture(callback = false, observation = at) {
     authorizationChange: Partial<WorkforceOnboardingInvitationAuthorization> = {},
     missing = false,
     malformedDigest = false;
-  const guards: Array<() => Promise<void>> = [],
-    finals: Array<() => void> = [],
+  const guards: (() => Promise<void>)[] = [],
+    finals: (() => void)[] = [],
     queries: string[] = [];
   const transaction = {
     async query(sql: string, values: readonly unknown[]) {

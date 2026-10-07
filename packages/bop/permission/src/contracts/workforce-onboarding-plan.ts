@@ -31,8 +31,10 @@ export function workforceOnboardingPlanUnavailable(): never {
  * The digest is derived outside this payload so it cannot recursively hash itself. */
 export function parseWorkforceOnboardingPlan(value: unknown) {
   try {
-    const profileDescriptor = value !== null && typeof value === "object"
-      ? Object.getOwnPropertyDescriptor(value, "profile") : undefined;
+    const profileDescriptor =
+      value !== null && typeof value === "object"
+        ? Object.getOwnPropertyDescriptor(value, "profile")
+        : undefined;
     if (!profileDescriptor?.enumerable || !("value" in profileDescriptor))
       return workforceOnboardingPlanUnavailable();
     const firstOwner = profileDescriptor.value === "FirstOwnerCreationPlanV1";
@@ -58,9 +60,14 @@ export function parseWorkforceOnboardingPlan(value: unknown) {
       "expectedPolicy",
       "policySnapshotReference",
       "reasonCode",
-      ...(firstOwner ? ["creation", "operatingEntityQualification", "corporateEmailQualification"] : []),
+      ...(firstOwner
+        ? ["creation", "operatingEntityQualification", "corporateEmailQualification"]
+        : []),
     ]);
-    if ((!firstOwner && r.profile !== "WorkforceOnboardingPlanV1") || r.purposeCode !== "WORKFORCE_ONBOARDING")
+    if (
+      (!firstOwner && r.profile !== "WorkforceOnboardingPlanV1") ||
+      r.purposeCode !== "WORKFORCE_ONBOARDING"
+    )
       return workforceOnboardingPlanUnavailable();
     const configuration = parseWorkforceOnboardingConfiguration(r.configuration),
       environmentReference = reference(r.environmentReference),
@@ -130,19 +137,56 @@ export function parseWorkforceOnboardingPlan(value: unknown) {
       policySnapshotReference,
       reasonCode: r.reasonCode,
     };
-    if (!firstOwner) return Object.freeze({ profile: "WorkforceOnboardingPlanV1" as const, ...common });
-    if (expectedPolicy !== null || policy.roles.length !== 1 || policy.roles[0]?.roleCode !== "owner")
+    if (!firstOwner)
+      return Object.freeze({ profile: "WorkforceOnboardingPlanV1" as const, ...common });
+    if (
+      expectedPolicy !== null ||
+      policy.roles.length !== 1 ||
+      policy.roles[0]?.roleCode !== "owner"
+    )
       return workforceOnboardingPlanUnavailable();
-    const c = readClosedRecord(r.creation, ["brand", "brandAuditReference", "membershipAuditReference", "policyAuditReference"]);
-    const b = readClosedRecord(c.brand, ["brandReference", "code", "displayName", "defaultLocale", "currencyCode"]);
-    const syntaxBrand = createBrand({ ...b, lifecycle: "Draft", version: 1, createdAt: "0001-01-01T00:00:00.000Z", updatedAt: "0001-01-01T00:00:00.000Z" });
+    const c = readClosedRecord(r.creation, [
+      "brand",
+      "brandAuditReference",
+      "membershipAuditReference",
+      "policyAuditReference",
+    ]);
+    const b = readClosedRecord(c.brand, [
+      "brandReference",
+      "code",
+      "displayName",
+      "defaultLocale",
+      "currencyCode",
+    ]);
+    const syntaxBrand = createBrand({
+      ...b,
+      lifecycle: "Draft",
+      version: 1,
+      createdAt: "0001-01-01T00:00:00.000Z",
+      updatedAt: "0001-01-01T00:00:00.000Z",
+    });
     if (String(syntaxBrand.brandReference) !== brandReference || syntaxBrand.currencyCode !== "CAD")
       return workforceOnboardingPlanUnavailable();
-    const occupied = new Set([environmentReference, operationReference, operatorReference, approvedByReference, common.approvalEvidenceReference, brandReference, actorReference, membershipReference, common.workforceRelationshipReference, common.relationshipEvidenceReference, policySnapshotReference]);
+    const occupied = new Set([
+      environmentReference,
+      operationReference,
+      operatorReference,
+      approvedByReference,
+      common.approvalEvidenceReference,
+      brandReference,
+      actorReference,
+      membershipReference,
+      common.workforceRelationshipReference,
+      common.relationshipEvidenceReference,
+      policySnapshotReference,
+    ]);
     for (const role of policy.roles) {
       occupied.add(role.roleReference);
       occupied.add(role.assignment.assignmentReference);
-      for (const grant of role.grants) { occupied.add(grant.grantReference); occupied.add(grant.permissionReference); }
+      for (const grant of role.grants) {
+        occupied.add(grant.grantReference);
+        occupied.add(grant.permissionReference);
+      }
     }
     const auditReference = (value: unknown) => {
       const id = reference(value);
@@ -151,14 +195,35 @@ export function parseWorkforceOnboardingPlan(value: unknown) {
       return id;
     };
     const creation = Object.freeze({
-      brand: Object.freeze({ brandReference: String(syntaxBrand.brandReference), code: syntaxBrand.code, displayName: syntaxBrand.displayName, defaultLocale: syntaxBrand.defaultLocale, currencyCode: syntaxBrand.currencyCode }),
+      brand: Object.freeze({
+        brandReference: String(syntaxBrand.brandReference),
+        code: syntaxBrand.code,
+        displayName: syntaxBrand.displayName,
+        defaultLocale: syntaxBrand.defaultLocale,
+        currencyCode: syntaxBrand.currencyCode,
+      }),
       brandAuditReference: auditReference(c.brandAuditReference),
       membershipAuditReference: auditReference(c.membershipAuditReference),
       policyAuditReference: auditReference(c.policyAuditReference),
     });
-    const e = readClosedRecord(r.operatingEntityQualification, ["operatingEntityReference", "entityVersion", "entityDigest", "entityEvidenceReference", "reviewEvidenceReference", "materialDigest"]);
-    const email = readClosedRecord(r.corporateEmailQualification, ["evidenceReference", "operatingEntityReference", "emailDigest", "materialDigest"]);
-    const digest = (value: unknown): string => typeof value === "string" && /^sha256:[0-9a-f]{64}$/u.test(value) ? value : workforceOnboardingPlanUnavailable();
+    const e = readClosedRecord(r.operatingEntityQualification, [
+      "operatingEntityReference",
+      "entityVersion",
+      "entityDigest",
+      "entityEvidenceReference",
+      "reviewEvidenceReference",
+      "materialDigest",
+    ]);
+    const email = readClosedRecord(r.corporateEmailQualification, [
+      "evidenceReference",
+      "operatingEntityReference",
+      "emailDigest",
+      "materialDigest",
+    ]);
+    const digest = (value: unknown): string =>
+      typeof value === "string" && /^sha256:[0-9a-f]{64}$/u.test(value)
+        ? value
+        : workforceOnboardingPlanUnavailable();
     const operatingEntityQualification = Object.freeze({
       operatingEntityReference: reference(e.operatingEntityReference),
       entityVersion: parseOrganizationVersion(e.entityVersion),
@@ -173,15 +238,40 @@ export function parseWorkforceOnboardingPlan(value: unknown) {
       emailDigest: parseSelectorHash(email.emailDigest),
       materialDigest: digest(email.materialDigest),
     });
-    if (corporateEmailQualification.operatingEntityReference !== operatingEntityQualification.operatingEntityReference || corporateEmailQualification.emailDigest !== common.emailDigest || [operatingEntityQualification.operatingEntityReference, operatingEntityQualification.entityEvidenceReference, operatingEntityQualification.reviewEvidenceReference, corporateEmailQualification.evidenceReference].some((id) => [creation.brandAuditReference, creation.membershipAuditReference, creation.policyAuditReference].includes(id)))
+    if (
+      corporateEmailQualification.operatingEntityReference !==
+        operatingEntityQualification.operatingEntityReference ||
+      corporateEmailQualification.emailDigest !== common.emailDigest ||
+      [
+        operatingEntityQualification.operatingEntityReference,
+        operatingEntityQualification.entityEvidenceReference,
+        operatingEntityQualification.reviewEvidenceReference,
+        corporateEmailQualification.evidenceReference,
+      ].some((id) =>
+        [
+          creation.brandAuditReference,
+          creation.membershipAuditReference,
+          creation.policyAuditReference,
+        ].includes(id),
+      )
+    )
       return workforceOnboardingPlanUnavailable();
-    return Object.freeze({ profile: "FirstOwnerCreationPlanV1" as const, ...common, creation, operatingEntityQualification, corporateEmailQualification });
+    return Object.freeze({
+      profile: "FirstOwnerCreationPlanV1" as const,
+      ...common,
+      creation,
+      operatingEntityQualification,
+      corporateEmailQualification,
+    });
   } catch {
     return workforceOnboardingPlanUnavailable();
   }
 }
 export type WorkforceOnboardingPlan = ReturnType<typeof parseWorkforceOnboardingPlan>;
-export type FirstOwnerCreationPlan = Extract<WorkforceOnboardingPlan, { readonly profile: "FirstOwnerCreationPlanV1" }>;
+export type FirstOwnerCreationPlan = Extract<
+  WorkforceOnboardingPlan,
+  { readonly profile: "FirstOwnerCreationPlanV1" }
+>;
 export function hashWorkforceOnboardingPlan(value: unknown): string {
   return `sha256:${sha256Hex(canonicalizeRfc8785(parseWorkforceOnboardingPlan(value)))}`;
 }

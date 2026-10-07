@@ -669,7 +669,11 @@ test("@production saved Tax Draft and Registration prepare immutable candidate a
       .locator(".bop-skip-link")
       .evaluate((element) => element.getBoundingClientRect().bottom),
   ).toBeLessThanOrEqual(0);
-  await expect.poll(() => page.locator(".bop-skip-link").evaluate((element) => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
+  await expect
+    .poll(() =>
+      page.locator(".bop-skip-link").evaluate((element) => element.getBoundingClientRect().bottom),
+    )
+    .toBeLessThanOrEqual(0);
   await panel.screenshot({ path: test.info().outputPath("candidate-packet-mobile.png") });
   await page.setViewportSize({ width: 1280, height: 900 });
   await panel.getByRole("button", { name: "Refresh candidate workspace", exact: true }).click();

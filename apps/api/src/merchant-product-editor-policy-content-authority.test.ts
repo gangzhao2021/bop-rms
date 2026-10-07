@@ -494,7 +494,9 @@ function runtimeFixture() {
     ...f.options,
     runtimeBrandSources: {
       async withCurrentBrandContent<T>(
-        actual: Parameters<NonNullable<Options["runtimeBrandSources"]>["withCurrentBrandContent"]>[0],
+        actual: Parameters<
+          NonNullable<Options["runtimeBrandSources"]>["withCurrentBrandContent"]
+        >[0],
         work: (packet: CurrentBrandConfigurationContent) => Promise<T>,
       ): Promise<T> {
         let completed: readonly [T] | undefined;
