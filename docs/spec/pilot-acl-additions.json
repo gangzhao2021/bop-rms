@@ -396,6 +396,42 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_receipt",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-DIRECT-RECEIPT 2026-10-07: Store direct receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_receipt",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-DIRECT-RECEIPT 2026-10-07: Store direct receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_receipt_void",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-DIRECT-RECEIPT 2026-10-07: Store direct receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_receipt_void",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-DIRECT-RECEIPT 2026-10-07: Store direct receipts"
     }
   ]
 }

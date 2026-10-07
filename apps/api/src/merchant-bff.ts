@@ -192,6 +192,10 @@ import {
   type createMerchantRoleAdministration,
 } from "./merchant-role-administration.js";
 import {
+  MerchantStoreReceiptError,
+  type createMerchantStoreReceipts,
+} from "./merchant-store-receipts.js";
+import {
   MerchantOpeningCountError,
   type createMerchantOpeningCount,
 } from "./merchant-opening-count.js";
@@ -277,6 +281,7 @@ const merchantNavigation = Object.freeze({
   "INV-ITEM-LIST": ["/app/supply/items", "inventory.item.read"],
   "INV-LOCATION-LIST": ["/app/supply/locations", "inventory.location.read"],
   "INV-OPENING-COUNT": ["/app/supply/opening-count", "inventory.count.read"],
+  "INV-RECEIPT-LIST": ["/operations/receiving", "inventory.receipt.read"],
 } as const);
 
 export interface MerchantNavigationItem {
@@ -435,6 +440,7 @@ export interface MerchantBffRouterOptions {
   readonly inventoryItems?: ReturnType<typeof createMerchantInventoryItems>;
   readonly stockPlaces?: ReturnType<typeof createMerchantStockPlaces>;
   readonly openingCount?: ReturnType<typeof createMerchantOpeningCount>;
+  readonly storeReceipts?: ReturnType<typeof createMerchantStoreReceipts>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
   readonly ordinaryRefundSend?: ReturnType<typeof createMerchantOrdinaryRefundSendCommand>;
   readonly ordinaryRefundReconciliation?: ReturnType<
@@ -834,7 +840,11 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       return;
     }
     // WP-2423 / DEC-INV-OPENING: an opening count may carry up to 5000 lines.
-    if (request.method === "POST" && request.path === "/supply/opening-count/command") {
+    if (
+      request.method === "POST" &&
+      (request.path === "/supply/opening-count/command" ||
+        request.path === "/supply/receipts/command")
+    ) {
       express.json({ limit: 1_048_576, strict: true })(request, response, (error?: unknown) => {
         if (!error) {
           next();
@@ -5089,6 +5099,86 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .command({ sessionCookie, csrf, body: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => openingCountFailure(response, error));
+  });
+
+  // WP-2423 / DEC-INV-DIRECT-RECEIPT: Store direct receipts.
+  const receiptStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    AlreadyVoided: 409,
+    StockUsed: 409,
+    LineInvalid: 422,
+    Invalid: 400,
+  } as const;
+  const receiptFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantStoreReceiptError)) {
+      denied(response);
+      return;
+    }
+    response
+      .status(receiptStatus[error.code])
+      .json({ error: error.code, lineReference: error.lineReference });
+  };
+  router.post("/supply/receipts/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { receiptReference?: unknown; before?: unknown } | undefined;
+    const receiptReference = body?.receiptReference ?? null,
+      before = body?.before ?? null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).sort().join(",") !== "before,receiptReference" ||
+      (receiptReference !== null &&
+        (typeof receiptReference !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            receiptReference,
+          ))) ||
+      (before !== null &&
+        (typeof before !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(before)))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeReceipts) {
+      response.status(503).json({ error: "store_receipts_unavailable" });
+      return;
+    }
+    void options.storeReceipts
+      .query({
+        sessionCookie,
+        csrf,
+        receiptReference: receiptReference as string | null,
+        before: before as string | null,
+      })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => receiptFailure(response, error));
+  });
+  router.post("/supply/receipts/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeReceipts) {
+      response.status(503).json({ error: "store_receipts_unavailable" });
+      return;
+    }
+    void options.storeReceipts
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => receiptFailure(response, error));
   });
 
   router.post("/kitchen/release", sameOriginMutation(options), (request, response) => {

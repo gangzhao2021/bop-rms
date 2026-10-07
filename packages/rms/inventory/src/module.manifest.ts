@@ -32,6 +32,8 @@ const moduleManifestInput: ModuleManifest =
         "opening_count",
         "opening_count_version",
         "opening_count_posting",
+        "store_receipt",
+        "store_receipt_void",
         "inventory_item_version",
         "item_sku_mapping_version",
         "recipe_configuration_source_capture",

@@ -215,3 +215,6 @@ export {
 export { createPostgresStockPlaceStore } from "./infrastructure/persistence/stock-place-store.js";
 export * from "./domain/opening-count.js";
 export * from "./infrastructure/persistence/opening-count-store.js";
+export * from "./domain/store-receipt.js";
+export * from "./infrastructure/persistence/store-receipt-store.js";
+export * from "./infrastructure/persistence/ledger-posting.js";

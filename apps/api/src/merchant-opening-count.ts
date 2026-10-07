@@ -1,19 +1,16 @@
 import {
   commitOpeningCountChange,
-  createPostgresInventoryItemStore,
-  createPostgresStockPlaceStore,
   listOpeningCounts,
   loadOpeningCount,
   OpeningCountError,
   parseOpeningCountLines,
   postOpeningCount,
-  type InventoryItemAggregate,
-  type InventoryItemTransaction,
   type OpeningCount,
   type OpeningCountChange,
   type OpeningCountTransaction,
 } from "@rms/inventory";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { merchantStockCatalog } from "./merchant-stock-catalog.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
@@ -124,31 +121,6 @@ export function createMerchantOpeningCount(options: {
       );
     throw error;
   };
-  const name = (names: Readonly<Record<string, string>>, fallback: string) =>
-    names[options.locale] ?? Object.values(names)[0] ?? fallback;
-
-  /** Active, stock-tracked items of the Brand for the count picker, in code order. */
-  async function countableItems(tx: Tx, scope: Awaited<ReturnType<typeof scopeFor>>) {
-    const owner = ownerScope(scope);
-    const store = createPostgresInventoryItemStore(
-      { run: (work) => work(tx as unknown as InventoryItemTransaction) },
-      { tenantReference: owner.tenantReference, brandReference: owner.brandReference },
-    );
-    const items: InventoryItemAggregate[] = [];
-    let after: string | null = null;
-    for (let page = 0; page < 20; page += 1) {
-      const result = await store.list({
-        search: null,
-        lifecycle: "Active",
-        afterInternalCode: after,
-        limit: 200,
-      });
-      items.push(...result.items.filter((item) => item.trackingPolicy.stockTrackingEnabled));
-      if (!result.hasMore) break;
-      after = result.items.at(-1)?.internalCode ?? null;
-    }
-    return items;
-  }
 
   const query = async (input: {
     sessionCookie: unknown;
@@ -171,11 +143,7 @@ export function createMerchantOpeningCount(options: {
           selected = await loadOpeningCount(otx, owner, input.countReference);
           if (selected === null) return fail("NotFound");
         }
-        const items = await countableItems(tx, scope);
-        const places = await createPostgresStockPlaceStore(
-          { run: (work) => work(tx as unknown as InventoryItemTransaction) },
-          owner,
-        ).list();
+        const catalog = await merchantStockCatalog(tx, owner, options.locale);
         return {
           screenId: "INV-OPENING-COUNT" as const,
           sourceAsOf: options.persistence.now(),
@@ -198,21 +166,8 @@ export function createMerchantOpeningCount(options: {
                   version: selected.version,
                   lines: selected.lines,
                 },
-          items: items.map((item) => ({
-            itemReference: item.itemReference,
-            internalCode: item.internalCode,
-            name: name(item.localizedNames, item.internalCode),
-            unitCode: item.baseUnit.unitCode,
-            ledgerPrecision: item.baseUnit.ledgerPrecision,
-            lotTracking: item.trackingPolicy.lotTrackingMode,
-          })),
-          locations: places.locations
-            .filter((location) => location.lifecycle === "Active")
-            .map((location) => ({
-              locationReference: location.locationReference,
-              code: location.code,
-              name: name(location.localizedNames, location.code),
-            })),
+          items: catalog.items,
+          locations: catalog.locations,
         };
       }),
     );

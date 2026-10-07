@@ -55,7 +55,6 @@ import {
 } from "./InventoryTransferPages.js";
 import { InventoryLotExpiryPage } from "./InventoryLotExpiryPage.js";
 import { InventoryReplenishmentPage } from "./InventoryReplenishmentPage.js";
-import { GoodsReceiptPage } from "./GoodsReceiptPage.js";
 import { DiscrepancyPage } from "./DiscrepancyPage.js";
 import { SupplierPerformancePage } from "./SupplierPerformancePage.js";
 import { CustomerDetailPage, CustomerListPage } from "./CustomerProfilePages.js";
@@ -124,6 +123,12 @@ import { StockLocationListPage } from "./StockLocationPages.js";
 import { createStockLocationClient } from "./stock-location-pages.js";
 import { OpeningCountPage } from "./OpeningCountPages.js";
 import { createOpeningCountClient } from "./opening-count-pages.js";
+import {
+  StoreReceiptDetailPage,
+  StoreReceiptFormPage,
+  StoreReceiptListPage,
+} from "./StoreReceiptPages.js";
+import { createStoreReceiptClient } from "./store-receipt-pages.js";
 import { createStaffPageClient } from "./staff-administration-pages.js";
 import { ExportJobListPage } from "./ExportJobPages.js";
 import { PlatformTenantDetailPage } from "./PlatformTenantPages.js";
@@ -638,7 +643,45 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route path="/operations/inventory/transfers" element={<InventoryTransferListPage />} />
       <Route path="/operations/inventory/transfers/:id" element={<InventoryTransferDetailPage />} />
       <Route path="/operations/inventory/lots" element={<InventoryLotExpiryPage />} />
-      <Route path="/operations/receiving/new" element={<GoodsReceiptPage />} />
+      <Route
+        path="/operations/receiving"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreReceiptListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStoreReceiptClient(state.csrf)}
+            />
+          ) : (
+            <StoreReceiptListPage />
+          )
+        }
+      />
+      <Route
+        path="/operations/receiving/new"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreReceiptFormPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStoreReceiptClient(state.csrf)}
+            />
+          ) : (
+            <StoreReceiptFormPage />
+          )
+        }
+      />
+      <Route
+        path="/operations/receiving/:id"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreReceiptDetailPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createStoreReceiptClient(state.csrf)}
+            />
+          ) : (
+            <StoreReceiptDetailPage />
+          )
+        }
+      />
       <Route
         path="/app/supply/opening-count"
         element={

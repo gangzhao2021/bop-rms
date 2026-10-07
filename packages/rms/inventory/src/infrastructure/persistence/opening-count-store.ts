@@ -13,6 +13,12 @@ import {
 import type { StorageLocation } from "../../domain/stock-place.js";
 import { createPostgresInventoryItemStore } from "./inventory-item-store.js";
 import { createPostgresStockPlaceStore } from "./stock-place-store.js";
+import {
+  appendStockMovement,
+  ensureStockAccount,
+  ensureStockLot,
+  LedgerPostingError,
+} from "./ledger-posting.js";
 
 /**
  * WP-2423 / DEC-INV-OPENING: Inventory owner persistence for the Store opening count. Runs inside
@@ -289,137 +295,51 @@ export async function postOpeningCount(
     const item = refs.items.get(line.itemReference) as InventoryItemAggregate,
       location = refs.locations.get(line.locationReference) as StorageLocation;
     let lot: string | null = null;
-    if (line.lotCode !== null) {
-      const existing = (
-        await tx.query(
-          "SELECT lot_id::text AS lot,expiry_date::text AS expiry FROM rms_inventory.stock_lot WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND item_id=$4 AND lot_code=$5",
-          [
-            scope.tenantReference,
-            scope.brandReference,
-            scope.storeReference,
-            item.itemReference,
-            line.lotCode,
-          ],
-        )
-      ).rows[0];
-      if (existing) {
-        if ((existing.expiry ?? null) !== line.expiryDate)
-          fail("OPENING_COUNT_LINE_INVALID", line.lineReference);
-        lot = String(existing.lot);
-      } else {
-        lot = input.nextReference();
-        await tx.query(
-          `INSERT INTO rms_inventory.stock_lot (tenant_id,brand_id,store_id,lot_id,item_id,lot_code,expiry_date,source_type,source_id,created_at,created_by_actor_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,'OpeningCount',$8,$9,$10)`,
-          [
-            scope.tenantReference,
-            scope.brandReference,
-            scope.storeReference,
-            lot,
-            item.itemReference,
-            line.lotCode,
-            line.expiryDate,
-            next.countReference,
-            input.occurredAt,
-            input.actorReference,
-          ],
-        );
-      }
-    }
-    const account = (
-      await tx.query(
-        `SELECT a.account_id::text AS account,b.ledger_version::text AS version FROM rms_inventory.stock_account a
-         JOIN rms_inventory.stock_balance b ON b.tenant_id=a.tenant_id AND b.brand_id=a.brand_id AND b.store_id=a.store_id AND b.account_id=a.account_id
-         WHERE a.tenant_id=$1 AND a.brand_id=$2 AND a.store_id=$3 AND a.stock_site_id=$4 AND a.location_id=$5 AND a.item_id=$6
-           AND a.lot_id IS NOT DISTINCT FROM $7::uuid`,
-        [
-          scope.tenantReference,
-          scope.brandReference,
-          scope.storeReference,
-          location.stockSiteReference,
-          location.locationReference,
-          item.itemReference,
-          lot,
-        ],
-      )
-    ).rows[0];
-    // An account that already moved stock cannot receive an opening balance.
-    if (account && account.version !== "1") fail("OPENING_COUNT_STOCK_EXISTS", line.lineReference);
-    const accountReference = account ? String(account.account) : input.nextReference();
-    if (!account) {
-      await tx.query(
-        `INSERT INTO rms_inventory.stock_account (tenant_id,brand_id,store_id,stock_site_id,location_id,account_id,item_id,item_version,
-           lot_id,expiry_date,unit_code,ledger_precision,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [
-          scope.tenantReference,
-          scope.brandReference,
-          scope.storeReference,
-          location.stockSiteReference,
-          location.locationReference,
-          accountReference,
-          item.itemReference,
-          item.aggregateVersion,
-          lot,
-          line.expiryDate,
-          item.baseUnit.unitCode,
-          item.baseUnit.ledgerPrecision,
-          input.occurredAt,
-        ],
-      );
-      await tx.query(
-        "INSERT INTO rms_inventory.stock_balance (tenant_id,brand_id,store_id,account_id,ledger_version,on_hand,reserved,in_transit) VALUES ($1,$2,$3,$4,1,0,0,0)",
-        [scope.tenantReference, scope.brandReference, scope.storeReference, accountReference],
-      );
-    }
-    const movement = input.nextReference();
-    const balance = (onHand: string, ledgerVersion: number) => ({
-      onHand,
-      reserved: "0",
-      available: onHand,
-      inTransit: "0",
-      unitCode: item.baseUnit.unitCode,
-      ledgerVersion,
-    });
-    await tx.query(
-      `INSERT INTO rms_inventory.stock_movement (tenant_id,brand_id,store_id,account_id,movement_id,ledger_version,movement_type,
-         base_quantity_delta,record_json,audit_id,occurred_at) VALUES ($1,$2,$3,$4,$5,2,'OpeningBalance',$6,$7,$8,$9)`,
-      [
-        scope.tenantReference,
-        scope.brandReference,
-        scope.storeReference,
-        accountReference,
-        movement,
-        line.quantity,
-        JSON.stringify({
-          movementReference: movement,
-          tenantReference: scope.tenantReference,
-          brandReference: scope.brandReference,
+    try {
+      if (line.lotCode !== null)
+        lot = await ensureStockLot(tx, scope, {
           itemReference: item.itemReference,
-          movementType: "OpeningBalance",
-          quantityDelta: line.quantity,
-          unitCode: item.baseUnit.unitCode,
-          baseQuantityDelta: line.quantity,
-          baseUnitCode: item.baseUnit.unitCode,
-          conversionMultiplier: "1",
-          sourceScope: null,
-          destinationScope: { scopeType: "Location", scopeReference: location.locationReference },
-          lotReference: lot,
+          lotCode: line.lotCode,
           expiryDate: line.expiryDate,
-          businessSourceType: "OpeningCount",
-          businessSourceReference: next.countReference,
-          reasonCode: "STORE_OPENING_COUNT",
-          performedBy: input.actorReference,
+          sourceType: "OpeningCount",
+          sourceReference: next.countReference,
+          actorReference: input.actorReference,
           occurredAt: input.occurredAt,
-          before: balance("0", 1),
-          after: balance(line.quantity, 2),
-          auditReference: input.auditReference,
-          correctsMovementReference: null,
-          unitCostMinor: line.unitCostMinor,
-        }),
-        input.auditReference,
-        input.occurredAt,
-      ],
-    );
+          nextReference: input.nextReference,
+        });
+    } catch (error) {
+      if (error instanceof LedgerPostingError)
+        fail("OPENING_COUNT_LINE_INVALID", line.lineReference);
+      throw error;
+    }
+    const account = await ensureStockAccount(tx, scope, {
+      item,
+      location,
+      lotReference: lot,
+      expiryDate: line.expiryDate,
+      occurredAt: input.occurredAt,
+      nextReference: input.nextReference,
+      open: true,
+    });
+    // An account that already moved stock cannot receive an opening balance.
+    if (account.ledgerVersion !== 1) fail("OPENING_COUNT_STOCK_EXISTS", line.lineReference);
+    await appendStockMovement(tx, scope, {
+      account,
+      item,
+      location,
+      lotReference: lot,
+      expiryDate: line.expiryDate,
+      movementType: "OpeningBalance",
+      delta: line.quantity,
+      businessSourceType: "OpeningCount",
+      businessSourceReference: next.countReference,
+      reasonCode: "STORE_OPENING_COUNT",
+      actorReference: input.actorReference,
+      occurredAt: input.occurredAt,
+      auditReference: input.auditReference,
+      extra: { unitCostMinor: line.unitCostMinor },
+      nextReference: input.nextReference,
+    });
   }
   await tx.query(
     `INSERT INTO rms_inventory.opening_count_posting (tenant_id,brand_id,store_id,count_id,movement_count,posted_by_actor_id,posted_at,audit_id)

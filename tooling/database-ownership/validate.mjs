@@ -1390,6 +1390,22 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/order-line-consumption-store.ts";
+        // WP-2423: shared ledger posting steps and Store direct receipts (DEC-INV-DIRECT-RECEIPT).
+        const acceptedLedgerPostingAsset =
+          module.packageName === "@rms/inventory" &&
+          module.manifest.ownedDatabase?.schema === "rms_inventory" &&
+          [
+            "stock_lot",
+            "stock_account",
+            "stock_balance",
+            "stock_movement",
+            "store_receipt",
+            "store_receipt_void",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          [
+            "src/infrastructure/persistence/ledger-posting.ts",
+            "src/infrastructure/persistence/store-receipt-store.ts",
+          ].includes(moduleRelative);
         // WP-2423 / DEC-INV-OPENING: Store opening count posting to the ledger.
         const acceptedOpeningCountAsset =
           module.packageName === "@rms/inventory" &&
@@ -3059,6 +3075,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedOrderLineConsumptionAsset &&
           !acceptedStockPlaceAsset &&
           !acceptedOpeningCountAsset &&
+          !acceptedLedgerPostingAsset &&
           !acceptedOrderItemInventoryLinkAsset &&
           !acceptedBrowserSessionSelectionAsset &&
           !acceptedBrowserBrandSessionSelectionAsset &&
