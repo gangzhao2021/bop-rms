@@ -15,6 +15,13 @@ type TransactionPermissionPolicy = ReturnType<
 import { createMerchantSelectedContext } from "./merchant-selected-context.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
+/** IDR-0039 least-privilege named KDS Operator profile: whatever the Actor's roles allow,
+ * a NamedKdsOperator Session can only enter the workspace and operate the Kitchen. */
+export const kdsOperatorProfileActions: ReadonlySet<string> = new Set([
+  "merchant.access",
+  "kitchen.operate",
+]);
+
 /** Current Workforce session, selected Tenant/Brand/Store and per-action policy.
  * Returned allowed rechecks the same selection and actor in this transaction.
  */
@@ -100,6 +107,11 @@ function createMerchantStoreScopeResolver(
       fresh: Awaited<ReturnType<typeof selectedContext>>,
       requestedAction: string,
     ) => {
+      if (
+        session.policy.code === "NamedKdsOperator" &&
+        !kdsOperatorProfileActions.has(requestedAction)
+      )
+        return null;
       const memberships = createPostgresCurrentMembershipSource(tx, fresh.context);
       const membership = resolveActiveMembership(
         await memberships.findMemberships(actorReference, context.brand.brandReference),

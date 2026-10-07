@@ -1,7 +1,7 @@
 import { createPostgresCurrentPermissionPolicySource } from "@bop/permission";
 import { createIdentityActor } from "@bop/identity";
 import { createBrand, createStore, createTenantContext } from "@bop/tenant";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMerchantStoreScope,
   createInitiallyAuthorizedMerchantStoreScope,
@@ -90,9 +90,10 @@ function selection(changed?: "tenant" | "brand" | "store" | "actor") {
     context: createTenantContext(actor(changed === "actor" ? 90 : 2), brand, store, at),
   };
 }
-const session = (n = 2) => ({
+const session = (n = 2, policyCode = "WorkforceStandard") => ({
   sessionReference: id(6),
   actor: actor(n),
+  policy: { code: policyCode },
   idleExpiresAt: "2026-10-04T12:30:00.000Z",
   absoluteExpiresAt: "2026-10-04T20:00:00.000Z",
 });
@@ -433,4 +434,30 @@ it("keeps the later policy boundary when the shared source expires", async () =>
   expect(scope.authorizationValidUntil()).toBe(until);
   clock = until;
   await expect(scope.allowed()).rejects.toThrow("STORE_SERVICE_PERMISSION_DENIED");
+});
+
+describe("IDR-0039 named KDS Operator profile", () => {
+  it("allows workspace entry and Kitchen operation", async () => {
+    ports.session.mockResolvedValue(session(2, "NamedKdsOperator"));
+    const scope = await resolve("kitchen.operate");
+    expect(await scope.allowed()).toBe(true);
+    expect(ports.authorize.mock.calls.map(([request]) => request.action)).toEqual([
+      "merchant.access",
+      "kitchen.operate",
+    ]);
+  });
+  it.each(["fulfillment.operate", "payment.refund", "catalog.manage", "kitchen.production.manage"])(
+    "denies %s even when the Actor's roles allow it, before any policy read",
+    async (action) => {
+      ports.session.mockResolvedValue(session(2, "NamedKdsOperator"));
+      const scope = await resolve(action);
+      expect(await scope.allowed()).toBe(false);
+      expect(await scope.authorizeAction(action)).toBeNull();
+      expect(ports.authorize.mock.calls.map(([request]) => request.action)).not.toContain(action);
+    },
+  );
+  it("leaves ordinary Workforce Sessions to their role policy", async () => {
+    const scope = await resolve("fulfillment.operate");
+    expect(await scope.allowed()).toBe(true);
+  });
 });
