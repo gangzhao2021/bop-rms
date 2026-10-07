@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseStockCountCommandBody } from "./merchant-stock-counts.js";
+import { parseStockCountCommandBody, redactStockCount } from "./merchant-stock-counts.js";
 import { parseStoreWasteCommandBody } from "./merchant-store-waste.js";
 
 const id = (n: number) => "01909a1b-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -115,5 +115,37 @@ describe("WP-2423 waste command body", () => {
     ],
   ])("refuses %s", (_name, body) => {
     expect(() => parseStoreWasteCommandBody(body)).toThrow();
+  });
+});
+
+describe("WP-2423 blind count redaction", () => {
+  const count = (status: string, assignee: string) =>
+    ({
+      status,
+      assigneeReference: assignee,
+      expectedQuantityVisibility: "BlindUntilSubmit",
+      lines: [{ expectedQuantity: "14", variance: "-0.5", balanceVersion: 3 }],
+    }) as never;
+  it("hides expected quantities from the counter even when they may approve", () => {
+    expect(redactStockCount(count("InProgress", id(9)), true, id(9)).lines[0]).toMatchObject({
+      expectedQuantity: null,
+      variance: null,
+    });
+  });
+  it("shows them to other approvers, and to everyone once submitted", () => {
+    expect(
+      redactStockCount(count("InProgress", id(9)), true, id(8)).lines[0]?.expectedQuantity,
+    ).toBe("14");
+    expect(
+      redactStockCount(count("InProgress", id(9)), false, id(8)).lines[0]?.expectedQuantity,
+    ).toBeNull();
+    expect(
+      redactStockCount(count("Submitted", id(9)), false, id(9)).lines[0]?.expectedQuantity,
+    ).toBe("14");
+  });
+  it("never sends ledger versions to the browser", () => {
+    expect(
+      redactStockCount(count("Posted", id(9)), true, id(8)).lines[0]?.balanceVersion,
+    ).toBeUndefined();
   });
 });

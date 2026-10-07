@@ -205,6 +205,31 @@ const permissionOf: Record<StockCountAction, string> = {
   Post: "inventory.count.approve",
 };
 
+/**
+ * Blind counting: expected quantities stay hidden from the counter until submission, whatever their
+ * role; other approvers may see them meanwhile.
+ */
+export function redactStockCount(
+  count: StockCountAggregate,
+  mayViewExpected: boolean,
+  viewer: string,
+) {
+  const submitted = ["Submitted", "Approved", "Posted"].includes(count.status);
+  const reveal =
+    submitted ||
+    count.expectedQuantityVisibility === "Visible" ||
+    (mayViewExpected && count.assigneeReference !== viewer);
+  return {
+    ...count,
+    lines: count.lines.map((line) => ({
+      ...line,
+      expectedQuantity: reveal ? line.expectedQuantity : null,
+      variance: reveal ? line.variance : null,
+      balanceVersion: undefined,
+    })),
+  };
+}
+
 export function createMerchantStockCounts(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -232,23 +257,6 @@ export function createMerchantStockCounts(options: {
     };
   }
   const ledger = (tx: Tx) => tx as unknown as LedgerTransaction;
-  /** Blind counting: expected quantities stay hidden from counters until submission. */
-  const redact = (count: StockCountAggregate, mayViewExpected: boolean) => {
-    const reveal =
-      mayViewExpected ||
-      count.expectedQuantityVisibility === "Visible" ||
-      ["Submitted", "Approved", "Posted"].includes(count.status);
-    return {
-      ...count,
-      lines: count.lines.map((line) => ({
-        ...line,
-        expectedQuantity: reveal ? line.expectedQuantity : null,
-        variance: reveal ? line.variance : null,
-        balanceVersion: undefined,
-      })),
-    };
-  };
-
   const query = async (input: {
     sessionCookie: unknown;
     csrf: unknown;
@@ -298,7 +306,7 @@ export function createMerchantStockCounts(options: {
           return {
             screenId: "INV-COUNT-WORKBENCH" as const,
             ...base,
-            count: redact(count, permissions.mayApprove),
+            count: redactStockCount(count, permissions.mayApprove, scope.actor),
             lots: Object.fromEntries(lots),
           };
         }
