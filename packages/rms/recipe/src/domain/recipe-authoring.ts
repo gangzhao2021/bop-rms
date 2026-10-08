@@ -1,4 +1,3 @@
-import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   createRecipeSnapshot,
   parseRecipeReference,
@@ -218,22 +217,6 @@ export interface RecipeDraftFacts {
 const stepCode = (reference: string) =>
   "CAP-" + reference.replaceAll("-", "").slice(-12).toUpperCase();
 
-export function recipeSnapshotDigest(
-  snapshot: Omit<RecipeSnapshot, "snapshotDigest">,
-): RecipeDigest {
-  const { snapshotDigest: _ignored, ...core } = snapshot as RecipeSnapshot;
-  void _ignored;
-  return ("sha256:" + sha256Hex(canonicalizeRfc8785(core))) as RecipeDigest;
-}
-/** What a reviewer approves: the exact version content plus its names, texts and stations. */
-export function recipeReviewDigest(
-  snapshot: RecipeSnapshot,
-  displayName: string,
-  presentation: RecipePresentation,
-) {
-  return "sha256:" + sha256Hex(canonicalizeRfc8785({ snapshot, displayName, presentation }));
-}
-
 /**
  * Builds the immutable Draft version (new requirement, step and preparation references every
  * version) and its presentation. Refuses references that are not current facts of the Brand.
@@ -249,6 +232,8 @@ export function buildRecipeDraftVersion(input: {
   readonly lifecycle: "Draft" | "Published";
   readonly at: string;
   readonly nextReference: () => string;
+  /** Content digest of the version without its own digest (infrastructure supplies SHA-256). */
+  readonly snapshotDigest: (core: Omit<RecipeSnapshot, "snapshotDigest">) => RecipeDigest;
 }): { readonly snapshot: RecipeSnapshot; readonly presentation: RecipePresentation } {
   const { draft, facts } = input;
   const yieldDimension = recipeYieldUnits[draft.yieldUnit] as UnitDimension;
@@ -340,7 +325,7 @@ export function buildRecipeDraftVersion(input: {
   };
   const snapshot = createRecipeSnapshot({
     ...core,
-    snapshotDigest: recipeSnapshotDigest(core as never),
+    snapshotDigest: input.snapshotDigest(core as never),
   } as never);
   const presentation: RecipePresentation = Object.freeze({
     profile: "RecipePresentationV1",

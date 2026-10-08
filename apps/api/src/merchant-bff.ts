@@ -196,6 +196,7 @@ import {
   type createMerchantStoreReceipts,
 } from "./merchant-store-receipts.js";
 import { MerchantRecipeError, type createMerchantRecipes } from "./merchant-recipes.js";
+import { MerchantProductError, type createMerchantProducts } from "./merchant-products.js";
 import {
   MerchantStockCountError,
   type createMerchantStockCounts,
@@ -451,6 +452,7 @@ export interface MerchantBffRouterOptions {
   readonly openingCount?: ReturnType<typeof createMerchantOpeningCount>;
   readonly storeReceipts?: ReturnType<typeof createMerchantStoreReceipts>;
   readonly recipes?: ReturnType<typeof createMerchantRecipes>;
+  readonly products?: ReturnType<typeof createMerchantProducts>;
   readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
   readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
@@ -5264,6 +5266,76 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .command({ sessionCookie, csrf, body: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => recipeFailure(response, error));
+  });
+
+  // WP-2423 / DEC-CAT-PRODUCT-ADMIN: CAT-PRODUCT-LIST / CAT-PRODUCT-DETAIL reads and Product commands.
+  const productStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    CodeTaken: 409,
+    SizeInUse: 409,
+    TaxClassUnavailable: 422,
+    Lifecycle: 409,
+    Invalid: 400,
+  } as const;
+  const productFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantProductError)) {
+      denied(response);
+      return;
+    }
+    response.status(productStatus[error.code]).json({ error: error.code });
+  };
+  router.post("/commerce/products/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { productReference?: unknown } | undefined;
+    const productReference = body?.productReference ?? null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).join(",") !== "productReference" ||
+      (productReference !== null &&
+        (typeof productReference !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            productReference,
+          )))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.products) {
+      response.status(503).json({ error: "products_unavailable" });
+      return;
+    }
+    void options.products
+      .query({ sessionCookie, csrf, productReference: productReference as string | null })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => productFailure(response, error));
+  });
+  router.post("/commerce/products/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.products) {
+      response.status(503).json({ error: "products_unavailable" });
+      return;
+    }
+    void options.products
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => productFailure(response, error));
   });
 
   // WP-2423 / DEC-INV-STOCK-COUNT: INV-COUNT-LIST / INV-COUNT-WORKBENCH.

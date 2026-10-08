@@ -6,9 +6,6 @@ import {
   OptionSetDetailPage,
   OptionSetEditPage,
 } from "./OptionSetAuthoringPages.js";
-import { ProductCreatePage } from "./ProductCreatePage.js";
-import { ProductEditPage } from "./ProductEditPage.js";
-import { CatalogProductListPage, ProductListState } from "./CatalogProductListPage.js";
 import { CurrentStoreCapabilityPage } from "./CurrentStoreCapabilityPage.js";
 import { RefundPaymentPage } from "./RefundPaymentPage.js";
 import { DiningSessionWorkspace } from "./DiningSessionWorkspace.js";
@@ -31,6 +28,7 @@ import { PriceBookEditorPage, PriceBookListPage } from "./PriceBookPages.js";
 import { TaxConfigPage } from "./TaxConfigPage.js";
 import { PromotionEditorPage, PromotionListPage } from "./PromotionPages.js";
 import { RecipeEditorPage, RecipeListPage } from "./RecipePages.js";
+import { ProductEditorPage, ProductListPage } from "./ProductPages.js";
 import { ProductionBatchPage } from "./ProductionBatchPage.js";
 import { DiningTableListPage } from "./DiningPages.js";
 import {
@@ -128,6 +126,7 @@ import {
 } from "./StoreReceiptPages.js";
 import { createStoreReceiptClient } from "./store-receipt-pages.js";
 import { createRecipeClient } from "./recipe-pages.js";
+import { createProductClient } from "./product-pages.js";
 import { StockCountListPage, StockCountWorkbenchPage } from "./StockCountPages.js";
 import { createStockCountClient } from "./stock-count-pages.js";
 import { StoreWasteDetailPage, StoreWasteFormPage, StoreWasteListPage } from "./StoreWastePages.js";
@@ -478,100 +477,32 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route
         path="/app/commerce/products"
         element={
-          state.kind === "Ready" &&
-          !state.switching &&
-          state.workspace.navigation.some(
-            (item) =>
-              item.screenId === "CAT-PRODUCT-LIST" &&
-              item.href === "/app/commerce/products" &&
-              item.permission === "catalog.manage",
-          ) ? (
-            <CatalogProductListPage
+          state.kind === "Ready" && !state.switching ? (
+            <ProductListPage
               key={state.workspace.selectedScope.storeReference + state.csrf}
-              storeReference={state.workspace.selectedScope.storeReference}
-              storeLabel={state.workspace.selectedScope.storeLabel}
-              brandLabel={state.workspace.selectedScope.brandLabel}
-              csrf={state.csrf}
+              client={createProductClient(state.csrf)}
             />
           ) : (
-            <ProductListState
-              state={
-                state.kind === "Ready" && !state.switching
-                  ? "Denied"
-                  : state.kind === "Loading"
-                    ? "Loading"
-                    : state.kind === "Offline"
-                      ? "Offline"
-                      : state.kind === "SignedOut"
-                        ? "Denied"
-                        : "Unavailable"
-              }
-            />
+            <ProductListPage />
           )
         }
       />
-      <Route
-        path="/app/commerce/products/new"
-        element={
-          state.kind === "Ready" &&
-          !state.switching &&
-          state.workspace.navigation.some(
-            (item) =>
-              item.screenId === "CAT-PRODUCT-LIST" &&
-              item.href === "/app/commerce/products" &&
-              item.permission === "catalog.manage",
-          ) ? (
-            <ProductCreatePage
-              key={state.workspace.selectedScope.storeReference + state.csrf}
-              storeReference={state.workspace.selectedScope.storeReference}
-              storeLabel={state.workspace.selectedScope.storeLabel}
-              brandLabel={state.workspace.selectedScope.brandLabel}
-              csrf={state.csrf}
-            />
-          ) : (
-            <ProductListState
-              state={
-                state.kind === "Loading"
-                  ? "Loading"
-                  : state.kind === "Offline"
-                    ? "Offline"
-                    : "Denied"
-              }
-            />
-          )
-        }
-      />
-      <Route
-        path="/app/commerce/products/:id/edit"
-        element={
-          state.kind === "Ready" &&
-          !state.switching &&
-          state.workspace.navigation.some(
-            (item) =>
-              item.screenId === "CAT-PRODUCT-LIST" &&
-              item.href === "/app/commerce/products" &&
-              item.permission === "catalog.manage",
-          ) ? (
-            <ProductEditPage
-              key={state.workspace.selectedScope.storeReference + state.csrf}
-              storeReference={state.workspace.selectedScope.storeReference}
-              storeLabel={state.workspace.selectedScope.storeLabel}
-              brandLabel={state.workspace.selectedScope.brandLabel}
-              csrf={state.csrf}
-            />
-          ) : (
-            <ProductListState
-              state={
-                state.kind === "Loading"
-                  ? "Loading"
-                  : state.kind === "Offline"
-                    ? "Offline"
-                    : "Denied"
-              }
-            />
-          )
-        }
-      />
+      {["/app/commerce/products/new", "/app/commerce/products/:id/edit"].map((path) => (
+        <Route
+          key={path}
+          path={path}
+          element={
+            state.kind === "Ready" && !state.switching ? (
+              <ProductEditorPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                client={createProductClient(state.csrf)}
+              />
+            ) : (
+              <ProductEditorPage />
+            )
+          }
+        />
+      ))}
       <Route
         path="/app/commerce/menus"
         element={

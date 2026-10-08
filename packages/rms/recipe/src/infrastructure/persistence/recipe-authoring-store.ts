@@ -5,12 +5,11 @@ import {
   type AppendAuditRecordInput,
 } from "@bop/audit";
 import { RecipeWorkflowError } from "../../application/recipe-service.js";
+import { recipeReviewDigest, recipeSnapshotDigest } from "../recipe-digests.js";
 import type { RecipeAction, RecipeOperationRecord } from "../../application/ports/recipe-ports.js";
 import {
   buildRecipeDraftVersion,
   recipeDraftOf,
-  recipeReviewDigest,
-  recipeSnapshotDigest,
   recipeStandardCostCents,
   RecipeAuthoringError,
   type RecipeDraft,
@@ -611,6 +610,7 @@ export async function saveRecipeDraft(
     lifecycle: "Draft",
     at: input.at,
     nextReference: input.nextReference,
+    snapshotDigest: recipeSnapshotDigest,
   });
   await commitVersion(tx, brand, {
     action,

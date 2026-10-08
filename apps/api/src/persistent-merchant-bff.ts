@@ -296,7 +296,9 @@ export function createPersistentMerchantBffService(
           navigation.push(item);
         continue;
       }
-      if (item.screenId === "CAT-PRODUCT-LIST") {
+      // WP-2423 / DEC-CAT-PRODUCT-ADMIN: without a WP-2421 product-list runtime the entry leads to
+      // the Brand Product pages and follows the ordinary current permission check below.
+      if (item.screenId === "CAT-PRODUCT-LIST" && (currentNavigation || legacyNavigation)) {
         const show =
           currentNavigation && hold
             ? await createMerchantProductListNavigationRuntime({

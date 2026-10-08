@@ -639,6 +639,213 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 DEC-INV-WASTE 2026-10-07: Store waste records"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sku",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sku",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sku",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_version_category_assignment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_version_category_assignment",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_option",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_sku_scope",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_channel",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_source_commit",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_source_commit",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_source_head",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_source_head",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_source_head",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_publication_revision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
     }
   ]
 }

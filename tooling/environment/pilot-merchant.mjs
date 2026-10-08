@@ -46,6 +46,7 @@ import { createMerchantStockPlaces } from "../../apps/api/dist/merchant-stock-pl
 import { createMerchantOpeningCount } from "../../apps/api/dist/merchant-opening-count.js";
 import { createMerchantStoreReceipts } from "../../apps/api/dist/merchant-store-receipts.js";
 import { createMerchantRecipes } from "../../apps/api/dist/merchant-recipes.js";
+import { createMerchantProducts } from "../../apps/api/dist/merchant-products.js";
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
@@ -121,16 +122,13 @@ export async function createInternalMerchant(
           href: "/app/organization/stores/" + selected.storeReference + "/setup",
           permission: "organization.manage",
         },
-        ...(createInternalMerchantProduct === undefined
-          ? []
-          : [
-              {
-                screenId: "CAT-PRODUCT-LIST",
-                label: "Products",
-                href: "/app/commerce/products",
-                permission: "catalog.manage",
-              },
-            ]),
+        // WP-2423 / DEC-CAT-PRODUCT-ADMIN: Brand Products (merchant-products).
+        {
+          screenId: "CAT-PRODUCT-LIST",
+          label: "Products",
+          href: "/app/commerce/products",
+          permission: "catalog.manage",
+        },
         ...(typeof product.optionSetList === "function"
           ? [
               {
@@ -484,6 +482,13 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en",
   });
+  // TEST-ONLY locale: the internal-test Brand writes its menu in Canadian English.
+  const products = createMerchantProducts({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en-CA",
+  });
   const stockCounts = createMerchantStockCounts({
     persistence,
     authentication: service,
@@ -612,6 +617,7 @@ export async function createInternalMerchant(
       openingCount,
       storeReceipts,
       recipes,
+      products,
       stockCounts,
       storeWaste,
       pickupQuery,

@@ -1422,6 +1422,20 @@ async function scanUnsupported(root, module, diagnostics) {
             "src/infrastructure/persistence/ledger-posting.ts",
             "src/infrastructure/persistence/store-receipt-store.ts",
           ].includes(moduleRelative);
+        // WP-2423 / DEC-CAT-PRODUCT-ADMIN: Brand Product list/detail reads and the Store's tax classes.
+        const acceptedProductAdministrationAsset =
+          (module.packageName === "@rms/catalog" &&
+            module.manifest.ownedDatabase?.schema === "rms_catalog" &&
+            ["product", "product_version", "sku"].every((table) =>
+              module.manifest.ownedDatabase?.tables?.includes(table),
+            ) &&
+            moduleRelative === "src/infrastructure/persistence/product-admin-read-store.ts") ||
+          (module.packageName === "@rms/pricing" &&
+            module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+            ["tax_configuration", "tax_configuration_version", "tax_configuration_rule"].every(
+              (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+            ) &&
+            moduleRelative === "src/infrastructure/persistence/store-tax-classification-store.ts");
         // WP-2423 / DEC-INV-STOCK-COUNT and DEC-INV-WASTE: Store counts and waste on the ledger.
         const acceptedStockCountWasteAsset =
           module.packageName === "@rms/inventory" &&
@@ -3140,6 +3154,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedStockPlaceAsset &&
           !acceptedOpeningCountAsset &&
           !acceptedStockCountWasteAsset &&
+          !acceptedProductAdministrationAsset &&
           !acceptedLedgerPostingAsset &&
           !acceptedOrderItemInventoryLinkAsset &&
           !acceptedBrowserSessionSelectionAsset &&

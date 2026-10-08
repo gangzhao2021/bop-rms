@@ -416,3 +416,9 @@ export * from "./infrastructure/persistence/product-tax-coverage-source-store.js
 export * from "./contracts/brand-catalog-source.js";
 
 export * from "./infrastructure/persistence/brand-catalog-source-store.js";
+
+export {
+  listBrandProducts,
+  loadBrandProduct,
+  type BrandProductSummary,
+} from "./infrastructure/persistence/product-admin-read-store.js";

@@ -3,10 +3,10 @@ import {
   buildRecipeDraftVersion,
   parseRecipeDraft,
   recipeDraftOf,
-  recipeReviewDigest,
   recipeStandardCostCents,
   scaledDecimal,
 } from "../domain/recipe-authoring.js";
+import { recipeReviewDigest, recipeSnapshotDigest } from "../infrastructure/recipe-digests.js";
 
 const id = (n: number) => "01909a19-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const milk = id(1),
@@ -65,6 +65,7 @@ const build = (value = draft(), at = "2026-10-07T10:00:00.000Z") => {
     lifecycle: "Draft",
     at,
     nextReference: () => id(++n),
+    snapshotDigest: recipeSnapshotDigest,
   });
 };
 
