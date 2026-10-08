@@ -150,6 +150,7 @@ const moduleManifestInput =
         "menu_section_category",
         "sellable_placement",
         "menu_operation_record",
+        "menu_operation_snapshot",
         "option_set",
         "option_set_version",
         "option",

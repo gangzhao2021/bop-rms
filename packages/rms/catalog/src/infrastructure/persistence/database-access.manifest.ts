@@ -474,6 +474,17 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      table: "menu_operation_snapshot",
+      classification: "append-only-record",
+      writeOwner: {
+        kind: "module",
+        id: "@rms/catalog",
+      },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "option_set",
       classification: "aggregate-root",
       writeOwner: {

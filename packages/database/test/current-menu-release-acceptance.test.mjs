@@ -62,6 +62,19 @@ it("reads effective current menu authority under scoped RLS and denies withdrawn
         [id(4), id(1), id(2), at],
       );
       await admin.query(
+        "INSERT INTO rms_catalog.menu_version_store(menu_version_id,menu_id,brand_id,store_id) VALUES($1,$2,$3,$4)",
+        [id(4), id(1), id(2), id(12)],
+      );
+      await admin.query(
+        "INSERT INTO rms_catalog.menu_version_channel(menu_version_id,menu_id,brand_id,channel_code) VALUES($1,$2,$3,'CUSTOMER_PWA')",
+        [id(4), id(1), id(2)],
+      );
+      await admin.query(
+        "INSERT INTO rms_catalog.menu_version_order_type(menu_version_id,menu_id,brand_id,order_type_code) VALUES($1,$2,$3,'PICKUP'),($1,$2,$3,'DINE_IN')",
+        [id(4), id(1), id(2)],
+      );
+      // Published after its content (a submitted Menu version is frozen, DEC-MENU-REVISION).
+      await admin.query(
         `INSERT INTO rms_catalog.menu_publication_revision (lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,snapshot_digest,state,validation_evidence_id,approval_evidence_id,changed_at) VALUES ($1,4,$2,$3,$4,$5,'Published',$6,$7,$8)`,
         [id(5), id(1), id(4), id(2), digest, id(6), id(7), at],
       );
@@ -74,18 +87,6 @@ it("reads effective current menu authority under scoped RLS and denies withdrawn
         [id(9), id(8), id(1), id(2), at, "2026-08-02T00:00:00.000Z", digest, id(7)],
       );
 
-      await admin.query(
-        "INSERT INTO rms_catalog.menu_version_store(menu_version_id,menu_id,brand_id,store_id) VALUES($1,$2,$3,$4)",
-        [id(4), id(1), id(2), id(12)],
-      );
-      await admin.query(
-        "INSERT INTO rms_catalog.menu_version_channel(menu_version_id,menu_id,brand_id,channel_code) VALUES($1,$2,$3,'CUSTOMER_PWA')",
-        [id(4), id(1), id(2)],
-      );
-      await admin.query(
-        "INSERT INTO rms_catalog.menu_version_order_type(menu_version_id,menu_id,brand_id,order_type_code) VALUES($1,$2,$3,'PICKUP'),($1,$2,$3,'DINE_IN')",
-        [id(4), id(1), id(2)],
-      );
       await admin.query(
         "CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT",
       );

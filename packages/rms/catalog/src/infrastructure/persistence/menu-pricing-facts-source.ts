@@ -44,7 +44,7 @@ export function createPostgresMenuPricingFactsSource(options: {
       );
       const roots = rows(
         await transaction.query(
-          "SELECT m.aggregate_version,v.menu_version_id FROM rms_catalog.menu m JOIN rms_catalog.menu_version v ON v.menu_id=m.menu_id AND v.brand_id=m.brand_id WHERE m.brand_id=$1 AND m.menu_id=$2 AND v.status='Draft' AND m.created_at<=$3::timestamptz AND m.updated_at<=$3::timestamptz AND v.created_at<=$3::timestamptz AND v.updated_at<=$3::timestamptz AND date_trunc('milliseconds',m.updated_at)=m.updated_at AND date_trunc('milliseconds',v.updated_at)=v.updated_at FOR SHARE OF m,v",
+          "SELECT m.aggregate_version,v.menu_version_id FROM rms_catalog.menu m JOIN rms_catalog.menu_version v ON v.menu_id=m.menu_id AND v.brand_id=m.brand_id AND v.menu_version_id=m.current_version_id WHERE m.brand_id=$1 AND m.menu_id=$2 AND v.status='Draft' AND m.created_at<=$3::timestamptz AND m.updated_at<=$3::timestamptz AND v.created_at<=$3::timestamptz AND v.updated_at<=$3::timestamptz AND date_trunc('milliseconds',m.updated_at)=m.updated_at AND date_trunc('milliseconds',v.updated_at)=v.updated_at FOR SHARE OF m,v",
           [brand, menu, at],
         ),
       );

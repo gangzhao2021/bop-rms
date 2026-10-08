@@ -12,7 +12,7 @@ export interface CategoryMenuAuthorizationEvidence {
 }
 
 export type CategoryOperationAction = "Create" | "Move" | "ChangeLifecycle";
-export type MenuOperationAction = "Create" | "ReplaceDraft";
+export type MenuOperationAction = "Create" | "ReplaceDraft" | "Revise";
 
 export interface CategoryOperationRecord {
   readonly action: CategoryOperationAction;

@@ -53,6 +53,7 @@ const selectDraft = `SELECT jsonb_build_object(
  WHERE s.menu_version_id=v.menu_version_id AND p.menu_id=m.menu_id AND p.brand_id=m.brand_id
  AND (p.created_at>$3::timestamptz OR date_trunc('milliseconds',p.created_at)<>p.created_at))) coherent
 FROM rms_catalog.menu m JOIN rms_catalog.menu_version v ON v.menu_id=m.menu_id AND v.brand_id=m.brand_id
+ AND v.menu_version_id=m.current_version_id
 WHERE m.brand_id=$1 AND m.menu_id=$2 AND v.status='Draft'
 FOR SHARE OF m,v`;
 

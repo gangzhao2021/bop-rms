@@ -424,3 +424,4 @@ export {
   loadBrandProduct,
   type BrandProductSummary,
 } from "./infrastructure/persistence/product-admin-read-store.js";
+export { createPostgresMenuDraftStore } from "./infrastructure/persistence/menu-draft-store.js";

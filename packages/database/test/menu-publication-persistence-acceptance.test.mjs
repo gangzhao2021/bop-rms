@@ -841,14 +841,13 @@ it("persists Menu review approval publication and archive with exact replay and 
         ).rows[0];
       const before = { revisions: 2, snapshots: 2, audits: 6, events: 0, releases: 0 };
       assert.deepEqual(await counts(), before);
-      await admin.query(
-        "UPDATE rms_catalog.menu_version SET localized_names_json=$2 WHERE menu_version_id=$1",
-        [id(801), JSON.stringify({ "en-CA": "Changed draft" })],
-      );
-      assert.equal((await send(publish)).status, 409);
-      await admin.query(
-        "UPDATE rms_catalog.menu_version SET localized_names_json=$2 WHERE menu_version_id=$1",
-        [id(801), JSON.stringify({ "en-CA": "Synthetic" })],
+      // DEC-MENU-REVISION: a submitted version cannot drift from what was reviewed.
+      await assert.rejects(
+        admin.query(
+          "UPDATE rms_catalog.menu_version SET localized_names_json=$2 WHERE menu_version_id=$1",
+          [id(801), JSON.stringify({ "en-CA": "Changed draft" })],
+        ),
+        /submitted Menu version cannot change/u,
       );
       bindingAvailable = false;
       assert.equal((await send(publish)).status, 503);
@@ -962,9 +961,13 @@ it("persists Menu review approval publication and archive with exact replay and 
         generation: id(980),
       });
       bindingAvailable = false;
-      await admin.query(
-        "UPDATE rms_catalog.menu_version SET localized_names_json=$2 WHERE menu_version_id=$1",
-        [id(801), JSON.stringify({ "en-CA": "Later draft" })],
+      // DEC-MENU-REVISION: the published version cannot be edited in place (a revision is needed).
+      await assert.rejects(
+        admin.query(
+          "UPDATE rms_catalog.menu_version SET localized_names_json=$2 WHERE menu_version_id=$1",
+          [id(801), JSON.stringify({ "en-CA": "Later draft" })],
+        ),
+        /submitted Menu version cannot change/u,
       );
       const archived = await execute(command("Archive", 4, 103, query.observedAt));
       assert.equal(archived.record.lifecycle.state, "Archived");

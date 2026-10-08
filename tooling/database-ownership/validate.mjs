@@ -1429,7 +1429,10 @@ async function scanUnsupported(root, module, diagnostics) {
             ["product", "product_version", "sku"].every((table) =>
               module.manifest.ownedDatabase?.tables?.includes(table),
             ) &&
-            moduleRelative === "src/infrastructure/persistence/product-admin-read-store.ts") ||
+            [
+              "src/infrastructure/persistence/product-admin-read-store.ts",
+              "src/infrastructure/persistence/menu-draft-store.ts",
+            ].includes(moduleRelative)) ||
           (module.packageName === "@rms/pricing" &&
             module.manifest.ownedDatabase?.schema === "rms_pricing" &&
             ["tax_configuration", "tax_configuration_version", "tax_configuration_rule"].every(
