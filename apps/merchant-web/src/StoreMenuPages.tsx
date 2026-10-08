@@ -116,9 +116,11 @@ export function StoreMenuListPage({
                   {Object.values(menu.localizedNames)[0] ?? menu.internalCode}
                 </Link>
               </td>
-              <td>{stageText[menuStage(menu.publication)]}</td>
-              <td>{menu.placements}</td>
-              <td>{menu.latestRelease ? when(menu.latestRelease.createdAt) : "—"}</td>
+              <td data-label="Version">{stageText[menuStage(menu.publication)]}</td>
+              <td data-label="Items">{menu.placements}</td>
+              <td data-label="Last published">
+                {menu.latestRelease ? when(menu.latestRelease.createdAt) : "—"}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -188,7 +190,10 @@ function MenuBuilder({
   const sellables = new Map(view.sellables.map((item) => [item.skuReference, item]));
   const label = (sku: string) => {
     const item = sellables.get(sku);
-    return item ? `${item.productName} — ${item.sizeName}` : "Item " + sku.slice(-4);
+    if (!item) return "Item " + sku.slice(-4);
+    return item.sizeName === item.productName
+      ? item.productName
+      : `${item.productName} — ${item.sizeName}`;
   };
   const send = async (fresh: MenuCommand, done: string) => {
     if (!client.command) return;

@@ -219,8 +219,8 @@ export function StoreAvailabilityPage({
             {view.items.map((item) => (
               <tr key={item.skuReference}>
                 <td>{label(item)}</td>
-                <td>{item.skuCode}</td>
-                <td>
+                <td data-label="Code">{item.skuCode}</td>
+                <td data-label="Status">
                   {item.status === "SoldOut"
                     ? soldOutText(item.soldOutUntil, view.timeZone)
                     : statusText[item.status]}
