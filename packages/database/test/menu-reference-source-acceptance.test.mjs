@@ -140,6 +140,8 @@ it("holds complete Menu reference graph through caller COMMIT while preserving p
           " TO " +
           role,
       );
+      // DEC-MENU-REVISION: effective periods apply the end recorded when a release was superseded.
+      await admin.query("GRANT SELECT ON rms_catalog.menu_release_effective_end TO " + role);
       await source.withCurrentSnapshot(request, async (s) => {
         assert.equal(s.generation, "0");
         assert.equal(s.reviews.length, 0);

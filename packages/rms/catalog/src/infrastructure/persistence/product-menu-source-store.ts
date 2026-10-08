@@ -36,6 +36,11 @@ const utc = (column: string) =>
 const limit = productMenuSourceMaximumRows + 1;
 // One statement covers target membership and all immutable reviewed snapshots/publication histories.
 // SQL bounds are checked in the public parser; truncation can never become Complete.
+// DEC-MENU-REVISION: a period runs until its own end or the end recorded when its release was
+// superseded by a later publication (LEAST ignores a missing end).
+const periodUntil =
+  "LEAST(p.effective_until,(SELECT e.ended_at FROM rms_catalog.menu_release_effective_end e " +
+  "WHERE e.release_id=p.release_id AND e.brand_id=p.brand_id AND e.menu_id=p.menu_id))";
 const array = (expression: string) =>
   `CASE WHEN jsonb_typeof(${expression})='array' THEN ${expression} ELSE '[]'::jsonb END`;
 const collect = (sql: string) =>
@@ -69,9 +74,10 @@ const select = `SELECT jsonb_build_object(
  AND EXISTS(SELECT 1 FROM rms_catalog.menu_publication_revision revision WHERE revision.lifecycle_id=r.lifecycle_id AND revision.lifecycle_version=r.lifecycle_version
  AND revision.brand_id=r.brand_id AND revision.menu_id=r.menu_id AND revision.menu_version_id=r.menu_version_id AND revision.snapshot_digest=r.snapshot_digest AND revision.state='Published' AND revision.changed_at<=r.created_at)
  AND ((r.release_sequence=1 AND r.previous_release_id IS NULL) OR EXISTS(SELECT 1 FROM rms_catalog.menu_publication_release prior WHERE prior.release_id=r.previous_release_id AND prior.menu_id=r.menu_id AND prior.brand_id=r.brand_id AND prior.release_sequence=r.release_sequence-1 AND prior.created_at<=r.created_at)),
-'periods',${collect(`SELECT jsonb_build_object('timingReference',p.timing_version_id,'timeZone',p.time_zone,'effectiveFrom',${utc("p.effective_from")},'effectiveUntil',${utc("p.effective_until")},'periodDigest',p.period_digest,'createdAt',${utc("p.created_at")},
+'periods',${collect(`SELECT jsonb_build_object('timingReference',p.timing_version_id,'timeZone',p.time_zone,'effectiveFrom',${utc("p.effective_from")},'effectiveUntil',${utc(periodUntil)},'periodDigest',p.period_digest,'createdAt',${utc("p.created_at")},
 'precise',p.menu_id=r.menu_id AND p.brand_id=r.brand_id AND date_trunc('milliseconds',p.effective_from)=p.effective_from AND
- (p.effective_until IS NULL OR date_trunc('milliseconds',p.effective_until)=p.effective_until) AND date_trunc('milliseconds',p.created_at)=p.created_at) row_value
+ (p.effective_until IS NULL OR date_trunc('milliseconds',p.effective_until)=p.effective_until) AND date_trunc('milliseconds',p.created_at)=p.created_at
+ AND (${periodUntil}) IS NOT DISTINCT FROM date_trunc('milliseconds',${periodUntil})) row_value
  FROM rms_catalog.menu_release_effective_period p WHERE p.release_id=r.release_id ORDER BY p.timing_version_id`)}) row_value
  FROM rms_catalog.menu_publication_release r WHERE r.brand_id=c.brand_id AND r.lifecycle_id=c.lifecycle_id ORDER BY r.release_sequence`)}) row_value
  FROM rms_catalog.menu_review_content c WHERE c.brand_id=$1 ORDER BY c.lifecycle_id`)} ) source`;
