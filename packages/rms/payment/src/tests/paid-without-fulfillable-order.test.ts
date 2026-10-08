@@ -1241,6 +1241,17 @@ describe("WP-1310 paid-without-fulfillable compensation service", () => {
     expect(value.counts.refund).toBe(0);
   });
 
+  it("re-evaluates an unchanged open case without appending another case version", async () => {
+    const value = serviceHarness({ method: "TerminalInterac", interacEvidence: null });
+    const first = await value.service.execute(disposition());
+    expect(first.status).toBe("InPersonActionRequired");
+    const reconciles = value.calls.filter((call) => call === "case.reconcile").length;
+    value.state.setClock("2026-08-08T16:00:10.000Z");
+    const second = await value.service.execute(disposition());
+    expect(second).toEqual(first);
+    expect(value.calls.filter((call) => call === "case.reconcile")).toHaveLength(reconciles);
+  });
+
   it("claims fresh authorized Interac evidence but never calls the generic refund port", async () => {
     const value = serviceHarness({ method: "TerminalInterac" });
     expect((await value.service.execute(disposition())).status).toBe(

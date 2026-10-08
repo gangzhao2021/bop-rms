@@ -162,3 +162,39 @@ it("publishes real lifecycle snapshots without starting on construction", async 
   await workload.stop();
   expect(workload.snapshot().state).toBe("stopped");
 });
+it("backs off a candidate whose result is unchanged and resets when it changes", async () => {
+  vi.useFakeTimers();
+  let clock = 0;
+  let status = "InPersonActionRequired";
+  const discover = vi.fn(async () => ({
+    candidates: [candidate("a")],
+    nextAfterDispositionReference: null,
+  }));
+  const execute = vi.fn(async () => ({ status }));
+  const workload = createPaymentCompensationWorkload({
+    discover,
+    execute,
+    recordFailure: async () => undefined,
+    pageSize: 5,
+    pollIntervalMs: 10,
+    drainDeadlineMs: 100,
+    unchangedBackoffMaxMs: 40,
+    now: () => clock,
+  });
+  await workload.start();
+  const at = async (ms: number) => {
+    clock = ms;
+    await vi.advanceTimersByTimeAsync(10);
+  };
+  // Runs at 0 and 10 (first unchanged result: 10 ms delay), then 20 ms, then capped at 40 ms.
+  for (const ms of [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140]) await at(ms);
+  const unchangedRuns = execute.mock.calls.length;
+  expect(unchangedRuns).toBeLessThan(discover.mock.calls.length);
+  expect(unchangedRuns).toBeGreaterThanOrEqual(4);
+  status = "Closed";
+  await at(200);
+  await at(210);
+  const changed = execute.mock.calls.length;
+  expect(changed).toBe(unchangedRuns + 2);
+  await workload.stop();
+});

@@ -2,6 +2,9 @@ import { createOutboxWorkload, type OutboxWorkloadSnapshot } from "./outbox-work
 
 /** Owner ports perform scoped discovery, durable execution and failure recording.
  * Cursors are scan progress only: restart/full-round reset replays durable owner work.
+ * A candidate whose result did not change is re-executed with doubling delay (up to
+ * `unchangedBackoffMaxMs`): an open case awaiting a person or the Provider is still rechecked, without
+ * claiming a fresh lease on every poll. A changed result or a failure resets the delay.
  */
 export function createPaymentCompensationWorkload<
   T extends { readonly dispositionReference: string },
@@ -23,10 +26,25 @@ export function createPaymentCompensationWorkload<
   readonly pollIntervalMs: number;
   readonly drainDeadlineMs: number;
   readonly onSnapshot?: (snapshot: OutboxWorkloadSnapshot) => void;
+  /** Longest delay before an unchanged candidate is executed again; default five minutes. */
+  readonly unchangedBackoffMaxMs?: number;
+  /** Test seam: the clock (milliseconds). */
+  readonly now?: () => number;
 }) {
   if (!Number.isInteger(options.pageSize) || options.pageSize < 1 || options.pageSize > 100)
     throw new TypeError("COMPENSATION_WORKLOAD_CONFIG_INVALID");
   const pageSize = options.pageSize;
+  const backoffMax = options.unchangedBackoffMaxMs ?? 300_000;
+  if (!Number.isInteger(backoffMax) || backoffMax < 0)
+    throw new TypeError("COMPENSATION_WORKLOAD_CONFIG_INVALID");
+  const now = options.now ?? Date.now;
+  const resultKey = (value: unknown) =>
+    JSON.stringify(value ?? null, (_key, item: unknown) =>
+      typeof item === "bigint" ? String(item) : item,
+    );
+  /** Per candidate: the last result, its current delay and when it is due again. */
+  const settled = new Map<string, { result: string; waitMs: number; dueAt: number }>();
+  let seen = new Set<string>();
   let cursor: string | null = null,
     stopping = false;
   const workload = createOutboxWorkload({
@@ -58,16 +76,35 @@ export function createPaymentCompensationWorkload<
         let executed = 0;
         for (const candidate of page.candidates) {
           if (stopping) break;
+          const reference = candidate.dispositionReference;
+          seen.add(reference);
+          const prior = settled.get(reference);
+          if (prior !== undefined && now() < prior.dueAt) continue;
           try {
             const result = await options.execute(candidate);
             await options.afterExecute?.(candidate, result);
+            const key = resultKey(result);
+            const waitMs =
+              prior?.result === key
+                ? Math.min(Math.max(prior.waitMs * 2, options.pollIntervalMs), backoffMax)
+                : 0;
+            settled.set(reference, { result: key, waitMs, dueAt: now() + waitMs });
           } catch {
+            settled.delete(reference);
             // Never forward raw Provider/errors to generic worker logging.
             await options.recordFailure(candidate, "COMPENSATION_EXECUTION_FAILED");
           }
           executed++;
         }
-        if (!stopping) cursor = page.nextAfterDispositionReference;
+        if (!stopping) {
+          cursor = page.nextAfterDispositionReference;
+          // A full round ends: forget candidates discovery no longer returns.
+          if (cursor === null) {
+            for (const reference of settled.keys())
+              if (!seen.has(reference)) settled.delete(reference);
+            seen = new Set();
+          }
+        }
         return executed;
       },
       async stop() {

@@ -1313,6 +1313,13 @@ async function reconcileCase(
     closedAt: closed ? effectiveAt : null,
     version: input.current.version + 1,
   });
+  // Re-evaluating an open case that nothing changed is not a new case version: the worker rescans
+  // open cases, and appending identical history on every scan grows it without bound.
+  if (
+    fingerprint({ ...next, version: input.current.version, updatedAt: input.current.updatedAt }) ===
+    fingerprint(input.current)
+  )
+    return input.current;
   let reconciled;
   try {
     reconciled = await ports.cases.reconcile({
