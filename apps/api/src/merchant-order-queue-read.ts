@@ -36,7 +36,7 @@ export function createMerchantOrderQueueRead(options: {
     options.transactions.run(async (transaction) => {
       const scope = await options.authorize(transaction, input.sessionCookie);
       if (scope === null) return unavailable();
-      const allowed = async () => {
+      const recheck = async () => {
         const current = await options.authorize(transaction, input.sessionCookie);
         return (
           current !== null &&
@@ -46,6 +46,11 @@ export function createMerchantOrderQueueRead(options: {
           current.sessionReference === scope.sessionReference
         );
       };
+      // WP-2423: the per-order readers are read-only and share one confirmation instead of a full
+      // session/membership/policy evaluation each (3–5 per order made a 50-order page exceed its
+      // timeout). Nothing is returned unless the full recheck after the last read still holds.
+      let confirmed: Promise<boolean> | null = null;
+      const allowed = () => (confirmed ??= recheck());
       const ownerScope = {
         brandReference: scope.brandReference,
         storeReference: scope.storeReference,
@@ -200,7 +205,7 @@ export function createMerchantOrderQueueRead(options: {
           }),
         );
       }
-      if (!(await allowed())) return unavailable();
+      if (!(await recheck())) return unavailable();
       return Object.freeze({
         items: Object.freeze(items),
         nextAfterOrderReference: index.nextAfterOrderReference,

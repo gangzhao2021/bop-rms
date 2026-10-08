@@ -50,10 +50,10 @@ const scope = {
   storeReference: id(3),
   sessionReference: id(9),
 };
-function read() {
+function read(authorize: () => Promise<typeof scope | null> = async () => scope) {
   return createMerchantOrderQueueRead({
     transactions: { run: async (work) => work({ query: async () => ({ rows: [], rowCount: 0 }) }) },
-    authorize: async () => scope,
+    authorize,
     quoteVersion: 1,
     now: () => "2026-09-22T00:00:00.000Z",
   })({ sessionCookie: "synthetic", afterOrderReference: null, limit: 50 });
@@ -87,4 +87,14 @@ it("keeps unsupported missing state unresolved", async () => {
 it("does not conceal conflicting cancellation history", async () => {
   mocks.cancelled.mockRejectedValue(new Error("ORDER_TERMINATION_CONFLICT"));
   await expect(read()).rejects.toThrow("ORDER_TERMINATION_CONFLICT");
+});
+
+it("WP-2423: shares one confirmation across the readers and rechecks fully at the end", async () => {
+  mocks.cancelled.mockResolvedValue({ phase: "Cancelled", orderVersion: 2 });
+  const authorize = vi.fn(async () => scope);
+  await read(authorize);
+  // Admission and the final recheck (the mocked readers here do not call it; real readers share one).
+  expect(authorize).toHaveBeenCalledTimes(2);
+  let calls = 0;
+  await expect(read(async () => (++calls === 2 ? null : scope))).rejects.toThrow();
 });
