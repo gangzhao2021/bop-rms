@@ -16,6 +16,8 @@
    - **Recipe Developer 配方研发**：读写配方草稿。
    - **Recipe Reviewer 配方审核**：审核配方成本与食品安全（发布前需两位不同的审核人，且都不是草稿作者）。
    - **Menu Manager 菜单经理**（目录 v4）：商品、菜单、选项、价目的编辑、提交、批准与发布——作为价目与菜单“他人批准”的第二人。
+     目录 v5（2026-10-08）：Brand Owner 与 Menu Manager 另持有菜单发布所需的 Publishing 审核权限（`publishing.draft.create`、
+     `publishing.review.submit`、`publishing.review.approve`、`publishing.release.publish`）。
      品牌角色的授权对品牌及其全部门店有效。
 2. **开通方式与门店角色相同**：平台运营人员准备完整计划（每个角色与权限逐条列出），由独立的平台审批人用专用密钥签名
    （用途 `BRAND_ROLE_PROVISIONING`，与门店开通、角色分配审批的密钥互不通用）；写入前与提交前各核验一次签名与信任；

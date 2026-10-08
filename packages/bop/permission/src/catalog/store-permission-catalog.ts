@@ -9,8 +9,10 @@
  * v3 (2026-10-07): Brand role templates for Brand-level master data (DEC-PERM-BRAND-ROLES).
  * v4 (2026-10-07): Menu review actions, legacy names still checked by Catalog/Pricing services, and
  * the Brand Menu Manager template (second person for menu and price approval).
+ * v5 (2026-10-08): Brand Owner and Menu Manager hold the Publishing review actions Menu publication
+ * checks (create a review draft, submit it, approve it, publish a release).
  */
-export const storePermissionCatalogVersion = 4 as const;
+export const storePermissionCatalogVersion = 5 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -523,6 +525,10 @@ export const brandRoleTemplates: Readonly<Record<BrandRoleTemplateCode, readonly
         "media.",
         "audit.catalog.",
         "audit.inventory.item.",
+        "publishing.draft.create",
+        "publishing.review.submit",
+        "publishing.review.approve",
+        "publishing.release.publish",
       ]),
     ),
     "recipe-developer": Object.freeze([
@@ -545,6 +551,10 @@ export const brandRoleTemplates: Readonly<Record<BrandRoleTemplateCode, readonly
         "pricing.tax_config.read",
         "recipe.read",
         "inventory.item.read",
+        "publishing.draft.create",
+        "publishing.review.submit",
+        "publishing.review.approve",
+        "publishing.release.publish",
       ]),
     ),
   });
