@@ -21,11 +21,13 @@ describe("WP-2423 staff administration command input", () => {
     { operation: "Approve", changeReference: id(4) },
     { operation: "Withdraw", changeReference: id(4) },
     { operation: "Revoke", assignmentReference: id(5), operationReference: id(2) },
+    { operation: "RemoveFromStore", actorReference: id(1), operationReference: id(2) },
   ])("accepts $operation", (value) => {
     expect(parseStaffCommand(value).operation).toBe(value.operation);
   });
   it.each([
     ["unknown operation", { operation: "Delete", changeReference: id(4) }],
+    ["removal without operation", { operation: "RemoveFromStore", actorReference: id(1) }],
     ["extra field", { operation: "Approve", changeReference: id(4), decidedBy: id(9) }],
     ["bad reference", { operation: "Approve", changeReference: "not-a-uuid" }],
     [

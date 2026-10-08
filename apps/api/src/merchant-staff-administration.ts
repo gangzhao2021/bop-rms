@@ -2,6 +2,7 @@ import { appendAuditRecordInTransaction } from "@bop/audit";
 import {
   confirmBrandMemberScope,
   confirmStoreMemberScope,
+  endStoreMemberAssignment,
   listStoreMembers,
   loadStoreMember,
   MemberDirectoryError,
@@ -18,7 +19,9 @@ import {
   type RoleAdministrationTransaction,
   type RoleAssignmentTransaction,
 } from "@bop/permission";
+import { revokeActorSessions } from "@bop/identity";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
+import { derivedReference } from "./merchant-products.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -31,10 +34,20 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
  * is never done by the requester or the subject.
  * DEC-PERM-BRAND-ROLES: Brand roles (Recipes, Catalog, pricing) are assigned on the same page; they
  * need the same actions held at Brand scope, and the subject needs only an Active Brand Membership.
+ * WP-2423 step 9: removing someone from the Store (organization.staff.manage) ends their Store roles
+ * and Store assignment and signs them out at once; their Brand roles end with it, which
+ * needs the same action at Brand scope. The last owner cannot be removed; nobody removes themselves.
  */
 export class MerchantStaffAdministrationError extends Error {
   constructor(
-    readonly code: "PermissionDenied" | "NotFound" | "Conflict" | "LastOwner" | "Invalid",
+    readonly code:
+      | "PermissionDenied"
+      | "NotFound"
+      | "Conflict"
+      | "LastOwner"
+      | "BrandRolesRemain"
+      | "PendingRequestsRemain"
+      | "Invalid",
   ) {
     super(code);
     this.name = "MerchantStaffAdministrationError";
@@ -68,6 +81,11 @@ export type StaffCommand =
   | {
       readonly operation: "Revoke";
       readonly assignmentReference: string;
+      readonly operationReference: string;
+    }
+  | {
+      readonly operation: "RemoveFromStore";
+      readonly actorReference: string;
       readonly operationReference: string;
     };
 export function parseStaffCommand(value: unknown): StaffCommand {
@@ -109,6 +127,13 @@ export function parseStaffCommand(value: unknown): StaffCommand {
       return {
         operation: "Revoke",
         assignmentReference: ref(r.assignmentReference),
+        operationReference: ref(r.operationReference),
+      };
+    case "RemoveFromStore":
+      if (keys !== "actorReference,operation,operationReference") return fail("Invalid");
+      return {
+        operation: "RemoveFromStore",
+        actorReference: ref(r.actorReference),
         operationReference: ref(r.operationReference),
       };
     default:
@@ -247,6 +272,7 @@ export function createMerchantStaffAdministration(options: {
               mayWithdraw: manages(item.scope) && item.requestedBy === viewer,
             })),
           mayRequest: (mayManage || brandMayManage) && !self,
+          mayRemove: mayManage && !self,
           mayRename: mayManage,
         };
       }),
@@ -395,6 +421,87 @@ export function createMerchantStaffAdministration(options: {
                         at,
                       }),
               );
+            }
+            case "RemoveFromStore": {
+              await require("organization.staff.manage");
+              if (command.actorReference === viewer) fail("PermissionDenied");
+              const current = await assignmentsOf(tx, owner);
+              const held = current.assignments.filter(
+                (item) => item.actorReference === command.actorReference,
+              );
+              // Open role requests close too, so none can be approved after they leave: the
+              // requester's own are withdrawn, others' are rejected (which needs approval rights).
+              const open = current.pending.filter(
+                (item) => item.actorReference === command.actorReference,
+              );
+              for (const item of open)
+                if (
+                  item.requestedBy !== viewer &&
+                  !(await (item.scope === "Store"
+                    ? may(scope, "identity.role.approve")
+                    : brandAllowed("identity.role.approve")))
+                )
+                  fail("PendingRequestsRemain");
+              // Brand roles end too; a Store manager cannot end them, so says so instead.
+              if (
+                held.some((item) => item.scope === "Brand") &&
+                !(await brandAllowed("organization.staff.manage"))
+              )
+                fail("BrandRolesRemain");
+              for (const item of open)
+                await decideRoleAssignment(
+                  permissionTx(tx),
+                  {
+                    ...scoped(item.scope),
+                    changeReference: item.changeReference,
+                    decision: item.requestedBy === viewer ? "Withdrawn" : "Rejected",
+                    decidedBy: viewer,
+                    at,
+                    auditReference: options.references.next(),
+                    snapshotReference: options.references.next(),
+                  },
+                  async () => true,
+                );
+              for (const item of held)
+                await revokeRoleAssignment(permissionTx(tx), {
+                  ...scoped(item.scope),
+                  changeReference: derivedReference(
+                    command.operationReference,
+                    "role:" + item.assignmentReference,
+                  ),
+                  assignmentReference: item.assignmentReference,
+                  revokedBy: viewer,
+                  at,
+                  auditReference: options.references.next(),
+                  snapshotReference: options.references.next(),
+                });
+              const ended = await endStoreMemberAssignment(
+                directoryTx(tx),
+                {
+                  ...owner,
+                  actorReference: command.actorReference,
+                  operationReference: command.operationReference,
+                  endedBy: viewer,
+                  endedAt: at,
+                  auditReference: options.references.next(),
+                },
+                (transaction, record) =>
+                  appendAuditRecordInTransaction(
+                    transaction,
+                    record as unknown as Parameters<typeof appendAuditRecordInTransaction>[1],
+                  ),
+              );
+              const signedOut = await revokeActorSessions(tx as never, {
+                actorReference: command.actorReference,
+                reason: "StoreAssignmentRemoved",
+                at,
+              });
+              return {
+                status: ended.status,
+                requestsClosed: open.length,
+                rolesEnded: held.length,
+                sessionsEnded: signedOut,
+              };
             }
             case "Revoke": {
               const assignment = (await assignmentsOf(tx, owner)).assignments.find(

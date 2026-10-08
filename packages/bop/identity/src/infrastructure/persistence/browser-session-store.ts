@@ -651,3 +651,32 @@ function createStore(options: Options, profile: Profile) {
     },
   });
 }
+
+/**
+ * WP-2423 step 9: signs a workforce member out everywhere at once — e.g. when they leave a Store or
+ * lose access. Which Brand a session works in is private to that session (row security), so all
+ * their active sessions end; where they still work they sign in again. Returns how many ended;
+ * caller owns the transaction.
+ */
+export async function revokeActorSessions(
+  tx: {
+    query(
+      sql: string,
+      values: readonly unknown[],
+    ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+  },
+  input: {
+    readonly actorReference: string;
+    readonly reason: "StoreAssignmentRemoved" | "RoleRemoved" | "MembershipDisabled";
+    readonly at: string;
+  },
+): Promise<number> {
+  const rows = (
+    await tx.query(
+      `UPDATE bop_identity.authentication_session SET status='Revoked',revocation_reason=$2,revoked_at=$3,version=version+1
+       WHERE actor_id=$1 AND status='Active' AND created_at<=$3 RETURNING session_id`,
+      [input.actorReference, input.reason, input.at],
+    )
+  ).rows;
+  return rows.length;
+}

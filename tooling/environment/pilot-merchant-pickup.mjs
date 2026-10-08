@@ -148,13 +148,16 @@ export async function createInternalMerchantPickup(
 }
 
 /** Logs an unexpected failure as a code and source locations only (no message or business data). */
-/** Unexpected read failures are logged by code and source position only (no messages or data). */
 export function logUnexpected(event, call) {
   return async (input) => {
     try {
       return await call(input);
     } catch (error) {
-      if (error?.name !== "FulfillmentReadinessError") {
+      // Expected business refusals are answered to the caller, not logged.
+      if (
+        error?.name !== "FulfillmentReadinessError" &&
+        !/^Merchant[A-Za-z]*Error$/.test(error?.name ?? "")
+      ) {
         const code = error?.code ?? error?.name;
         console.error(
           JSON.stringify({

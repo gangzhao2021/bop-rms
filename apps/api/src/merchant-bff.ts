@@ -4912,6 +4912,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     NotFound: 404,
     Conflict: 409,
     LastOwner: 409,
+    BrandRolesRemain: 409,
+    PendingRequestsRemain: 409,
     Invalid: 400,
   } as const;
   const staffFailure = (response: express.Response, error: unknown) => {

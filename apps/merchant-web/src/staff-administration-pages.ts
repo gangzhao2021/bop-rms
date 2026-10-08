@@ -4,6 +4,8 @@ export type StaffPageErrorCode =
   | "NotFound"
   | "Conflict"
   | "LastOwner"
+  | "BrandRolesRemain"
+  | "PendingRequestsRemain"
   | "Invalid"
   | "Offline"
   | "Unavailable";
@@ -43,6 +45,8 @@ export interface StaffMemberView {
   readonly pending: readonly StaffPendingView[];
   readonly mayRequest: boolean;
   readonly mayRename: boolean;
+  /** WP-2423 step 9: may remove this person from the Store (not oneself). */
+  readonly mayRemove: boolean;
 }
 export interface StaffPageView {
   readonly screenId: "IAM-USER-LIST" | "IAM-USER-DETAIL";
@@ -79,6 +83,11 @@ export type StaffCommandRequest =
   | {
       readonly operation: "Revoke";
       readonly assignmentReference: string;
+      readonly operationReference: string;
+    }
+  | {
+      readonly operation: "RemoveFromStore";
+      readonly actorReference: string;
       readonly operationReference: string;
     };
 export interface StaffPageClient {
@@ -137,6 +146,7 @@ export function parseStaffPageView(
       "pending",
       "mayRequest",
       "mayRename",
+      "mayRemove",
     ]);
     if (!Number.isSafeInteger(m.profileVersion) || (m.profileVersion as number) < 0) invalid();
     return Object.freeze({
@@ -187,6 +197,7 @@ export function parseStaffPageView(
       }),
       mayRequest: flag(m.mayRequest),
       mayRename: flag(m.mayRename),
+      mayRemove: flag(m.mayRemove),
     });
   });
   if (screenId === "IAM-USER-DETAIL" && staff.length !== 1) invalid();
@@ -222,6 +233,8 @@ const codes: Record<string, StaffPageErrorCode> = {
   NotFound: "NotFound",
   Conflict: "Conflict",
   LastOwner: "LastOwner",
+  BrandRolesRemain: "BrandRolesRemain",
+  PendingRequestsRemain: "PendingRequestsRemain",
   Invalid: "Invalid",
 };
 export function createStaffPageClient(csrf: string, fetcher: typeof fetch = fetch) {

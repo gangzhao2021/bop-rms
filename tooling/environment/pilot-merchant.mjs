@@ -735,7 +735,10 @@ export async function createInternalMerchant(
       kitchenCommand,
       kitchenRelease,
       roleAdministration,
-      staffAdministration,
+      staffAdministration: {
+        ...staffAdministration,
+        command: logUnexpected("INTERNAL_STAFF_COMMAND_UNAVAILABLE", staffAdministration.command),
+      },
       inventoryItems,
       stockPlaces,
       openingCount,

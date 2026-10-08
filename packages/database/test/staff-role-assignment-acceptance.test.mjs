@@ -1,12 +1,15 @@
+import { Buffer } from "node:buffer";
 import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
 import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
 import {
   confirmStoreMemberScope,
+  endStoreMemberAssignment,
   listStoreMembers,
   setStoreMemberDisplayName,
 } from "../../bop/membership/src/index.ts";
+import { revokeActorSessions } from "../../bop/identity/src/index.ts";
 import {
   decideRoleAssignment,
   listRoleAdministration,
@@ -261,6 +264,238 @@ it("assigns Store roles only after independent approval and keeps an Owner", asy
       ]);
     } finally {
       await admin.end().catch(() => undefined);
+    }
+  });
+});
+
+/** WP-2423 step 9: someone who leaves is removed from the Store and signed out at once. */
+it("removes a staff member from the Store: roles, assignment and sessions end", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_staff_leave" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    let sequence = 2000;
+    const next = () => id(++sequence);
+    const [tenant, brand, store, owner, cashier, otherBrand] = [1, 2, 3, 4, 6, 9].map(id);
+    const members = new Map();
+    try {
+      await admin.query(
+        "INSERT INTO bop_tenant.brand VALUES ($1,'STAFF','Staff Brand','en-CA','CAD','Active',1,$2,$2)",
+        [brand, at],
+      );
+      await admin.query(
+        "INSERT INTO bop_tenant.store VALUES ($1,$2,'STAFF_STORE','Staff Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+        [store, brand, at],
+      );
+      for (const actor of [owner, cashier]) {
+        const membership = next(),
+          assignment = next();
+        members.set(actor, { membership, assignment });
+        await admin.query(
+          "INSERT INTO bop_membership.membership(membership_id,actor_id,brand_id,workforce_relationship_reference,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$4,'Active',$5,NULL,1,$5,$5)",
+          [membership, actor, brand, next(), at],
+        );
+        await admin.query(
+          "INSERT INTO bop_membership.store_assignment(assignment_id,membership_id,actor_id,brand_id,store_id,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,'Active',$6,NULL,1,$6,$6)",
+          [assignment, membership, actor, brand, store, at],
+        );
+      }
+      await openSyntheticStoreRoles(admin, {
+        tenant,
+        brand,
+        store,
+        operator: id(20),
+        approver: id(21),
+        at,
+        next,
+        owner: {
+          actorReference: owner,
+          membershipReference: members.get(owner).membership,
+          storeAssignmentReference: members.get(owner).assignment,
+        },
+      });
+      const scope = { brandReference: brand, storeReference: store };
+      let minute = 1;
+      const tx = async (work) => {
+        const now = `2026-10-07T12:${String(minute++).padStart(2, "0")}:00.000Z`;
+        await admin.query("BEGIN");
+        try {
+          const value = await work(now);
+          await admin.query("COMMIT");
+          return value;
+        } catch (error) {
+          await admin.query("ROLLBACK");
+          throw error;
+        }
+      };
+      // The cashier works front of house (requested by the owner, approved by someone else).
+      const roles = new Map(
+        (await listRoleAdministration(admin, scope, at)).map((role) => [
+          role.record.code,
+          role.record.roleReference,
+        ]),
+      );
+      const change = next();
+      await tx((now) =>
+        requestRoleAssignment(admin, {
+          ...scope,
+          changeReference: change,
+          assignmentReference: next(),
+          roleReference: roles.get("front_of_house"),
+          actorReference: cashier,
+          membershipReference: members.get(cashier).membership,
+          storeAssignmentReference: members.get(cashier).assignment,
+          requestedBy: owner,
+          at: now,
+          auditReference: next(),
+        }),
+      );
+      await tx((now) =>
+        decideRoleAssignment(
+          admin,
+          {
+            ...scope,
+            changeReference: change,
+            decision: "Approved",
+            decidedBy: id(21),
+            at: now,
+            auditReference: next(),
+            snapshotReference: next(),
+          },
+          (member) => confirmStoreMemberScope(admin, { ...scope, ...member, at: now }),
+        ),
+      );
+      assert.equal(
+        (
+          await listStoreRoleAssignments(admin, scope, "2026-10-07T12:59:00.000Z")
+        ).assignments.filter((a) => a.actorReference === cashier).length,
+        1,
+      );
+      // Two signed-in sessions (one working in another Brand): both end; they sign in again where they work.
+      const session = async (brandReference) => {
+        const sessionId = next();
+        await admin.query(
+          `INSERT INTO bop_identity.authentication_session(session_id,actor_id,session_selector_hash,csrf_selector_hash,policy_code,status,encrypted_secret,cipher_algorithm,key_reference,encryption_context,authenticated_at,created_at,last_seen_at,idle_expires_at,absolute_expires_at,rotated_from_session_id,revocation_reason,revoked_at,version)
+           VALUES($1,$2,$3,$4,'WorkforceStandard','Active',$5,'SYNTHETIC_AES_256_GCM','test-key','test-context',$6,$6,$6,'2026-10-07T23:00:00.000Z','2026-10-08T09:00:00.000Z',NULL,NULL,NULL,1)`,
+          [
+            sessionId,
+            cashier,
+            Buffer.alloc(32, sequence % 255),
+            Buffer.alloc(32, (sequence + 1) % 255),
+            Buffer.alloc(40, 1),
+            at,
+          ],
+        );
+        await admin.query(
+          "INSERT INTO bop_identity.browser_session_selection(session_id,actor_id,tenant_id,brand_id,store_id,selected_at) VALUES($1,$2,$3,$4,$5,$6)",
+          [
+            sessionId,
+            cashier,
+            tenant,
+            brandReference,
+            brandReference === brand ? store : next(),
+            at,
+          ],
+        );
+        return sessionId;
+      };
+      const here = await session(brand);
+      const elsewhere = await session(otherBrand);
+
+      // Remove: Store roles end, the assignment ends, this Brand's sessions are signed out.
+      const operation = next();
+      const removal = () =>
+        tx(async (now) => {
+          const held = await listStoreRoleAssignments(admin, scope, now);
+          for (const item of held.assignments.filter((a) => a.actorReference === cashier))
+            await revokeRoleAssignment(admin, {
+              ...scope,
+              changeReference: next(),
+              assignmentReference: item.assignmentReference,
+              revokedBy: owner,
+              at: now,
+              auditReference: next(),
+              snapshotReference: next(),
+            });
+          const ended = await endStoreMemberAssignment(
+            admin,
+            {
+              ...scope,
+              actorReference: cashier,
+              operationReference: operation,
+              endedBy: owner,
+              endedAt: now,
+              auditReference: next(),
+            },
+            appendAuditRecordInTransaction,
+          );
+          const signedOut = await revokeActorSessions(admin, {
+            actorReference: cashier,
+            reason: "StoreAssignmentRemoved",
+            at: now,
+          });
+          return { ended, signedOut };
+        });
+      const first = await removal();
+      assert.equal(first.ended.status, "Applied");
+      assert.equal(first.signedOut, 2);
+      const again = await removal();
+      assert.deepEqual([again.ended.status, again.signedOut], ["AlreadyApplied", 0]);
+      const sessions = (
+        await admin.query(
+          "SELECT session_id::text id,status,revocation_reason FROM bop_identity.authentication_session WHERE actor_id=$1",
+          [cashier],
+        )
+      ).rows;
+      assert.deepEqual(
+        sessions
+          .map((row) => [
+            row.id === here ? "here" : row.id === elsewhere ? "elsewhere" : "?",
+            row.status,
+            row.revocation_reason,
+          ])
+          .sort(),
+        [
+          ["elsewhere", "Revoked", "StoreAssignmentRemoved"],
+          ["here", "Revoked", "StoreAssignmentRemoved"],
+        ],
+      );
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id',$2,false)",
+        [brand, store],
+      );
+      const assignment = (
+        await admin.query(
+          "SELECT lifecycle,effective_until IS NOT NULL ended FROM bop_membership.store_assignment WHERE actor_id=$1",
+          [cashier],
+        )
+      ).rows[0];
+      assert.deepEqual([assignment.lifecycle, assignment.ended], ["Ended", true]);
+      assert.deepEqual(
+        (await listStoreMembers(admin, scope)).map((member) => member.actorReference),
+        [owner],
+      );
+      const active = (await listStoreRoleAssignments(admin, scope, "2026-10-07T13:00:00.000Z"))
+        .assignments;
+      assert.equal(active.filter((a) => a.actorReference === cashier).length, 0);
+      // The last Owner cannot leave this way: their Owner role cannot be ended.
+      await assert.rejects(
+        tx(async (now) => {
+          const held = await listStoreRoleAssignments(admin, scope, now);
+          for (const item of held.assignments.filter((a) => a.actorReference === owner))
+            await revokeRoleAssignment(admin, {
+              ...scope,
+              changeReference: next(),
+              assignmentReference: item.assignmentReference,
+              revokedBy: cashier,
+              at: now,
+              auditReference: next(),
+              snapshotReference: next(),
+            });
+        }),
+        { code: "ROLE_ASSIGNMENT_LAST_OWNER" },
+      );
+    } finally {
+      await admin.end();
     }
   });
 });

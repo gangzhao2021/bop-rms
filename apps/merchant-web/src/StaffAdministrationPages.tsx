@@ -1,7 +1,7 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import {
   StaffPageError,
@@ -21,6 +21,10 @@ const copy: Record<StaffPageErrorCode | "Loading", string> = {
   NotFound: "This staff member is not assigned to the selected Store.",
   Conflict: "The staff or role state changed. Refresh and try again.",
   LastOwner: "The Store must keep at least one active Owner. Assign another Owner first.",
+  PendingRequestsRemain:
+    "Someone else has requested a role for this person. Ask an administrator who may approve roles to reject it, or to remove the person.",
+  BrandRolesRemain:
+    "This person also holds Brand roles (all Stores). Only someone who manages Brand staff can remove them; ask the Owner.",
   Invalid: "The change was refused because the input is invalid.",
   Offline: "Offline. Your change was not confirmed; retry sends the same request again.",
   Unavailable: "Staff administration is unavailable.",
@@ -44,7 +48,9 @@ function Member({
     [role, setRole] = useState(""),
     [pending, setPending] = useState<StaffCommandRequest | null>(null),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState<StaffPageErrorCode | null>(null);
+    [error, setError] = useState<StaffPageErrorCode | null>(null),
+    [confirmRemoval, setConfirmRemoval] = useState(false);
+  const navigate = useNavigate();
   const run = useCallback(
     async (request: StaffCommandRequest) => {
       if (!client.command) return;
@@ -54,7 +60,9 @@ function Member({
       try {
         await client.command(request);
         setPending(null);
-        reload();
+        // A removed person is no longer on this Store's list.
+        if (request.operation === "RemoveFromStore") void navigate("/app/organization/users");
+        else reload();
       } catch (failure) {
         setError(failure instanceof StaffPageError ? failure.code : "Unavailable");
       } finally {
@@ -196,6 +204,42 @@ function Member({
           ))}
         </ul>
       </StatePanel>
+      {member.mayRemove ? (
+        <StatePanel heading="Remove from this Store">
+          <p>
+            For someone who no longer works here: ends all their roles at this Store (and their
+            Brand roles), ends their Store assignment and signs them out now. History stays on
+            record.
+          </p>
+          {confirmRemoval ? (
+            <>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void run(
+                    pending?.operation === "RemoveFromStore"
+                      ? pending
+                      : {
+                          operation: "RemoveFromStore",
+                          actorReference: member.actorReference,
+                          operationReference: newOperationReference(),
+                        },
+                  )
+                }
+              >
+                Confirm: remove {member.label}
+              </button>{" "}
+              <button disabled={busy} onClick={() => setConfirmRemoval(false)}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button disabled={busy} onClick={() => setConfirmRemoval(true)}>
+              Remove from this Store
+            </button>
+          )}
+        </StatePanel>
+      ) : null}
       {error ? (
         <StatePanel heading="Change not applied" tone="error" status>
           <p>{copy[error]}</p>

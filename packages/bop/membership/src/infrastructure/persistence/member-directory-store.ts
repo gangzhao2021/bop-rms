@@ -173,3 +173,71 @@ export async function setStoreMemberDisplayName(
   });
   return { profileVersion: head + 1, status: "Applied" };
 }
+
+/**
+ * WP-2423 step 9: a member leaves the Store — their Store assignment ends now (append-only history:
+ * the row keeps its start and gains its end). The caller ends their Store roles and sessions in the
+ * same transaction. Ending an already ended assignment is a no-op (a retried request).
+ */
+export async function endStoreMemberAssignment(
+  tx: MemberDirectoryTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly operationReference: string;
+    readonly endedBy: string;
+    readonly endedAt: string;
+    readonly auditReference: string;
+  },
+  /** The platform Audit append (`appendAuditRecordInTransaction`) supplied by the composition. */
+  appendAudit: (
+    tx: MemberDirectoryTransaction,
+    record: Record<string, unknown>,
+  ) => Promise<unknown>,
+): Promise<{
+  readonly status: "Applied" | "AlreadyApplied";
+  readonly membershipReference: string;
+}> {
+  parseMembershipReference(input.actorReference);
+  await tx.query(scopeSql, [input.brandReference, input.storeReference]);
+  const rows = (
+    await tx.query(
+      `SELECT assignment_id::text assignment,membership_id::text membership,lifecycle FROM bop_membership.store_assignment
+       WHERE brand_id=$1 AND store_id=$2 AND actor_id=$3 ORDER BY effective_from DESC,assignment_id DESC LIMIT 2`,
+      [input.brandReference, input.storeReference, input.actorReference],
+    )
+  ).rows;
+  const latest = rows[0];
+  if (latest === undefined) throw new MemberDirectoryError("MEMBER_DIRECTORY_NOT_FOUND");
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "bop_membership.store_assignment:" + String(latest.assignment),
+  ]);
+  if (latest.lifecycle === "Ended")
+    return { status: "AlreadyApplied", membershipReference: String(latest.membership) };
+  const updated = await tx.query(
+    `UPDATE bop_membership.store_assignment SET lifecycle='Ended',effective_until=$2,version=version+1,updated_at=$2
+     WHERE assignment_id=$1 AND lifecycle<>'Ended' AND effective_from<$2 RETURNING version`,
+    [latest.assignment, input.endedAt],
+  );
+  if (updated.rows.length !== 1)
+    throw new MemberDirectoryError("MEMBER_DIRECTORY_VERSION_CONFLICT");
+  await appendAudit(tx, {
+    auditId: input.auditReference,
+    brandId: input.brandReference,
+    storeId: input.storeReference,
+    actor: { type: "User", reference: input.endedBy },
+    actionCode: "MEMBER_STORE_ASSIGNMENT_ENDED",
+    targetType: "StoreAssignment",
+    targetId: String(latest.assignment),
+    afterSummary: { lifecycle: "Ended" },
+    reasonCode: "STAFF_OFFBOARDING",
+    correlationId: input.operationReference,
+    occurredAt: input.endedAt,
+    sourceChannel: "MERCHANT_WEB",
+    dataClassification: "Internal",
+    retentionPolicyCode: "AUDIT_STANDARD",
+    retentionPolicyVersion: 1,
+  });
+  return { status: "Applied", membershipReference: String(latest.membership) };
+}
