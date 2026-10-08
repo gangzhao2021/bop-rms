@@ -164,6 +164,7 @@ const moduleManifestInput =
         "availability_rule",
         "availability_reference_generation",
         "availability_rule_operation_record",
+        "availability_rule_operation_snapshot",
         "availability_workbench_projection_generation",
         "availability_workbench_projection",
         "availability_workbench_projection_checkpoint",

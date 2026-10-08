@@ -1710,6 +1710,69 @@
       "privilege": "MAINTAIN",
       "principal": "api",
       "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
     }
   ]
 }

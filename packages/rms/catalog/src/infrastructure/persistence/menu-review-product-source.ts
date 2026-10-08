@@ -5,6 +5,7 @@ import {
   parseCatalogLocale,
   parseLocalizedNames,
   parseProductLifecycle,
+  sellableDisplayNames,
 } from "../../contracts/product.js";
 import type { ProductLifecycleTransaction } from "./product-lifecycle-store.js";
 
@@ -85,10 +86,14 @@ export function createPostgresMenuReviewProductSource(options: {
           return unavailable();
         const defaultLocale = parseCatalogLocale(row.default_locale);
         const productNames = parseLocalizedNames(row.product_names, defaultLocale);
-        // SKU localization is an override; preserve Product fallback translations.
+        // SKU names complete the Product name; Product translations remain the fallback.
         if (!row.sku_names || typeof row.sku_names !== "object" || Array.isArray(row.sku_names))
           return unavailable();
-        const names = parseLocalizedNames({ ...productNames, ...row.sku_names }, defaultLocale);
+        const skuNames: Record<string, string> = {};
+        for (const [key, value] of Object.entries(row.sku_names))
+          if (typeof value === "string") skuNames[key] = value;
+          else return unavailable();
+        const names = sellableDisplayNames(productNames, skuNames, defaultLocale);
         return Object.freeze({
           brandReference: brand,
           sellableReference,

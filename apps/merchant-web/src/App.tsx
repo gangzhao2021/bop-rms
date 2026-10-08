@@ -23,8 +23,9 @@ import { OrderDetailPage, OrderQueuePage } from "./OrderQueuePages.js";
 import { OrderAmendmentPage } from "./OrderAmendmentPage.js";
 import { StoreMenuBuilderPage, StoreMenuListPage } from "./StoreMenuPages.js";
 import { createMenuClient } from "./store-menu-pages.js";
+import { StoreAvailabilityPage } from "./StoreAvailabilityPage.js";
+import { createAvailabilityClient } from "./store-availability-page.js";
 import { BundleEditorPage, BundleListPage } from "./BundlePages.js";
-import { AvailabilityWorkbenchPage } from "./AvailabilityWorkbenchPage.js";
 import { StorePriceEditorPage, StorePriceListPage } from "./StorePricePages.js";
 import { createPriceClient } from "./store-price-pages.js";
 import { AllergenItemPage, AllergenListPage } from "./AllergenDeclarationPages.js";
@@ -532,7 +533,19 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       />
       <Route path="/app/commerce/bundles" element={<BundleListPage />} />
       <Route path="/app/commerce/bundles/:id/edit" element={<BundleEditorPage />} />
-      <Route path="/app/commerce/availability" element={<AvailabilityWorkbenchPage />} />
+      <Route
+        path="/app/commerce/availability"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreAvailabilityPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createAvailabilityClient(state.csrf)}
+            />
+          ) : (
+            <StoreAvailabilityPage />
+          )
+        }
+      />
       <Route
         path="/app/commerce/pricing"
         element={

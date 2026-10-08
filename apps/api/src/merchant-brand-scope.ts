@@ -249,8 +249,15 @@ export function createMerchantBrandScope(
       selectedStoreReference: selected.store.storeReference,
       selectedStoreTimeZone: selected.store.timeZone,
       context,
+      /** The selected Store's context, for actions a Store role may take at that Store only. */
+      storeContext: selected.context,
       actorReference: selected.actorReference,
       authorizeAction,
+      /** Store-scope decision for the selected Store (WP-2423 8.5: sold-out marks). */
+      async authorizeStoreAction(action: string) {
+        const decision = await selected.authorizeAction(action);
+        return decision?.scopeKind === "Store" && decision.action === action ? decision : null;
+      },
       authorizeActionsWithValidity,
       async authorizeActions(actions: readonly string[]) {
         return (await authorizeActionsWithValidity(actions))?.decisions ?? null;

@@ -219,7 +219,7 @@ it("persists Menu review approval publication and archive with exact replay and 
       const product = products[0];
       assert.equal(product.productReference, id(802));
       assert.equal(product.productVersionReference, id(803));
-      assert.equal(product.localizedNames["en-CA"], "Reviewed item");
+      assert.equal(product.localizedNames["en-CA"], "Product fallback — Reviewed item");
       assert.equal(product.localizedNames["fr-CA"], "Produit");
       assert.equal(product.productLifecycle, "Active");
       assert.equal(product.skuLifecycle, "Active");
@@ -989,9 +989,12 @@ it("persists Menu review approval publication and archive with exact replay and 
           readProducts(tx, { ...productRequest, observedAt: query.observedAt }),
         )
       )[0];
-      assert.equal(currentProduct.localizedNames["en-CA"], "Later product name");
+      assert.equal(currentProduct.localizedNames["en-CA"], "Product fallback — Later product name");
       const retained = await runner.run((tx) => contentStore.loadExact(tx, exactInput));
-      assert.equal(retained.sections[0].sellables[0].localizedNames["en-CA"], "Reviewed item");
+      assert.equal(
+        retained.sections[0].sellables[0].localizedNames["en-CA"],
+        "Product fallback — Reviewed item",
+      );
       assert.equal(retained.localizedNames["en-CA"], "Synthetic");
       assert.equal(retained.sections[0].sellables[0].localizedNames["fr-CA"], "Produit");
       assert.equal(retained.sections[0].sellables[0].allergenDisclosure.items[0].code, "MILK");

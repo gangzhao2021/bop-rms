@@ -380,7 +380,7 @@ it("holds complete Availability references against real source writes until oute
       await admin.query("ROLLBACK");
       await assert.rejects(
         admin.query(
-          "TRUNCATE rms_catalog.availability_rule,rms_catalog.availability_rule_operation_record",
+          "TRUNCATE rms_catalog.availability_rule,rms_catalog.availability_rule_operation_record,rms_catalog.availability_rule_operation_snapshot",
         ),
         (e) => e.code === "55000",
       );

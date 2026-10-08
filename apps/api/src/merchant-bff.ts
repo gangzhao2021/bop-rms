@@ -201,6 +201,10 @@ import { MerchantPriceError, type createMerchantPrices } from "./merchant-prices
 import { MerchantAllergenError, type createMerchantAllergens } from "./merchant-allergens.js";
 import { MerchantMenuError, type createMerchantMenus } from "./merchant-menus.js";
 import {
+  MerchantAvailabilityError,
+  type createMerchantAvailability,
+} from "./merchant-availability.js";
+import {
   MerchantStockCountError,
   type createMerchantStockCounts,
 } from "./merchant-stock-counts.js";
@@ -280,6 +284,7 @@ const merchantNavigation = Object.freeze({
   "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
   "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.manage"],
   "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.menu.read"],
+  "CAT-AVAILABILITY": ["/app/commerce/availability", "catalog.sku.read"],
   "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
@@ -461,6 +466,7 @@ export interface MerchantBffRouterOptions {
   readonly prices?: ReturnType<typeof createMerchantPrices>;
   readonly allergens?: ReturnType<typeof createMerchantAllergens>;
   readonly menus?: ReturnType<typeof createMerchantMenus>;
+  readonly availability?: ReturnType<typeof createMerchantAvailability>;
   readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
   readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
@@ -5559,6 +5565,70 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .then((result) => response.json(result))
       .catch((error: unknown) => menuFailure(response, error));
   });
+
+  // WP-2423 8.5: CAT-AVAILABILITY reads and commands for the selected Store.
+  const availabilityStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    Invalid: 400,
+  } as const;
+  const availabilityFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantAvailabilityError)) {
+      denied(response);
+      return;
+    }
+    response.status(availabilityStatus[error.code]).json({ error: error.code });
+  };
+  router.post("/commerce/availability/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as Record<string, unknown> | undefined;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.availability) {
+      response.status(503).json({ error: "availability_unavailable" });
+      return;
+    }
+    void options.availability
+      .query({ sessionCookie, csrf })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => availabilityFailure(response, error));
+  });
+  router.post(
+    "/commerce/availability/command",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.availability) {
+        response.status(503).json({ error: "availability_unavailable" });
+        return;
+      }
+      void options.availability
+        .command({ sessionCookie, csrf, body: request.body })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => availabilityFailure(response, error));
+    },
+  );
 
   // WP-2423 / DEC-INV-STOCK-COUNT: INV-COUNT-LIST / INV-COUNT-WORKBENCH.
   const countStatus = {

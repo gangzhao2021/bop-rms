@@ -274,6 +274,31 @@ export function parseLocalizedNames(
   }
   return Object.freeze(normalized);
 }
+/**
+ * WP-2423: the name a customer sees for a sellable. A SKU of a multi-size Product is named by its size
+ * ("Small (8 oz)"), so it is shown after the Product name ("Flat White — Small (8 oz)"); a SKU name that
+ * already carries the Product name, or a Product without its own SKU name, is shown as is.
+ */
+export function sellableDisplayNames(
+  productNames: Readonly<Record<string, string>>,
+  skuNames: Readonly<Record<string, string>>,
+  defaultLocale: unknown,
+): Readonly<Record<string, string>> {
+  const names: Record<string, string> = {};
+  for (const key of new Set([...Object.keys(productNames), ...Object.keys(skuNames)])) {
+    const product = productNames[key]?.trim();
+    const sku = skuNames[key]?.trim();
+    if (!sku) names[key] = product ?? "";
+    else if (!product || sku.toLocaleLowerCase().startsWith(product.toLocaleLowerCase()))
+      names[key] = sku;
+    else {
+      const composed = `${product} — ${sku}`;
+      // Names stay within the 120-character limit; an over-long pair keeps the SKU name alone.
+      names[key] = composed.length <= 120 ? composed : sku;
+    }
+  }
+  return parseLocalizedNames(names, defaultLocale);
+}
 function lifecycle(value: unknown): ProductLifecycle {
   if (
     value !== "Draft" &&

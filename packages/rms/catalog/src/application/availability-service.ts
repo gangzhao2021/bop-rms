@@ -63,13 +63,24 @@ function failure(error: unknown): never {
     throw error;
   throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
 }
+/**
+ * WP-2423: rules are managed with the Section 88 code `catalog.sku.availability.manage`. Brand scope
+ * may write any rule; Store scope (a Store Manager on the floor) may only mark items unavailable at
+ * its own Store and end such marks — it never makes an item available.
+ */
+interface AvailabilityAuthority {
+  readonly brand: CatalogReference;
+  readonly actor: CatalogReference;
+  readonly store: CatalogReference | null;
+  readonly audit: AppendAuditRecordInput;
+}
 async function authorize(
   ports: AvailabilityPorts,
   action: AvailabilityOperationAction,
   operationReference: CatalogReference,
   ruleReference: CatalogReference,
   at: CatalogInstant,
-): Promise<{ brand: CatalogReference; actor: CatalogReference; audit: AppendAuditRecordInput }> {
+): Promise<AvailabilityAuthority> {
   const evidence = await ports.authorization
     .authorize({ action, operationReference, ruleReference, observedAt: at })
     .catch(failure);
@@ -78,14 +89,15 @@ async function authorize(
     const context = revalidateTenantContext(evidence.tenantContext);
     const audit = validateAuditRecord(evidence.audit, Date.parse(at));
     const actor = context.actor.actorReference;
+    const store = context.scopeKind === "Store" ? context.store?.storeReference : undefined;
     if (
-      context.scopeKind !== "Brand" ||
+      (context.scopeKind !== "Brand" && store === undefined) ||
       actor === null ||
       evidence.permission.effect !== "Allow" ||
-      evidence.permission.scopeKind !== "Brand" ||
-      evidence.permission.action !== "catalog.availability.manage" ||
+      evidence.permission.scopeKind !== context.scopeKind ||
+      evidence.permission.action !== availabilityPermission ||
       audit.brandId !== String(context.brand.brandReference) ||
-      audit.storeId !== undefined ||
+      (store === undefined ? audit.storeId !== undefined : audit.storeId !== String(store)) ||
       audit.actor.type === "System" ||
       audit.actor.reference !== actor ||
       audit.actionCode !== `CATALOG_AVAILABILITY_${action.toUpperCase()}` ||
@@ -97,11 +109,24 @@ async function authorize(
     return {
       brand: parseCatalogReference(context.brand.brandReference),
       actor: parseCatalogReference(actor),
+      store: store === undefined ? null : parseCatalogReference(store),
       audit,
     };
   } catch {
     throw new CatalogError("CATALOG_PERMISSION_DENIED");
   }
+}
+export const availabilityPermission = "catalog.sku.availability.manage";
+/** Store authority covers only unavailability at its own Store. */
+function withinStore(
+  auth: AvailabilityAuthority,
+  ...rules: readonly ReturnType<typeof parseAvailabilityRule>[]
+) {
+  if (
+    auth.store !== null &&
+    rules.some((rule) => rule.storeReference !== auth.store || rule.decision !== "Unavailable")
+  )
+    throw new CatalogError("CATALOG_PERMISSION_DENIED");
 }
 async function replay(
   ports: AvailabilityPorts,
@@ -234,6 +259,7 @@ export function createAvailabilityService(ports: AvailabilityPorts) {
         createdByActorReference: auth.actor,
         updatedAt: requestedAt,
       });
+      withinStore(auth, aggregate);
       if (
         !(await ports.repository
           .codeAvailable({
@@ -298,6 +324,7 @@ export function createAvailabilityService(ports: AvailabilityPorts) {
         candidate.updatedAt !== requestedAt
       )
         return invalid();
+      withinStore(auth, current, candidate);
       await facts(ports, candidate);
       const record = Object.freeze({
         action: "Replace" as const,
@@ -345,6 +372,7 @@ export function createAvailabilityService(ports: AvailabilityPorts) {
       );
       if (auth.brand !== current.brandReference)
         throw new CatalogError("CATALOG_PERMISSION_DENIED");
+      withinStore(auth, current);
       const aggregate = parseAvailabilityRule({
         ...current,
         lifecycle: lifecycle(current.lifecycle, raw.targetLifecycle as AvailabilityRuleLifecycle),

@@ -1434,6 +1434,7 @@ async function scanUnsupported(root, module, diagnostics) {
               "src/infrastructure/persistence/menu-draft-store.ts",
               "src/infrastructure/persistence/allergen-declaration-store.ts",
               "src/infrastructure/persistence/menu-admin-read-store.ts",
+              "src/infrastructure/persistence/availability-rule-store.ts",
             ].includes(moduleRelative)) ||
           (module.packageName === "@rms/pricing" &&
             module.manifest.ownedDatabase?.schema === "rms_pricing" &&

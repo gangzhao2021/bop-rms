@@ -1,4 +1,4 @@
-import { createBrand, createTenantContext } from "@bop/tenant";
+import { createBrand, createStore, createTenantContext } from "@bop/tenant";
 import { describe, expect, it } from "vitest";
 import { createAvailabilityService } from "../application/availability-service.js";
 import type {
@@ -91,7 +91,7 @@ function digest(value: string) {
   }
   return (state >>> 0).toString(16).padStart(8, "0").repeat(8);
 }
-function context() {
+function context(store = false) {
   return createTenantContext(
     {
       actorType: "User",
@@ -114,14 +114,29 @@ function context() {
       createdAt: at,
       updatedAt: at,
     }),
-    null,
+    store
+      ? createStore({
+          storeReference: ids.store,
+          brandReference: ids.brand,
+          code: "STORE",
+          displayName: "Catalog Store",
+          timeZone: "America/Toronto",
+          locale: "en-CA",
+          currencyCode: "CAD",
+          lifecycle: "Active",
+          version: 1,
+          createdAt: at,
+          updatedAt: at,
+        })
+      : null,
     at,
   );
 }
-function audit(action: AvailabilityOperationRecord["action"]) {
+function audit(action: AvailabilityOperationRecord["action"], store = false) {
   return {
     auditId: ids.audit,
     brandId: ids.brand,
+    ...(store ? { storeId: ids.store } : {}),
     actor: { type: "User" as const, reference: ids.actor },
     actionCode: `CATALOG_AVAILABILITY_${action.toUpperCase()}`,
     targetType: "CatalogAvailabilityRule",
@@ -154,7 +169,9 @@ function createInput() {
     requestedAt: at,
   };
 }
-function serviceFixture(options: { denied?: boolean; invalidFacts?: boolean } = {}) {
+function serviceFixture(
+  options: { denied?: boolean; invalidFacts?: boolean; store?: boolean } = {},
+) {
   let aggregate: AvailabilityRuleAggregate | null = null;
   const operations = new Map<string, AvailabilityOperationRecord>();
   const ports: AvailabilityPorts = {
@@ -162,18 +179,18 @@ function serviceFixture(options: { denied?: boolean; invalidFacts?: boolean } = 
       async authorize(input) {
         if (options.denied) return null;
         return {
-          tenantContext: context(),
+          tenantContext: context(options.store),
           permission: {
             effect: "Allow",
             reason: "ROLE_PERMISSION",
             source: "RolePermission",
-            action: "catalog.availability.manage",
-            scopeKind: "Brand",
+            action: "catalog.sku.availability.manage",
+            scopeKind: options.store ? "Store" : "Brand",
             policySnapshotReference: ids.policy,
             policyVersion: 1,
             audit: { effect: "Allow", reason: "ROLE_PERMISSION", source: "RolePermission" },
           },
-          audit: audit(input.action),
+          audit: audit(input.action, options.store),
         } as never;
       },
     },
@@ -376,5 +393,31 @@ describe("Store Availability Overlay", () => {
         requestedAt: at,
       }),
     ).rejects.toMatchObject({ code: "CATALOG_VERSION_CONFLICT" });
+  });
+  it("lets Store authority mark its own Store unavailable but never make an item available", async () => {
+    const state = serviceFixture({ store: true });
+    await expect(state.service.create(createInput())).rejects.toMatchObject({
+      code: "CATALOG_PERMISSION_DENIED",
+    });
+    await expect(
+      state.service.create({ ...createInput(), storeReference: null, decision: "Unavailable" }),
+    ).rejects.toMatchObject({ code: "CATALOG_PERMISSION_DENIED" });
+    await expect(
+      state.service.create({
+        ...createInput(),
+        decision: "Unavailable",
+        reasonCode: "SOLD_OUT",
+        priority: 900,
+      }),
+    ).resolves.toMatchObject({ status: "Applied", aggregate: { decision: "Unavailable" } });
+    await expect(
+      state.service.changeLifecycle({
+        ruleReference: ids.brandRule,
+        targetLifecycle: "Active",
+        expectedAggregateVersion: 1,
+        operationReference: ids.secondOperation,
+        requestedAt: at,
+      }),
+    ).resolves.toMatchObject({ aggregate: { lifecycle: "Active", aggregateVersion: 2 } });
   });
 });
