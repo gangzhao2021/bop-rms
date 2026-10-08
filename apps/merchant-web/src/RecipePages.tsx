@@ -602,8 +602,14 @@ function AllergenSummary({ recipe }: { readonly recipe: RecipeDetail }) {
   const undeclared = lines.filter((line) => !line.declared).length;
   return (
     <p>
-      <strong>Allergens from ingredients:</strong> {allergenText({ contains, mayContain })}
-      {undeclared ? ` · ${undeclared} ingredient(s) not declared` : ""}. Sub-recipes add their own.
+      <strong>Allergens from ingredients:</strong>{" "}
+      {undeclared
+        ? `unknown — ${undeclared} ingredient(s) not declared` +
+          (contains.length || mayContain.length
+            ? "; declared so far: " + allergenText({ contains, mayContain })
+            : "")
+        : allergenText({ contains, mayContain })}
+      . Sub-recipes add their own.
     </p>
   );
 }

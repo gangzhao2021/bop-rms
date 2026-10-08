@@ -40,6 +40,8 @@ export interface IngredientDeclarationView {
   readonly declaredBy: string;
   readonly reviewedAt: string;
   readonly validUntil: string;
+  /** Last local date (Store time zone) the declaration is valid on. */
+  readonly validThrough?: string;
 }
 export type DeclarationStatus =
   "Current" | "ExpiringSoon" | "ItemChanged" | "RegistryChanged" | "Missing";

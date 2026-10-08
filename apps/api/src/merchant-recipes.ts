@@ -394,7 +394,12 @@ export function createMerchantRecipes(options: {
             .map((sku) => ({
               skuReference: sku.skuReference,
               code: sku.skuCode,
-              name: name(sku.localizedNames, sku.skuCode),
+              // Product and size, e.g. "Flat White — Large (16 oz)".
+              name: (() => {
+                const product = name(sku.productLocalizedNames, "");
+                const size = name(sku.localizedNames, sku.skuCode);
+                return product && product !== size ? product + " — " + size : size;
+              })(),
               unitOfSale: sku.unitOfSale,
             })),
         };

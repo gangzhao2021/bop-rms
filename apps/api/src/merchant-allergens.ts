@@ -152,6 +152,16 @@ const declarationErrors: Record<AllergenDeclarationError["code"], MerchantAllerg
   ALLERGEN_IDEMPOTENCY_CONFLICT: "Conflict",
 };
 
+/** The last local date a declaration is valid on (its validity ends at the next local midnight). */
+export function validThroughDate(validUntil: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(Date.parse(validUntil) - 1));
+}
+
 export function createMerchantAllergens(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -213,8 +223,13 @@ export function createMerchantAllergens(options: {
           ]),
         );
         const soon = Date.parse(at) + 30 * 86_400_000;
+        const local = <T extends { readonly validUntil: string }>(d: T) => ({
+          ...d,
+          validThrough: validThroughDate(d.validUntil, s.timeZone),
+        });
         const rows = items.map((item) => {
-          const d = declarations.get(item.itemReference) ?? null;
+          const found = declarations.get(item.itemReference);
+          const d = found === undefined ? null : local(found);
           const status =
             d === null
               ? "Missing"
@@ -259,11 +274,9 @@ export function createMerchantAllergens(options: {
             screenId: "CMP-ALLERGEN-ITEM" as const,
             ...base,
             item: row,
-            history: await listIngredientDeclarationHistory(
-              reads(tx),
-              s.owner,
-              input.itemReference,
-            ),
+            history: (
+              await listIngredientDeclarationHistory(reads(tx), s.owner, input.itemReference)
+            ).map(local),
           };
         }
         return { screenId: "CMP-ALLERGEN-REVIEW" as const, ...base, items: rows };

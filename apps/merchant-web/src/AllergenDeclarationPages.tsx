@@ -197,7 +197,7 @@ export function AllergenListPage({
               <th>Code</th>
               <th>Status</th>
               <th>Declared allergens</th>
-              <th>Valid until</th>
+              <th>Valid through</th>
             </tr>
           </thead>
           <tbody>
@@ -213,7 +213,11 @@ export function AllergenListPage({
                     ? declarationSummary(view.registry, item.declaration, view.locale)
                     : "—"}
                 </td>
-                <td>{item.declaration ? item.declaration.validUntil.slice(0, 10) : "—"}</td>
+                <td>
+                  {item.declaration
+                    ? (item.declaration.validThrough ?? item.declaration.validUntil.slice(0, 10))
+                    : "—"}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -443,8 +447,8 @@ function AllergenItem({
             {view.history.map((d) => (
               <li key={d.evidenceReference}>
                 {d.reviewedAt.slice(0, 10)}: {declarationSummary(registry, d, view.locale)} ·{" "}
-                {sourceText[d.sourceKind] ?? d.sourceKind}: {d.documentReference} · valid until{" "}
-                {d.validUntil.slice(0, 10)}
+                {sourceText[d.sourceKind] ?? d.sourceKind}: {d.documentReference} · valid through{" "}
+                {d.validThrough ?? d.validUntil.slice(0, 10)}
                 {d.declaredBy === view.viewer ? " · by you" : ""}
               </li>
             ))}

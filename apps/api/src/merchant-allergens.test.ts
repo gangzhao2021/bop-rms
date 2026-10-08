@@ -69,3 +69,10 @@ describe("WP-2423 allergen command body", () => {
     expect(canadaPriorityAllergensTest.policyDocument).toMatch(/^TEST-ONLY/u);
   });
 });
+
+describe("WP-2423 declaration validity", () => {
+  it("shows the last valid local date", async () => {
+    const { validThroughDate } = await import("./merchant-allergens.js");
+    expect(validThroughDate("2027-10-09T04:00:00.000Z", "America/Toronto")).toBe("2027-10-08");
+  });
+});
