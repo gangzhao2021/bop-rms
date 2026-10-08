@@ -294,7 +294,10 @@ export { createPostgresOrderRefundBasisReader } from "./infrastructure/persisten
 
 export { createRefundReceiptSnapshot } from "./application/refund-receipt-snapshot.js";
 
-export { createPostgresMerchantOrderIndex } from "./infrastructure/persistence/merchant-order-index.js";
+export {
+  createPostgresMerchantOrderIndex,
+  listStoreOrderNumbers,
+} from "./infrastructure/persistence/merchant-order-index.js";
 
 export { createPostgresOrderBatchIdentitySource } from "./infrastructure/persistence/order-batch-identity-source.js";
 

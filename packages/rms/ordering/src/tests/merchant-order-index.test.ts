@@ -150,3 +150,21 @@ it("WP-2423: lists the newest Orders first and pages back to older ones", async 
     }),
   ).rejects.toThrow("MERCHANT_ORDER_INDEX_UNAVAILABLE");
 });
+it("WP-2423: reads the Store's order numbers for given Orders", async () => {
+  const { tx, query } = fixture([]);
+  query.mockImplementation(async (sql: string) => ({
+    rows: sql.includes("order_number FROM")
+      ? [
+          { order_id: id(3), order_number: "15" },
+          { order_id: id(4), order_number: null },
+        ]
+      : [],
+    rowCount: 0,
+  }));
+  const { listStoreOrderNumbers } =
+    await import("../infrastructure/persistence/merchant-order-index.js");
+  const numbers = await listStoreOrderNumbers(tx, scope, [id(3), id(4)]);
+  expect([...numbers]).toEqual([[id(3), "15"]]);
+  expect(String(query.mock.calls[1]?.[0])).toContain("brand_id=$1 AND store_id=$2");
+  expect((await listStoreOrderNumbers(tx, scope, [])).size).toBe(0);
+});

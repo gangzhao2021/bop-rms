@@ -97,7 +97,11 @@ export function createPickupClient(options: {
               orderReference: raw.orderReference,
               phase: raw.phase,
               readyAt: raw.readyAt,
-              publicOrderNumber: null,
+              publicOrderNumber:
+                typeof raw.orderNumber === "string" &&
+                /^[A-Z0-9][A-Z0-9-]{0,39}$/u.test(raw.orderNumber)
+                  ? raw.orderNumber
+                  : null,
               proofReadiness:
                 raw.phase === "Ready" &&
                 execution.proof &&

@@ -134,3 +134,17 @@ it("preserves configured workstation without inventing one when absent", async (
   );
   await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
 });
+it("WP-2423: shows the Store's order number on the pickup card when the server gives one", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({
+      ...page(),
+      items: [
+        { ...item(), orderNumber: "15" },
+        { ...item(), fulfillmentReference: id(4), orderNumber: "<b>" },
+      ],
+    }),
+  );
+  const view = parsePickupQueueView(await f.client.loadQueue());
+  expect(view.items.map((card) => card.publicOrderNumber)).toEqual(["15", null]);
+});

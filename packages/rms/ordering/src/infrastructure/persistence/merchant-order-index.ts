@@ -127,3 +127,33 @@ export function createPostgresMerchantOrderIndex(options: {
     },
   });
 }
+
+/**
+ * WP-2423: the order numbers staff and customers use for the given Orders of the Store (e.g. on
+ * pickup cards). Orders of other Stores are not returned. Caller authorizes and owns the
+ * transaction.
+ */
+export async function listStoreOrderNumbers(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  if (orderReferences.length === 0) return new Map();
+  if (orderReferences.length > 100) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const orders = orderReferences.map((reference) => parseOrderingReference(reference));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT order_id::text order_id,order_number FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[])",
+      [scope.brandReference, scope.storeReference, orders],
+    )
+  ).rows as readonly { order_id: string; order_number: unknown }[];
+  return new Map(
+    rows
+      .filter((row) => typeof row.order_number === "string")
+      .map((row) => [row.order_id, row.order_number as string]),
+  );
+}

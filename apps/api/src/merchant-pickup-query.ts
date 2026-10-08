@@ -5,6 +5,7 @@ import {
   parseReadinessReference,
   FulfillmentReadinessError,
 } from "@rms/fulfillment";
+import { listStoreOrderNumbers } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -119,6 +120,12 @@ export function createMerchantPickupQuery(options: {
               deviceReference: parseReadinessReference(configured.deviceReference),
               pickupLocationReference: parseReadinessReference(configured.pickupLocationReference),
             });
+      // The order number staff call out and customers see (WP-2423).
+      const numbers = await listStoreOrderNumbers(
+        tx,
+        selected,
+        result.items.map((item) => String(item.orderReference)),
+      );
       if (!(await scope.allowed()))
         throw new FulfillmentReadinessError("FULFILLMENT_READINESS_PERMISSION_DENIED");
       return Object.freeze({
@@ -126,7 +133,11 @@ export function createMerchantPickupQuery(options: {
         workstation,
         storeReference: selected.storeReference,
         items: result.items.map((item) =>
-          Object.freeze({ ...item, aggregateVersion: item.aggregateVersion.toString() }),
+          Object.freeze({
+            ...item,
+            aggregateVersion: item.aggregateVersion.toString(),
+            orderNumber: numbers.get(String(item.orderReference)) ?? null,
+          }),
         ),
       });
     });
