@@ -1435,7 +1435,10 @@ async function scanUnsupported(root, module, diagnostics) {
             ["tax_configuration", "tax_configuration_version", "tax_configuration_rule"].every(
               (table) => module.manifest.ownedDatabase?.tables?.includes(table),
             ) &&
-            moduleRelative === "src/infrastructure/persistence/store-tax-classification-store.ts");
+            [
+              "src/infrastructure/persistence/store-tax-classification-store.ts",
+              "src/infrastructure/persistence/store-price-book-assignment-store.ts",
+            ].includes(moduleRelative));
         // WP-2423 / DEC-INV-STOCK-COUNT and DEC-INV-WASTE: Store counts and waste on the ledger.
         const acceptedStockCountWasteAsset =
           module.packageName === "@rms/inventory" &&

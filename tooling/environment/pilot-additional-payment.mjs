@@ -1,4 +1,5 @@
 import console from "node:console";
+import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createHash } from "node:crypto";
 import { createPostgresSubmissionFinalValidationStore } from "../../packages/rms/inventory/src/index.ts";
 import { paymentProviderAdmissionKillSwitchKey } from "../../packages/rms/payment/src/index.ts";
@@ -45,9 +46,7 @@ export async function createInternalAdditionalPayment(
       workflow: saved.workflow.payment,
       authorize: configured.authorize,
       authorizeOverride: async () => false,
-      resolveExpiryCutoff: async () => {
-        throw new Error("INTERNAL_NO_LOT_ONLY");
-      },
+      resolveExpiryCutoff: createInternalExpiryCutoff(resources),
     };
     const admission = createCustomerAdditionalDiningPaymentAdmission({
       scope,

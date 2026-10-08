@@ -83,3 +83,4 @@ export * from "./contracts/tax-config-candidate-authoring.js";
 export * from "./infrastructure/persistence/tax-config-candidate-store.js";
 export * from "./contracts/tax-config-candidate-fixture-comparison.js";
 export * from "./infrastructure/persistence/store-tax-classification-store.js";
+export * from "./infrastructure/persistence/store-price-book-assignment-store.js";

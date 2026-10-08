@@ -2,28 +2,13 @@ import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
 import { createMerchantProducts } from "../../../apps/api/src/merchant-products.ts";
-import { createBrand, createTenantContext } from "../../bop/tenant/src/index.ts";
 import { listBrandSkuChoices } from "../../rms/catalog/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { productApiGrants } from "../test-support/merchant-api-grants.mjs";
+import { syntheticMerchantBrandScope } from "../test-support/merchant-brand-scope.mjs";
 
 const { Client } = pg;
 const id = (n) => "01909a1b-0000-7000-8000-" + n.toString(16).padStart(12, "0");
-
-/** The grants the pilot API role holds for Brand Products (docs/spec/pilot-acl-additions.json). */
-export const productApiGrants = [
-  "GRANT USAGE ON SCHEMA rms_catalog,rms_pricing,platform_audit,platform_helpers,platform_eventing TO ROLE_",
-  "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id(),platform_helpers.is_uuid_v7(uuid) TO ROLE_",
-  "GRANT SELECT,INSERT,UPDATE ON rms_catalog.product,rms_catalog.product_version TO ROLE_",
-  "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_catalog.sku TO ROLE_",
-  "GRANT SELECT,DELETE ON rms_catalog.product_version_category_assignment,rms_catalog.product_option_binding,rms_catalog.product_option_binding_option,rms_catalog.product_option_binding_sku_scope,rms_catalog.product_option_binding_channel TO ROLE_",
-  "GRANT SELECT,INSERT ON rms_catalog.product_operation_record,rms_catalog.product_operation_snapshot,rms_catalog.product_source_commit TO ROLE_",
-  "GRANT SELECT,INSERT,UPDATE ON rms_catalog.product_source_head TO ROLE_",
-  "GRANT SELECT ON rms_catalog.product_publication_revision TO ROLE_",
-  "GRANT SELECT ON rms_pricing.tax_configuration,rms_pricing.tax_configuration_version,rms_pricing.tax_configuration_rule TO ROLE_",
-  "GRANT SELECT,INSERT ON platform_audit.audit_record TO ROLE_",
-  "GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ROLE_",
-  "GRANT INSERT ON platform_eventing.outbox_event TO ROLE_",
-];
 
 /** WP-2423 / DEC-CAT-PRODUCT-ADMIN: Brand Products through the API composition, under the API's RLS. */
 it("creates products with sizes, edits them, starts selling and refuses unsafe changes", async () => {
@@ -108,80 +93,27 @@ it("creates products with sizes, edits them, starts selling and refuses unsafe c
           },
         },
       };
-      const brand = createBrand({
-        brandReference,
-        code: "PRODUCT_TEST",
-        displayName: "Synthetic Products",
-        defaultLocale: "en-CA",
-        currencyCode: "CAD",
-        lifecycle: "Active",
-        version: 1,
-        createdAt: at,
-        updatedAt: at,
-      });
       // Brand grants per Actor: the owner holds every Product action; the reader may only read.
-      const granted = {
-        [owner]: [
-          "catalog.product.read",
-          "catalog.product.create",
-          "catalog.product.update",
-          "catalog.product.manage",
-          "catalog.product.publish",
-          "catalog.sku.create",
-          "catalog.sku.activate",
-        ],
-        [reader]: ["catalog.product.read"],
-        [outsider]: [],
-      };
-      let actor = owner;
-      const resolveScope = async (tx, cookie) => {
-        assert.equal(cookie, "cookie");
-        const current = actor;
-        const tenantContext = createTenantContext(
-          {
-            actorType: "User",
-            actorReference: current,
-            accountKind: "Workforce",
-            status: "Active",
-            authenticationMethod: "Oidc",
-            verificationLevel: "SingleFactor",
-            authenticatedAt: at,
-            recentMfaAt: null,
-          },
-          brand,
-          null,
-          at,
-        );
-        // As the real scope resolver: deciding a Store-scoped policy sets the Store, and each
-        // Brand write must restore the Brand scope itself.
-        await tx.query(
-          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
-          [brandReference, storeReference],
-        );
-        return {
-          context: tenantContext,
-          tenantReference,
-          selectedStoreReference: storeReference,
-          actorReference: current,
-          authorizeAction: async (action) => {
-            const allowed = granted[current].includes(action);
-            return {
-              action,
-              scopeKind: "Brand",
-              effect: allowed ? "Allow" : "Deny",
-              reason: "ROLE_PERMISSION",
-              source: "RolePermission",
-              policySnapshotReference: id(300),
-              policyVersion: 1,
-              audit: {
-                effect: allowed ? "Allow" : "Deny",
-                reason: "ROLE_PERMISSION",
-                source: "RolePermission",
-              },
-            };
-          },
-        };
-      };
+      const scope = syntheticMerchantBrandScope({
+        tenantReference,
+        brandReference,
+        storeReference,
+        policyReference: id(300),
+        grants: {
+          [owner]: [
+            "catalog.product.read",
+            "catalog.product.create",
+            "catalog.product.update",
+            "catalog.product.manage",
+            "catalog.product.publish",
+            "catalog.sku.create",
+            "catalog.sku.activate",
+          ],
+          [reader]: ["catalog.product.read"],
+          [outsider]: [],
+        },
+      });
+      const resolveScope = scope.resolveScope;
       const products = createMerchantProducts({
         persistence,
         authentication: { authorize: async () => ({ sessionReference: id(7) }) },
@@ -398,7 +330,7 @@ it("creates products with sizes, edits them, starts selling and refuses unsafe c
       );
 
       // A reader sees products but cannot change them; without read permission nothing shows.
-      actor = reader;
+      scope.as(reader);
       const readOnly = await products.query({ ...session, productReference: null });
       assert.equal(readOnly.products.length, 1);
       assert.equal(readOnly.permissions.mayCreate, false);
@@ -414,7 +346,7 @@ it("creates products with sizes, edits them, starts selling and refuses unsafe c
         }),
         "PermissionDenied",
       );
-      actor = outsider;
+      scope.as(outsider);
       await rejects(products.query({ ...session, productReference: null }), "PermissionDenied");
     } finally {
       await admin.query("RESET ROLE").catch(() => undefined);

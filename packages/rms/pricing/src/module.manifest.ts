@@ -107,6 +107,8 @@ const moduleManifestInput =
         "option_price_rule",
         "option_price_rule_version",
         "option_price_authoring_operation",
+        "store_price_book_assignment",
+        "store_price_book_assignment_end",
       ],
     },
     ownedJobs: [],

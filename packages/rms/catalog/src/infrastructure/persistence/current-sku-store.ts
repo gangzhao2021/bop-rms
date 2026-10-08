@@ -145,6 +145,8 @@ export async function listBrandSkuChoices(
     readonly skuReference: string;
     readonly skuCode: string;
     readonly localizedNames: Readonly<Record<string, string>>;
+    readonly productReference: string;
+    readonly productLocalizedNames: Readonly<Record<string, string>>;
     readonly unitOfSale: string;
     readonly active: boolean;
   }[]
@@ -156,8 +158,10 @@ export async function listBrandSkuChoices(
   );
   return (
     await tx.query(
-      `SELECT s.sku_id::text sku,s.sku_code,s.localized_names_json names,s.unit_of_sale,s.lifecycle sku_lifecycle,p.lifecycle product_lifecycle
+      `SELECT s.sku_id::text sku,s.sku_code,s.localized_names_json names,s.unit_of_sale,s.lifecycle sku_lifecycle,p.lifecycle product_lifecycle,
+        p.product_id::text product,v.localized_names_json product_names
        FROM rms_catalog.sku s JOIN rms_catalog.product p ON p.product_id=s.product_id AND p.brand_id=s.brand_id
+       JOIN rms_catalog.product_version v ON v.product_version_id=s.product_version_id AND v.product_id=s.product_id AND v.brand_id=s.brand_id
        WHERE s.brand_id=$1 ORDER BY s.sku_code LIMIT 2000`,
       [brand],
     )
@@ -166,6 +170,8 @@ export async function listBrandSkuChoices(
       skuReference: String(row.sku),
       skuCode: String(row.sku_code),
       localizedNames: (row.names ?? {}) as Readonly<Record<string, string>>,
+      productReference: String(row.product),
+      productLocalizedNames: (row.product_names ?? {}) as Readonly<Record<string, string>>,
       unitOfSale: String(row.unit_of_sale),
       active: row.sku_lifecycle === "Active" && row.product_lifecycle === "Active",
     }),

@@ -71,7 +71,7 @@ export type { RecipeItemDemandContribution } from "./application/recipe-demand-s
 
 export { createPostgresStockCandidateSource } from "./infrastructure/persistence/stock-candidate-source.js";
 
-export { planStockAllocation } from "./domain/stock-allocation.js";
+export { planStockAllocation, storeDayEndExpiryCutoff } from "./domain/stock-allocation.js";
 
 export {
   parseInventoryReservationSet,

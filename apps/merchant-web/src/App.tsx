@@ -24,7 +24,8 @@ import { OrderAmendmentPage } from "./OrderAmendmentPage.js";
 import { MenuBuilderPage, MenuListPage } from "./CatalogMenuPages.js";
 import { BundleEditorPage, BundleListPage } from "./BundlePages.js";
 import { AvailabilityWorkbenchPage } from "./AvailabilityWorkbenchPage.js";
-import { PriceBookEditorPage, PriceBookListPage } from "./PriceBookPages.js";
+import { StorePriceEditorPage, StorePriceListPage } from "./StorePricePages.js";
+import { createPriceClient } from "./store-price-pages.js";
 import { TaxConfigPage } from "./TaxConfigPage.js";
 import { PromotionEditorPage, PromotionListPage } from "./PromotionPages.js";
 import { RecipeEditorPage, RecipeListPage } from "./RecipePages.js";
@@ -522,8 +523,32 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route path="/app/commerce/bundles" element={<BundleListPage />} />
       <Route path="/app/commerce/bundles/:id/edit" element={<BundleEditorPage />} />
       <Route path="/app/commerce/availability" element={<AvailabilityWorkbenchPage />} />
-      <Route path="/app/commerce/pricing" element={<PriceBookListPage />} />
-      <Route path="/app/commerce/pricing/:id" element={<PriceBookEditorPage />} />
+      <Route
+        path="/app/commerce/pricing"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StorePriceListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createPriceClient(state.csrf)}
+            />
+          ) : (
+            <StorePriceListPage />
+          )
+        }
+      />
+      <Route
+        path="/app/commerce/pricing/:id"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StorePriceEditorPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createPriceClient(state.csrf)}
+            />
+          ) : (
+            <StorePriceEditorPage />
+          )
+        }
+      />
       <Route
         path="/app/commerce/tax"
         element={

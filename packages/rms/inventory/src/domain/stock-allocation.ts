@@ -192,3 +192,42 @@ export function planStockAllocation(value: unknown) {
     allocations: Object.freeze(allocations),
   });
 }
+
+/**
+ * WP-2423 / DEC-INV-EXPIRY-CUTOFF: a lot whose expiry date is D may be used through the end of D in
+ * the Store's local time; it stops being available at local midnight starting D + 1 (exact across
+ * daylight-saving changes).
+ */
+export function storeDayEndExpiryCutoff(expiryDate: string, timeZone: string): string {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/u.test(expiryDate) ||
+    new Date(expiryDate + "T00:00:00.000Z").toISOString().slice(0, 10) !== expiryDate
+  )
+    return fail();
+  const next = new Date(Date.parse(expiryDate + "T00:00:00.000Z") + 86_400_000);
+  const localMidnightAsUtc = next.getTime();
+  const offsetAt = (instant: number) => {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      })
+        .formatToParts(new Date(instant))
+        .map((part) => [part.type, part.value]),
+    );
+    return (
+      Date.parse(
+        `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.000Z`,
+      ) - instant
+    );
+  };
+  let instant = localMidnightAsUtc - offsetAt(localMidnightAsUtc);
+  instant = localMidnightAsUtc - offsetAt(instant);
+  return new Date(instant).toISOString();
+}

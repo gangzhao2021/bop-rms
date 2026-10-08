@@ -63,6 +63,22 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      table: "store_price_book_assignment",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "store_price_book_assignment_end",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "option_price_authoring_operation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/pricing" },
@@ -958,6 +974,46 @@ const databaseAccessManifestInput = {
       readPattern: "owner-repository",
       source:
         "packages/rms/pricing/src/infrastructure/persistence/configuration-reference-source-store.ts",
+    },
+    {
+      id: "store-price-book-assignment.read.store_price_book_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_book_assignment" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/store-price-book-assignment-store.ts",
+    },
+    {
+      id: "store-price-book-assignment.write.store_price_book_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_book_assignment" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/store-price-book-assignment-store.ts",
+    },
+    {
+      id: "store-price-book-assignment.read.store_price_book_assignment_end",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_book_assignment_end" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/store-price-book-assignment-store.ts",
+    },
+    {
+      id: "store-price-book-assignment.write.store_price_book_assignment_end",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_book_assignment_end" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/store-price-book-assignment-store.ts",
     },
   ],
 } as const;

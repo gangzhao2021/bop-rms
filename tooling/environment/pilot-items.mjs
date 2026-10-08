@@ -1,4 +1,5 @@
 import { createInternalReadTransactions } from "./pilot-read-transactions.mjs";
+import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createHash } from "node:crypto";
 export async function createInternalTestItems(resources, { saved, expectedDatabaseName }) {
   if (
@@ -41,9 +42,7 @@ export async function createInternalTestItems(resources, { saved, expectedDataba
       selectedInventory: {
         scope: saved.scope,
         transactions: reads,
-        resolveExpiryCutoff: async () => {
-          throw new Error("INTERNAL_NO_LOT_ONLY");
-        },
+        resolveExpiryCutoff: createInternalExpiryCutoff(resources),
       },
       writeTransactions: resources.transactions,
       references: {

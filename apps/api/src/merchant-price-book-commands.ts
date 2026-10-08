@@ -77,8 +77,10 @@ export function createMerchantPriceBookCommands(options: {
     transaction: Transaction,
     snapshot: PriceBookSnapshot,
   ): Promise<readonly PriceResolutionContext[]>;
+  /** Test seam: the Brand scope resolver (defaults to the current session's Brand scope). */
+  resolveScope?: ReturnType<typeof createMerchantBrandScope>;
 }) {
-  const resolveScope = createMerchantBrandScope(options.merchant);
+  const resolveScope = options.resolveScope ?? createMerchantBrandScope(options.merchant);
   const execute = async (request: MerchantPriceBookCommandRequest, transport: boolean) => {
     const session = await options.authentication.authorize({
       sessionCookie: request.sessionCookie,
@@ -122,6 +124,13 @@ export function createMerchantPriceBookCommands(options: {
         session.sessionReference,
       );
       const brand = parsePricingReference(scope.context.brand.brandReference);
+      // Price books, their events and audits are Brand facts: deciding a permission selects the
+      // Store again, so every write and the draft-author event read restore the Brand scope.
+      const brandScope = () =>
+        transaction.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+          [brand],
+        );
       if (
         candidate &&
         (candidate.brandReference !== brand ||
@@ -166,6 +175,7 @@ export function createMerchantPriceBookCommands(options: {
               return false;
             if (input.record.action === "Publish") await checkCoverage(input.record.aggregate);
           }
+          await brandScope();
           return true;
         },
         appendEvent: async (_tx, record) => {
@@ -216,6 +226,9 @@ export function createMerchantPriceBookCommands(options: {
           authorize: async (input) => {
             const manage = await permission("pricing.price-book.manage");
             if (!manage) return null;
+            const approval =
+              input.action === "Publish" ? await permission("pricing.price-book.approve") : null;
+            await brandScope();
             const provenance =
               input.action === "Publish"
                 ? await author.load(transaction, input.priceBookReference)
@@ -223,8 +236,7 @@ export function createMerchantPriceBookCommands(options: {
             return {
               tenantContext: scope.context,
               permission: manage,
-              approvalPermission:
-                input.action === "Publish" ? await permission("pricing.price-book.approve") : null,
+              approvalPermission: approval,
               draftAuthorActorReference: provenance?.actorReference ?? null,
               audit: {
                 auditId: parsePricingReference(options.auditReference(input.operationReference)),

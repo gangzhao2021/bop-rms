@@ -197,6 +197,7 @@ import {
 } from "./merchant-store-receipts.js";
 import { MerchantRecipeError, type createMerchantRecipes } from "./merchant-recipes.js";
 import { MerchantProductError, type createMerchantProducts } from "./merchant-products.js";
+import { MerchantPriceError, type createMerchantPrices } from "./merchant-prices.js";
 import {
   MerchantStockCountError,
   type createMerchantStockCounts,
@@ -290,6 +291,7 @@ const merchantNavigation = Object.freeze({
   "INV-OPENING-COUNT": ["/app/supply/opening-count", "inventory.count.read"],
   "INV-RECEIPT-LIST": ["/operations/receiving", "inventory.receipt.read"],
   "RECIPE-LIST": ["/app/commerce/recipes", "recipe.read"],
+  "PRICE-BOOK-LIST": ["/app/commerce/pricing", "pricing.price_book.read"],
   "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
 } as const);
@@ -453,6 +455,7 @@ export interface MerchantBffRouterOptions {
   readonly storeReceipts?: ReturnType<typeof createMerchantStoreReceipts>;
   readonly recipes?: ReturnType<typeof createMerchantRecipes>;
   readonly products?: ReturnType<typeof createMerchantProducts>;
+  readonly prices?: ReturnType<typeof createMerchantPrices>;
   readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
   readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
@@ -858,7 +861,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       request.method === "POST" &&
       (request.path === "/supply/opening-count/command" ||
         request.path === "/supply/receipts/command" ||
-        request.path === "/commerce/recipes/command")
+        request.path === "/commerce/recipes/command" ||
+        request.path === "/commerce/pricing/command")
     ) {
       express.json({ limit: 1_048_576, strict: true })(request, response, (error?: unknown) => {
         if (!error) {
@@ -5336,6 +5340,80 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .command({ sessionCookie, csrf, body: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => productFailure(response, error));
+  });
+
+  // WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: PRICE-BOOK-LIST / PRICE-BOOK-EDITOR reads and commands.
+  const priceStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    CodeTaken: 409,
+    ApprovalRequired: 403,
+    NotCovered: 409,
+    NotPublished: 409,
+    AlreadyAssigned: 409,
+    Lifecycle: 409,
+    Invalid: 400,
+  } as const;
+  const priceFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantPriceError)) {
+      denied(response);
+      return;
+    }
+    response
+      .status(priceStatus[error.code])
+      .json({ error: error.code, sellableReferences: error.sellableReferences });
+  };
+  router.post("/commerce/pricing/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { priceBookReference?: unknown } | undefined;
+    const priceBookReference = body?.priceBookReference ?? null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).join(",") !== "priceBookReference" ||
+      (priceBookReference !== null &&
+        (typeof priceBookReference !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            priceBookReference,
+          )))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.prices) {
+      response.status(503).json({ error: "prices_unavailable" });
+      return;
+    }
+    void options.prices
+      .query({ sessionCookie, csrf, priceBookReference: priceBookReference as string | null })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => priceFailure(response, error));
+  });
+  router.post("/commerce/pricing/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.prices) {
+      response.status(503).json({ error: "prices_unavailable" });
+      return;
+    }
+    void options.prices
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => priceFailure(response, error));
   });
 
   // WP-2423 / DEC-INV-STOCK-COUNT: INV-COUNT-LIST / INV-COUNT-WORKBENCH.

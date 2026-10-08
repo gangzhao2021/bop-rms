@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { createPostgresCurrentQuoteService } from "../../packages/rms/pricing/src/index.ts";
+import {
+  createPostgresCurrentQuoteService,
+  currentStorePriceBook,
+} from "../../packages/rms/pricing/src/index.ts";
+import { listProductVersionTaxClassifications } from "../../packages/rms/catalog/src/index.ts";
 import { createInternalReadTransactions } from "./pilot-read-transactions.mjs";
 export async function createInternalTestQuote(
   resources,
@@ -32,19 +36,22 @@ export async function createInternalTestQuote(
     retentionPolicyCode: "AUDIT_DEFAULT",
     retentionPolicyVersion: 1,
   });
-  const policies = createPostgresCurrentQuoteService(createInternalReadTransactions(resources), {
-    scope,
-    priceBookReference: policy.priceBook.priceBookReference,
-    taxConfigurationReference: policy.taxConfiguration.configurationReference,
-    currencyMetadata: policy.currencyMetadata,
-    clock: { now: resources.now },
-    evidence: {
-      load: async () => ({
-        registrationEvidence: policy.taxConfiguration.registrationEvidence,
-        professionalEvidence: policy.taxConfiguration.professionalEvidence,
-      }),
-    },
-  });
+  const reads = createInternalReadTransactions(resources);
+  // WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: the Store's assigned price book, read for each quote.
+  const policies = (priceBookReference) =>
+    createPostgresCurrentQuoteService(reads, {
+      scope,
+      priceBookReference,
+      taxConfigurationReference: policy.taxConfiguration.configurationReference,
+      currencyMetadata: policy.currencyMetadata,
+      clock: { now: resources.now },
+      evidence: {
+        load: async () => ({
+          registrationEvidence: policy.taxConfiguration.registrationEvidence,
+          professionalEvidence: policy.taxConfiguration.professionalEvidence,
+        }),
+      },
+    });
   return {
     cartQuote: {
       references,
@@ -53,7 +60,22 @@ export async function createInternalTestQuote(
       pricingReferences: { ...references, generateReference: reference },
       candidate: async (input) => {
         if (input.orderType !== orderType) throw new Error("INTERNAL_QUOTE_CHANNEL_UNAVAILABLE");
-        const quote = await policies.create({
+        // The Store's price book and each line's Product version tax class (DEC-CAT-PRODUCT-ADMIN).
+        const { assignment, taxClasses } = await reads.run(async (tx) => ({
+          assignment: await currentStorePriceBook(tx, scope),
+          taxClasses: await listProductVersionTaxClassifications(
+            tx,
+            scope,
+            input.lines.map((line) => line.catalogSelectionEvidence.productVersionReference),
+          ),
+        }));
+        if (assignment === null) throw new Error("INTERNAL_QUOTE_PRICE_BOOK_UNASSIGNED");
+        const taxClassOf = (line) => {
+          const value = taxClasses.get(line.catalogSelectionEvidence.productVersionReference);
+          if (typeof value !== "string") throw new Error("INTERNAL_QUOTE_TAX_CLASS_UNAVAILABLE");
+          return value;
+        };
+        const quote = await policies(assignment.priceBookReference).create({
           ...scope,
           quoteReference: reference(),
           cartReference: input.cartReference,
@@ -83,7 +105,7 @@ export async function createInternalTestQuote(
               ...scope,
               jurisdictionCode: "CA-ON",
               currencyCode: "CAD",
-              taxClassificationReference: policy.taxClassificationReference,
+              taxClassificationReference: taxClassOf(line),
               orderType: input.orderType,
               chargeType: "Sellable",
               evaluatedAt: input.requestedAt,

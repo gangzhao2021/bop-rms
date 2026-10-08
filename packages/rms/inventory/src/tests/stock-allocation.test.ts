@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planStockAllocation } from "../domain/stock-allocation.js";
+import { planStockAllocation, storeDayEndExpiryCutoff } from "../domain/stock-allocation.js";
 const id = (n: number) => "01909998-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-09-11T16:00:00.000Z";
 const scope = {
@@ -85,4 +85,24 @@ describe("stock allocation proposal", () => {
       status: "Ready",
       allocations: [],
     }));
+});
+
+describe("WP-2423 lot expiry cutoff", () => {
+  it("keeps a lot usable through the end of its expiry date in the Store's time zone", () => {
+    expect(storeDayEndExpiryCutoff("2026-10-12", "America/Toronto")).toBe(
+      "2026-10-13T04:00:00.000Z",
+    );
+    expect(storeDayEndExpiryCutoff("2026-12-31", "America/Toronto")).toBe(
+      "2027-01-01T05:00:00.000Z",
+    );
+    // Daylight saving ends on 2026-11-01 in Toronto: midnight starting 11-01 is still EDT.
+    expect(storeDayEndExpiryCutoff("2026-10-31", "America/Toronto")).toBe(
+      "2026-11-01T04:00:00.000Z",
+    );
+    expect(storeDayEndExpiryCutoff("2026-11-01", "America/Toronto")).toBe(
+      "2026-11-02T05:00:00.000Z",
+    );
+    expect(storeDayEndExpiryCutoff("2026-10-12", "UTC")).toBe("2026-10-13T00:00:00.000Z");
+    expect(() => storeDayEndExpiryCutoff("2026-02-30", "UTC")).toThrow();
+  });
 });

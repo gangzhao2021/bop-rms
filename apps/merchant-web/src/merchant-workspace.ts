@@ -38,6 +38,7 @@ export interface MerchantNavigationItem {
     | "INV-OPENING-COUNT"
     | "INV-RECEIPT-LIST"
     | "RECIPE-LIST"
+    | "PRICE-BOOK-LIST"
     | "INV-COUNT-LIST"
     | "INV-WASTE-RECORD";
   readonly label: string;
@@ -74,6 +75,7 @@ const NAVIGATION = Object.freeze({
   "INV-OPENING-COUNT": ["/app/supply/opening-count", "inventory.count.read"],
   "INV-RECEIPT-LIST": ["/operations/receiving", "inventory.receipt.read"],
   "RECIPE-LIST": ["/app/commerce/recipes", "recipe.read"],
+  "PRICE-BOOK-LIST": ["/app/commerce/pricing", "pricing.price_book.read"],
   "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
 } as const);

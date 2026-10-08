@@ -80,3 +80,64 @@ export async function loadBrandProduct(
   if (rows.length !== 1 || !rows[0]) return null;
   return parseProductAggregate(rows[0].snapshot);
 }
+
+/**
+ * WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: the sellables on the Store's current published menus (every
+ * active menu projection that applies to the Store). A Store's price book must price each of them.
+ */
+export async function listStoreMenuSellables(
+  tx: Tx,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+): Promise<readonly string[]> {
+  const brand = parseCatalogReference(scope.brandReference);
+  const store = parseCatalogReference(scope.storeReference);
+  await brandScope(tx, brand);
+  return (
+    await tx.query(
+      `SELECT DISTINCT v.sellable_id::text sellable
+       FROM rms_catalog.published_menu_projection_checkpoint c
+       JOIN rms_catalog.published_menu_projection_generation g ON g.generation_id=c.active_generation_id
+        AND g.menu_id=c.menu_id AND g.brand_id=c.brand_id AND g.generation_status='Active'
+       JOIN rms_catalog.published_menu_projection p ON p.generation_id=g.generation_id AND p.menu_id=g.menu_id
+        AND p.brand_id=g.brand_id
+       JOIN rms_catalog.published_menu_projection_sellable v ON v.generation_id=p.generation_id
+        AND v.menu_id=p.menu_id AND v.brand_id=p.brand_id
+       WHERE c.consumer_name='catalog.published-menu-projection' AND c.brand_id=$1
+        AND (p.store_ids_json IS NULL OR p.store_ids_json='[]'::jsonb OR p.store_ids_json @> jsonb_build_array($2::text))
+       ORDER BY 1`,
+      [brand, store],
+    )
+  ).rows.map((row) => String(row.sellable));
+}
+
+/**
+ * WP-2423 / DEC-CAT-PRODUCT-ADMIN: each Product version's tax classification (for quotes). Reads in the
+ * Brand scope and restores the caller's Store scope afterwards.
+ */
+export async function listProductVersionTaxClassifications(
+  tx: Tx,
+  scope: { readonly brandReference: string },
+  productVersionReferences: readonly string[],
+): Promise<ReadonlyMap<string, string | null>> {
+  const brand = parseCatalogReference(scope.brandReference);
+  const versions = productVersionReferences.map(parseCatalogReference);
+  const previous = (await tx.query("SELECT current_setting('bop.store_id',true) store", [])).rows[0]
+    ?.store;
+  await brandScope(tx, brand);
+  try {
+    const rows = (
+      await tx.query(
+        `SELECT product_version_id::text version,tax_classification_id::text tax FROM rms_catalog.product_version
+         WHERE brand_id=$1 AND product_version_id=ANY($2::uuid[])`,
+        [brand, versions],
+      )
+    ).rows;
+    return new Map(
+      rows.map((row) => [String(row.version), row.tax === null ? null : String(row.tax)]),
+    );
+  } finally {
+    await tx.query("SELECT set_config('bop.store_id',$1,true)", [
+      typeof previous === "string" ? previous : "",
+    ]);
+  }
+}

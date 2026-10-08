@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { GuestSessionService, readClosedRecord } from "../../packages/bop/identity/src/index.ts";
 import { createPostgresInventoryFinalizedOrderCreationRepository } from "../../packages/rms/ordering/src/index.ts";
 import { createCustomerDiningOrderSubmissionComposition } from "../../apps/api/dist/customer-dining-order-submission-composition.js";
@@ -102,9 +103,7 @@ export async function createInternalOrder(
         r.submissionReference === input.submissionReference &&
         r.actorReference === guest.sessionReference &&
         (await authorized(tx, now())),
-      resolveExpiryCutoff: async () => {
-        throw new Error("INTERNAL_NO_LOT_ONLY");
-      },
+      resolveExpiryCutoff: createInternalExpiryCutoff(resources),
       generateReference: reference,
       audit: {
         reasonCode: "INTERNAL_TEST_SUBMISSION",

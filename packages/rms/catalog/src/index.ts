@@ -419,6 +419,8 @@ export * from "./infrastructure/persistence/brand-catalog-source-store.js";
 
 export {
   listBrandProducts,
+  listProductVersionTaxClassifications,
+  listStoreMenuSellables,
   loadBrandProduct,
   type BrandProductSummary,
 } from "./infrastructure/persistence/product-admin-read-store.js";

@@ -9,6 +9,7 @@ import { createInternalMerchantAcceptance } from "./pilot-merchant-acceptance.mj
 import { createInternalMerchantSession } from "./pilot-merchant-session.mjs";
 import { createInternalMerchant } from "./pilot-merchant.mjs";
 import { createInternalMerchantProduct } from "./pilot-merchant-product.mjs";
+import { createInternalPricingPolicy } from "./pilot-pricing-policy.mjs";
 import { createInternalDiningCredentialLoaders } from "./pilot-dining-credentials.mjs";
 import { createInternalCredentialLoaders } from "./pilot-credentials.mjs";
 import { refreshInternalOrderReceiptObservations } from "./pilot-receipt-observations.mjs";
@@ -68,6 +69,15 @@ export function composeMerchantDependencies(
             }),
         }),
     loadTaskQueue: installation.loadTaskQueue,
+    // WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: TEST-ONLY synthetic CAD metadata of the internal pricing policy.
+    loadPricingCurrencyMetadata: async () =>
+      (
+        await createInternalPricingPolicy({
+          loadProfile: installation.loadProfile,
+          loadMenu: installation.loadMenu,
+          expectedDatabaseName: installation.database,
+        })
+      ).currencyMetadata,
     createInternalRefundPreparation: f.createInternalRefundPreparation,
     createInternalRefundSend: (options) =>
       f.createInternalRefundSend({ ...options, ...account, createSimulatedProvider: provider }),

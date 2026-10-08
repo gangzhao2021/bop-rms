@@ -118,6 +118,7 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "expectedDatabaseName",
       "roleMapping",
       "loadTaskQueue",
+      "loadPricingCurrencyMetadata",
       "createInternalRefundPreparation",
       "createInternalRefundSend",
       "createInternalRefundReconciliation",

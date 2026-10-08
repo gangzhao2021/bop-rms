@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createCustomerSessionPaymentIntent } from "../../apps/api/dist/customer-session-payment-intent.js";
 import { createCustomerCheckoutSessionRead } from "../../apps/api/dist/customer-checkout-session-read.js";
 import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/customer-checkout-session-authorization.js";
@@ -103,9 +104,7 @@ export async function createInternalPaymentIntent(
             scope,
             authorize,
             evaluate: action,
-            resolveExpiryCutoff: async () => {
-              throw new Error("INTERNAL_NO_LOT_ONLY");
-            },
+            resolveExpiryCutoff: createInternalExpiryCutoff(resources),
           }),
         });
       },

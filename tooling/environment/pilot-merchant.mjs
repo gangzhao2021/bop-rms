@@ -47,6 +47,7 @@ import { createMerchantOpeningCount } from "../../apps/api/dist/merchant-opening
 import { createMerchantStoreReceipts } from "../../apps/api/dist/merchant-store-receipts.js";
 import { createMerchantRecipes } from "../../apps/api/dist/merchant-recipes.js";
 import { createMerchantProducts } from "../../apps/api/dist/merchant-products.js";
+import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
@@ -70,6 +71,7 @@ export async function createInternalMerchant(
     exceptionPaymentMode,
     roleMapping,
     taxConfigCurrencyMetadata,
+    loadPricingCurrencyMetadata,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -180,6 +182,12 @@ export async function createInternalMerchant(
           label: "Recipes",
           href: "/app/commerce/recipes",
           permission: "recipe.read",
+        },
+        {
+          screenId: "PRICE-BOOK-LIST",
+          label: "Prices",
+          href: "/app/commerce/pricing",
+          permission: "pricing.price_book.read",
         },
         {
           screenId: "INV-COUNT-LIST",
@@ -489,6 +497,16 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en-CA",
   });
+  const prices =
+    loadPricingCurrencyMetadata === undefined
+      ? undefined
+      : createMerchantPrices({
+          persistence,
+          authentication: service,
+          references: { next: () => resources.credentials.reference() },
+          currencyMetadata: await loadPricingCurrencyMetadata(),
+          locale: "en-CA",
+        });
   const stockCounts = createMerchantStockCounts({
     persistence,
     authentication: service,
@@ -618,6 +636,7 @@ export async function createInternalMerchant(
       storeReceipts,
       recipes,
       products,
+      ...(prices === undefined ? {} : { prices }),
       stockCounts,
       storeWaste,
       pickupQuery,

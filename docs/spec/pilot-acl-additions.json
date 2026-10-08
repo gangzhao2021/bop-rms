@@ -846,6 +846,96 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_entry",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "store_price_book_assignment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "store_price_book_assignment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "store_price_book_assignment_end",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "store_price_book_assignment_end",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
     }
   ]
 }

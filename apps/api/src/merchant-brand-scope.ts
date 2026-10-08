@@ -247,6 +247,7 @@ export function createMerchantBrandScope(
     return Object.freeze({
       tenantReference: selected.selected.tenantReference,
       selectedStoreReference: selected.store.storeReference,
+      selectedStoreTimeZone: selected.store.timeZone,
       context,
       actorReference: selected.actorReference,
       authorizeAction,
