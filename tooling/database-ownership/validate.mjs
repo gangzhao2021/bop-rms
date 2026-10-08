@@ -802,7 +802,15 @@ async function scanUnsupported(root, module, diagnostics) {
             "recipe_reference_binding",
             "recipe_ingredient_requirement",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
-          moduleRelative === "src/infrastructure/persistence/recipe-authoring-store.ts";
+          (moduleRelative === "src/infrastructure/persistence/recipe-authoring-store.ts" ||
+            // WP-2423 slice 4.4: option recipe changes, expanded into modifier rules.
+            (moduleRelative === "src/infrastructure/persistence/option-recipe-change-store.ts" &&
+              [
+                "option_recipe_change",
+                "option_recipe_change_review",
+                "option_recipe_change_publication",
+                "recipe_modifier_version",
+              ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table))));
         const acceptedRecipeStoreAsset =
           module.packageName === "@rms/recipe" &&
           module.manifest.ownedDatabase?.schema === "rms_recipe" &&

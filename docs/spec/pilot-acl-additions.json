@@ -1998,6 +1998,69 @@
       "privilege": "EXECUTE",
       "principal": "api",
       "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change_review",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change_review",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change_publication",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change_publication",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_modifier_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
     }
   ]
 }

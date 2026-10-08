@@ -210,6 +210,10 @@ import {
   type createMerchantOptionPrices,
 } from "./merchant-option-prices.js";
 import {
+  MerchantOptionRecipeError,
+  type createMerchantOptionRecipes,
+} from "./merchant-option-recipes.js";
+import {
   MerchantStockCountError,
   type createMerchantStockCounts,
 } from "./merchant-stock-counts.js";
@@ -307,6 +311,7 @@ const merchantNavigation = Object.freeze({
   "RECIPE-LIST": ["/app/commerce/recipes", "recipe.read"],
   "PRICE-BOOK-LIST": ["/app/commerce/pricing", "pricing.price_book.read"],
   "PRICE-OPTION-LIST": ["/app/commerce/option-prices", "pricing.price_book.read"],
+  "RECIPE-OPTION-LIST": ["/app/commerce/option-recipes", "recipe.read"],
   "CMP-ALLERGEN-REVIEW": ["/app/compliance/allergens", "catalog.allergen.read"],
   "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
@@ -477,6 +482,7 @@ export interface MerchantBffRouterOptions {
   readonly availability?: ReturnType<typeof createMerchantAvailability>;
   readonly optionSets?: ReturnType<typeof createMerchantOptionSets>;
   readonly optionPrices?: ReturnType<typeof createMerchantOptionPrices>;
+  readonly optionRecipes?: ReturnType<typeof createMerchantOptionRecipes>;
   readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
   readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
@@ -789,7 +795,7 @@ export function parseMerchantWorkspaceSnapshot(value: unknown): MerchantWorkspac
     (input.freshness !== "Current" && input.freshness !== "Stale") ||
     input.dashboardAvailability !== "UnavailableUntilWP1905" ||
     !Array.isArray(input.navigation) ||
-    input.navigation.length > 20
+    input.navigation.length > 40
   )
     throw new Error("MERCHANT_WORKSPACE_DENIED");
   const selected = selectedScope(input.selectedScope);
@@ -5536,6 +5542,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     NotRevisable: 409,
     ReviewBlocked: 409,
     OptionPriceMissing: 409,
+    OptionRecipeMissing: 409,
     ApprovalRequired: 403,
     Lifecycle: 409,
     Invalid: 400,
@@ -5793,6 +5800,85 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         .command({ sessionCookie, csrf, body: request.body })
         .then((result) => response.json(result))
         .catch((error: unknown) => optionPriceFailure(response, error));
+    },
+  );
+
+  // WP-2423 slice 4.4: RECIPE-OPTION-LIST for the selected Store's Brand.
+  const optionRecipeStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    NoRecipe: 409,
+    IngredientMissing: 409,
+    IngredientPresent: 409,
+    UnitMismatch: 409,
+    ItemUnavailable: 409,
+    AllergenUndeclared: 409,
+    ReviewRequired: 409,
+    ReviewerNotIndependent: 409,
+    Invalid: 400,
+  } as const;
+  const optionRecipeFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantOptionRecipeError)) {
+      denied(response);
+      return;
+    }
+    response
+      .status(optionRecipeStatus[error.code])
+      .json({ error: error.code, skuReference: error.skuReference });
+  };
+  router.post(
+    "/commerce/option-recipes/query",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      const body = request.body as Record<string, unknown> | undefined;
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0 ||
+        body === undefined ||
+        body === null ||
+        Object.keys(body).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.optionRecipes) {
+        response.status(503).json({ error: "option_recipes_unavailable" });
+        return;
+      }
+      void options.optionRecipes
+        .query({ sessionCookie, csrf })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => optionRecipeFailure(response, error));
+    },
+  );
+  router.post(
+    "/commerce/option-recipes/command",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.optionRecipes) {
+        response.status(503).json({ error: "option_recipes_unavailable" });
+        return;
+      }
+      void options.optionRecipes
+        .command({ sessionCookie, csrf, body: request.body })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => optionRecipeFailure(response, error));
     },
   );
 

@@ -53,6 +53,7 @@ import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
 import { createMerchantAvailability } from "../../apps/api/dist/merchant-availability.js";
 import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-sets.js";
 import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
+import { createMerchantOptionRecipes } from "../../apps/api/dist/merchant-option-recipes.js";
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
@@ -193,6 +194,12 @@ export async function createInternalMerchant(
           screenId: "RECIPE-LIST",
           label: "Recipes",
           href: "/app/commerce/recipes",
+          permission: "recipe.read",
+        },
+        {
+          screenId: "RECIPE-OPTION-LIST",
+          label: "Option recipes",
+          href: "/app/commerce/option-recipes",
           permission: "recipe.read",
         },
         {
@@ -574,6 +581,11 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en-CA",
   });
+  const optionRecipes = createMerchantOptionRecipes({
+    persistence,
+    authentication: service,
+    locale: "en-CA",
+  });
   const optionSets = createMerchantOptionSets({
     persistence,
     authentication: service,
@@ -720,6 +732,7 @@ export async function createInternalMerchant(
       availability,
       optionSets,
       optionPrices,
+      optionRecipes,
       stockCounts,
       storeWaste,
       pickupQuery,

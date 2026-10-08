@@ -43,6 +43,7 @@ export interface MerchantNavigationItem {
     | "RECIPE-LIST"
     | "PRICE-BOOK-LIST"
     | "PRICE-OPTION-LIST"
+    | "RECIPE-OPTION-LIST"
     | "CMP-ALLERGEN-REVIEW"
     | "INV-COUNT-LIST"
     | "INV-WASTE-RECORD";
@@ -83,6 +84,7 @@ const NAVIGATION = Object.freeze({
   "RECIPE-LIST": ["/app/commerce/recipes", "recipe.read"],
   "PRICE-BOOK-LIST": ["/app/commerce/pricing", "pricing.price_book.read"],
   "PRICE-OPTION-LIST": ["/app/commerce/option-prices", "pricing.price_book.read"],
+  "RECIPE-OPTION-LIST": ["/app/commerce/option-recipes", "recipe.read"],
   "CMP-ALLERGEN-REVIEW": ["/app/compliance/allergens", "catalog.allergen.read"],
   "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
@@ -227,7 +229,7 @@ export function parseMerchantWorkspace(value: unknown): MerchantWorkspaceSnapsho
     (input.freshness !== "Current" && input.freshness !== "Stale") ||
     input.dashboardAvailability !== "UnavailableUntilWP1905" ||
     !Array.isArray(input.navigation) ||
-    input.navigation.length > 20
+    input.navigation.length > 40
   )
     throw new Error("MERCHANT_WORKSPACE_INVALID");
   const selectedScope = storeOption(input.selectedScope);

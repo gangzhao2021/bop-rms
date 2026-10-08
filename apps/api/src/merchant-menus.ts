@@ -23,7 +23,7 @@ import {
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { createMerchantMenuPublicationCommand } from "./merchant-menu-publication-command.js";
-import { unpricedMenuOptions } from "./menu-option-prices.js";
+import { menuOptionsWithoutRecipes, unpricedMenuOptions } from "./menu-option-gates.js";
 import { localBoundary } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -47,6 +47,7 @@ export class MerchantMenuError extends Error {
       | "NotRevisable"
       | "ReviewBlocked"
       | "OptionPriceMissing"
+      | "OptionRecipeMissing"
       | "ApprovalRequired"
       | "Lifecycle"
       | "Invalid",
@@ -470,6 +471,17 @@ export function createMerchantMenus(options: {
             if (registry === null) return fail("ReviewBlocked");
             if ((await unpricedOptions(tx, s, loaded.aggregate)).length > 0)
               fail("OptionPriceMissing");
+            if (
+              (
+                await menuOptionsWithoutRecipes(ptx(tx) as never, {
+                  owner: s.owner,
+                  observedAt: options.persistence.now(),
+                  menu: loaded.aggregate.draft,
+                })
+              ).length > 0
+            )
+              fail("OptionRecipeMissing");
+            await brandScope(tx, s.owner.brandReference);
             return { s, loaded, registry };
           }),
         );

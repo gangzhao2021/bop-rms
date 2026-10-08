@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { it } from "vitest";
-import { unpricedMenuOptions } from "../../../apps/api/src/menu-option-prices.ts";
+import { unpricedMenuOptions } from "../../../apps/api/src/menu-option-gates.ts";
 import { createMerchantOptionPrices } from "../../../apps/api/src/merchant-option-prices.ts";
 import { createMerchantOptionSets } from "../../../apps/api/src/merchant-option-sets.ts";
 import { createMerchantProducts } from "../../../apps/api/src/merchant-products.ts";

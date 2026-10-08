@@ -4,12 +4,7 @@ import {
   type MemberDirectoryTransaction,
 } from "@bop/membership";
 import { brandActionHeldBy, type RoleAssignmentTransaction } from "@bop/permission";
-import {
-  currentAllergenRegistry,
-  listBrandSkuChoices,
-  listCurrentIngredientDeclarations,
-} from "@rms/catalog";
-import { listInventoryRecipeIngredientFacts } from "@rms/inventory";
+import { listBrandSkuChoices } from "@rms/catalog";
 import { listKitchenStationCapabilities } from "@rms/kitchen";
 import {
   archiveRecipe,
@@ -29,6 +24,7 @@ import {
   type RecipeDraftFacts,
 } from "@rms/recipe";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
+import { recipeIngredientItems } from "./recipe-ingredient-items.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
@@ -247,49 +243,22 @@ export function createMerchantRecipes(options: {
     names[options.locale] ?? Object.values(names)[0] ?? fallback;
 
   async function facts(tx: Tx, scope: Awaited<ReturnType<typeof scopeFor>>) {
-    const items = await listInventoryRecipeIngredientFacts(tx as never, scope);
+    // DEC-ALLERGEN-DECLARATIONS: each item's current declaration, for its current version and
+    // the current registry only.
+    const {
+      items,
+      registry,
+      declarations,
+      declarationOf,
+      facts: itemFacts,
+    } = await recipeIngredientItems(tx, scope, options.persistence.now());
     const subRecipes = await listPublishedSubRecipes(
       tx as unknown as RecipeAuthoringTransaction,
       scope,
     );
     const stations = await listKitchenStationCapabilities(tx as never, scope);
-    // DEC-ALLERGEN-DECLARATIONS: each item's current declaration, for its current version and
-    // the current registry only.
-    const registry = await currentAllergenRegistry(tx as never, scope);
-    const declarations = new Map(
-      (await listCurrentIngredientDeclarations(tx as never, scope, options.persistence.now()))
-        .filter((d) => d.registryVersionReference === registry?.registryVersionReference)
-        .map((d) => [d.itemReference, d]),
-    );
-    const declarationOf = (item: (typeof items)[number]) => {
-      const d = declarations.get(item.itemReference);
-      return d !== undefined && d.itemVersionReference === item.configurationOperationReference
-        ? d
-        : null;
-    };
     const recipeFacts: RecipeDraftFacts = {
-      items: new Map(
-        items
-          .filter((item) => item.stockTracked)
-          .map((item) => [
-            item.itemReference,
-            {
-              configurationOperationReference: item.configurationOperationReference,
-              dimension: item.dimension,
-              unitCode: item.unitCode,
-              active: item.active,
-              allergenDeclaration: (() => {
-                const d = declarationOf(item);
-                return d === null
-                  ? null
-                  : {
-                      evidenceReference: d.evidenceReference,
-                      allergenReferences: d.allergens.map((a) => a.allergenReference),
-                    };
-              })(),
-            },
-          ]),
-      ),
+      items: itemFacts,
       subRecipes: new Map(subRecipes.map((recipe) => [recipe.recipeReference, recipe])),
       capabilityReferences: new Set(
         stations

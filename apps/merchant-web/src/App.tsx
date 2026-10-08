@@ -4,6 +4,8 @@ import { StoreOptionSetEditPage, StoreOptionSetListPage } from "./StoreOptionSet
 import { createOptionSetClient } from "./store-option-set-page.js";
 import { StoreOptionPricesPage } from "./StoreOptionPricesPage.js";
 import { createOptionPriceClient } from "./store-option-prices-page.js";
+import { StoreOptionRecipesPage } from "./StoreOptionRecipesPage.js";
+import { createOptionRecipeClient } from "./store-option-recipes-page.js";
 import { CurrentStoreCapabilityPage } from "./CurrentStoreCapabilityPage.js";
 import { RefundPaymentPage } from "./RefundPaymentPage.js";
 import { DiningSessionWorkspace } from "./DiningSessionWorkspace.js";
@@ -514,6 +516,19 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             />
           ) : (
             <StoreAvailabilityPage />
+          )
+        }
+      />
+      <Route
+        path="/app/commerce/option-recipes"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreOptionRecipesPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createOptionRecipeClient(state.csrf)}
+            />
+          ) : (
+            <StoreOptionRecipesPage />
           )
         }
       />
