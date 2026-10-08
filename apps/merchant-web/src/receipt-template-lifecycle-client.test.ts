@@ -294,10 +294,16 @@ it("rejects late old-scope response after a new scoped command supersedes its ep
     release = resolve;
   });
   let first = true;
+  let started: (() => void) | undefined;
+  // The old request must be in flight before the newer one starts (not merely one tick later).
+  const inFlight = new Promise<void>((resolve) => {
+    started = resolve;
+  });
   const c = createReceiptTemplateLifecycleClient(
     vi.fn(async () => {
       if (first) {
         first = false;
+        started?.();
         await held;
         if (!old) throw new Error("fixture original");
         return response(receipt(old));
@@ -313,7 +319,7 @@ it("rejects late old-scope response after a new scoped command supersedes its ep
     operationReference: id(81),
   });
   const pending = c.execute(old, { csrf });
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await inFlight;
   await c.execute(newer, { csrf });
   if (!release) throw new Error("fixture release");
   release();
