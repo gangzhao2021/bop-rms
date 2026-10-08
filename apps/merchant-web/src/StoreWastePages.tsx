@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -97,7 +98,7 @@ export function StoreWasteListPage({
           <p>
             Record waste when it happens; it leaves stock at once. Records worth CAD{" "}
             {centsText(view.reviewThresholdMinor)} or more, or without a known cost, are reviewed by
-            a manager. Source as of {view.sourceAsOf}
+            a manager. Source as of <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
         {view.permissions.mayRecord ? (

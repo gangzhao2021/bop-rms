@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   ComplianceCasePageError,
@@ -52,7 +53,8 @@ export function ComplianceCaseList({ view }: { readonly view: ComplianceCaseList
           <p className="bop-eyebrow">CMP-CASE-LIST · Compliance</p>
           <h1>Compliance Cases</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
         {view.permissions.mayCreate ? <button>Create Case</button> : null}
@@ -136,7 +138,7 @@ export function ComplianceCaseDetail({ view }: { readonly view: ComplianceCaseDe
             {label(item.lifecycle)}
           </h1>
           <p>
-            Case {item.caseReference} · source as of {view.sourceAsOf}
+            Case {item.caseReference} · source as of <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>

@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -128,7 +129,8 @@ export function StockCountListPage({
           <h2>Stock counts</h2>
           <p>
             Count one storage location at a time, ideally while the Store is closed. Counters count
-            blind; a manager explains the differences and posts them. Source as of {view.sourceAsOf}
+            blind; a manager explains the differences and posts them. Source as of{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>

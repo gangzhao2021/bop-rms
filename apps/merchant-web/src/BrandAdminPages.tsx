@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { SourceTime } from "./StoreTime.js";
 import { BrandDiscoveryPage } from "./BrandDiscoveryPage.js";
 import { BrandStoreTopologyDraftPanel } from "./BrandStoreTopologyDraftPanel.js";
 import { StatePanel, AppFrame } from "@bop-rms/ui";
@@ -50,7 +51,7 @@ export function Brands({ view }: { readonly view: BrandAdminView }) {
           <p className="bop-eyebrow">{view.screenId} · Organization</p>
           <h1>Brands</h1>
           <p>
-            Source {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source <SourceTime instant={view.sourceAsOf} /> · {view.completeness} · {view.freshness}
           </p>
         </div>
         {view.permissions.mayCreate ? (

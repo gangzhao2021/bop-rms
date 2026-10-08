@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -82,7 +83,9 @@ export function StoreReceiptListPage({
         <div>
           <p className="bop-eyebrow">INV-RECEIPT-LIST</p>
           <h2>Receiving</h2>
-          <p>Goods received at this Store. Source as of {view.sourceAsOf}</p>
+          <p>
+            Goods received at this Store. Source as of <SourceTime instant={view.sourceAsOf} />
+          </p>
         </div>
         {view.permissions.mayReceive ? (
           <Link to="/operations/receiving/new">Receive goods</Link>

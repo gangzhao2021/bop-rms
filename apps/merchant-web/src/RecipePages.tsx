@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -107,7 +108,8 @@ export function RecipeListPage({
           <p>
             Recipes are shared by every Store of the Brand. A recipe is published after an
             independent cost review and food safety review; a SKU uses its recipe to reserve and
-            consume stock and to show kitchen instructions. Source as of {view.sourceAsOf}
+            consume stock and to show kitchen instructions. Source as of{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
         {view.permissions.mayEdit ? (

@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -263,7 +264,9 @@ function Page({
         <div>
           <p className="bop-eyebrow">{view.screenId}</p>
           <h2>Store staff and roles</h2>
-          <p>Source as of {view.sourceAsOf}</p>
+          <p>
+            Source as of <SourceTime instant={view.sourceAsOf} />
+          </p>
         </div>
       </header>
       {view.staff.length === 0 ? (

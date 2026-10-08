@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   CompliancePolicyPageError,
@@ -48,7 +49,8 @@ export function CompliancePolicies({ view }: { readonly view: CompliancePolicyVi
           <p className="bop-eyebrow">{view.screenId} · Compliance Configuration</p>
           <h1>Policies and Regulatory Requirements</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
         {view.permissions.mayCreateRevision ? <button>Create policy revision</button> : null}

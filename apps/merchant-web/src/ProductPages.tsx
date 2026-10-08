@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -101,7 +102,8 @@ export function ProductListPage({
           <h2>Products</h2>
           <p>
             Products and their sizes are shared by every Store of the Brand. A size is what a
-            customer orders; prices, menus and recipes refer to it. Source as of {view.sourceAsOf}
+            customer orders; prices, menus and recipes refer to it. Source as of{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
         {view.permissions.mayCreate ? (

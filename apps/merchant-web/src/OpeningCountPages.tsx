@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -447,7 +448,7 @@ export function OpeningCountPage({
           <h2>Opening stock count</h2>
           <p>
             Count what the Store holds before it opens. Posting turns the count into the Store's
-            opening stock, once. Source as of {view.sourceAsOf}
+            opening stock, once. Source as of <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>

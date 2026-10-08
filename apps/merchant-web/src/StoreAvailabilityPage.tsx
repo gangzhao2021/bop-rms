@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import {
@@ -188,7 +189,8 @@ export function StoreAvailabilityPage({
           <h2>Item availability</h2>
           <p>
             Customers can order an item on a published menu only where it is offered and not sold
-            out; ingredient stock is checked again when they order. Source as of {view.sourceAsOf}
+            out; ingredient stock is checked again when they order. Source as of{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>

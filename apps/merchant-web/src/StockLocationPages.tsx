@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { newOperationReference } from "./RoleAdministrationPages.js";
 import {
@@ -376,7 +377,9 @@ export function StockLocationListPage({
         <div>
           <p className="bop-eyebrow">INV-LOCATION-LIST</p>
           <h2>Stock locations</h2>
-          <p>Where this Store keeps its stock. Source as of {view.sourceAsOf}</p>
+          <p>
+            Where this Store keeps its stock. Source as of <SourceTime instant={view.sourceAsOf} />
+          </p>
         </div>
       </header>
       {view.needsSetup ? (

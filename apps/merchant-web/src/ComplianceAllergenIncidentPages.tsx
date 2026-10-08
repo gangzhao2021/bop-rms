@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   ComplianceAllergenIncidentPageError,
@@ -56,7 +57,8 @@ export function ComplianceAllergenReview({
           <p className="bop-eyebrow">CMP-ALLERGEN-REVIEW · Food Safety</p>
           <h1>Allergen Control Review</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
       </header>
@@ -155,7 +157,8 @@ export function ComplianceIncident({ view }: { readonly view: ComplianceIncident
           <p className="bop-eyebrow">CMP-INCIDENT · Restricted Food Safety</p>
           <h1>Food Safety Incident</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
       </header>

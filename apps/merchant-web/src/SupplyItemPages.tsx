@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -148,7 +149,10 @@ export function SupplyItemListPage({
         <div>
           <p className="bop-eyebrow">INV-ITEM-LIST</p>
           <h2>Inventory items</h2>
-          <p>Ingredients and supplies the Brand stocks. Source as of {view.sourceAsOf}</p>
+          <p>
+            Ingredients and supplies the Brand stocks. Source as of{" "}
+            <SourceTime instant={view.sourceAsOf} />
+          </p>
         </div>
         {view.permissions.mayCreate ? <Link to="/app/supply/items/new">Create item</Link> : null}
       </header>

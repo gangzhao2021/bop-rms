@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import {
@@ -346,7 +347,9 @@ function Screen({
         <div>
           <p className="bop-eyebrow">{view.screenId}</p>
           <h2>Role and permission governance</h2>
-          <p>Source as of {view.sourceAsOf}</p>
+          <p>
+            Source as of <SourceTime instant={view.sourceAsOf} />
+          </p>
           {!editor && view.mayManage ? (
             <p>
               To create a custom role, open a role and duplicate it, then adjust its permissions.

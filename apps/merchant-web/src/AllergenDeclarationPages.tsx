@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -126,7 +127,7 @@ export function AllergenListPage({
             Every ingredient used in a recipe needs an allergen declaration taken from its supplier
             specification, label or manufacturer statement. Recipes carry these declarations; a
             recipe's food safety review approves them, and menus disclose them to customers. Source
-            as of {view.sourceAsOf}
+            as of <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>

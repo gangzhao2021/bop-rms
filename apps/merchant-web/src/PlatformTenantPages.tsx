@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -96,7 +97,9 @@ export function PlatformTenantListPage({
         <div>
           <p className="bop-eyebrow">PLT-TENANT-LIST</p>
           <h2>Tenant and lifecycle operations</h2>
-          <p>Source as of {state.view.sourceAsOf}</p>
+          <p>
+            Source as of <SourceTime instant={state.view.sourceAsOf} />
+          </p>
         </div>
         <button disabled={!state.view.mayStartOnboarding}>Start approved onboarding</button>
       </header>

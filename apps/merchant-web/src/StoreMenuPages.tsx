@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -95,7 +96,7 @@ export function StoreMenuListPage({
           <p>
             A menu lists what customers can order, by section. Changes are reviewed by someone else
             before they are published; a published menu is changed through a revision. Source as of{" "}
-            {view.sourceAsOf}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>

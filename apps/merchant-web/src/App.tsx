@@ -15,6 +15,7 @@ import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router";
 import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
+import { StoreTimeZoneContext } from "./StoreTime.js";
 import { MerchantShell } from "./MerchantShell.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { PickupQueuePage } from "./PickupPages.js";
@@ -1102,15 +1103,21 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route path="*" element={<Navigate replace to="/app" />} />
     </Routes>
   );
-  return state.kind === "Ready" && usesWorkspaceLayout(pathname) ? (
-    <WorkspaceLayout
-      items={state.workspace.navigation}
-      path={pathname}
-      storeLabel={state.workspace.selectedScope.storeLabel}
+  return (
+    <StoreTimeZoneContext.Provider
+      value={state.kind === "Ready" ? state.workspace.selectedScope.timeZone : undefined}
     >
-      {routes}
-    </WorkspaceLayout>
-  ) : (
-    routes
+      {state.kind === "Ready" && usesWorkspaceLayout(pathname) ? (
+        <WorkspaceLayout
+          items={state.workspace.navigation}
+          path={pathname}
+          storeLabel={state.workspace.selectedScope.storeLabel}
+        >
+          {routes}
+        </WorkspaceLayout>
+      ) : (
+        routes
+      )}
+    </StoreTimeZoneContext.Provider>
   );
 }

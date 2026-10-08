@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./RoleAdministrationPages.js";
@@ -143,7 +144,7 @@ export function StorePriceListPage({
           <p>
             A price book holds a price for each size. A published book never changes: to change
             prices, start a new book (usually a copy of the current one), have someone else publish
-            it, then use it at this Store. Source as of {view.sourceAsOf}
+            it, then use it at this Store. Source as of <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>
