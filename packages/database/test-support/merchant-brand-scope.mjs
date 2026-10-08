@@ -83,6 +83,9 @@ export function syntheticMerchantBrandScope({
     return {
       context,
       storeContext,
+      // The selected Store's decision: any of the Actor's Store or Brand grants there.
+      allowedAtSelectedStore: async (action) =>
+        (storeGrants[current] ?? []).includes(action) || (grants[current] ?? []).includes(action),
       authorizeStoreAction: async (action) => {
         await tx.query("SELECT set_config('bop.store_id',$1,true)", [storeReference]);
         return decide(action, (storeGrants[current] ?? []).includes(action), "Store");

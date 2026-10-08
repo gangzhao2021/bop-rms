@@ -5,6 +5,7 @@ import { createOptionSetClient } from "./store-option-set-page.js";
 import { StoreOptionPricesPage } from "./StoreOptionPricesPage.js";
 import { createOptionPriceClient } from "./store-option-prices-page.js";
 import { StoreOptionRecipesPage } from "./StoreOptionRecipesPage.js";
+import { StoreTaxReviewPage, createTaxReviewClient } from "./StoreTaxReviewPage.js";
 import { createOptionRecipeClient } from "./store-option-recipes-page.js";
 import { CurrentStoreCapabilityPage } from "./CurrentStoreCapabilityPage.js";
 import { RefundPaymentPage } from "./RefundPaymentPage.js";
@@ -516,6 +517,19 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             />
           ) : (
             <StoreAvailabilityPage />
+          )
+        }
+      />
+      <Route
+        path="/app/commerce/tax-review"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreTaxReviewPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createTaxReviewClient(state.csrf)}
+            />
+          ) : (
+            <StoreTaxReviewPage />
           )
         }
       />

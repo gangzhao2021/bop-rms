@@ -209,6 +209,7 @@ import {
   MerchantOptionPriceError,
   type createMerchantOptionPrices,
 } from "./merchant-option-prices.js";
+import { MerchantStoreTaxError, type createMerchantStoreTax } from "./merchant-store-tax.js";
 import {
   MerchantOptionRecipeError,
   type createMerchantOptionRecipes,
@@ -312,6 +313,7 @@ const merchantNavigation = Object.freeze({
   "PRICE-BOOK-LIST": ["/app/commerce/pricing", "pricing.price_book.read"],
   "PRICE-OPTION-LIST": ["/app/commerce/option-prices", "pricing.price_book.read"],
   "RECIPE-OPTION-LIST": ["/app/commerce/option-recipes", "recipe.read"],
+  "TAX-STORE-REVIEW": ["/app/commerce/tax-review", "pricing.tax_config.read"],
   "CMP-ALLERGEN-REVIEW": ["/app/compliance/allergens", "catalog.allergen.read"],
   "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
@@ -483,6 +485,7 @@ export interface MerchantBffRouterOptions {
   readonly optionSets?: ReturnType<typeof createMerchantOptionSets>;
   readonly optionPrices?: ReturnType<typeof createMerchantOptionPrices>;
   readonly optionRecipes?: ReturnType<typeof createMerchantOptionRecipes>;
+  readonly storeTax?: ReturnType<typeof createMerchantStoreTax>;
   readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
   readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
@@ -5542,6 +5545,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     NotRevisable: 409,
     ReviewBlocked: 409,
     OptionPriceMissing: 409,
+    TaxNotCovered: 409,
     OptionRecipeMissing: 409,
     ApprovalRequired: 403,
     Lifecycle: 409,
@@ -5802,6 +5806,37 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         .catch((error: unknown) => optionPriceFailure(response, error));
     },
   );
+
+  // WP-2423 8.7: TAX-STORE-REVIEW (read only) for the selected Store.
+  router.post("/commerce/tax-review/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as Record<string, unknown> | undefined;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      body === null ||
+      Object.keys(body).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeTax) {
+      response.status(503).json({ error: "tax_review_unavailable" });
+      return;
+    }
+    void options.storeTax
+      .query({ sessionCookie, csrf })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => {
+        if (error instanceof MerchantStoreTaxError)
+          response.status(403).json({ error: error.code });
+        else denied(response);
+      });
+  });
 
   // WP-2423 slice 4.4: RECIPE-OPTION-LIST for the selected Store's Brand.
   const optionRecipeStatus = {

@@ -7,7 +7,11 @@ import {
   type MenuAggregate,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
-import { createPostgresCurrentOptionPriceStore, type CurrencyMetadataSnapshot } from "@rms/pricing";
+import {
+  createPostgresCurrentOptionPriceStore,
+  listStoreTaxClassifications,
+  type CurrencyMetadataSnapshot,
+} from "@rms/pricing";
 import { optionRecipeCovered, type RecipeAuthoringTransaction } from "@rms/recipe";
 
 /** The pricing channel customer Quotes use (customer-menu-store-facts, pilot Quote). */
@@ -151,6 +155,48 @@ export async function menuOptionsWithoutRecipes(
         )
           missing.push({ skuReference, optionReference: String(option.optionReference) });
     }
+  }
+  return missing;
+}
+
+/**
+ * WP-2423 8.7: the menu's items whose product tax class the Store's current tax configuration does
+ * not tax for one of the menu's order types (or that have no tax class). The Quote could not tax
+ * such an item, so the menu is not submitted for review. Reads only; caller owns the transaction.
+ */
+export async function menuItemsWithoutTax(
+  tx: ProductLifecycleTransaction,
+  input: {
+    readonly owner: { readonly brandReference: string; readonly storeReference: string };
+    readonly observedAt: string;
+    readonly menu: Pick<MenuAggregate["draft"], "sections" | "orderTypeCodes">;
+  },
+): Promise<readonly string[]> {
+  const { owner, observedAt, menu } = input;
+  const orderTypes = menu.orderTypeCodes.flatMap((code) =>
+    code === "PICKUP" ? ["Pickup"] : code === "DINE_IN" ? ["DineIn"] : [],
+  );
+  const covered = await listStoreTaxClassifications(tx as never, owner, observedAt);
+  const skus = await listBrandSkuChoices(tx as never, owner);
+  const missing: string[] = [];
+  const placed = new Set(
+    menu.sections.flatMap((section) =>
+      section.placements.map((placement) => String(placement.sellableReference)),
+    ),
+  );
+  for (const skuReference of placed) {
+    const sku = skus.find((item) => item.skuReference === skuReference);
+    if (sku === undefined) continue;
+    const product = await loadBrandProduct(
+      tx as never,
+      { brandReference: owner.brandReference },
+      sku.productReference,
+    );
+    const taxClass = product?.draft.taxClassificationReference ?? null;
+    const rules =
+      covered.find((choice) => choice.taxClassificationReference === taxClass)?.rules ?? [];
+    if (taxClass === null || orderTypes.some((type) => !rules.some((r) => r.orderType === type)))
+      missing.push(skuReference);
   }
   return missing;
 }

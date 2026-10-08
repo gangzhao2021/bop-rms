@@ -31,6 +31,8 @@ const copy: Record<MenuErrorCode | "Loading", string> = {
     "The review could not be prepared. Every item needs a published recipe whose ingredients all have current allergen declarations (see Allergens and Recipes), and the Brand allergen list must be approved.",
   OptionPriceMissing:
     "Some options on this menu's items have no published price, so customers could not order them. Set and publish them under Option prices, then submit again.",
+  TaxNotCovered:
+    "Some items on this menu have no tax rate for one of its order types at this Store (see Tax review), so their price could not be quoted. Fix the product's tax class or the Store's tax configuration, then submit again.",
   OptionRecipeMissing:
     "Some options on this menu's items have no published recipe change (what they do to stock, kitchen and allergens). Set, review and publish them under Option recipes, then submit again.",
   ApprovalRequired:

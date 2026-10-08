@@ -44,6 +44,7 @@ export interface MerchantNavigationItem {
     | "PRICE-BOOK-LIST"
     | "PRICE-OPTION-LIST"
     | "RECIPE-OPTION-LIST"
+    | "TAX-STORE-REVIEW"
     | "CMP-ALLERGEN-REVIEW"
     | "INV-COUNT-LIST"
     | "INV-WASTE-RECORD";
@@ -85,6 +86,7 @@ const NAVIGATION = Object.freeze({
   "PRICE-BOOK-LIST": ["/app/commerce/pricing", "pricing.price_book.read"],
   "PRICE-OPTION-LIST": ["/app/commerce/option-prices", "pricing.price_book.read"],
   "RECIPE-OPTION-LIST": ["/app/commerce/option-recipes", "recipe.read"],
+  "TAX-STORE-REVIEW": ["/app/commerce/tax-review", "pricing.tax_config.read"],
   "CMP-ALLERGEN-REVIEW": ["/app/compliance/allergens", "catalog.allergen.read"],
   "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],

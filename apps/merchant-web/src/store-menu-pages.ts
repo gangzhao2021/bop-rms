@@ -7,6 +7,7 @@ export type MenuErrorCode =
   | "NotRevisable"
   | "ReviewBlocked"
   | "OptionPriceMissing"
+  | "TaxNotCovered"
   | "OptionRecipeMissing"
   | "ApprovalRequired"
   | "Lifecycle"
@@ -196,6 +197,7 @@ const codes = new Set<MenuErrorCode>([
   "NotRevisable",
   "ReviewBlocked",
   "OptionPriceMissing",
+  "TaxNotCovered",
   "OptionRecipeMissing",
   "ApprovalRequired",
   "Lifecycle",

@@ -23,7 +23,11 @@ import {
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { createMerchantMenuPublicationCommand } from "./merchant-menu-publication-command.js";
-import { menuOptionsWithoutRecipes, unpricedMenuOptions } from "./menu-option-gates.js";
+import {
+  menuItemsWithoutTax,
+  menuOptionsWithoutRecipes,
+  unpricedMenuOptions,
+} from "./menu-option-gates.js";
 import { localBoundary } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -47,6 +51,7 @@ export class MerchantMenuError extends Error {
       | "NotRevisable"
       | "ReviewBlocked"
       | "OptionPriceMissing"
+      | "TaxNotCovered"
       | "OptionRecipeMissing"
       | "ApprovalRequired"
       | "Lifecycle"
@@ -469,6 +474,17 @@ export function createMerchantMenus(options: {
             const registry = await currentAllergenRegistry(ptx(tx) as never, s.owner);
             if (loaded === null) return fail("NotFound");
             if (registry === null) return fail("ReviewBlocked");
+            if (
+              (
+                await menuItemsWithoutTax(ptx(tx) as never, {
+                  owner: s.owner,
+                  observedAt: options.persistence.now(),
+                  menu: loaded.aggregate.draft,
+                })
+              ).length > 0
+            )
+              fail("TaxNotCovered");
+            await brandScope(tx, s.owner.brandReference);
             if ((await unpricedOptions(tx, s, loaded.aggregate)).length > 0)
               fail("OptionPriceMissing");
             if (

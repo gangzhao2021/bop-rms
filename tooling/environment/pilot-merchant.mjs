@@ -55,6 +55,7 @@ import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-se
 import { logUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
 import { createMerchantOptionRecipes } from "../../apps/api/dist/merchant-option-recipes.js";
+import { createMerchantStoreTax } from "../../apps/api/dist/merchant-store-tax.js";
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
@@ -232,6 +233,12 @@ export async function createInternalMerchant(
           label: "Option prices",
           href: "/app/commerce/option-prices",
           permission: "pricing.price_book.read",
+        },
+        {
+          screenId: "TAX-STORE-REVIEW",
+          label: "Tax review",
+          href: "/app/commerce/tax-review",
+          permission: "pricing.tax_config.read",
         },
         {
           screenId: "CMP-ALLERGEN-REVIEW",
@@ -582,6 +589,11 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en-CA",
   });
+  const storeTax = createMerchantStoreTax({
+    persistence,
+    authentication: service,
+    locale: "en-CA",
+  });
   const optionRecipes = createMerchantOptionRecipes({
     persistence,
     authentication: service,
@@ -737,6 +749,7 @@ export async function createInternalMerchant(
       optionSets,
       optionPrices,
       optionRecipes,
+      storeTax,
       stockCounts,
       storeWaste,
       pickupQuery,

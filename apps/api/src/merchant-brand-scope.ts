@@ -258,6 +258,13 @@ export function createMerchantBrandScope(
         const decision = await selected.authorizeAction(action);
         return decision?.scopeKind === "Store" && decision.action === action ? decision : null;
       },
+      /**
+       * WP-2423 8.7: whether the Actor may take the action at the selected Store, by any of their
+       * grants there (the same decision the workspace navigation uses) — for the Store's own facts.
+       */
+      async allowedAtSelectedStore(action: string) {
+        return (await selected.authorizeAction(action))?.effect === "Allow";
+      },
       authorizeActionsWithValidity,
       async authorizeActions(actions: readonly string[]) {
         return (await authorizeActionsWithValidity(actions))?.decisions ?? null;
