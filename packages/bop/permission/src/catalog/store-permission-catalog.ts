@@ -11,8 +11,10 @@
  * the Brand Menu Manager template (second person for menu and price approval).
  * v5 (2026-10-08): Brand Owner and Menu Manager hold the Publishing review actions Menu publication
  * checks (create a review draft, submit it, approve it, publish a release).
+ * v6 (2026-10-08): allergen registry and ingredient declaration actions (DEC-ALLERGEN-DECLARATIONS);
+ * recipe roles may read them.
  */
-export const storePermissionCatalogVersion = 5 as const;
+export const storePermissionCatalogVersion = 6 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -139,6 +141,9 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["catalog.menu.submit", "Submit a Menu version for review", "Medium"],
     ["catalog.menu.approve", "Approve a submitted Menu version", "High"],
     ["catalog.menu.archive", "Archive a Menu release", "High"],
+    ["catalog.allergen.read", "Read the allergen registry and ingredient declarations", "Low"],
+    ["catalog.allergen.declare", "Record ingredient allergen declarations", "Medium"],
+    ["catalog.allergen_registry.manage", "Approve the Brand allergen registry", "High"],
     ["catalog.content_registry.read", "Read registered product content", "Low"],
     ["catalog.content_registry.manage", "Register product content", "Medium"],
   ]),
@@ -536,12 +541,14 @@ export const brandRoleTemplates: Readonly<Record<BrandRoleTemplateCode, readonly
       "recipe.read",
       "recipe.update",
       "inventory.item.read",
+      "catalog.allergen.read",
     ]),
     "recipe-reviewer": Object.freeze([
       "merchant.access",
       "recipe.read",
       "recipe.approve",
       "inventory.item.read",
+      "catalog.allergen.read",
     ]),
     "menu-manager": Object.freeze(
       pick([

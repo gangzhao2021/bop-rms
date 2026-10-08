@@ -19,6 +19,7 @@ import {
   type RecipeEditorView,
   type RecipeErrorCode,
   type RecipeListView,
+  allergenText,
 } from "./recipe-pages.js";
 
 /** WP-2423 / DEC-RECIPE-AUTHORING: Brand recipes — drafts, independent review, publication, SKUs. */
@@ -28,6 +29,8 @@ const copy: Record<RecipeErrorCode | "Loading", string> = {
   NotFound: "This recipe does not exist for the Brand.",
   Conflict: "The recipe changed or this step was already recorded. Refresh and check again.",
   CodeTaken: "Another recipe of the Brand already uses this code.",
+  AllergenUndeclared:
+    "The highlighted ingredient has no current allergen declaration in this version. Declare it under Allergens, then save the recipe again (its reviews start over).",
   ReviewRequired:
     "Publishing needs an approved Cost review and an approved Food safety review of exactly this version, by two different reviewers who are not the author and still hold reviewer permission.",
   ReviewerNotIndependent:
@@ -445,6 +448,19 @@ function DraftForm({
                     ))}
               </select>
             </label>
+            {item.kind === "InventoryItem" && item.sourceReference ? (
+              <p>
+                Allergens:{" "}
+                {(() => {
+                  const status = items.get(item.sourceReference)?.allergens;
+                  if (!status || status.status === "Missing")
+                    return "not declared — declare under Allergens before publishing";
+                  if (status.status === "Outdated")
+                    return "declaration out of date — declare again under Allergens";
+                  return allergenText(status);
+                })()}
+              </p>
+            ) : null}
             <label>
               Quantity ({unit ?? "unit"})
               <input
@@ -568,6 +584,30 @@ function DraftForm({
   );
 }
 
+/** WP-2423 / DEC-ALLERGEN-DECLARATIONS: a saved version's allergens for one ingredient line. */
+function lineAllergens(recipe: RecipeDetail, line: number): string {
+  const entry = recipe.ingredientAllergens?.find((item) => item.line === line);
+  if (!entry) return "—";
+  if (entry.kind === "SubRecipe") return "From the sub-recipe";
+  if (!entry.declared) return "Not declared";
+  return allergenText(entry) + (entry.current ? "" : " (declaration since replaced)");
+}
+function AllergenSummary({ recipe }: { readonly recipe: RecipeDetail }) {
+  const lines = (recipe.ingredientAllergens ?? []).filter((line) => line.kind === "InventoryItem");
+  if (!lines.length) return null;
+  const contains = [...new Set(lines.flatMap((line) => line.contains))].sort();
+  const mayContain = [...new Set(lines.flatMap((line) => line.mayContain))]
+    .filter((name) => !contains.includes(name))
+    .sort();
+  const undeclared = lines.filter((line) => !line.declared).length;
+  return (
+    <p>
+      <strong>Allergens from ingredients:</strong> {allergenText({ contains, mayContain })}
+      {undeclared ? ` · ${undeclared} ingredient(s) not declared` : ""}. Sub-recipes add their own.
+    </p>
+  );
+}
+
 function ReadOnlyRecipe({
   recipe,
   choices,
@@ -588,6 +628,7 @@ function ReadOnlyRecipe({
             <th>Quantity</th>
             <th>Loss %</th>
             <th>Standard cost (CAD per unit)</th>
+            <th>Allergens (this version)</th>
           </tr>
         </thead>
         <tbody>
@@ -610,10 +651,12 @@ function ReadOnlyRecipe({
                   ? centsToDollarsText(item.unitCostCents ?? "0")
                   : "—"}
               </td>
+              <td>{lineAllergens(recipe, index + 1)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      <AllergenSummary recipe={recipe} />
       <h3>Kitchen steps</h3>
       <ol>
         {recipe.draft.steps.map((step, index) => (

@@ -48,6 +48,7 @@ import { createMerchantStoreReceipts } from "../../apps/api/dist/merchant-store-
 import { createMerchantRecipes } from "../../apps/api/dist/merchant-recipes.js";
 import { createMerchantProducts } from "../../apps/api/dist/merchant-products.js";
 import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
+import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.js";
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
@@ -188,6 +189,12 @@ export async function createInternalMerchant(
           label: "Prices",
           href: "/app/commerce/pricing",
           permission: "pricing.price_book.read",
+        },
+        {
+          screenId: "CMP-ALLERGEN-REVIEW",
+          label: "Allergens",
+          href: "/app/compliance/allergens",
+          permission: "catalog.allergen.read",
         },
         {
           screenId: "INV-COUNT-LIST",
@@ -507,6 +514,12 @@ export async function createInternalMerchant(
           currencyMetadata: await loadPricingCurrencyMetadata(),
           locale: "en-CA",
         });
+  const allergens = createMerchantAllergens({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en-CA",
+  });
   const stockCounts = createMerchantStockCounts({
     persistence,
     authentication: service,
@@ -637,6 +650,7 @@ export async function createInternalMerchant(
       recipes,
       products,
       ...(prices === undefined ? {} : { prices }),
+      allergens,
       stockCounts,
       storeWaste,
       pickupQuery,

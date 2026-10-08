@@ -38,7 +38,11 @@ const select = `SELECT jsonb_build_object(
      WHERE a.brand_id=r.brand_id AND a.evidence_id=ANY($3::uuid[]) AND a.registry_version_id<>r.registry_version_id)
    AND NOT EXISTS (SELECT 1 FROM rms_catalog.allergen_source_evidence e
      WHERE e.brand_id=r.brand_id AND e.evidence_id=ANY($3::uuid[]) AND
-     (date_trunc('milliseconds',e.reviewed_at)<>e.reviewed_at OR date_trunc('milliseconds',e.valid_until)<>e.valid_until))
+     (date_trunc('milliseconds',e.reviewed_at)<>e.reviewed_at OR date_trunc('milliseconds',e.valid_until)<>e.valid_until
+      -- DEC-ALLERGEN-DECLARATIONS: a declaration speaks only for its own registry version.
+      OR (e.registry_version_id IS NOT NULL AND e.registry_version_id<>r.registry_version_id)
+      OR (e.registry_version_id IS NULL AND NOT EXISTS (SELECT 1 FROM rms_catalog.allergen_source_assertion a
+        WHERE a.evidence_id=e.evidence_id AND a.brand_id=e.brand_id))))
   ) AS coherent
 FROM rms_catalog.allergen_registry_version r WHERE r.brand_id=$1 AND r.registry_version_id=$2`;
 const fail = (): never => {

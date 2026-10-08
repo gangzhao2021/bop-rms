@@ -21,7 +21,8 @@ export type RecipeAuthoringErrorCode =
   | "RECIPE_AUTHORING_REVIEW_REQUIRED"
   | "RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT"
   | "RECIPE_AUTHORING_LIFECYCLE"
-  | "RECIPE_AUTHORING_IN_USE";
+  | "RECIPE_AUTHORING_IN_USE"
+  | "RECIPE_AUTHORING_ALLERGEN_UNDECLARED";
 export class RecipeAuthoringError extends Error {
   constructor(
     readonly code: RecipeAuthoringErrorCode,
@@ -202,6 +203,14 @@ export interface RecipeDraftFacts {
       readonly dimension: string;
       readonly unitCode: string;
       readonly active: boolean;
+      /**
+       * WP-2423 / DEC-ALLERGEN-DECLARATIONS: the item's current, valid allergen declaration for
+       * this item version (its allergens may be none), or null when the item has none.
+       */
+      readonly allergenDeclaration?: {
+        readonly evidenceReference: string;
+        readonly allergenReferences: readonly string[];
+      } | null;
     }
   >;
   readonly subRecipes: ReadonlyMap<
@@ -213,6 +222,24 @@ export interface RecipeDraftFacts {
     }
   >;
   readonly capabilityReferences: ReadonlySet<string>;
+}
+/** The requirement's allergens from the ingredient declaration (empty and undeclared without one). */
+function allergensOf(
+  declaration: {
+    readonly evidenceReference: string;
+    readonly allergenReferences: readonly string[];
+  } | null,
+) {
+  if (declaration === null) return { allergens: [] };
+  const evidence = parseRecipeReference(declaration.evidenceReference);
+  return {
+    allergens: [...new Set(declaration.allergenReferences)].sort().map((allergen) => ({
+      allergenReference: parseRecipeReference(allergen),
+      evidenceReference: evidence,
+      verified: true,
+    })),
+    allergenDeclarationReference: evidence,
+  };
 }
 const stepCode = (reference: string) =>
   "CAP-" + reference.replaceAll("-", "").slice(-12).toUpperCase();
@@ -264,7 +291,7 @@ export function buildRecipeDraftVersion(input: {
         // Cents per base unit with 4 decimals, applied to microunits: cost = q·c / (10^6·10^4).
         unitCostMinorNumerator: cost.toString(),
         unitCostDenominator: "10000000000",
-        allergens: [],
+        ...allergensOf(item.allergenDeclaration ?? null),
       };
     }
     const sub = facts.subRecipes.get(ingredient.sourceReference);

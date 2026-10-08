@@ -198,6 +198,7 @@ import {
 import { MerchantRecipeError, type createMerchantRecipes } from "./merchant-recipes.js";
 import { MerchantProductError, type createMerchantProducts } from "./merchant-products.js";
 import { MerchantPriceError, type createMerchantPrices } from "./merchant-prices.js";
+import { MerchantAllergenError, type createMerchantAllergens } from "./merchant-allergens.js";
 import {
   MerchantStockCountError,
   type createMerchantStockCounts,
@@ -292,6 +293,7 @@ const merchantNavigation = Object.freeze({
   "INV-RECEIPT-LIST": ["/operations/receiving", "inventory.receipt.read"],
   "RECIPE-LIST": ["/app/commerce/recipes", "recipe.read"],
   "PRICE-BOOK-LIST": ["/app/commerce/pricing", "pricing.price_book.read"],
+  "CMP-ALLERGEN-REVIEW": ["/app/compliance/allergens", "catalog.allergen.read"],
   "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
 } as const);
@@ -456,6 +458,7 @@ export interface MerchantBffRouterOptions {
   readonly recipes?: ReturnType<typeof createMerchantRecipes>;
   readonly products?: ReturnType<typeof createMerchantProducts>;
   readonly prices?: ReturnType<typeof createMerchantPrices>;
+  readonly allergens?: ReturnType<typeof createMerchantAllergens>;
   readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
   readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
@@ -5210,6 +5213,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     ReviewerNotIndependent: 403,
     Lifecycle: 409,
     InUse: 409,
+    AllergenUndeclared: 409,
     LineInvalid: 422,
     Invalid: 400,
   } as const;
@@ -5414,6 +5418,73 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .command({ sessionCookie, csrf, body: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => priceFailure(response, error));
+  });
+
+  // WP-2423 / DEC-ALLERGEN-DECLARATIONS: CMP-ALLERGEN-REVIEW reads and commands.
+  const allergenStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    RegistryMissing: 409,
+    Invalid: 400,
+  } as const;
+  const allergenFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantAllergenError)) {
+      denied(response);
+      return;
+    }
+    response.status(allergenStatus[error.code]).json({ error: error.code });
+  };
+  router.post("/compliance/allergens/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { itemReference?: unknown } | undefined;
+    const itemReference = body?.itemReference ?? null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).join(",") !== "itemReference" ||
+      (itemReference !== null &&
+        (typeof itemReference !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            itemReference,
+          )))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.allergens) {
+      response.status(503).json({ error: "allergens_unavailable" });
+      return;
+    }
+    void options.allergens
+      .query({ sessionCookie, csrf, itemReference: itemReference as string | null })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => allergenFailure(response, error));
+  });
+  router.post("/compliance/allergens/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.allergens) {
+      response.status(503).json({ error: "allergens_unavailable" });
+      return;
+    }
+    void options.allergens
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => allergenFailure(response, error));
   });
 
   // WP-2423 / DEC-INV-STOCK-COUNT: INV-COUNT-LIST / INV-COUNT-WORKBENCH.

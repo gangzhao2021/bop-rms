@@ -30,6 +30,11 @@ import {
   recordRecipeReview,
   saveRecipeDraft,
 } from "../../rms/recipe/src/index.ts";
+import {
+  createAllergenRegistryVersion,
+  listCurrentIngredientDeclarations,
+  recordIngredientAllergenDeclaration,
+} from "../../rms/catalog/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { kilogram, litre, syntheticInventoryItems } from "../test-support/inventory-items.mjs";
 import { ensureSyntheticStockPlace } from "../test-support/stock-place.mjs";
@@ -243,8 +248,59 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
         "GRANT INSERT ON platform_eventing.outbox_event TO ROLE_",
       ])
         await admin.query(sql.replaceAll("ROLE_", role));
+      // DEC-ALLERGEN-DECLARATIONS: the Brand allergen list and both ingredients' declarations
+      // (milk contains milk; the beans contain none) exist before recipes are written.
+      const registryAt = clock();
+      const milkAllergen = id(60);
+      const registry = id(61);
+      await setupTx((t) =>
+        createAllergenRegistryVersion(t, scope, {
+          registryVersionReference: registry,
+          jurisdictionCode: "CA",
+          policyDocument: "TEST-ONLY synthetic allergen list",
+          entries: [
+            { allergenReference: milkAllergen, code: "MILK", localizedNames: { "en-CA": "Milk" } },
+            { allergenReference: id(62), code: "SOY", localizedNames: { "en-CA": "Soy" } },
+          ],
+          actorReference: owner,
+          at: registryAt,
+          auditReference: next(),
+        }),
+      );
+      const itemVersions = new Map(
+        (await setupTx((t) => listInventoryRecipeIngredientFacts(t, scope))).map((item) => [
+          item.itemReference,
+          item.configurationOperationReference,
+        ]),
+      );
+      for (const [item, contains] of [
+        [milk, [milkAllergen]],
+        [beans, []],
+      ])
+        await setupTx((t) =>
+          recordIngredientAllergenDeclaration(t, scope, {
+            evidenceReference: next(),
+            itemReference: item,
+            itemVersionReference: itemVersions.get(item),
+            registryVersionReference: registry,
+            allergens: contains.map((allergenReference) => ({
+              allergenReference,
+              classification: "Contains",
+            })),
+            sourceKind: "SupplierSpecification",
+            documentReference: "TEST-ONLY synthetic specification",
+            note: null,
+            validUntil: "2027-10-07T00:00:00.000Z",
+            actorReference: owner,
+            at: clock(),
+            auditReference: next(),
+          }),
+        );
       const facts = async () => {
         const inventory = await tx((t) => listInventoryRecipeIngredientFacts(t, scope));
+        const declarations = await setupTx((t) =>
+          listCurrentIngredientDeclarations(t, scope, "2026-10-07T23:00:00.000Z"),
+        );
         const stations = await tx((t) => listKitchenStationCapabilities(t, scope));
         const subRecipes = await tx((t) => listPublishedSubRecipes(t, scope));
         return {
@@ -258,6 +314,19 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
                   dimension: item.dimension,
                   unitCode: item.unitCode,
                   active: item.active,
+                  allergenDeclaration: (() => {
+                    const d = declarations.find(
+                      (x) =>
+                        x.itemReference === item.itemReference &&
+                        x.itemVersionReference === item.configurationOperationReference,
+                    );
+                    return d === undefined
+                      ? null
+                      : {
+                          evidenceReference: d.evidenceReference,
+                          allergenReferences: d.allergens.map((a) => a.allergenReference),
+                        };
+                  })(),
                 },
               ]),
             ),

@@ -24,6 +24,12 @@ export interface IngredientRequirement {
   readonly unitCostMinorNumerator: string;
   readonly unitCostDenominator: string;
   readonly allergens: readonly AllergenEvidence[];
+  /**
+   * WP-2423 / DEC-ALLERGEN-DECLARATIONS: the ingredient allergen declaration `allergens` came from.
+   * Present on Inventory Item requirements saved since declarations exist; absent otherwise. A
+   * declaration with no allergens states the ingredient contains none of its registry's allergens.
+   */
+  readonly allergenDeclarationReference?: RecipeReference;
 }
 export interface PreparationStep {
   readonly stepReference: RecipeReference;
@@ -141,7 +147,12 @@ function allergen(value: unknown): AllergenEvidence {
   });
 }
 function ingredient(value: unknown): IngredientRequirement {
+  const declared =
+    value !== null &&
+    typeof value === "object" &&
+    Object.hasOwn(value, "allergenDeclarationReference");
   const raw = plain(value, [
+    ...(declared ? ["allergenDeclarationReference"] : []),
     "requirementReference",
     "sourceKind",
     "sourceReference",
@@ -167,6 +178,15 @@ function ingredient(value: unknown): IngredientRequirement {
   const allergens = raw.allergens.map(allergen);
   if (new Set(allergens.map((item) => item.allergenReference)).size !== allergens.length)
     return fail("RECIPE_INPUT_INVALID");
+  // A declared requirement takes every allergen from that one ingredient declaration.
+  if (
+    declared &&
+    (raw.sourceKind !== "InventoryItem" ||
+      allergens.some(
+        (item) => item.evidenceReference !== raw.allergenDeclarationReference || !item.verified,
+      ))
+  )
+    return fail("RECIPE_INPUT_INVALID");
   return Object.freeze({
     requirementReference: parseRecipeReference(raw.requirementReference),
     sourceKind: raw.sourceKind,
@@ -180,6 +200,11 @@ function ingredient(value: unknown): IngredientRequirement {
     unitCostMinorNumerator: natural(raw.unitCostMinorNumerator).toString(),
     unitCostDenominator: natural(raw.unitCostDenominator, true).toString(),
     allergens: Object.freeze(allergens),
+    ...(declared
+      ? {
+          allergenDeclarationReference: parseRecipeReference(raw.allergenDeclarationReference),
+        }
+      : {}),
   });
 }
 function step(value: unknown): PreparationStep {

@@ -59,8 +59,31 @@ export function createMenuRecipeAllergenSource(options: {
           ...recipe.configuredIngredients,
           ...recipe.graph.flatMap((snapshot) => snapshot.ingredients),
         ]) {
-          if (requirement.sourceKind === "InventoryItem" && !requirement.allergens.length)
+          // DEC-ALLERGEN-DECLARATIONS: an ingredient needs a declaration; one may list no allergens.
+          if (
+            requirement.sourceKind === "InventoryItem" &&
+            !requirement.allergens.length &&
+            requirement.allergenDeclarationReference === undefined
+          )
             return fail();
+          if (requirement.allergenDeclarationReference !== undefined) {
+            const reference = requirement.allergenDeclarationReference;
+            const existing = expected.get(reference);
+            if (
+              existing &&
+              (existing.subjectReference !== requirement.sourceReference ||
+                existing.subjectKind !== "Ingredient" ||
+                existing.sourceVersionReference !== requirement.sourceVersionReference)
+            )
+              return fail();
+            if (!existing)
+              expected.set(reference, {
+                subjectReference: requirement.sourceReference,
+                subjectKind: "Ingredient",
+                sourceVersionReference: requirement.sourceVersionReference,
+                allergens: new Set<string>(),
+              });
+          }
           for (const assertion of requirement.allergens) {
             if (!assertion.verified) return fail();
             const subjectKind =

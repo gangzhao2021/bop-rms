@@ -879,6 +879,17 @@ export async function publishRecipe(
           requirement.sourceVersionReference;
     if (!ok) fail("RECIPE_AUTHORING_LINE_INVALID", index + 1);
   });
+  // DEC-ALLERGEN-DECLARATIONS: every ingredient carries the declaration still current for it.
+  s.ingredients.forEach((requirement, index) => {
+    if (requirement.sourceKind !== "InventoryItem") return;
+    const item = input.facts.items.get(requirement.sourceReference);
+    if (
+      requirement.allergenDeclarationReference === undefined ||
+      item?.configurationOperationReference !== requirement.sourceVersionReference ||
+      item.allergenDeclaration?.evidenceReference !== requirement.allergenDeclarationReference
+    )
+      fail("RECIPE_AUTHORING_ALLERGEN_UNDECLARED", index + 1);
+  });
   const reviews = await approvedReviews(
     tx,
     brand,

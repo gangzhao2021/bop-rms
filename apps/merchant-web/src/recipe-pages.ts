@@ -8,6 +8,7 @@ export type RecipeErrorCode =
   | "ReviewerNotIndependent"
   | "Lifecycle"
   | "InUse"
+  | "AllergenUndeclared"
   | "LineInvalid"
   | "Invalid"
   | "Offline"
@@ -78,8 +79,36 @@ export interface RecipeReview {
   readonly reviewedAt: string;
   readonly current: boolean;
 }
+/** WP-2423 / DEC-ALLERGEN-DECLARATIONS: an ingredient's declaration as offered for new versions. */
+export interface IngredientAllergenStatus {
+  readonly status: "Declared" | "Outdated" | "Missing";
+  readonly contains: readonly string[];
+  readonly mayContain: readonly string[];
+}
+/** What a saved version declares for one ingredient line. */
+export interface IngredientLineAllergens {
+  readonly line: number;
+  readonly kind: "InventoryItem" | "SubRecipe";
+  readonly declared: boolean;
+  readonly current: boolean;
+  readonly contains: readonly string[];
+  readonly mayContain: readonly string[];
+}
+export function allergenText(value: {
+  readonly contains: readonly string[];
+  readonly mayContain: readonly string[];
+}): string {
+  if (!value.contains.length && !value.mayContain.length) return "No priority allergens";
+  return [
+    value.contains.length ? "Contains " + value.contains.join(", ") : null,
+    value.mayContain.length ? "May contain " + value.mayContain.join(", ") : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
 export interface RecipeDetail extends RecipeSummary {
   readonly draft: RecipeDraft;
+  readonly ingredientAllergens?: readonly IngredientLineAllergens[];
   readonly authorReference: string;
   readonly authorLabel: string;
   readonly reviews: readonly RecipeReview[];
@@ -97,6 +126,8 @@ export interface RecipeChoices {
     readonly name: string;
     readonly unitCode: string;
     readonly latestUnitCostCents: number | null;
+    /** WP-2423 / DEC-ALLERGEN-DECLARATIONS: the ingredient's current allergen declaration. */
+    readonly allergens?: IngredientAllergenStatus;
   }[];
   readonly subRecipes: readonly {
     readonly recipeReference: string;
@@ -275,6 +306,7 @@ const codes = new Set<RecipeErrorCode>([
   "ReviewerNotIndependent",
   "Lifecycle",
   "InUse",
+  "AllergenUndeclared",
   "LineInvalid",
   "Invalid",
 ]);

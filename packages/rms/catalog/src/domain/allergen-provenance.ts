@@ -102,8 +102,9 @@ export function parseAllergenSourceEvidence(
   if (
     !["Ingredient", "Recipe", "Product", "Option"].includes(value.subjectKind) ||
     !["Approved", "Invalidated", "Conflicting"].includes(value.status) ||
-    !Array.isArray(value.assertions) ||
-    value.assertions.length < 1
+    // DEC-ALLERGEN-DECLARATIONS: no assertions states the subject contains none of the registry's
+    // allergens; the owning reader admits that only for declarations bound to that registry.
+    !Array.isArray(value.assertions)
   )
     blocked();
   const reviewedAt = parseCatalogInstant(value.reviewedAt);

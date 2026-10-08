@@ -4,7 +4,11 @@ import {
   type MemberDirectoryTransaction,
 } from "@bop/membership";
 import { brandActionHeldBy, type RoleAssignmentTransaction } from "@bop/permission";
-import { listBrandSkuChoices } from "@rms/catalog";
+import {
+  currentAllergenRegistry,
+  listBrandSkuChoices,
+  listCurrentIngredientDeclarations,
+} from "@rms/catalog";
 import { listInventoryRecipeIngredientFacts } from "@rms/inventory";
 import { listKitchenStationCapabilities } from "@rms/kitchen";
 import {
@@ -46,6 +50,7 @@ export class MerchantRecipeError extends Error {
       | "ReviewerNotIndependent"
       | "Lifecycle"
       | "InUse"
+      | "AllergenUndeclared"
       | "LineInvalid"
       | "Invalid",
     readonly line: number | null = null,
@@ -209,6 +214,7 @@ const authoringErrors: Record<RecipeAuthoringError["code"], MerchantRecipeError[
   RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT: "ReviewerNotIndependent",
   RECIPE_AUTHORING_LIFECYCLE: "Lifecycle",
   RECIPE_AUTHORING_IN_USE: "InUse",
+  RECIPE_AUTHORING_ALLERGEN_UNDECLARED: "AllergenUndeclared",
 };
 
 export function createMerchantRecipes(options: {
@@ -247,6 +253,20 @@ export function createMerchantRecipes(options: {
       scope,
     );
     const stations = await listKitchenStationCapabilities(tx as never, scope);
+    // DEC-ALLERGEN-DECLARATIONS: each item's current declaration, for its current version and
+    // the current registry only.
+    const registry = await currentAllergenRegistry(tx as never, scope);
+    const declarations = new Map(
+      (await listCurrentIngredientDeclarations(tx as never, scope, options.persistence.now()))
+        .filter((d) => d.registryVersionReference === registry?.registryVersionReference)
+        .map((d) => [d.itemReference, d]),
+    );
+    const declarationOf = (item: (typeof items)[number]) => {
+      const d = declarations.get(item.itemReference);
+      return d !== undefined && d.itemVersionReference === item.configurationOperationReference
+        ? d
+        : null;
+    };
     const recipeFacts: RecipeDraftFacts = {
       items: new Map(
         items
@@ -258,6 +278,15 @@ export function createMerchantRecipes(options: {
               dimension: item.dimension,
               unitCode: item.unitCode,
               active: item.active,
+              allergenDeclaration: (() => {
+                const d = declarationOf(item);
+                return d === null
+                  ? null
+                  : {
+                      evidenceReference: d.evidenceReference,
+                      allergenReferences: d.allergens.map((a) => a.allergenReference),
+                    };
+              })(),
             },
           ]),
       ),
@@ -268,7 +297,7 @@ export function createMerchantRecipes(options: {
           .flatMap((station) => station.capabilityReferences),
       ),
     };
-    return { items, subRecipes, stations, recipeFacts };
+    return { items, subRecipes, stations, recipeFacts, registry, declarations, declarationOf };
   }
 
   const query = async (input: {
@@ -287,7 +316,37 @@ export function createMerchantRecipes(options: {
         };
         const at = options.persistence.now();
         const rtx = tx as unknown as RecipeAuthoringTransaction;
-        const { items, subRecipes, stations } = await facts(tx, scope);
+        const { items, subRecipes, stations, registry, declarations, declarationOf } = await facts(
+          tx,
+          scope,
+        );
+        const allergenName = new Map(
+          (registry?.entries ?? []).map((entry) => [
+            entry.allergenReference,
+            name(entry.localizedNames, entry.code),
+          ]),
+        );
+        /** "Declared" (with allergens, possibly none), "Outdated" (older item version) or "Missing". */
+        const allergenStatus = (item: (typeof items)[number]) => {
+          const d = declarationOf(item);
+          if (d !== null)
+            return {
+              status: "Declared" as const,
+              contains: d.allergens
+                .filter((a) => a.classification === "Contains")
+                .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference),
+              mayContain: d.allergens
+                .filter((a) => a.classification === "CrossContactPossible")
+                .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference),
+            };
+          return {
+            status: declarations.has(item.itemReference)
+              ? ("Outdated" as const)
+              : ("Missing" as const),
+            contains: [],
+            mayContain: [],
+          };
+        };
         const skus = await listBrandSkuChoices(tx as never, scope);
         const members = await listStoreMembers(tx as unknown as MemberDirectoryTransaction, scope);
         const people = new Map(
@@ -312,6 +371,7 @@ export function createMerchantRecipes(options: {
               name: name(item.localizedNames, item.internalCode),
               unitCode: item.unitCode,
               latestUnitCostCents: item.latestUnitCostMinor,
+              allergens: allergenStatus(item),
             })),
           subRecipes: subRecipes.map((recipe) => ({
             recipeReference: recipe.recipeReference,
@@ -351,6 +411,28 @@ export function createMerchantRecipes(options: {
               ...detail,
               snapshot: undefined,
               presentation: undefined,
+              // DEC-ALLERGEN-DECLARATIONS: what this version declares for each ingredient line.
+              ingredientAllergens: detail.snapshot.ingredients.map((requirement, index) => {
+                const reference = requirement.allergenDeclarationReference ?? null;
+                const declaration = [...declarations.values()].find(
+                  (d) => d.evidenceReference === reference,
+                );
+                const classification = (allergen: string) =>
+                  declaration?.allergens.find((a) => a.allergenReference === allergen)
+                    ?.classification ?? "Contains";
+                const names = (kind: "Contains" | "CrossContactPossible") =>
+                  requirement.allergens
+                    .filter((a) => classification(a.allergenReference) === kind)
+                    .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference);
+                return {
+                  line: index + 1,
+                  kind: requirement.sourceKind,
+                  declared: reference !== null,
+                  current: declaration !== undefined,
+                  contains: names("Contains"),
+                  mayContain: names("CrossContactPossible"),
+                };
+              }),
               authorLabel: label(detail.authorReference),
               reviews: detail.reviews.map((review) => ({
                 ...review,

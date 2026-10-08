@@ -33,7 +33,7 @@ export async function insertRecipeVersion(
   );
   for (const ingredient of s.ingredients) {
     await tx.query(
-      "INSERT INTO rms_recipe.recipe_ingredient_requirement (requirement_id,recipe_version_id,recipe_id,brand_id,source_kind,source_id,source_version_id,quantity_microunits,unit_dimension,conversion_numerator,conversion_denominator,loss_basis_points,unit_cost_minor_numerator,unit_cost_denominator) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+      "INSERT INTO rms_recipe.recipe_ingredient_requirement (requirement_id,recipe_version_id,recipe_id,brand_id,source_kind,source_id,source_version_id,quantity_microunits,unit_dimension,conversion_numerator,conversion_denominator,loss_basis_points,unit_cost_minor_numerator,unit_cost_denominator,allergen_declaration_evidence_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
       [
         ingredient.requirementReference,
         s.versionReference,
@@ -49,6 +49,7 @@ export async function insertRecipeVersion(
         ingredient.lossBasisPoints,
         ingredient.unitCostMinorNumerator,
         ingredient.unitCostDenominator,
+        ingredient.allergenDeclarationReference ?? null,
       ],
     );
     for (const evidence of ingredient.allergens) {

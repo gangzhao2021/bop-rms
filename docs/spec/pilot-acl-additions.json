@@ -936,6 +936,447 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_entry",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_entry",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_entry",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_evidence",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_evidence",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_evidence",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_assertion",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_assertion",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_assertion",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sellable_placement",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sellable_placement",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sellable_placement",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sellable_placement",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section_category",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section_category",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section_category",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section_category",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_store",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_store",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_store",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_store",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_channel",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_channel",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_channel",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_channel",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_order_type",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_order_type",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_order_type",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_order_type",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_review_content",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_revision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "routine",
+      "schema": "rms_catalog",
+      "object": "rms_catalog.menu_version_submitted(uuid)",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
     }
   ]
 }

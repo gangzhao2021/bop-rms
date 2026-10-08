@@ -26,6 +26,8 @@ import { BundleEditorPage, BundleListPage } from "./BundlePages.js";
 import { AvailabilityWorkbenchPage } from "./AvailabilityWorkbenchPage.js";
 import { StorePriceEditorPage, StorePriceListPage } from "./StorePricePages.js";
 import { createPriceClient } from "./store-price-pages.js";
+import { AllergenItemPage, AllergenListPage } from "./AllergenDeclarationPages.js";
+import { createAllergenClient } from "./allergen-declaration-pages.js";
 import { TaxConfigPage } from "./TaxConfigPage.js";
 import { PromotionEditorPage, PromotionListPage } from "./PromotionPages.js";
 import { RecipeEditorPage, RecipeListPage } from "./RecipePages.js";
@@ -92,10 +94,7 @@ import {
 } from "./ComplianceInspectionActionPages.js";
 import { CleaningLogPage, TemperatureLogPage } from "./ComplianceMonitoringPages.js";
 import { ComplianceQualificationPage } from "./ComplianceQualificationPage.js";
-import {
-  ComplianceAllergenReviewPage,
-  ComplianceIncidentPage,
-} from "./ComplianceAllergenIncidentPages.js";
+import { ComplianceIncidentPage } from "./ComplianceAllergenIncidentPages.js";
 import { ComplianceTraceabilityPage } from "./ComplianceTraceabilityPage.js";
 import { ComplianceRecallCasePage } from "./ComplianceRecallCasePage.js";
 import { CompliancePolicyPage } from "./CompliancePolicyPage.js";
@@ -855,7 +854,32 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route path="/operations/compliance/temperature" element={<TemperatureLogPage />} />
       <Route path="/operations/compliance/cleaning" element={<CleaningLogPage />} />
       <Route path="/app/compliance/qualifications" element={<ComplianceQualificationPage />} />
-      <Route path="/app/compliance/allergens" element={<ComplianceAllergenReviewPage />} />
+      <Route
+        path="/app/compliance/allergens"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <AllergenListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createAllergenClient(state.csrf)}
+            />
+          ) : (
+            <AllergenListPage />
+          )
+        }
+      />
+      <Route
+        path="/app/compliance/allergens/:id"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <AllergenItemPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createAllergenClient(state.csrf)}
+            />
+          ) : (
+            <AllergenItemPage />
+          )
+        }
+      />
       <Route path="/app/compliance/incidents/:id" element={<ComplianceIncidentPage />} />
       <Route path="/app/compliance/traceability" element={<ComplianceTraceabilityPage />} />
       <Route path="/app/compliance/recalls/:id" element={<ComplianceRecallCasePage />} />
