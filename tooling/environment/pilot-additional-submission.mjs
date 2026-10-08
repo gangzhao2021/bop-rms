@@ -1,6 +1,6 @@
 import console from "node:console";
 import { GuestSessionService } from "../../packages/bop/identity/src/index.ts";
-import { createCheckoutValidationService } from "../../packages/rms/ordering/src/index.ts";
+import { createConfiguredCheckoutValidationService } from "../../packages/rms/ordering/src/index.ts";
 import { createPostgresPaymentTipSelectionStore } from "../../packages/rms/payment/src/index.ts";
 import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/customer-checkout-session-authorization.js";
 import { createCustomerAdditionalDiningHistoryAuthorization } from "../../apps/api/dist/customer-additional-dining-history-authorization.js";
@@ -141,8 +141,9 @@ export async function createInternalAdditionalSubmission(
           guestSessionReference: v.guestSessionReference,
           orderType: "DineIn",
         });
-        const fresh = await createCheckoutValidationService({
+        const fresh = await createConfiguredCheckoutValidationService({
           ...ports,
+          now,
           authorization: {
             authorize: async () => ({ guestSession: await identity.authorize(credentials) }),
           },
@@ -227,7 +228,7 @@ export async function createInternalAdditionalSubmission(
   };
   const tip = {
     preparation: diningCheckout.preparation,
-    quoteVersion: 1,
+    quoteVersion: 2,
     authorizeOrder,
     tip: {
       repository: createPostgresPaymentTipSelectionStore(transactions, scope, { now }),

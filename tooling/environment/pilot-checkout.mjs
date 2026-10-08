@@ -3,11 +3,13 @@ import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identit
 import { createPostgresAsapCapacityStore } from "../../packages/rms/fulfillment/src/index.ts";
 import {
   createPostgresCartQueryStore,
-  createPostgresCartQuoteStore,
+  createPostgresConfiguredCartQuoteReader,
 } from "../../packages/rms/ordering/src/index.ts";
+import { createPostgresConfiguredPriceQuoteHistoryReader } from "../../packages/rms/pricing/src/index.ts";
+import { createPostgresCatalogOrderSnapshotSource } from "../../packages/rms/catalog/src/index.ts";
 import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/customer-checkout-session-authorization.js";
-import { createCustomerPickupCapacitySources } from "../../apps/api/dist/customer-pickup-capacity-sources.js";
-import { createCustomerPickupSessionValidation } from "../../apps/api/dist/customer-pickup-session-validation.js";
+import { createCustomerConfiguredPickupCapacitySources } from "../../apps/api/dist/customer-pickup-capacity-sources.js";
+import { createCustomerConfiguredPickupSessionValidation } from "../../apps/api/dist/customer-pickup-session-validation.js";
 import { createCustomerCartSelectionInventory } from "../../apps/api/dist/customer-cart-selection-inventory.js";
 export function createInternalCheckout(resources, configuredEntry, catalogOptions) {
   const { scope, transactions, now, credentials } = resources,
@@ -46,7 +48,7 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
       ...configuredEntry.entry.session,
       store: createPostgresGuestSessionEntryStore(transactions, scope),
     },
-    sources: createCustomerPickupCapacitySources({
+    sources: createCustomerConfiguredPickupCapacitySources({
       scope,
       orderingTransactions: transactions,
       capacityTransactions: transactions,
@@ -69,13 +71,10 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
     references: { generate: reference },
   };
   const carts = createPostgresCartQueryStore(transactions, scope),
-    quotes = createPostgresCartQuoteStore(transactions, scope, {
-      hashIntent,
-      equals: (a, b) => a === b,
-    });
+    quotes = createPostgresConfiguredCartQuoteReader(transactions, scope);
   const options = {
     ...accessOptions,
-    quoteVersion: 1,
+    quoteVersion: 2,
     nextReference: reference,
     allocationAudit: (record) =>
       audit(
@@ -94,7 +93,7 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
         record.createOperationReference,
       ),
     validate: async (input) =>
-      createCustomerPickupSessionValidation({
+      createCustomerConfiguredPickupSessionValidation({
         preparation,
         checkout: checkoutPorts({
           ...input,
@@ -119,14 +118,22 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
         const authority = await access.authorize(request, selection.observedAt);
         if (!authority) throw new Error("INTERNAL_CHECKOUT_AUTHORITY_UNAVAILABLE");
         const cart = await carts.load(request.cartReference);
-        if (
-          !cart ||
-          cart.aggregateVersion !== request.cartVersion ||
-          cart.items.some((item) => item.optionSelections.length !== 0)
-        )
+        if (!cart || cart.aggregateVersion !== request.cartVersion)
           throw new Error("INTERNAL_CHECKOUT_CART_CHANGED");
+        // Stock is checked per configuration: the same item with the same options.
+        const configuration = (selections) =>
+          JSON.stringify(
+            [...selections]
+              .map((option) => [option.optionReference, option.quantity])
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+          );
         const quantity = cart.items
-          .filter((item) => item.sellableReference === selection.sellableReference)
+          .filter(
+            (item) =>
+              item.sellableReference === selection.sellableReference &&
+              configuration(item.optionSelections) ===
+                configuration(selection.optionSelections ?? []),
+          )
           .reduce((sum, item) => sum + item.quantity, 0);
         return transactions.run(async (authorityTx) => {
           const selected = createCustomerCartSelectionInventory(
@@ -169,6 +176,21 @@ export function createInternalCheckout(resources, configuredEntry, catalogOption
           }),
       },
       references: { hashIntent },
+      // Configured Quote (v2) evidence: the priced options and the current Catalog snapshot.
+      history: createPostgresConfiguredPriceQuoteHistoryReader(transactions, scope),
+      pricingChannelCode: "CUSTOMER_WEB",
+      snapshots: createPostgresCatalogOrderSnapshotSource(
+        catalogOptions.catalogTransactions,
+        {
+          ...scope,
+          ...catalogOptions.catalogScope,
+          orderType,
+          orderTypeCode:
+            orderType === "DineIn" ? "DINE_IN" : catalogOptions.catalogScope.orderTypeCode,
+        },
+        { ...catalogOptions.catalogSafety, clock: { now } },
+        { generate: reference, hash: hashIntent },
+      ),
     };
   }
 

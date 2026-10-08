@@ -31,7 +31,7 @@ export async function createRuntime(
       { entry } = configuredEntry;
     const items = await createInternalTestItems(resources);
     const diningCart = createInternalDiningCart(resources, items);
-    const quote = await createInternalChannelQuote(resources, configuredEntry, diningCart);
+    const quote = await createInternalChannelQuote(resources, configuredEntry, diningCart, items);
     const checkout = createInternalCheckout(resources, configuredEntry, items.catalogCartItems);
     const diningCheckout = createInternalDiningCheckout(resources, configuredEntry, checkout);
     const orders = await createInternalOrder(resources, checkout, items.catalogCartItems);

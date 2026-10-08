@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createCustomerOrderSourceComposition } from "../../apps/api/dist/customer-order-source-composition.js";
+import { createCustomerConfiguredOrderSourceComposition } from "../../apps/api/dist/customer-order-source-composition.js";
 import {
   createPostgresStoreBusinessDateSource,
   createPostgresCurrentStorePublicationProof,
@@ -29,7 +29,7 @@ export function createInternalOrderSourceOptions(resources, catalogOptions, orde
 }
 export function createInternalOrderSources(resources, catalogOptions, orderType = "Pickup") {
   const { scope, transactions, operating } = resources;
-  const source = createCustomerOrderSourceComposition(
+  const source = createCustomerConfiguredOrderSourceComposition(
     createInternalOrderSourceOptions(resources, catalogOptions, orderType),
   );
   const dateSource = createPostgresStoreBusinessDateSource({

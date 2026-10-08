@@ -57,7 +57,6 @@ export function createPostgresCurrentConfiguredQuoteService(
           createdAt > start ||
           expiresAt <= start ||
           !Array.isArray(source.options) ||
-          source.options.length < 1 ||
           source.options.length > 1000
         )
           throw new Error();

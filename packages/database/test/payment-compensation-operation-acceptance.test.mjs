@@ -228,10 +228,18 @@ it("persists compensation results under actual leases with immutable replay and 
         "Conflict",
         "Provider confirmation cannot disappear",
       );
-      const closed = record("Closed");
+      // WP-2423: history keeps growing past version 10 (the latest is the numeric maximum).
+      let latest = confirmed;
+      for (let step = 1; step <= 8; step++) {
+        latest = record("AwaitingOperationsReconciliation", 200 + step);
+        assert.equal((await commit(latest, second)).status, "Updated");
+      }
+      assert.equal(await count(), 11);
+      assert.deepEqual(await store.resolveOperation({ operationReference: id(20) }), latest);
+      const closed = record("Closed", 300);
       assert.equal((await commit(closed, second)).status, "Updated");
       assert.equal((await commit(next, second)).status, "Conflict", "Closed is not reopened");
-      assert.equal(await count(), 4);
+      assert.equal(await count(), 12);
       await assert.rejects(
         owner({ authorize: async () => false }).resolveOperation({ operationReference: id(20) }),
         { code: "PAYMENT_COMPENSATION_PERMISSION_DENIED" },

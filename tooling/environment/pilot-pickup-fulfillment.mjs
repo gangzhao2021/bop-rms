@@ -34,7 +34,7 @@ export function createInternalPickupFulfillment(resources) {
   function service(transaction) {
     const source = createPostgresOrderFulfillmentSourceStore({
       ...scope,
-      quoteVersion: 1,
+      quoteVersion: 2,
       sha256: hash,
       authorize: async (_tx, request) =>
         active() &&

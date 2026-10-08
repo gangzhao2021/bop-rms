@@ -575,7 +575,7 @@ export async function createInternalMerchant(
   );
   const orderQueue = createPersistentMerchantOrderQueue({
     persistence,
-    quoteVersion: 1,
+    quoteVersion: 2,
     acceptanceConfigured: true,
   });
   return {

@@ -112,6 +112,19 @@ function rows(value: unknown): readonly unknown[] {
     return fail();
   return descriptor.value as unknown[];
 }
+/** WP-2423: a bounded multi-row read (an Order line holds one reservation per ingredient). */
+function manyRows(value: unknown, limit = 500): readonly unknown[] {
+  if (value === null || typeof value !== "object") return fail();
+  const descriptor = Object.getOwnPropertyDescriptor(value, "rows");
+  if (
+    !descriptor ||
+    !("value" in descriptor) ||
+    !Array.isArray(descriptor.value) ||
+    descriptor.value.length > limit
+  )
+    return fail();
+  return descriptor.value as unknown[];
+}
 function version(value: unknown): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1) return fail();
   return Number(value);
@@ -745,7 +758,7 @@ export function createPostgresStockReservationStore(
       const submissionReference = parseInventoryReference(submission);
       const cartItemReference = parseInventoryReference(cartItem);
       return run(async (tx) => {
-        const found = rows(
+        const found = manyRows(
           await tx.query(
             "SELECT DISTINCT ON (reservation_id) " +
               columns +

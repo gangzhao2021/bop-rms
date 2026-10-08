@@ -3,9 +3,9 @@ import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createCustomerSessionPaymentIntent } from "../../apps/api/dist/customer-session-payment-intent.js";
 import { createCustomerCheckoutSessionRead } from "../../apps/api/dist/customer-checkout-session-read.js";
 import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/customer-checkout-session-authorization.js";
-import { createCustomerDiningPaymentAuthorization } from "../../apps/api/dist/customer-dining-payment-authorization.js";
+import { createCustomerConfiguredDiningPaymentAuthorization } from "../../apps/api/dist/customer-dining-payment-authorization.js";
 import { diningOrderCapacityLinkFromHistory } from "../../apps/api/dist/customer-dining-checkout-composition.js";
-import { createCustomerPickupPaymentAuthorization } from "../../apps/api/dist/customer-pickup-payment-authorization.js";
+import { createCustomerConfiguredPickupPaymentAuthorization } from "../../apps/api/dist/customer-pickup-payment-authorization.js";
 import { pickupOrderCapacityLinkFromHistory } from "../../apps/api/dist/customer-pickup-checkout-composition.js";
 import { createCustomerOrderPaymentClaimAdmission } from "../../apps/api/dist/customer-order-payment-admission.js";
 import { createCustomerCapacityPaymentClaimAdmission } from "../../apps/api/dist/customer-capacity-payment-admission.js";
@@ -33,8 +33,8 @@ export async function createInternalPaymentIntent(
     throw new Error("INTERNAL_PAYMENT_CHANNEL_INVALID");
   const dining = orderType === "DineIn",
     authorizePayment = dining
-      ? createCustomerDiningPaymentAuthorization
-      : createCustomerPickupPaymentAuthorization,
+      ? createCustomerConfiguredDiningPaymentAuthorization
+      : createCustomerConfiguredPickupPaymentAuthorization,
     capacityLink = dining ? diningOrderCapacityLinkFromHistory : pickupOrderCapacityLinkFromHistory;
   const { scope: identityScope, transactions, now, credentials } = resources,
     reference = credentials.reference;
@@ -71,7 +71,7 @@ export async function createInternalPaymentIntent(
       cartReference: v.cartReference,
       cartVersion: v.cartVersion,
       quoteReference: v.quoteReference,
-      quoteVersion: 1,
+      quoteVersion: 2,
     };
     const authority = await access.authorize(request, now());
     if (!authority) throw new Error("INTERNAL_PAYMENT_DENIED");
@@ -87,12 +87,12 @@ export async function createInternalPaymentIntent(
     });
     const admission = createCustomerOrderPaymentClaimAdmission({
       scope: identityScope,
-      quoteVersion: 1,
+      quoteVersion: 2,
       capacityForOrder: (currentOrder) => {
         const action = createCustomerIntactReservationPaymentAction({
           scope,
           currentOrder,
-          quoteVersion: 1,
+          quoteVersion: 2,
           workflow: saved.workflow.payment,
           authorize,
           authorizeOverride: async () => false,

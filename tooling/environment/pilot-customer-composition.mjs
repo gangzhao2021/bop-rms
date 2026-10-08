@@ -25,7 +25,7 @@ import { createInternalMerchantSession } from "./pilot-merchant-session.mjs";
 import { createInternalQrLoaders } from "./pilot-qr.mjs";
 import { createInternalDiningCredentialLoaders } from "./pilot-dining-credentials.mjs";
 import { createInternalCredentialLoaders } from "./pilot-credentials.mjs";
-import { createInternalTestQuote } from "./pilot-quote.mjs";
+import { createInternalConfiguredQuote } from "./pilot-configured-quote.mjs";
 import { createInternalPricingPolicy } from "./pilot-pricing-policy.mjs";
 import { createInternalReadTransactions } from "./pilot-read-transactions.mjs";
 import { createCustomerMenuStoreFacts } from "../../apps/api/dist/customer-menu-store-facts.js";
@@ -142,10 +142,10 @@ export function composeCustomerDependencies(directory, installation, config) {
         currencyMetadata: (await pricing()).currencyMetadata,
         priceChannelCode: "CUSTOMER_WEB",
       }),
-    createInternalChannelQuote: (r, e, c) =>
-      createInternalChannelQuote(r, e, c, {
-        createQuote: (resources, orderType = "Pickup") =>
-          createInternalTestQuote(resources, orderType, { loadPricingPolicy: pricing }),
+    createInternalChannelQuote: (r, e, c, i) =>
+      createInternalChannelQuote(r, e, c, i, {
+        createConfiguredQuote: (resources, orderType) =>
+          createInternalConfiguredQuote(resources, orderType, { loadPricingPolicy: pricing }),
       }),
     createInternalCheckout,
     createInternalCheckoutDetails,

@@ -71,7 +71,7 @@ export async function createInternalPaidOutcome(
   const additionalContext = createAdditionalOrderPaidContextSource({
     ...paymentOptions,
     tenantReference: scope.tenantReference,
-    quoteVersion: 1,
+    quoteVersion: 2,
     authorizeOrder: async (_tx, value) => sameScope(value),
     authorizeInventory: async () => active(),
   });
@@ -83,7 +83,7 @@ export async function createInternalPaidOutcome(
       environment: "Test",
     },
     tenantReference: scope.tenantReference,
-    quoteVersion: 1,
+    quoteVersion: 2,
     now: resources.now,
     authorize: async (_tx, event) =>
       event.tenantId === scope.brandReference && event.storeId === scope.storeReference && active(),
@@ -94,7 +94,7 @@ export async function createInternalPaidOutcome(
     let observedAt;
     const initialSource = createOrderPaidOutcomeSource({
       context,
-      quoteVersion: 1,
+      quoteVersion: 2,
       sha256: hash,
       release: {
         action: "ReleasePaidOrder",
@@ -166,7 +166,7 @@ export async function createInternalPaidOutcome(
         const workflow = additionalConfig.workflow;
         return createAdditionalOrderPaidOutcomeSource({
           context: { resolve: async () => current },
-          quoteVersion: 1,
+          quoteVersion: 2,
           sha256: hash,
           release: {
             action: "ReleasePaidOrder",

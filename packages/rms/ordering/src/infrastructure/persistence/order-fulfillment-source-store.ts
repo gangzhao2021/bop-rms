@@ -4,7 +4,10 @@ import {
   parseResolveConfirmedOrderFulfillmentSourceInput,
 } from "../../application/order-fulfillment-source.js";
 import { createOrderFulfillmentSourceFromSnapshot } from "../../application/order-fulfillment-snapshot.js";
-import { createPostgresOrderCreationQueryStore } from "./order-creation-query-store.js";
+import {
+  createPostgresOrderCreationQueryStore,
+  readOrderCreationQuoteVersion,
+} from "./order-creation-query-store.js";
 import { createPostgresOrderPaymentDispositionReader } from "./order-payment-disposition-store.js";
 import { createPostgresOrderInitialExecutionReader } from "./order-termination-store.js";
 import { parseOrderingReference } from "../../domain/cart.js";
@@ -98,14 +101,19 @@ export function createPostgresOrderFulfillmentSourceStore(options: {
               stored.orderConfirmedEvent.occurredAt > request.observedAt
             )
               return null;
+            // WP-2423: each Order is read with the Quote version it was priced with (its stored
+            // snapshot discriminator), so history priced before a version change stays readable.
+            const version =
+              (await readOrderCreationQuoteVersion(tx, scope, stored.record.submissionReference)) ??
+              quoteVersion;
             return createPostgresOrderCreationQueryStore(
               { run: async (work) => work(tx) },
               scope,
-              quoteVersion,
+              version,
             ).withCurrentSubmission(stored.record.submissionReference, async (_, order) =>
               createOrderFulfillmentSourceFromSnapshot({
-                order,
-                quoteVersion,
+                order: order as never,
+                quoteVersion: version,
                 confirmationEvent: stored.orderConfirmedEvent,
                 sha256: options.sha256,
               }),

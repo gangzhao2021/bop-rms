@@ -8,7 +8,7 @@ import {
   createPostgresDiningGuestBindingStore,
   createPostgresDiningCheckoutCommitmentStore,
 } from "../../packages/rms/dining/src/index.ts";
-import { createCustomerDiningSessionValidation } from "../../apps/api/dist/customer-dining-session-validation.js";
+import { createCustomerConfiguredDiningSessionValidation } from "../../apps/api/dist/customer-dining-session-validation.js";
 export function createInternalDiningCheckout(resources, entry, pickup) {
   const scope = {
       tenantReference: resources.publicProfile.binding.tenantReference,
@@ -76,7 +76,7 @@ export function createInternalDiningCheckout(resources, entry, pickup) {
         orderType: "DineIn",
       });
       await additional.prepare(input, checkout);
-      return createCustomerDiningSessionValidation({ preparation, checkout })(input);
+      return createCustomerConfiguredDiningSessionValidation({ preparation, checkout })(input);
     },
   };
   return {

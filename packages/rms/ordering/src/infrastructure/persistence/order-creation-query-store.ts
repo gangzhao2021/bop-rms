@@ -378,3 +378,34 @@ export async function readOrderCreationHistory<V extends 1 | 2 = 1>(
     return unavailable();
   return record;
 }
+
+/**
+ * WP-2423: the Quote version an Order was priced with, from its immutable item snapshots (their
+ * discriminator), so readers of mixed history decode each Order with its own version.
+ */
+export async function readOrderCreationQuoteVersion(
+  transaction: OrderCreationQueryTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  value: string,
+): Promise<1 | 2 | null> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    reference = parseOrderingReference(value);
+  const result = await transaction.query(selectHistory, [brand, store, reference]);
+  const d = Object.getOwnPropertyDescriptor(result, "rows");
+  if (!d?.enumerable || !("value" in d)) return unavailable();
+  const rows = capture(d.value);
+  if (!Array.isArray(rows) || rows.length > 1) return unavailable();
+  if (rows.length === 0) return null;
+  const history = exact(rows[0], ["history"]).history as {
+    readonly items?: readonly {
+      readonly snapshot?: { readonly pricing?: { readonly quoteVersion?: unknown } };
+    }[];
+  };
+  const versions = new Set(
+    (history.items ?? []).map((item) => item.snapshot?.pricing?.quoteVersion),
+  );
+  const [version] = versions;
+  if (versions.size !== 1 || (version !== 1 && version !== 2)) return unavailable();
+  return version;
+}

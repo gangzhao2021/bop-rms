@@ -137,6 +137,7 @@ export * from "./domain/order-item-snapshot-codec.js";
 
 export {
   createPostgresOrderCreationQueryStore,
+  readOrderCreationQuoteVersion,
   type OrderCreationQueryTransaction,
   type OrderCreationQueryTransactionRunner,
 } from "./infrastructure/persistence/order-creation-query-store.js";

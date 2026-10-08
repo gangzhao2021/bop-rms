@@ -30,7 +30,7 @@ export async function createInternalOrderCompletion(resources, { saved, actor })
         value.storeReference === scope.storeReference;
       const composition = createOrderFulfillmentEventComposition({
         scope,
-        quoteVersion: 1,
+        quoteVersion: 2,
         systemActorReference: actor,
         sha256: hash,
         fulfillment: {

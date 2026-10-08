@@ -5,6 +5,7 @@ import {
   createPostgresMerchantOrderIndex,
   createPostgresOrderAcceptanceReader,
   createPostgresOrderCreationQueryStore,
+  readOrderCreationQuoteVersion,
   createPostgresOrderExecutionReader,
   createPostgresDiningOrderItemStateReader,
   createPostgresDiningOrderPreparationSource,
@@ -63,11 +64,19 @@ export function createMerchantOrderQueueRead(options: {
         afterOrderReference: input.afterOrderReference,
         limit: input.limit,
       });
-      const reader = createPostgresOrderCreationQueryStore(
-        { run: (work) => work(transaction) },
-        ownerScope,
-        options.quoteVersion,
-      );
+      // WP-2423: history may hold Orders priced with either Quote version; each is decoded with its own.
+      const readers = {
+        1: createPostgresOrderCreationQueryStore(
+          { run: (work) => work(transaction) },
+          ownerScope,
+          1,
+        ),
+        2: createPostgresOrderCreationQueryStore(
+          { run: (work) => work(transaction) },
+          ownerScope,
+          2,
+        ),
+      } as const;
       const items = [];
       for (const item of index.items) {
         // Match acceptance/payment writers: disposition fence before the header row lock.
@@ -79,7 +88,13 @@ export function createMerchantOrderQueueRead(options: {
           orderReference: item.orderReference,
           orderBatchReference: item.initialBatchReference,
         });
-        const current = await reader.withCurrentSubmission(
+        const version =
+          (await readOrderCreationQuoteVersion(
+            transaction,
+            ownerScope,
+            item.initialSubmissionReference,
+          )) ?? options.quoteVersion;
+        const current = await (readers[version] as (typeof readers)[1]).withCurrentSubmission(
           item.initialSubmissionReference,
           async (_, original) => {
             if (

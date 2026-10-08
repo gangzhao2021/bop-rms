@@ -88,8 +88,9 @@ export function createPostgresPaymentCompensationOperationStore(options: {
   };
   const latest = async (tx: ConsumerTransaction, operationReference: string) => {
     const result = await tx.query(
-      "SELECT history_version::text,record_json::text AS record FROM rms_payment.payment_compensation_operation_history " +
-        "WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3 ORDER BY history_version DESC LIMIT 1",
+      // Order by the numeric column (h.), not the text output of the same name ("9" > "10").
+      "SELECT h.history_version::text,h.record_json::text AS record FROM rms_payment.payment_compensation_operation_history h " +
+        "WHERE h.brand_id=$1 AND h.store_id=$2 AND h.operation_id=$3 ORDER BY h.history_version DESC LIMIT 1",
       [brandReference, storeReference, operationReference],
     );
     if (result.rows.length === 0) return null;

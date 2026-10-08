@@ -71,7 +71,7 @@ export function createInternalKitchen(resources) {
     const observedAt = resources.now();
     const source = createPostgresOrderKitchenSourceStore({
       ...scope,
-      quoteVersion: 1,
+      quoteVersion: 2,
       sha256: hash,
       authorize: async () => active(),
     });

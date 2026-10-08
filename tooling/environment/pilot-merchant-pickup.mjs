@@ -135,10 +135,39 @@ export async function createInternalMerchantPickup(
   return {
     pickupProof,
     pickupHandoff,
-    pickupQuery: createMerchantPickupQuery({
-      ...common,
-      resolveWorkstation: async () => (active() ? workstation : null),
-    }),
+    pickupQuery: logUnexpected(
+      "INTERNAL_PICKUP_QUERY_UNAVAILABLE",
+      createMerchantPickupQuery({
+        ...common,
+        resolveWorkstation: async () => (active() ? workstation : null),
+      }),
+    ),
     workstation,
+  };
+}
+
+/** Logs an unexpected failure as a code and source locations only (no message or business data). */
+function logUnexpected(event, call) {
+  return async (input) => {
+    try {
+      return await call(input);
+    } catch (error) {
+      if (error?.name !== "FulfillmentReadinessError") {
+        const code = error?.code ?? error?.name;
+        console.error(
+          JSON.stringify({
+            event,
+            code: /^[A-Za-z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE",
+            frames:
+              String(error?.stack ?? "")
+                .match(
+                  /(?:apps\/api\/dist|packages\/[a-z]+\/[a-z-]+\/src)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
+                )
+                ?.slice(0, 5) ?? [],
+          }),
+        );
+      }
+      throw error;
+    }
   };
 }

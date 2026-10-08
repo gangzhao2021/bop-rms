@@ -2,12 +2,12 @@ import { readClosedRecord } from "../../packages/bop/identity/src/index.ts";
 import { createPostgresPaymentTipSelectionStore } from "../../packages/rms/payment/src/index.ts";
 import { createCustomerCheckoutSessionRead } from "../../apps/api/dist/customer-checkout-session-read.js";
 import {
-  createCustomerPickupSessionOrderSubmission,
-  createCustomerDiningSessionOrderSubmission,
+  createCustomerConfiguredPickupSessionOrderSubmission,
+  createCustomerConfiguredDiningSessionOrderSubmission,
 } from "../../apps/api/dist/customer-session-order-submission.js";
 import {
-  createCustomerPickupSessionTipSelection,
-  createCustomerDiningSessionTipSelection,
+  createCustomerConfiguredPickupSessionTipSelection,
+  createCustomerConfiguredDiningSessionTipSelection,
 } from "../../apps/api/dist/customer-session-tip-selection.js";
 export function createInternalPaymentPreparation(
   resources,
@@ -19,12 +19,12 @@ export function createInternalPaymentPreparation(
     throw new Error("INTERNAL_PAYMENT_CHANNEL_INVALID");
   const orderComposition =
       orderType === "DineIn"
-        ? createCustomerDiningSessionOrderSubmission
-        : createCustomerPickupSessionOrderSubmission,
+        ? createCustomerConfiguredDiningSessionOrderSubmission
+        : createCustomerConfiguredPickupSessionOrderSubmission,
     tipComposition =
       orderType === "DineIn"
-        ? createCustomerDiningSessionTipSelection
-        : createCustomerPickupSessionTipSelection;
+        ? createCustomerConfiguredDiningSessionTipSelection
+        : createCustomerConfiguredPickupSessionTipSelection;
   const { scope, now, transactions, credentials } = resources;
   const reader = createCustomerCheckoutSessionRead(checkout.accessOptions);
   async function resolve(value, tip = false) {

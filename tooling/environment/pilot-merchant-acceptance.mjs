@@ -63,7 +63,7 @@ export async function createInternalMerchantAcceptance(
           environment: "Test",
         };
         const initial = {
-          quoteVersion: 1,
+          quoteVersion: 2,
           acceptance: {
             action: "Accept",
             purposeCode: workflow.purposeCode,
@@ -75,7 +75,7 @@ export async function createInternalMerchantAcceptance(
             currentDiningAcceptance: identity.orderType === "DineIn",
             scope: paymentScope,
             tenantReference: scope.tenantReference,
-            quoteVersion: 1,
+            quoteVersion: 2,
             now: resources.now,
             authorize: async (transaction, event) =>
               event.payload.orderReference === command.orderReference &&
@@ -105,7 +105,7 @@ export async function createInternalMerchantAcceptance(
           context: createAdditionalOrderPaidContextSource({
             scope: paymentScope,
             tenantReference: scope.tenantReference,
-            quoteVersion: 1,
+            quoteVersion: 2,
             now: resources.now,
             authorize: async (transaction, event) =>
               event.payload.orderReference === command.orderReference &&

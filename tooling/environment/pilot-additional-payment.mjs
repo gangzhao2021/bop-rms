@@ -50,7 +50,7 @@ export async function createInternalAdditionalPayment(
     };
     const admission = createCustomerAdditionalDiningPaymentAdmission({
       scope,
-      quoteVersion: 1,
+      quoteVersion: 2,
       authorizeHistory: configured.submission.historyAuthorization,
       inventory,
     });

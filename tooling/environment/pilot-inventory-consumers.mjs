@@ -40,7 +40,25 @@ export function createInternalInventoryConsumers(resources) {
         sideEffect: "record_order_line_inventory_consumption",
         replaySafe: true,
         handler: async ({ transaction, envelope }) => {
-          await consume(transaction, authorized(envelope));
+          try {
+            await consume(transaction, authorized(envelope));
+          } catch (error) {
+            // A code and source locations only (no message or business data).
+            const code = error?.code ?? error?.name;
+            console.error(
+              JSON.stringify({
+                event: "INTERNAL_INVENTORY_CONSUMPTION_FAILED",
+                code: /^[A-Za-z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE",
+                frames:
+                  String(error?.stack ?? "")
+                    .match(
+                      /(?:apps\/api\/dist|packages\/[a-z]+\/[a-z-]+\/src)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
+                    )
+                    ?.slice(0, 5) ?? [],
+              }),
+            );
+            throw error;
+          }
           return { status: "completed" };
         },
       });

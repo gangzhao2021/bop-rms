@@ -294,7 +294,7 @@ it("replays a real parsed Abandoned original without current configuration or fr
   expect(value).toEqual(f.receipt);
   expect(f.configure).not.toHaveBeenCalled();
   expect(f.next).not.toHaveBeenCalled();
-  expect(f.queries.some((sql) => sql.includes("ORDER BY sequence_number"))).toBe(false);
+  expect(f.queries.some((sql) => sql.includes("ORDER BY o.sequence_number"))).toBe(false);
 });
 it("resolves historical Abandoned using only original identity and current fine authority", async () => {
   const f = fixture();
@@ -334,7 +334,7 @@ it("reads immutable history through held current read authority without loading 
   expect(f.configure).not.toHaveBeenCalled();
   expect(f.next).not.toHaveBeenCalled();
   expect(
-    f.queries.filter((sql) => sql.includes("ORDER BY sequence_number DESC LIMIT 3")),
+    f.queries.filter((sql) => sql.includes("ORDER BY o.sequence_number DESC LIMIT 3")),
   ).toHaveLength(2);
 });
 it("refuses malformed history selectors and denied current history authority without allocating", async () => {

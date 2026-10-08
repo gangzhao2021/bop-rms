@@ -499,7 +499,8 @@ function validate(
     quote.total.amountMinor !== subtotal + tax
   )
     fail();
-  if (configured && optionCount === 0) fail();
+  // WP-2423: a configured Quote may carry no Option charges (a cart without options).
+  if (configured && optionCount > 1000) fail();
   return quote;
 }
 

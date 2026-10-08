@@ -17,7 +17,7 @@ export async function createInternalOrderStatus(resources, { createCompletion })
   const references = { generateGeneration: resources.credentials.reference, now: resources.now };
   const created = createPersistedOrderCreatedProjectionComposition({
     scope,
-    quoteVersion: 1,
+    quoteVersion: 2,
     locale: "en-CA",
     sha256: hash,
     authorization: { authorize: authorized },

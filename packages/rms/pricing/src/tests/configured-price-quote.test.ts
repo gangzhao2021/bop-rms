@@ -54,6 +54,22 @@ function fixture() {
   return { base, line, entry, rule, option };
 }
 describe("configured Quote v2", () => {
+  it("WP-2423: without options equals the v1 Quote line by line and in total", () => {
+    const f = fixture();
+    const v1 = createPriceQuote(f.base);
+    const v2 = createConfiguredPriceQuote({ base: f.base, options: [] });
+    expect(v2.quoteVersion).toBe(2);
+    for (const field of ["subtotal", "tax", "total"] as const) expect(v2[field]).toEqual(v1[field]);
+    expect(v2.lines).toHaveLength(v1.lines.length);
+    v2.lines.forEach((line, index) => {
+      const base = v1.lines[index];
+      expect(line.optionPrices).toEqual([]);
+      expect(line.baseUnitPrice).toEqual(base?.unitPrice);
+      for (const field of ["unitPrice", "subtotal", "tax", "total"] as const)
+        expect(line[field]).toEqual(base?.[field]);
+    });
+    expect(decodeConfiguredPriceQuoteSnapshot(encodeConfiguredPriceQuoteSnapshot(v2))).toEqual(v2);
+  });
   it("includes exact Option charge and taxes the configured Sellable line", () => {
     const f = fixture();
     const quote = createConfiguredPriceQuote({ base: f.base, options: [f.option] });

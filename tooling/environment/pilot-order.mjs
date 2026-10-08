@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { GuestSessionService, readClosedRecord } from "../../packages/bop/identity/src/index.ts";
 import { createPostgresInventoryFinalizedOrderCreationRepository } from "../../packages/rms/ordering/src/index.ts";
-import { createCustomerDiningOrderSubmissionComposition } from "../../apps/api/dist/customer-dining-order-submission-composition.js";
-import { createCustomerPickupOrderSubmissionComposition } from "../../apps/api/dist/customer-pickup-order-submission-composition.js";
+import { createCustomerConfiguredDiningOrderSubmissionComposition } from "../../apps/api/dist/customer-dining-order-submission-composition.js";
+import { createCustomerConfiguredPickupOrderSubmissionComposition } from "../../apps/api/dist/customer-pickup-order-submission-composition.js";
 import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/customer-checkout-session-authorization.js";
 import { createCustomerSubmissionInventoryFinalizer } from "../../apps/api/dist/customer-submission-inventory-finalizer.js";
 import { createInternalOrderSources } from "./pilot-order-sources.mjs";
@@ -167,7 +167,7 @@ export async function createInternalOrder(
           { query: transactions, write: transactions },
           resources.scope,
           link,
-          1,
+          2,
           { now, policies, authorization },
           inventory,
         ),
@@ -176,12 +176,12 @@ export async function createInternalOrder(
   return {
     createOptions,
     orderSubmission: {
-      quoteVersion: 1,
+      quoteVersion: 2,
       async create(value) {
         const compose =
           orderType === "DineIn"
-            ? createCustomerDiningOrderSubmissionComposition
-            : createCustomerPickupOrderSubmissionComposition;
+            ? createCustomerConfiguredDiningOrderSubmissionComposition
+            : createCustomerConfiguredPickupOrderSubmissionComposition;
         return compose(await createOptions(value)).create(value);
       },
     },

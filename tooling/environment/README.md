@@ -412,8 +412,9 @@ Workflow, expected database binding and simulator control reference from its
 wrapper; existing InternalTest/scope/simulator checks remain mandatory. No
 Workflow publication or payment execution happens when these modules are imported.
 
-`pilot-items.mjs` and `pilot-quote.mjs` accept configured Inventory binding and
-pricing-policy loading from local wrappers. Synthetic price/tax evidence remains
+`pilot-items.mjs` and `pilot-configured-quote.mjs` accept configured Inventory binding and
+pricing-policy loading from local wrappers. Every new cart uses the configured Quote (v2), with or
+without options (WP-2423 slice 4). Synthetic price/tax evidence remains
 private InternalTest configuration and is not a legal or live Store assertion.
 The modules retain the existing owner Inventory and current Quote services.
 

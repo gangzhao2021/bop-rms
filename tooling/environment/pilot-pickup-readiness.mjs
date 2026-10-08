@@ -45,7 +45,7 @@ export function createInternalPickupReadiness(
   const resolveConfirmation = createConfirmation(resources);
   const source = createPostgresOrderFulfillmentSourceStore({
     ...scope,
-    quoteVersion: 1,
+    quoteVersion: 2,
     sha256: hash,
     authorize: async () => active(),
   });

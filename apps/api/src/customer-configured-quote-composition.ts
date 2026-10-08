@@ -178,13 +178,17 @@ export function createCustomerConfiguredQuoteComposition(
 }
 
 type WithoutCandidate<T> = T extends unknown ? Omit<T, "candidate"> : never;
+type ConfiguredQuotePolicies = Omit<
+  Parameters<typeof createPostgresCurrentConfiguredQuoteService>[1],
+  "scope" | "clock"
+>;
 export type CustomerConfiguredQuoteWithPoliciesOptions =
   WithoutCandidate<CustomerConfiguredQuoteCompositionOptions> & {
     readonly policyTransactions: Parameters<typeof createPostgresCurrentConfiguredQuoteService>[0];
-    readonly policies: Omit<
-      Parameters<typeof createPostgresCurrentConfiguredQuoteService>[1],
-      "scope" | "clock"
-    >;
+    /** Fixed policies, or (WP-2423) the policies current for each quote, e.g. the Store's price book. */
+    readonly policies:
+      | ConfiguredQuotePolicies
+      | ((input: Parameters<Candidate>[0]) => Promise<ConfiguredQuotePolicies>);
     readonly quoteRequest: (
       input: Parameters<Candidate>[0],
       identity: Parameters<Candidate>[1],
@@ -202,15 +206,26 @@ export type CustomerConfiguredQuoteWithPoliciesOptions =
 export function createCustomerConfiguredQuoteWithPoliciesComposition(
   options: CustomerConfiguredQuoteWithPoliciesOptions,
 ) {
-  const pricing = createPostgresCurrentConfiguredQuoteService(options.policyTransactions, {
-    ...options.policies,
-    scope: options.scope,
-    clock: { now: options.now },
-  });
+  const pricing = (policies: ConfiguredQuotePolicies) =>
+    createPostgresCurrentConfiguredQuoteService(options.policyTransactions, {
+      ...policies,
+      scope: options.scope,
+      clock: { now: options.now },
+    });
+  const fixed = typeof options.policies === "function" ? null : pricing(options.policies);
   return createCustomerConfiguredQuoteComposition({
     ...options,
     candidate: async (input, identity) => {
-      const quote = await pricing.create(await options.quoteRequest(input, identity));
+      const service =
+        fixed ??
+        pricing(
+          await (
+            options.policies as (
+              input: Parameters<Candidate>[0],
+            ) => Promise<ConfiguredQuotePolicies>
+          )(structuredClone(input)),
+        );
+      const quote = await service.create(await options.quoteRequest(input, identity));
       return { quote, audit: await options.quoteAudit(quote, input, identity) };
     },
   });

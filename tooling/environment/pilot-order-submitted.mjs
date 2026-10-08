@@ -21,7 +21,7 @@ export function createInternalOrderSubmitted(resources) {
       validateCurrentSource: async (_tx, p) => same(p.snapshot),
     },
     authorization: { authorize: authorized },
-    history: { quoteVersion: 1, locale: "en-CA" },
+    history: { quoteVersion: 2, locale: "en-CA" },
     references: { generateGeneration: resources.credentials.reference, now: resources.now },
     freshness: async (tx, snapshot) => {
       if (!same(snapshot)) throw new Error("ORDER_SUBMITTED_SCOPE_DENIED");

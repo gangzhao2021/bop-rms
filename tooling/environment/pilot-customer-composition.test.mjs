@@ -33,6 +33,7 @@ it("passes all existing customer routes and configured resources to the API runt
             "createInternalCheckout",
             "createInternalCheckoutDetails",
             "createInternalTestItems",
+            "createInternalMenuStoreFacts",
             "createInternalTestCart",
             "createInternalTestResources",
             "createInternalCustomerEntry",

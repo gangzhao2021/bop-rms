@@ -75,8 +75,9 @@ export function createConfiguredPriceQuote(input: {
     const raw = closed(input, ["base", "options"]);
     const baseInput = raw.base as CreatePriceQuoteInput;
     const base = createPriceQuote(baseInput);
-    if (!Array.isArray(raw.options) || raw.options.length < 1 || raw.options.length > 1000)
-      return fail();
+    // WP-2423: a cart without options is the same quote with no Option charges, so every new
+    // cart can use this one format; the amounts equal v1 (see the equivalence test).
+    if (!Array.isArray(raw.options) || raw.options.length > 1000) return fail();
     const options = raw.options.map((value) => {
       const row = closed(value, [
         "lineReference",

@@ -154,7 +154,7 @@ function historyFixture() {
   const state = { clock: at, until: "2026-10-05T10:00:05.000Z", allowed: true };
   const table = [historyRow(5), historyRow(4), historyRow(3), historyRow(2), historyRow(1)];
   const query = vi.fn(async (sql: string, values: readonly unknown[]) => ({
-    rows: sql.includes("ORDER BY sequence_number")
+    rows: sql.includes("ORDER BY o.sequence_number")
       ? table
           .filter((row) => values[2] === null || Number(row.sequence_number) < Number(values[2]))
           .slice(0, 3)
@@ -327,7 +327,7 @@ describe("held owning immutable Store configuration history", () => {
         code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE",
       });
       const statement = f.query.mock.calls.find(([sql]) =>
-        sql.includes("ORDER BY sequence_number"),
+        sql.includes("ORDER BY o.sequence_number"),
       )?.[0];
       expect(statement).toContain("CASE WHEN occurred_at=date_trunc('milliseconds',occurred_at)");
       expect(statement).toContain("ELSE NULL END occurred_at");

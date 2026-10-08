@@ -20,6 +20,7 @@ vi.mock("@rms/ordering", () => ({
       nextAfterOrderReference: null,
     }),
   }),
+  readOrderCreationQuoteVersion: async () => 2,
   createPostgresOrderAcceptanceReader: () => ({ loadByBatch: async () => null }),
   createPostgresOrderExecutionReader: vi.fn(),
   createPostgresDiningOrderItemStateReader: () => ({ load: async () => null }),

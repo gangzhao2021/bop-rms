@@ -556,7 +556,7 @@ export function createPostgresStoreConfigurationHistorySource(
     const observedAt = check();
     const result = rows(
       await sql(
-        "SELECT sequence_number::text sequence_number,operation_id,command_type,configuration_json,intent_digest,actor_reference,purpose_code,audit_reference,CASE WHEN occurred_at=date_trunc('milliseconds',occurred_at) THEN to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') ELSE NULL END occurred_at,expected_version::text expected_version,configuration_id,configuration_version::text configuration_version,lifecycle,data_classification FROM rms_store.store_configuration_authoring_operation WHERE brand_id=$1 AND store_id=$2 AND ($3::bigint IS NULL OR sequence_number<$3) ORDER BY sequence_number DESC LIMIT 3",
+        "SELECT sequence_number::text sequence_number,operation_id,command_type,configuration_json,intent_digest,actor_reference,purpose_code,audit_reference,CASE WHEN occurred_at=date_trunc('milliseconds',occurred_at) THEN to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') ELSE NULL END occurred_at,expected_version::text expected_version,configuration_id,configuration_version::text configuration_version,lifecycle,data_classification FROM rms_store.store_configuration_authoring_operation o WHERE o.brand_id=$1 AND o.store_id=$2 AND ($3::bigint IS NULL OR o.sequence_number<$3) ORDER BY o.sequence_number DESC LIMIT 3",
         [fixed.brandReference, fixed.storeReference, selector],
       ),
     );

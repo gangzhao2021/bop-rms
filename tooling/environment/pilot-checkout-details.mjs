@@ -7,7 +7,7 @@ export function createInternalCheckoutDetails(resources, entry, diningIdentity) 
   const { scope, transactions, now, credentials } = resources;
   const common = {
     scope,
-    quoteVersion: 1,
+    quoteVersion: 2,
     cartTransactions: transactions,
     detailsTransactions: transactions,
     now,
@@ -40,7 +40,7 @@ export function createInternalCheckoutDetails(resources, entry, diningIdentity) 
     }),
   };
   const pickup = {
-    quoteVersion: 1,
+    quoteVersion: 2,
     ...createCustomerPickupCheckoutDetailsComposition({
       ...common,
       session: {
@@ -54,7 +54,7 @@ export function createInternalCheckoutDetails(resources, entry, diningIdentity) 
     channelCheckoutDetails: {
       pickup,
       dining: {
-        quoteVersion: 1,
+        quoteVersion: 2,
         ...createCustomerDiningCheckoutDetailsComposition({ ...common, identity: diningIdentity }),
       },
     },
