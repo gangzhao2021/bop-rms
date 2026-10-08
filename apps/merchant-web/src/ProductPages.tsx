@@ -19,6 +19,8 @@ import {
   type ProductDetailView,
   type ProductErrorCode,
   type ProductListView,
+  type ProductOptionSetChoice,
+  type ProductOptionSetInput,
   type ProductTaxClass,
 } from "./product-pages.js";
 
@@ -158,6 +160,11 @@ interface EditableSize {
   name: string;
 }
 let sizeKey = 0;
+/** Option sets in order, each with its enabled options in any order. */
+const optionSetsKey = (sets: readonly ProductOptionSetInput[]) =>
+  JSON.stringify(
+    sets.map((set) => [set.optionSetReference, [...set.enabledOptionReferences].sort()]),
+  );
 const nextKey = () => "size-" + ++sizeKey;
 
 export function ProductEditorPage({
@@ -200,6 +207,7 @@ function ProductEditor({
   const [sizes, setSizes] = useState<EditableSize[]>([
     { key: nextKey(), skuReference: null, lifecycle: "Draft", skuCode: "", name: "Regular" },
   ]);
+  const [optionSets, setOptionSets] = useState<ProductOptionSetInput[]>([]);
   const [loadedVersion, setLoadedVersion] = useState<number | null>(null);
   const [pending, setPending] = useState<ProductCommand | null>(null);
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
@@ -233,6 +241,7 @@ function ProductEditor({
           name: size.name,
         })),
       );
+      setOptionSets([...(current.optionSets ?? [])]);
     } else if (taxClass === "" && view.taxClasses.length === 1) {
       setTaxClass(view.taxClasses[0]?.taxClassificationReference ?? "");
     }
@@ -313,6 +322,7 @@ function ProductEditor({
               name: name.trim(),
               taxClassificationReference: taxClass,
               sizes: sizeInputs,
+              ...(optionChoices === null ? {} : { optionSets }),
             },
     );
   const startSelling = () =>
@@ -327,6 +337,12 @@ function ProductEditor({
             expectedAggregateVersion: product.aggregateVersion,
           },
     );
+  const optionChoices =
+    view.screenId === "CAT-PRODUCT-DETAIL" ? (view.optionSetChoices ?? null) : null;
+  const optionSetsChanged =
+    product !== null &&
+    optionChoices !== null &&
+    optionSetsKey(optionSets) !== optionSetsKey(product.optionSets ?? []);
   const notSelling =
     product !== null &&
     (product.lifecycle === "Draft" || product.sizes.some((size) => size.lifecycle === "Draft"));
@@ -339,7 +355,8 @@ function ProductEditor({
       (size, index) =>
         size.skuReference !== product.sizes[index]?.skuReference ||
         size.name.trim() !== product.sizes[index]?.name,
-    );
+    ) ||
+    optionSetsChanged;
 
   return (
     <AppFrame
@@ -525,6 +542,14 @@ function ProductEditor({
             </button>
           ) : null}
         </fieldset>
+        {product !== null && optionChoices !== null ? (
+          <ProductOptionSetsFieldset
+            disabled={!mayEdit || busy}
+            choices={optionChoices}
+            value={optionSets}
+            onChange={setOptionSets}
+          />
+        ) : null}
         {mayEdit ? (
           <button type="submit" disabled={!valid || busy || !changed}>
             {pending && pending.action !== "StartSelling"
@@ -549,5 +574,138 @@ function ProductEditor({
         </section>
       ) : null}
     </AppFrame>
+  );
+}
+
+/** WP-2423 slice 4: the option sets customers choose from on this product, and which options. */
+function ProductOptionSetsFieldset({
+  disabled,
+  choices,
+  value,
+  onChange,
+}: {
+  readonly disabled: boolean;
+  readonly choices: readonly ProductOptionSetChoice[];
+  readonly value: readonly ProductOptionSetInput[];
+  readonly onChange: (next: ProductOptionSetInput[]) => void;
+}) {
+  const [adding, setAdding] = useState("");
+  const addable = choices.filter(
+    (choice) =>
+      !choice.archived &&
+      choice.options.some((option) => option.offered) &&
+      !value.some((item) => item.optionSetReference === choice.optionSetReference),
+  );
+  const replace = (index: number, item: ProductOptionSetInput | null) =>
+    onChange(
+      value.flatMap((current, at) => (at !== index ? [current] : item === null ? [] : [item])),
+    );
+  const move = (index: number, by: number) => {
+    const next = [...value];
+    const [item] = next.splice(index, 1);
+    if (item) next.splice(index + by, 0, item);
+    onChange(next);
+  };
+  return (
+    <fieldset disabled={disabled}>
+      <legend>Options</legend>
+      <p>
+        Choices customers make on this product, in the order they see them. Customers see changes
+        when a menu with this product is next published.
+      </p>
+      {value.length === 0 ? <p>No options on this product.</p> : null}
+      {value.map((item, index) => {
+        const choice = choices.find(
+          (candidate) => candidate.optionSetReference === item.optionSetReference,
+        );
+        if (choice === undefined) return null;
+        const toggle = (reference: string, on: boolean) => {
+          const enabled = on
+            ? [...item.enabledOptionReferences, reference]
+            : item.enabledOptionReferences.filter((existing) => existing !== reference);
+          replace(index, {
+            ...item,
+            enabledOptionReferences: choice.options
+              .map((option) => option.optionReference)
+              .filter((option) => enabled.includes(option)),
+          });
+        };
+        return (
+          <section key={item.optionSetReference} className="detail-section">
+            <h3>{choice.name}</h3>
+            {choice.archived ? (
+              <p>This option set is archived; remove it from the product.</p>
+            ) : null}
+            <ul aria-label={`Options from ${choice.name} on this product`}>
+              {choice.options.map((option) => (
+                <li key={option.optionReference}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={item.enabledOptionReferences.includes(option.optionReference)}
+                      disabled={
+                        item.enabledOptionReferences.length === 1 &&
+                        item.enabledOptionReferences.includes(option.optionReference)
+                      }
+                      onChange={(event) => toggle(option.optionReference, event.target.checked)}
+                    />
+                    {option.name}
+                    {option.offered ? "" : " (not offered by the Brand now)"}
+                  </label>
+                </li>
+              ))}
+            </ul>
+            {index > 0 ? (
+              <button type="button" onClick={() => move(index, -1)}>
+                Up
+              </button>
+            ) : null}
+            {index < value.length - 1 ? (
+              <button type="button" onClick={() => move(index, 1)}>
+                Down
+              </button>
+            ) : null}
+            <button type="button" onClick={() => replace(index, null)}>
+              Remove {choice.name}
+            </button>
+          </section>
+        );
+      })}
+      {addable.length > 0 ? (
+        <div>
+          <label>
+            Add option set
+            <select value={adding} onChange={(event) => setAdding(event.target.value)}>
+              <option value="">Choose…</option>
+              {addable.map((choice) => (
+                <option key={choice.optionSetReference} value={choice.optionSetReference}>
+                  {choice.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={adding === ""}
+            onClick={() => {
+              const choice = addable.find((item) => item.optionSetReference === adding);
+              if (!choice) return;
+              onChange([
+                ...value,
+                {
+                  optionSetReference: choice.optionSetReference,
+                  enabledOptionReferences: choice.options
+                    .filter((option) => option.offered)
+                    .map((option) => option.optionReference),
+                },
+              ]);
+              setAdding("");
+            }}
+          >
+            Add
+          </button>
+        </div>
+      ) : null}
+    </fieldset>
   );
 }

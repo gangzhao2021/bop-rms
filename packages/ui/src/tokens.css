@@ -190,6 +190,10 @@ button {
   cursor: pointer;
   transition: background var(--bop-motion-fast);
 }
+/* Side-by-side buttons keep a small gap. */
+:where(.bop-shell__main) :where(button:not([class]) + button:not([class])) {
+  margin-left: var(--bop-space-2);
+}
 :where(.bop-shell__main) :where(button:not([class]):hover:not(:disabled)) {
   background: var(--bop-color-surface-raised);
 }
@@ -239,6 +243,11 @@ button {
 :where(.bop-shell__main)
   :where(input:not([class]), select:not([class]), textarea:not([class])):focus {
   border-color: var(--bop-color-border-strong);
+}
+/* A field inside a table cell fills the cell. */
+:where(.bop-shell__main)
+  :where(td > input:not([class]):not([type="checkbox"], [type="radio"]), td > select:not([class])) {
+  width: 100%;
 }
 :where(.bop-shell__main) :where(input[type="checkbox"], input[type="radio"]) {
   width: 18px;

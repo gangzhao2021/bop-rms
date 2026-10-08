@@ -6,7 +6,11 @@ import {
   parseCatalogInstant,
 } from "../domain/product.js";
 import { resolveCurrentCatalogSelectionRules } from "./current-selection-rules.js";
-import type { CatalogSelectionValidationPorts } from "./ports/selection-validation-ports.js";
+import type { PublishedOptionRule } from "../domain/published-menu-projection.js";
+import type {
+  CatalogResolvedSelectionRule,
+  CatalogSelectionValidationPorts,
+} from "./ports/selection-validation-ports.js";
 
 type Input = Parameters<CatalogSelectionValidationPorts["snapshots"]["resolveCurrent"]>[0];
 export interface CurrentSelectionSourcePorts {
@@ -43,6 +47,8 @@ export interface CurrentSelectionSourcePorts {
         readonly snapshotDigest: string;
         readonly sellableReference: string;
         readonly productVersionReference: string;
+        /** The option rules customers were shown; absent only where a source has none. */
+        readonly optionRules?: readonly PublishedOptionRule[];
       };
       readonly sku: {
         readonly sellableReference: string;
@@ -63,6 +69,49 @@ export interface CurrentSelectionSourcePorts {
       readonly observedAt: string;
     }): Promise<{ readonly status: string; readonly observedAt: string }>;
   };
+}
+/**
+ * WP-2423 slice 4: the published menu is the authority for an item's choices; current owner facts
+ * only narrow it. A rule or option not yet published is ignored until the next publication; an
+ * option no longer enabled or offered now cannot be chosen. A published rule whose binding is gone
+ * keeps its minimum, so a required choice with nothing left to choose makes the item unorderable
+ * until the menu is published again — never a silent change to what the customer was shown.
+ */
+export function publishedSelectionRules(
+  published: readonly PublishedOptionRule[],
+  current: readonly CatalogResolvedSelectionRule[],
+  channelCode: string,
+): readonly CatalogResolvedSelectionRule[] {
+  return Object.freeze(
+    published
+      .filter(
+        (rule) =>
+          rule.channelCodes === undefined || rule.channelCodes.includes(channelCode as never),
+      )
+      .map((rule) => {
+        const now = current.find((item) => item.bindingReference === rule.bindingReference);
+        const options = rule.options.flatMap((option) => {
+          const live = now?.options.find((item) => item.optionReference === option.optionReference);
+          if (live === undefined || !rule.enabledOptionReferences.includes(option.optionReference))
+            return [];
+          return [
+            Object.freeze({
+              optionReference: option.optionReference,
+              maximumQuantity: Math.min(option.maximumQuantity, live.maximumQuantity),
+              conflictOptionReferences: option.conflictOptionReferences,
+            }),
+          ];
+        });
+        return Object.freeze({
+          bindingReference: rule.bindingReference,
+          optionSetVersionReference: rule.optionSetVersionReference,
+          activationOptionReferences: Object.freeze([...(rule.activationOptionReferences ?? [])]),
+          minimumQuantity: rule.minimumSelections,
+          maximumQuantity: rule.maximumSelections,
+          options: Object.freeze(options),
+        });
+      }),
+  );
 }
 /** A current selection observation only. Final Inventory and payment readiness are separate. */
 export function createCurrentCatalogSelectionSource(
@@ -148,12 +197,16 @@ export function createCurrentCatalogSelectionSource(
           s.catalogEligible !== true
         )
           return null;
-        const rules = resolveCurrentCatalogSelectionRules(facts.bindings, {
+        const currentRules = resolveCurrentCatalogSelectionRules(facts.bindings, {
           brandReference: fixed.brandReference,
           sellableReference: requested.sellableReference,
           channelCode: fixed.channelCode,
           observedAt: requested.observedAt,
         });
+        const rules =
+          p.optionRules === undefined
+            ? currentRules
+            : publishedSelectionRules(p.optionRules, currentRules, fixed.channelCode);
         // Capture owner facts before another asynchronous dependency can change provider-owned values.
         const snapshot = Object.freeze({
           brandReference: requested.brandReference,

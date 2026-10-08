@@ -1773,6 +1773,150 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_conflict",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_conflict",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_option",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_sku_scope",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_channel",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
     }
   ]
 }

@@ -4049,14 +4049,14 @@ it("admits only canonical Option List navigation in the server workspace", () =>
     screenId: "CAT-OPTIONSET-LIST",
     label: "Option sets",
     href: "/app/commerce/option-sets",
-    permission: "catalog.manage",
+    permission: "catalog.option_set.read",
   };
   expect(parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [item] }).navigation).toEqual([
     item,
   ]);
   for (const change of [
     { href: "/app/commerce/products" },
-    { permission: "catalog.option_set.read" },
+    { permission: "catalog.manage" },
     { screenId: "CAT-OPTION-SET-LIST" },
   ])
     expect(() =>

@@ -1,5 +1,10 @@
 // Explicit synthetic publication and commercial facts for WP-2402 composition acceptance.
-export async function seedCartCatalog(admin, id, at, { taxClassificationReference = null } = {}) {
+export async function seedCartCatalog(
+  admin,
+  id,
+  at,
+  { taxClassificationReference = null, optionRules = [] } = {},
+) {
   const digest = "sha256:" + "a".repeat(64);
   await admin.query(
     `INSERT INTO rms_catalog.menu (menu_id,brand_id,internal_code,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES ($1,$2,'ALL_DAY',1,$3,$4,$3)`,
@@ -44,7 +49,7 @@ export async function seedCartCatalog(admin, id, at, { taxClassificationReferenc
   );
   await admin.query(
     `INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json) VALUES ($1,$2,$3,$4,$5,$6,$7,'{"en-CA":"Latte"}'::jsonb,'Standard',0,false,'Available',$8::jsonb,'{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}'::jsonb)`,
-    [id(9), id(2), id(1), id(11), id(12), id(13), id(14), JSON.stringify([])],
+    [id(9), id(2), id(1), id(11), id(12), id(13), id(14), JSON.stringify(optionRules)],
   );
   await admin.query(
     `INSERT INTO rms_catalog.published_menu_projection_checkpoint (consumer_name,brand_id,menu_id,active_generation_id,source_event_id,source_aggregate_version,projected_at) VALUES ('catalog.published-menu-projection',$1,$2,$3,$4,4,$5)`,
@@ -115,8 +120,37 @@ export const cartCatalogTables = [
   "product_option_binding_channel",
 ];
 
-export async function seedCheckoutCatalog(admin, id, at, cart, scope) {
+/** The published menu carries the option rule customers choose from (maximum of the one option). */
+export async function seedCheckoutCatalog(admin, id, at, cart, scope, { maximum = 1 } = {}) {
   const attached = cart.items[0].catalogSelectionEvidence;
+  const names = JSON.stringify({ "en-CA": "Synthetic option" });
+  const setId = id(200100),
+    versionId = attached.ruleEvidence[0].optionSetVersionReference,
+    bindingId = attached.ruleEvidence[0].bindingReference,
+    optionId = cart.items[0].optionSelections[0].optionReference;
+  const optionRules = [
+    {
+      semanticsVersion: 2,
+      channelCodes: [attached.catalogChannelCode],
+      activationOptionReferences: [],
+      bindingReference: bindingId,
+      optionSetVersionReference: versionId,
+      minimumSelections: 1,
+      maximumSelections: maximum,
+      enabledOptionReferences: [optionId],
+      defaultOptionReferences: [optionId],
+      options: [
+        {
+          optionReference: optionId,
+          localizedNames: { "en-CA": "Synthetic option" },
+          maximumQuantity: maximum,
+          conflictOptionReferences: [],
+          selectedByDefault: true,
+          defaultQuantity: 1,
+        },
+      ],
+    },
+  ];
   const catalogId = (n) =>
     n === 2
       ? scope.brandReference
@@ -142,12 +176,8 @@ export async function seedCheckoutCatalog(admin, id, at, cart, scope) {
     },
     catalogId,
     at,
+    { optionRules },
   );
-  const names = JSON.stringify({ "en-CA": "Synthetic option" });
-  const setId = id(200100),
-    versionId = attached.ruleEvidence[0].optionSetVersionReference,
-    bindingId = attached.ruleEvidence[0].bindingReference,
-    optionId = cart.items[0].optionSelections[0].optionReference;
   await admin.query(
     "INSERT INTO rms_catalog.option_set(option_set_id,brand_id,internal_code,lifecycle,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES($1,$2,'SYNTHETIC_OPTION','Draft',1,$3,$4,$3)",
     [setId, scope.brandReference, at, catalogId(3)],

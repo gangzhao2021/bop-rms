@@ -661,6 +661,7 @@ describe("migration catalog", () => {
       "2000_016_alter_recipe_requirement_allergen_declaration",
       "2000_017_create_menu_release_effective_end",
       "2000_018_create_availability_rule_operation_snapshot",
+      "2000_019_create_option_set_operation_snapshot",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

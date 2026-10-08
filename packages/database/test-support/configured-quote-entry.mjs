@@ -229,12 +229,14 @@ export async function prepareConfiguredQuoteEntry({ context, admin, f, guest, no
           ],
         );
     }
+    // The published rule matches the quantity set the binding is changed to below.
     const { attached, catalogId } = await seedCheckoutCatalog(
       admin,
       id,
       f.observedAt,
       f.cart,
       scope,
+      { maximum: 3 },
     );
     await admin.query(
       "UPDATE rms_catalog.product_version SET tax_classification_id=$1 WHERE product_version_id=$2",

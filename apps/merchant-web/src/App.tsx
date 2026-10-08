@@ -1,11 +1,7 @@
 import { TaxConfigDraftPage } from "./TaxConfigDraftPage.js";
 import { StoreSetupDraftPage } from "./StoreSetupDraftPage.js";
-import { OptionSetListPage } from "./OptionSetListPage.js";
-import {
-  OptionSetCreatePage,
-  OptionSetDetailPage,
-  OptionSetEditPage,
-} from "./OptionSetAuthoringPages.js";
+import { StoreOptionSetEditPage, StoreOptionSetListPage } from "./StoreOptionSetPages.js";
+import { createOptionSetClient } from "./store-option-set-page.js";
 import { CurrentStoreCapabilityPage } from "./CurrentStoreCapabilityPage.js";
 import { RefundPaymentPage } from "./RefundPaymentPage.js";
 import { DiningSessionWorkspace } from "./DiningSessionWorkspace.js";
@@ -246,52 +242,6 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     }
   };
 
-  const optionPage = (
-    Page: ComponentType<{
-      brandReference: string | null;
-      storeReference: string | null;
-      brandLabel?: string;
-      storeLabel?: string;
-      csrf: string;
-    }>,
-    requireList = false,
-  ) =>
-    state.kind === "Ready" &&
-    !state.switching &&
-    (!requireList ||
-      state.workspace.navigation.some(
-        (item) =>
-          item.screenId === "CAT-OPTIONSET-LIST" &&
-          item.href === "/app/commerce/option-sets" &&
-          item.permission === "catalog.manage",
-      )) ? (
-      <Page
-        key={state.workspace.selectedScope.storeReference + state.csrf}
-        brandReference={null}
-        storeReference={state.workspace.selectedScope.storeReference}
-        brandLabel={state.workspace.selectedScope.brandLabel}
-        storeLabel={state.workspace.selectedScope.storeLabel}
-        csrf={state.csrf}
-      />
-    ) : (
-      <StatePanel
-        heading={
-          state.kind === "Loading"
-            ? "Loading option sets"
-            : state.kind === "Offline"
-              ? "Option sets offline"
-              : "Option sets unavailable"
-        }
-        status
-      >
-        <p>
-          {state.kind === "Ready" && !state.switching
-            ? "Option Set access is unavailable for this session and scope."
-            : "A current merchant session and selected Store are required."}
-        </p>
-      </StatePanel>
-    );
-
   const routes = (
     <Routes>
       <Route
@@ -469,15 +419,31 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         }
       />
       <Route path="/app/exports" element={<ExportJobListPage />} />
-      <Route path="/app/commerce/option-sets" element={optionPage(OptionSetListPage, true)} />
-      <Route path="/app/commerce/option-sets/new" element={optionPage(OptionSetCreatePage)} />
       <Route
-        path="/app/commerce/option-sets/:optionSetId/edit"
-        element={optionPage(OptionSetEditPage)}
+        path="/app/commerce/option-sets"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreOptionSetListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createOptionSetClient(state.csrf)}
+            />
+          ) : (
+            <StoreOptionSetListPage />
+          )
+        }
       />
       <Route
         path="/app/commerce/option-sets/:optionSetId"
-        element={optionPage(OptionSetDetailPage)}
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreOptionSetEditPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createOptionSetClient(state.csrf)}
+            />
+          ) : (
+            <StoreOptionSetEditPage />
+          )
+        }
       />
       <Route
         path="/app/commerce/products"

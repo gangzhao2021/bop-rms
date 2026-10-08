@@ -67,6 +67,8 @@ export interface ProductDetail {
     readonly lifecycle: string;
     readonly unitOfSale: string;
   }[];
+  /** The option sets on the product, in order, with the options it offers from each. */
+  readonly optionSets?: readonly ProductOptionSetInput[];
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -74,9 +76,29 @@ export interface ProductListView extends ProductViewBase {
   readonly screenId: "CAT-PRODUCT-LIST";
   readonly products: readonly ProductSummary[];
 }
+export interface ProductOptionSetChoice {
+  readonly optionSetReference: string;
+  readonly name: string;
+  readonly archived: boolean;
+  readonly displayStyle: string;
+  readonly minimum: number;
+  readonly maximum: number | null;
+  readonly perOptionMaximum: number;
+  readonly options: readonly {
+    readonly optionReference: string;
+    readonly name: string;
+    readonly offered: boolean;
+  }[];
+}
 export interface ProductDetailView extends ProductViewBase {
   readonly screenId: "CAT-PRODUCT-DETAIL";
   readonly product: ProductDetail;
+  /** The Brand's option sets; null without permission to read them. */
+  readonly optionSetChoices?: readonly ProductOptionSetChoice[] | null;
+}
+export interface ProductOptionSetInput {
+  readonly optionSetReference: string;
+  readonly enabledOptionReferences: readonly string[];
 }
 export interface ProductSizeInput {
   readonly skuReference: string | null;
@@ -101,6 +123,7 @@ export type ProductCommand =
       readonly name: string;
       readonly taxClassificationReference: string;
       readonly sizes: readonly ProductSizeInput[];
+      readonly optionSets?: readonly ProductOptionSetInput[];
     }
   | {
       readonly action: "StartSelling";

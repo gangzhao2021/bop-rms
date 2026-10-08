@@ -129,6 +129,7 @@ export function createPostgresCurrentSelectionFactsStore(
               sellableReference: published.sellableReference,
               productVersionReference: published.productVersionReference,
               localizedNames: published.localizedNames,
+              optionRules: published.optionRules,
             }),
             sku,
             bindings: options.bindings,

@@ -200,8 +200,8 @@ it("manages which items a Store sells with Brand and Store authority", async () 
         9,
       );
     } finally {
-      await admin.query("DROP OWNED BY " + role).catch(() => {});
-      await admin.query("DROP ROLE IF EXISTS " + role).catch(() => {});
+      await admin.query("DROP OWNED BY " + role).catch(() => undefined);
+      await admin.query("DROP ROLE IF EXISTS " + role).catch(() => undefined);
       await admin.end();
     }
   });

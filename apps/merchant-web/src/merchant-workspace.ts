@@ -64,7 +64,7 @@ const NAVIGATION = Object.freeze({
   "TASK-INBOX": ["/app/tasks", "workflow.operate"],
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
   "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
-  "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.manage"],
+  "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.option_set.read"],
   "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.menu.read"],
   "CAT-AVAILABILITY": ["/app/commerce/availability", "catalog.sku.read"],
   "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],

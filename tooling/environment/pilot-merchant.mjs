@@ -51,6 +51,7 @@ import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
 import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.js";
 import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
 import { createMerchantAvailability } from "../../apps/api/dist/merchant-availability.js";
+import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-sets.js";
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
@@ -198,6 +199,12 @@ export async function createInternalMerchant(
           label: "Menus",
           href: "/app/commerce/menus",
           permission: "catalog.menu.read",
+        },
+        {
+          screenId: "CAT-OPTIONSET-LIST",
+          label: "Options",
+          href: "/app/commerce/option-sets",
+          permission: "catalog.option_set.read",
         },
         {
           screenId: "CAT-AVAILABILITY",
@@ -551,6 +558,11 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en-CA",
   });
+  const optionSets = createMerchantOptionSets({
+    persistence,
+    authentication: service,
+    locale: "en-CA",
+  });
   const allergens = createMerchantAllergens({
     persistence,
     authentication: service,
@@ -690,6 +702,7 @@ export async function createInternalMerchant(
       allergens,
       ...(menus === undefined ? {} : { menus }),
       availability,
+      optionSets,
       stockCounts,
       storeWaste,
       pickupQuery,

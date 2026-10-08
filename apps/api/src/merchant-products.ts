@@ -5,10 +5,12 @@ import {
   createPostgresProductCreationStore,
   createPostgresProductDraftStore,
   createPostgresProductLifecycleStore,
+  listBrandOptionSets,
   listBrandProducts,
   loadBrandProduct,
   parseCatalogHash,
   parseCatalogReference,
+  type OptionSetAggregate,
   type ProductAggregate,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
@@ -27,6 +29,8 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
  * and catalog.sku.activate. A Store grant alone never satisfies them. Pilot (WP-2423 bypass list):
  * a Product version is edited in place without the publication review; every change is audited and
  * versioned. Pausing, discontinuing and archiving need the lifecycle review and are not offered yet.
+ * WP-2423 slice 4: a product lists the Brand option sets customers choose from (in order) and, for
+ * each, which of the set's options this product offers; the set's default choices are preselected.
  */
 export class MerchantProductError extends Error {
   constructor(
@@ -75,6 +79,11 @@ export interface ProductSizeInput {
   readonly skuCode: string;
   readonly name: string;
 }
+/** An option set on a product: the options of the set this product offers. */
+export interface ProductOptionSetInput {
+  readonly optionSetReference: string;
+  readonly enabledOptionReferences: readonly string[];
+}
 export type ProductCommandBody =
   | {
       readonly action: "Create";
@@ -93,6 +102,8 @@ export type ProductCommandBody =
       readonly name: string;
       readonly taxClassificationReference: string;
       readonly sizes: readonly ProductSizeInput[];
+      /** Absent: the product's option sets stay as they are. */
+      readonly optionSets?: readonly ProductOptionSetInput[];
     }
   | {
       readonly action: "StartSelling";
@@ -124,6 +135,28 @@ function sizes(value: unknown, creating: boolean): readonly ProductSizeInput[] {
     return fail("Invalid");
   return parsed;
 }
+function optionSetInputs(value: unknown): readonly ProductOptionSetInput[] {
+  if (!Array.isArray(value) || value.length > 12) return fail("Invalid");
+  const parsed = value.map((candidate: unknown) => {
+    const r = candidate as Record<string, unknown> | null;
+    if (
+      r === null ||
+      typeof r !== "object" ||
+      Array.isArray(r) ||
+      Object.keys(r).sort().join(",") !== "enabledOptionReferences,optionSetReference" ||
+      !Array.isArray(r.enabledOptionReferences) ||
+      r.enabledOptionReferences.length < 1 ||
+      r.enabledOptionReferences.length > 50
+    )
+      return fail("Invalid");
+    const enabled = r.enabledOptionReferences.map(ref);
+    if (new Set(enabled).size !== enabled.length) return fail("Invalid");
+    return { optionSetReference: ref(r.optionSetReference), enabledOptionReferences: enabled };
+  });
+  if (new Set(parsed.map((item) => item.optionSetReference)).size !== parsed.length)
+    return fail("Invalid");
+  return parsed;
+}
 export function parseProductCommandBody(value: unknown): ProductCommandBody {
   const r = value as Record<string, unknown> | null;
   if (r === null || typeof r !== "object" || Array.isArray(r)) return fail("Invalid");
@@ -144,10 +177,13 @@ export function parseProductCommandBody(value: unknown): ProductCommandBody {
       sizes: sizes(r.sizes, true),
     };
   }
+  const saveKeys =
+    "action,expectedAggregateVersion,name,operationReference,productReference,sizes,taxClassificationReference";
   if (
     r.action === "SaveDraft" &&
-    keys ===
-      "action,expectedAggregateVersion,name,operationReference,productReference,sizes,taxClassificationReference"
+    (keys === saveKeys ||
+      keys ===
+        "action,expectedAggregateVersion,name,operationReference,optionSets,productReference,sizes,taxClassificationReference")
   )
     return {
       action: "SaveDraft",
@@ -157,6 +193,7 @@ export function parseProductCommandBody(value: unknown): ProductCommandBody {
       name: text(r.name, 120),
       taxClassificationReference: ref(r.taxClassificationReference),
       sizes: sizes(r.sizes, false),
+      ...(keys === saveKeys ? {} : { optionSets: optionSetInputs(r.optionSets) }),
     };
   if (
     r.action === "StartSelling" &&
@@ -216,9 +253,34 @@ export function productView(product: ProductAggregate, locale: string) {
       lifecycle: sku.lifecycle,
       unitOfSale: sku.unitOfSale,
     })),
+    optionSets: product.draft.optionBindings.map((binding) => ({
+      optionSetReference: binding.optionSetReference,
+      enabledOptionReferences: binding.enabledOptionReferences,
+    })),
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };
+}
+/** The Brand's option sets a product can use, with their options (archived options left out). */
+export function optionSetChoices(sets: readonly OptionSetAggregate[], locale: string) {
+  const name = (names: Readonly<Record<string, string>>, fallback: string) =>
+    names[locale] ?? Object.values(names)[0] ?? fallback;
+  return sets.map((set) => ({
+    optionSetReference: set.optionSetReference,
+    name: name(set.draft.localizedNames, set.internalCode),
+    archived: set.lifecycle === "Archived",
+    displayStyle: set.draft.displayStyle,
+    minimum: set.draft.minimumSelection,
+    maximum: set.draft.maximumSelection,
+    perOptionMaximum: set.draft.perOptionMaximumQuantity,
+    options: set.draft.options
+      .filter((option) => option.lifecycle !== "Archived")
+      .map((option) => ({
+        optionReference: option.optionReference,
+        name: name(option.localizedNames, option.stableCode),
+        offered: option.lifecycle === "Active",
+      })),
+  }));
 }
 
 export function createMerchantProducts(options: {
@@ -234,6 +296,7 @@ export function createMerchantProducts(options: {
   type Tx = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
   type ReadTx = Parameters<typeof listBrandProducts>[0];
   const reads = (tx: Tx) => tx as unknown as ReadTx;
+  const productTx = (tx: Tx) => tx as unknown as ProductLifecycleTransaction;
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
@@ -291,10 +354,17 @@ export function createMerchantProducts(options: {
             input.productReference,
           );
           if (product === null) return fail("NotFound");
+          const mayReadOptions = (await s.decision("catalog.option_set.read"))?.effect === "Allow";
           return {
             screenId: "CAT-PRODUCT-DETAIL" as const,
             ...base,
             product: productView(product, options.locale),
+            optionSetChoices: mayReadOptions
+              ? optionSetChoices(
+                  await listBrandOptionSets(productTx(tx), { brandReference: s.brand }),
+                  options.locale,
+                )
+              : null,
           };
         }
         const products = await listBrandProducts(reads(tx), { brandReference: s.brand });
@@ -338,9 +408,6 @@ export function createMerchantProducts(options: {
         const creation = createPostgresProductCreationStore(storeOptions);
         const draftStore = createPostgresProductDraftStore(storeOptions);
         const lifecycleStore = createPostgresProductLifecycleStore(storeOptions);
-        const unavailable = (): never => {
-          throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-        };
         const actionCodes = {
           Create: "CATALOG_PRODUCT_CREATE",
           ReplaceDraft: "CATALOG_PRODUCT_REPLACEDRAFT",
@@ -359,7 +426,20 @@ export function createMerchantProducts(options: {
                   ? lifecycleStore.commit(value)
                   : draftStore.commit(value),
             },
-            optionSets: { resolveVersion: unavailable },
+            // The Brand's option set whose current version the binding names.
+            optionSets: {
+              resolveVersion: async (request) => {
+                if (request.brandReference !== brand) return null;
+                const sets = await listBrandOptionSets(productTx, { brandReference: brand });
+                return (
+                  sets.find(
+                    (set) =>
+                      set.optionSetReference === request.optionSetReference &&
+                      set.draft.versionReference === request.optionSetVersionReference,
+                  ) ?? null
+                );
+              },
+            },
             references: {
               generate: (purpose) => {
                 const index = generated[purpose] ?? 0;
@@ -411,6 +491,69 @@ export function createMerchantProducts(options: {
             )
           ).some((choice) => choice.taxClassificationReference === classification);
         const names = (name: string) => ({ [options.locale]: name });
+        /**
+         * The product's option sets in the order given. A set already on the product keeps its
+         * binding identity; a newly added set must be current (not archived). Enabled options are
+         * the set's non-archived options the merchant chose; the set's default choices among them
+         * that are offered are preselected (one each).
+         */
+        const bindingsFor = async (
+          product: ProductAggregate,
+          inputs: readonly ProductOptionSetInput[],
+          operation: string,
+        ) => {
+          const changed =
+            JSON.stringify(inputs) !==
+            JSON.stringify(productView(product, options.locale).optionSets);
+          if (changed && (await s.decision("catalog.option_set.read"))?.effect !== "Allow")
+            fail("PermissionDenied");
+          const sets = await listBrandOptionSets(productTx, { brandReference: brand });
+          return inputs.map((input, sortOrder) => {
+            const set = sets.find((item) => item.optionSetReference === input.optionSetReference);
+            if (set === undefined) return fail("Invalid");
+            const existing = product.draft.optionBindings.find(
+              (binding) => binding.optionSetReference === input.optionSetReference,
+            );
+            if (existing === undefined && set.lifecycle === "Archived") fail("Invalid");
+            const usable = new Set(
+              set.draft.options
+                .filter((option) => option.lifecycle !== "Archived")
+                .map((option) => String(option.optionReference)),
+            );
+            if (input.enabledOptionReferences.some((reference) => !usable.has(reference)))
+              fail("Invalid");
+            const enabled = [...input.enabledOptionReferences].sort();
+            const defaults = set.draft.options
+              .filter(
+                (option) =>
+                  option.defaultEligible &&
+                  option.lifecycle === "Active" &&
+                  enabled.includes(String(option.optionReference)),
+              )
+              .slice(0, set.draft.maximumSelection ?? undefined)
+              .map((option) => ({ optionReference: option.optionReference, quantity: 1 }))
+              .sort((a, b) => (a.optionReference < b.optionReference ? -1 : 1));
+            return {
+              bindingReference:
+                existing?.bindingReference ??
+                parseCatalogReference(
+                  derivedReference(operation, "binding:" + input.optionSetReference),
+                ),
+              optionSetReference: set.optionSetReference,
+              optionSetVersionReference: set.draft.versionReference,
+              purpose: existing?.purpose ?? "CUSTOMER_CHOICE",
+              sortOrder,
+              enabledOptionReferences: enabled.map(parseCatalogReference),
+              defaultSelections: defaults,
+              minimumSelectionOverride: null,
+              maximumSelectionOverride: null,
+              includedSkuReferences: [],
+              excludedSkuReferences: [],
+              channelCodes: [],
+              storeOverrideAllowed: false,
+            };
+          });
+        };
         try {
           if (body.action === "Create") {
             if (!(await taxClassOffered(body.taxClassificationReference)))
@@ -527,6 +670,10 @@ export function createMerchantProducts(options: {
                 createdByActorReference: parseCatalogReference(s.actor),
               };
             });
+            const optionBindings =
+              body.optionSets === undefined
+                ? product.draft.optionBindings
+                : await bindingsFor(product, body.optionSets, body.operationReference);
             const result = await service(body.operationReference).replaceDraft({
               productReference: product.productReference,
               expectedAggregateVersion: body.expectedAggregateVersion,
@@ -537,6 +684,7 @@ export function createMerchantProducts(options: {
                 localizedNames: { ...product.draft.localizedNames, ...names(body.name) },
                 taxClassificationReference: body.taxClassificationReference,
                 skus,
+                optionBindings,
                 updatedAt: at,
               },
             });

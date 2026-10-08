@@ -204,6 +204,7 @@ import {
   MerchantAvailabilityError,
   type createMerchantAvailability,
 } from "./merchant-availability.js";
+import { MerchantOptionSetError, type createMerchantOptionSets } from "./merchant-option-sets.js";
 import {
   MerchantStockCountError,
   type createMerchantStockCounts,
@@ -284,7 +285,7 @@ const merchantNavigation = Object.freeze({
   "TASK-INBOX": ["/app/tasks", "workflow.operate"],
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
   "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
-  "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.manage"],
+  "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.option_set.read"],
   "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.menu.read"],
   "CAT-AVAILABILITY": ["/app/commerce/availability", "catalog.sku.read"],
   "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],
@@ -469,6 +470,7 @@ export interface MerchantBffRouterOptions {
   readonly allergens?: ReturnType<typeof createMerchantAllergens>;
   readonly menus?: ReturnType<typeof createMerchantMenus>;
   readonly availability?: ReturnType<typeof createMerchantAvailability>;
+  readonly optionSets?: ReturnType<typeof createMerchantOptionSets>;
   readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
   readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
@@ -5653,6 +5655,73 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         .catch((error: unknown) => availabilityFailure(response, error));
     },
   );
+
+  // WP-2423 slice 4: CAT-OPTIONSET-LIST / CAT-OPTIONSET-EDIT for the selected Store's Brand.
+  const optionSetStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    Invalid: 400,
+  } as const;
+  const optionSetFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantOptionSetError)) {
+      denied(response);
+      return;
+    }
+    response.status(optionSetStatus[error.code]).json({ error: error.code });
+  };
+  const optionSetUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+  router.post("/commerce/option-sets/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as Record<string, unknown> | undefined;
+    const keys = body === undefined || body === null ? null : Object.keys(body);
+    const optionSetReference =
+      keys !== null && keys.length === 1 && keys[0] === "optionSetReference"
+        ? body?.optionSetReference
+        : null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      keys === null ||
+      (keys.length !== 0 &&
+        (typeof optionSetReference !== "string" || !optionSetUuid.test(optionSetReference)))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.optionSets) {
+      response.status(503).json({ error: "option_sets_unavailable" });
+      return;
+    }
+    void options.optionSets
+      .query({ sessionCookie, csrf, optionSetReference: optionSetReference as string | null })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => optionSetFailure(response, error));
+  });
+  router.post("/commerce/option-sets/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.optionSets) {
+      response.status(503).json({ error: "option_sets_unavailable" });
+      return;
+    }
+    void options.optionSets
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => optionSetFailure(response, error));
+  });
 
   // WP-2423 / DEC-INV-STOCK-COUNT: INV-COUNT-LIST / INV-COUNT-WORKBENCH.
   const countStatus = {
