@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   CurrentOrderDetails,
   CurrentOrderQueueRows,
+  storeTime,
   filterCurrentOrderItems,
 } from "./CurrentOrderQueuePage.js";
 import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
@@ -159,4 +160,10 @@ it("keeps payments accessible on cancelled Dining without offering unavailable s
   expect(render("Cancelled")).not.toContain("View serving progress");
   expect(render("Accepted")).toContain("View serving progress");
   expect(render("Fulfilled")).toContain("View serving progress");
+});
+
+it("WP-2423: shows order times in the Store's time zone", () => {
+  expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto")).toBe("21:30");
+  expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto", true)).toBe("2026-10-07 21:30");
+  expect(storeTime("2026-10-08T01:30:00.000Z", undefined)).toBe("01:30 UTC");
 });

@@ -34,13 +34,36 @@ export function filterCurrentOrderItems(
       (filters.phase === "All" || (order.currentPhase ?? "Unavailable") === filters.phase),
   );
 }
+/** WP-2423: an instant as Store-local time (UTC when the Store's time zone is not known). */
+export function storeTime(instant: string, timeZone: string | undefined, withDate = false): string {
+  if (timeZone === undefined)
+    return (withDate ? instant.slice(0, 10) + " " : "") + instant.slice(11, 16) + " UTC";
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(instant))
+      .map((part) => [part.type, part.value]),
+  );
+  const time = `${parts.hour}:${parts.minute}`;
+  return withDate ? `${parts.year}-${parts.month}-${parts.day} ${time}` : time;
+}
+
 export function CurrentOrderQueueRows({
   view,
   visibleOrderReferences,
   action,
   detail,
+  timeZone,
 }: {
   readonly view: CurrentOrderQueue;
+  readonly timeZone?: string | undefined;
   readonly visibleOrderReferences?: ReadonlySet<string>;
   readonly detail?: (order: CurrentOrderQueue["items"][number]) => React.ReactNode;
   readonly action?: (
@@ -101,7 +124,7 @@ export function CurrentOrderQueueRows({
               dateTime={order.submittedAt}
               title={order.submittedAt}
             >
-              {order.submittedAt.slice(11, 16)} UTC
+              {storeTime(order.submittedAt, timeZone)}
             </time>
           </summary>
           <div className="order-workbench-detail">
@@ -121,7 +144,9 @@ export function CurrentOrderQueueRows({
               <div>
                 <dt>Submitted</dt>
                 <dd>
-                  <time dateTime={order.submittedAt}>{order.submittedAt}</time>
+                  <time dateTime={order.submittedAt}>
+                    {storeTime(order.submittedAt, timeZone, true)}
+                  </time>
                 </dd>
               </div>
               <div>
@@ -182,9 +207,12 @@ export function CurrentOrderDetails({
 export function CurrentOrderQueuePage({
   storeLabel,
   csrf,
+  timeZone,
 }: {
   readonly storeLabel: string;
   readonly csrf: string;
+  /** WP-2423: the Store's IANA time zone; order times are shown in it. */
+  readonly timeZone?: string | undefined;
 }) {
   const operations = useRef(
     new Map<string, ReturnType<ReturnType<typeof createOrderAcceptanceClient>["prepare"]>>(),
@@ -344,6 +372,7 @@ export function CurrentOrderQueuePage({
             ) : null}
             <CurrentOrderQueueRows
               view={state.view}
+              timeZone={timeZone}
               visibleOrderReferences={visibleOrderReferences}
               detail={(order) => (
                 <CurrentOrderDetails

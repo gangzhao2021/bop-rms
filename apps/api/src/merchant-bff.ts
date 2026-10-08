@@ -264,6 +264,8 @@ export interface MerchantWorkspaceSnapshot {
     readonly brandLabel: string;
     readonly storeLabel: string;
     readonly storeReference: string;
+    /** WP-2423: the Store's IANA time zone, for store-local times and the Business Date. */
+    readonly timeZone?: string;
   };
   readonly authorizedStores: readonly {
     readonly brandLabel: string;
@@ -665,6 +667,28 @@ function targetStoreReference(value: unknown): unknown {
   return closed(value, ["targetStoreReference"]).targetStoreReference;
 }
 
+const ianaTimeZone = (value: unknown): value is string => {
+  if (typeof value !== "string" || !/^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$/u.test(value))
+    return false;
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+};
+/** WP-2423: the selected Store may carry its IANA time zone for store-local times and dates. */
+function selectedScope(value: unknown) {
+  const zoned = value !== null && typeof value === "object" && Object.hasOwn(value, "timeZone");
+  if (!zoned) return scope(value);
+  const input = closed(value, [...scopeKeys, "timeZone"]);
+  if (!ianaTimeZone(input.timeZone)) throw new Error("MERCHANT_WORKSPACE_DENIED");
+  const { brandLabel, storeLabel, storeReference } = input;
+  return Object.freeze({
+    ...scope({ brandLabel, storeLabel, storeReference }),
+    timeZone: input.timeZone,
+  });
+}
 function scope(value: unknown) {
   const input = closed(value, scopeKeys);
   if (
@@ -760,21 +784,21 @@ export function parseMerchantWorkspaceSnapshot(value: unknown): MerchantWorkspac
     input.navigation.length > 20
   )
     throw new Error("MERCHANT_WORKSPACE_DENIED");
-  const selectedScope = scope(input.selectedScope);
+  const selected = selectedScope(input.selectedScope);
   const navigation = Object.freeze(
-    input.navigation.map((value) => navigationItem(value, selectedScope.storeReference)),
+    input.navigation.map((value) => navigationItem(value, selected.storeReference)),
   );
   if (new Set(navigation.map((item) => item.screenId)).size !== navigation.length)
     throw new Error("MERCHANT_WORKSPACE_DENIED");
   const authorizedStores = Object.freeze(input.authorizedStores.map(scope));
   if (
     new Set(authorizedStores.map((item) => item.storeReference)).size !== authorizedStores.length ||
-    !authorizedStores.some((item) => item.storeReference === selectedScope.storeReference)
+    !authorizedStores.some((item) => item.storeReference === selected.storeReference)
   )
     throw new Error("MERCHANT_WORKSPACE_DENIED");
   return Object.freeze({
     screenId: "HOME-OVERVIEW",
-    selectedScope,
+    selectedScope: selected,
     authorizedStores,
     businessDate: input.businessDate,
     storeStatus: input.storeStatus as MerchantWorkspaceSnapshot["storeStatus"],

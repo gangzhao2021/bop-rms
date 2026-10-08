@@ -2,6 +2,8 @@ export interface MerchantStoreOption {
   readonly brandLabel: string;
   readonly storeLabel: string;
   readonly storeReference: string;
+  /** WP-2423: the selected Store's IANA time zone, when the server provides it. */
+  readonly timeZone?: string;
 }
 
 export interface MerchantWorkspaceSnapshot {
@@ -106,7 +108,15 @@ function record(value: unknown, keys: readonly string[]): Readonly<Record<string
 }
 
 function storeOption(value: unknown): MerchantStoreOption {
-  const input = record(value, ["brandLabel", "storeLabel", "storeReference"]);
+  const zoned = value !== null && typeof value === "object" && Object.hasOwn(value, "timeZone");
+  const input = record(
+    value,
+    zoned
+      ? ["brandLabel", "storeLabel", "storeReference", "timeZone"]
+      : ["brandLabel", "storeLabel", "storeReference"],
+  );
+  if (zoned && (typeof input.timeZone !== "string" || !validTimeZone(input.timeZone)))
+    throw new Error("MERCHANT_WORKSPACE_INVALID");
   if (
     typeof input.brandLabel !== "string" ||
     !SAFE_LABEL.test(input.brandLabel) ||
@@ -120,7 +130,16 @@ function storeOption(value: unknown): MerchantStoreOption {
     brandLabel: input.brandLabel,
     storeLabel: input.storeLabel,
     storeReference: input.storeReference,
+    ...(zoned ? { timeZone: input.timeZone as string } : {}),
   });
+}
+function validTimeZone(value: string) {
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: value });
+    return /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$/u.test(value);
+  } catch {
+    return false;
+  }
 }
 
 function navigationItem(value: unknown, selectedStoreReference: string): MerchantNavigationItem {

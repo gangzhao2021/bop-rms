@@ -108,6 +108,7 @@ export async function createInternalMerchant(
         brandLabel: context.brand.displayName,
         storeLabel: context.store.displayName,
         storeReference: selected.storeReference,
+        timeZone: context.store.timeZone,
       },
       authorizedStores: [
         {
@@ -116,7 +117,13 @@ export async function createInternalMerchant(
           storeReference: selected.storeReference,
         },
       ],
-      businessDate: context.resolvedAt.slice(0, 10),
+      // The Store-local calendar date (a UTC date is already tomorrow in Toronto after 20:00).
+      businessDate: new Intl.DateTimeFormat("en-CA", {
+        timeZone: context.store.timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date(context.resolvedAt)),
       storeStatus: "Unavailable",
       freshness: "Stale",
       dashboardAvailability: "UnavailableUntilWP1905",

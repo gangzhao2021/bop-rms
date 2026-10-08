@@ -631,6 +631,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 key={state.workspace.selectedScope.storeReference + state.csrf}
                 storeLabel={state.workspace.selectedScope.storeLabel}
                 csrf={state.csrf}
+                timeZone={state.workspace.selectedScope.timeZone}
               />
             ) : (
               <StatePanel heading="Order Queue unavailable" status>

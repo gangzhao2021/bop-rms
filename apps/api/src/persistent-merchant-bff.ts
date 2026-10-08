@@ -353,15 +353,17 @@ export function createPersistentMerchantBffService(
         );
       }
     }
-    const selectedScope = Object.freeze({
+    const storeOption = Object.freeze({
       brandLabel: context.brand.displayName,
       storeLabel: store.displayName,
       storeReference: store.storeReference,
     });
+    // WP-2423: the selected Store's own time zone, for Store-local order times.
+    const selectedScope = Object.freeze({ ...storeOption, timeZone: store.timeZone });
     const authorizedStores = [];
     for (const candidate of result.authorizedStores) {
       if (candidate.storeReference === store.storeReference) {
-        authorizedStores.push(selectedScope);
+        authorizedStores.push(storeOption);
         continue;
       }
       const target = await options.targetScope(tx, session, candidate.storeReference);
