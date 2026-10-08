@@ -15,6 +15,11 @@ export interface CustomerMenuStoreContext {
 export interface CustomerMenuStoreFact {
   readonly availability: "Available" | "SoldOut" | "NotOffered";
   readonly price: { readonly amount: string; readonly currency: string } | null;
+  /** WP-2423 slice 4.5: each published option's current price for one, by "binding:option". */
+  readonly optionPrices?: ReadonlyMap<
+    string,
+    { readonly amount: string; readonly currency: string }
+  >;
 }
 
 export interface CustomerMenuQueryPorts {
@@ -39,6 +44,12 @@ export interface CustomerMenuQueryPorts {
       readonly orderTypeCode: CustomerMenuQueryInput["orderTypeCode"];
       readonly requestedAt: CustomerMenuQueryInput["requestedAt"];
       readonly sellableReferences: readonly CatalogReference[];
+      /** The published options of those items to price (each item's own bindings). */
+      readonly options?: readonly {
+        readonly sellableReference: CatalogReference;
+        readonly bindingReference: CatalogReference;
+        readonly optionReference: CatalogReference;
+      }[];
     }): Promise<ReadonlyMap<string, CustomerMenuStoreFact>>;
   };
 }

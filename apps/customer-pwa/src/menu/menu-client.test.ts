@@ -69,6 +69,7 @@ function found() {
               availability: "Available",
               optionRules: [
                 {
+                  name: "Milk",
                   bindingReference: references.binding,
                   optionSetVersionReference: references.optionSet,
                   minimumSelections: 0,
@@ -165,6 +166,7 @@ describe("Customer Menu client", () => {
                 allergens: [{ name: "Milk", classification: "Contains" }],
                 optionRules: [
                   {
+                    name: "Milk",
                     minimumSelections: 0,
                     maximumSelections: 1,
                     options: [
@@ -174,6 +176,7 @@ describe("Customer Menu client", () => {
                         maximumQuantity: 1,
                         conflictOptionReferences: [],
                         selectedByDefault: false,
+                        price: null,
                       },
                     ],
                   },

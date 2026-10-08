@@ -14,6 +14,8 @@ export interface CustomerMenuQueryInput {
 
 export interface CustomerMenuOptionRuleDto {
   readonly semanticsVersion?: 2;
+  /** The option set's name ("Milk"); null for menus published before names were included. */
+  readonly name: string | null;
   readonly activationOptionReferences?: readonly CatalogReference[];
   readonly bindingReference: CatalogReference;
   readonly optionSetVersionReference: CatalogReference;
@@ -28,12 +30,20 @@ export interface CustomerMenuOptionRuleDto {
     readonly conflictOptionReferences: readonly CatalogReference[];
     readonly selectedByDefault: boolean;
     readonly defaultQuantity?: number;
-    readonly incrementalPrice: {
-      readonly status: "Unavailable";
-      readonly amount: null;
-      readonly currency: null;
-      readonly reason: "PRICING_NOT_INTEGRATED";
-    };
+    /** What one of this option adds now at the Store (0 is "no charge"); the Quote decides. */
+    readonly incrementalPrice:
+      | {
+          readonly status: "Available";
+          readonly amount: string;
+          readonly currency: string;
+          readonly reason: null;
+        }
+      | {
+          readonly status: "Unavailable";
+          readonly amount: null;
+          readonly currency: null;
+          readonly reason: "PRICING_NOT_INTEGRATED" | "PRICE_NOT_SET";
+        };
   }[];
 }
 

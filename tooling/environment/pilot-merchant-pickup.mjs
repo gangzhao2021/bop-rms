@@ -1,3 +1,4 @@
+import console from "node:console";
 import { Buffer } from "node:buffer";
 import { appendAuditRecordInTransaction } from "../../packages/bop/audit/src/index.ts";
 import { createAbuseBudgetConsumer } from "../../packages/database/src/index.ts";
@@ -147,7 +148,8 @@ export async function createInternalMerchantPickup(
 }
 
 /** Logs an unexpected failure as a code and source locations only (no message or business data). */
-function logUnexpected(event, call) {
+/** Unexpected read failures are logged by code and source position only (no messages or data). */
+export function logUnexpected(event, call) {
   return async (input) => {
     try {
       return await call(input);

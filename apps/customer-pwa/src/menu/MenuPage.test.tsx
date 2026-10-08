@@ -26,6 +26,7 @@ const sellable: MenuSellable = Object.freeze({
   ]),
   optionRules: Object.freeze([
     Object.freeze({
+      name: null,
       minimumSelections: 0,
       maximumSelections: 1,
       options: Object.freeze([
@@ -35,6 +36,7 @@ const sellable: MenuSellable = Object.freeze({
           maximumQuantity: 1,
           conflictOptionReferences: Object.freeze([]),
           selectedByDefault: false,
+          price: null,
         }),
       ]),
     }),
@@ -176,9 +178,12 @@ describe("WP-1701 Customer Menu screens", () => {
       ...sellable,
       optionRules: [
         {
+          name: "Milk",
           minimumSelections: 1,
           maximumSelections: 1,
-          options: sellable.optionRules.flatMap((rule) => rule.options),
+          options: sellable.optionRules
+            .flatMap((rule) => rule.options)
+            .map((option) => ({ ...option, price: { amount: "0.75", currency: "CAD" } })),
         },
       ],
     };
@@ -194,8 +199,11 @@ describe("WP-1701 Customer Menu screens", () => {
         <SellableConfigurator sellable={configurable} controller={controller} />
       </MemoryRouter>,
     );
-    expect(html).toContain("Choice group 1 requires at least 1");
-    expect(html).toContain("Published choices are confirmed by the server");
+    expect(html).toContain("Milk requires at least 1");
+    expect(html).toContain("Milk — choose 1");
+    expect(html).toContain('type="radio"');
+    expect(html).toContain("+ CAD 0.75");
+    expect(html).toContain("Prices shown are what each choice adds now");
     expect(html).toContain("Oat beverage");
     expect(html).toContain("Do not enter allergy, medical or other sensitive details");
     expect(html).not.toContain(configurable.optionRules[0]?.options[0]?.optionReference);
@@ -276,12 +284,14 @@ it("renders the published default quantity and hides inactive conditional groups
     ...sellable,
     optionRules: [
       {
+        name: "Extra shot",
         minimumSelections: 2,
         maximumSelections: 3,
         activationOptionReferences: [],
         options: [{ ...option, selectedByDefault: true, defaultQuantity: 2, maximumQuantity: 3 }],
       },
       {
+        name: null,
         minimumSelections: 1,
         maximumSelections: 1,
         activationOptionReferences: ["not-selected"],

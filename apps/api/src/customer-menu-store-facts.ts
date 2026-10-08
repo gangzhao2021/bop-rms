@@ -9,9 +9,12 @@ import {
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
 import {
+  createPostgresCurrentOptionPriceStore,
   createPostgresCurrentPriceBookStore,
   currentStorePriceBook,
+  OptionPriceError,
   PriceResolutionError,
+  resolveOptionPrice,
   resolvePrice,
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
@@ -19,7 +22,8 @@ import {
 /**
  * WP-2423 8.6: what the customer menu shows for each item at the Store — whether the Store offers
  * it, whether it is sold out, and its current base price from the Store's assigned price book (the
- * same book, channel and order type the Quote prices from). Options and tax are added in the Quote.
+ * same book, channel and order type the Quote prices from). WP-2423 slice 4.5: and what one of each
+ * published option adds, from the current option prices the Quote uses. Tax is added in the Quote.
  */
 export function createCustomerMenuStoreFacts(options: {
   /** A read-only transaction the caller owns and releases. */
@@ -62,6 +66,11 @@ export function createCustomerMenuStoreFacts(options: {
                 priceBookReference: assignment.priceBookReference,
                 observedAt: input.requestedAt,
               });
+        const optionPriceStore = createPostgresCurrentOptionPriceStore(
+          { run: (work) => work(tx as never) },
+          scope,
+          options.currencyMetadata,
+        );
         const facts = new Map<string, CustomerMenuStoreFact>();
         for (const sellable of input.sellableReferences) {
           const own = rules.filter((rule) => rule.sellableReference === sellable);
@@ -103,10 +112,51 @@ export function createCustomerMenuStoreFacts(options: {
               // No price or an ambiguous one: shown as unpriced; the Quote refuses it the same way.
               if (!(error instanceof PriceResolutionError)) throw error;
             }
+          const optionPrices = new Map<string, { amount: string; currency: string }>();
+          if (orderType !== undefined)
+            for (const option of (input.options ?? []).filter(
+              (candidate) => candidate.sellableReference === sellable,
+            )) {
+              const rules = await optionPriceStore.load({
+                bindingReference: option.bindingReference,
+                optionReference: option.optionReference,
+                skuReference: sellable,
+                storeGroupReference: null,
+                regionReference: null,
+                channelCode: options.priceChannelCode,
+                orderType,
+                observedAt: input.requestedAt,
+              });
+              try {
+                const found = resolveOptionPrice(rules, {
+                  brandReference: scope.brandReference as never,
+                  storeReference: scope.storeReference as never,
+                  storeGroupReference: null,
+                  regionReference: null,
+                  bindingReference: option.bindingReference as never,
+                  optionReference: option.optionReference as never,
+                  skuReference: sellable as never,
+                  channelCode: options.priceChannelCode as never,
+                  orderType,
+                  currencyMetadata: options.currencyMetadata,
+                  selectedQuantity: 1,
+                  itemQuantity: 1,
+                  evaluatedAt: input.requestedAt,
+                });
+                optionPrices.set(option.bindingReference + ":" + option.optionReference, {
+                  amount: decimal(found.amount.amountMinor),
+                  currency: found.amount.currencyCode,
+                });
+              } catch (error) {
+                // No price or an ambiguous one: shown as unpriced; the Quote refuses it the same way.
+                if (!(error instanceof OptionPriceError)) throw error;
+              }
+            }
           facts.set(sellable, {
             availability:
               resolved.status === "Available" ? "Available" : soldOut ? "SoldOut" : "NotOffered",
             price,
+            optionPrices,
           });
         }
         return facts;

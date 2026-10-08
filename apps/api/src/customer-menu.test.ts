@@ -68,6 +68,7 @@ function found(): CustomerMenuQueryResult {
               availability: "Available",
               optionRules: [
                 {
+                  name: "Milk",
                   bindingReference: "018f7500-0000-7000-8000-00000000000b" as never,
                   optionSetVersionReference: "018f7500-0000-7000-8000-00000000000c" as never,
                   minimumSelections: 0,

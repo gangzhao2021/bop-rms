@@ -96,6 +96,7 @@ function optionRule(value: unknown): MenuOptionRule {
     Object.getOwnPropertyDescriptor(value, "semanticsVersion")?.value === 2;
   const raw = exact(value, [
     ...(quantity ? ["semanticsVersion", "activationOptionReferences"] : []),
+    "name",
     "bindingReference",
     "optionSetVersionReference",
     "minimumSelections",
@@ -146,10 +147,19 @@ function optionRule(value: unknown): MenuOptionRule {
         Number(option.maximumQuantity) > 999 ||
         typeof option.selectedByDefault !== "boolean" ||
         conflictOptionReferences.includes(optionReference) ||
-        incrementalPrice.status !== "Unavailable" ||
-        incrementalPrice.amount !== null ||
-        incrementalPrice.currency !== null ||
-        incrementalPrice.reason !== "PRICING_NOT_INTEGRATED"
+        !(
+          (incrementalPrice.status === "Available" &&
+            typeof incrementalPrice.amount === "string" &&
+            /^\d{1,9}(\.\d{1,4})?$/u.test(incrementalPrice.amount) &&
+            typeof incrementalPrice.currency === "string" &&
+            /^[A-Z]{3}$/u.test(incrementalPrice.currency) &&
+            incrementalPrice.reason === null) ||
+          (incrementalPrice.status === "Unavailable" &&
+            incrementalPrice.amount === null &&
+            incrementalPrice.currency === null &&
+            (incrementalPrice.reason === "PRICING_NOT_INTEGRATED" ||
+              incrementalPrice.reason === "PRICE_NOT_SET"))
+        )
       )
         throw new TypeError("option invalid");
       return Object.freeze({
@@ -159,6 +169,13 @@ function optionRule(value: unknown): MenuOptionRule {
         conflictOptionReferences,
         selectedByDefault: option.selectedByDefault,
         ...(quantity ? { defaultQuantity } : {}),
+        price:
+          incrementalPrice.status === "Available"
+            ? Object.freeze({
+                amount: String(incrementalPrice.amount),
+                currency: String(incrementalPrice.currency),
+              })
+            : null,
       });
     }),
   );
@@ -184,7 +201,9 @@ function optionRule(value: unknown): MenuOptionRule {
     )
   )
     throw new TypeError("invalid option rule");
+  if (raw.name !== null && typeof raw.name !== "string") throw new TypeError("name invalid");
   return Object.freeze({
+    name: raw.name === null ? null : text(raw.name),
     ...(quantity
       ? { activationOptionReferences: referenceList(raw.activationOptionReferences) }
       : {}),

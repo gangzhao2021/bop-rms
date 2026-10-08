@@ -24,14 +24,18 @@ const row = (n = 1) => ({
   currentPhase: "Accepted",
   currentVersion: 2,
 });
-it("preserves current version and validates monotonic pagination", () => {
-  const items = Array.from({ length: 50 }, (_, i) => row(i + 1));
+it("preserves current version and validates newest-first pagination", () => {
+  // WP-2423: newest first; the next page continues with older Orders.
+  const items = Array.from({ length: 50 }, (_, i) => row(60 - i));
   expect(
-    parseCurrentOrderQueue({ items, nextAfterOrderReference: id(50) }).items[0]?.currentVersion,
+    parseCurrentOrderQueue({ items, nextAfterOrderReference: id(11) }).items[0]?.currentVersion,
   ).toBe(2);
-  expect(() => parseCurrentOrderQueue({ items, nextAfterOrderReference: id(49) })).toThrow();
+  expect(() => parseCurrentOrderQueue({ items, nextAfterOrderReference: id(12) })).toThrow();
   expect(() =>
-    parseCurrentOrderQueue({ items: [row()], nextAfterOrderReference: null }, id(1)),
+    parseCurrentOrderQueue({ items: [row(1), row(2)], nextAfterOrderReference: null }),
+  ).toThrow();
+  expect(() =>
+    parseCurrentOrderQueue({ items: [row(2)], nextAfterOrderReference: null }, id(1)),
   ).toThrow();
 });
 it.each([
@@ -55,13 +59,13 @@ it("keeps unresolved states explicit", () => {
 });
 it("uses same-origin no-store GET and only cursor in URL", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-    new Response(JSON.stringify({ items: [row(2)], nextAfterOrderReference: null }), {
+    new Response(JSON.stringify({ items: [row(1)], nextAfterOrderReference: null }), {
       headers: { "content-type": "application/json", "cache-control": "no-store" },
     }),
   );
-  await createCurrentOrderQueueClient(fetcher).load(id(1), new AbortController().signal);
+  await createCurrentOrderQueueClient(fetcher).load(id(2), new AbortController().signal);
   expect(fetcher).toHaveBeenCalledWith(
-    "/merchant/orders?after=" + id(1),
+    "/merchant/orders?after=" + id(2),
     expect.objectContaining({
       method: "GET",
       credentials: "same-origin",

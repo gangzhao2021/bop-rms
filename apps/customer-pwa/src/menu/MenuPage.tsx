@@ -20,6 +20,7 @@ import type {
   CustomerMenuClient,
   MenuJourneyContext,
   MenuLoadResult,
+  MenuOptionRule,
   MenuSellable,
   MenuView,
 } from "./types.js";
@@ -85,6 +86,24 @@ function useMenuLoad(
     if (state.kind !== "Loading") heading.current?.focus();
   }, [state.kind]);
   return { state, heading, retry: () => setRevision((value) => value + 1) };
+}
+
+/** One choice only: shown as radio buttons. */
+const singleChoice = (rule: MenuOptionRule) =>
+  rule.maximumSelections === 1 && rule.options.every((option) => option.maximumQuantity === 1);
+/** "choose 1", "choose up to 3 (optional)", "choose 1 to 2". */
+function choiceText(rule: MenuOptionRule): string {
+  const { minimumSelections: min, maximumSelections: max } = rule;
+  if (min === max) return `choose ${max}`;
+  if (min === 0) return `optional, up to ${max}`;
+  return `choose ${min} to ${max}`;
+}
+/** "+ CAD 0.75", "No extra charge", or a note that the quote will price it. */
+function optionPriceText(price: MenuOptionRule["options"][number]["price"]): string {
+  if (price === null) return "Price shown in your final quote";
+  return /^0+(\.0+)?$/u.test(price.amount)
+    ? "No extra charge"
+    : `+ ${price.currency} ${price.amount}`;
 }
 
 export function MenuBrowsePage({ context, client, readOnlyNotice }: MenuPageProps) {
@@ -649,9 +668,13 @@ function configurationIssues(
       0,
     );
     if (count < rule.minimumSelections)
-      issues.push(`Choice group ${index + 1} requires at least ${rule.minimumSelections}.`);
+      issues.push(
+        `${rule.name ?? `Choice group ${index + 1}`} requires at least ${rule.minimumSelections}.`,
+      );
     if (count > rule.maximumSelections)
-      issues.push(`Choice group ${index + 1} allows at most ${rule.maximumSelections}.`);
+      issues.push(
+        `${rule.name ?? `Choice group ${index + 1}`} allows at most ${rule.maximumSelections}.`,
+      );
     rule.options.forEach((option) => {
       const optionQuantity = selected.get(option.optionReference) ?? 0;
       if (
@@ -794,8 +817,8 @@ export function SellableConfigurator({
     <form className="sellable-configurator" aria-labelledby="configure-heading" onSubmit={submit}>
       <h3 id="configure-heading">Configure {sellable.name}</h3>
       <p>
-        Published choices are confirmed by the server. Incremental prices are unavailable and final
-        amounts appear only in a valid Quote.
+        Prices shown are what each choice adds now; your final total, with tax, comes from the quote
+        at checkout.
       </p>
       <label htmlFor="configure-quantity">Quantity</label>
       <input
@@ -811,19 +834,24 @@ export function SellableConfigurator({
       {activeRules.map((rule, groupIndex) => (
         <fieldset key={`${rule.minimumSelections}-${rule.maximumSelections}-${groupIndex}`}>
           <legend>
-            Choice group {groupIndex + 1} — select {rule.minimumSelections} to{" "}
-            {rule.maximumSelections}
+            {rule.name ?? `Choice group ${groupIndex + 1}`} — {choiceText(rule)}
           </legend>
           {rule.options.map((option) => (
             <div className="configure-option" key={option.optionReference}>
               <label>
                 <input
-                  type="checkbox"
+                  type={singleChoice(rule) ? "radio" : "checkbox"}
+                  name={`configure-group-${groupIndex}`}
                   checked={selected.has(option.optionReference)}
                   disabled={busy || unresolved || state.status === "added"}
                   onChange={() => {
                     const next = new Map(selected);
-                    if (next.has(option.optionReference)) next.delete(option.optionReference);
+                    if (singleChoice(rule)) {
+                      // Choosing one replaces the group's other choice.
+                      for (const other of rule.options) next.delete(other.optionReference);
+                      next.set(option.optionReference, 1);
+                    } else if (next.has(option.optionReference))
+                      next.delete(option.optionReference);
                     else next.set(option.optionReference, 1);
                     setSelected(next);
                   }}
@@ -849,7 +877,7 @@ export function SellableConfigurator({
                   />
                 </label>
               ) : null}
-              <span>Incremental price confirmed in the final Quote</span>
+              <span>{optionPriceText(option.price)}</span>
             </div>
           ))}
         </fieldset>

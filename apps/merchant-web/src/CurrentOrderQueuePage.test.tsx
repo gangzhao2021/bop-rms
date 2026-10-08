@@ -80,7 +80,7 @@ it("filters only by exact public order number and fields present on the current 
     currentVersion: phase === null ? null : 2,
   });
   const view = parseCurrentOrderQueue({
-    items: [item(1, "ORD-1001", "Pickup", "Accepted"), item(2, "ORD-10010", "DineIn", null)],
+    items: [item(2, "ORD-10010", "DineIn", null), item(1, "ORD-1001", "Pickup", "Accepted")],
     nextAfterOrderReference: null,
   });
   const all = { orderNumber: "", type: "All", channel: "All", phase: "All" };

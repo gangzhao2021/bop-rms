@@ -12,6 +12,8 @@ export interface MenuAllergenItem {
 }
 
 export interface MenuOptionRule {
+  /** The option set's name ("Milk"); null for menus published before names were included. */
+  readonly name: string | null;
   readonly activationOptionReferences?: readonly string[];
   readonly minimumSelections: number;
   readonly maximumSelections: number;
@@ -22,6 +24,8 @@ export interface MenuOptionRule {
     readonly conflictOptionReferences: readonly string[];
     readonly selectedByDefault: boolean;
     readonly defaultQuantity?: number;
+    /** What one adds now ("0.75" CAD); null when the Store has not priced it yet. */
+    readonly price: { readonly amount: string; readonly currency: string } | null;
   }[];
 }
 

@@ -63,6 +63,7 @@ export function createMerchantOrderQueueRead(options: {
         transaction,
         afterOrderReference: input.afterOrderReference,
         limit: input.limit,
+        newestFirst: true,
       });
       // WP-2423: history may hold Orders priced with either Quote version; each is decoded with its own.
       const readers = {

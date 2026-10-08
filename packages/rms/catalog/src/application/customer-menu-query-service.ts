@@ -1,6 +1,7 @@
 import {
   customerMenuFreshnessTargetMilliseconds,
   type CustomerMenuFound,
+  type CustomerMenuOptionRuleDto,
   type CustomerMenuQueryInput,
   type CustomerMenuSellableDto,
 } from "../contracts/customer-menu-query.js";
@@ -118,6 +119,23 @@ function localized(
   return selected;
 }
 
+/** One option's current price at the Store, when the Store's facts were read. */
+function optionPrice(
+  fact: CustomerMenuStoreFact | null,
+  bindingReference: CatalogReference,
+  optionReference: CatalogReference,
+): CustomerMenuOptionRuleDto["options"][number]["incrementalPrice"] {
+  const price = fact?.optionPrices?.get(bindingReference + ":" + optionReference);
+  if (price !== undefined)
+    return { status: "Available", amount: price.amount, currency: price.currency, reason: null };
+  return {
+    status: "Unavailable",
+    amount: null,
+    currency: null,
+    reason:
+      fact === null || fact.optionPrices === undefined ? "PRICING_NOT_INTEGRATED" : "PRICE_NOT_SET",
+  };
+}
 function publicSellable(
   item: PublishedMenuProjection["snapshot"]["sections"][number]["sellables"][number],
   locale: string,
@@ -142,6 +160,10 @@ function publicSellable(
         .map((rule) =>
           Object.freeze({
             ...rule,
+            name:
+              rule.localizedNames === undefined
+                ? null
+                : (rule.localizedNames[locale] ?? rule.localizedNames[defaultLocale] ?? null),
             options: Object.freeze(
               rule.options.map((option) =>
                 Object.freeze({
@@ -153,12 +175,9 @@ function publicSellable(
                   ...(rule.semanticsVersion === 2
                     ? { defaultQuantity: Number(option.defaultQuantity) }
                     : {}),
-                  incrementalPrice: Object.freeze({
-                    status: "Unavailable" as const,
-                    amount: null,
-                    currency: null,
-                    reason: "PRICING_NOT_INTEGRATED" as const,
-                  }),
+                  incrementalPrice: Object.freeze(
+                    optionPrice(fact, rule.bindingReference, option.optionReference),
+                  ),
                 }),
               ),
             ),
@@ -335,6 +354,26 @@ export function createCustomerMenuQueryService(ports: CustomerMenuQueryPorts) {
             sellableReferences: Object.freeze(
               projection.snapshot.sections.flatMap((section) =>
                 section.sellables.map((item) => item.sellableReference),
+              ),
+            ),
+            // The published options offered on this channel, to show what each adds.
+            options: Object.freeze(
+              projection.snapshot.sections.flatMap((section) =>
+                section.sellables.flatMap((item) =>
+                  item.optionRules
+                    .filter(
+                      (rule) =>
+                        rule.semanticsVersion !== 2 ||
+                        rule.channelCodes?.some((channel) => channel === input.channelCode),
+                    )
+                    .flatMap((rule) =>
+                      rule.options.map((option) => ({
+                        sellableReference: item.sellableReference,
+                        bindingReference: rule.bindingReference,
+                        optionReference: option.optionReference,
+                      })),
+                    ),
+                ),
               ),
             ),
           });

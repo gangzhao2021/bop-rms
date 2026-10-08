@@ -52,6 +52,7 @@ import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.
 import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
 import { createMerchantAvailability } from "../../apps/api/dist/merchant-availability.js";
 import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-sets.js";
+import { logUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
 import { createMerchantOptionRecipes } from "../../apps/api/dist/merchant-option-recipes.js";
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
@@ -613,11 +614,14 @@ export async function createInternalMerchant(
     resources,
     { persistence, service },
   );
-  const orderQueue = createPersistentMerchantOrderQueue({
-    persistence,
-    quoteVersion: 2,
-    acceptanceConfigured: true,
-  });
+  const orderQueue = logUnexpected(
+    "INTERNAL_ORDER_QUEUE_UNAVAILABLE",
+    createPersistentMerchantOrderQueue({
+      persistence,
+      quoteVersion: 2,
+      acceptanceConfigured: true,
+    }),
+  );
   return {
     ordinaryRefundReconciliation,
     ordinaryRefundSend,

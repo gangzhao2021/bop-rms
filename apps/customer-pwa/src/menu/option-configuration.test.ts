@@ -10,6 +10,7 @@ const group = (
   defaultQuantity: number,
   activation: readonly string[],
 ): MenuOptionRule => ({
+  name: null,
   minimumSelections: 0,
   maximumSelections: 3,
   activationOptionReferences: activation,
@@ -21,6 +22,7 @@ const group = (
       conflictOptionReferences: [],
       selectedByDefault: defaultQuantity > 0,
       defaultQuantity,
+      price: null,
     },
   ],
 });

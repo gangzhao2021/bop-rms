@@ -56,7 +56,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       "batches",
     ]);
     const orderReference = reference(item.orderReference);
-    if (previous !== null && orderReference <= previous) return fail();
+    // WP-2423: newest first; a following page continues with older Orders.
+    if (previous !== null && orderReference >= previous) return fail();
     previous = orderReference;
     if (
       typeof item.canRequestAcceptance !== "boolean" ||

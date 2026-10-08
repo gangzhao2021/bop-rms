@@ -59,7 +59,13 @@ export function createPostgresMerchantOrderIndex(options: {
       transaction: ConsumerTransaction;
       afterOrderReference: string | null;
       limit: number;
+      /**
+       * WP-2423: the operations queue lists the newest Orders first and pages back to older ones, so
+       * the current day's Orders are never behind earlier days'. Complete scans keep the default.
+       */
+      newestFirst?: boolean;
     }) {
+      const newest = input.newestFirst === true;
       if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)
         return unavailable();
       const after =
@@ -77,8 +83,9 @@ export function createPostgresMerchantOrderIndex(options: {
           "s.submission_id,b.order_batch_id FROM rms_ordering.order_header h " +
           "JOIN rms_ordering.order_submission_record s ON s.order_id=h.order_id AND s.brand_id=h.brand_id AND s.store_id=h.store_id AND s.submission_kind='Initial' " +
           "JOIN rms_ordering.order_batch b ON b.order_id=h.order_id AND b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.submission_id=s.submission_id " +
-          "WHERE h.brand_id=$1 AND h.store_id=$2 AND ($3::uuid IS NULL OR h.order_id>$3::uuid) " +
-          "ORDER BY h.order_id LIMIT $4",
+          "WHERE h.brand_id=$1 AND h.store_id=$2 AND ($3::uuid IS NULL OR " +
+          (newest ? "h.order_id<$3::uuid) " : "h.order_id>$3::uuid) ") +
+          (newest ? "ORDER BY h.order_id DESC LIMIT $4" : "ORDER BY h.order_id LIMIT $4"),
         [scope.brandReference, scope.storeReference, after, input.limit + 1],
       );
       if (result.rows.length > input.limit + 1) return unavailable();
@@ -88,7 +95,8 @@ export function createPostgresMerchantOrderIndex(options: {
         if (
           row.brand_id !== scope.brandReference ||
           row.store_id !== scope.storeReference ||
-          (previous !== null && orderReference <= previous) ||
+          (previous !== null &&
+            (newest ? orderReference >= previous : orderReference <= previous)) ||
           typeof row.order_number !== "string" ||
           !/^[A-Z0-9][A-Z0-9-]{0,39}$/.test(row.order_number) ||
           (row.order_type !== "DineIn" && row.order_type !== "Pickup") ||

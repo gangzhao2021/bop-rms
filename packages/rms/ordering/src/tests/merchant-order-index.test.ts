@@ -129,3 +129,24 @@ it("resolves original Dining context from owner fields", async () => {
     }),
   ).toMatchObject({ diningSessionReference: id(13), guestSessionReference: id(12) });
 });
+it("WP-2423: lists the newest Orders first and pages back to older ones", async () => {
+  const { tx, query } = fixture([row(5), row(4), row(3)]);
+  const result = await createPostgresMerchantOrderIndex({
+    ...scope,
+    authorize: async () => true,
+  }).list({ transaction: tx, limit: 2, afterOrderReference: id(6), newestFirst: true });
+  expect(result.items.map((item) => item.orderReference)).toEqual([id(5), id(4)]);
+  expect(result.nextAfterOrderReference).toBe(id(4));
+  const sql = String(query.mock.calls[1]?.[0]);
+  expect(sql).toContain("h.order_id<$3::uuid");
+  expect(sql).toContain("ORDER BY h.order_id DESC");
+  const { tx: wrong } = fixture([row(3), row(4)]);
+  await expect(
+    createPostgresMerchantOrderIndex({ ...scope, authorize: async () => true }).list({
+      transaction: wrong,
+      limit: 10,
+      afterOrderReference: null,
+      newestFirst: true,
+    }),
+  ).rejects.toThrow("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+});

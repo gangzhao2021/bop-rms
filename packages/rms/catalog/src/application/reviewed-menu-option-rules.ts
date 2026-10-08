@@ -55,6 +55,7 @@ export function buildReviewedMenuOptionRules(
         });
         return Object.freeze({
           semanticsVersion: 2 as const,
+          localizedNames: parseLocalizedNames(pair.optionSet.draft.localizedNames, defaultLocale),
           channelCodes: Object.freeze([parseCatalogCode(channel.channelCode)]),
           activationOptionReferences: rule.activationOptionReferences,
           bindingReference: rule.bindingReference,

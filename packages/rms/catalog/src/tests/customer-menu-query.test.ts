@@ -391,3 +391,76 @@ it("WP-2423 8.6: shows the Store's prices and sold-out items and omits items it 
   });
   await expect(failing.getPublishedMenu(input())).resolves.toEqual({ status: "Unavailable" });
 });
+
+it("WP-2423 4.5: names each option group and shows what each option adds at the Store", async () => {
+  const base = projection();
+  const [section] = base.snapshot.sections;
+  const [latte] = section?.sellables ?? [];
+  if (section === undefined || latte === undefined) throw new Error("fixture");
+  const [rule] = latte.optionRules;
+  if (rule === undefined) throw new Error("fixture");
+  const menu: PublishedMenuProjection = {
+    ...base,
+    snapshot: {
+      ...base.snapshot,
+      sections: [
+        {
+          ...section,
+          sellables: [
+            {
+              ...latte,
+              optionRules: [{ ...rule, localizedNames: { "en-CA": "Milk", "fr-CA": "Lait" } }],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const requested: { options?: unknown }[] = [];
+  const query = (optionPrices: Map<string, { amount: string; currency: string }> | undefined) =>
+    createCustomerMenuQueryService({
+      stores: {
+        resolvePublic: async () => ({
+          brandReference: id(3) as never,
+          storeReference: id(7) as never,
+          status: "Active",
+        }),
+      },
+      projections: { loadCandidates: async () => [menu] },
+      storeFacts: {
+        async load(value) {
+          requested.push(value);
+          return new Map([
+            [
+              id(10),
+              {
+                availability: "Available" as const,
+                price: null,
+                ...(optionPrices === undefined ? {} : { optionPrices }),
+              },
+            ],
+          ]);
+        },
+      },
+    }).getPublishedMenu(input({ locale: "fr-CA" }));
+  const priced = await query(
+    new Map([[id(12) + ":" + id(14), { amount: "0.75", currency: "CAD" }]]),
+  );
+  if (priced.status !== "Found") throw new Error("menu");
+  const [found] = priced.menu.sections[0]?.sellables[0]?.optionRules ?? [];
+  expect(found?.name).toBe("Lait");
+  expect(found?.options[0]?.incrementalPrice).toEqual({
+    status: "Available",
+    amount: "0.75",
+    currency: "CAD",
+    reason: null,
+  });
+  expect(requested[0]?.options).toEqual([
+    { sellableReference: id(10), bindingReference: id(12), optionReference: id(14) },
+  ]);
+  const unpriced = await query(new Map());
+  if (unpriced.status !== "Found") throw new Error("menu");
+  expect(
+    unpriced.menu.sections[0]?.sellables[0]?.optionRules[0]?.options[0]?.incrementalPrice,
+  ).toMatchObject({ status: "Unavailable", reason: "PRICE_NOT_SET" });
+});

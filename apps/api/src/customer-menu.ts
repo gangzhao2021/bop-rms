@@ -149,6 +149,7 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
                   activationOptionReferences: [...(rule.activationOptionReferences ?? [])],
                 }
               : {}),
+            name: rule.name,
             bindingReference: rule.bindingReference,
             optionSetVersionReference: rule.optionSetVersionReference,
             minimumSelections: rule.minimumSelections,
@@ -164,12 +165,7 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
               ...(rule.semanticsVersion === 2
                 ? { defaultQuantity: Number(option.defaultQuantity) }
                 : {}),
-              incrementalPrice: {
-                status: option.incrementalPrice.status,
-                amount: option.incrementalPrice.amount,
-                currency: option.incrementalPrice.currency,
-                reason: option.incrementalPrice.reason,
-              },
+              incrementalPrice: { ...option.incrementalPrice },
             })),
           })),
           allergenDisclosure: {

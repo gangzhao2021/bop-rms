@@ -17,6 +17,8 @@ import {
 
 export interface PublishedOptionRule {
   readonly semanticsVersion?: 2;
+  /** WP-2423 slice 4.5: the option set's name customers choose from (absent in older menus). */
+  readonly localizedNames?: Readonly<Record<string, string>>;
   readonly activationOptionReferences?: readonly CatalogReference[];
   readonly channelCodes?: readonly CatalogCode[];
   readonly bindingReference: CatalogReference;
@@ -201,6 +203,9 @@ function optionRule(value: PublishedOptionRule, defaultLocale: string): Publishe
           channelCodes: channels,
         }
       : {}),
+    ...(value.localizedNames === undefined
+      ? {}
+      : { localizedNames: parseLocalizedNames(value.localizedNames, defaultLocale) }),
     bindingReference: parseCatalogReference(value.bindingReference),
     optionSetVersionReference: parseCatalogReference(value.optionSetVersionReference),
     minimumSelections,
