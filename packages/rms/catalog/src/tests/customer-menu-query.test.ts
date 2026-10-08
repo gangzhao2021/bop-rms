@@ -316,3 +316,78 @@ it("filters versioned option rules by channel and exposes quantity defaults", as
   expect(rules).toHaveLength(1);
   expect(rules?.[0]?.options[0]?.defaultQuantity).toBe(2);
 });
+
+it("WP-2423 8.6: shows the Store's prices and sold-out items and omits items it does not offer", async () => {
+  const base = projection();
+  const [section] = base.snapshot.sections;
+  const [latte] = section?.sellables ?? [];
+  if (section === undefined || latte === undefined) throw new Error("fixture");
+  const mocha = {
+    ...latte,
+    placementReference: id(40) as never,
+    sellableReference: id(41) as never,
+    sortOrder: 4,
+  };
+  const tea = {
+    ...latte,
+    placementReference: id(42) as never,
+    sellableReference: id(43) as never,
+    sortOrder: 5,
+  };
+  const menu: PublishedMenuProjection = {
+    ...base,
+    snapshot: { ...base.snapshot, sections: [{ ...section, sellables: [latte, mocha, tea] }] },
+  };
+  interface Fact {
+    availability: "Available" | "SoldOut" | "NotOffered";
+    price: { amount: string; currency: string } | null;
+  }
+  const requested: unknown[] = [];
+  const ports: CustomerMenuQueryPorts = {
+    stores: {
+      resolvePublic: async () => ({
+        brandReference: id(3) as never,
+        storeReference: id(7) as never,
+        status: "Active",
+      }),
+    },
+    projections: { loadCandidates: async () => [menu] },
+    storeFacts: {
+      async load(value) {
+        requested.push(value);
+        return new Map<string, Fact>([
+          [id(10), { availability: "Available", price: null }],
+          [id(41), { availability: "SoldOut", price: { amount: "5.25", currency: "CAD" } }],
+          [id(43), { availability: "NotOffered", price: { amount: "3.00", currency: "CAD" } }],
+        ]);
+      },
+    },
+  };
+  const found = await createCustomerMenuQueryService(ports).getPublishedMenu(
+    input({ locale: "en-CA" }),
+  );
+  if (found.status !== "Found") throw new Error("menu");
+  const items = found.menu.sections.flatMap((s) => s.sellables);
+  expect(items.map((i) => i.sellableReference)).toEqual([id(10), id(41)]);
+  expect(items[0]?.displayPrice).toMatchObject({ status: "Unavailable", reason: "PRICE_NOT_SET" });
+  expect(items[1]).toMatchObject({
+    availability: "SoldOut",
+    displayPrice: { status: "Available", amount: "5.25", currency: "CAD", reason: null },
+  });
+  expect(requested[0]).toMatchObject({
+    storeReference: id(7),
+    channelCode: "DINE_IN",
+    sellableReferences: [id(10), id(16), id(19), id(41), id(43)].filter((ref) =>
+      menu.snapshot.sections[0]?.sellables.some((item) => item.sellableReference === ref),
+    ),
+  });
+  const failing = createCustomerMenuQueryService({
+    ...ports,
+    storeFacts: {
+      load: async () => {
+        throw new Error("down");
+      },
+    },
+  });
+  await expect(failing.getPublishedMenu(input())).resolves.toEqual({ status: "Unavailable" });
+});

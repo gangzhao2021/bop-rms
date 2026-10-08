@@ -30,6 +30,10 @@ export interface MenuSellable {
   readonly name: string;
   readonly presentationRole: "Standard" | "Featured" | "Promotional" | "Sponsored";
   readonly pinned: boolean;
+  /** WP-2423 8.6: SoldOut while the Store has marked it sold out. */
+  readonly availability: "Available" | "SoldOut";
+  /** The Store's base price before options and tax, when it has one. */
+  readonly price: { readonly amount: string; readonly currency: string } | null;
   readonly allergens: readonly MenuAllergenItem[];
   readonly optionRules: readonly MenuOptionRule[];
 }

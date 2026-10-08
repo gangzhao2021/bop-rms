@@ -167,6 +167,8 @@ export interface LocalCustomerRuntimeOptions {
   readonly sessionTransactions: GuestSessionEntryTransactionRunner;
   // Must own a separate, bounded, read-only transaction and release its connection.
   readonly menuTransactions: PublishedMenuQueryTransactionRunner;
+  /** WP-2423 8.6: Store availability and prices shown on the menu (absent: available, unpriced). */
+  readonly menuStoreFacts?: CustomerMenuQueryPorts["storeFacts"];
   // Optional scoped, bounded read-only transactions; the caller retains resource ownership.
   readonly cartTransactions?: CartQueryTransactionRunner;
   readonly cartReplacement?: CustomerCartReplacementPort;
@@ -280,6 +282,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       },
     },
     projections,
+    ...(options.menuStoreFacts === undefined ? {} : { storeFacts: options.menuStoreFacts }),
   });
   let customerCart: CustomerCartHandler | undefined;
   let orderSubmission = options.orderSubmission;

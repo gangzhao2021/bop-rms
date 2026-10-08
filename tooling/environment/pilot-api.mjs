@@ -17,6 +17,7 @@ export async function createRuntime(
     createInternalCheckout,
     createInternalCheckoutDetails,
     createInternalTestItems,
+    createInternalMenuStoreFacts,
     createInternalTestCart,
     createInternalTestResources,
     createInternalCustomerEntry,
@@ -112,6 +113,9 @@ export async function createRuntime(
             return work(tx);
           }),
       },
+      ...(createInternalMenuStoreFacts === undefined
+        ? {}
+        : { menuStoreFacts: await createInternalMenuStoreFacts(resources) }),
       menuStores: {
         resolvePublic: async (reference) => {
           if (String(reference) !== resources.publicProfile.binding.publicStoreReference)

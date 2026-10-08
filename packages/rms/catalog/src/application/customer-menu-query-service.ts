@@ -17,7 +17,10 @@ import {
   parsePublishedMenuProjection,
   type PublishedMenuProjection,
 } from "../domain/published-menu-projection.js";
-import type { CustomerMenuQueryPorts } from "./ports/customer-menu-query-ports.js";
+import type {
+  CustomerMenuQueryPorts,
+  CustomerMenuStoreFact,
+} from "./ports/customer-menu-query-ports.js";
 
 function invalid(): never {
   throw new CatalogError("CATALOG_INPUT_INVALID");
@@ -120,6 +123,7 @@ function publicSellable(
   locale: string,
   defaultLocale: string,
   channelCode: string,
+  fact: CustomerMenuStoreFact | null,
 ): CustomerMenuSellableDto {
   return Object.freeze({
     sellableReference: item.sellableReference,
@@ -127,7 +131,7 @@ function publicSellable(
     name: localized(item.localizedNames, locale, defaultLocale),
     presentationRole: item.presentationRole as CustomerMenuSellableDto["presentationRole"],
     pinned: item.pinned,
-    availability: "Available",
+    availability: fact?.availability === "SoldOut" ? "SoldOut" : "Available",
     optionRules: Object.freeze(
       item.optionRules
         .filter(
@@ -176,12 +180,28 @@ function publicSellable(
       allergenFreeClaim: false,
       assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
     }),
-    displayPrice: Object.freeze({
-      status: "Unavailable",
-      amount: null,
-      currency: null,
-      reason: "PRICING_NOT_INTEGRATED",
-    }),
+    displayPrice: Object.freeze(
+      fact === null
+        ? {
+            status: "Unavailable" as const,
+            amount: null,
+            currency: null,
+            reason: "PRICING_NOT_INTEGRATED" as const,
+          }
+        : fact.price === null
+          ? {
+              status: "Unavailable" as const,
+              amount: null,
+              currency: null,
+              reason: "PRICE_NOT_SET" as const,
+            }
+          : {
+              status: "Available" as const,
+              amount: fact.price.amount,
+              currency: fact.price.currency,
+              reason: null,
+            },
+    ),
     taxDisplayContext: Object.freeze({
       status: "Unavailable",
       taxInclusive: null,
@@ -193,6 +213,7 @@ function publicSellable(
 function found(
   projection: PublishedMenuProjection,
   input: CustomerMenuQueryInput,
+  facts: ReadonlyMap<string, CustomerMenuStoreFact> | null,
 ): CustomerMenuFound {
   const snapshot = projection.snapshot;
   const search = input.searchTerm?.toLocaleLowerCase(input.locale) ?? null;
@@ -206,7 +227,11 @@ function found(
       const sellables = section.sellables
         .filter(
           (item) =>
-            item.configuredAvailability === "Available" && item.presentationRole !== "Hidden",
+            item.configuredAvailability === "Available" &&
+            item.presentationRole !== "Hidden" &&
+            // Items the Store does not offer are not on its menu.
+            (facts === null ||
+              (facts.get(item.sellableReference)?.availability ?? "NotOffered") !== "NotOffered"),
         )
         .filter((item) => {
           if (search === null) return true;
@@ -216,7 +241,13 @@ function found(
         })
         .sort((left, right) => left.sortOrder - right.sortOrder)
         .map((item) =>
-          publicSellable(item, input.locale, snapshot.defaultLocale, input.channelCode),
+          publicSellable(
+            item,
+            input.locale,
+            snapshot.defaultLocale,
+            input.channelCode,
+            facts?.get(item.sellableReference) ?? null,
+          ),
         );
       return Object.freeze({
         sectionReference: section.sectionReference,
@@ -292,7 +323,25 @@ export function createCustomerMenuQueryService(ports: CustomerMenuQueryPorts) {
       if (projection === undefined) return Object.freeze({ status: "Unavailable" as const });
       if (projection.freshnessStatus !== "Fresh")
         return Object.freeze({ status: "ProjectionStale" as const });
-      return found(projection, input);
+      let facts: ReadonlyMap<string, CustomerMenuStoreFact> | null = null;
+      if (ports.storeFacts !== undefined)
+        try {
+          facts = await ports.storeFacts.load({
+            brandReference: store.brandReference,
+            storeReference: store.storeReference,
+            channelCode: input.channelCode,
+            orderTypeCode: input.orderTypeCode,
+            requestedAt: input.requestedAt,
+            sellableReferences: Object.freeze(
+              projection.snapshot.sections.flatMap((section) =>
+                section.sellables.map((item) => item.sellableReference),
+              ),
+            ),
+          });
+        } catch {
+          return Object.freeze({ status: "Unavailable" as const });
+        }
+      return found(projection, input, facts);
     },
   });
 }

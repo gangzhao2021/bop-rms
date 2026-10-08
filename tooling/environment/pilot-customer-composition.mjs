@@ -27,6 +27,8 @@ import { createInternalDiningCredentialLoaders } from "./pilot-dining-credential
 import { createInternalCredentialLoaders } from "./pilot-credentials.mjs";
 import { createInternalTestQuote } from "./pilot-quote.mjs";
 import { createInternalPricingPolicy } from "./pilot-pricing-policy.mjs";
+import { createInternalReadTransactions } from "./pilot-read-transactions.mjs";
+import { createCustomerMenuStoreFacts } from "../../apps/api/dist/customer-menu-store-facts.js";
 import { createInternalAdditionalPayment } from "./pilot-additional-payment.mjs";
 import { createInternalPaymentIntent } from "./pilot-payment-intent.mjs";
 import { createInternalOrderConfirmation } from "./pilot-order-confirmation.mjs";
@@ -132,6 +134,13 @@ export function composeCustomerDependencies(directory, installation, config) {
       createInternalTestItems(r, {
         saved: await installation.loadCustomerData("internal-test-inventory.json"),
         expectedDatabaseName,
+      }),
+    // WP-2423 8.6: the menu shows the Store's offers, sold-out items and the prices the Quote uses.
+    createInternalMenuStoreFacts: async (r) =>
+      createCustomerMenuStoreFacts({
+        transactions: createInternalReadTransactions(r),
+        currencyMetadata: (await pricing()).currencyMetadata,
+        priceChannelCode: "CUSTOMER_WEB",
       }),
     createInternalChannelQuote: (r, e, c) =>
       createInternalChannelQuote(r, e, c, {

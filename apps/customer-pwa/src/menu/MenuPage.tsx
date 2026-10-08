@@ -514,8 +514,8 @@ function SellableCard({
               : "Featured item"}
         </p>
       ) : null}
-      <p className="menu-available">Available now</p>
-      <p>Price confirmed in your final quote</p>
+      <AvailabilityLine sellable={sellable} />
+      <p>{priceLine(sellable)}</p>
       {sectionName ? (
         <p className="menu-result-section">
           <span>Section</span>
@@ -531,6 +531,25 @@ function SellableCard({
         View item
       </Link>
     </article>
+  );
+}
+
+/** WP-2423 8.6: the Store's base price; options and tax are added in the final quote. */
+function priceLine(sellable: MenuSellable): string {
+  if (sellable.price === null) return "Price confirmed in your final quote";
+  // Decimal text from the server; never converted to a binary number.
+  const amount =
+    (sellable.price.currency === "CAD" ? "$" : sellable.price.currency + " ") +
+    sellable.price.amount;
+  return sellable.optionRules.length === 0
+    ? `${amount} plus tax`
+    : `From ${amount} plus tax; options may add to it`;
+}
+function AvailabilityLine({ sellable }: { readonly sellable: MenuSellable }) {
+  return sellable.availability === "SoldOut" ? (
+    <p className="menu-sold-out">Sold out</p>
+  ) : (
+    <p className="menu-available">Available now</p>
   );
 }
 
@@ -553,11 +572,11 @@ function SellableDetail({
         Image not available
       </div>
       <Heading headingRef={headingRef}>{sellable.name}</Heading>
-      <p className="menu-available">Available now</p>
+      <AvailabilityLine sellable={sellable} />
       <dl>
         <div>
           <dt>Price</dt>
-          <dd>Confirmed in your final quote</dd>
+          <dd>{sellable.price === null ? "Confirmed in your final quote" : priceLine(sellable)}</dd>
         </div>
         <div>
           <dt>Tax</dt>
@@ -594,6 +613,8 @@ function SellableDetail({
         <div className="menu-readonly-boundary" role="status">
           {readOnlyNotice}
         </div>
+      ) : sellable.availability === "SoldOut" ? (
+        <p role="status">Sold out at this store right now. Please choose another item.</p>
       ) : configuring ? (
         <SellableConfigurator
           channel={channel}

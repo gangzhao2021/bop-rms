@@ -649,7 +649,8 @@
   padding-inline-start: var(--bop-space-5);
 }
 
-.menu-available {
+.menu-available,
+.menu-sold-out {
   font-weight: 700;
 }
 

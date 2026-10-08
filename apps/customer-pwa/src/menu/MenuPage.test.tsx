@@ -18,6 +18,8 @@ const sellable: MenuSellable = Object.freeze({
   name: "Latte",
   presentationRole: "Standard",
   pinned: false,
+  availability: "Available",
+  price: null,
   allergens: Object.freeze([
     Object.freeze({ name: "Milk", classification: "Contains" as const }),
     Object.freeze({ name: "Peanuts", classification: "CrossContactPossible" as const }),
@@ -114,6 +116,25 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).toContain("No published detail available");
     expect(html).toContain("Configure and add");
     expect(html).not.toContain(sellable.optionRules[0]?.options[0]?.optionReference);
+  });
+
+  it("WP-2423 8.6: shows the Store price and refuses a sold-out item", () => {
+    const priced = { ...sellable, price: { amount: "5.25", currency: "CAD" } };
+    const html = render({
+      context,
+      detail: priced,
+      mode: "detail",
+      state: { kind: "Found", menu },
+    });
+    expect(html).toContain("From $5.25 plus tax; options may add to it");
+    const soldOut = render({
+      context,
+      detail: { ...priced, availability: "SoldOut" as const },
+      mode: "detail",
+      state: { kind: "Found", menu },
+    });
+    expect(soldOut).toContain("Sold out at this store right now");
+    expect(soldOut).not.toContain("Configure and add");
   });
 
   it.each([

@@ -62,6 +62,8 @@ const menu: MenuView = Object.freeze({
           name: "Synthetic mushroom rice bowl",
           presentationRole: "Featured",
           pinned: true,
+          availability: "Available",
+          price: null,
           allergens: Object.freeze([
             Object.freeze({ name: "Soy", classification: "Contains" }),
             Object.freeze({ name: "Sesame", classification: "CrossContactPossible" }),
@@ -73,6 +75,8 @@ const menu: MenuView = Object.freeze({
           name: "Synthetic iced tea",
           presentationRole: "Standard",
           pinned: false,
+          availability: "Available",
+          price: null,
           allergens: Object.freeze([]),
           optionRules: Object.freeze([]),
         }),

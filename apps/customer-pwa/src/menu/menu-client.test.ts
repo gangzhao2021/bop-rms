@@ -160,6 +160,8 @@ describe("Customer Menu client", () => {
                 name: "Latte",
                 presentationRole: "Standard",
                 pinned: false,
+                availability: "Available",
+                price: null,
                 allergens: [{ name: "Milk", classification: "Contains" }],
                 optionRules: [
                   {

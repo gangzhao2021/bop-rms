@@ -183,12 +183,20 @@ function publicFound(value: CustomerMenuFound): CustomerMenuFound {
             allergenFreeClaim: false,
             assistanceCode: sellable.allergenDisclosure.assistanceCode,
           },
-          displayPrice: {
-            status: sellable.displayPrice.status,
-            amount: sellable.displayPrice.amount,
-            currency: sellable.displayPrice.currency,
-            reason: sellable.displayPrice.reason,
-          },
+          displayPrice:
+            sellable.displayPrice.status === "Available"
+              ? {
+                  status: "Available" as const,
+                  amount: sellable.displayPrice.amount,
+                  currency: sellable.displayPrice.currency,
+                  reason: null,
+                }
+              : {
+                  status: "Unavailable" as const,
+                  amount: null,
+                  currency: null,
+                  reason: sellable.displayPrice.reason,
+                },
           taxDisplayContext: {
             status: sellable.taxDisplayContext.status,
             taxInclusive: sellable.taxDisplayContext.taxInclusive,

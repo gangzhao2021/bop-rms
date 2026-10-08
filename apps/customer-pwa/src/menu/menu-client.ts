@@ -244,17 +244,26 @@ function sellable(value: unknown): MenuSellable {
   if (
     !presentationRoles.includes(raw.presentationRole as never) ||
     typeof raw.pinned !== "boolean" ||
-    raw.availability !== "Available" ||
+    (raw.availability !== "Available" && raw.availability !== "SoldOut") ||
     !Array.isArray(raw.optionRules)
   )
     throw new TypeError("sellable invalid");
   const price = exact(raw.displayPrice, ["status", "amount", "currency", "reason"]);
   const tax = exact(raw.taxDisplayContext, ["status", "taxInclusive", "reason"]);
+  const priced =
+    price.status === "Available" &&
+    typeof price.amount === "string" &&
+    /^\d{1,9}(\.\d{1,4})?$/u.test(price.amount) &&
+    typeof price.currency === "string" &&
+    /^[A-Z]{3}$/u.test(price.currency) &&
+    price.reason === null;
+  const unpriced =
+    price.status === "Unavailable" &&
+    price.amount === null &&
+    price.currency === null &&
+    (price.reason === "PRICING_NOT_INTEGRATED" || price.reason === "PRICE_NOT_SET");
   if (
-    price.status !== "Unavailable" ||
-    price.amount !== null ||
-    price.currency !== null ||
-    price.reason !== "PRICING_NOT_INTEGRATED" ||
+    !(priced || unpriced) ||
     tax.status !== "Unavailable" ||
     tax.taxInclusive !== null ||
     tax.reason !== "FINAL_QUOTE_REQUIRED"
@@ -299,6 +308,8 @@ function sellable(value: unknown): MenuSellable {
     name: text(raw.name),
     presentationRole: raw.presentationRole as MenuSellable["presentationRole"],
     pinned: raw.pinned,
+    availability: raw.availability as MenuSellable["availability"],
+    price: priced ? { amount: price.amount as string, currency: price.currency as string } : null,
     allergens: allergenDisclosure(raw.allergenDisclosure),
     optionRules,
   });

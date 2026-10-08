@@ -43,7 +43,8 @@ export interface CustomerMenuSellableDto {
   readonly name: string;
   readonly presentationRole: "Standard" | "Featured" | "Promotional" | "Sponsored";
   readonly pinned: boolean;
-  readonly availability: "Available";
+  /** WP-2423 8.6: SoldOut while the Store has marked the item sold out (ordering is refused). */
+  readonly availability: "Available" | "SoldOut";
   readonly optionRules: readonly CustomerMenuOptionRuleDto[];
   readonly allergenDisclosure: {
     readonly registryVersionReference: CatalogReference;
@@ -56,12 +57,20 @@ export interface CustomerMenuSellableDto {
     readonly allergenFreeClaim: false;
     readonly assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED";
   };
-  readonly displayPrice: {
-    readonly status: "Unavailable";
-    readonly amount: null;
-    readonly currency: null;
-    readonly reason: "PRICING_NOT_INTEGRATED";
-  };
+  /** The Store's current base price before options and tax; the final Quote stays authoritative. */
+  readonly displayPrice:
+    | {
+        readonly status: "Available";
+        readonly amount: string;
+        readonly currency: string;
+        readonly reason: null;
+      }
+    | {
+        readonly status: "Unavailable";
+        readonly amount: null;
+        readonly currency: null;
+        readonly reason: "PRICING_NOT_INTEGRATED" | "PRICE_NOT_SET";
+      };
   readonly taxDisplayContext: {
     readonly status: "Unavailable";
     readonly taxInclusive: null;
