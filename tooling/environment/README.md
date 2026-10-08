@@ -934,3 +934,19 @@ tables/7249 rows and all4 SQLite tables/48 rows match; source preservation and
 original-service resumption pass. This is existing-installation local recovery
 acceptance. It does not prove fresh-machine keys/roles, real Provider recovery,
 application cutover or production RPO/RTO.
+
+## Dead-letter operations (WP-2423)
+
+Until the platform `INT-DEAD-LETTER` console has platform sign-in, platform support handles events
+that exhausted their retries with `dead-letter-operations.mjs` (run inside the pilot image so the
+database is reachable; the env file is the migration connection file, never printed):
+
+```bash
+node --import ./tooling/environment/register-workspace-typescript.mjs tooling/environment/dead-letter-operations.mjs list --env-file <migration env>
+```
+
+`retry` (one consumer, optionally `--since YYYY-MM-DD`, after the cause is fixed), `discard` (one
+item, authorized discard) and `resolve` (close retries whose consumer completed) need
+`--confirm-target <environment>:<database>` and `--operator <uuid>`; each action is recorded in
+`platform_eventing.dead_letter_action`. Retries reuse the event's idempotency, so a consumer never
+applies an event twice.
