@@ -17,6 +17,7 @@ it("reads effective current menu authority under scoped RLS and denies withdrawn
       "menu_publication_revision",
       "menu_publication_release",
       "menu_release_effective_period",
+      "menu_release_effective_end",
       "menu_version_store",
       "menu_version_channel",
       "menu_version_order_type",
@@ -153,6 +154,60 @@ it("reads effective current menu authority under scoped RLS and denies withdrawn
       await assert.rejects(store.load({ ...input, brandReference: id(99) }), {
         code: "CATALOG_DEPENDENCY_UNAVAILABLE",
       });
+      // DEC-MENU-REVISION: a revised version published at 20:00 supersedes the first release there.
+      const second = "2026-08-01T20:00:00.000Z";
+      await admin.query(
+        `INSERT INTO rms_catalog.menu_version (menu_version_id,menu_id,brand_id,status,default_locale,localized_names_json,created_at,updated_at,revision_of_version_id) VALUES ($1,$2,$3,'Draft','en-CA','{"en-CA":"All Day"}'::jsonb,$4,$4,$5)`,
+        [id(30), id(1), id(2), at, id(4)],
+      );
+      for (const sql of [
+        "INSERT INTO rms_catalog.menu_version_store(menu_version_id,menu_id,brand_id,store_id) VALUES($1,$2,$3,$4)",
+        "INSERT INTO rms_catalog.menu_version_channel(menu_version_id,menu_id,brand_id,channel_code) VALUES($1,$2,$3,'CUSTOMER_PWA')",
+        "INSERT INTO rms_catalog.menu_version_order_type(menu_version_id,menu_id,brand_id,order_type_code) VALUES($1,$2,$3,'PICKUP')",
+      ])
+        await admin.query(
+          sql,
+          sql.includes("store_id") ? [id(30), id(1), id(2), id(12)] : [id(30), id(1), id(2)],
+        );
+      await admin.query(
+        `INSERT INTO rms_catalog.menu_publication_revision (lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,snapshot_digest,state,validation_evidence_id,approval_evidence_id,changed_at) VALUES ($1,4,$2,$3,$4,$5,'Published',$6,$7,$8)`,
+        [id(31), id(1), id(30), id(2), digest, id(6), id(7), second],
+      );
+      await admin.query(
+        `INSERT INTO rms_catalog.menu_publication_release (release_id,lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,release_sequence,release_kind,snapshot_digest,created_at) VALUES ($1,$2,4,$3,$4,$5,2,'Publish',$6,$7)`,
+        [id(32), id(31), id(1), id(30), id(2), digest, second],
+      );
+      const period = () =>
+        admin.query(
+          `INSERT INTO rms_catalog.menu_release_effective_period (timing_version_id,release_id,menu_id,brand_id,time_zone,effective_from,effective_until,period_digest,approval_evidence_id,created_at) VALUES ($1,$2,$3,$4,'UTC',$5,NULL,$6,$7,$5)`,
+          [id(33), id(32), id(1), id(2), second, digest, id(7)],
+        );
+      const end = (endedAt) =>
+        admin.query(
+          "INSERT INTO rms_catalog.menu_release_effective_end VALUES($1,$2,$3,$4,$5,$6)",
+          [id(8), id(2), id(1), endedAt, id(32), id(34)],
+        );
+      // Without ending the release in effect, the periods overlap at commit.
+      await admin.query("BEGIN");
+      await period();
+      await assert.rejects(admin.query("COMMIT"), /overlapping menu effective period/u);
+      // The end must be where the successor starts.
+      await admin.query("BEGIN");
+      await period();
+      await assert.rejects(end("2026-08-01T19:00:00.000Z"), /ends where its superseding release/u);
+      await admin.query("ROLLBACK");
+      await admin.query("BEGIN");
+      await period();
+      await end(second);
+      await admin.query("COMMIT");
+      assert.equal(
+        (await store.load({ ...input, observedAt: "2026-08-01T19:59:59.999Z" })).releaseReference,
+        id(8),
+      );
+      assert.equal(
+        (await store.load({ ...input, observedAt: "2026-08-01T21:00:00.000Z" })).releaseReference,
+        id(32),
+      );
       await admin.query(
         "INSERT INTO rms_catalog.menu_publication_revision(lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,snapshot_digest,state,validation_evidence_id,approval_evidence_id,changed_at) VALUES($1,5,$2,$3,$4,$5,'Archived',$6,$7,$8)",
         [id(5), id(1), id(4), id(2), digest, id(6), id(7), "2026-08-01T16:01:00.000Z"],
@@ -163,7 +218,7 @@ it("reads effective current menu authority under scoped RLS and denies withdrawn
       assert.equal(
         (await admin.query("SELECT count(*)::int AS n FROM rms_catalog.menu_publication_release"))
           .rows[0].n,
-        1,
+        2,
       );
       assert.equal(active, 0);
     } finally {

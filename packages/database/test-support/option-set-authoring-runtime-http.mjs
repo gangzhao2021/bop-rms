@@ -994,6 +994,7 @@ export async function exerciseOptionSetAuthoringRuntimeHttp(context, selection =
           "menu_publication_revision",
           "menu_publication_release",
           "menu_release_effective_period",
+          "menu_release_effective_end",
           "bundle_reference_generation",
           "bundle",
           "bundle_version",

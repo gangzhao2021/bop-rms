@@ -23,6 +23,7 @@ it("joins actual published membership and current owner facts in one repeatable 
       "menu_publication_revision",
       "menu_publication_release",
       "menu_release_effective_period",
+      "menu_release_effective_end",
       "menu_version_store",
       "menu_version_channel",
       "menu_version_order_type",

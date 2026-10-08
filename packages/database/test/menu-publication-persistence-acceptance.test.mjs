@@ -78,7 +78,7 @@ it("persists Menu review approval publication and archive with exact replay and 
       ]);
       await admin.query("GRANT SELECT,INSERT ON rms_catalog.menu_review_content TO " + role);
       await admin.query(
-        "GRANT SELECT,INSERT ON rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period,rms_catalog.menu_publication_operation_record,rms_catalog.menu_publication_operation_snapshot,platform_audit.audit_record,platform_eventing.outbox_event TO " +
+        "GRANT SELECT,INSERT ON rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period,rms_catalog.menu_release_effective_end,rms_catalog.menu_publication_operation_record,rms_catalog.menu_publication_operation_snapshot,platform_audit.audit_record,platform_eventing.outbox_event TO " +
           role,
       );
       await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO " + role);

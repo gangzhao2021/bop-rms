@@ -162,7 +162,7 @@ export const localMerchantWorkspace: MerchantWorkspaceSnapshot = parseMerchantWo
       screenId: "CAT-MENU-LIST",
       label: "Menus",
       href: "/app/commerce/menus",
-      permission: "catalog.read",
+      permission: "catalog.menu.read",
     },
     {
       screenId: "OPS-ORDER-QUEUE",

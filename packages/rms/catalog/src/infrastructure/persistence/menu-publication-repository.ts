@@ -235,6 +235,23 @@ export function createPostgresMenuPublicationRepository(options: {
       return fail();
     return result;
   };
+  // DEC-MENU-REVISION: a period runs until its own end or the end recorded when it was superseded.
+  const periods = `SELECT p.release_id,p.effective_from,
+    CASE WHEN e.ended_at IS NULL THEN p.effective_until
+      WHEN p.effective_until IS NULL THEN e.ended_at ELSE LEAST(p.effective_until,e.ended_at) END effective_until
+    FROM rms_catalog.menu_release_effective_period p
+    LEFT JOIN rms_catalog.menu_release_effective_end e ON e.release_id=p.release_id
+    WHERE p.brand_id=$1 AND p.menu_id=$2`;
+  /** The release in effect when a new release would start, which the new release supersedes. */
+  const supersedable = async (tx: Transaction, from: string) => {
+    const { rows } = await tx.query<{ release_id: string }>(
+      `SELECT release_id FROM (${periods}) q WHERE q.effective_from<$3::timestamptz
+        AND (q.effective_until IS NULL OR q.effective_until>$3::timestamptz)`,
+      [brand, menu, from],
+    );
+    if (rows.length > 1) return fail();
+    return rows[0]?.release_id ?? null;
+  };
   const overlap = async (tx: Transaction, record: MenuPublicationRecord) => {
     if (
       !record.effectivePeriod ||
@@ -243,9 +260,11 @@ export function createPostgresMenuPublicationRepository(options: {
     )
       return fail();
     const p = validateMenuEffectivePeriod(record.effectivePeriod);
+    const replaced = await supersedable(tx, p.effectiveFrom.instant);
     const { rows } = await tx.query<{ overlap: boolean }>(
-      "SELECT EXISTS(SELECT 1 FROM rms_catalog.menu_release_effective_period WHERE brand_id=$1 AND menu_id=$2 AND tstzrange(effective_from,effective_until,'[)') && tstzrange($3::timestamptz,$4::timestamptz,'[)')) overlap",
-      [brand, menu, p.effectiveFrom.instant, p.effectiveUntil?.instant ?? null],
+      `SELECT EXISTS(SELECT 1 FROM (${periods}) q WHERE ($5::uuid IS NULL OR q.release_id<>$5::uuid)
+        AND tstzrange(q.effective_from,q.effective_until,'[)') && tstzrange($3::timestamptz,$4::timestamptz,'[)')) overlap`,
+      [brand, menu, p.effectiveFrom.instant, p.effectiveUntil?.instant ?? null, replaced],
     );
     if (rows.length !== 1 || typeof rows[0]?.overlap !== "boolean") return fail();
     return rows[0].overlap;
@@ -425,6 +444,8 @@ export function createPostgresMenuPublicationRepository(options: {
             ],
           );
           if (c.action === "Publish" && r && p) {
+            const replaced = await supersedable(tx, p.effectiveFrom.instant);
+            if (await overlap(tx, operation.result)) return fail("CATALOG_LIFECYCLE_CONFLICT");
             await tx.query(
               "INSERT INTO rms_catalog.menu_publication_release VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
               [
@@ -456,6 +477,11 @@ export function createPostgresMenuPublicationRepository(options: {
                 c.requestedAt,
               ],
             );
+            if (replaced !== null)
+              await tx.query(
+                "INSERT INTO rms_catalog.menu_release_effective_end(release_id,brand_id,menu_id,ended_at,superseded_by_release_id,operation_id) VALUES($1,$2,$3,$4,$5,$6)",
+                [replaced, brand, menu, p.effectiveFrom.instant, r.releaseId, c.operationReference],
+              );
           }
           await tx.query(
             "INSERT INTO rms_catalog.menu_publication_operation_record VALUES($1,$2,$3,$4,$5,$6,$7,$8)",

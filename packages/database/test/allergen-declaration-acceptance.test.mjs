@@ -27,8 +27,8 @@ export const allergenApiGrants = [
   "GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ROLE_",
   "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ROLE_",
   "GRANT SELECT,INSERT ON rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry,rms_catalog.allergen_source_evidence,rms_catalog.allergen_source_assertion TO ROLE_",
-  // Menu review locks these sources in SHARE mode (UPDATE privilege); their update rules do nothing.
-  "GRANT UPDATE ON rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry,rms_catalog.allergen_source_evidence,rms_catalog.allergen_source_assertion TO ROLE_",
+  // Menu review locks these sources in SHARE mode (MAINTAIN: lock without changing data).
+  "GRANT MAINTAIN ON rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry,rms_catalog.allergen_source_evidence,rms_catalog.allergen_source_assertion TO ROLE_",
   "GRANT SELECT ON rms_inventory.inventory_item,rms_inventory.inventory_item_version,rms_inventory.inventory_item_operation,rms_inventory.stock_movement TO ROLE_",
   "GRANT SELECT,INSERT,UPDATE ON rms_recipe.recipe,rms_recipe.recipe_scope_binding,rms_recipe.recipe_reference_generation TO ROLE_",
   "GRANT SELECT,INSERT ON rms_recipe.recipe_version,rms_recipe.recipe_ingredient_requirement,rms_recipe.recipe_allergen_evidence,rms_recipe.recipe_preparation_step,rms_recipe.recipe_operation_record,rms_recipe.recipe_review_record,rms_recipe.recipe_preparation_content,rms_recipe.recipe_version_presentation,rms_recipe.recipe_authoring_review,rms_recipe.recipe_scope_binding_end,rms_recipe.recipe_reference_binding TO ROLE_",

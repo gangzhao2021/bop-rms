@@ -21,7 +21,8 @@ import { KdsProfilePage } from "./KdsProfilePage.js";
 import { OrderExceptionPage } from "./OrderExceptionPage.js";
 import { OrderDetailPage, OrderQueuePage } from "./OrderQueuePages.js";
 import { OrderAmendmentPage } from "./OrderAmendmentPage.js";
-import { MenuBuilderPage, MenuListPage } from "./CatalogMenuPages.js";
+import { StoreMenuBuilderPage, StoreMenuListPage } from "./StoreMenuPages.js";
+import { createMenuClient } from "./store-menu-pages.js";
 import { BundleEditorPage, BundleListPage } from "./BundlePages.js";
 import { AvailabilityWorkbenchPage } from "./AvailabilityWorkbenchPage.js";
 import { StorePriceEditorPage, StorePriceListPage } from "./StorePricePages.js";
@@ -506,17 +507,27 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route
         path="/app/commerce/menus"
         element={
-          <LocalDemoRoute notice={demo?.Notice ?? null}>
-            <MenuListPage {...clientProps(demo?.catalogMenu)} />
-          </LocalDemoRoute>
+          state.kind === "Ready" && !state.switching ? (
+            <StoreMenuListPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createMenuClient(state.csrf)}
+            />
+          ) : (
+            <StoreMenuListPage />
+          )
         }
       />
       <Route
-        path="/app/commerce/menus/:id/edit"
+        path="/app/commerce/menus/:id"
         element={
-          <LocalDemoRoute notice={demo?.Notice ?? null}>
-            <MenuBuilderPage {...clientProps(demo?.catalogMenu)} />
-          </LocalDemoRoute>
+          state.kind === "Ready" && !state.switching ? (
+            <StoreMenuBuilderPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createMenuClient(state.csrf)}
+            />
+          ) : (
+            <StoreMenuBuilderPage />
+          )
         }
       />
       <Route path="/app/commerce/bundles" element={<BundleListPage />} />

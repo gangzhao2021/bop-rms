@@ -427,7 +427,7 @@ export async function exerciseProductPublicationCrossDomainReferencesV2() {
           role,
       );
       await admin.query(
-        "GRANT SELECT ON rms_catalog.product_publication_revision,rms_catalog.menu_reference_generation,rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period,rms_catalog.bundle_reference_generation,rms_catalog.bundle,rms_catalog.bundle_version,rms_catalog.bundle_component_group,rms_catalog.bundle_component_sellable,rms_catalog.availability_rule,rms_catalog.availability_reference_generation TO " +
+        "GRANT SELECT ON rms_catalog.product_publication_revision,rms_catalog.menu_reference_generation,rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period,rms_catalog.menu_release_effective_end,rms_catalog.bundle_reference_generation,rms_catalog.bundle,rms_catalog.bundle_version,rms_catalog.bundle_component_group,rms_catalog.bundle_component_sellable,rms_catalog.availability_rule,rms_catalog.availability_reference_generation TO " +
           role,
       );
       await admin.query("GRANT INSERT ON rms_catalog.product_publication_revision TO " + role);

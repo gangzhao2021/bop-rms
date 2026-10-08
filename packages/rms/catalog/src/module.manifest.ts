@@ -151,6 +151,7 @@ const moduleManifestInput =
         "sellable_placement",
         "menu_operation_record",
         "menu_operation_snapshot",
+        "menu_release_effective_end",
         "option_set",
         "option_set_version",
         "option",

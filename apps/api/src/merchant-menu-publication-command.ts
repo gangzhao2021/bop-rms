@@ -143,8 +143,10 @@ export function createMerchantMenuPublicationCommand(options: {
     purpose: "Audit" | "Lifecycle" | "Release" | "Event" | "Timing",
     operationReference: string,
   ): string;
+  /** Test seam: the Brand scope resolver (defaults to the current session's Brand scope). */
+  resolveScope?: ReturnType<typeof createMerchantBrandScope>;
 }) {
-  const resolveScope = createMerchantBrandScope(options.merchant);
+  const resolveScope = options.resolveScope ?? createMerchantBrandScope(options.merchant);
   return async (request: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const session = await options.authentication.authorize({
       sessionCookie: request.sessionCookie,

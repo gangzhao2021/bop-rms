@@ -1219,7 +1219,7 @@ async function prove(context) {
     assert.deepEqual(await creationCounts(), afterCreation);
     await admin.query("RESET ROLE");
     await admin.query(
-      "GRANT SELECT,INSERT ON rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period,rms_catalog.menu_publication_operation_record,rms_catalog.menu_publication_operation_snapshot TO " +
+      "GRANT SELECT,INSERT ON rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period,rms_catalog.menu_release_effective_end,rms_catalog.menu_publication_operation_record,rms_catalog.menu_publication_operation_snapshot TO " +
         role,
     );
     await admin.query("SET ROLE " + role);

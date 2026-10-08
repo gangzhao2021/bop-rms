@@ -16,6 +16,19 @@ export async function seedMenu(admin, mode = "DineIn") {
     `INSERT INTO rms_catalog.menu_version (menu_version_id,menu_id,brand_id,status,default_locale,localized_names_json,created_at,updated_at) VALUES ($1,$2,$3,'Draft','en-CA','{"en-CA":"All Day"}'::jsonb,$4,$4)`,
     [id(4), id(1), scope.brandReference, at],
   );
+  // Menu content precedes its publication (a submitted version is frozen, DEC-MENU-REVISION).
+  await admin.query(
+    "INSERT INTO rms_catalog.menu_version_store(menu_version_id,menu_id,brand_id,store_id) VALUES($1,$2,$3,$4)",
+    [id(4), id(1), scope.brandReference, scope.storeReference],
+  );
+  await admin.query(
+    "INSERT INTO rms_catalog.menu_version_channel(menu_version_id,menu_id,brand_id,channel_code) VALUES($1,$2,$3,'CUSTOMER_PWA')",
+    [id(4), id(1), scope.brandReference],
+  );
+  await admin.query(
+    "INSERT INTO rms_catalog.menu_version_order_type(menu_version_id,menu_id,brand_id,order_type_code) VALUES($1,$2,$3,$4)",
+    [id(4), id(1), scope.brandReference, mode === "Pickup" ? "PICKUP" : "DINE_IN"],
+  );
   await admin.query(
     `INSERT INTO rms_catalog.menu_publication_revision (lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,snapshot_digest,state,validation_evidence_id,approval_evidence_id,changed_at) VALUES ($1,4,$2,$3,$4,$5,'Published',$6,$7,$8)`,
     [id(5), id(1), id(4), scope.brandReference, digest, id(6), id(7), at],
@@ -67,17 +80,5 @@ export async function seedMenu(admin, mode = "DineIn") {
   await admin.query(
     "INSERT INTO rms_catalog.menu_release_effective_period(timing_version_id,release_id,menu_id,brand_id,time_zone,effective_from,effective_until,period_digest,approval_evidence_id,created_at) VALUES($1,$2,$3,$4,'UTC',$5,NULL,$6,$7,$5)",
     [id(50), id(8), id(1), scope.brandReference, at, digest, id(7)],
-  );
-  await admin.query(
-    "INSERT INTO rms_catalog.menu_version_store(menu_version_id,menu_id,brand_id,store_id) VALUES($1,$2,$3,$4)",
-    [id(4), id(1), scope.brandReference, scope.storeReference],
-  );
-  await admin.query(
-    "INSERT INTO rms_catalog.menu_version_channel(menu_version_id,menu_id,brand_id,channel_code) VALUES($1,$2,$3,'CUSTOMER_PWA')",
-    [id(4), id(1), scope.brandReference],
-  );
-  await admin.query(
-    "INSERT INTO rms_catalog.menu_version_order_type(menu_version_id,menu_id,brand_id,order_type_code) VALUES($1,$2,$3,$4)",
-    [id(4), id(1), scope.brandReference, mode === "Pickup" ? "PICKUP" : "DINE_IN"],
   );
 }

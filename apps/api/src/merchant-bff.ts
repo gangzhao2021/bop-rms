@@ -199,6 +199,7 @@ import { MerchantRecipeError, type createMerchantRecipes } from "./merchant-reci
 import { MerchantProductError, type createMerchantProducts } from "./merchant-products.js";
 import { MerchantPriceError, type createMerchantPrices } from "./merchant-prices.js";
 import { MerchantAllergenError, type createMerchantAllergens } from "./merchant-allergens.js";
+import { MerchantMenuError, type createMerchantMenus } from "./merchant-menus.js";
 import {
   MerchantStockCountError,
   type createMerchantStockCounts,
@@ -278,7 +279,7 @@ const merchantNavigation = Object.freeze({
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
   "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
   "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.manage"],
-  "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.read"],
+  "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.menu.read"],
   "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
@@ -459,6 +460,7 @@ export interface MerchantBffRouterOptions {
   readonly products?: ReturnType<typeof createMerchantProducts>;
   readonly prices?: ReturnType<typeof createMerchantPrices>;
   readonly allergens?: ReturnType<typeof createMerchantAllergens>;
+  readonly menus?: ReturnType<typeof createMerchantMenus>;
   readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
   readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
@@ -5485,6 +5487,77 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .command({ sessionCookie, csrf, body: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => allergenFailure(response, error));
+  });
+
+  // WP-2423 / DEC-MENU-REVISION: CAT-MENU-LIST / CAT-MENU-BUILDER reads and commands.
+  const menuStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    Frozen: 409,
+    NotRevisable: 409,
+    ReviewBlocked: 409,
+    ApprovalRequired: 403,
+    Lifecycle: 409,
+    Invalid: 400,
+  } as const;
+  const menuFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantMenuError)) {
+      denied(response);
+      return;
+    }
+    response.status(menuStatus[error.code]).json({ error: error.code });
+  };
+  router.post("/commerce/menus/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { menuReference?: unknown } | undefined;
+    const menuReference = body?.menuReference ?? null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).join(",") !== "menuReference" ||
+      (menuReference !== null &&
+        (typeof menuReference !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            menuReference,
+          )))
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.menus) {
+      response.status(503).json({ error: "menus_unavailable" });
+      return;
+    }
+    void options.menus
+      .query({ sessionCookie, csrf, menuReference: menuReference as string | null })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => menuFailure(response, error));
+  });
+  router.post("/commerce/menus/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.menus) {
+      response.status(503).json({ error: "menus_unavailable" });
+      return;
+    }
+    void options.menus
+      .command({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => menuFailure(response, error));
   });
 
   // WP-2423 / DEC-INV-STOCK-COUNT: INV-COUNT-LIST / INV-COUNT-WORKBENCH.

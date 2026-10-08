@@ -960,9 +960,9 @@
       "schema": "rms_catalog",
       "object": "allergen_registry_version",
       "column": null,
-      "privilege": "UPDATE",
+      "privilege": "MAINTAIN",
       "principal": "api",
-      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (MAINTAIN only for menu review SHARE locks)"
     },
     {
       "type": "table",
@@ -987,9 +987,9 @@
       "schema": "rms_catalog",
       "object": "allergen_registry_entry",
       "column": null,
-      "privilege": "UPDATE",
+      "privilege": "MAINTAIN",
       "principal": "api",
-      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (MAINTAIN only for menu review SHARE locks)"
     },
     {
       "type": "table",
@@ -1014,9 +1014,9 @@
       "schema": "rms_catalog",
       "object": "allergen_source_evidence",
       "column": null,
-      "privilege": "UPDATE",
+      "privilege": "MAINTAIN",
       "principal": "api",
-      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (MAINTAIN only for menu review SHARE locks)"
     },
     {
       "type": "table",
@@ -1041,9 +1041,9 @@
       "schema": "rms_catalog",
       "object": "allergen_source_assertion",
       "column": null,
-      "privilege": "UPDATE",
+      "privilege": "MAINTAIN",
       "principal": "api",
-      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (MAINTAIN only for menu review SHARE locks)"
     },
     {
       "type": "table",
@@ -1377,6 +1377,339 @@
       "privilege": "EXECUTE",
       "principal": "api",
       "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_revision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_release",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_release",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_release_effective_period",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_release_effective_period",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_release_effective_end",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: a published revision ends the release it supersedes"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_release_effective_end",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: a published revision ends the release it supersedes"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_allergen_validation_evidence",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_allergen_validation_evidence",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_sellable_allergen_disclosure",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_sellable_allergen_disclosure",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_review_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_reference_generation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_reference_generation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_reference_generation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_checkpoint",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_checkpoint",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_generation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_generation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_section",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_section",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_sellable",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_sellable",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_version",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_conflict",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_option",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_sku_scope",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_channel",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
     }
   ]
 }

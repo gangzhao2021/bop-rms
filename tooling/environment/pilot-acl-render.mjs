@@ -10,7 +10,7 @@ const identifier = /^[a-z_][a-z0-9_]{0,62}$/u;
 const routine = /^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}\([a-z0-9_, ]*\)$/u;
 const privileges = {
   schema: ["USAGE"],
-  table: ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+  table: ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"],
   view: ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
   sequence: ["USAGE", "SELECT", "UPDATE"],
   column: ["SELECT", "INSERT", "UPDATE", "REFERENCES"],

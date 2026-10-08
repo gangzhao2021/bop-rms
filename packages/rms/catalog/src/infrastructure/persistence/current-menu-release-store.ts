@@ -66,7 +66,10 @@ LEFT JOIN LATERAL (
 ) v ON true
 WHERE p.brand_id = $1 AND p.menu_id = $3
   AND p.effective_from <= $6::timestamptz
-  AND (p.effective_until IS NULL OR p.effective_until > $6::timestamptz)`;
+  AND (p.effective_until IS NULL OR p.effective_until > $6::timestamptz)
+  -- DEC-MENU-REVISION: a superseded release ends where its successor takes effect.
+  AND NOT EXISTS (SELECT 1 FROM rms_catalog.menu_release_effective_end e
+    WHERE e.release_id = p.release_id AND e.ended_at <= $6::timestamptz)`;
 
 /** Current owner publication fact only; no sale, Inventory, price or allergen authorization. */
 export function createPostgresCurrentMenuReleaseStore(

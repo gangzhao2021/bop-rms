@@ -129,7 +129,7 @@ async function prove(context) {
       `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint TO ${role}`,
     );
     await admin.query(
-      `GRANT SELECT ON rms_catalog.menu_release_effective_period,
+      `GRANT SELECT ON rms_catalog.menu_release_effective_period,rms_catalog.menu_release_effective_end,
       rms_catalog.menu_publication_release,rms_catalog.menu_publication_revision,
       rms_catalog.menu_version_store,rms_catalog.menu_version_channel,
       rms_catalog.menu_version_order_type TO ` + role,

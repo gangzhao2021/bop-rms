@@ -63,7 +63,7 @@ it("composes scoped persisted entry and menu through one restartable loopback ru
       );
       await admin.query(`GRANT USAGE ON SCHEMA rms_catalog TO ${menuRole}`);
       await admin.query(
-        `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint, rms_catalog.menu_release_effective_period, rms_catalog.menu_publication_release, rms_catalog.menu_publication_revision, rms_catalog.menu_version_store, rms_catalog.menu_version_channel, rms_catalog.menu_version_order_type TO ${menuRole}`,
+        `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint, rms_catalog.menu_release_effective_period,rms_catalog.menu_release_effective_end, rms_catalog.menu_publication_release, rms_catalog.menu_publication_revision, rms_catalog.menu_version_store, rms_catalog.menu_version_channel, rms_catalog.menu_version_order_type TO ${menuRole}`,
       );
       await admin.query(`GRANT USAGE ON SCHEMA rms_ordering TO ${cartRole}`);
       await admin.query(`GRANT SELECT ON rms_ordering.cart_binding_record TO ${cartRole}`);

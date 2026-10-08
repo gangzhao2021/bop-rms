@@ -427,3 +427,4 @@ export {
 export { createPostgresMenuDraftStore } from "./infrastructure/persistence/menu-draft-store.js";
 
 export * from "./infrastructure/persistence/allergen-declaration-store.js";
+export * from "./infrastructure/persistence/menu-admin-read-store.js";

@@ -89,7 +89,7 @@ export async function exerciseProductFullPublicationSources(env) {
     "GRANT SELECT ON platform_audit.audit_record,platform_eventing.outbox_event TO " + role,
   );
   await admin.query(
-    "GRANT SELECT ON rms_catalog.menu_reference_generation,rms_catalog.menu_review_content,rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period,rms_catalog.bundle_reference_generation,rms_catalog.bundle,rms_catalog.bundle_version,rms_catalog.bundle_component_group,rms_catalog.bundle_component_sellable,rms_catalog.availability_rule,rms_catalog.availability_reference_generation TO " +
+    "GRANT SELECT ON rms_catalog.menu_reference_generation,rms_catalog.menu_review_content,rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period,rms_catalog.menu_release_effective_end,rms_catalog.bundle_reference_generation,rms_catalog.bundle,rms_catalog.bundle_version,rms_catalog.bundle_component_group,rms_catalog.bundle_component_sellable,rms_catalog.availability_rule,rms_catalog.availability_reference_generation TO " +
       role,
   );
   await admin.query("GRANT USAGE ON SCHEMA rms_recipe,rms_inventory,rms_pricing TO " + role);

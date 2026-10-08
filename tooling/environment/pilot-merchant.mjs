@@ -49,6 +49,7 @@ import { createMerchantRecipes } from "../../apps/api/dist/merchant-recipes.js";
 import { createMerchantProducts } from "../../apps/api/dist/merchant-products.js";
 import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
 import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.js";
+import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
@@ -183,6 +184,12 @@ export async function createInternalMerchant(
           label: "Recipes",
           href: "/app/commerce/recipes",
           permission: "recipe.read",
+        },
+        {
+          screenId: "CAT-MENU-LIST",
+          label: "Menus",
+          href: "/app/commerce/menus",
+          permission: "catalog.menu.read",
         },
         {
           screenId: "PRICE-BOOK-LIST",
@@ -514,6 +521,16 @@ export async function createInternalMerchant(
           currencyMetadata: await loadPricingCurrencyMetadata(),
           locale: "en-CA",
         });
+  const menus =
+    loadPricingCurrencyMetadata === undefined
+      ? undefined
+      : createMerchantMenus({
+          persistence,
+          authentication: service,
+          references: { next: () => resources.credentials.reference() },
+          currencyMetadata: await loadPricingCurrencyMetadata(),
+          locale: "en-CA",
+        });
   const allergens = createMerchantAllergens({
     persistence,
     authentication: service,
@@ -651,6 +668,7 @@ export async function createInternalMerchant(
       products,
       ...(prices === undefined ? {} : { prices }),
       allergens,
+      ...(menus === undefined ? {} : { menus }),
       stockCounts,
       storeWaste,
       pickupQuery,

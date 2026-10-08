@@ -62,7 +62,7 @@ const NAVIGATION = Object.freeze({
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
   "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
   "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.manage"],
-  "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.read"],
+  "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.menu.read"],
   "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
