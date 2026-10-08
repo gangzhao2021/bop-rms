@@ -680,3 +680,53 @@ export async function revokeActorSessions(
   ).rows;
   return rows.length;
 }
+
+/**
+ * WP-2423: when each given session ended, or null while it (or the session it was rotated into)
+ * is still live at `at`. A session ended at the first of its revocation, idle expiry and absolute
+ * expiry. Rotation continues a session, so its end is the end of
+ * the latest session rotated from it. Unknown references are omitted.
+ */
+export async function loadSessionEnds(
+  tx: {
+    query(
+      sql: string,
+      values: readonly unknown[],
+    ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+  },
+  input: { readonly sessionReferences: readonly string[]; readonly at: string },
+): Promise<ReadonlyMap<string, string | null>> {
+  const references = [...new Set(input.sessionReferences.map(parseSessionReference))];
+  if (references.length === 0) return new Map();
+  if (references.length > 100) throw new TypeError("SESSION_REFERENCES_INVALID");
+  const rows = (
+    await tx.query(
+      `WITH RECURSIVE chain(root,session_id,depth) AS (
+         SELECT session_id,session_id,0 FROM bop_identity.authentication_session WHERE session_id=ANY($1::uuid[])
+         UNION ALL
+         SELECT c.root,s.session_id,c.depth+1 FROM chain c
+           JOIN bop_identity.authentication_session s ON s.rotated_from_session_id=c.session_id
+         WHERE c.depth<32)
+       SELECT DISTINCT ON (c.root) c.root::text AS root,s.status,
+         CASE WHEN s.status='Revoked' THEN least(s.revoked_at,s.idle_expires_at,s.absolute_expires_at)
+              WHEN s.status='Expired' OR least(s.idle_expires_at,s.absolute_expires_at)<=$2::timestamptz
+                THEN least(s.idle_expires_at,s.absolute_expires_at) END AS ended_at
+       FROM chain c JOIN bop_identity.authentication_session s ON s.session_id=c.session_id
+       ORDER BY c.root,c.depth DESC,s.created_at DESC`,
+      [references, input.at],
+    )
+  ).rows;
+  const ends = new Map<string, string | null>();
+  for (const row of rows) {
+    const ended = row.ended_at;
+    ends.set(
+      String(row.root),
+      ended === null || ended === undefined
+        ? null
+        : ended instanceof Date
+          ? ended.toISOString()
+          : new Date(String(ended)).toISOString(),
+    );
+  }
+  return ends;
+}

@@ -70,33 +70,86 @@ export function createPostgresKdsOperatorShiftStore(options: {
   }
   return Object.freeze({
     /** Records the Start once and derives a ShiftHandover from the latest released prior
-     * operator at this Store that has not been handed over yet. Repeats are idempotent. */
+     * operator at this Store that has not been handed over yet: one who released the board, or
+     * (with `sessionEnds`) one whose session ended without Release. Repeats are idempotent. */
     async start(input: {
       readonly transaction: ConsumerTransaction;
       readonly session: KdsOperatorSessionEvidence;
       readonly recordedAt: string;
+      /** When each given earlier operator session ended (signed out, revoked or expired), or null
+       * while it is still live; supplied by the composition from Identity. Without it, only an
+       * explicit Release ends a shift. */
+      readonly sessionEnds?: (
+        sessionReferences: readonly string[],
+      ) => Promise<ReadonlyMap<string, string | null>>;
     }): Promise<KdsOperatorHandoverRecord | null> {
       const tx = input.transaction,
         next = bound(input.session);
       if (next.state !== "Active") return unavailable();
       await scoped(tx);
       await append(tx, next, "Started", next.observedAt, input.recordedAt);
-      const prior = await tx.query<Record<string, unknown>>(
-        "SELECT r.session_id,r.actor_id,r.session_version,r.occurred_at AS released_at," +
-          "r.session_valid_until,s.occurred_at AS started_at " +
-          "FROM rms_kitchen.kds_operator_shift_event r " +
-          "JOIN rms_kitchen.kds_operator_shift_event s ON s.brand_id=r.brand_id AND " +
-          "s.store_id=r.store_id AND s.session_id=r.session_id AND s.event_kind='Started' " +
-          "WHERE r.brand_id=$1 AND r.store_id=$2 AND r.event_kind='Released' " +
-          "AND r.session_id<>$3 AND r.actor_id<>$4 AND r.occurred_at<=$5 " +
-          "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kds_operator_handover h WHERE " +
-          "h.brand_id=r.brand_id AND h.store_id=r.store_id AND " +
-          "(h.prior_session_id=r.session_id OR h.next_session_id=$3)) " +
-          "ORDER BY r.occurred_at DESC,r.session_id DESC LIMIT 1",
-        [brand, store, next.sessionReference, next.actorReference, next.observedAt],
+      const released = (
+        await tx.query<Record<string, unknown>>(
+          "SELECT r.session_id,r.actor_id,r.session_version,r.occurred_at AS ended_at," +
+            "r.session_valid_until,s.occurred_at AS started_at " +
+            "FROM rms_kitchen.kds_operator_shift_event r " +
+            "JOIN rms_kitchen.kds_operator_shift_event s ON s.brand_id=r.brand_id AND " +
+            "s.store_id=r.store_id AND s.session_id=r.session_id AND s.event_kind='Started' " +
+            "WHERE r.brand_id=$1 AND r.store_id=$2 AND r.event_kind='Released' " +
+            "AND r.session_id<>$3 AND r.actor_id<>$4 AND r.occurred_at<=$5 " +
+            "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kds_operator_handover h WHERE " +
+            "h.brand_id=r.brand_id AND h.store_id=r.store_id AND " +
+            "(h.prior_session_id=r.session_id OR h.next_session_id=$3)) " +
+            "ORDER BY r.occurred_at DESC,r.session_id DESC LIMIT 1",
+          [brand, store, next.sessionReference, next.actorReference, next.observedAt],
+        )
+      ).rows;
+      // An operator who walked away without Release still ended their shift when their session
+      // ended. Only sessions started within the absolute session lifetime can end that late.
+      const unreleased =
+        input.sessionEnds === undefined
+          ? []
+          : (
+              await tx.query<Record<string, unknown>>(
+                "SELECT s.session_id,s.actor_id,s.session_version,s.session_valid_until," +
+                  "s.occurred_at AS started_at FROM rms_kitchen.kds_operator_shift_event s " +
+                  "WHERE s.brand_id=$1 AND s.store_id=$2 AND s.event_kind='Started' " +
+                  "AND s.session_id<>$3 AND s.actor_id<>$4 AND s.occurred_at<=$5 " +
+                  "AND s.occurred_at>$5::timestamptz-interval '24 hours' " +
+                  "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kds_operator_shift_event r WHERE " +
+                  "r.brand_id=s.brand_id AND r.store_id=s.store_id AND r.session_id=s.session_id " +
+                  "AND r.event_kind='Released') " +
+                  "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kds_operator_handover h WHERE " +
+                  "h.brand_id=s.brand_id AND h.store_id=s.store_id AND " +
+                  "(h.prior_session_id=s.session_id OR h.next_session_id=$3)) " +
+                  "ORDER BY s.occurred_at DESC,s.session_id DESC LIMIT 50",
+                [brand, store, next.sessionReference, next.actorReference, next.observedAt],
+              )
+            ).rows;
+      const ends =
+        unreleased.length === 0 || input.sessionEnds === undefined
+          ? new Map<string, string | null>()
+          : await input.sessionEnds(unreleased.map((row) => String(row.session_id)));
+      const candidates = [
+        ...released.map((row) => ({ row, endedAt: iso(row.ended_at) })),
+        ...unreleased.flatMap((row) => {
+          const ended = ends.get(String(row.session_id));
+          if (ended === undefined || ended === null) return [];
+          const endedAt = parseKitchenTicketInstant(ended);
+          return endedAt < iso(row.started_at) || endedAt > next.observedAt
+            ? []
+            : [{ row, endedAt }];
+        }),
+      ].sort((a, b) =>
+        a.endedAt === b.endedAt
+          ? String(b.row.session_id).localeCompare(String(a.row.session_id))
+          : a.endedAt < b.endedAt
+            ? 1
+            : -1,
       );
-      const row = prior.rows[0];
-      if (!row) return null;
+      const latest = candidates[0];
+      if (!latest) return null;
+      const row = latest.row;
       const record = createKdsOperatorHandover({
         handoverReference: options.references.next(),
         priorSession: {
@@ -111,7 +164,7 @@ export function createPostgresKdsOperatorShiftStore(options: {
           validUntil: iso(row.session_valid_until),
         } as unknown as KdsOperatorSessionEvidence,
         nextSession: next,
-        priorFinalizedAt: iso(row.released_at),
+        priorFinalizedAt: latest.endedAt,
         nextActivatedAt: next.observedAt,
         recordedAt: parseKitchenTicketInstant(input.recordedAt),
         reasonCode: "ShiftHandover",

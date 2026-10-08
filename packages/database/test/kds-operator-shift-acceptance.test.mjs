@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import pg from "pg";
 import { it } from "vitest";
 
+import { loadSessionEnds } from "../../bop/identity/src/index.ts";
 import { createPostgresKdsOperatorShiftStore } from "../../rms/kitchen/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
@@ -76,6 +78,9 @@ async function prove(context) {
       `GRANT SELECT,INSERT ON rms_kitchen.kds_operator_shift_event,
        rms_kitchen.kds_operator_handover TO ${role}`,
     );
+    // The pilot API role already reads Identity sessions to authenticate.
+    await client.query(`GRANT USAGE ON SCHEMA bop_identity TO ${role}`);
+    await client.query(`GRANT SELECT ON bop_identity.authentication_session TO ${role}`);
 
     const a = session(10, 20, "2026-08-11T14:00:00.000Z");
     assert.equal(
@@ -157,6 +162,77 @@ async function prove(context) {
       "evidence for another Store is refused before any write",
     );
 
+    // Operators who walk away without Release: their shift ends when their Identity session ends.
+    // 12 was rotated into 17, still live; 13 idled out at 17:00; 14 was revoked at 17:10.
+    let byte = 1;
+    const identitySession = (n, actor, created, idle, rotatedFrom = null, revokedAt = null) =>
+      client.query(
+        `INSERT INTO bop_identity.authentication_session(session_id,actor_id,session_selector_hash,
+          csrf_selector_hash,policy_code,status,encrypted_secret,cipher_algorithm,key_reference,
+          encryption_context,authenticated_at,created_at,last_seen_at,idle_expires_at,
+          absolute_expires_at,rotated_from_session_id,revocation_reason,revoked_at,version)
+         VALUES($1,$2,$3,$4,'NamedKdsOperator',$5,$6,'SYNTHETIC_AES_256_GCM','test-key',
+          'test-context',$7,$7,$7,$8,'2026-08-12T04:00:00.000Z',$9,$10,$11,1)`,
+        [
+          id(n),
+          id(actor),
+          Buffer.alloc(32, byte++),
+          Buffer.alloc(32, byte++),
+          revokedAt === null ? "Active" : "Revoked",
+          Buffer.alloc(40, 1),
+          created,
+          idle,
+          rotatedFrom === null ? null : id(rotatedFrom),
+          revokedAt === null ? null : "Administrative",
+          revokedAt,
+        ],
+      );
+    await identitySession(
+      12,
+      21,
+      "2026-08-11T16:05:00.000Z",
+      "2026-08-11T17:05:00.000Z",
+      null,
+      "2026-08-11T16:40:00.000Z",
+    );
+    await identitySession(17, 21, "2026-08-11T16:40:00.000Z", "2026-08-11T18:40:00.000Z", 12);
+    await identitySession(13, 22, "2026-08-11T16:10:00.000Z", "2026-08-11T17:00:00.000Z");
+    await identitySession(
+      14,
+      20,
+      "2026-08-11T16:20:00.000Z",
+      "2026-08-11T18:00:00.000Z",
+      null,
+      "2026-08-11T17:10:00.000Z",
+    );
+    await identitySession(16, 24, "2026-08-11T17:30:00.000Z", "2026-08-11T18:30:00.000Z");
+    const startWithEnds = (next) =>
+      asRuntime(client, role, store, (s, tx) =>
+        s.start({
+          transaction: tx,
+          session: next,
+          recordedAt: next.observedAt,
+          sessionEnds: (sessionReferences) =>
+            loadSessionEnds(tx, { sessionReferences, at: next.observedAt }),
+        }),
+      );
+    const afterRevoked = await startWithEnds(session(16, 24, "2026-08-11T17:30:00.000Z"));
+    assert.equal(afterRevoked.priorSessionReference, id(14), "the latest ended shift wins");
+    assert.equal(afterRevoked.priorFinalizedAt, "2026-08-11T17:10:00.000Z");
+    assert.equal(afterRevoked.priorFinalState, "Ended");
+    const afterIdle = await startWithEnds(session(18, 25, "2026-08-11T17:40:00.000Z"));
+    assert.equal(
+      afterIdle.priorSessionReference,
+      id(13),
+      "an idled-out operator is handed over from",
+    );
+    assert.equal(afterIdle.priorFinalizedAt, "2026-08-11T17:00:00.000Z");
+    assert.equal(
+      await startWithEnds(session(19, 26, "2026-08-11T17:50:00.000Z")),
+      null,
+      "a rotated session that is still live has not ended",
+    );
+
     await assert.rejects(
       client.query(
         "UPDATE rms_kitchen.kds_operator_shift_event SET event_kind='Released' WHERE session_id=$1",
@@ -167,8 +243,8 @@ async function prove(context) {
     await client.query("DELETE FROM rms_kitchen.kds_operator_shift_event WHERE session_id=$1", [
       a.sessionReference,
     ]);
-    assert.equal(await count(client, "kds_operator_shift_event"), 8);
-    assert.equal(await count(client, "kds_operator_handover"), 2);
+    assert.equal(await count(client, "kds_operator_shift_event"), 11);
+    assert.equal(await count(client, "kds_operator_handover"), 4);
   } finally {
     await client.query("RESET ROLE").catch(() => undefined);
     await client.query(`DROP OWNED BY ${role}`).catch(() => undefined);
