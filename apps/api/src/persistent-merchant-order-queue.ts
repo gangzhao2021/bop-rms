@@ -1,4 +1,5 @@
 import type { ConsumerTransaction } from "@bop/eventing";
+import { loadMerchantOrderLines } from "@rms/ordering";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
@@ -9,6 +10,8 @@ export function createPersistentMerchantOrderQueue(options: {
   persistence: PersistentMerchantBffOptions;
   quoteVersion: 1 | 2;
   acceptanceConfigured?: boolean;
+  /** WP-2423: the locale item names are shown in on the order detail (the Store's locale). */
+  locale?: string;
 }) {
   const source = options.persistence;
   const currentSession = createPostgresCurrentBrowserSessionSource({
@@ -17,7 +20,12 @@ export function createPersistentMerchantOrderQueue(options: {
     currentActor: source.currentActor,
   });
   const resolveScope = createMerchantStoreScope(source);
-  return async (input: { sessionCookie: unknown; afterOrderReference: string | null }) =>
+  return async (input: {
+    sessionCookie: unknown;
+    afterOrderReference: string | null;
+    /** WP-2423 OPS-ORDER-DETAIL: the one Order the detail shows. */
+    orderReference?: string;
+  }) =>
     source.transactions.run(async (transaction) => {
       const session = await currentSession(transaction, input.sessionCookie);
       const businessTransaction: ConsumerTransaction = {
@@ -67,9 +75,39 @@ export function createPersistentMerchantOrderQueue(options: {
           };
         },
       });
-      const result = await read({ ...input, limit: 50 });
+      const result = await read({
+        sessionCookie: input.sessionCookie,
+        afterOrderReference: input.orderReference === undefined ? input.afterOrderReference : null,
+        limit: input.orderReference === undefined ? 50 : 1,
+        ...(input.orderReference === undefined ? {} : { onlyOrderReference: input.orderReference }),
+      });
+      // What was ordered, read in the same transaction under the same ordering.operate scope.
+      const only = result.items[0];
+      const lines =
+        input.orderReference === undefined || only === undefined
+          ? null
+          : await (async () => {
+              const resolved = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                "ordering.operate",
+                session.sessionReference,
+              );
+              if ((await resolved.allowed()) !== true)
+                throw new Error("MERCHANT_ORDER_QUEUE_UNAVAILABLE");
+              return loadMerchantOrderLines(
+                businessTransaction,
+                {
+                  brandReference: String(resolved.context.brand.brandReference),
+                  storeReference: String(resolved.store.storeReference),
+                },
+                only.orderReference,
+                options.locale ?? "en-CA",
+              );
+            })();
       return Object.freeze({
         ...result,
+        lines,
         items: Object.freeze(
           result.items.map((item) => {
             const latestBatchSequence = item.batches.reduce(

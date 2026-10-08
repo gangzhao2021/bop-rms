@@ -134,6 +134,66 @@
 .order-workbench-detail h3 {
   font-size: 15px;
 }
+/* WP-2423 OPS-ORDER-DETAIL: items ordered and totals. */
+.order-lines ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.order-lines li {
+  display: grid;
+  grid-template-columns: 3.5em minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e8ebef;
+}
+.order-line-quantity {
+  color: #606873;
+  font-variant-numeric: tabular-nums;
+}
+.order-line-name {
+  display: grid;
+  gap: 2px;
+  font-weight: 500;
+}
+.order-line-options,
+.order-line-note {
+  font-weight: 400;
+  font-size: 13px;
+  color: #606873;
+}
+.order-line-note {
+  color: #1d2329;
+}
+.order-line-amount,
+.order-lines-totals dd {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.order-workbench-detail .order-lines-totals {
+  display: grid;
+  gap: 4px;
+  max-width: 320px;
+  margin: 12px 0 0 auto;
+  font-size: 14px;
+}
+.order-lines-totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.order-workbench-detail .order-lines-totals dd {
+  margin: 0;
+}
+.order-lines-totals > div:last-child {
+  font-weight: 600;
+  border-top: 1px solid #dce0e5;
+  padding-top: 6px;
+}
+.order-lines-state {
+  color: #606873;
+  font-size: 13px;
+}
 @media (max-width: 760px) {
   .orders-page .bop-shell__header,
   .orders-page .bop-shell__main {

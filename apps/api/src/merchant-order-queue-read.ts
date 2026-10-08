@@ -33,6 +33,8 @@ export function createMerchantOrderQueueRead(options: {
     sessionCookie: unknown;
     afterOrderReference: string | null;
     limit: number;
+    /** WP-2423 OPS-ORDER-DETAIL: only this Order (an empty page when not at this Store). */
+    onlyOrderReference?: string;
   }) =>
     options.transactions.run(async (transaction) => {
       const scope = await options.authorize(transaction, input.sessionCookie);
@@ -64,6 +66,9 @@ export function createMerchantOrderQueueRead(options: {
         afterOrderReference: input.afterOrderReference,
         limit: input.limit,
         newestFirst: true,
+        ...(input.onlyOrderReference === undefined
+          ? {}
+          : { onlyOrderReference: input.onlyOrderReference }),
       });
       // WP-2423: history may hold Orders priced with either Quote version; each is decoded with its own.
       const readers = {

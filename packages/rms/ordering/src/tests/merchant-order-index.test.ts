@@ -168,3 +168,54 @@ it("WP-2423: reads the Store's order numbers for given Orders", async () => {
   expect(String(query.mock.calls[1]?.[0])).toContain("brand_id=$1 AND store_id=$2");
   expect((await listStoreOrderNumbers(tx, scope, [])).size).toBe(0);
 });
+it("WP-2423: reads one Order of the Store for its detail", async () => {
+  const { tx, query } = fixture([row(4)]);
+  const result = await createPostgresMerchantOrderIndex({
+    ...scope,
+    authorize: async () => true,
+  }).list({
+    transaction: tx,
+    limit: 1,
+    afterOrderReference: null,
+    newestFirst: true,
+    onlyOrderReference: id(4),
+  });
+  expect(result.items.map((item) => item.orderReference)).toEqual([id(4)]);
+  expect(String(query.mock.calls[1]?.[0])).toContain("h.order_id=$5::uuid");
+  expect(query.mock.calls[1]?.[1]).toEqual([
+    scope.brandReference,
+    scope.storeReference,
+    null,
+    2,
+    id(4),
+  ]);
+});
+it("WP-2423: reads an Order's lines with option names, notes and totals", async () => {
+  const { configuredOrderItemFixture } = await import("./configured-order-item.fixture.js");
+  const { encodeConfiguredOrderItemSnapshot } =
+    await import("../domain/order-item-snapshot-codec.js");
+  const { loadMerchantOrderLines } =
+    await import("../infrastructure/persistence/merchant-order-index.js");
+  const { item } = await configuredOrderItemFixture();
+  const wire = JSON.parse(encodeConfiguredOrderItemSnapshot(item));
+  const { tx, query } = fixture([]);
+  query.mockImplementation(async (sql: string) => ({
+    rows: sql.includes("FROM rms_ordering.order_item")
+      ? [
+          { transaction_snapshot_json: wire, quote_version: "2" },
+          { transaction_snapshot_json: wire, quote_version: "2" },
+        ]
+      : [],
+    rowCount: 0,
+  }));
+  const lines = await loadMerchantOrderLines(tx, scope, id(3), "en-CA");
+  expect(lines?.items).toHaveLength(2);
+  expect(lines?.items[0]?.options).toEqual([
+    { name: "Synthetic option", quantity: item.catalog.options[0]?.quantity },
+  ]);
+  expect(lines?.items[0]?.total).toEqual({ amountMinor: "2825", currencyCode: "CAD" });
+  expect(lines?.totals.total).toEqual({ amountMinor: "5650", currencyCode: "CAD" });
+  expect(String(query.mock.calls[1]?.[0])).toContain("i.brand_id=$1 AND i.store_id=$2");
+  query.mockImplementation(async () => ({ rows: [], rowCount: 0 }));
+  expect(await loadMerchantOrderLines(tx, scope, id(3), "en-CA")).toBeNull();
+});

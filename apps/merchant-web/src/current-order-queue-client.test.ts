@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 import {
   createCurrentOrderQueueClient,
+  parseCurrentOrderDetail,
   parseCurrentOrderQueue,
 } from "./current-order-queue-client.js";
 const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -240,4 +241,59 @@ it("accepts terminal cancellation without actionable batches but refuses empty l
       nextAfterOrderReference: null,
     }),
   ).toThrow();
+});
+const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+const line = (n: number) => ({
+  orderItemReference: id(200 + n),
+  orderBatchReference: id(90),
+  name: "Mocha — Regular (12 oz)",
+  options: [{ name: "Oat milk", quantity: 1 }],
+  quantity: 1,
+  customerNote: n === 1 ? "No whipped cream" : null,
+  unitPrice: money("600"),
+  subtotal: money("600"),
+  discount: money("0"),
+  tax: money("78"),
+  fee: money("0"),
+  total: money("678"),
+});
+const detail = () => ({
+  screenId: "OPS-ORDER-DETAIL",
+  order: row(1),
+  lines: {
+    items: [line(1)],
+    totals: {
+      subtotal: money("600"),
+      discount: money("0"),
+      tax: money("78"),
+      fee: money("0"),
+      total: money("678"),
+    },
+  },
+});
+it("WP-2423: reads one order's detail with its lines and refuses a different order", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(detail()), {
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    }),
+  );
+  const parsed = await createCurrentOrderQueueClient(fetcher).loadDetail(
+    id(1),
+    new AbortController().signal,
+  );
+  expect(fetcher).toHaveBeenCalledWith("/merchant/orders/detail?order=" + id(1), expect.anything());
+  expect(parsed.order.orderNumber).toBe("ORD-1001");
+  expect(parsed.lines.items[0]?.options).toEqual([{ name: "Oat milk", quantity: 1 }]);
+  expect(parsed.lines.totals.total).toEqual(money("678"));
+  expect(() => parseCurrentOrderDetail(detail(), id(2))).toThrow();
+  expect(() =>
+    parseCurrentOrderDetail(
+      { ...detail(), lines: { ...detail().lines, items: [{ ...line(1), total: 6.78 }] } },
+      id(1),
+    ),
+  ).toThrow();
+  const missing = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 404 }));
+  await expect(
+    createCurrentOrderQueueClient(missing).loadDetail(id(1), new AbortController().signal),
+  ).rejects.toMatchObject({ code: "NotFound" });
 });

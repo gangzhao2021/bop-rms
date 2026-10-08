@@ -10,7 +10,7 @@ import { createOptionRecipeClient } from "./store-option-recipes-page.js";
 import { CurrentStoreCapabilityPage } from "./CurrentStoreCapabilityPage.js";
 import { RefundPaymentPage } from "./RefundPaymentPage.js";
 import { DiningSessionWorkspace } from "./DiningSessionWorkspace.js";
-import { CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
+import { CurrentOrderDetailRoute, CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
 import { StoreServiceControlPanel } from "./StoreServiceControlPanel.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
@@ -965,7 +965,20 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         path="/operations/orders/:id"
         element={
           <LocalDemoRoute notice={demo?.Notice ?? null}>
-            <OrderDetailPage {...clientProps(demo?.orderQueue)} />
+            {demo !== null ? (
+              <OrderDetailPage {...clientProps(demo.orderQueue)} />
+            ) : state.kind === "Ready" && !state.switching ? (
+              <CurrentOrderDetailRoute
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                storeLabel={state.workspace.selectedScope.storeLabel}
+                csrf={state.csrf}
+                timeZone={state.workspace.selectedScope.timeZone}
+              />
+            ) : (
+              <StatePanel heading="Order unavailable" status>
+                <p>A current merchant session and Store are required.</p>
+              </StatePanel>
+            )}
           </LocalDemoRoute>
         }
       />

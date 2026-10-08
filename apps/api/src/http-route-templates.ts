@@ -99,6 +99,7 @@ export const apiRouteTemplates = Object.freeze([
   "/merchant/dining/sessions/join-state",
   "/merchant/dining/sessions/regenerate",
   "/merchant/orders/accept",
+  "/merchant/orders/detail",
   "/merchant/payments/refunds/context",
   "/merchant/payments/refunds/status",
   "/merchant/payments/refunds/items",

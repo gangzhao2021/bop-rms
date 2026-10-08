@@ -780,6 +780,7 @@ it("protects current order queue reads and bounds cursor authority", async () =>
   const queue = vi.fn<NonNullable<MerchantBffRouterOptions["orderQueue"]>>(async () => ({
     items: [],
     nextAfterOrderReference: null,
+    lines: null,
   }));
   const root = await serve(
     fakeService(),
@@ -823,6 +824,65 @@ it("protects current order queue reads and bounds cursor authority", async () =>
   expect(await failed.json()).toEqual({ error: "request_denied" });
   const unconfigured = await serve(fakeService());
   expect((await request(unconfigured, "/merchant/orders", { headers })).status).toBe(503);
+});
+
+it("WP-2423: reads one order's detail with its lines and hides other Stores' orders", async () => {
+  const order = "0198a408-0000-7000-8000-000000000123";
+  const item = {
+    orderReference: order,
+    orderNumber: "16",
+    orderType: "Pickup" as const,
+    sourceChannel: "Qr" as const,
+    submittedAt: "2026-10-08T21:00:30.000Z",
+    initialBatchReference: "0198a408-0000-7000-8000-000000000124",
+    canRequestAcceptance: false,
+    batches: [
+      {
+        orderBatchReference: "0198a408-0000-7000-8000-000000000124",
+        sequence: 1,
+        acceptanceStatus: "Accepted" as const,
+        canRequestAcceptance: false,
+      },
+    ],
+    currentPhase: "Fulfilled",
+    currentVersion: 4,
+    observedAt: "2026-10-08T21:30:00.000Z",
+  };
+  const lines = { items: [], totals: {} };
+  const queue = vi.fn(async () => ({
+    items: [item],
+    nextAfterOrderReference: null,
+    lines,
+  }));
+  const root = await serve(
+    fakeService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    queue as never,
+  );
+  const headers = { ...safeHeaders, Cookie: "__Host-bop-merchant=" + sessionCookie };
+  expect((await request(root, "/merchant/orders/detail", { headers })).status).toBe(403);
+  expect((await request(root, "/merchant/orders/detail?order=16", { headers })).status).toBe(403);
+  expect(
+    (await request(root, "/merchant/orders/detail?order=" + order + "&after=x", { headers }))
+      .status,
+  ).toBe(403);
+  expect(queue).not.toHaveBeenCalled();
+  const response = await request(root, "/merchant/orders/detail?order=" + order, { headers });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ screenId: "OPS-ORDER-DETAIL", order: item, lines });
+  expect(queue).toHaveBeenCalledWith({
+    sessionCookie,
+    afterOrderReference: null,
+    orderReference: order,
+  });
+  queue.mockResolvedValueOnce({ items: [], nextAfterOrderReference: null, lines: null } as never);
+  const missing = await request(root, "/merchant/orders/detail?order=" + order, { headers });
+  expect(missing.status).toBe(404);
 });
 
 it("protects price management transport and sanitizes command failures", async () => {

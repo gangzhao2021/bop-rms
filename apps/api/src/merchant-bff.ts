@@ -1428,6 +1428,61 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       });
   });
 
+  // WP-2423 OPS-ORDER-DETAIL: one Order of the selected Store with what was ordered.
+  router.get("/orders/detail", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const order = request.query.order;
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).some((key) => key !== "order") ||
+      typeof order !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(order) ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.orderQueue) {
+      response.status(503).json({ error: "order_queue_unavailable" });
+      return;
+    }
+    void options
+      .orderQueue({ sessionCookie, afterOrderReference: null, orderReference: order })
+      .then((view) => {
+        const item = view.items[0];
+        if (item === undefined || view.lines === null) {
+          response.status(404).json({ error: "order_not_found" });
+          return;
+        }
+        response.json({
+          screenId: "OPS-ORDER-DETAIL",
+          order: {
+            orderReference: item.orderReference,
+            orderNumber: item.orderNumber,
+            orderType: item.orderType,
+            sourceChannel: item.sourceChannel,
+            submittedAt: item.submittedAt,
+            initialBatchReference: item.initialBatchReference,
+            canRequestAcceptance: item.canRequestAcceptance,
+            batches: item.batches.map((batch) => ({
+              orderBatchReference: batch.orderBatchReference,
+              sequence: batch.sequence,
+              acceptanceStatus: batch.acceptanceStatus,
+              canRequestAcceptance: batch.canRequestAcceptance,
+            })),
+            currentPhase: item.currentPhase,
+            currentVersion: item.currentVersion,
+            observedAt: item.observedAt,
+          },
+          lines: view.lines,
+        });
+      })
+      .catch(() => denied(response));
+  });
+
   router.get("/orders", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     const after = request.query.after;

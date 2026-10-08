@@ -1,5 +1,9 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
+import {
+  decodeConfiguredOrderItemSnapshot,
+  decodeOrderItemSnapshot,
+} from "../../domain/order-item-snapshot-codec.js";
 
 const unavailable = (): never => {
   throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
@@ -64,6 +68,8 @@ export function createPostgresMerchantOrderIndex(options: {
        * the current day's Orders are never behind earlier days'. Complete scans keep the default.
        */
       newestFirst?: boolean;
+      /** WP-2423 OPS-ORDER-DETAIL: only this Order of the Store (an empty page when not here). */
+      onlyOrderReference?: string;
     }) {
       const newest = input.newestFirst === true;
       if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)
@@ -72,6 +78,10 @@ export function createPostgresMerchantOrderIndex(options: {
         input.afterOrderReference === null
           ? null
           : parseOrderingReference(input.afterOrderReference);
+      const only =
+        input.onlyOrderReference === undefined
+          ? null
+          : parseOrderingReference(input.onlyOrderReference);
       const tx = input.transaction;
       if ((await options.authorize(tx, scope)) !== true) return unavailable();
       await tx.query(
@@ -85,8 +95,9 @@ export function createPostgresMerchantOrderIndex(options: {
           "JOIN rms_ordering.order_batch b ON b.order_id=h.order_id AND b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.submission_id=s.submission_id " +
           "WHERE h.brand_id=$1 AND h.store_id=$2 AND ($3::uuid IS NULL OR " +
           (newest ? "h.order_id<$3::uuid) " : "h.order_id>$3::uuid) ") +
+          "AND ($5::uuid IS NULL OR h.order_id=$5::uuid) " +
           (newest ? "ORDER BY h.order_id DESC LIMIT $4" : "ORDER BY h.order_id LIMIT $4"),
-        [scope.brandReference, scope.storeReference, after, input.limit + 1],
+        [scope.brandReference, scope.storeReference, after, input.limit + 1, only],
       );
       if (result.rows.length > input.limit + 1) return unavailable();
       let previous = after;
@@ -156,4 +167,110 @@ export async function listStoreOrderNumbers(
       .filter((row) => typeof row.order_number === "string")
       .map((row) => [row.order_id, row.order_number as string]),
   );
+}
+
+export interface MerchantOrderLineMoney {
+  readonly amountMinor: string;
+  readonly currencyCode: string;
+}
+export interface MerchantOrderLine {
+  readonly orderItemReference: string;
+  readonly orderBatchReference: string;
+  readonly name: string;
+  readonly options: readonly { readonly name: string; readonly quantity: number }[];
+  readonly quantity: number;
+  /** The customer's note for the kitchen (may describe allergies: show, never log). */
+  readonly customerNote: string | null;
+  readonly unitPrice: MerchantOrderLineMoney;
+  readonly subtotal: MerchantOrderLineMoney;
+  readonly discount: MerchantOrderLineMoney;
+  readonly tax: MerchantOrderLineMoney;
+  readonly fee: MerchantOrderLineMoney;
+  readonly total: MerchantOrderLineMoney;
+}
+
+/**
+ * WP-2423 OPS-ORDER-DETAIL: what was ordered — each item's immutable snapshot (name and options in
+ * the locale, quantity, the customer's note and the priced amounts) in batch and line order, with
+ * the Order's totals. Read only; caller authorizes and owns the transaction. Null when the Order is
+ * not this Store's.
+ */
+export async function loadMerchantOrderLines(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+  locale: string,
+): Promise<{
+  readonly items: readonly MerchantOrderLine[];
+  readonly totals: Readonly<
+    Record<"subtotal" | "discount" | "tax" | "fee" | "total", MerchantOrderLineMoney>
+  >;
+} | null> {
+  const order = parseOrderingReference(orderReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT i.transaction_snapshot_json,i.transaction_snapshot_json#>>'{pricing,quoteVersion}' AS quote_version " +
+        "FROM rms_ordering.order_item i JOIN rms_ordering.order_batch b ON b.brand_id=i.brand_id AND " +
+        "b.store_id=i.store_id AND b.order_id=i.order_id AND b.order_batch_id=i.order_batch_id " +
+        "WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 " +
+        "ORDER BY b.submitted_at,b.order_batch_id,i.ordinal LIMIT 101",
+      [scope.brandReference, scope.storeReference, order],
+    )
+  ).rows;
+  if (rows.length === 0) return null;
+  if (rows.length > 100) return unavailable();
+  const name = (names: Readonly<Record<string, string>>) =>
+    names[locale] ?? names[locale.slice(0, 2)] ?? Object.values(names)[0] ?? "";
+  const money = (value: { readonly amountMinor: bigint; readonly currencyCode: string }) =>
+    Object.freeze({ amountMinor: String(value.amountMinor), currencyCode: value.currencyCode });
+  const sums = { subtotal: 0n, discount: 0n, tax: 0n, fee: 0n, total: 0n };
+  let currency: string | null = null;
+  const items = rows.map((row) => {
+    if (row.quote_version !== "1" && row.quote_version !== "2") return unavailable();
+    const snapshot =
+      row.quote_version === "2"
+        ? decodeConfiguredOrderItemSnapshot(row.transaction_snapshot_json)
+        : decodeOrderItemSnapshot(row.transaction_snapshot_json);
+    const pricing = snapshot.pricing;
+    for (const key of Object.keys(sums) as (keyof typeof sums)[]) {
+      if ((currency ??= pricing[key].currencyCode) !== pricing[key].currencyCode)
+        return unavailable();
+      sums[key] += pricing[key].amountMinor;
+    }
+    return Object.freeze({
+      orderItemReference: String(snapshot.orderItemReference),
+      orderBatchReference: String(snapshot.orderBatchReference),
+      name: name(snapshot.catalog.localizedNames),
+      options: Object.freeze(
+        snapshot.catalog.options.map((option) =>
+          Object.freeze({ name: name(option.localizedNames), quantity: option.quantity }),
+        ),
+      ),
+      quantity: snapshot.quantity,
+      customerNote: snapshot.customerNote,
+      unitPrice: money(pricing.unitPrice),
+      subtotal: money(pricing.subtotal),
+      discount: money(pricing.discount),
+      tax: money(pricing.tax),
+      fee: money(pricing.fee),
+      total: money(pricing.total),
+    });
+  });
+  const code = currency ?? unavailable();
+  const total = (key: keyof typeof sums) =>
+    Object.freeze({ amountMinor: String(sums[key]), currencyCode: code });
+  return Object.freeze({
+    items: Object.freeze(items),
+    totals: Object.freeze({
+      subtotal: total("subtotal"),
+      discount: total("discount"),
+      tax: total("tax"),
+      fee: total("fee"),
+      total: total("total"),
+    }),
+  });
 }

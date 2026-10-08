@@ -5,15 +5,17 @@ import { createOrderAcceptanceClient } from "./order-acceptance-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router";
 import {
   createCurrentOrderQueueClient,
   CurrentOrderQueueError,
+  type CurrentOrderDetail,
   type CurrentOrderQueue,
 } from "./current-order-queue-client.js";
 
 type State =
-  | { kind: "Loading" | "PermissionDenied" | "Unavailable" }
-  | { kind: "Ready"; view: CurrentOrderQueue };
+  | { kind: "Loading" | "PermissionDenied" | "NotFound" | "Unavailable" }
+  | { kind: "Ready"; view: CurrentOrderQueue; detail?: CurrentOrderDetail };
 const client = createCurrentOrderQueueClient();
 interface CurrentOrderFilters {
   readonly orderNumber: string;
@@ -55,7 +57,114 @@ export function storeTime(instant: string, timeZone: string | undefined, withDat
   return withDate ? `${parts.year}-${parts.month}-${parts.day} ${time}` : time;
 }
 
+/** "$6.78" for 678 CAD minor units; the currency's own minor-unit exponent, no floating point. */
+export function orderMoney(value: { readonly amountMinor: string; readonly currencyCode: string }) {
+  const exponent =
+    new Intl.NumberFormat("en-CA", {
+      style: "currency",
+      currency: value.currencyCode,
+    }).resolvedOptions().maximumFractionDigits ?? 2;
+  const negative = value.amountMinor.startsWith("-");
+  const digits = (negative ? value.amountMinor.slice(1) : value.amountMinor).padStart(
+    exponent + 1,
+    "0",
+  );
+  const amount =
+    exponent === 0 ? digits : digits.slice(0, -exponent) + "." + digits.slice(-exponent);
+  return (
+    (negative ? "−" : "") + (value.currencyCode === "CAD" ? "$" : value.currencyCode + " ") + amount
+  );
+}
+
+/** WP-2423 OPS-ORDER-DETAIL: what was ordered — items with options and notes, and the totals. */
+export function CurrentOrderLines({ lines }: { readonly lines: CurrentOrderDetail["lines"] }) {
+  const t = lines.totals;
+  return (
+    <section className="order-lines" aria-label="Items ordered">
+      <h3>Items</h3>
+      <ul>
+        {lines.items.map((item) => (
+          <li key={item.orderItemReference}>
+            <span className="order-line-quantity">{item.quantity} ×</span>
+            <span className="order-line-name">
+              {item.name}
+              {item.options.length > 0 ? (
+                <span className="order-line-options">
+                  {item.options
+                    .map((option) =>
+                      option.quantity > 1 ? `${option.name} × ${option.quantity}` : option.name,
+                    )
+                    .join(" · ")}
+                </span>
+              ) : null}
+              {item.customerNote !== null ? (
+                <span className="order-line-note">Note: {item.customerNote}</span>
+              ) : null}
+            </span>
+            <span className="order-line-amount">{orderMoney(item.subtotal)}</span>
+          </li>
+        ))}
+      </ul>
+      <dl className="order-lines-totals">
+        <div>
+          <dt>Subtotal</dt>
+          <dd>{orderMoney(t.subtotal)}</dd>
+        </div>
+        {t.discount.amountMinor !== "0" ? (
+          <div>
+            <dt>Discount</dt>
+            <dd>{orderMoney(t.discount)}</dd>
+          </div>
+        ) : null}
+        {t.fee.amountMinor !== "0" ? (
+          <div>
+            <dt>Fees</dt>
+            <dd>{orderMoney(t.fee)}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>Tax</dt>
+          <dd>{orderMoney(t.tax)}</dd>
+        </div>
+        <div>
+          <dt>Total</dt>
+          <dd>{orderMoney(t.total)}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+/** Reads an Order's lines when its queue entry is opened. */
+function QueuedOrderLines({ orderReference }: { readonly orderReference: string }) {
+  const [state, setState] = useState<
+    { kind: "Loading" | "Unavailable" } | { kind: "Ready"; detail: CurrentOrderDetail }
+  >({ kind: "Loading" });
+  useEffect(() => {
+    const controller = new AbortController();
+    void client
+      .loadDetail(orderReference, controller.signal)
+      .then((detail) => {
+        if (!controller.signal.aborted) setState({ kind: "Ready", detail });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setState({ kind: "Unavailable" });
+      });
+    return () => controller.abort();
+  }, [orderReference]);
+  return state.kind === "Ready" ? (
+    <CurrentOrderLines lines={state.detail.lines} />
+  ) : (
+    <p className="order-lines-state" role="status">
+      {state.kind === "Loading"
+        ? "Reading items…"
+        : "Items could not be read. Open the order to retry."}
+    </p>
+  );
+}
+
 export function CurrentOrderQueueRows({
+  single = false,
   view,
   visibleOrderReferences,
   action,
@@ -65,19 +174,22 @@ export function CurrentOrderQueueRows({
   readonly view: CurrentOrderQueue;
   readonly timeZone?: string | undefined;
   readonly visibleOrderReferences?: ReadonlySet<string>;
-  readonly detail?: (order: CurrentOrderQueue["items"][number]) => React.ReactNode;
+  readonly detail?: (order: CurrentOrderQueue["items"][number], open: boolean) => React.ReactNode;
+  /** OPS-ORDER-DETAIL: one Order, no page count. */
+  readonly single?: boolean;
   readonly action?: (
     order: CurrentOrderQueue["items"][number],
     batch: CurrentOrderQueue["items"][number]["batches"][number],
   ) => React.ReactNode;
 }) {
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   return view.items.length === 0 ? (
     <StatePanel heading="No orders on this page" status>
       <p>No orders were returned for this page.</p>
     </StatePanel>
   ) : (
     <div className="order-workbench" aria-label="Current orders">
-      <p className="order-workbench-count">
+      <p className="order-workbench-count" hidden={single}>
         {visibleOrderReferences?.size ?? view.items.length} matching orders on this page
       </p>
       {view.items.map((order) => (
@@ -89,6 +201,16 @@ export function CurrentOrderQueueRows({
             !visibleOrderReferences.has(order.orderReference)
           }
           open={view.items.length === 1 || visibleOrderReferences?.size === 1}
+          onToggle={(event) => {
+            const open = event.currentTarget.open;
+            setOpened((current) => {
+              if (open === current.has(order.orderReference)) return current;
+              const next = new Set(current);
+              if (open) next.add(order.orderReference);
+              else next.delete(order.orderReference);
+              return next;
+            });
+          }}
         >
           <summary>
             <span className="order-workbench-identity">
@@ -152,11 +274,13 @@ export function CurrentOrderQueueRows({
               <div>
                 <dt>Last checked</dt>
                 <dd>
-                  <time dateTime={order.observedAt}>{order.observedAt}</time>
+                  <time dateTime={order.observedAt} title={order.observedAt}>
+                    {storeTime(order.observedAt, timeZone, true)}
+                  </time>
                 </dd>
               </div>
             </dl>
-            {detail?.(order)}
+            {detail?.(order, opened.has(order.orderReference) || view.items.length === 1)}
             {order.batches.map((batch) => (
               <section key={batch.orderBatchReference} aria-label={"Batch " + batch.sequence}>
                 <h3>
@@ -183,14 +307,18 @@ export function CurrentOrderDetails({
   csrf,
   locked,
   onBusy,
+  lines,
 }: {
   readonly order: CurrentOrderQueue["items"][number];
   readonly csrf: string;
   readonly locked: boolean;
   readonly onBusy: (busy: boolean) => void;
+  /** The Order's items, or null when they are not shown (the queue entry is closed). */
+  readonly lines?: React.ReactNode;
 }) {
   return (
     <>
+      {lines}
       <OrderPaymentLinks orderReference={order.orderReference} csrf={csrf} />
       {order.orderType === "DineIn" && order.currentPhase !== "Cancelled" ? (
         <DiningOrderProgress
@@ -208,9 +336,12 @@ export function CurrentOrderQueuePage({
   storeLabel,
   csrf,
   timeZone,
+  orderReference,
 }: {
   readonly storeLabel: string;
   readonly csrf: string;
+  /** WP-2423 OPS-ORDER-DETAIL (/operations/orders/:id): only this Order, with its items. */
+  readonly orderReference?: string | undefined;
   /** WP-2423: the Store's IANA time zone; order times are shown in it. */
   readonly timeZone?: string | undefined;
 }) {
@@ -231,17 +362,22 @@ export function CurrentOrderQueuePage({
   useEffect(() => {
     const controller = new AbortController();
     setState({ kind: "Loading" });
-    void client
-      .load(after, controller.signal)
-      .then((view) => {
-        if (!controller.signal.aborted) setState({ kind: "Ready", view });
+    void (
+      orderReference === undefined
+        ? client.load(after, controller.signal).then((view) => ({ kind: "Ready" as const, view }))
+        : client
+            .loadDetail(orderReference, controller.signal)
+            .then((detail) => ({ kind: "Ready" as const, view: detail.view, detail }))
+    )
+      .then((ready) => {
+        if (!controller.signal.aborted) setState(ready);
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted)
           setState({ kind: error instanceof CurrentOrderQueueError ? error.code : "Unavailable" });
       });
     return () => controller.abort();
-  }, [after, refresh]);
+  }, [after, refresh, orderReference]);
   useEffect(() => {
     if (state.kind !== "Loading" && restoreFocus.current) {
       restoreFocus.current = false;
@@ -279,16 +415,24 @@ export function CurrentOrderQueuePage({
     setChannelFilter("All");
     setPhaseFilter("All");
   };
+  const single = orderReference !== undefined;
+  const detail = state.kind === "Ready" ? state.detail : undefined;
   return (
     <div className="orders-page">
-      <AppFrame title="Orders" description={storeLabel}>
+      <AppFrame
+        title={
+          single ? (detail === undefined ? "Order" : `Order ${detail.order.orderNumber}`) : "Orders"
+        }
+        description={single ? `OPS-ORDER-DETAIL · ${storeLabel}` : storeLabel}
+      >
         <div className="card-actions">
+          {single ? <Link to="/operations/orders">All orders</Link> : null}
           <button
             ref={refreshButton}
             onClick={() => reload(null)}
             disabled={state.kind === "Loading" || servingBusy}
           >
-            Refresh orders
+            {single ? "Refresh order" : "Refresh orders"}
           </button>
           {after !== null ? (
             <button onClick={() => reload(null)} disabled={state.kind === "Loading" || servingBusy}>
@@ -299,6 +443,7 @@ export function CurrentOrderQueuePage({
         {state.kind === "Ready" ? (
           <>
             <div
+              hidden={single}
               className="list-filters order-queue-filters"
               role="search"
               aria-label="Filter orders on this page"
@@ -371,11 +516,22 @@ export function CurrentOrderQueuePage({
               </StatePanel>
             ) : null}
             <CurrentOrderQueueRows
+              single={single}
               view={state.view}
               timeZone={timeZone}
               visibleOrderReferences={visibleOrderReferences}
-              detail={(order) => (
+              detail={(order, open) => (
                 <CurrentOrderDetails
+                  lines={
+                    detail !== undefined ? (
+                      <CurrentOrderLines lines={detail.lines} />
+                    ) : open ? (
+                      <>
+                        <QueuedOrderLines orderReference={order.orderReference} />
+                        <Link to={`/operations/orders/${order.orderReference}`}>Open order</Link>
+                      </>
+                    ) : null
+                  }
                   order={order}
                   csrf={csrf}
                   locked={servingBusy}
@@ -421,7 +577,7 @@ export function CurrentOrderQueuePage({
                 ) : null
               }
             />
-            {state.view.nextAfterOrderReference !== null ? (
+            {!single && state.view.nextAfterOrderReference !== null ? (
               <button
                 disabled={servingBusy}
                 onClick={() => reload(state.view.nextAfterOrderReference)}
@@ -434,23 +590,53 @@ export function CurrentOrderQueuePage({
           <StatePanel
             heading={
               state.kind === "Loading"
-                ? "Loading orders"
+                ? single
+                  ? "Loading order"
+                  : "Loading orders"
                 : state.kind === "PermissionDenied"
                   ? "Permission denied"
-                  : "Orders unavailable"
+                  : state.kind === "NotFound"
+                    ? "Order not found"
+                    : single
+                      ? "Order unavailable"
+                      : "Orders unavailable"
             }
             status
           >
             <p>
               {state.kind === "Loading"
-                ? "Reading current orders…"
+                ? single
+                  ? "Reading the order…"
+                  : "Reading current orders…"
                 : state.kind === "PermissionDenied"
                   ? "Your current session or Store permissions do not allow this queue."
-                  : "Orders could not be refreshed. Check your connection and try again."}
+                  : state.kind === "NotFound"
+                    ? "This order is not at the selected Store."
+                    : "Orders could not be refreshed. Check your connection and try again."}
             </p>
           </StatePanel>
         )}
       </AppFrame>
     </div>
+  );
+}
+
+const orderRoute = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+/** WP-2423 OPS-ORDER-DETAIL at /operations/orders/:id. */
+export function CurrentOrderDetailRoute(props: {
+  readonly storeLabel: string;
+  readonly csrf: string;
+  readonly timeZone?: string | undefined;
+}) {
+  const id = useParams().id;
+  return id === undefined || !orderRoute.test(id) ? (
+    <AppFrame title="Order" description="OPS-ORDER-DETAIL">
+      <StatePanel heading="Order not found" status>
+        <p>This order link is not valid.</p>
+        <Link to="/operations/orders">All orders</Link>
+      </StatePanel>
+    </AppFrame>
+  ) : (
+    <CurrentOrderQueuePage key={id} {...props} orderReference={id} />
   );
 }

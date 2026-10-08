@@ -2,6 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import {
   CurrentOrderDetails,
+  CurrentOrderLines,
+  orderMoney,
   CurrentOrderQueueRows,
   storeTime,
   filterCurrentOrderItems,
@@ -166,4 +168,48 @@ it("WP-2423: shows order times in the Store's time zone", () => {
   expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto")).toBe("21:30");
   expect(storeTime("2026-10-08T01:30:00.000Z", "America/Toronto", true)).toBe("2026-10-07 21:30");
   expect(storeTime("2026-10-08T01:30:00.000Z", undefined)).toBe("01:30 UTC");
+});
+
+it("WP-2423: shows what was ordered with options, notes and totals", () => {
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const html = renderToStaticMarkup(
+    <CurrentOrderLines
+      lines={{
+        items: [
+          {
+            orderItemReference: "a",
+            orderBatchReference: "b",
+            batchKnown: true,
+            name: "Latte — Regular (12 oz)",
+            options: [
+              { name: "Oat milk", quantity: 1 },
+              { name: "Extra shot", quantity: 2 },
+            ],
+            quantity: 2,
+            customerNote: "Extra hot",
+            unitPrice: money("700"),
+            subtotal: money("1400"),
+            discount: money("0"),
+            tax: money("182"),
+            fee: money("0"),
+            total: money("1582"),
+          },
+        ],
+        totals: {
+          subtotal: money("1400"),
+          discount: money("0"),
+          tax: money("182"),
+          fee: money("0"),
+          total: money("1582"),
+        },
+      }}
+    />,
+  );
+  expect(html).toContain("2 ×");
+  expect(html).toContain("Oat milk · Extra shot × 2");
+  expect(html).toContain("Note: Extra hot");
+  expect(html).toContain("$15.82");
+  expect(html).not.toContain("Discount");
+  expect(orderMoney({ amountMinor: "5", currencyCode: "CAD" })).toBe("$0.05");
+  expect(orderMoney({ amountMinor: "500", currencyCode: "JPY" })).toBe("JPY 500");
 });

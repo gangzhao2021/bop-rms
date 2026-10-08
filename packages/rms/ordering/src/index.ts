@@ -297,6 +297,9 @@ export { createRefundReceiptSnapshot } from "./application/refund-receipt-snapsh
 export {
   createPostgresMerchantOrderIndex,
   listStoreOrderNumbers,
+  loadMerchantOrderLines,
+  type MerchantOrderLine,
+  type MerchantOrderLineMoney,
 } from "./infrastructure/persistence/merchant-order-index.js";
 
 export { createPostgresOrderBatchIdentitySource } from "./infrastructure/persistence/order-batch-identity-source.js";

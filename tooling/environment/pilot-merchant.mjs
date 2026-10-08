@@ -632,6 +632,7 @@ export async function createInternalMerchant(
       persistence,
       quoteVersion: 2,
       acceptanceConfigured: true,
+      locale: "en-CA",
     }),
   );
   return {
