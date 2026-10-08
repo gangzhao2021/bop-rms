@@ -206,6 +206,10 @@ import {
 } from "./merchant-availability.js";
 import { MerchantOptionSetError, type createMerchantOptionSets } from "./merchant-option-sets.js";
 import {
+  MerchantOptionPriceError,
+  type createMerchantOptionPrices,
+} from "./merchant-option-prices.js";
+import {
   MerchantStockCountError,
   type createMerchantStockCounts,
 } from "./merchant-stock-counts.js";
@@ -302,6 +306,7 @@ const merchantNavigation = Object.freeze({
   "INV-RECEIPT-LIST": ["/operations/receiving", "inventory.receipt.read"],
   "RECIPE-LIST": ["/app/commerce/recipes", "recipe.read"],
   "PRICE-BOOK-LIST": ["/app/commerce/pricing", "pricing.price_book.read"],
+  "PRICE-OPTION-LIST": ["/app/commerce/option-prices", "pricing.price_book.read"],
   "CMP-ALLERGEN-REVIEW": ["/app/compliance/allergens", "catalog.allergen.read"],
   "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
   "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
@@ -471,6 +476,7 @@ export interface MerchantBffRouterOptions {
   readonly menus?: ReturnType<typeof createMerchantMenus>;
   readonly availability?: ReturnType<typeof createMerchantAvailability>;
   readonly optionSets?: ReturnType<typeof createMerchantOptionSets>;
+  readonly optionPrices?: ReturnType<typeof createMerchantOptionPrices>;
   readonly stockCounts?: ReturnType<typeof createMerchantStockCounts>;
   readonly storeWaste?: ReturnType<typeof createMerchantStoreWaste>;
   readonly ordinaryRefund?: ReturnType<typeof createMerchantOrdinaryRefundCommand>;
@@ -5529,6 +5535,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     Frozen: 409,
     NotRevisable: 409,
     ReviewBlocked: 409,
+    OptionPriceMissing: 409,
     ApprovalRequired: 403,
     Lifecycle: 409,
     Invalid: 400,
@@ -5722,6 +5729,72 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .then((result) => response.json(result))
       .catch((error: unknown) => optionSetFailure(response, error));
   });
+
+  // WP-2423 slice 4.3: PRICE-OPTION-LIST for the selected Store's Brand.
+  const optionPriceStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Conflict: 409,
+    ApprovalRequired: 409,
+    Invalid: 400,
+  } as const;
+  const optionPriceFailure = (response: express.Response, error: unknown) => {
+    if (!(error instanceof MerchantOptionPriceError)) {
+      denied(response);
+      return;
+    }
+    response.status(optionPriceStatus[error.code]).json({ error: error.code });
+  };
+  router.post("/commerce/option-prices/query", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as Record<string, unknown> | undefined;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      body === null ||
+      Object.keys(body).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.optionPrices) {
+      response.status(503).json({ error: "option_prices_unavailable" });
+      return;
+    }
+    void options.optionPrices
+      .query({ sessionCookie, csrf })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => optionPriceFailure(response, error));
+  });
+  router.post(
+    "/commerce/option-prices/command",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.optionPrices) {
+        response.status(503).json({ error: "option_prices_unavailable" });
+        return;
+      }
+      void options.optionPrices
+        .command({ sessionCookie, csrf, body: request.body })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => optionPriceFailure(response, error));
+    },
+  );
 
   // WP-2423 / DEC-INV-STOCK-COUNT: INV-COUNT-LIST / INV-COUNT-WORKBENCH.
   const countStatus = {

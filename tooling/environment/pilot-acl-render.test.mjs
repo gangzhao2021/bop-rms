@@ -42,8 +42,28 @@ describe("renderPilotAclSql", () => {
     ["an injected identifier", entry("table", "s", 't"; DROP TABLE x; --', "SELECT")],
     ["a routine outside its schema", entry("routine", "s", "other.f()", "EXECUTE")],
     ["ALL privileges", entry("table", "s", "t", "ALL")],
+    ["an injected argument type", entry("routine", "s", "s.f(uuid); DROP TABLE x)", "EXECUTE")],
+    ["a dangling argument separator", entry("routine", "s", "s.f(uuid,)", "EXECUTE")],
   ])("rejects %s", (_name, bad) => {
     expect(() => renderPilotAclSql([matrix([bad])], roles)).toThrow("PILOT_ACL_RENDER_INVALID");
+  });
+  it("renders routines whose argument types are schema-qualified domains", () => {
+    const sql = renderPilotAclSql(
+      [
+        matrix([
+          entry(
+            "routine",
+            "rms_pricing",
+            "rms_pricing.f(platform_helpers.uuid_v7,platform_helpers.uuid_v7)",
+            "EXECUTE",
+          ),
+        ]),
+      ],
+      roles,
+    );
+    expect(sql).toContain(
+      'GRANT EXECUTE ON FUNCTION rms_pricing.f(platform_helpers.uuid_v7,platform_helpers.uuid_v7) TO "pilot_api";',
+    );
   });
   it("rejects shared or unsafe role names", () => {
     expect(() => renderPilotAclSql([matrix([])], { api: "x", worker: "x" })).toThrow();

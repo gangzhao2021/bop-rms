@@ -1917,6 +1917,87 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_authoring_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_authoring_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "routine",
+      "schema": "rms_pricing",
+      "object": "rms_pricing.option_price_authoring_operation_available(platform_helpers.uuid_v7,platform_helpers.uuid_v7)",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
     }
   ]
 }

@@ -13,3 +13,11 @@ export const productApiGrants = [
   "GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ROLE_",
   "GRANT INSERT ON platform_eventing.outbox_event TO ROLE_",
 ];
+
+/** The pilot API role's grants for Brand option sets and product bindings (pilot-acl-additions.json). */
+export const optionSetApiGrants = [
+  "GRANT SELECT,INSERT,UPDATE ON rms_catalog.option_set,rms_catalog.option_set_version,rms_catalog.option TO ROLE_",
+  "GRANT SELECT,INSERT,DELETE ON rms_catalog.option_conflict TO ROLE_",
+  "GRANT SELECT,INSERT ON rms_catalog.option_set_operation_record,rms_catalog.option_set_operation_snapshot TO ROLE_",
+  "GRANT INSERT ON rms_catalog.product_option_binding,rms_catalog.product_option_binding_option,rms_catalog.product_option_binding_sku_scope,rms_catalog.product_option_binding_channel TO ROLE_",
+];

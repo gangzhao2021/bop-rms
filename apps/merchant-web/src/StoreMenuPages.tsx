@@ -29,6 +29,8 @@ const copy: Record<MenuErrorCode | "Loading", string> = {
   NotRevisable: "Only a submitted or published version can be revised; keep editing this one.",
   ReviewBlocked:
     "The review could not be prepared. Every item needs a published recipe whose ingredients all have current allergen declarations (see Allergens and Recipes), and the Brand allergen list must be approved.",
+  OptionPriceMissing:
+    "Some options on this menu's items have no published price, so customers could not order them. Set and publish them under Option prices, then submit again.",
   ApprovalRequired:
     "Approval needs someone other than the person who submitted the menu, holding menu approval.",
   Lifecycle: "This step is not possible in the menu's current state.",

@@ -4,19 +4,11 @@ import { it } from "vitest";
 import { createMerchantOptionSets } from "../../../apps/api/src/merchant-option-sets.ts";
 import { createMerchantProducts } from "../../../apps/api/src/merchant-products.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
-import { productApiGrants } from "../test-support/merchant-api-grants.mjs";
+import { optionSetApiGrants, productApiGrants } from "../test-support/merchant-api-grants.mjs";
 import { syntheticMerchantBrandScope } from "../test-support/merchant-brand-scope.mjs";
 
 const { Client } = pg;
 const id = (n) => "01909a20-0000-7000-8000-" + n.toString(16).padStart(12, "0");
-
-/** The pilot API role's grants for Brand option sets and product bindings (pilot-acl-additions.json). */
-export const optionSetApiGrants = [
-  "GRANT SELECT,INSERT,UPDATE ON rms_catalog.option_set,rms_catalog.option_set_version,rms_catalog.option TO ROLE_",
-  "GRANT SELECT,INSERT,DELETE ON rms_catalog.option_conflict TO ROLE_",
-  "GRANT SELECT,INSERT ON rms_catalog.option_set_operation_record,rms_catalog.option_set_operation_snapshot TO ROLE_",
-  "GRANT INSERT ON rms_catalog.product_option_binding,rms_catalog.product_option_binding_option,rms_catalog.product_option_binding_sku_scope,rms_catalog.product_option_binding_channel TO ROLE_",
-];
 
 /** WP-2423 slice 4: Brand option sets authored and bound to a product, under the API's RLS. */
 it("creates and edits option sets, keeps saved options and binds them to a product", async () => {

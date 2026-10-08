@@ -52,6 +52,7 @@ import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.
 import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
 import { createMerchantAvailability } from "../../apps/api/dist/merchant-availability.js";
 import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-sets.js";
+import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
@@ -216,6 +217,12 @@ export async function createInternalMerchant(
           screenId: "PRICE-BOOK-LIST",
           label: "Prices",
           href: "/app/commerce/pricing",
+          permission: "pricing.price_book.read",
+        },
+        {
+          screenId: "PRICE-OPTION-LIST",
+          label: "Option prices",
+          href: "/app/commerce/option-prices",
           permission: "pricing.price_book.read",
         },
         {
@@ -542,6 +549,15 @@ export async function createInternalMerchant(
           currencyMetadata: await loadPricingCurrencyMetadata(),
           locale: "en-CA",
         });
+  const optionPrices =
+    loadPricingCurrencyMetadata === undefined
+      ? undefined
+      : createMerchantOptionPrices({
+          persistence,
+          authentication: service,
+          currencyMetadata: await loadPricingCurrencyMetadata(),
+          locale: "en-CA",
+        });
   const menus =
     loadPricingCurrencyMetadata === undefined
       ? undefined
@@ -703,6 +719,7 @@ export async function createInternalMerchant(
       ...(menus === undefined ? {} : { menus }),
       availability,
       optionSets,
+      optionPrices,
       stockCounts,
       storeWaste,
       pickupQuery,

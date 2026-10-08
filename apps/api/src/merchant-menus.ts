@@ -23,6 +23,7 @@ import {
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { createMerchantMenuPublicationCommand } from "./merchant-menu-publication-command.js";
+import { unpricedMenuOptions } from "./menu-option-prices.js";
 import { localBoundary } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -45,6 +46,7 @@ export class MerchantMenuError extends Error {
       | "Frozen"
       | "NotRevisable"
       | "ReviewBlocked"
+      | "OptionPriceMissing"
       | "ApprovalRequired"
       | "Lifecycle"
       | "Invalid",
@@ -57,6 +59,7 @@ const fail = (code: MerchantMenuError["code"]): never => {
   throw new MerchantMenuError(code);
 };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
 const ref = (value: unknown): string =>
   typeof value === "string" && uuid.test(value) ? value : fail("Invalid");
 const version = (value: unknown): number =>
@@ -303,6 +306,16 @@ export function createMerchantMenus(options: {
       priceMinor: prices.get(sku.skuReference) ?? null,
     }));
   };
+  const unpricedOptions = async (tx: unknown, s: Scope, aggregate: MenuAggregate) => {
+    const missing = await unpricedMenuOptions(ptx(tx) as never, {
+      owner: s.owner,
+      currencyMetadata: options.currencyMetadata,
+      observedAt: options.persistence.now(),
+      menu: aggregate.draft,
+    });
+    await brandScope(tx, s.owner.brandReference);
+    return missing;
+  };
   const menuView = (aggregate: MenuAggregate) => ({
     menuReference: aggregate.menuReference,
     internalCode: aggregate.internalCode,
@@ -455,6 +468,8 @@ export function createMerchantMenus(options: {
             const registry = await currentAllergenRegistry(ptx(tx) as never, s.owner);
             if (loaded === null) return fail("NotFound");
             if (registry === null) return fail("ReviewBlocked");
+            if ((await unpricedOptions(tx, s, loaded.aggregate)).length > 0)
+              fail("OptionPriceMissing");
             return { s, loaded, registry };
           }),
         );

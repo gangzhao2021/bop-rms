@@ -7,7 +7,9 @@ import { pathToFileURL } from "node:url";
 // additions) as GRANT SQL for one installation's api/worker role names. Least privilege only:
 // no schema-wide or future grants, and no role names in migrations (Section 95.4).
 const identifier = /^[a-z_][a-z0-9_]{0,62}$/u;
-const routine = /^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}\([a-z0-9_, ]*\)$/u;
+// Argument types may be schema-qualified (e.g. platform_helpers.uuid_v7 domains).
+const routine =
+  /^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}\((?:[a-z_][a-z0-9_]{0,62}(?:\.[a-z_][a-z0-9_]{0,62})?(?:, ?(?=[a-z_]))?)*\)$/u;
 const privileges = {
   schema: ["USAGE"],
   table: ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"],

@@ -2,6 +2,8 @@ import { TaxConfigDraftPage } from "./TaxConfigDraftPage.js";
 import { StoreSetupDraftPage } from "./StoreSetupDraftPage.js";
 import { StoreOptionSetEditPage, StoreOptionSetListPage } from "./StoreOptionSetPages.js";
 import { createOptionSetClient } from "./store-option-set-page.js";
+import { StoreOptionPricesPage } from "./StoreOptionPricesPage.js";
+import { createOptionPriceClient } from "./store-option-prices-page.js";
 import { CurrentStoreCapabilityPage } from "./CurrentStoreCapabilityPage.js";
 import { RefundPaymentPage } from "./RefundPaymentPage.js";
 import { DiningSessionWorkspace } from "./DiningSessionWorkspace.js";
@@ -512,6 +514,19 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             />
           ) : (
             <StoreAvailabilityPage />
+          )
+        }
+      />
+      <Route
+        path="/app/commerce/option-prices"
+        element={
+          state.kind === "Ready" && !state.switching ? (
+            <StoreOptionPricesPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              client={createOptionPriceClient(state.csrf)}
+            />
+          ) : (
+            <StoreOptionPricesPage />
           )
         }
       />
