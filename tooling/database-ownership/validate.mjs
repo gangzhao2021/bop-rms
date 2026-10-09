@@ -2536,6 +2536,7 @@ async function scanUnsupported(root, module, diagnostics) {
             "pickup_proof_operation",
             "pickup_proof_verification",
             "pickup_in_person_verification",
+            "pickup_not_collected_record",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/fulfillment-readiness-store.ts";
         const acceptedPickupHandoffStoreAsset =
@@ -2547,8 +2548,10 @@ async function scanUnsupported(root, module, diagnostics) {
             "pickup_handoff_item",
             "pickup_handoff_operation",
             "fulfillment_completion_publication",
-            // WP-2423: in-person verification when the pickup proof expired or was never issued.
+            // WP-2423: in-person verification when the pickup proof expired or was never issued,
+            // and closing a pickup nobody collected.
             "pickup_in_person_verification",
+            "pickup_not_collected_record",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           [
             "src/infrastructure/persistence/pickup-handoff-store.ts",

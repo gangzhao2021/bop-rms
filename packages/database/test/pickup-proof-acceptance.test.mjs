@@ -408,6 +408,41 @@ async function prove(context) {
       ),
       /identity_check/u,
     );
+    // WP-2423: closing a pickup nobody collected: once per fulfillment, only after the hold.
+    await seedReadyPickup(client, id(3), 600);
+    const closeRow = (closureId, idempotency, closedAt) =>
+      client.query(
+        `INSERT INTO rms_fulfillment.pickup_not_collected_record (
+           pickup_not_collected_id,brand_id,store_id,fulfillment_id,actor_id,reason,ready_at,
+           closed_at,idempotency_id,correlation_id,aggregate_version_before,data_classification
+         ) VALUES ($1,$2,$3,$4,$5,'NotCollected',$6,$7,$8,$9,2,'IndirectIdentifier')`,
+        [
+          closureId,
+          id(2),
+          id(3),
+          id(600),
+          id(631),
+          "2026-08-11T18:01:00.000Z",
+          closedAt,
+          idempotency,
+          id(closureId === id(630) ? 632 : 642),
+        ],
+      );
+    await assert.rejects(
+      closeRow(id(640), id(641), "2026-08-11T18:30:00.000Z"),
+      /pickup_not_collected_record_hold_check/u,
+    );
+    await closeRow(id(630), id(633), "2026-08-11T19:05:00.000Z");
+    await assert.rejects(
+      closeRow(id(640), id(641), "2026-08-11T19:10:00.000Z"),
+      /pickup_not_collected_record_fulfillment_unique/u,
+    );
+    await assert.rejects(
+      client.query(
+        "UPDATE rms_fulfillment.pickup_not_collected_record SET closed_at=closed_at WHERE pickup_not_collected_id=$1",
+        [id(630)],
+      ),
+    );
     await seedReadyPickup(client, id(99), 200);
     await insertGeneration(client, {
       capabilityId: id(230),
@@ -428,6 +463,15 @@ async function prove(context) {
     for (const table of tables)
       await client.query(`GRANT SELECT ON rms_fulfillment.${table} TO ${role}`);
     await client.query(`GRANT SELECT ON rms_fulfillment.pickup_in_person_verification TO ${role}`);
+    await client.query(`GRANT SELECT ON rms_fulfillment.pickup_not_collected_record TO ${role}`);
+    assert.equal(
+      await scopedCount(client, role, id(3), "rms_fulfillment.pickup_not_collected_record"),
+      1,
+    );
+    assert.equal(
+      await scopedCount(client, role, id(99), "rms_fulfillment.pickup_not_collected_record"),
+      0,
+    );
     assert.equal(
       await scopedCount(client, role, id(3), "rms_fulfillment.pickup_in_person_verification"),
       1,

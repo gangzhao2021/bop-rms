@@ -9,7 +9,14 @@ import {
   type PickupHandoffEffect,
   type PickupInPersonVerificationRecord,
 } from "../../contracts/pickup-handoff.js";
-import { parsePickupProofReference } from "../../contracts/pickup-proof.js";
+import {
+  parsePickupProofInstant,
+  parsePickupProofReference,
+} from "../../contracts/pickup-proof.js";
+import {
+  planPickupNotCollected,
+  type PickupNotCollectedRecord,
+} from "../../domain/pickup-not-collected.js";
 import { parseReadinessReference } from "../../contracts/fulfillment-readiness.js";
 import { encodePickupHandoffRecord } from "../../application/pickup-handoff-record.js";
 import { encodePickupProofVerificationRecord } from "../../application/pickup-proof-record.js";
@@ -54,7 +61,14 @@ export function createPostgresPickupHandoffStore(options: {
   ) => Promise<boolean>;
   readonly appendAudit: (
     tx: ConsumerTransaction,
-    audit: PickupHandoffEffect["audit"] & { readonly fulfillmentReference: string },
+    audit: (
+      | PickupHandoffEffect["audit"]
+      | (Omit<PickupHandoffEffect["audit"], "actionCode" | "permission" | "purpose"> & {
+          readonly actionCode: "PICKUP_NOT_COLLECTED";
+          readonly permission: "ordering.order.cancel";
+          readonly purpose: "CloseUncollectedPickup";
+        })
+    ) & { readonly fulfillmentReference: string },
   ) => Promise<void>;
 }) {
   const brand = parsePickupProofReference(options.brandReference),
@@ -284,6 +298,112 @@ export function createPostgresPickupHandoffStore(options: {
       await authorize(input.transaction, input.orderReference, "Recover");
       return recover(input);
     },
+    /**
+     * WP-2423: closes a ready pickup nobody collected after the pickup hold, with no valid code.
+     * The caller authorizes the staff member (a cancellation permission); no refund happens here.
+     */
+    async closeUncollected(input: {
+      transaction: ConsumerTransaction;
+      orderReference: string;
+      expectedAggregateVersion: bigint;
+      notCollectedReference: string;
+      idempotencyReference: string;
+      correlationReference: string;
+      closedAt: string;
+    }): Promise<{ status: "Applied" | "AlreadyApplied"; record: PickupNotCollectedRecord }> {
+      const tx = input.transaction;
+      await authorize(tx, input.orderReference, "Complete");
+      const key = parsePickupProofReference(input.idempotencyReference);
+      const replay = async () => {
+        const rows = (
+          await tx.query(
+            "SELECT n.*,f.order_id FROM rms_fulfillment.pickup_not_collected_record n " +
+              "JOIN rms_fulfillment.fulfillment f ON f.brand_id=n.brand_id AND f.store_id=n.store_id AND f.fulfillment_id=n.fulfillment_id " +
+              "WHERE n.brand_id=$1 AND n.store_id=$2 AND n.idempotency_id=$3",
+            [brand, store, key],
+          )
+        ).rows;
+        if (!rows.length) return null;
+        const row = rows[0];
+        if (rows.length !== 1 || !row || row.order_id !== input.orderReference)
+          return unavailable();
+        const at = (value: unknown) => (value instanceof Date ? value.toISOString() : value);
+        return Object.freeze({
+          status: "AlreadyApplied" as const,
+          record: Object.freeze({
+            notCollectedReference: String(row.pickup_not_collected_id),
+            fulfillmentReference: String(row.fulfillment_id),
+            brandReference: brand,
+            storeReference: store,
+            actorReference: String(row.actor_id),
+            reason: "NotCollected" as const,
+            readyAt: String(at(row.ready_at)),
+            closedAt: String(at(row.closed_at)),
+            idempotencyReference: key,
+            correlationReference: String(row.correlation_id),
+            aggregateVersionBefore: BigInt(String(row.aggregate_version_before)),
+          }),
+        });
+      };
+      const prior = await replay();
+      if (prior) return prior;
+      const state = await current(tx, input.orderReference);
+      const again = await replay();
+      if (again) return again;
+      const record = planPickupNotCollected({
+        source: state.source,
+        readyAt: String(state.readyAt),
+        proofExpiresAt: state.capability ? String(state.capability.expiresAt) : null,
+        alreadyClosed: state.notCollected,
+        expectedAggregateVersion: input.expectedAggregateVersion,
+        actorReference: actor,
+        notCollectedReference: input.notCollectedReference,
+        idempotencyReference: key,
+        correlationReference: input.correlationReference,
+        closedAt: input.closedAt,
+      });
+      await tx.query("SAVEPOINT pickup_not_collected_write", []);
+      try {
+        await tx.query(
+          "INSERT INTO rms_fulfillment.pickup_not_collected_record (pickup_not_collected_id,brand_id,store_id," +
+            "fulfillment_id,actor_id,reason,ready_at,closed_at,idempotency_id,correlation_id,aggregate_version_before," +
+            "data_classification) VALUES ($1,$2,$3,$4,$5,'NotCollected',$6,$7,$8,$9,$10,'IndirectIdentifier')",
+          [
+            record.notCollectedReference,
+            brand,
+            store,
+            record.fulfillmentReference,
+            record.actorReference,
+            record.readyAt,
+            record.closedAt,
+            record.idempotencyReference,
+            record.correlationReference,
+            record.aggregateVersionBefore.toString(),
+          ],
+        );
+        await options.appendAudit(tx, {
+          auditReference: parsePickupProofReference(record.notCollectedReference),
+          actorReference: parsePickupProofReference(record.actorReference),
+          actionCode: "PICKUP_NOT_COLLECTED",
+          permission: "ordering.order.cancel",
+          purpose: "CloseUncollectedPickup",
+          correlationReference: parsePickupProofReference(record.correlationReference),
+          dataClassification: "Confidential",
+          occurredAt: parsePickupProofInstant(record.closedAt),
+          fulfillmentReference: record.fulfillmentReference,
+        });
+        await tx.query("RELEASE SAVEPOINT pickup_not_collected_write", []);
+      } catch {
+        try {
+          await tx.query("ROLLBACK TO SAVEPOINT pickup_not_collected_write", []);
+          await tx.query("RELEASE SAVEPOINT pickup_not_collected_write", []);
+        } catch {
+          /* Caller rolls back a failed outer transaction. */
+        }
+        return unavailable();
+      }
+      return { status: "Applied", record };
+    },
     async complete(input: {
       transaction: ConsumerTransaction;
       orderReference: string;
@@ -308,6 +428,7 @@ export function createPostgresPickupHandoffStore(options: {
       const state = await current(tx, input.orderReference);
       prior = await recover(query);
       if (prior) return matchOriginal(tx, command, prior);
+      if (state.notCollected) throw new PickupHandoffError("PICKUP_HANDOFF_ALREADY_COMPLETED");
       const submitted = command.verification;
       if (
         command.handedOverAt > state.source.lockedAt ||

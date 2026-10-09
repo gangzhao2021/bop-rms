@@ -86,5 +86,12 @@ export function foldPickupHandoffHistory(
     });
     lastHandoffAt = r.handedOverAt;
   }
-  return { source, verifications, inPerson, capability: proof.capability, lastHandoffAt };
+  return {
+    source,
+    verifications,
+    inPerson,
+    capability: proof.capability,
+    lastHandoffAt,
+    readyAt: proof.source.readyAt,
+  };
 }

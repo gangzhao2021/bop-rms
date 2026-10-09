@@ -622,10 +622,8 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en",
   });
-  const { pickupQuery, pickupProof, pickupHandoff } = await createInternalMerchantPickup(
-    resources,
-    { persistence, service },
-  );
+  const { pickupQuery, pickupProof, pickupHandoff, pickupNotCollected } =
+    await createInternalMerchantPickup(resources, { persistence, service });
   const orderQueue = logUnexpected(
     "INTERNAL_ORDER_QUEUE_UNAVAILABLE",
     createPersistentMerchantOrderQueue({
@@ -649,6 +647,7 @@ export async function createInternalMerchant(
     pickupQuery,
     pickupProof,
     pickupHandoff,
+    pickupNotCollected,
     orderAcceptance,
     bff: {
       taxConfigAuthoring: createMerchantTaxConfigAuthoring({
@@ -759,6 +758,7 @@ export async function createInternalMerchant(
       pickupQuery,
       pickupProof,
       pickupHandoff,
+      pickupNotCollected,
       orderAcceptance,
       exactOrigin: "https://127.0.0.1:4443",
       acceptedHost: "127.0.0.1:4443",

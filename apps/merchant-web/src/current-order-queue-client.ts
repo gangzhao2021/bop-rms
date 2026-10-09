@@ -51,6 +51,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       "initialBatchReference",
       "canRequestAcceptance",
       "unfulfillable",
+      "pickupNotCollected",
       "currentPhase",
       "currentVersion",
       "observedAt",
@@ -61,6 +62,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     if (previous !== null && orderReference >= previous) return fail();
     previous = orderReference;
     if (
+      typeof item.pickupNotCollected !== "boolean" ||
       (item.unfulfillable !== null &&
         !["CapacityExpired", "SubmissionCancelled", "OrderNoLongerFulfillable"].includes(
           String(item.unfulfillable),
@@ -150,6 +152,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       /** WP-2423: paid but no longer fulfillable; Payment refunds it (never accepted). */
       unfulfillable: item.unfulfillable as
         "CapacityExpired" | "SubmissionCancelled" | "OrderNoLongerFulfillable" | null,
+      /** WP-2423: the Store closed this pickup as not collected (not refunded automatically). */
+      pickupNotCollected: item.pickupNotCollected as boolean,
       currentPhase: item.currentPhase as string | null,
       currentVersion: item.currentVersion as number | null,
     });

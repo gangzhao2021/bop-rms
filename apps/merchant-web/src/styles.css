@@ -104,7 +104,8 @@
   color: #2853a0;
   background: #edf2ff;
 }
-.order-workbench-phase[data-phase="Expired"] {
+.order-workbench-phase[data-phase="Expired"],
+.order-workbench-phase[data-phase="NotCollected"] {
   color: #4b5259;
   background: #eef0f2;
 }

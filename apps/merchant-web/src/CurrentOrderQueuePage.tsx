@@ -36,8 +36,11 @@ export function filterCurrentOrderItems(
       (filters.phase === "All" ||
         (filters.phase === "Expired"
           ? order.unfulfillable !== null
-          : order.unfulfillable === null &&
-            (order.currentPhase ?? "Unavailable") === filters.phase)),
+          : filters.phase === "NotCollected"
+            ? order.pickupNotCollected
+            : order.unfulfillable === null &&
+              !order.pickupNotCollected &&
+              (order.currentPhase ?? "Unavailable") === filters.phase)),
   );
 }
 /** WP-2423: an instant as Store-local time (UTC when the Store's time zone is not known). */
@@ -237,14 +240,20 @@ export function CurrentOrderQueueRows({
             <span
               className="order-workbench-phase"
               data-phase={
-                order.unfulfillable !== null ? "Expired" : (order.currentPhase ?? "Unavailable")
+                order.pickupNotCollected
+                  ? "NotCollected"
+                  : order.unfulfillable !== null
+                    ? "Expired"
+                    : (order.currentPhase ?? "Unavailable")
               }
             >
-              {order.unfulfillable !== null
-                ? "Expired · refunded"
-                : order.currentPhase === "InProgress"
-                  ? "In progress"
-                  : (order.currentPhase ?? "Status unavailable")}
+              {order.pickupNotCollected
+                ? "Not collected"
+                : order.unfulfillable !== null
+                  ? "Expired · refunded"
+                  : order.currentPhase === "InProgress"
+                    ? "In progress"
+                    : (order.currentPhase ?? "Status unavailable")}
             </span>
             <span className="order-workbench-batches">
               {order.batches.filter((batch) => batch.acceptanceStatus === "Accepted").length}{" "}
@@ -294,6 +303,12 @@ export function CurrentOrderQueueRows({
                 </dd>
               </div>
             </dl>
+            {order.pickupNotCollected ? (
+              <p className="order-workbench-closed" role="note">
+                Closed as not collected after the pickup hold. It was not refunded automatically; a
+                manager can still grant a refund from payments.
+              </p>
+            ) : null}
             {order.unfulfillable !== null ? (
               <p className="order-workbench-closed" role="note">
                 {unfulfillableText[order.unfulfillable]} The payment was refunded automatically;
@@ -514,6 +529,7 @@ export function CurrentOrderQueuePage({
                   <option value="Cancelled">Cancelled</option>
                   <option value="Fulfilled">Fulfilled</option>
                   <option value="Expired">Expired · refunded</option>
+                  <option value="NotCollected">Not collected</option>
                   <option value="Unavailable">Unavailable</option>
                 </select>
               </label>

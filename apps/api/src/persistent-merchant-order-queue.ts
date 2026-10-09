@@ -1,5 +1,6 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { listStoreUnfulfillablePaidOrders, loadMerchantOrderLines } from "@rms/ordering";
+import { listStoreUncollectedPickupOrders } from "@rms/fulfillment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
@@ -120,6 +121,15 @@ export function createPersistentMerchantOrderQueue(options: {
               ownerScope,
               result.items.map((item) => item.orderReference),
             );
+      // WP-2423: pickup orders the Store closed as not collected (Fulfillment's public read).
+      const uncollected =
+        ownerScope === null || result.items.length === 0
+          ? new Set<string>()
+          : await listStoreUncollectedPickupOrders(
+              businessTransaction,
+              ownerScope,
+              result.items.map((item) => item.orderReference),
+            );
       return Object.freeze({
         ...result,
         lines,
@@ -133,6 +143,7 @@ export function createPersistentMerchantOrderQueue(options: {
             return Object.freeze({
               ...item,
               unfulfillable: closed,
+              pickupNotCollected: uncollected.has(item.orderReference),
               batches: Object.freeze(
                 item.batches.map((batch) =>
                   Object.freeze({

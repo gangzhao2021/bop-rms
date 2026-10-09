@@ -1,5 +1,6 @@
 import { PickupProofForm } from "./PickupProofForm.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
+import { PickupNotCollectedAction, pickupHoldMinutes } from "./PickupNotCollectedAction.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useState, useMemo, useRef, type RefObject } from "react";
 import { createPickupClient } from "./pickup-client.js";
@@ -148,6 +149,13 @@ function PickupCard({
           ) : (
             <button disabled>Open proof verification</button>
           )}
+          {inPersonEligible && wait >= pickupHoldMinutes && proofContext ? (
+            <PickupNotCollectedAction
+              item={item}
+              csrf={proofContext.csrf}
+              storeReference={proofContext.storeReference}
+            />
+          ) : null}
           <button disabled aria-describedby="pickup-command-availability">
             Report exception
           </button>

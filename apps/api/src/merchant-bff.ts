@@ -184,6 +184,7 @@ import type { createMerchantPickupQuery } from "./merchant-pickup-query.js";
 import { FulfillmentReadinessError } from "@rms/fulfillment";
 import type { createMerchantPickupProof } from "./merchant-pickup-proof.js";
 import type { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
+import type { createMerchantPickupNotCollected } from "./merchant-pickup-not-collected.js";
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
 import type { createMerchantKitchenRelease } from "./merchant-kitchen-release.js";
@@ -467,6 +468,7 @@ export interface MerchantBffRouterOptions {
   readonly pickupQuery?: ReturnType<typeof createMerchantPickupQuery>;
   readonly pickupProof?: ReturnType<typeof createMerchantPickupProof>;
   readonly pickupHandoff?: ReturnType<typeof createMerchantPickupHandoff>;
+  readonly pickupNotCollected?: ReturnType<typeof createMerchantPickupNotCollected>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
@@ -1468,6 +1470,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             initialBatchReference: item.initialBatchReference,
             canRequestAcceptance: item.canRequestAcceptance,
             unfulfillable: item.unfulfillable,
+            pickupNotCollected: item.pickupNotCollected,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,
@@ -1518,6 +1521,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             initialBatchReference: item.initialBatchReference,
             canRequestAcceptance: item.canRequestAcceptance,
             unfulfillable: item.unfulfillable,
+            pickupNotCollected: item.pickupNotCollected,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,
@@ -6207,6 +6211,43 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
     }
     void options
       .pickupHandoff({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => {
+        if (!(error instanceof PickupHandoffError)) {
+          denied(response);
+          return;
+        }
+        const status = {
+          PICKUP_HANDOFF_INPUT_INVALID: 400,
+          PICKUP_HANDOFF_PERMISSION_DENIED: 403,
+          PICKUP_HANDOFF_NOT_READY: 422,
+          PICKUP_HANDOFF_VERIFICATION_FAILED: 422,
+          PICKUP_HANDOFF_ALREADY_COMPLETED: 409,
+          PICKUP_HANDOFF_VERSION_CONFLICT: 409,
+        }[error.code];
+        response.status(status).json({ error: error.code });
+      });
+  });
+
+  // WP-2423: close a ready pickup nobody collected after the pickup hold (no refund here).
+  router.post("/pickup/not-collected", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.pickupNotCollected) {
+      response.status(503).json({ error: "pickup_not_collected_unavailable" });
+      return;
+    }
+    void options
+      .pickupNotCollected({ sessionCookie, csrf, command: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
         if (!(error instanceof PickupHandoffError)) {

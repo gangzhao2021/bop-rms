@@ -12,6 +12,7 @@ import {
   type PickupHandoffSource,
 } from "../contracts/pickup-handoff.js";
 import type { PickupProofVerificationRecord } from "../contracts/pickup-proof.js";
+import { planPickupNotCollected } from "../domain/pickup-not-collected.js";
 
 const id = (n: number) =>
   `018f3f7a-8b1c-7a11-8d01-${String(n).padStart(12, "0")}` as PickupHandoffReference;
@@ -451,5 +452,45 @@ describe("WP-2423 in-person handoff when the pickup proof expired or was never i
         ),
       "PICKUP_HANDOFF_VERIFICATION_FAILED",
     );
+  });
+});
+
+describe("WP-2423 closing an uncollected pickup", () => {
+  const close = (overrides: Record<string, unknown> = {}) =>
+    planPickupNotCollected({
+      source: source({
+        currentProofGeneration: null,
+        lockedAt: "2026-08-11T14:00:00.000Z" as never,
+      }),
+      readyAt: "2026-08-11T12:00:00.000Z",
+      proofExpiresAt: null,
+      alreadyClosed: false,
+      expectedAggregateVersion: 5n,
+      actorReference: refs.actor,
+      notCollectedReference: id(50),
+      idempotencyReference: id(51),
+      correlationReference: id(52),
+      closedAt: "2026-08-11T13:30:00.000Z",
+      ...overrides,
+    } as never);
+  it("closes after the pickup hold when no valid code remains", () => {
+    expect(close()).toMatchObject({ reason: "NotCollected", aggregateVersionBefore: 5n });
+    expect(close({ proofExpiresAt: "2026-08-11T13:00:00.000Z" }).reason).toBe("NotCollected");
+  });
+  it("refuses before the hold ends, while a code is valid, twice, or after handoff", () => {
+    code(() => close({ closedAt: "2026-08-11T12:59:59.999Z" }), "PICKUP_HANDOFF_NOT_READY");
+    code(() => close({ proofExpiresAt: "2026-08-11T13:45:00.000Z" }), "PICKUP_HANDOFF_NOT_READY");
+    code(() => close({ alreadyClosed: true }), "PICKUP_HANDOFF_ALREADY_COMPLETED");
+    code(
+      () =>
+        close({
+          source: source({
+            canonicalPhase: "Completed",
+            lockedAt: "2026-08-11T14:00:00.000Z" as never,
+          }),
+        }),
+      "PICKUP_HANDOFF_ALREADY_COMPLETED",
+    );
+    code(() => close({ expectedAggregateVersion: 4n }), "PICKUP_HANDOFF_VERSION_CONFLICT");
   });
 });

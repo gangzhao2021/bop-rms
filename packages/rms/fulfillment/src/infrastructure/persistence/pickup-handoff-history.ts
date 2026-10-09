@@ -119,3 +119,29 @@ export async function readPickupInPersonVerifications(
     });
   });
 }
+
+/**
+ * WP-2423: which of the given Orders of the Store were closed as not collected at pickup (for the
+ * operations order queue). Caller authorizes and owns the transaction.
+ */
+export async function listStoreUncollectedPickupOrders(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (orderReferences.length === 0) return new Set();
+  if (orderReferences.length > 100) return unavailable();
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    scope.brandReference,
+    scope.storeReference,
+  ]);
+  const rows = (
+    await tx.query(
+      "SELECT f.order_id::text order_id FROM rms_fulfillment.pickup_not_collected_record n " +
+        "JOIN rms_fulfillment.fulfillment f ON f.brand_id=n.brand_id AND f.store_id=n.store_id AND f.fulfillment_id=n.fulfillment_id " +
+        "WHERE n.brand_id=$1 AND n.store_id=$2 AND f.order_id=ANY($3::uuid[])",
+      [scope.brandReference, scope.storeReference, orderReferences],
+    )
+  ).rows;
+  return new Set(rows.map((row) => String(row.order_id)));
+}

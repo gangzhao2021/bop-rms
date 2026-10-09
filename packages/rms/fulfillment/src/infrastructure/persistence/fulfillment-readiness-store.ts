@@ -50,7 +50,9 @@ export function createPostgresFulfillmentReadinessStore(options: {
   }): Promise<PickupQueueReadPage>;
   lockPickupHandoffByOrder(
     input: Parameters<FulfillmentReadinessPorts["repository"]["lockByOrder"]>[0],
-  ): Promise<ReturnType<typeof foldPickupHandoffHistory> | null>;
+  ): Promise<
+    (ReturnType<typeof foldPickupHandoffHistory> & { readonly notCollected: boolean }) | null
+  >;
   lockPickupProofByOrder(
     input: Parameters<FulfillmentReadinessPorts["repository"]["lockByOrder"]>[0],
   ): Promise<ReturnType<typeof foldPickupProofHistory> | null>;
@@ -205,8 +207,17 @@ export function createPostgresFulfillmentReadinessStore(options: {
       store,
       aggregate.fulfillmentReference,
     );
+    const notCollected = (
+      await tx.query(
+        "SELECT pickup_not_collected_id FROM rms_fulfillment.pickup_not_collected_record " +
+          "WHERE brand_id=$1 AND store_id=$2 AND fulfillment_id=$3",
+        [brand, store, aggregate.fulfillmentReference],
+      )
+    ).rows.length;
+    if (notCollected > 1) return unavailable();
     if (phase !== "Ready") {
       if (
+        notCollected ||
         proofHistory.issues.length ||
         proofHistory.verifications.length ||
         handoffHistory.length ||
@@ -214,7 +225,7 @@ export function createPostgresFulfillmentReadinessStore(options: {
           .length
       )
         return unavailable();
-      return { readiness, proof: null, handoff: null, hasHandoff: false };
+      return { readiness, proof: null, handoff: null, hasHandoff: false, notCollected: false };
     }
     const readyAt = history.reduce(
       (at, effect) => (effect.result.occurredAt > at ? effect.result.occurredAt : at),
@@ -236,6 +247,8 @@ export function createPostgresFulfillmentReadinessStore(options: {
     return {
       handoff,
       hasHandoff: handoffHistory.length > 0,
+      // WP-2423: closed as not collected; no later handoff or code.
+      notCollected: notCollected === 1,
       readiness: parseFulfillmentReadinessSource({
         ...readiness,
         aggregateVersion: proof.source.aggregateVersion,
@@ -282,6 +295,8 @@ export function createPostgresFulfillmentReadinessStore(options: {
             "AND ($3::uuid IS NULL OR f.fulfillment_id>$3::uuid) " +
             "AND EXISTS (SELECT 1 FROM rms_fulfillment.fulfillment_ready_operation r " +
             "WHERE r.brand_id=f.brand_id AND r.store_id=f.store_id AND r.fulfillment_id=f.fulfillment_id AND r.phase_after='Ready') " +
+            "AND NOT EXISTS (SELECT 1 FROM rms_fulfillment.pickup_not_collected_record n " +
+            "WHERE n.brand_id=f.brand_id AND n.store_id=f.store_id AND n.fulfillment_id=f.fulfillment_id) " +
             "AND ($4::boolean OR NOT EXISTS (SELECT 1 FROM rms_fulfillment.pickup_handoff_operation h " +
             "WHERE h.brand_id=f.brand_id AND h.store_id=f.store_id AND h.fulfillment_id=f.fulfillment_id AND h.phase_after='Completed')) " +
             "ORDER BY f.fulfillment_id LIMIT $5",
@@ -377,10 +392,8 @@ export function createPostgresFulfillmentReadinessStore(options: {
     },
     async lockPickupHandoffByOrder(input) {
       scope(input);
-      return (
-        (await current(input.transaction, parseReadinessReference(input.orderReference)))
-          ?.handoff ?? null
-      );
+      const state = await current(input.transaction, parseReadinessReference(input.orderReference));
+      return state?.handoff ? { ...state.handoff, notCollected: state.notCollected } : null;
     },
     async apply(input) {
       const effect = validateFulfillmentReadyRecordEffect(input.effect, options.sha256),

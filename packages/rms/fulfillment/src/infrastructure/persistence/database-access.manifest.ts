@@ -27,6 +27,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      table: "pickup_not_collected_record",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "pickup_in_person_verification",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/fulfillment" },

@@ -57,6 +57,7 @@ const moduleManifestInput =
         "pickup_proof_operation",
         "pickup_proof_verification",
         "pickup_in_person_verification",
+        "pickup_not_collected_record",
         "fulfillment_ready_operation",
         "pickup_handoff_record",
         "pickup_handoff_item",
