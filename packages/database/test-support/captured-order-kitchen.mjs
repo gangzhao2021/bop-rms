@@ -1,3 +1,4 @@
+import { seedOrdinaryRefundSession } from "./ordinary-refund-session.mjs";
 import { createMerchantAcceptanceConfigurationResolver } from "../../../apps/api/src/merchant-acceptance-configuration-resolver.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
@@ -126,8 +127,25 @@ export async function exerciseCapturedOrderKitchen({
     actor,
     at,
     kitchenPermission: kitchenNow !== undefined,
-    authenticationPolicyCode: kitchenNow !== undefined ? "NamedKdsOperator" : "WorkforceStandard",
+    // Staff accept from an ordinary Workforce Session; a NamedKdsOperator Session may only enter
+    // the workspace and operate the Kitchen (IDR-0039), so the Kitchen gets its own Session below.
+    authenticationPolicyCode: "WorkforceStandard",
   });
+  const kitchenSession =
+    kitchenNow === undefined
+      ? undefined
+      : {
+          ...(await seedOrdinaryRefundSession({
+            client: admin,
+            runner: () => runner,
+            scope,
+            requester: actor,
+            at,
+            policyCode: "NamedKdsOperator",
+            referencePrefix: "01909966",
+          })),
+          revokeKitchen: session.revokeKitchen,
+        };
   const queue = createPersistentMerchantOrderQueue({
     persistence: { ...session.persistence, now: () => new Date().toISOString() },
     quoteVersion,
@@ -333,7 +351,7 @@ export async function exerciseCapturedOrderKitchen({
     observedAt,
   };
   await exerciseKitchenTicketCreation({
-    merchantKitchen: kitchenNow === undefined ? undefined : { session, actor },
+    merchantKitchen: kitchenSession === undefined ? undefined : { session: kitchenSession, actor },
     kitchenNow,
     onItemReady: fulfillment?.consumeReady,
     reuseInventoryRecipe: reuseInventoryRecipe ?? order.order.orderType === "DineIn",

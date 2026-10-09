@@ -383,12 +383,12 @@ export async function verifyPersistentMerchantBff({
   );
   await admin.query("GRANT USAGE ON SCHEMA rms_fulfillment TO " + role);
   await admin.query(
-    "GRANT SELECT ON rms_fulfillment.fulfillment,rms_fulfillment.fulfillment_item,rms_fulfillment.fulfillment_creation_operation,rms_fulfillment.fulfillment_item_ready_result,rms_fulfillment.fulfillment_ready_operation,rms_fulfillment.pickup_handoff_operation,rms_fulfillment.pickup_handoff_record,rms_fulfillment.pickup_handoff_item,rms_fulfillment.pickup_proof_operation,rms_fulfillment.pickup_proof_generation,rms_fulfillment.pickup_proof_invalidation,rms_fulfillment.pickup_proof_verification TO " +
+    "GRANT SELECT ON rms_fulfillment.fulfillment,rms_fulfillment.fulfillment_item,rms_fulfillment.fulfillment_creation_operation,rms_fulfillment.fulfillment_item_ready_result,rms_fulfillment.fulfillment_ready_operation,rms_fulfillment.pickup_handoff_operation,rms_fulfillment.pickup_handoff_record,rms_fulfillment.pickup_handoff_item,rms_fulfillment.pickup_proof_operation,rms_fulfillment.pickup_proof_generation,rms_fulfillment.pickup_proof_invalidation,rms_fulfillment.pickup_proof_verification,rms_fulfillment.pickup_in_person_verification,rms_fulfillment.pickup_not_collected_record TO " +
       role,
   );
   await admin.query("GRANT USAGE ON SCHEMA rms_ordering TO " + role);
   await admin.query(
-    "GRANT SELECT ON rms_ordering.order_header,rms_ordering.order_submission_record,rms_ordering.order_batch,rms_ordering.order_number_allocation,rms_ordering.order_item,rms_ordering.order_revision,rms_ordering.order_acceptance_record,rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record TO " +
+    "GRANT SELECT ON rms_ordering.order_header,rms_ordering.order_submission_record,rms_ordering.order_batch,rms_ordering.order_number_allocation,rms_ordering.order_item,rms_ordering.order_revision,rms_ordering.order_acceptance_record,rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record,rms_ordering.order_payment_disposition_record TO " +
       role,
   );
   await admin.query(
@@ -618,11 +618,11 @@ export async function verifyPersistentMerchantBff({
     brandProductGrant = f.uuid("9104");
   await admin.query(
     "INSERT INTO bop_permission.permission_definition VALUES($1,'catalog.product.manage','Active',1,$2,$2)",
-    [productPermission, f.FROM],
+    [productPermission, clock.from],
   );
   await admin.query(
     "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,$5,'Active',$6,$7,1,$6,$6)",
-    [storeProductGrant, f.STORE_ROLE, productPermission, f.BRAND, f.STORE, f.FROM, f.UNTIL],
+    [storeProductGrant, f.STORE_ROLE, productPermission, f.BRAND, f.STORE, clock.from, clock.until],
   );
   let navigationAllowed = true,
     navigationFailure = false,
@@ -635,7 +635,7 @@ export async function verifyPersistentMerchantBff({
       assert.equal(input.storeReference, f.STORE);
       assert.equal(input.actorReference, f.ACTOR);
       assert.equal(input.sessionReference, initial.session.sessionReference);
-      assert.equal(input.observedAt, f.AT);
+      assert.equal(input.observedAt, clock.at);
       assert.equal(input.screenId, "CAT-PRODUCT-LIST");
       assert.equal(input.permission, "catalog.manage");
       assert.equal(input.action, "catalog.product.manage");
@@ -660,15 +660,23 @@ export async function verifyPersistentMerchantBff({
   assert.equal((await currentBrandDecision()).effect, "Deny");
   await admin.query(
     "INSERT INTO bop_permission.role VALUES($1,$2,NULL,'synthetic_brand_product','Active',$3,$4,1,$3,$3)",
-    [brandProductRole, f.BRAND, f.FROM, f.UNTIL],
+    [brandProductRole, f.BRAND, clock.from, clock.until],
   );
   await admin.query(
     "INSERT INTO bop_permission.role_assignment VALUES($1,$2,$3,NULL,$4,$5,NULL,'Active',$6,$7,1,$6,$6)",
-    [brandProductAssignment, brandProductRole, f.MEMBERSHIP, f.ACTOR, f.BRAND, f.FROM, f.UNTIL],
+    [
+      brandProductAssignment,
+      brandProductRole,
+      f.MEMBERSHIP,
+      f.ACTOR,
+      f.BRAND,
+      clock.from,
+      clock.until,
+    ],
   );
   await admin.query(
     "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,NULL,'Active',$5,$6,1,$5,$5)",
-    [brandProductGrant, brandProductRole, productPermission, f.BRAND, f.FROM, f.UNTIL],
+    [brandProductGrant, brandProductRole, productPermission, f.BRAND, clock.from, clock.until],
   );
   const readGrants = [];
   for (const [permission, grant, action] of [
@@ -683,11 +691,11 @@ export async function verifyPersistentMerchantBff({
     );
     await admin.query(
       "INSERT INTO bop_permission.permission_definition VALUES($1,$2,'Active',1,$3,$3)",
-      [permission, action, f.FROM],
+      [permission, action, clock.from],
     );
     await admin.query(
       "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,NULL,'Active',$5,$6,1,$5,$5)",
-      [grant, brandProductRole, permission, f.BRAND, f.FROM, f.UNTIL],
+      [grant, brandProductRole, permission, f.BRAND, clock.from, clock.until],
     );
     readGrants.push(grant);
   }
@@ -1153,10 +1161,11 @@ export async function verifyPersistentMerchantBff({
       [ownerOrderReference],
     );
     assert.equal(ownerOrderNumber.rowCount, 1);
+    // WP-2423: the order queue lists the newest Orders first (descending Order reference).
     pickupExpectedInitialOrderNumbers = [
       ownerOrderNumber.rows[0].order_number,
       firstStoreOrderNumber,
-    ];
+    ].reverse();
   }
   const tableReference = f.uuid("3152");
   const table = createDiningTable({

@@ -2455,8 +2455,19 @@ export function createKitchenWorkLifecycleService(ports: KitchenWorkLifecyclePor
               return dependency();
             if (!sameCommandIntent(ports, command, stored.intentDigest)) return conflict();
             const expiry = stored.operation.replayExpiresAt;
-            if (Date.parse(observedAt) < Date.parse(stored.operation.occurredAt))
-              return dependency();
+            if (Date.parse(observedAt) < Date.parse(stored.operation.occurredAt)) {
+              // WP-2423: a duplicate authorized before the original committed (a double tap or a
+              // network retry) waits on the idempotency fence and then finds it. Only a clock that
+              // is still earlier than the original now is a regression.
+              let current: string;
+              try {
+                current = parseKitchenTicketInstant(ports.clock.now());
+              } catch {
+                return dependency();
+              }
+              if (Date.parse(current) < Date.parse(stored.operation.occurredAt))
+                return dependency();
+            }
             if (expiry === null || Date.parse(observedAt) >= Date.parse(expiry)) return conflict();
             return stored.result;
           }

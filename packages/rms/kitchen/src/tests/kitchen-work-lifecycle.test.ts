@@ -1796,10 +1796,16 @@ describe("Kitchen work lifecycle service", () => {
     const expiry = test.effect()?.operation.replayExpiresAt;
     expect(expiry).not.toBeNull();
 
+    // A clock still earlier than the original is a regression.
     test.setObservedAt("2026-08-09T12:00:00.999Z");
+    test.setNow("2026-08-09T12:00:00.999Z");
     await expect(test.service.execute(first)).rejects.toEqual(
       expectCode("KITCHEN_WORK_DEPENDENCY_UNAVAILABLE"),
     );
+    // WP-2423: a concurrent duplicate authorized just before the original committed gets the
+    // original result once the current clock has reached it.
+    test.setNow(actionAt);
+    await expect(test.service.execute(first)).resolves.toEqual(original);
     test.setObservedAt(actionAt);
     await expect(test.service.execute(first)).resolves.toEqual(original);
     test.setObservedAt("2026-08-09T12:00:01.001Z");
@@ -1814,7 +1820,8 @@ describe("Kitchen work lifecycle service", () => {
       expectCode("KITCHEN_WORK_VERSION_CONFLICT"),
     );
     expect(test.loadSourceForUpdate).toHaveBeenCalledTimes(1);
-    expect(test.now).toHaveBeenCalledTimes(1);
+    // The original effect, then one fresh reading for each of the two earlier observations.
+    expect(test.now).toHaveBeenCalledTimes(3);
   });
 
   it("denies before transaction/lookup and rejects forbidden mutation-source fields", async () => {

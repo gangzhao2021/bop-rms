@@ -33,6 +33,9 @@ export async function exerciseDiningCustomerStatus({
     "GRANT SELECT,INSERT ON platform_eventing.delivery_attempt,platform_eventing.dead_letter_item TO " +
       role,
   );
+  // A dead letter is reopened when an operator retry fails again (ON CONFLICT DO UPDATE); the
+  // pilot runtime role holds the same privilege.
+  await admin.query("GRANT UPDATE ON platform_eventing.dead_letter_item TO " + role);
   await admin.query(
     "GRANT SELECT,INSERT,UPDATE ON platform_eventing.consumer_retry_schedule TO " + role,
   );

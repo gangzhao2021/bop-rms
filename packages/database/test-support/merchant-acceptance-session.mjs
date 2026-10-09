@@ -79,6 +79,12 @@ export async function seedMerchantAcceptanceSession({
     await admin.query("GRANT UPDATE(kitchen_ticket_id) ON rms_kitchen.kitchen_ticket TO " + role);
 
     await admin.query("GRANT USAGE ON SCHEMA rms_kitchen,rms_dining TO " + role);
+    // WP-2423: the order queue shows pickups the Store closed as not collected (pilot api grant).
+    await admin.query("GRANT USAGE ON SCHEMA rms_fulfillment TO " + role);
+    await admin.query(
+      "GRANT SELECT ON rms_fulfillment.fulfillment,rms_fulfillment.pickup_not_collected_record TO " +
+        role,
+    );
     await admin.query(
       "GRANT SELECT ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_work_item,rms_kitchen.kitchen_order_item_ready_result,rms_dining.dining_item_service_record TO " +
         role,

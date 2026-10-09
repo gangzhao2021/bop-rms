@@ -194,8 +194,11 @@ export async function verifyPersistentMerchantBffHttp({
         pickupExpectedInitialOrderNumbers ?? [expectedOrderNumbers[0]],
       );
       if (pickupExpectedInitialOrderNumbers) {
+        // The owner's Order is the one that is not the fixture Order (the queue is newest first).
         const ownerOrder = result.items.find(
-          (item) => item.orderNumber === pickupExpectedInitialOrderNumbers[0],
+          (item) =>
+            pickupExpectedInitialOrderNumbers.includes(item.orderNumber) &&
+            item.orderNumber !== expectedOrderNumbers[0],
         );
         const fixtureOrder = result.items.find(
           (item) => item.orderNumber === expectedOrderNumbers[0],
