@@ -6,6 +6,8 @@ const m = vi.hoisted(() => ({
   legacy: vi.fn(),
   acceptance: vi.fn(),
   inventory: vi.fn(),
+  version: vi.fn(),
+  reader: vi.fn(),
 }));
 vi.mock("./order-captured-payment-source.js", () => ({
   createOrderCapturedPaymentSource: () => ({ resolve: m.captured }),
@@ -16,7 +18,11 @@ vi.mock("./initial-dining-acceptance-source.js", () => ({
 vi.mock("./order-paid-capacity-source.js", () => ({ readOrderPaidCapacity: async () => null }));
 vi.mock("@rms/ordering", async (load) => ({
   ...(await load<object>()),
-  createPostgresOrderCreationQueryStore: () => ({ withCurrentSubmission: m.original }),
+  createPostgresOrderCreationQueryStore: (...args: unknown[]) => {
+    m.reader(...args);
+    return { withCurrentSubmission: m.original };
+  },
+  readOrderCreationQuoteVersion: m.version,
   createPostgresOrderAcceptanceReader: () => ({ loadByBatch: m.acceptance }),
   createPostgresOrderInitialExecutionReader: () => ({ loadByBatch: m.legacy }),
 }));
@@ -45,6 +51,7 @@ const p = {
 const tx = { query: vi.fn() };
 beforeEach(() => {
   vi.clearAllMocks();
+  m.version.mockResolvedValue(null);
   m.captured.mockResolvedValue({ payment: { intent: { preparation: p } } });
   m.original.mockImplementation(async (_s, work) =>
     work(tx, {
@@ -114,4 +121,24 @@ it("leaves non-opted-in consumers on the existing initial reader", async () => {
   expect((await source(false).resolve(tx, {})).currentDining).toBeNull();
   expect(m.dining).not.toHaveBeenCalled();
   expect(m.legacy).toHaveBeenCalledOnce();
+});
+
+it("WP-2423: reads an Order with the Quote version it was priced with", async () => {
+  m.version.mockResolvedValue(1);
+  m.legacy.mockResolvedValue(null);
+  m.acceptance.mockResolvedValue(null);
+  const context = await createOrderPaidContextSource({
+    scope,
+    tenantReference: id(10),
+    quoteVersion: 2,
+    now: () => at,
+    authorize: async () => true,
+    authorizeOrder: async () => true,
+    authorizeInventory: async () => true,
+  })
+    .resolve(tx as never, {})
+    .catch(() => null);
+  expect(m.version).toHaveBeenCalledWith(tx, expect.anything(), p.submissionReference);
+  expect(m.reader.mock.calls[0]?.[2]).toBe(1);
+  if (context !== null) expect(context.quoteVersion).toBe(1);
 });

@@ -6,6 +6,7 @@ import {
   createPostgresOrderAcceptanceReader,
   createPostgresOrderInitialExecutionReader,
   createPostgresOrderCreationQueryStore,
+  readOrderCreationQuoteVersion,
   parseOrderingReference,
   parseOrderingInstant,
   OrderPaymentOutcomeError,
@@ -21,6 +22,9 @@ export function createOrderPaidContextSource(
   options: Parameters<typeof createOrderCapturedPaymentSource>[0] & {
     /** Initial Dining acceptance/release callers opt into current batch execution. */
     currentDiningAcceptance?: boolean;
+    /** The Quote version of Orders whose history does not record one. WP-2423: each Order is
+     * read with the version it was priced with, so Orders placed before a pricing upgrade still
+     * receive their payment outcome. */
     quoteVersion: 1 | 2;
     tenantReference: string;
     authorizeInventory: Parameters<
@@ -43,7 +47,6 @@ export function createOrderPaidContextSource(
     ...scope,
     authorize: options.authorizeOrder,
   });
-  const quoteVersion = options.quoteVersion;
   return Object.freeze({
     async resolve(transaction: ConsumerTransaction, event: unknown) {
       try {
@@ -55,6 +58,12 @@ export function createOrderPaidContextSource(
           orderReference: preparation.orderReference,
           orderBatchReference: preparation.orderBatchReference,
         });
+        const quoteVersion =
+          (await readOrderCreationQuoteVersion(
+            transaction,
+            scope,
+            preparation.submissionReference,
+          )) ?? options.quoteVersion;
         const reader = createPostgresOrderCreationQueryStore(
           { run: async (work) => work(transaction) },
           scope,
@@ -126,6 +135,7 @@ export function createOrderPaidContextSource(
             if (initialExecution.phase === "Cancelled" || initialExecution.phase === "Rejected")
               return Object.freeze({
                 ...paymentFacts,
+                quoteVersion,
                 order,
                 acceptance,
                 initialExecution,
@@ -171,6 +181,7 @@ export function createOrderPaidContextSource(
               return unavailable();
             return Object.freeze({
               ...paymentFacts,
+              quoteVersion,
               order,
               acceptance,
               initialExecution,

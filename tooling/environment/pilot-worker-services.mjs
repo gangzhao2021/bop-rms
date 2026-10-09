@@ -19,6 +19,7 @@ export async function createInternalWorkerServices(
     createInternalPickupReadiness,
     createInternalPickupProofConsumer,
     createInternalOrderCompletionConsumer,
+    createInternalRefundConsumers,
   } = dependencies;
   if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_WORKER_ONLY");
   const paid = await createInternalPaidOutcome(resources, { persistentWaiting }),
@@ -44,6 +45,7 @@ export async function createInternalWorkerServices(
     createInternalPickupReadiness(resources).worker,
     createInternalPickupProofConsumer(resources),
     await createInternalOrderCompletionConsumer(resources),
+    ...(createInternalRefundConsumers ? createInternalRefundConsumers(resources) : []),
     status.completed,
   ];
   new ConsumerRegistry(services.map((value) => value.registration));

@@ -67,12 +67,42 @@ export function createPostgresOrderLineConsumptionStore(
           input.submissionReference,
           input.cartItemReference,
         );
-        const effects = planOrderLineKitchenEffects({
-          cartItemReference: input.cartItemReference,
-          reservations: line,
-          kitchen: input.kitchen,
-          occurredAt,
-        });
+        const plan = (at: string) =>
+          planOrderLineKitchenEffects({
+            cartItemReference: input.cartItemReference,
+            reservations: line,
+            kitchen: input.kitchen,
+            occurredAt: parseInventoryInstant(at),
+          });
+        let postedAt = occurredAt;
+        let effects = plan(postedAt);
+        // A stock ledger is ordered by posting. A Kitchen fact that arrives after a later movement
+        // on one of its accounts (a delayed or retried event) is posted when it is booked; the
+        // Kitchen completion time stays on the source event this movement is correlated with.
+        const accounts = [...new Set(effects.map((effect) => effect.accountReference))];
+        if (accounts.length > 0) {
+          const clock: unknown = await tx.query(
+            "SELECT to_char(date_trunc('milliseconds',clock_timestamp()) AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS now," +
+              "EXISTS(SELECT 1 FROM rms_inventory.stock_movement m JOIN rms_inventory.stock_balance b ON " +
+              "b.tenant_id=m.tenant_id AND b.brand_id=m.brand_id AND b.store_id=m.store_id AND b.account_id=m.account_id " +
+              "AND b.ledger_version=m.ledger_version WHERE m.tenant_id=$1 AND m.brand_id=$2 AND m.store_id=$3 " +
+              "AND m.account_id=ANY($4::uuid[]) AND m.occurred_at>$5::timestamptz) AS late",
+            [tenant, brand, store, accounts, occurredAt],
+          );
+          const rows =
+            clock !== null && typeof clock === "object"
+              ? (Object.getOwnPropertyDescriptor(clock, "rows")?.value as unknown)
+              : null;
+          const first: unknown = Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
+          if (first === null || typeof first !== "object") return fail();
+          const late = Object.getOwnPropertyDescriptor(first, "late")?.value;
+          const now = Object.getOwnPropertyDescriptor(first, "now")?.value;
+          if (typeof late !== "boolean" || typeof now !== "string") return fail();
+          if (late) {
+            postedAt = parseInventoryInstant(now);
+            effects = plan(postedAt);
+          }
+        }
         const applied = [];
         for (const effect of effects) {
           const balance: unknown = await tx.query(
@@ -113,7 +143,7 @@ export function createPostgresOrderLineConsumptionStore(
               targetId: effect.reservation.reservationReference,
               reasonCode: input.audit.reasonCode,
               correlationId: operationReference,
-              occurredAt,
+              occurredAt: postedAt,
               sourceChannel: input.audit.sourceChannel,
               dataClassification: "Internal",
               retentionPolicyCode: input.audit.retentionPolicyCode,

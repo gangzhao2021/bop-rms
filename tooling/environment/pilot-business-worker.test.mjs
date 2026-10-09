@@ -41,6 +41,7 @@ it("preserves the complete enabled consumer registration set and scoped workflow
       "createInternalPaidOutcome",
       "createInternalOrderStatus",
       "createInternalReceiptConsumer",
+      "createInternalRefundConsumers",
       "createInternalPickupFulfillment",
       "createInternalKitchen",
       "createInternalKitchenConsumers",

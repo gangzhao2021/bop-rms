@@ -949,4 +949,14 @@ node --import ./tooling/environment/register-workspace-typescript.mjs tooling/en
 item, authorized discard) and `resolve` (close retries whose consumer completed) need
 `--confirm-target <environment>:<database>` and `--operator <uuid>`; each action is recorded in
 `platform_eventing.dead_letter_action`. Retries reuse the event's idempotency, so a consumer never
-applies an event twice.
+applies an event twice. `retry --dead-letter <uuid>` retries one item of either path (an Outbox item
+below its automatic attempt limit). An operator retry opens a new bounded window from the time of the
+retry; a retry that fails again reopens the item.
+
+Outbox events that exhausted all eight automatic deliveries are recovered with
+`outbox-recovery-operations.mjs recover --operator <uuid> [--dead-letter <uuid>]`, run in the pilot
+container (it reads `PILOT_RUNTIME_DIRECTORY`). It builds the business worker composition without
+starting it, schedules one manual recovery per item in aggregate order and performs the single
+permitted handoff; consumers that already completed the event acknowledge it as a duplicate, and only
+a full acknowledgement publishes the event and resolves its dead letter. Rejected events are not
+eligible: fix the cause (for example a missing consumer subscription) and use `retry --dead-letter`.

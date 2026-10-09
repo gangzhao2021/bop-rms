@@ -330,9 +330,11 @@ it("reserves each Order line separately with sequential ledger versions and exac
         [],
         "a replayed completion does not deduct twice",
       );
+      // WP-2423: line B's completion arrives late, timed before line A's booked consumption on the
+      // same account (a delayed or retried Kitchen event): it is posted when booked, not refused.
       assert.deepEqual(
         (
-          await consume(lineB, { kind: "Progress", completedQuantity: 1, requiredQuantity: 1 }, 4)
+          await consume(lineB, { kind: "Progress", completedQuantity: 1, requiredQuantity: 1 }, 0)
         ).map((e) => [e.action, e.quantity]),
         [
           ["StartProduction", null],
@@ -340,6 +342,16 @@ it("reserves each Order line separately with sequential ledger versions and exac
         ],
       );
       assert.deepEqual(await stock(), { h: "0.3334", r: "0" });
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT bool_and(occurred_at >= lag) ordered FROM (SELECT occurred_at, lag(occurred_at, 1, occurred_at) OVER (ORDER BY ledger_version) lag FROM rms_inventory.stock_movement WHERE account_id=$1) q",
+            [accountReference],
+          )
+        ).rows[0],
+        { ordered: true },
+        "the ledger stays in posting order",
+      );
       const audits = (
         await admin.query(
           "SELECT action_code a,count(*)::int n,bool_and(actor_reference=$1) by_cook FROM platform_audit.audit_record WHERE action_code IN ('INVENTORY_RESERVATION_START_PRODUCTION','INVENTORY_RESERVATION_CONSUME') GROUP BY 1 ORDER BY 1",

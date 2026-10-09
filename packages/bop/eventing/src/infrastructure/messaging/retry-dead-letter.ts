@@ -4,6 +4,7 @@ import {
   type DeadLetterCommand,
   type RetryResolution,
   resolveRetry,
+  retryPolicy,
   validateRetryResolution,
 } from "../../contracts/retry-dead-letter.js";
 import type { ConsumerTransaction } from "../../contracts/consumer-inbox.js";
@@ -114,7 +115,15 @@ const createDeadLetterSql = `INSERT INTO platform_eventing.dead_letter_item (
   failure_class, safe_code, attempt_count, policy_name, policy_version, status
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open')
 ON CONFLICT (brand_id, store_id, delivery_path, event_id, consumer_name)
-DO NOTHING
+DO UPDATE SET
+  failure_class = EXCLUDED.failure_class,
+  safe_code = EXCLUDED.safe_code,
+  attempt_count = EXCLUDED.attempt_count,
+  status = 'open',
+  version = platform_eventing.dead_letter_item.version + 1
+-- WP-2423: an operator retry that fails again reopens the item for the next decision; an item
+-- that is still open, discarded or resolved is left as it is.
+WHERE platform_eventing.dead_letter_item.status = 'retry_scheduled'
 RETURNING dead_letter_id::text`;
 
 const existingDeadLetterSql = `SELECT dead_letter_id::text
@@ -241,13 +250,13 @@ export async function recordOutboxFailureDecision(
 }
 
 const parkedOutboxBatchSql = `SELECT
-  event_id::text,
-  brand_id::text,
-  store_id::text,
-  attempt_count,
-  last_error_code,
-  recorded_at
-FROM platform_eventing.outbox_event
+  o.event_id::text,
+  o.brand_id::text,
+  o.store_id::text,
+  o.attempt_count,
+  o.last_error_code,
+  o.recorded_at
+FROM platform_eventing.outbox_event o
 WHERE published_at IS NULL
   AND lease_token IS NULL
   AND last_error_code IS NOT NULL
@@ -256,8 +265,18 @@ WHERE published_at IS NULL
     (platform_helpers.current_store_id() IS NULL AND store_id IS NULL)
     OR store_id = platform_helpers.current_store_id()
   )
-ORDER BY recorded_at, event_id
-FOR UPDATE SKIP LOCKED
+  -- WP-2423: a failure already decided (dead-lettered, awaiting an operator) keeps its error but is
+  -- not parked work; selecting it again would hold the head of the queue for every later event.
+  AND NOT EXISTS (
+    SELECT 1 FROM platform_eventing.delivery_attempt a
+    WHERE a.brand_id = o.brand_id
+      AND a.store_id IS NOT DISTINCT FROM o.store_id
+      AND a.delivery_path = 'outbox'
+      AND a.event_id = o.event_id
+      AND a.attempt_number = o.attempt_count
+  )
+ORDER BY o.recorded_at, o.event_id
+FOR UPDATE OF o SKIP LOCKED
 LIMIT $1`;
 
 export async function scheduleParkedOutboxBatch(
@@ -681,9 +700,14 @@ export async function applyDeadLetterCommand(
             [item.event_id],
           )
         : await transaction.query(
+            // WP-0033: an authorized retry creates a new bounded schedule: a fresh policy-horizon
+            // window from now (its start distinguishes the retry's attempts from the original
+            // ones). The attempt count is kept, so the retry is one further delivery, not a fresh
+            // budget.
             `UPDATE platform_eventing.consumer_retry_schedule
              SET state = 'scheduled',
                  available_at = statement_timestamp(),
+                 deadline_at = statement_timestamp() + ${retryPolicy.maximumHorizonMs} * interval '1 millisecond',
                  lease_token = NULL,
                  lease_owner = NULL,
                  lease_expires_at = NULL,

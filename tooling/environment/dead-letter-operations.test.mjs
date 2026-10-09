@@ -19,6 +19,19 @@ describe("WP-2423 dead-letter operations", () => {
       "2026-10-08",
     ]);
     expect(retry.get("--since")).toBe("2026-10-08");
+    const single = parseDeadLetterArguments([
+      "retry",
+      "--env-file",
+      "x.env",
+      "--confirm-target",
+      "local:db",
+      "--operator",
+      operator,
+      "--dead-letter",
+      operator,
+    ]);
+    expect(single.get("--dead-letter")).toBe(operator);
+    expect(single.get("--consumer")).toBeNull();
   });
   it.each([
     [["delete", "--env-file", "x"]],
@@ -63,6 +76,38 @@ describe("WP-2423 dead-letter operations", () => {
         "a:v1",
         "--since",
         "10/08",
+      ],
+    ],
+    // retry needs exactly one of --consumer and --dead-letter; --since only with --consumer
+    [["retry", "--env-file", "x", "--confirm-target", "t", "--operator", operator]],
+    [
+      [
+        "retry",
+        "--env-file",
+        "x",
+        "--confirm-target",
+        "t",
+        "--operator",
+        operator,
+        "--consumer",
+        "a:v1",
+        "--dead-letter",
+        operator,
+      ],
+    ],
+    [
+      [
+        "retry",
+        "--env-file",
+        "x",
+        "--confirm-target",
+        "t",
+        "--operator",
+        operator,
+        "--dead-letter",
+        operator,
+        "--since",
+        "2026-10-08",
       ],
     ],
   ])("refuses %j", (args) => {

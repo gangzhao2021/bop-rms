@@ -2061,6 +2061,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_refund_status_projection",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-08 (investigate dead letters, then retry): the catalogued payment.status-projection consumer of PaymentRefunded records Provider-confirmed refund status"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_refund_status_projection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-08 (investigate dead letters, then retry): the catalogued payment.status-projection consumer of PaymentRefunded records Provider-confirmed refund status"
     }
   ]
 }

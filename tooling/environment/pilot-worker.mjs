@@ -93,9 +93,18 @@ export async function createInternalWorker(resources, observers = {}, options = 
       now: resources.now,
       random: Math.random,
       outboxIdentities: (event, attempt) => identities("outbox:" + event + ":" + attempt),
+      // The window start distinguishes an operator retry's attempt from the original attempt
+      // with the same number (WP-2423); within one window it is stable, so replays still match.
       consumerIdentities: (input) =>
         identities(
-          "consumer:" + input.eventId + ":" + input.consumerName + ":" + input.attemptNumber,
+          "consumer:" +
+            input.eventId +
+            ":" +
+            input.consumerName +
+            ":" +
+            input.attemptNumber +
+            ":" +
+            input.firstAttemptAt,
         ),
     },
     services,

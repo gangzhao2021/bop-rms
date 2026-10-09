@@ -19,7 +19,6 @@ type ReleaseEvaluation = Parameters<typeof evaluateOrderPaidWorkflow>[0];
 /** Caller owns transaction/owner fences; only the consumer writer commits the returned candidate. */
 export function createOrderPaidOutcomeSource(options: {
   context: ReturnType<typeof createOrderPaidContextSource>;
-  quoteVersion: 1 | 2;
   release: ReleaseEvaluation["release"];
   generateDispositionReference(): string;
   generateConfirmationReference(): string;
@@ -34,7 +33,6 @@ export function createOrderPaidOutcomeSource(options: {
   ): Promise<Pick<ReleaseEvaluation, "request" | "gates">>;
 }): OrderPaymentOutcomeConsumerPorts["source"] {
   const release = Object.freeze({ ...options.release });
-  const quoteVersion = options.quoteVersion;
   return Object.freeze({
     async loadExact(input) {
       const event = parseExactPaidOutcomeEvent(input);
@@ -96,7 +94,8 @@ export function createOrderPaidOutcomeSource(options: {
         throw new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
       return createOrderPaymentConfirmationCandidate({
         order: context.order,
-        quoteVersion,
+        // The Order's own Quote version (it may predate the configured one).
+        quoteVersion: context.quoteVersion,
         preparation: context.payment.intent.preparation,
         acceptance: context.acceptance,
         paymentEvent: event,

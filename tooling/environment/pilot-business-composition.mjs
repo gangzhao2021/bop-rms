@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createInternalAdditionalReceiptConsumer } from "./pilot-additional-receipt-consumer.mjs";
 import { createInternalOrderSubmitted } from "./pilot-order-submitted.mjs";
 import { createInternalPaymentStatus } from "./pilot-payment-status.mjs";
+import { createInternalRefundConsumers } from "./pilot-refund-consumers.mjs";
 import { createInternalPaidOutcome } from "./pilot-paid-outcome.mjs";
 import { createInternalOrderStatus } from "./pilot-order-status.mjs";
 import { createInternalReceiptConsumer } from "./pilot-receipt-consumer.mjs";
@@ -27,6 +28,7 @@ import { createInternalWorkerServices } from "./pilot-worker-services.mjs";
 import { createInternalWorker } from "./pilot-worker.mjs";
 
 const factories = {
+  createInternalRefundConsumers,
   createInternalBatchCancellationDispatcher,
   createInternalCompensationService,
   createInternalAdditionalReceiptConsumer,
@@ -96,6 +98,7 @@ export function composeConfiguredBusinessWorker({
   const dependencies = {
     createInternalOrderSubmitted: f.createInternalOrderSubmitted,
     createInternalPaymentStatus: (r) => f.createInternalPaymentStatus(r, account),
+    createInternalRefundConsumers: f.createInternalRefundConsumers,
     createInternalPaidOutcome: paid,
     createInternalOrderStatus: (r) =>
       f.createInternalOrderStatus(r, { createCompletion: completion }),
@@ -155,3 +158,5 @@ export function composeConfiguredBusinessWorker({
     });
   };
 }
+/** The default implementations, for operator tooling that composes the worker without starting it. */
+export { factories as pilotBusinessFactories };

@@ -19,8 +19,12 @@ import { uuidV7 } from "./permission-catalog-install.mjs";
  *   list    --env-file                                              open items (no payloads)
  *   retry   --env-file --confirm-target --operator --consumer [--since YYYY-MM-DD]
  *           consumer-path items of one consumer, after their cause is fixed (DEPENDENCY_RECOVERED)
+ *   retry   --env-file --confirm-target --operator --dead-letter
+ *           one item of either path (an Outbox item below its automatic attempt limit; exhausted
+ *           Outbox items use outbox-recovery-operations.mjs)
  *   discard --env-file --confirm-target --operator --dead-letter     AUTHORIZED_DISCARD of one item
  *   resolve --env-file --confirm-target --operator                   closes retries that completed
+ *                                                                    (consumer completed or event published)
  */
 const require = createRequire(new URL("../../packages/database/package.json", import.meta.url));
 const pg = require("pg");
@@ -29,11 +33,11 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 const consumerName = /^[a-z][a-z0-9]*([._-][a-z0-9]+)*:v[1-9][0-9]*$/u;
 const shapes = {
   list: ["--env-file"],
-  retry: ["--env-file", "--confirm-target", "--operator", "--consumer"],
+  retry: ["--env-file", "--confirm-target", "--operator"],
   discard: ["--env-file", "--confirm-target", "--operator", "--dead-letter"],
   resolve: ["--env-file", "--confirm-target", "--operator"],
 };
-const optional = { retry: ["--since"] };
+const optional = { retry: ["--consumer", "--since", "--dead-letter"] };
 
 export function parseDeadLetterArguments(args) {
   const [command, ...rest] = args;
@@ -54,7 +58,11 @@ export function parseDeadLetterArguments(args) {
       throw new Error(`usage: dead-letter-operations ${command} ${allowed.join(" ")}`);
     values.set(flag, value);
   }
-  if (required.some((flag) => !values.has(flag)))
+  if (
+    required.some((flag) => !values.has(flag)) ||
+    (command === "retry" && values.has("--consumer") === values.has("--dead-letter")) ||
+    (command === "retry" && values.has("--since") && !values.has("--consumer"))
+  )
     throw new Error(`usage: dead-letter-operations ${command} ${allowed.join(" ")}`);
   if (values.has("--operator") && !uuid.test(values.get("--operator")))
     throw new Error("DEAD_LETTER_OPERATOR_INVALID");
@@ -139,6 +147,21 @@ export async function runDeadLetterOperations(args) {
   return withClient(
     get,
     async (client) => {
+      if (name === "retry" && get("--dead-letter") !== null) {
+        const rows = (
+          await client.query(`${itemsSql} WHERE d.dead_letter_id=$1 AND d.status='open'`, [
+            get("--dead-letter"),
+          ])
+        ).rows;
+        if (rows.length !== 1) throw new Error("DEAD_LETTER_NOT_OPEN");
+        return each(client, rows, (row) =>
+          applyDeadLetterCommand(
+            client,
+            "retry",
+            command(row, operator, "retry", "DEPENDENCY_RECOVERED"),
+          ),
+        );
+      }
       if (name === "retry") {
         const rows = (
           await client.query(
@@ -170,11 +193,15 @@ export async function runDeadLetterOperations(args) {
           ),
         );
       }
-      // resolve: retries whose consumer has now completed the event.
+      // resolve: retries that completed: the consumer completed the event, or (Outbox path) the
+      // event is now published.
       const rows = (
         await client.query(
-          `${itemsSql} JOIN platform_eventing.consumer_retry_schedule s ON s.event_id=d.event_id AND s.consumer_name=d.consumer_name
-           WHERE d.status='retry_scheduled' AND s.state='completed' ORDER BY d.opened_at`,
+          `${itemsSql} WHERE d.status='retry_scheduled' AND (
+             (d.delivery_path='consumer' AND EXISTS (SELECT 1 FROM platform_eventing.consumer_retry_schedule s
+               WHERE s.event_id=d.event_id AND s.consumer_name=d.consumer_name AND s.state='completed'))
+             OR (d.delivery_path='outbox' AND o.published_at IS NOT NULL))
+           ORDER BY d.opened_at`,
         )
       ).rows;
       return each(client, rows, (row) =>

@@ -2,6 +2,8 @@ import process from "node:process";
 import { createPostgresOrderBatchIdentitySource } from "../../packages/rms/ordering/src/index.ts";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import { parseKitchenOrderReadyEnvelope } from "../../packages/rms/kitchen/src/index.ts";
+/** The longest a pickup proof may stay valid after the order is ready (pickup-proof domain rule). */
+const pickupWindowMs = 60 * 60 * 1000;
 export function createInternalPickupProofConsumer(
   resources,
   { createConfirmation, createReadiness, createProof },
@@ -62,6 +64,12 @@ export function createInternalPickupProofConsumer(
         // Owner folds and verifies immutable issuance/handoff history. Replays must not regenerate expired or used proofs.
         return { status: "completed" };
       }
+      // WP-2423: a pickup proof is valid for at most an hour after the order is ready. A ready event
+      // delivered after that window (a delayed or recovered event) can no longer yield a usable
+      // proof, so it completes without one instead of failing until it is dead-lettered; the order
+      // stays ready for the Store to resolve.
+      if (Date.parse(resources.now()) >= Date.parse(event.payload.readyAt) + pickupWindowMs)
+        return { status: "completed" };
       await proof.issuer.ensureIssued({
         transaction,
         orderReference,

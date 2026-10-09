@@ -277,6 +277,64 @@ async function prove(context) {
       [concurrentParked.map((item) => item.eventId)],
     );
 
+    // WP-2423: an event already decided (here a rejected, dead-lettered one that keeps its error)
+    // must not hold the head of the parked queue: a later retryable failure is still scheduled.
+    const decidedEvent = event(nextId(), { aggregateId: nextId() });
+    await seed(admin, decidedEvent);
+    await admin.query(
+      `UPDATE platform_eventing.outbox_event SET attempt_count = 1, last_error_code = 'TRANSPORT_REJECTED'
+       WHERE event_id = $1`,
+      [decidedEvent.eventId],
+    );
+    await inScope(first, { brandId: brandA }, (transaction) =>
+      recordOutboxFailureDecision(transaction, {
+        attemptId: nextId(),
+        attemptNumber: 1,
+        brandId: brandA,
+        eventId: decidedEvent.eventId,
+        idempotencyKey: nextId(),
+        safeCode: "TRANSPORT_REJECTED",
+        resolution: retryResolution("TRANSPORT_REJECTED"),
+        deadLetterId: nextId(),
+      }),
+    );
+    const laterEvent = event(nextId(), { aggregateId: nextId() });
+    await seed(admin, laterEvent);
+    await admin.query(
+      `UPDATE platform_eventing.outbox_event SET attempt_count = 1, last_error_code = 'TRANSPORT_TIMEOUT'
+       WHERE event_id = $1`,
+      [laterEvent.eventId],
+    );
+    const headResults = await inScope(first, { brandId: brandA }, (transaction) =>
+      scheduleParkedOutboxBatch(transaction, {
+        batchSize: 1,
+        now: new Date(Date.now() + 1_000).toISOString(),
+        random: () => 0,
+        identities: () => ({
+          attemptId: nextId(),
+          deadLetterId: nextId(),
+          idempotencyKey: nextId(),
+        }),
+      }),
+    );
+    assert.deepEqual(headResults, [{ status: "applied" }]);
+    assert.deepEqual(
+      (
+        await admin.query(
+          "SELECT event_id::text, last_error_code FROM platform_eventing.outbox_event WHERE event_id = ANY($1::uuid[]) ORDER BY recorded_at",
+          [[decidedEvent.eventId, laterEvent.eventId]],
+        )
+      ).rows,
+      [
+        { event_id: decidedEvent.eventId, last_error_code: "TRANSPORT_REJECTED" },
+        { event_id: laterEvent.eventId, last_error_code: null },
+      ],
+    );
+    await admin.query(
+      "UPDATE platform_eventing.outbox_event SET published_at = statement_timestamp() WHERE event_id = $1",
+      [laterEvent.eventId],
+    );
+
     const operatorRetryEvent = event(nextId(), { aggregateId: nextId() });
     await seed(admin, operatorRetryEvent);
     await admin.query(
@@ -478,6 +536,96 @@ async function prove(context) {
         recordConsumerFailureDecision(transaction, exhaustedInput),
       ),
       { status: "applied", deadLetterId: exhaustedInput.deadLetterId },
+    );
+
+    // WP-2423: an operator retry of a consumer dead letter found days later opens a new bounded
+    // window (the old one ended when it was dead-lettered) without resetting the attempt count.
+    await admin.query(
+      `UPDATE platform_eventing.consumer_retry_schedule
+       SET available_at = statement_timestamp() - interval '2 days',
+           deadline_at = statement_timestamp() - interval '2 days'
+       WHERE schedule_id = $1 AND state = 'dead_lettered'`,
+      [expiredScheduleId],
+    );
+    const lateRetry = {
+      deadLetterId: exhaustedInput.deadLetterId,
+      brandId: brandA,
+      actorId,
+      permission: "EVENTING_DEAD_LETTER_RETRY",
+      purpose: "RELIABILITY_RECOVERY",
+      reason: "DEPENDENCY_RECOVERED",
+      expectedVersion: 0n,
+      idempotencyKey: nextId(),
+      actionId: nextId(),
+    };
+    assert.equal(
+      await inScope(first, { brandId: brandA }, (transaction) =>
+        applyDeadLetterCommand(transaction, "retry", lateRetry),
+      ),
+      "applied",
+    );
+    const reopened = (
+      await admin.query(
+        `SELECT state, attempt_count, deadline_at > statement_timestamp() + interval '23 hours' AS window_open
+         FROM platform_eventing.consumer_retry_schedule WHERE schedule_id = $1`,
+        [expiredScheduleId],
+      )
+    ).rows[0];
+    assert.deepEqual(reopened, {
+      state: "scheduled",
+      attempt_count: expiredClaims[0].attemptCount,
+      window_open: true,
+    });
+    const lateClaims = await inScope(first, { brandId: brandA }, (transaction) =>
+      claimConsumerRetryBatch(transaction, {
+        batchSize: 25,
+        leaseDurationSeconds: 30,
+        leaseOwner: "retry_worker_late",
+        leaseToken: nextId(),
+        now: new Date().toISOString(),
+      }),
+    );
+    assert.deepEqual(
+      lateClaims.map((claim) => claim.eventId),
+      [expiredEventId],
+    );
+    // The retry fails again: its attempt is recorded (new identity in the new window) and the
+    // item is reopened for the operator's next decision instead of staying "retry scheduled".
+    const lateNow = new Date();
+    const lateFailure = {
+      ...expiredInput,
+      attemptId: nextId(),
+      idempotencyKey: nextId(),
+      deadLetterId: nextId(),
+      // The real case: the retried event had already used its eight automatic attempts.
+      attemptNumber: 8,
+      resolution: resolveRetry({
+        actualAttemptNumber: 8,
+        firstAttemptAt: new Date(lateNow.getTime() - 1_000).toISOString(),
+        now: lateNow.toISOString(),
+        path: "consumer",
+        random: 0,
+        safeCode: "CONSUMER_TEMPORARY_FAILURE",
+      }),
+    };
+    assert.deepEqual(
+      await inScope(first, { brandId: brandA }, (transaction) =>
+        recordConsumerFailureDecision(transaction, lateFailure),
+      ),
+      { status: "applied", deadLetterId: exhaustedInput.deadLetterId },
+    );
+    assert.deepEqual(
+      (
+        await admin.query(
+          `SELECT d.status, d.version::int, s.state,
+             (SELECT count(*)::int FROM platform_eventing.delivery_attempt a WHERE a.event_id = d.event_id) attempts
+           FROM platform_eventing.dead_letter_item d JOIN platform_eventing.consumer_retry_schedule s
+             ON s.event_id = d.event_id AND s.consumer_name = d.consumer_name
+           WHERE d.dead_letter_id = $1`,
+          [exhaustedInput.deadLetterId],
+        )
+      ).rows[0],
+      { status: "open", version: 2, state: "dead_lettered", attempts: 3 },
     );
 
     const storeConsumerInput = {

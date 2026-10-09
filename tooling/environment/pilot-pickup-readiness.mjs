@@ -4,6 +4,7 @@ import { parseKitchenItemReadyEnvelope } from "../../packages/rms/kitchen/src/in
 import { createHash } from "node:crypto";
 import { appendAuditRecordInTransaction } from "../../packages/bop/audit/src/index.ts";
 import {
+  createPostgresMerchantOrderIndex,
   createPostgresOrderFulfillmentSourceStore,
   createPostgresOrderExecutionReader,
 } from "../../packages/rms/ordering/src/index.ts";
@@ -123,12 +124,35 @@ export function createInternalPickupReadiness(
       service.consume(transaction, await authorized(transaction, value)),
     worker: {
       registration: service.registration,
-      consume: async (transaction, value) =>
-        consumeEventInTransaction(
+      consume: async (transaction, value) => {
+        const event = parseKitchenItemReadyEnvelope(value);
+        // WP-2423: pickup readiness applies to pickup Orders. A dine-in item is served at the
+        // table (the dining serving flow owns its readiness), so the event completes here with
+        // no readiness effect instead of failing until it is dead-lettered.
+        const order = active()
+          ? await createPostgresMerchantOrderIndex({
+              ...scope,
+              authorize: async () => active(),
+            }).find({ transaction, orderReference: event.payload.orderReference })
+          : null;
+        if (order?.orderType === "DineIn")
+          return consumeEventInTransaction(
+            transaction,
+            {
+              ...service.registration,
+              handler: async () => ({
+                status: "completed",
+                resultHash: hash("NotApplicable:DineIn:" + event.eventId).slice(7),
+              }),
+            },
+            event,
+          );
+        return consumeEventInTransaction(
           transaction,
           service.registration,
-          await authorized(transaction, value),
-        ),
+          await authorized(transaction, event),
+        );
+      },
     },
   };
 }

@@ -94,7 +94,6 @@ export async function createInternalPaidOutcome(
     let observedAt;
     const initialSource = createOrderPaidOutcomeSource({
       context,
-      quoteVersion: 2,
       sha256: hash,
       release: {
         action: "ReleasePaidOrder",
@@ -213,18 +212,23 @@ export async function createInternalPaidOutcome(
     const outcomes = createPostgresOrderPaymentOutcomeStore({
       ...resources.scope,
       sha256: hash,
+      // WP-2423: a declined payment is its own audited fact. It was recorded with the capture
+      // action and the last capture's evaluation time, so the failure writer refused every one.
       audit: async ({ orderReference, correlationReference, outcome }) => ({
         auditId: reference(),
         brandId: scope.brandReference,
         storeId: scope.storeReference,
         actor: { type: "System" },
-        actionCode: "ORDER_PAYMENT_DISPOSITION_RECORDED",
+        actionCode:
+          outcome === "PaymentFailed"
+            ? "ORDER_PAYMENT_FAILURE_RECORDED"
+            : "ORDER_PAYMENT_DISPOSITION_RECORDED",
         targetType: "Order",
         targetId: orderReference,
         correlationId: correlationReference,
         afterSummary: { outcome },
-        reasonCode: "PAYMENT_CAPTURED",
-        occurredAt: observedAt ?? resources.now(),
+        reasonCode: outcome === "PaymentFailed" ? "PAYMENT_FAILED" : "PAYMENT_CAPTURED",
+        occurredAt: outcome === "PaymentFailed" ? resources.now() : (observedAt ?? resources.now()),
         sourceChannel: "EVENT_CONSUMER",
         dataClassification: "Restricted",
         retentionPolicyCode: "FINANCIAL_COMPLIANCE",
