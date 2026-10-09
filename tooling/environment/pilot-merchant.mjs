@@ -15,6 +15,7 @@ import { resolveInternalDiningTaskPolicy } from "./pilot-dining-task-policy.mjs"
 import { createInternalExceptionSnapshotTransactions } from "./pilot-exception-snapshot.mjs";
 import { readInternalExceptionCoverage } from "./pilot-exception-coverage.mjs";
 import { createPersistentMerchantOrderExceptions } from "../../apps/api/dist/persistent-merchant-order-exceptions.js";
+import { createPersistentMerchantSettlement } from "../../apps/api/dist/persistent-merchant-settlement.js";
 import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
 import { createMerchantCompensationReconciliationQuery } from "../../apps/api/dist/merchant-compensation-reconciliation-query.js";
 import { createMerchantCompensationReconciliationCommand } from "../../apps/api/dist/merchant-compensation-reconciliation-command.js";
@@ -175,6 +176,13 @@ export async function createInternalMerchant(
           label: "Pickup",
           href: "/operations/pickup",
           permission: "fulfillment.operate",
+        },
+        // WP-2423 P1: day-end settlement for the Store Manager (Section 88 PAY-RECONCILIATION).
+        {
+          screenId: "PAY-RECONCILIATION",
+          label: "Settlement",
+          href: "/app/operations/payment-reconciliation",
+          permission: "operations.order-exception.manage",
         },
         {
           screenId: "INV-ITEM-LIST",
@@ -377,6 +385,19 @@ export async function createInternalMerchant(
       if (scope[key] !== selected[key]) throw new Error("INTERNAL_REFUND_SCOPE_DENIED");
     return { providerAccountReference, environment: "Test", roleMapping };
   };
+  const settlement = logUnexpected(
+    "INTERNAL_SETTLEMENT_UNAVAILABLE",
+    createPersistentMerchantSettlement({
+      persistence,
+      resolveConfiguration: async (tx, scope) => {
+        const configuration = await refundConfiguration(tx, scope);
+        return {
+          providerAccountReference: configuration.providerAccountReference,
+          environment: configuration.environment,
+        };
+      },
+    }),
+  );
   const refundPaymentContext = createMerchantRefundPaymentContext({
     persistence,
     authentication: service,
@@ -717,6 +738,7 @@ export async function createInternalMerchant(
       reconciliationFollowUp,
       reconciliationFollowUpQuery,
       orderExceptions,
+      settlement,
       compensationReconciliation,
       compensationQuery,
       ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),

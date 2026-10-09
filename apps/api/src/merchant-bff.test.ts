@@ -1862,6 +1862,85 @@ it("protects the minimal Dining serve command and keeps private facts out of res
   ).toBe(503);
 });
 
+async function serveSettlement(settlement?: MerchantBffRouterOptions["settlement"]) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(settlement ? { settlement } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+describe("WP-2423 P1 merchant settlement read route", () => {
+  const view = {
+    screenId: "PAY-RECONCILIATION" as const,
+    storeLabel: "Synthetic Store",
+    businessDate: "2026-09-21",
+    window: {
+      startsAt: "2026-09-21T08:00:00.000Z",
+      endsAt: "2026-09-22T08:00:00.000Z",
+      timeZone: "America/Toronto",
+      status: "Closed" as const,
+    },
+    captured: { count: 3, amountMinor: "4500", currencyCode: "CAD" as const },
+    refunded: null,
+    reconciliation: { runs: [], differences: [] },
+    projectedAt: "2026-09-22T09:00:00.000Z",
+  };
+  const headers = {
+    host: "merchant.invalid",
+    cookie: "__Host-bop-merchant=" + sessionCookie,
+    "sec-fetch-site": "same-origin",
+  };
+  it("passes the session cookie and an optional business date to the reader, no caching", async () => {
+    const read = vi.fn<NonNullable<MerchantBffRouterOptions["settlement"]>>(async () => view);
+    const root = await serveSettlement(read);
+    const latest = await request(root, "/merchant/settlement", { headers });
+    expect(latest.status).toBe(200);
+    expect(latest.headers.get("cache-control")).toBe("no-store");
+    expect(read).toHaveBeenLastCalledWith({ sessionCookie, businessDate: null });
+    const day = await request(root, "/merchant/settlement?businessDate=2026-09-21", { headers });
+    expect(day.status).toBe(200);
+    expect(await day.json()).toMatchObject({
+      screenId: "PAY-RECONCILIATION",
+      businessDate: "2026-09-21",
+    });
+    expect(read).toHaveBeenLastCalledWith({ sessionCookie, businessDate: "2026-09-21" });
+  });
+  it("refuses a malformed date, extra parameters, a missing session and a cross-site read", async () => {
+    const read = vi.fn<NonNullable<MerchantBffRouterOptions["settlement"]>>(async () => view);
+    const root = await serveSettlement(read);
+    for (const [path, extra] of [
+      ["/merchant/settlement?businessDate=2026-9-1", {}],
+      ["/merchant/settlement?businessDate=2026-09-21&store=x", {}],
+      ["/merchant/settlement", { cookie: "" }],
+      ["/merchant/settlement", { "sec-fetch-site": "cross-site" }],
+    ] as const) {
+      const result = await request(root, path, { headers: { ...headers, ...extra } });
+      expect(result.status).toBe(403);
+    }
+    expect(read).not.toHaveBeenCalled();
+    const absent = await serveSettlement();
+    expect((await request(absent, "/merchant/settlement", { headers })).status).toBe(503);
+  });
+  it("answers a reader failure as denied without leaking the reason", async () => {
+    const root = await serveSettlement(async () => {
+      throw new Error("MERCHANT_SETTLEMENT_UNAVAILABLE");
+    });
+    const result = await request(root, "/merchant/settlement", { headers });
+    expect(result.status).toBe(403);
+    expect(await result.text()).not.toContain("SETTLEMENT");
+  });
+});
 async function serveOrderClose(orderClosure?: MerchantBffRouterOptions["orderClosure"]) {
   const app = express();
   app.use(

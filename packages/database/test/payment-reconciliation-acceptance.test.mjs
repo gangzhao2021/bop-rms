@@ -185,6 +185,95 @@ it("persists immutable Store-scoped Payment reconciliation runs, checks and exce
   await withIsolatedDatabase({ caseId: "payment_recon", root }, prove);
 }, 180_000);
 
+it("reads one business day's runs and unmatched checks through the settlement window source", async () => {
+  await withIsolatedDatabase({ caseId: "payment_recon_window", root }, async (context) => {
+    const { createPostgresPaymentReconciliationWindowSource } =
+      await import("../../rms/payment/src/infrastructure/persistence/payment-reconciliation-window-source.ts");
+    const client = new Client(context.clientConfig);
+    await client.connect();
+    try {
+      const startsAt = "2026-08-03T08:00:00.000Z",
+        endsAt = "2026-08-04T08:00:00.000Z";
+      const run = (reference, mode, cutoffAt, difference) =>
+        client.query(
+          `INSERT INTO rms_payment.payment_reconciliation_run
+           (reconciliation_run_id,brand_id,store_id,mode,actor_id,purpose,scheduled_at,cutoff_at,
+            max_candidates,completed_at,matched_count,healed_count,unresolved_count,unavailable_count,difference_count)
+           VALUES ($1,$2,$3,$4,NULL,'ReconcilePayments',$5,$5,10,$5,3,0,0,0,$6)`,
+          [reference, id(2), id(3), mode, cutoffAt, difference],
+        );
+      await run(id(30), "DailySettlement", endsAt, 1);
+      await run(id(31), "Operational", "2026-08-04T09:00:00.000Z", 0);
+      await client.query(
+        `INSERT INTO rms_payment.payment_reconciliation_exception
+         (reconciliation_exception_id,brand_id,store_id,candidate_id,reason,severity,status,opened_at)
+         VALUES ($1,$2,$3,$4,'RefundMismatch','Error','Open',$5)`,
+        [id(32), id(2), id(3), id(33), endsAt],
+      );
+      await client.query(
+        `INSERT INTO rms_payment.payment_reconciliation_record
+         (reconciliation_check_id,reconciliation_run_id,candidate_id,brand_id,store_id,mode,
+          settlement_reference,outcome,difference_reason,internal_captured_minor,provider_captured_minor,
+          internal_refunded_minor,provider_refunded_minor,currency_code,reconciliation_exception_id,checked_at)
+         VALUES ($1,$2,$3,$4,$5,'DailySettlement','set_SYNTHETIC_DAY','Difference','RefundMismatch',
+          1130,1130,0,1130,'CAD',$6,$7)`,
+        [id(34), id(30), id(33), id(2), id(3), id(32), endsAt],
+      );
+      await client.query(
+        `INSERT INTO rms_payment.payment_reconciliation_record
+         (reconciliation_check_id,reconciliation_run_id,candidate_id,brand_id,store_id,mode,
+          settlement_reference,outcome,internal_captured_minor,provider_captured_minor,
+          internal_refunded_minor,provider_refunded_minor,currency_code,checked_at)
+         VALUES ($1,$2,$3,$4,$5,'DailySettlement','set_SYNTHETIC_DAY_B','Matched',2500,2500,0,0,'CAD',$6)`,
+        [id(36), id(30), id(37), id(2), id(3), endsAt],
+      );
+      const tx = { query: (sql, values) => client.query(sql, values) };
+      const read = createPostgresPaymentReconciliationWindowSource({
+        scope: { brandReference: id(2), storeReference: id(3) },
+        authorize: async () => true,
+      });
+      const day = await read(tx, { startsAt, endsAt });
+      assert.equal(day.runs.length, 1);
+      assert.equal(day.runs[0].runReference, id(30));
+      assert.deepEqual(day.runs[0].counts, {
+        Matched: 3,
+        Healed: 0,
+        Unresolved: 0,
+        Unavailable: 0,
+        Difference: 1,
+      });
+      assert.equal(day.differences.length, 1);
+      assert.deepEqual(
+        {
+          outcome: day.differences[0].outcome,
+          reason: day.differences[0].differenceReason,
+          settlement: day.differences[0].settlementReference,
+          providerRefunded: day.differences[0].providerRefundedMinor,
+          exception: day.differences[0].exceptionReference,
+        },
+        {
+          outcome: "Difference",
+          reason: "RefundMismatch",
+          settlement: "set_SYNTHETIC_DAY",
+          providerRefunded: "1130",
+          exception: id(32),
+        },
+      );
+      const next = await read(tx, { startsAt: endsAt, endsAt: "2026-08-05T08:00:00.000Z" });
+      assert.equal(next.runs.length, 1);
+      assert.equal(next.runs[0].mode, "Operational");
+      assert.equal(next.differences.length, 0);
+      const other = createPostgresPaymentReconciliationWindowSource({
+        scope: { brandReference: id(2), storeReference: id(9) },
+        authorize: async () => true,
+      });
+      assert.deepEqual((await other(tx, { startsAt, endsAt })).runs, []);
+    } finally {
+      await client.end();
+    }
+  });
+}, 180_000);
+
 it("retains Provider-only capture evidence with exact exception scope and immutable history", async () => {
   await withIsolatedDatabase({ caseId: "provider_capture", root }, async (context) => {
     const client = new Client(context.clientConfig);

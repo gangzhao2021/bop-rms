@@ -19,6 +19,8 @@ import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { MerchantShell } from "./MerchantShell.js";
 import { StoreOverview } from "./StoreOverview.js";
+import { SettlementPage } from "./SettlementPage.js";
+import { WorkspacePage } from "./WorkspacePage.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { PickupQueuePage } from "./PickupPages.js";
 import { KdsProfilePage } from "./KdsProfilePage.js";
@@ -1132,6 +1134,24 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       />
       <Route path="/app/integrations/kds-profiles" element={<KdsProfilePage />} />
       <Route path="/app/operations/tables" element={<DiningTableListPage />} />
+      <Route
+        path="/app/operations/payment-reconciliation"
+        element={
+          demo === null && state.kind === "Ready" && !state.switching ? (
+            <SettlementPage
+              key={state.workspace.selectedScope.storeReference + state.csrf}
+              storeLabel={state.workspace.selectedScope.storeLabel}
+              timeZone={state.workspace.selectedScope.timeZone}
+            />
+          ) : (
+            <WorkspacePage title="Settlement">
+              <StatePanel heading="Settlement unavailable" tone="error" status>
+                <p>A current merchant session and Store are required.</p>
+              </StatePanel>
+            </WorkspacePage>
+          )
+        }
+      />
       <Route
         path="/operations/order-exceptions"
         element={

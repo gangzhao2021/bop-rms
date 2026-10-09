@@ -2263,6 +2263,16 @@ async function scanUnsupported(root, module, diagnostics) {
             "payment_reconciliation_record",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/payment-reconciliation-run-source.ts";
+        const acceptedPaymentReconciliationWindowAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "payment_reconciliation_run",
+            "payment_reconciliation_exception",
+            "payment_reconciliation_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/payment-reconciliation-window-source.ts";
         const acceptedReconciliationFollowUpAsset =
           module.packageName === "@rms/payment" &&
           module.manifest.ownedDatabase?.schema === "rms_payment" &&
@@ -3297,6 +3307,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedOrderCancelledAmountAsset &&
           !acceptedPaymentReconciliationCandidatesAsset &&
           !acceptedPaymentReconciliationRunAsset &&
+          !acceptedPaymentReconciliationWindowAsset &&
           !acceptedReconciliationFollowUpAsset &&
           !acceptedUnmatchedCaptureRefundAsset &&
           !acceptedProviderCaptureExceptionAsset &&

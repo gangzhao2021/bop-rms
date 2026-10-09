@@ -6696,6 +6696,79 @@ body:has(.product-complete-draft) .bop-shell__header,
   grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
   gap: 16px;
 }
+/* WP-2423 P1: the day-end settlement page. */
+.settlement {
+  display: grid;
+  gap: 16px;
+}
+.settlement__picker {
+  grid-template-columns: minmax(10rem, 14rem) auto auto;
+  align-items: end;
+  margin-bottom: 16px;
+}
+.settlement__picker input[type="date"] {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+}
+.settlement__day .status-chip[data-state="open"] {
+  border-style: dashed;
+}
+.settlement__totals {
+  margin: 0;
+}
+.settlement__differences {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.settlement__differences th,
+.settlement__differences td {
+  padding: 8px 12px 8px 0;
+  border-top: 1px solid var(--bop-color-border-default);
+  text-align: left;
+  vertical-align: top;
+}
+.settlement__differences th {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.settlement__differences td {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 767px) {
+  .settlement__picker {
+    grid-template-columns: 1fr;
+  }
+  .settlement__differences thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .settlement__differences tr {
+    display: grid;
+    gap: 2px;
+    padding: 10px 0;
+    border-top: 1px solid var(--bop-color-border-default);
+  }
+  .settlement__differences td {
+    padding: 0;
+    border: 0;
+  }
+  .settlement__differences td::before {
+    content: attr(data-label) " · ";
+    color: var(--bop-color-text-muted);
+    font-size: 13px;
+  }
+}
 /* WP-2423 P2: the live "right now" card. */
 .overview-card--today header {
   display: flex;

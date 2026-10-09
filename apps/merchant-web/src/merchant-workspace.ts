@@ -31,6 +31,7 @@ export interface MerchantNavigationItem {
     | "CAT-OPTIONSET-LIST"
     | "OPS-ORDER-QUEUE"
     | "OPS-ORDER-EXCEPTION"
+    | "PAY-RECONCILIATION"
     | "KIT-KITCHEN-QUEUE"
     | "FUL-PICKUP-QUEUE"
     | "DEV-KDS-PROFILE"
@@ -73,6 +74,11 @@ const NAVIGATION = Object.freeze({
   "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
+  // WP-2423 P1: day-end settlement under the pilot's exception permission.
+  "PAY-RECONCILIATION": [
+    "/app/operations/payment-reconciliation",
+    "operations.order-exception.manage",
+  ],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],

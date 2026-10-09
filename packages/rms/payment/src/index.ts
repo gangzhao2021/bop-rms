@@ -174,6 +174,14 @@ export {
   createPostgresPaymentReconciliationRunSource,
   createPostgresPaymentReconciliationRepository,
 } from "./infrastructure/persistence/payment-reconciliation-run-source.js";
+export {
+  createPostgresPaymentReconciliationWindowSource,
+  paymentReconciliationWindowRunLimit,
+  paymentReconciliationWindowDifferenceLimit,
+  type PaymentReconciliationWindow,
+  type PaymentReconciliationWindowRun,
+  type PaymentReconciliationWindowDifference,
+} from "./infrastructure/persistence/payment-reconciliation-window-source.js";
 
 export {
   createPostgresPaymentReconciliationCandidates,

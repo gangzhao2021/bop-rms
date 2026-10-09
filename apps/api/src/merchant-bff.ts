@@ -263,6 +263,7 @@ import type { createMerchantDiningItemService } from "./merchant-dining-item-ser
 import type { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
 import type { createMerchantServiceControl } from "./merchant-service-control.js";
 import type { createMerchantOrderExceptionRead } from "./merchant-order-exception-read.js";
+import type { createMerchantSettlementRead } from "./merchant-settlement-read.js";
 import type {
   AuthenticationSession,
   BrowserCookieMutation,
@@ -303,6 +304,11 @@ const merchantNavigation = Object.freeze({
   "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],
   "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
+  // WP-2423 P1: day-end settlement (Section 88 PAY-RECONCILIATION) under the pilot's exception permission.
+  "PAY-RECONCILIATION": [
+    "/app/operations/payment-reconciliation",
+    "operations.order-exception.manage",
+  ],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
@@ -547,6 +553,8 @@ export interface MerchantBffRouterOptions {
   readonly storeConfigurationState?: ReturnType<typeof createMerchantStoreConfiguration>["read"];
   readonly serviceControlState?: ReturnType<typeof createMerchantServiceControl>["read"];
   readonly orderExceptions?: ReturnType<typeof createMerchantOrderExceptionRead>;
+  /** WP-2423 P1: the day-end settlement view for one business day. */
+  readonly settlement?: ReturnType<typeof createMerchantSettlementRead>;
   readonly service: MerchantBffService;
   readonly exactOrigin: string;
   readonly acceptedHost: string;
@@ -1601,6 +1609,32 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           })),
         });
       })
+      .catch(() => denied(response));
+  });
+
+  router.get("/settlement", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const businessDate = request.query.businessDate;
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).some((key) => key !== "businessDate") ||
+      (businessDate !== undefined &&
+        (typeof businessDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(businessDate))) ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.settlement) {
+      response.status(503).json({ error: "settlement_unavailable" });
+      return;
+    }
+    void options
+      .settlement({ sessionCookie, businessDate: businessDate === undefined ? null : businessDate })
+      .then((view) => response.json(view))
       .catch(() => denied(response));
   });
 

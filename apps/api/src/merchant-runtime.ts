@@ -269,6 +269,7 @@ export interface MerchantRuntimeOptions {
     readonly review: NonNullable<ConfigurationOptions["review"]>;
   };
   readonly orderExceptions?: MerchantBffRouterOptions["orderExceptions"];
+  readonly settlement?: MerchantBffRouterOptions["settlement"];
   readonly diningItemService?: Omit<
     Parameters<typeof createMerchantDiningItemService>[0],
     "persistence" | "authentication"
@@ -907,5 +908,6 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
           }),
         }),
     ...(options.orderExceptions === undefined ? {} : { orderExceptions: options.orderExceptions }),
+    ...(options.settlement === undefined ? {} : { settlement: options.settlement }),
   };
 }
