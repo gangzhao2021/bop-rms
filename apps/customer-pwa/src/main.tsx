@@ -16,6 +16,7 @@ import "@fontsource-variable/jetbrains-mono/index.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
+import { AppErrorBoundary } from "@bop-rms/ui";
 import { App } from "./App.js";
 import { createCustomerEntryClient } from "./entry/entry-client.js";
 import "./styles.css";
@@ -80,13 +81,15 @@ async function start() {
   };
   createRoot(root).render(
     <StrictMode>
-      <BrowserRouter>
-        <App
-          entryClient={entryClient}
-          diningAdmission={diningAdmission}
-          initialMenuContext={initialMenuContext}
-        />
-      </BrowserRouter>
+      <AppErrorBoundary>
+        <BrowserRouter>
+          <App
+            entryClient={entryClient}
+            diningAdmission={diningAdmission}
+            initialMenuContext={initialMenuContext}
+          />
+        </BrowserRouter>
+      </AppErrorBoundary>
     </StrictMode>,
   );
   startCustomerServiceWorker();

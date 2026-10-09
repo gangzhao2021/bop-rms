@@ -53,7 +53,7 @@ export default defineConfig(({ command, mode }) => {
         registerType: "prompt",
         manifest: false,
         injectManifest: {
-          globPatterns: ["**/*.{js,css,woff2,html,webmanifest}"],
+          globPatterns: ["**/*.{js,css,woff2,html,webmanifest,png,svg}"],
           globIgnores: ["**/*.map"],
         },
         devOptions: { enabled: false },

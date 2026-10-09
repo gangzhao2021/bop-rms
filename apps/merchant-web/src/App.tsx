@@ -22,7 +22,6 @@ import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { PickupQueuePage } from "./PickupPages.js";
 import { KdsProfilePage } from "./KdsProfilePage.js";
 import { OrderExceptionPage } from "./OrderExceptionPage.js";
-import { OrderDetailPage, OrderQueuePage } from "./OrderQueuePages.js";
 import { OrderAmendmentPage } from "./OrderAmendmentPage.js";
 import { StoreMenuBuilderPage, StoreMenuListPage } from "./StoreMenuPages.js";
 import { createMenuClient } from "./store-menu-pages.js";
@@ -639,7 +638,12 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         element={
           <LocalDemoRoute notice={demo?.Notice ?? null}>
             {demo !== null ? (
-              <OrderQueuePage {...clientProps(demo.orderQueue)} />
+              <CurrentOrderQueuePage
+                storeLabel={demo.demoStore.storeLabel}
+                csrf="local-demo"
+                timeZone={demo.demoStore.timeZone}
+                fetcher={demo.merchantFetch}
+              />
             ) : state.kind === "Ready" && !state.switching ? (
               <CurrentOrderQueuePage
                 key={state.workspace.selectedScope.storeReference + state.csrf}
@@ -969,7 +973,12 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         element={
           <LocalDemoRoute notice={demo?.Notice ?? null}>
             {demo !== null ? (
-              <OrderDetailPage {...clientProps(demo.orderQueue)} />
+              <CurrentOrderDetailRoute
+                storeLabel={demo.demoStore.storeLabel}
+                csrf="local-demo"
+                timeZone={demo.demoStore.timeZone}
+                fetcher={demo.merchantFetch}
+              />
             ) : state.kind === "Ready" && !state.switching ? (
               <CurrentOrderDetailRoute
                 key={state.workspace.selectedScope.storeReference + state.csrf}

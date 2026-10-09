@@ -52,11 +52,14 @@ export function DiningOrderProgress({
   csrf,
   locked = false,
   onBusy,
+  fetcher,
 }: {
   readonly orderReference: string;
   readonly csrf: string;
   readonly locked?: boolean;
   readonly onBusy?: (busy: boolean) => void;
+  /** WP-2423 P5: an injected transport (the local demo). */
+  readonly fetcher?: typeof fetch | undefined;
 }) {
   const [state, setState] = useState<State>({ kind: "Idle" });
   const [busy, setBusy] = useState(false);
@@ -73,7 +76,11 @@ export function DiningOrderProgress({
     active.current = controller;
     setState({ kind: "Loading" });
     try {
-      const view = await createDiningProgressClient().load(orderReference, csrf, controller.signal);
+      const view = await createDiningProgressClient(fetcher).load(
+        orderReference,
+        csrf,
+        controller.signal,
+      );
       if (!controller.signal.aborted) setState({ kind: "Ready", view });
     } catch (error) {
       if (!controller.signal.aborted)

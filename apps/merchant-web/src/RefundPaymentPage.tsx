@@ -3,7 +3,7 @@ import {
   createOrdinaryRefundPreparationClient,
   OrdinaryRefundPreparationClientError,
 } from "./ordinary-refund-preparation-client.js";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { SourceTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -30,10 +30,17 @@ const errorMessage = (error: unknown) =>
 export function OrderPaymentLinks({
   orderReference,
   csrf,
+  fetcher,
 }: {
   readonly orderReference: string;
   readonly csrf: string;
+  /** WP-2423 P5: an injected transport (the local demo); the shared client otherwise. */
+  readonly fetcher?: typeof fetch | undefined;
 }) {
+  const paymentClient = useMemo(
+    () => (fetcher === undefined ? client : createOrdinaryRefundClient(fetcher)),
+    [fetcher],
+  );
   const [links, setLinks] = useState<readonly string[]>([]),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
@@ -46,7 +53,7 @@ export function OrderPaymentLinks({
     setBusy(true);
     setMessage("");
     try {
-      const result = await client.items(orderReference, csrf, controller.signal);
+      const result = await paymentClient.items(orderReference, csrf, controller.signal);
       if (!controller.signal.aborted) {
         const ids = [
           ...new Set(

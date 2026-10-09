@@ -19,8 +19,8 @@ const routes = [
   },
   { path: "/app/commerce/menus", identity: "Menus are unavailable" },
   { path: `/app/commerce/menus/${MENU_REFERENCE}/edit`, identity: "Synthetic Brand" },
-  { path: "/operations/orders", identity: "OPS-ORDER-QUEUE" },
-  { path: `/operations/orders/${ORDER_REFERENCE}`, identity: "OPS-ORDER-DETAIL" },
+  { path: "/operations/orders", identity: "ORD-1002" },
+  { path: `/operations/orders/${ORDER_REFERENCE}`, identity: "Synthetic mushroom rice bowl" },
   { path: "/operations/kitchen", identity: "Kitchen display" },
   {
     path: `/operations/kitchen/work-items/${WORK_ITEM_REFERENCE}`,
@@ -96,7 +96,7 @@ test.describe("@demo local-only Merchant showcase", () => {
     await expect(skipLink).toBeFocused();
     await expect(skipLink).toBeInViewport();
 
-    const orderQueue = page.getByRole("link", { name: /Order Queue/ });
+    const orderQueue = page.getByRole("main").getByRole("link", { name: /\bOrders\b/ });
     await expect(orderQueue).toBeVisible();
     await orderQueue.click();
     await expect(page).toHaveURL(/\/operations\/orders$/u);

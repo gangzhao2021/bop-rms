@@ -19,7 +19,6 @@ import {
 type State =
   | { kind: "Loading" | "PermissionDenied" | "NotFound" | "Unavailable" }
   | { kind: "Ready"; view: CurrentOrderQueue; detail?: CurrentOrderDetail };
-const client = createCurrentOrderQueueClient();
 interface CurrentOrderFilters {
   readonly orderNumber: string;
   readonly type: string;
@@ -125,7 +124,13 @@ export function CurrentOrderLines({ lines }: { readonly lines: CurrentOrderDetai
 }
 
 /** Reads an Order's lines when its queue entry is opened. */
-function QueuedOrderLines({ orderReference }: { readonly orderReference: string }) {
+function QueuedOrderLines({
+  orderReference,
+  client,
+}: {
+  readonly orderReference: string;
+  readonly client: ReturnType<typeof createCurrentOrderQueueClient>;
+}) {
   const [state, setState] = useState<
     { kind: "Loading" | "Unavailable" } | { kind: "Ready"; detail: CurrentOrderDetail }
   >({ kind: "Loading" });
@@ -140,7 +145,7 @@ function QueuedOrderLines({ orderReference }: { readonly orderReference: string 
         if (!controller.signal.aborted) setState({ kind: "Unavailable" });
       });
     return () => controller.abort();
-  }, [orderReference]);
+  }, [orderReference, client]);
   return state.kind === "Ready" ? (
     <CurrentOrderLines lines={state.detail.lines} />
   ) : (
@@ -321,6 +326,7 @@ export function CurrentOrderDetails({
   locked,
   onBusy,
   lines,
+  fetcher,
 }: {
   readonly order: CurrentOrderQueue["items"][number];
   readonly csrf: string;
@@ -328,17 +334,19 @@ export function CurrentOrderDetails({
   readonly onBusy: (busy: boolean) => void;
   /** The Order's items, or null when they are not shown (the queue entry is closed). */
   readonly lines?: React.ReactNode;
+  readonly fetcher?: typeof fetch | undefined;
 }) {
   return (
     <>
       {lines}
-      <OrderPaymentLinks orderReference={order.orderReference} csrf={csrf} />
+      <OrderPaymentLinks orderReference={order.orderReference} csrf={csrf} fetcher={fetcher} />
       {order.orderType === "DineIn" && order.currentPhase !== "Cancelled" ? (
         <DiningOrderProgress
           orderReference={order.orderReference}
           csrf={csrf}
           locked={locked}
           onBusy={onBusy}
+          fetcher={fetcher}
         />
       ) : null}
     </>
@@ -350,6 +358,7 @@ export function CurrentOrderQueuePage({
   csrf,
   timeZone,
   orderReference,
+  fetcher,
 }: {
   readonly storeLabel: string;
   readonly csrf: string;
@@ -357,7 +366,10 @@ export function CurrentOrderQueuePage({
   readonly orderReference?: string | undefined;
   /** WP-2423: the Store's IANA time zone; order times are shown in it. */
   readonly timeZone?: string | undefined;
+  /** WP-2423 P5: the transport for every read and command on this page (the local demo injects one). */
+  readonly fetcher?: typeof fetch | undefined;
 }) {
+  const client = useMemo(() => createCurrentOrderQueueClient(fetcher), [fetcher]);
   const operations = useRef(
     new Map<string, ReturnType<ReturnType<typeof createOrderAcceptanceClient>["prepare"]>>(),
   );
@@ -535,12 +547,13 @@ export function CurrentOrderQueuePage({
               visibleOrderReferences={visibleOrderReferences}
               detail={(order, open) => (
                 <CurrentOrderDetails
+                  fetcher={fetcher}
                   lines={
                     detail !== undefined ? (
                       <CurrentOrderLines lines={detail.lines} />
                     ) : open ? (
                       <>
-                        <QueuedOrderLines orderReference={order.orderReference} />
+                        <QueuedOrderLines orderReference={order.orderReference} client={client} />
                         <Link to={`/operations/orders/${order.orderReference}`}>Open order</Link>
                       </>
                     ) : null
@@ -569,7 +582,7 @@ export function CurrentOrderQueuePage({
                       operation={() => {
                         let operation = operations.current.get(batch.orderBatchReference);
                         if (!operation) {
-                          operation = createOrderAcceptanceClient().prepare({
+                          operation = createOrderAcceptanceClient(fetcher).prepare({
                             acceptanceReference: serviceOperationReference(),
                             operationReference: serviceOperationReference(),
                             orderReference: order.orderReference,
@@ -640,6 +653,7 @@ export function CurrentOrderDetailRoute(props: {
   readonly storeLabel: string;
   readonly csrf: string;
   readonly timeZone?: string | undefined;
+  readonly fetcher?: typeof fetch | undefined;
 }) {
   const id = useParams().id;
   return id === undefined || !orderRoute.test(id) ? (

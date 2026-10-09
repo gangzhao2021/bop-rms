@@ -11,7 +11,7 @@ import {
   sanitizedSupportCaseFixture,
 } from "./merchant-demo.js";
 import { LocalDemoNotice } from "./merchant-demo-ui.js";
-import { parseOrderQueueView } from "./order-queue.js";
+import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
 import { parseStoreListView } from "./store-admin.js";
 import { parseSupportCasePageView } from "./support-case-pages.js";
 
@@ -42,7 +42,10 @@ describe("local-only Merchant core workflow preview", () => {
     expect(clients.enabled).toBe(true);
     expect(parseStoreListView(await clients.storeAdmin.listStores()).items).toHaveLength(1);
     expect(parseMenuListView(await clients.catalogMenu.listMenus()).items).toHaveLength(1);
-    expect(parseOrderQueueView(await clients.orderQueue.loadQueue()).items).toHaveLength(1);
+    expect(
+      parseCurrentOrderQueue(await (await clients.merchantFetch("/merchant/orders")).json(), null)
+        .items,
+    ).toHaveLength(3);
     expect(parseKitchenBoardView(await clients.kitchenBoard.loadQueue()).items).toHaveLength(1);
     expect(
       parseComplianceDashboardView(await clients.complianceDashboard.load()).signals,

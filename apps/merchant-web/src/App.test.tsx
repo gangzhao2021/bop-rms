@@ -107,7 +107,7 @@ describe("HOME-OVERVIEW Merchant shell", () => {
       "Orders today",
       "CAD $1,284.60",
       "Explore the operating system",
-      "Order Queue",
+      "Orders",
       "Kitchen Board",
       "Store Configuration",
       "Compliance Dashboard",

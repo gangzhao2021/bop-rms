@@ -13,8 +13,8 @@ export function ShowcaseOverview() {
   const modules = [
     {
       eyebrow: "OPERATIONS",
-      title: "Order Queue",
-      detail: "1 submitted order · 2 items",
+      title: "Orders",
+      detail: "3 open orders · 1 awaiting acceptance",
       status: "Live preview",
       href: "/operations/orders",
     },

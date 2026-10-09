@@ -358,6 +358,32 @@ button {
 .bop-muted {
   color: var(--bop-color-text-muted);
 }
+/* WP-2423 P4: the application error page. */
+.bop-error-page {
+  width: min(36rem, 100%);
+  margin: 0 auto;
+  padding: 12vh clamp(1rem, 4vw, 2rem) var(--bop-space-8);
+}
+.bop-error-page h1 {
+  margin: 0 0 var(--bop-space-3);
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+.bop-error-page p {
+  margin: 0 0 var(--bop-space-5);
+  color: var(--bop-color-text-muted);
+}
+.bop-error-page button {
+  min-height: 44px;
+  padding: 0 var(--bop-space-5);
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font: inherit;
+  font-weight: 600;
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

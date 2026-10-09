@@ -1,13 +1,29 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  AppErrorBoundary,
   AppFrame,
+  ErrorFallback,
   SkipLinkProvidedContext,
   StatePanel,
   bopPilotNeutralTokenNames,
 } from "./index.js";
 
 describe("shared UI foundation", () => {
+  it("passes children through the error boundary and offers a reload on failure", () => {
+    expect(
+      renderToStaticMarkup(
+        <AppErrorBoundary>
+          <p>Body</p>
+        </AppErrorBoundary>,
+      ),
+    ).toBe("<p>Body</p>");
+    const fallback = renderToStaticMarkup(<ErrorFallback onReload={() => undefined} />);
+    expect(fallback).toContain('<main id="main-content" class="bop-error-page"');
+    expect(fallback).toContain("Something went wrong");
+    expect(fallback).toContain(">Reload</button>");
+    expect(fallback).not.toContain("stack");
+  });
   it("leaves its skip link out inside a layout that already provides one", () => {
     const html = renderToStaticMarkup(
       <SkipLinkProvidedContext.Provider value={true}>

@@ -1,5 +1,5 @@
 import { AppFrame } from "@bop-rms/ui";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Link } from "react-router";
 
 export type CustomerJourneyStep =
@@ -33,6 +33,10 @@ export function CustomerPage({
   readonly children: ReactNode;
 }) {
   const mode = serviceModeLabel(store?.serviceMode);
+  // The browser tab and the installed app carry the Store's name, not the product's.
+  useEffect(() => {
+    document.title = store ? `${store.storeName} · Order` : "BOP Order";
+  }, [store]);
   const description = store
     ? [store.brandName, mode].filter((part) => part !== undefined && part !== "").join(" · ")
     : "Scan the location QR code to begin";
