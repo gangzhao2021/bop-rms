@@ -1,6 +1,7 @@
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
 import { createPostgresKitchenCustomerStatusReader } from "@rms/kitchen";
 import { createPostgresPaymentStatusStore } from "@rms/payment";
+import { loadPickupNotCollected } from "@rms/fulfillment";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   GuestSessionService,
@@ -202,6 +203,11 @@ export function createCustomerOrderStatusRead(
               freshnessStatus: projection.freshnessStatus,
             }));
           }
+          // WP-2423: a pickup the Store closed as not collected (Fulfillment's fact).
+          const pickup =
+            result.order.orderType === "Pickup" && (await stillAuthorized())
+              ? await loadPickupNotCollected(transaction, options.scope, orderReference)
+              : undefined;
           if (!(await stillAuthorized()))
             throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
           const checkedAt = now();
@@ -221,6 +227,9 @@ export function createCustomerOrderStatusRead(
                     }
                   : null,
               payments,
+              ...(pickup === undefined
+                ? {}
+                : { pickup: pickup === null ? null : { notCollectedAt: pickup.closedAt } }),
             },
           };
         });

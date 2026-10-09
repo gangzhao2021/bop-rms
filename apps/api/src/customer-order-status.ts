@@ -170,6 +170,14 @@ export class CustomerOrderStatusHandler {
                                   currencyCode: payment.amount.currencyCode,
                                 },
                         })),
+                  ...(sources.pickup === undefined
+                    ? {}
+                    : {
+                        pickup:
+                          sources.pickup === null
+                            ? null
+                            : { notCollectedAt: sources.pickup.notCollectedAt },
+                      }),
                 },
               };
         response.status(200).json({ schemaVersion: 1, status: { ...status, ...publicSources } });

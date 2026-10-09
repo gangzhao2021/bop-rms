@@ -140,3 +140,23 @@ it("only serializes customer-safe fields and fails closed when unconfigured", as
   expect(await response.text()).not.toContain("private");
   expect((await (await setup(false)).send()).status).toBe(503);
 });
+it("WP-2423: serializes only the not-collected time of a pickup source", async () => {
+  const f = await setup();
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      pickup: { notCollectedAt: "2026-09-12T11:59:00.000Z", actorReference: "private" },
+    },
+  });
+  const body = await (await f.send()).json();
+  expect(body.status.sources.pickup).toEqual({ notCollectedAt: "2026-09-12T11:59:00.000Z" });
+  expect(JSON.stringify(body)).not.toContain("private");
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: { checkedAt: "2026-09-12T12:00:00.000Z", kitchen: null, payments: null },
+  });
+  expect((await (await f.send()).json()).status.sources).not.toHaveProperty("pickup");
+});

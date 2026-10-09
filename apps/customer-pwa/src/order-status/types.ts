@@ -24,6 +24,8 @@ export interface OrderStatusSources {
         readonly amount: null | { readonly amountMinor: bigint; readonly currencyCode: string };
         readonly freshnessStatus: OrderStatusFreshness;
       }[];
+  /** WP-2423: a pickup the Store closed as not collected after the pickup time (Pickup only). */
+  readonly pickup?: null | { readonly notCollectedAt: string };
 }
 
 export interface OrderStatusView {

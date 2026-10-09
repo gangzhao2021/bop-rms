@@ -67,4 +67,7 @@ export {
   pickupHoldMilliseconds,
   type PickupNotCollectedRecord,
 } from "./domain/pickup-not-collected.js";
-export { listStoreUncollectedPickupOrders } from "./infrastructure/persistence/pickup-handoff-history.js";
+export {
+  listStoreUncollectedPickupOrders,
+  loadPickupNotCollected,
+} from "./infrastructure/persistence/pickup-handoff-history.js";

@@ -26,6 +26,8 @@ function StatusContent({
 }) {
   const complete =
     view.order.orderType === "Pickup" && view.order.fulfillmentStatus === "Completed";
+  const notCollected =
+    view.order.orderType === "Pickup" && !complete && Boolean(view.sources?.pickup?.notCollectedAt);
   const kitchen = view.sources?.kitchen;
   const kitchenLabel = !kitchen
     ? "Not available yet"
@@ -56,18 +58,23 @@ function StatusContent({
         ? ["Order not accepted", "Your order was not accepted."]
         : complete
           ? ["Order collected", "Your order has been collected."]
-          : allServed
-            ? ["Items served", "All listed items have been served."]
-            : someServed
-              ? [
-                  "Serving your order",
-                  "Some items have been served. Check the remaining items below.",
-                ]
-              : kitchenLabel === "Ready"
-                ? ["Kitchen preparation complete", "All listed batches are ready."]
-                : kitchenLabel === "Preparing"
-                  ? ["Preparing your order", "The kitchen is preparing your order."]
-                  : ["Order submitted", "We have your order."];
+          : notCollected
+            ? [
+                "Not collected",
+                "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
+              ]
+            : allServed
+              ? ["Items served", "All listed items have been served."]
+              : someServed
+                ? [
+                    "Serving your order",
+                    "Some items have been served. Check the remaining items below.",
+                  ]
+                : kitchenLabel === "Ready"
+                  ? ["Kitchen preparation complete", "All listed batches are ready."]
+                  : kitchenLabel === "Preparing"
+                    ? ["Preparing your order", "The kitchen is preparing your order."]
+                    : ["Order submitted", "We have your order."];
   const payments = view.sources?.payments;
   return (
     <>
@@ -197,7 +204,7 @@ function StatusContent({
           </article>
         ))}
       </section>
-      {view.order.orderType === "Pickup" && !complete ? (
+      {view.order.orderType === "Pickup" && !complete && !notCollected ? (
         <PickupCodePanel
           orderReference={view.order.orderReference}
           orderNumber={view.order.orderNumber}

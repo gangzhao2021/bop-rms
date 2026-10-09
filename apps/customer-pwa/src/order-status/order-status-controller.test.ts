@@ -269,6 +269,50 @@ describe("independent order status sources", () => {
       },
     };
   }
+  it("WP-2423: admits a Pickup not-collected fact only for Pickup and within the source window", () => {
+    const input = sourced();
+    const withPickup = {
+      ...input,
+      sources: { ...input.sources, pickup: { notCollectedAt: "2026-08-11T13:59:30.000Z" } },
+    };
+    expect(parseOrderStatusView(withPickup, id(1)).sources?.pickup).toEqual({
+      notCollectedAt: "2026-08-11T13:59:30.000Z",
+    });
+    expect(
+      parseOrderStatusView({ ...input, sources: { ...input.sources, pickup: null } }, id(1)).sources
+        ?.pickup,
+    ).toBeNull();
+    expect(() =>
+      parseOrderStatusView(
+        {
+          ...withPickup,
+          sources: {
+            ...withPickup.sources,
+            pickup: { notCollectedAt: "2026-08-11T14:01:00.000Z" },
+          },
+        },
+        id(1),
+      ),
+    ).toThrow();
+    expect(() =>
+      parseOrderStatusView(
+        {
+          ...withPickup,
+          sources: {
+            ...withPickup.sources,
+            pickup: { notCollectedAt: "2026-08-11T13:59:30.000Z", by: id(9) },
+          },
+        },
+        id(1),
+      ),
+    ).toThrow();
+    expect(() =>
+      parseOrderStatusView(
+        { ...withPickup, order: { ...withPickup.order, orderType: "DineIn" } },
+        id(1),
+      ),
+    ).toThrow();
+  });
   it("accepts a scoped nonempty subset without inventing another batch state", () => {
     const input = sourced();
     const first = input.order.batches[0];

@@ -145,3 +145,34 @@ export async function listStoreUncollectedPickupOrders(
   ).rows;
   return new Set(rows.map((row) => String(row.order_id)));
 }
+
+/**
+ * WP-2423: when the Store closed this pickup Order as not collected, for the customer's order status
+ * (null when it was not). Caller authorizes the customer's access and owns the transaction.
+ */
+export async function loadPickupNotCollected(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<{ readonly closedAt: string } | null> {
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    scope.brandReference,
+    scope.storeReference,
+  ]);
+  const rows = (
+    await tx.query(
+      "SELECT n.closed_at FROM rms_fulfillment.pickup_not_collected_record n " +
+        "JOIN rms_fulfillment.fulfillment f ON f.brand_id=n.brand_id AND f.store_id=n.store_id AND f.fulfillment_id=n.fulfillment_id " +
+        "WHERE n.brand_id=$1 AND n.store_id=$2 AND f.order_id=$3 LIMIT 2",
+      [scope.brandReference, scope.storeReference, orderReference],
+    )
+  ).rows;
+  if (rows.length > 1) return unavailable();
+  const row = rows[0];
+  if (!row) return null;
+  const closedAt =
+    row.closed_at instanceof Date
+      ? row.closed_at.toISOString()
+      : new Date(String(row.closed_at)).toISOString();
+  return Object.freeze({ closedAt });
+}

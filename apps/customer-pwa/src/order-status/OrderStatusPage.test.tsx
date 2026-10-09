@@ -360,3 +360,24 @@ it.each([
   expect(html).toContain(heading);
   expect(html).not.toContain("Order submitted");
 });
+
+it("WP-2423: says a pickup was not collected and stops offering the pickup code", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const html = render({
+    ...state,
+    view: {
+      ...state.view,
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: null,
+        pickup: { notCollectedAt: "2026-08-11T13:59:00.000Z" },
+      },
+    },
+  });
+  expect(html).toContain("Not collected");
+  expect(html).toContain("Contact the store");
+  expect(html).not.toContain("Check pickup readiness");
+  expect(html).not.toContain("Order collected");
+});

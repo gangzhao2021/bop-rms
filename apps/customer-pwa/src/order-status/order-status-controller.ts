@@ -153,6 +153,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "dining")
       ? ["dining"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "pickup")
+      ? ["pickup"]
+      : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
@@ -257,7 +260,24 @@ function parseSources(
       }),
     );
   }
-  return Object.freeze({ checkedAt, kitchen, payments, ...(dining ? { dining } : {}) });
+  // WP-2423: a pickup the Store closed as not collected (Pickup only, within the source window).
+  let pickup: OrderStatusSources["pickup"];
+  if (Object.hasOwn(raw, "pickup")) {
+    if (orderType !== "Pickup") return invalid();
+    pickup =
+      raw.pickup === null
+        ? null
+        : Object.freeze({
+            notCollectedAt: sourceInstant(exact(raw.pickup, ["notCollectedAt"]).notCollectedAt),
+          });
+  }
+  return Object.freeze({
+    checkedAt,
+    kitchen,
+    payments,
+    ...(dining ? { dining } : {}),
+    ...(pickup === undefined ? {} : { pickup }),
+  });
 }
 
 export function parseOrderStatusView(value: unknown, expectedReference: string): OrderStatusView {
