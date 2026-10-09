@@ -32,6 +32,8 @@ describe("renderPilotAclSql", () => {
       'GRANT SELECT ON TABLE "rms_kitchen"."kitchen_ticket" TO "pilot_worker";',
       'GRANT UPDATE ("revoked_at") ON TABLE "bop_identity"."guest_session" TO "pilot_api";',
       'GRANT USAGE ON SCHEMA "rms_kitchen" TO "pilot_api";',
+      // WP-2423: all supervised pools (7 x 5) plus operator headroom fit the api role at once.
+      'ALTER ROLE "pilot_api" CONNECTION LIMIT 45;',
       "COMMIT;",
       "",
     ]);
@@ -64,6 +66,17 @@ describe("renderPilotAclSql", () => {
     expect(sql).toContain(
       'GRANT EXECUTE ON FUNCTION rms_pricing.f(platform_helpers.uuid_v7,platform_helpers.uuid_v7) TO "pilot_api";',
     );
+  });
+  it("WP-2423: renders routines with PostgreSQL multi-word argument types only", () => {
+    const object =
+      "security.consume_abuse_budget(text,bytea,timestamp with time zone,integer,integer,timestamp with time zone)";
+    expect(
+      renderPilotAclSql([matrix([entry("routine", "security", object, "EXECUTE")])], roles),
+    ).toContain(`GRANT EXECUTE ON FUNCTION ${object} TO "pilot_api";`);
+    for (const bad of ["security.f(uuid drop table x)", "security.f(timestamp with zone)"])
+      expect(() =>
+        renderPilotAclSql([matrix([entry("routine", "security", bad, "EXECUTE")])], roles),
+      ).toThrow("PILOT_ACL_RENDER_INVALID");
   });
   it("rejects shared or unsafe role names", () => {
     expect(() => renderPilotAclSql([matrix([])], { api: "x", worker: "x" })).toThrow();

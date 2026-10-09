@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import process from "node:process";
 import { createTenantTransactionRunner } from "../../packages/database/dist/transaction-runner.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
+import { pilotApiRoleConnectionLimit, pilotPoolSize } from "./pilot-connection-budget.mjs";
 const require = createRequire(new URL("../../packages/database/package.json", import.meta.url));
 const { Pool } = require("pg");
 
@@ -33,7 +34,7 @@ export async function createApplicationDatabase(
     user: user(service),
     password,
     ssl: false,
-    max: 5,
+    max: pilotPoolSize,
     connectionTimeoutMillis: 2000,
     query_timeout: 5000,
     idleTimeoutMillis: 5000,
@@ -55,8 +56,15 @@ export async function createApplicationDatabase(
     async probe() {
       if (closing) return "not_ready";
       try {
-        const result = await pool.query("SELECT 1 AS connected");
-        return result.rows[0]?.connected === 1 ? "ready" : "not_ready";
+        const result = await pool.query(
+          "SELECT 1 AS connected, rolconnlimit AS limit FROM pg_catalog.pg_roles WHERE rolname = current_user",
+        );
+        const row = result.rows[0];
+        return row?.connected === 1 &&
+          (row.limit === -1 ||
+            (service === "api" ? row.limit >= pilotApiRoleConnectionLimit : true))
+          ? "ready"
+          : "not_ready";
       } catch {
         return "not_ready";
       }
