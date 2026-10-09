@@ -938,6 +938,13 @@ export async function exerciseSubmissionInventoryPayment({
           },
           observations,
           terminal: {
+            // The Provider's authoritative capture occurrence (as the pilot simulator reports it),
+            // not the time this reconciliation query observed it.
+            occurrence: async ({ candidate, snapshot }) => {
+              assert.equal(candidate.providerIntentReference, providerReference);
+              assert.equal(snapshot.status, "Captured");
+              return { status: "Captured", occurredAt: captured.observedAt };
+            },
             record: async (input) => {
               const committed = await terminalService.record(input);
               assert.equal(committed.status, "Created");
