@@ -1,14 +1,14 @@
-import process from "node:process";
 import { createHash } from "node:crypto";
 import { createOrderFulfillmentEventComposition } from "../../apps/api/dist/order-fulfillment-composition.js";
+import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 export async function createInternalOrderCompletion(resources, { saved, actor }) {
   const scope = {
     tenantReference: resources.publicProfile.binding.tenantReference,
     ...resources.scope,
   };
   if (
-    process.env.NODE_ENV !== "development" ||
-    saved.environment !== "InternalTest" ||
+    !isPilotRuntime() ||
+    !matchesPilotEnvironment(saved.environment) ||
     saved.scope.brandReference !== scope.brandReference ||
     saved.scope.storeReference !== scope.storeReference
   )

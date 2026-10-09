@@ -1,4 +1,3 @@
-import process from "node:process";
 import { loadOutboxEnvelope } from "../../packages/bop/eventing/src/index.ts";
 import { createPostgresOrderPaymentAcceptanceWaitStore } from "../../packages/rms/ordering/src/index.ts";
 import { createAdditionalOrderPaidContextSource } from "../../apps/api/dist/additional-order-paid-context-source.js";
@@ -13,6 +12,7 @@ import {
   createOrderPaymentOutcomeConsumerService,
   createPostgresOrderPaymentOutcomeStore,
 } from "../../packages/rms/ordering/src/index.ts";
+import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 export async function createInternalPaidOutcome(
   resources,
   { persistentWaiting = false } = {},
@@ -31,8 +31,8 @@ export async function createInternalPaidOutcome(
     },
     reference = resources.credentials.reference;
   if (
-    process.env.NODE_ENV !== "development" ||
-    saved.environment !== "InternalTest" ||
+    !isPilotRuntime() ||
+    !matchesPilotEnvironment(saved.environment) ||
     saved.scope.storeReference !== scope.storeReference
   )
     throw new Error("INTERNAL_PAID_OUTCOME_ONLY");

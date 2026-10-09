@@ -1,12 +1,12 @@
-import process from "node:process";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import {
   parseKitchenWorkCreatedEnvelope,
   parseKitchenWorkLifecycleEnvelope,
   parseKitchenReadyEnvelope,
 } from "../../packages/rms/kitchen/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalKitchenConsumers(resources, { createQueue }) {
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_KITCHEN_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_KITCHEN_ONLY");
   const parsers = {
     KitchenWorkCreated: parseKitchenWorkCreatedEnvelope,
     KitchenWorkAccepted: parseKitchenWorkLifecycleEnvelope,

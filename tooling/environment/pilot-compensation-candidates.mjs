@@ -1,15 +1,15 @@
-import process from "node:process";
 import {
   createPostgresOrderCompensationCandidateReader,
   parseOrderingReference,
   parseOrderingInstant,
 } from "../../packages/rms/ordering/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 /** Read-only owner discovery; candidate presence never authorizes or executes a refund. */
 export function createInternalCompensationCandidates(resources) {
   const unavailable = () => {
     throw new Error("INTERNAL_COMPENSATION_DISCOVERY_UNAVAILABLE");
   };
-  if (process.env.NODE_ENV !== "development") return unavailable();
+  if (!isPilotRuntime()) return unavailable();
   const binding = resources.publicProfile.binding;
   const scope = {
     brandReference: String(parseOrderingReference(resources.scope.brandReference)),
@@ -21,8 +21,7 @@ export function createInternalCompensationCandidates(resources) {
   )
     return unavailable();
   const validUntil = parseOrderingInstant(binding.validUntil);
-  const active = () =>
-    process.env.NODE_ENV === "development" && parseOrderingInstant(resources.now()) < validUntil;
+  const active = () => isPilotRuntime() && parseOrderingInstant(resources.now()) < validUntil;
   const reader = createPostgresOrderCompensationCandidateReader({
     scope,
     authorize: async (_tx, input) =>

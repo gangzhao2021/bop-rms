@@ -1,16 +1,16 @@
-import process from "node:process";
 import {
   createPostgresPaymentReconciliationExceptionSource,
   createPostgresPaymentIntentBindingSource,
   parsePaymentReference,
 } from "../../packages/rms/payment/src/index.ts";
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 /** Retained transaction for scoped owner reads and an explicit projection consumer. */
 export function createInternalReconciliationExceptionPageRunner(resources, consume) {
   const deny = () => {
     throw Error("INTERNAL_RECONCILIATION_EXCEPTIONS_UNAVAILABLE");
   };
-  if (process.env.NODE_ENV !== "development") return deny();
+  if (!isPilotRuntime()) return deny();
   const binding = resources.publicProfile.binding;
   const scope = Object.freeze({
     tenantReference: String(parsePaymentReference(binding.tenantReference)),
@@ -24,8 +24,7 @@ export function createInternalReconciliationExceptionPageRunner(resources, consu
     binding.storeReference !== scope.storeReference
   )
     return deny();
-  const active = () =>
-    process.env.NODE_ENV === "development" && parseCanonicalInstant(resources.now()) < validUntil;
+  const active = () => isPilotRuntime() && parseCanonicalInstant(resources.now()) < validUntil;
   if (!active()) return deny();
   return async (input) => {
     if (!active()) return deny();

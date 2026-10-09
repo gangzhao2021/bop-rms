@@ -7,6 +7,7 @@ import { createCustomerConfiguredPickupOrderSubmissionComposition } from "../../
 import { createCustomerCheckoutSessionAuthorization } from "../../apps/api/dist/customer-checkout-session-authorization.js";
 import { createCustomerSubmissionInventoryFinalizer } from "../../apps/api/dist/customer-submission-inventory-finalizer.js";
 import { createInternalOrderSources } from "./pilot-order-sources.mjs";
+import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 export async function createInternalOrder(
   resources,
   checkout,
@@ -23,7 +24,7 @@ export async function createInternalOrder(
     now = resources.now,
     reference = resources.credentials.reference;
   if (
-    saved.environment !== "InternalTest" ||
+    !matchesPilotEnvironment(saved.environment) ||
     saved.database !== expectedDatabaseName ||
     Object.keys(scope).some((key) => saved.scope[key] !== scope[key])
   )

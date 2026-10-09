@@ -1,4 +1,3 @@
-import process from "node:process";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import {
   parseOrderConfirmedEnvelope,
@@ -11,8 +10,9 @@ import {
   createPickupFulfillmentService,
   createPostgresPickupFulfillmentStore,
 } from "../../packages/rms/fulfillment/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalPickupFulfillment(resources) {
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_FULFILLMENT_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_FULFILLMENT_ONLY");
   const scope = resources.scope,
     hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
   const active = () => resources.now() < resources.publicProfile.binding.validUntil;

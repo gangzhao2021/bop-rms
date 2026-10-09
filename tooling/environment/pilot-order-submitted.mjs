@@ -1,11 +1,11 @@
-import process from "node:process";
 import {
   createPostgresOrderSubmittedConsumer,
   createPostgresOrderBatchIdentitySource,
   createPostgresAdditionalDiningExecutionReader,
 } from "../../packages/rms/ordering/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalOrderSubmitted(resources) {
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_ORDER_SUBMITTED_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_ORDER_SUBMITTED_ONLY");
   const scope = resources.scope,
     active = () => resources.now() < resources.publicProfile.binding.validUntil;
   const authorized = async (_tx, event) =>

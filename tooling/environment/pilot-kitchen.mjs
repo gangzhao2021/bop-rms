@@ -1,4 +1,3 @@
-import process from "node:process";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import { parseOrderConfirmedEnvelope } from "../../packages/rms/ordering/src/index.ts";
 import { createHash } from "node:crypto";
@@ -15,8 +14,9 @@ import {
   createConfirmedOrderConsumerService,
   createKitchenWorkPlanService,
 } from "../../packages/rms/kitchen/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalKitchen(resources) {
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_KITCHEN_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_KITCHEN_ONLY");
   const scope = resources.scope,
     hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
   const active = () => resources.now() < resources.publicProfile.binding.validUntil;

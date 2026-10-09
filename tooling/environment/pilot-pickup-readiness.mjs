@@ -1,4 +1,3 @@
-import process from "node:process";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import { parseKitchenItemReadyEnvelope } from "../../packages/rms/kitchen/src/index.ts";
 import { createHash } from "node:crypto";
@@ -12,13 +11,14 @@ import {
   createFulfillmentReadinessService,
   createPostgresFulfillmentReadinessStore,
 } from "../../packages/rms/fulfillment/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalPickupReadiness(
   resources,
   confirmation = null,
   { createConfirmation },
 ) {
   if (
-    process.env.NODE_ENV !== "development" ||
+    !isPilotRuntime() ||
     (confirmation !== null &&
       (confirmation.tenantId !== resources.scope.brandReference ||
         confirmation.storeId !== resources.scope.storeReference ||

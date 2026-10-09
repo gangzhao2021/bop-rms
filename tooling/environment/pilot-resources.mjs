@@ -1,3 +1,4 @@
+import { isInternalTest, matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { canonicalizeRfc8785, sha256Hex } from "../../packages/bop/audit/src/index.ts";
 import { createPersistentPublicStoreProfileReader } from "../../apps/api/dist/persistent-public-store-profile.js";
 import { createPersistentEntryOperatingReader } from "../../apps/api/dist/persistent-entry-operating.js";
@@ -13,10 +14,14 @@ export async function createInternalTestResources({
   const menu = await loadMenu();
   if (
     [profile, menu].some(
-      (value) => value.environment !== "InternalTest" || value.database !== expectedDatabaseName,
+      (value) =>
+        !matchesPilotEnvironment(value.environment) || value.database !== expectedDatabaseName,
     )
   )
     throw new Error("INTERNAL_CONFIGURATION_REQUIRED");
+  // WP-2423 P1b: the Store live gates, operating authorization and time zone below are InternalTest
+  // stand-ins; a Pilot Store needs its real ones before this composition may serve it.
+  if (!isInternalTest()) throw new Error("PILOT_CAPABILITY_MISSING:StoreOperatingSource");
   const credentials = await createInternalTestCredentials(),
     database = await createApplicationDatabase("api");
   try {

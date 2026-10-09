@@ -1,5 +1,5 @@
-import process from "node:process";
 import { createOutboxWorkload } from "../../apps/worker/dist/outbox-workload.js";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 /** Opt-in assembly only. The injected owner dispatcher retains all publication and financial gates. */
 export async function createOptionalBatchCancellationWorkloads({
   enabled,
@@ -8,7 +8,7 @@ export async function createOptionalBatchCancellationWorkloads({
   createDispatcher,
 }) {
   if (enabled !== true) return [];
-  if (process.env.NODE_ENV !== "development" || typeof createDispatcher !== "function")
+  if (!isPilotRuntime() || typeof createDispatcher !== "function")
     throw new Error("PILOT_BATCH_CANCELLATION_UNAVAILABLE");
   const dispatcher = await createDispatcher(resources);
   return [

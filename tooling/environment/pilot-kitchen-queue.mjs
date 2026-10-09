@@ -1,8 +1,8 @@
-import process from "node:process";
 import { createHash, randomUUID } from "node:crypto";
 import { createPostgresKitchenQueueReadModel } from "../../packages/rms/kitchen/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalKitchenQueue(resources, { actorReference }) {
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_KITCHEN_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_KITCHEN_ONLY");
   const scope = resources.scope,
     active = () => resources.now() < resources.publicProfile.binding.validUntil;
   const hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");

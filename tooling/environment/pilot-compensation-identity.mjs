@@ -1,4 +1,3 @@
-import process from "node:process";
 import { createHash } from "node:crypto";
 import {
   parsePaidWithoutFulfillableOrderDisposition,
@@ -6,12 +5,13 @@ import {
   parsePaymentDigest,
   parseProviderIdempotencyKey,
 } from "../../packages/rms/payment/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 /** Versioned deterministic names for one InternalTest payment; never allocation or authorization. */
 export function createInternalCompensationIdentity(value, now) {
   const deny = () => {
     throw new Error("INTERNAL_COMPENSATION_IDENTITY_UNAVAILABLE");
   };
-  if (process.env.NODE_ENV !== "development") return deny();
+  if (!isPilotRuntime()) return deny();
   const d = parsePaidWithoutFulfillableOrderDisposition(value);
   const base = {
     environment: "Test",
@@ -52,7 +52,7 @@ export function createInternalCompensationIdentity(value, now) {
   );
   const exact = (input, expected) => {
     if (
-      process.env.NODE_ENV !== "development" ||
+      !isPilotRuntime() ||
       !input ||
       typeof input !== "object" ||
       Object.keys(input).length !== Object.keys(expected).length ||

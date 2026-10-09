@@ -1,4 +1,3 @@
-import process from "node:process";
 import { createHash } from "node:crypto";
 import { createPersistedOrderCreatedProjectionComposition } from "../../apps/api/dist/order-created-projection-composition.js";
 import {
@@ -7,8 +6,9 @@ import {
   createFulfillmentCompletedEventConsumerService,
   parseOrderStatusProjection,
 } from "../../packages/rms/ordering/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export async function createInternalOrderStatus(resources, { createCompletion }) {
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_STATUS_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_STATUS_ONLY");
   const scope = resources.scope,
     hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
     active = () => resources.now() < resources.publicProfile.binding.validUntil;

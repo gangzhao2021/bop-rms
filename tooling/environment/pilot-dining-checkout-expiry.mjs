@@ -1,14 +1,13 @@
-import process from "node:process";
 import { createDiningCheckoutExpiryDispatcher } from "../../apps/api/dist/dining-checkout-expiry-dispatcher.js";
 import { createOutboxWorkload } from "../../apps/worker/dist/outbox-workload.js";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalDiningCheckoutExpiryWorkload(
   resources,
   onSnapshot,
   { providerAccountReference },
 ) {
   const allowed = () =>
-    process.env.NODE_ENV === "development" &&
-    resources.now() < resources.publicProfile.binding.validUntil;
+    isPilotRuntime() && resources.now() < resources.publicProfile.binding.validUntil;
   const dispatcher = createDiningCheckoutExpiryDispatcher({
     scope: {
       ...resources.scope,

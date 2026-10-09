@@ -1,5 +1,5 @@
-import process from "node:process";
 import { resolveDiningExceptionTaskPolicy } from "../../packages/rms/dining/src/index.ts";
+import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 /** Optional explicit InternalTest routing; absence keeps settled-only closing. */
 export function resolveInternalDiningTaskPolicy({ queue, scope, observedAt }) {
   const fail = () => {
@@ -8,8 +8,8 @@ export function resolveInternalDiningTaskPolicy({ queue, scope, observedAt }) {
   if (queue.exceptionTaskPolicy === undefined) return undefined;
   try {
     if (
-      process.env.NODE_ENV !== "development" ||
-      queue.environment !== "InternalTest" ||
+      !isPilotRuntime() ||
+      !matchesPilotEnvironment(queue.environment) ||
       ["tenantReference", "brandReference", "storeReference"].some(
         (key) => queue[key] !== scope[key],
       ) ||

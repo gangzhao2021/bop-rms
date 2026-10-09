@@ -1,6 +1,6 @@
-import process from "node:process";
 import { createHash } from "node:crypto";
 import { createMerchantDiningItemService } from "../../apps/api/dist/merchant-dining-item-service.js";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export const diningPreparationDigest = (current) =>
   createHash("sha256")
     .update(
@@ -18,7 +18,7 @@ export function createInternalMerchantDining(resources, persistence, authenticat
     persistence,
     authentication,
     validateSource: async (_tx, record, current) =>
-      process.env.NODE_ENV === "development" &&
+      isPilotRuntime() &&
       resources.now() < resources.publicProfile.binding.validUntil &&
       record.brandReference === resources.scope.brandReference &&
       record.storeReference === resources.scope.storeReference &&

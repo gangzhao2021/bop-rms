@@ -18,12 +18,13 @@ import {
 import { withPilotRecoveryResumeAccess } from "./pilot-maintenance.mjs";
 import { startPilotRuntime } from "./pilot-start.mjs";
 import { runPilotService } from "./pilot-service.mjs";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 const fail = () => {
   throw Error("PILOT_RECOVERY_RESUME_REVIEW_REQUIRED");
 };
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 export async function resumePilotRecoverySource(args, { takeover = false } = {}) {
-  if (process.env.NODE_ENV !== "development") fail();
+  if (!isPilotRuntime()) fail();
   const plan = parsePilotRecoveryArguments(args),
     directory = path.resolve(plan.runtimeDirectory),
     folder = path.join(directory, plan.label);

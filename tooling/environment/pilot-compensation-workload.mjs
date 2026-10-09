@@ -1,5 +1,5 @@
-import process from "node:process";
 import { createPaymentCompensationWorkload } from "../../apps/worker/dist/payment-compensation-workload.js";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export async function createOptionalCompensationWorkloads({
   enabled,
   resources,
@@ -7,7 +7,7 @@ export async function createOptionalCompensationWorkloads({
   createService,
 }) {
   if (enabled !== true) return [];
-  if (process.env.NODE_ENV !== "development" || typeof createService !== "function")
+  if (!isPilotRuntime() || typeof createService !== "function")
     throw new Error("PILOT_COMPENSATION_UNAVAILABLE");
   const service = await createService(resources);
   if (

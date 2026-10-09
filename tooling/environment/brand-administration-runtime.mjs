@@ -19,6 +19,7 @@ import {
   createPrivateInstallationReader,
   parsePrivateInstallationFilename,
 } from "./private-installation-files.mjs";
+import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 
 const unavailable = () => new Error("INTERNAL_BRAND_ADMINISTRATION_UNAVAILABLE");
 /** Trusted InternalTest startup only. Files and accounts must already exist.
@@ -33,12 +34,7 @@ export async function createInternalBrandAdministrationRuntime(input) {
   };
   try {
     const { directory, port } = readClosedRecord(input, ["directory", "port"]);
-    if (
-      !["development", "test"].includes(process.env.NODE_ENV) ||
-      !Number.isInteger(port) ||
-      port < 1 ||
-      port > 65535
-    )
+    if (!isPilotRuntime({ test: true }) || !Number.isInteger(port) || port < 1 || port > 65535)
       throw unavailable();
     const { read } = await createPrivateInstallationReader(directory);
     const installationBytes = await read("installation.json"),
@@ -56,7 +52,7 @@ export async function createInternalBrandAdministrationRuntime(input) {
     ]);
     if (
       config.schemaVersion !== 1 ||
-      config.environment !== "InternalTest" ||
+      !matchesPilotEnvironment(config.environment, { test: true }) ||
       config.database !== installation.database
     )
       throw unavailable();

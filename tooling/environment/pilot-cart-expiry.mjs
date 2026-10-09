@@ -1,4 +1,3 @@
-import process from "node:process";
 import { createHash } from "node:crypto";
 import {
   CartError,
@@ -8,10 +7,10 @@ import {
   createCartLifecycleCommandService,
 } from "../../packages/rms/ordering/src/index.ts";
 import { createCartExpiryWorkload } from "../../apps/worker/dist/cart-expiry-workload.js";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalCartExpiryPorts(resources) {
   const { scope, transactions, now, publicProfile } = resources;
-  const allowed = () =>
-    process.env.NODE_ENV === "development" && now() < publicProfile.binding.validUntil;
+  const allowed = () => isPilotRuntime() && now() < publicProfile.binding.validUntil;
   const derive = (value) => {
     const d = createHash("sha256").update(value).digest("hex");
     return (

@@ -128,8 +128,11 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "createInternalMerchantPickup",
       "createInternalMerchantAcceptance",
       "createInternalMerchantSession",
+      // WP-2423 P6: the unmatched capture refund is sent through the configured provider.
+      "refundUnmatchedCapture",
     ].sort(),
   );
+  expect(typeof dependencies.refundUnmatchedCapture).toBe("function");
 });
 it("accepts only an explicit safe installation", () => {
   expect(parsePilotHttpsArguments([".local/pilot-example"])).toBe(".local/pilot-example");

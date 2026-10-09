@@ -1,5 +1,5 @@
-import process from "node:process";
 import { parsePaymentReconciliationRunInput } from "../../packages/rms/payment/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 /** One dedicated connection owns one Store/run lease; never return a locked client to the pool. */
 export function createInternalReconciliationLease({ database, run: rawRun, active }) {
   const run = parsePaymentReconciliationRunInput(rawRun),
@@ -7,7 +7,7 @@ export function createInternalReconciliationLease({ database, run: rawRun, activ
   const fail = () => {
     throw Error("RECONCILIATION_EXECUTION_LEASE_UNAVAILABLE");
   };
-  const allowed = () => process.env.NODE_ENV === "development" && active() === true;
+  const allowed = () => isPilotRuntime() && active() === true;
   if (!allowed()) return fail();
   const key = "PaymentReconciliationExecution:" + run.brandReference + ":" + run.storeReference;
   let client = null,

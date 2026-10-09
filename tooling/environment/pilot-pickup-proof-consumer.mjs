@@ -1,14 +1,14 @@
-import process from "node:process";
 import { createPostgresOrderBatchIdentitySource } from "../../packages/rms/ordering/src/index.ts";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import { parseKitchenOrderReadyEnvelope } from "../../packages/rms/kitchen/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 /** The longest a pickup proof may stay valid after the order is ready (pickup-proof domain rule). */
 const pickupWindowMs = 60 * 60 * 1000;
 export function createInternalPickupProofConsumer(
   resources,
   { createConfirmation, createReadiness, createProof },
 ) {
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_PICKUP_PROOF_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_PICKUP_PROOF_ONLY");
   const confirmation = createConfirmation(resources),
     ready = createReadiness(resources),
     proof = createProof(resources);

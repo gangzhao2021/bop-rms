@@ -1,4 +1,3 @@
-import process from "node:process";
 import { createHash } from "node:crypto";
 import {
   createPaymentRefundStatusConsumer,
@@ -8,6 +7,7 @@ import {
 import { createPostgresOrderExceptionSourceStore } from "../../packages/bop/projection/src/index.ts";
 import { createPaymentOrderExceptionConsumer } from "../../apps/api/dist/payment-order-exception-consumer.js";
 import { createPaymentOrderExceptionSource } from "../../apps/api/dist/payment-order-exception-source.js";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 
 /**
  * WP-2423: the two catalogued consumers of PaymentRefunded for the pilot Store. Without them the
@@ -17,7 +17,7 @@ import { createPaymentOrderExceptionSource } from "../../apps/api/dist/payment-o
  *   (the same source the in-process compensation projection writes, so its write is idempotent).
  */
 export function createInternalRefundConsumers(resources) {
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_REFUND_CONSUMERS_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_REFUND_CONSUMERS_ONLY");
   const active = () => resources.now() < resources.publicProfile.binding.validUntil;
   const scope = {
     brandReference: resources.scope.brandReference,

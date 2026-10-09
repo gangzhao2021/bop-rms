@@ -6,13 +6,14 @@ import {
   createGuestSessionAbuseKeys,
 } from "../../packages/bop/identity/src/index.ts";
 import { createAbuseBudgetConsumer } from "../../packages/database/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 
 /** Local trusted configuration, sharing API connection ownership with its caller. */
 export async function createCustomerRequestAdmission(
   { database, scope, now = () => new Date().toISOString() },
   { file },
 ) {
-  if (!["development", "test"].includes(process.env.NODE_ENV ?? "development"))
+  if (!isPilotRuntime({ test: true, unset: "development" }))
     throw new Error("LOCAL_GUEST_ADMISSION_UNAVAILABLE");
   const state = await lstat(file);
   if (

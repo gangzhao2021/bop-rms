@@ -5,6 +5,7 @@ import { URL, fileURLToPath, pathToFileURL } from "node:url";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { createConfiguredPilotApiRuntime } from "./pilot-customer-composition.mjs";
 import { startApiRuntime } from "../../apps/api/dist/server.js";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function parsePilotApiArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
     throw Error("PILOT_API_ARGUMENT_INVALID");
@@ -12,7 +13,7 @@ export function parsePilotApiArguments(args) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    if (process.env.NODE_ENV !== "development" || process.env.PORT !== "4300")
+    if (!isPilotRuntime() || process.env.PORT !== "4300")
       throw Error("PILOT_API_ENVIRONMENT_INVALID");
     const dir = path.join(
       fileURLToPath(new URL("../../", import.meta.url)),

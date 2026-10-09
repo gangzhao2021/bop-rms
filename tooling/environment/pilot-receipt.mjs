@@ -1,11 +1,11 @@
-import process from "node:process";
 import { createPersistentReceiptRuntime } from "../../apps/api/dist/persistent-receipt-runtime.js";
+import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 export async function createInternalReceipt(
   resources,
   transactions = resources.transactions,
   { config, providerAccountReference },
 ) {
-  if (process.env.NODE_ENV !== "development" || config.environment !== "InternalTest")
+  if (!isPilotRuntime() || !matchesPilotEnvironment(config.environment))
     throw new Error("INTERNAL_RECEIPT_ONLY");
   const scope = {
     ...resources.scope,

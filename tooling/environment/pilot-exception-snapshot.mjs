@@ -1,12 +1,11 @@
-import process from "node:process";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 /** Exception reads need one snapshot; current permission readers retain row locks. */
 export function createInternalExceptionSnapshotTransactions(resources) {
   const binding = resources.publicProfile.binding;
   const fail = () => {
     throw Error("INTERNAL_EXCEPTION_SNAPSHOT_UNAVAILABLE");
   };
-  const active = () =>
-    process.env.NODE_ENV === "development" && resources.now() < binding.validUntil;
+  const active = () => isPilotRuntime() && resources.now() < binding.validUntil;
   if (
     binding.brandReference !== resources.scope.brandReference ||
     binding.storeReference !== resources.scope.storeReference

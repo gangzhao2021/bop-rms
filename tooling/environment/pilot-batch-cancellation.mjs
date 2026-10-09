@@ -1,11 +1,11 @@
 import { createDiningBatchCancellationInventory } from "../../apps/api/dist/dining-batch-cancellation-inventory.js";
-import process from "node:process";
 import { createPostgresWorkflowDefinitionStore } from "../../packages/bop/workflow/src/index.ts";
 import {
   parseOrderBatchCheckoutExpiry,
   summarizeOrderItemProgress,
 } from "../../packages/rms/ordering/src/index.ts";
 import { createDiningBatchCancellation } from "../../apps/api/dist/dining-batch-cancellation.js";
+import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 const unavailable = () => {
   throw new Error("INTERNAL_BATCH_CANCELLATION_UNAVAILABLE");
 };
@@ -21,16 +21,15 @@ export async function createInternalBatchCancellation(
     };
   const sameScope = (value) => Object.keys(scope).every((k) => value[k] === scope[k]);
   if (
-    process.env.NODE_ENV !== "development" ||
-    saved.environment !== "InternalTest" ||
+    !isPilotRuntime() ||
+    !matchesPilotEnvironment(saved.environment) ||
     saved.database !== expectedDatabaseName ||
     !sameScope(saved.scope) ||
     saved.definition.purposeCode !== "InternalTestBatchCancellation"
   )
     return unavailable();
   const active = () =>
-    process.env.NODE_ENV === "development" &&
-    resources.now() < resources.publicProfile.binding.validUntil;
+    isPilotRuntime() && resources.now() < resources.publicProfile.binding.validUntil;
   const principal = systemActorReference,
     purposeCode = saved.definition.purposeCode;
   async function loadPublished(tx, at) {

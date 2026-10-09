@@ -3,6 +3,7 @@ import { readFile, lstat, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import process from "node:process";
 import { createTenantTransactionRunner } from "../../packages/database/dist/transaction-runner.js";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 const require = createRequire(new URL("../../packages/database/package.json", import.meta.url));
 const { Pool } = require("pg");
 
@@ -10,10 +11,7 @@ export async function createApplicationDatabase(
   service,
   { passwordFile, host, port, database, user },
 ) {
-  if (
-    !["api", "worker"].includes(service) ||
-    !["development", "test"].includes(process.env.NODE_ENV ?? "development")
-  )
+  if (!["api", "worker"].includes(service) || !isPilotRuntime({ test: true, unset: "development" }))
     throw new Error("LOCAL_DATABASE_CONFIGURATION_UNAVAILABLE");
   const file = passwordFile(service);
   const state = await lstat(file);

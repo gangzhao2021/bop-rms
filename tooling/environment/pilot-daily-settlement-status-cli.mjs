@@ -7,17 +7,17 @@ import { createInternalClosedSettlementWindow } from "./pilot-settlement-window.
 import { createPostgresPaymentReconciliationRunSource } from "../../packages/rms/payment/src/index.ts";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { readPilotDailySettlementStatus } from "./pilot-daily-settlement-status.mjs";
+import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 let resources;
 try {
-  if (process.env.NODE_ENV !== "development" || process.argv.length !== 3)
-    throw Error("UNAVAILABLE");
+  if (!isPilotRuntime() || process.argv.length !== 3) throw Error("UNAVAILABLE");
   const directory = path.resolve(parsePilotRuntimeDirectory(process.argv[2]));
   const installation = await loadPilotInstallation(directory);
   resources = await createConfiguredPilotResources(directory);
   const active = async () => {
     const p = await installation.loadProfile();
     return (
-      p.environment === "InternalTest" &&
+      matchesPilotEnvironment(p.environment) &&
       p.database === installation.database &&
       p.binding.brandReference === resources.scope.brandReference &&
       p.binding.storeReference === resources.scope.storeReference &&

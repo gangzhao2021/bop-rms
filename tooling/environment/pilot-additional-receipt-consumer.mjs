@@ -1,14 +1,14 @@
-import process from "node:process";
 import { createOrderCapturedPaymentSource } from "../../apps/api/dist/order-captured-payment-source.js";
 import { createPostgresOrderBatchIdentitySource } from "../../packages/rms/ordering/src/index.ts";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import { parsePaymentSucceededEnvelope } from "../../packages/rms/payment/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalAdditionalReceiptConsumer(
   resources,
   { refreshObservations, createReceipt, providerAccountReference },
 ) {
   const authorize = (event) =>
-    process.env.NODE_ENV === "development" &&
+    isPilotRuntime() &&
     resources.now() < resources.publicProfile.binding.validUntil &&
     event.tenantId === resources.scope.brandReference &&
     event.storeId === resources.scope.storeReference;

@@ -1,4 +1,9 @@
 import { assertPilotMaintenanceAccess } from "./pilot-maintenance.mjs";
+import {
+  currentPilotEnvironment,
+  isPilotRuntime,
+  pilotChildEnvironment,
+} from "./pilot-environment.mjs";
 import { parsePilotWorkloadHealth, pilotHealthComponents } from "./pilot-workload-health.mjs";
 import console from "node:console";
 import fs from "node:fs/promises";
@@ -89,7 +94,13 @@ export function parsePilotProcess({
     if (Object.hasOwn(environment, key)) return fail();
     environment[key] = entry.slice(separator + 1);
   }
-  if (environment.NODE_ENV !== "development" || (service === "api" && environment.PORT !== "4300"))
+  // WP-2423 P1b: a supervised child runs in exactly the supervisor's pilot environment.
+  if (
+    !isPilotRuntime({ test: true }) ||
+    !isPilotRuntime({ env: environment }) ||
+    currentPilotEnvironment({ env: environment }) !== currentPilotEnvironment({ test: true }) ||
+    (service === "api" && environment.PORT !== "4300")
+  )
     return fail();
   return { args, environment, started: fields[19] };
 }
@@ -156,7 +167,10 @@ export function pilotLaunchEnvironment(service, environment) {
     ].includes(service)
   )
     return fail();
-  const result = { NODE_ENV: "development", ...(service === "api" ? { PORT: "4300" } : {}) };
+  const result = {
+    ...pilotChildEnvironment(currentPilotEnvironment({ test: true })),
+    ...(service === "api" ? { PORT: "4300" } : {}),
+  };
   for (const key of ["PATH", "HOME", "TMPDIR"])
     if (typeof environment[key] === "string") result[key] = environment[key];
   return result;

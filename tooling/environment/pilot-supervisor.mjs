@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { createPilotRecoverySweep } from "./pilot-recovery-sweep.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
+import { assertPilotReady, isPilotRuntime } from "./pilot-environment.mjs";
 export async function acquirePilotSupervisorLease(runtimeDirectory) {
   const root = await fs.realpath(process.cwd());
   const directory = path.join(root, parsePilotRuntimeDirectory(runtimeDirectory));
@@ -103,8 +104,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   try {
-    if (process.argv.length !== 3 || process.env.NODE_ENV !== "development")
+    if (process.argv.length !== 3 || !isPilotRuntime())
       throw Error("PILOT_SUPERVISOR_ARGUMENT_INVALID");
+    try {
+      assertPilotReady();
+    } catch (error) {
+      // WP-2423 P1b: name what a Pilot Store still lacks (capability codes only, no data).
+      console.error(
+        String(error?.message).startsWith("PILOT_CAPABILITY_MISSING:")
+          ? error.message
+          : "PILOT_ENVIRONMENT_INVALID",
+      );
+      throw error;
+    }
     await runPilotSupervisor({
       runtimeDirectory: process.argv[2],
       signal: controller.signal,

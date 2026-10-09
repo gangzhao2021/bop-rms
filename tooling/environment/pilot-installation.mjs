@@ -6,6 +6,7 @@ import { open, realpath, lstat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join, isAbsolute } from "node:path";
 import process from "node:process";
+import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { Buffer } from "node:buffer";
 const unavailable = () => {
   throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
@@ -19,7 +20,7 @@ const identifier = (value) => typeof value === "string" && /^[a-z][a-z0-9_]{0,62
 export async function loadPilotInstallation(directory) {
   try {
     if (
-      !["development", "test"].includes(process.env.NODE_ENV) ||
+      !isPilotRuntime({ test: true }) ||
       !isAbsolute(directory) ||
       (await realpath(directory)) !== directory
     )
@@ -61,7 +62,7 @@ export async function loadPilotInstallation(directory) {
     if (
       !exact(config, ["schemaVersion", "environment", "database", "port", "roles"]) ||
       config.schemaVersion !== 1 ||
-      config.environment !== "InternalTest" ||
+      !matchesPilotEnvironment(config.environment, { test: true }) ||
       !identifier(config.database) ||
       !Number.isSafeInteger(config.port) ||
       config.port < 1 ||
@@ -75,7 +76,10 @@ export async function loadPilotInstallation(directory) {
     const load = async (name) => {
       try {
         const value = await read(name);
-        if (value?.environment !== "InternalTest" || value.database !== config.database)
+        if (
+          !matchesPilotEnvironment(value?.environment, { test: true }) ||
+          value.database !== config.database
+        )
           return unavailable();
         return value;
       } catch {
@@ -245,7 +249,7 @@ export async function loadPilotInstallation(directory) {
           const value = await read("internal-test-receipt-template.json");
           const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
           if (
-            value?.environment !== "InternalTest" ||
+            !matchesPilotEnvironment(value?.environment, { test: true }) ||
             [value.templateReference, value.familyReference, value.versionReference].some(
               (v) => typeof v !== "string" || !ref.test(v),
             )

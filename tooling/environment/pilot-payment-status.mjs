@@ -1,11 +1,11 @@
-import process from "node:process";
 import { createHash } from "node:crypto";
 import {
   createPaymentStatusEventConsumerService,
   createPostgresPaymentStatusStore,
 } from "../../packages/rms/payment/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalPaymentStatus(resources, { providerAccountReference }) {
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_PAYMENT_STATUS_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_PAYMENT_STATUS_ONLY");
   const active = () => resources.now() < resources.publicProfile.binding.validUntil;
   const scope = {
     ...resources.scope,

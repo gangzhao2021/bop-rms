@@ -4,6 +4,7 @@ import { createMerchantStoreScope } from "../../apps/api/dist/merchant-store-sco
 import { createMerchantOrderAcceptanceCommand } from "../../apps/api/dist/merchant-order-acceptance-command.js";
 import { createMerchantAcceptanceConfigurationResolver } from "../../apps/api/dist/merchant-acceptance-configuration-resolver.js";
 import { createOrderPaidContextSource } from "../../apps/api/dist/order-paid-context-source.js";
+import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 export async function createInternalMerchantAcceptance(
   resources,
   persistence,
@@ -12,7 +13,7 @@ export async function createInternalMerchantAcceptance(
 ) {
   const saved = await loadPickupWorkflow();
   if (
-    saved.environment !== "InternalTest" ||
+    !matchesPilotEnvironment(saved.environment) ||
     saved.database !== expectedDatabaseName ||
     saved.scope.storeReference !== resources.scope.storeReference
   )

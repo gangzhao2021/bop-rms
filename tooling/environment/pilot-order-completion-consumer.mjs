@@ -1,12 +1,12 @@
-import process from "node:process";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import { parseFulfillmentCompletedEnvelope } from "../../packages/rms/ordering/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export async function createInternalOrderCompletionConsumer(resources, { createCompletion }) {
   const service = await createCompletion(resources);
   const authorized = (value) => {
     const event = parseFulfillmentCompletedEnvelope(value);
     if (
-      process.env.NODE_ENV !== "development" ||
+      !isPilotRuntime() ||
       resources.now() >= resources.publicProfile.binding.validUntil ||
       event.tenantId !== resources.scope.brandReference ||
       event.storeId !== resources.scope.storeReference

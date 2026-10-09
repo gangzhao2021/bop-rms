@@ -18,6 +18,11 @@ import { loadPilotInstallation } from "./pilot-installation.mjs";
 import { createApplicationDatabase } from "./pilot-connections.mjs";
 import { createInternalCredentialLoaders } from "./pilot-credentials.mjs";
 import { createAdministrationTransactions } from "./administration-transactions.mjs";
+import {
+  currentPilotEnvironment,
+  isPilotRuntime,
+  matchesPilotEnvironment,
+} from "./pilot-environment.mjs";
 
 const unavailable = () => new Error("INTERNAL_BRAND_INITIAL_PROVISIONING_UNAVAILABLE");
 /** Fixed local InternalTest shape (no Brand/Store pilot profile is read):
@@ -41,7 +46,7 @@ export async function runInternalBrandInitialProvisioning(input) {
   let failed = false;
   try {
     const { directory } = readClosedRecord(input, ["directory"]);
-    if (!["development", "test"].includes(process.env.NODE_ENV)) throw unavailable();
+    if (!isPilotRuntime({ test: true })) throw unavailable();
     const { read } = await createPrivateInstallationReader(directory);
     // Apply the stronger entry file boundary even to existing shared loaders.
     const installationBytes = await read("installation.json");
@@ -58,7 +63,7 @@ export async function runInternalBrandInitialProvisioning(input) {
     ]);
     if (
       config.schemaVersion !== 1 ||
-      config.environment !== "InternalTest" ||
+      !matchesPilotEnvironment(config.environment, { test: true }) ||
       config.database !== installation.database
     )
       throw unavailable();
@@ -203,7 +208,10 @@ export async function runInternalBrandInitialProvisioning(input) {
       !["Applied", "AlreadyApplied"].includes(result.status)
     )
       throw unavailable();
-    outcome = Object.freeze({ environment: "InternalTest", status: result.status });
+    outcome = Object.freeze({
+      environment: currentPilotEnvironment({ test: true }),
+      status: result.status,
+    });
   } catch {
     failed = true;
   } finally {

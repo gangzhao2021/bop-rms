@@ -1,5 +1,5 @@
-import process from "node:process";
 import { ConsumerRegistry } from "../../packages/bop/eventing/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export async function createInternalWorkerServices(
   resources,
   { persistentWaiting = false } = {},
@@ -21,7 +21,7 @@ export async function createInternalWorkerServices(
     createInternalOrderCompletionConsumer,
     createInternalRefundConsumers,
   } = dependencies;
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_WORKER_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_WORKER_ONLY");
   const paid = await createInternalPaidOutcome(resources, { persistentWaiting }),
     status = await createInternalOrderStatus(resources);
   const paymentStatus = createInternalPaymentStatus(resources);

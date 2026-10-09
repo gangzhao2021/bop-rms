@@ -10,6 +10,7 @@ import {
   runPilotService,
   parsePilotRuntimeDirectory,
 } from "./pilot-service.mjs";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 const fail = () => {
   throw Error("PILOT_MAINTENANCE_CLEAR_STOP_UNAVAILABLE");
 };
@@ -116,7 +117,7 @@ export async function clearStoppedPilotMaintenance(
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (
-      process.env.NODE_ENV !== "development" ||
+      !isPilotRuntime() ||
       !(
         process.argv.length === 3 ||
         (process.argv.length === 4 && process.argv[3] === "--finish-stop")

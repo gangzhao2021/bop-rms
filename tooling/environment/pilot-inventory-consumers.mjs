@@ -1,11 +1,12 @@
-import process from "node:process";
+import console from "node:console";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import { parseKitchenWorkLifecycleEnvelope } from "../../packages/rms/kitchen/src/index.ts";
 import { createKitchenInventoryConsumption } from "../../apps/api/dist/kitchen-inventory-consumption.js";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 
 /** WP-2423: Inventory consumes Kitchen lifecycle Events per Order line (Section 30.6). */
 export function createInternalInventoryConsumers(resources) {
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_INVENTORY_ONLY");
+  if (!isPilotRuntime()) throw new Error("INTERNAL_INVENTORY_ONLY");
   const consume = createKitchenInventoryConsumption({
     scope: {
       tenantReference: resources.publicProfile.binding.tenantReference,

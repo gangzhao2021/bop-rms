@@ -3,11 +3,12 @@ import { Buffer } from "node:buffer";
 import { createGuestDiningBindingCredentialProvider } from "../../packages/bop/identity/src/index.ts";
 import { readFile, open, lstat, realpath } from "node:fs/promises";
 import { randomBytes, randomInt, createHmac, timingSafeEqual, createHash } from "node:crypto";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalDiningCredentialLoaders({ path }) {
   async function load() {
     const stat = await lstat(path);
     if (
-      process.env.NODE_ENV !== "development" ||
+      !isPilotRuntime() ||
       !stat.isFile() ||
       stat.isSymbolicLink() ||
       (stat.mode & 0o777) !== 0o600 ||
@@ -20,7 +21,7 @@ export function createInternalDiningCredentialLoaders({ path }) {
     return Buffer.from(raw, "hex");
   }
   async function provisionInternalDiningCredentials() {
-    if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_DINING_ONLY");
+    if (!isPilotRuntime()) throw new Error("INTERNAL_DINING_ONLY");
     let file;
     try {
       file = await open(path, "wx", 0o600);

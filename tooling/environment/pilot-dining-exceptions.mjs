@@ -1,4 +1,3 @@
-import process from "node:process";
 import { createHash } from "node:crypto";
 import { createPostgresTaskStore } from "../../packages/bop/task/src/index.ts";
 import {
@@ -8,6 +7,7 @@ import {
   parseDiningInstant,
   parseDiningHash,
 } from "../../packages/rms/dining/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 /** Current Task plus immutable Dining association, never a financial-clearance assertion. */
 export function createInternalDiningExceptionPageRunner(resources, consume) {
   const deny = () => {
@@ -20,8 +20,7 @@ export function createInternalDiningExceptionPageRunner(resources, consume) {
     storeReference: String(parseDiningReference(resources.scope.storeReference)),
   });
   const until = parseDiningInstant(binding.validUntil);
-  const active = () =>
-    process.env.NODE_ENV === "development" && parseDiningInstant(resources.now()) < until;
+  const active = () => isPilotRuntime() && parseDiningInstant(resources.now()) < until;
   if (
     !active() ||
     binding.brandReference !== scope.brandReference ||

@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import process from "node:process";
 import { createHash, randomUUID } from "node:crypto";
 import { parsePilotRecoveryArguments } from "./pilot-recovery-plan.mjs";
 import { inspectPilotRecoveryScope } from "./pilot-recovery-review.mjs";
@@ -12,6 +11,7 @@ import {
   snapshotPilotResumeFile,
   assertPilotResumeDirectory,
 } from "./pilot-recovery-resume-owner.mjs";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 const fail = () => {
   throw Error("PILOT_RESUME_TAKEOVER_REVIEW_REQUIRED");
 };
@@ -26,7 +26,7 @@ async function syncDirectory(file) {
 }
 /** Explicit takeover preparation; never deletes prior evidence or releases maintenance. */
 export async function preparePilotResumeTakeover(args) {
-  if (process.env.NODE_ENV !== "development") fail();
+  if (!isPilotRuntime()) fail();
   const plan = parsePilotRecoveryArguments(args),
     root = path.resolve(plan.runtimeDirectory);
   await assertPilotResumeDirectory(root);

@@ -1,15 +1,13 @@
-import process from "node:process";
 import { createHash } from "node:crypto";
 import {
   createPostgresPickupOrderCompletionLookup,
   createPostgresOrderPaymentOutcomeStore,
 } from "../../packages/rms/ordering/src/index.ts";
 import { createPostgresCapturedBatchPaymentSource } from "../../packages/rms/payment/src/index.ts";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalOrderConfirmation(resources, { providerAccountReference }) {
   const scope = resources.scope,
-    active = () =>
-      process.env.NODE_ENV === "development" &&
-      resources.now() < resources.publicProfile.binding.validUntil;
+    active = () => isPilotRuntime() && resources.now() < resources.publicProfile.binding.validUntil;
   const hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
   return async (transaction, orderReference) => {
     if (!active()) throw new Error("INTERNAL_CONFIRMATION_DENIED");
