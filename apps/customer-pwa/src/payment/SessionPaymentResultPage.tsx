@@ -1,9 +1,19 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import { formatCartMoney } from "../cart/format-money.js";
+import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { createSessionPaymentResultClient } from "./session-payment-result-client.js";
 import { createSessionPaymentResultController } from "./session-payment-result-controller.js";
-export function SessionPaymentResultPage() {
+
+/** Pending and unknown results are re-checked with a growing delay, up to this many times. */
+export const paymentResultPollDelaysMs = [3_000, 5_000, 8_000, 13_000, 21_000, 30_000] as const;
+export const paymentResultPollLimit = 12;
+
+export function SessionPaymentResultPage({
+  store,
+}: {
+  readonly store?: CustomerStoreContext | undefined;
+}) {
   const [controller] = useState(() =>
     createSessionPaymentResultController(createSessionPaymentResultClient()),
   );
@@ -28,6 +38,16 @@ export function SessionPaymentResultPage() {
     state.status === "unknown" ||
     (result?.status === "Pending" && result.paymentIntentReference !== null) ||
     result?.status === "Unknown";
+  const [polls, setPolls] = useState(0);
+  useEffect(() => {
+    if (!refresh || polls >= paymentResultPollLimit) return;
+    const delay = paymentResultPollDelaysMs[Math.min(polls, paymentResultPollDelaysMs.length - 1)];
+    const timer = window.setTimeout(() => {
+      setPolls((count) => count + 1);
+      void controller.refresh();
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [controller, polls, refresh]);
   const unknown = state.status === "unknown" || result?.status === "Unknown";
   const unprepared = result?.status === "Pending" && result.paymentIntentReference === null;
   const heading =
@@ -72,30 +92,30 @@ export function SessionPaymentResultPage() {
     unknown ||
     result?.status === "Failed";
   return (
-    <main id="main-content" className="payment-page payment-result-page">
-      <header className="payment-page__header payment-result-page__header">
-        <span>BOP</span>
-        <strong>Payment result</strong>
-        <span>Guest session · exact Store scope required</span>
-      </header>
-      <nav
-        className="payment-page__journey payment-result-page__journey"
-        aria-label="Customer checkout journey"
-      >
-        <Link to="/">Entry</Link>
-        <Link to="/menu">Menu</Link>
-        <Link to="/cart">Cart</Link>
-        <Link to="/checkout">Checkout</Link>
-        <span aria-current="page">Payment</span>
-      </nav>
-      <h1>Check your payment</h1>
-      <p className="payment-result-page__intro">
-        {unknown
-          ? "The payment result is still being confirmed."
-          : result?.status === "Failed"
-            ? "This payment was not completed."
-            : "Payment details come from your current checkout session."}
-      </p>
+    <CustomerPage
+      step="payment"
+      store={store}
+      orderReference={
+        result?.status === "Succeeded" ? (result.orderReference ?? undefined) : undefined
+      }
+      className="payment-page payment-result-page"
+    >
+      <PageHeading title="Check your payment">
+        <p className="payment-result-page__intro">
+          {unknown
+            ? "The payment result is still being confirmed."
+            : result?.status === "Failed"
+              ? "This payment was not completed."
+              : result?.status === "Succeeded"
+                ? "Thank you. Your order has been sent to the kitchen."
+                : "Payment details come from your current checkout."}
+        </p>
+      </PageHeading>
+      <ol className="checkout-progress" aria-label="Checkout progress">
+        <li>1 Review</li>
+        <li>2 Pay</li>
+        <li aria-current="step">3 Done</li>
+      </ol>
       <section className="payment-result-page__card" aria-labelledby="payment-result-heading">
         <span className="payment-result-page__badge" data-tone={badgeTone}>
           {badge}
@@ -136,7 +156,12 @@ export function SessionPaymentResultPage() {
                 </p>
               ) : null}
               {result.orderReference ? (
-                <Link to={"/orders/" + result.orderReference}>View order status</Link>
+                <Link
+                  className="payment-result-page__order"
+                  to={"/orders/" + result.orderReference}
+                >
+                  View order status
+                </Link>
               ) : null}
             </>
           ) : null}
@@ -145,18 +170,25 @@ export function SessionPaymentResultPage() {
           ) : null}
         </div>
         {refresh ? (
-          <button
-            type="button"
-            className="payment-result-page__refresh"
-            onClick={() => void controller.refresh()}
-          >
-            Check payment status
-          </button>
+          <>
+            <p className="payment-result-page__polling" role="status">
+              {polls < paymentResultPollLimit
+                ? "Checking again automatically…"
+                : "Automatic checks stopped. Check again or contact the store."}
+            </p>
+            <button
+              type="button"
+              className="payment-result-page__refresh"
+              onClick={() => void controller.refresh()}
+            >
+              Check payment status
+            </button>
+          </>
         ) : null}
       </section>
       <Link className="payment-result-page__back" to="/checkout">
         Back to checkout
       </Link>
-    </main>
+    </CustomerPage>
   );
 }

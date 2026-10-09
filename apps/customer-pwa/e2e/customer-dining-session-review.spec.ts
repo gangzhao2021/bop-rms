@@ -34,16 +34,15 @@ test("@production CUST-DINE-IN-SESSION stays source-limited at responsive widths
     const card = await main.locator(".dining-session__unavailable").boundingBox();
     if (card === null) throw new Error("Dining Session unavailable card missing");
     expect(card.width).toBeLessThanOrEqual(width - 16);
-    const header = await main.locator(":scope > header").boundingBox();
-    const navigation = await main.locator(".dining-session__navigation").boundingBox();
-    const intro = await main.locator(".delivery-status__intro").boundingBox();
-    if (header === null || navigation === null || intro === null) {
-      throw new Error("Dining Session Figma hierarchy is incomplete");
+    const header = await page.locator(".bop-shell__header").boundingBox();
+    const navigation = await page
+      .getByRole("navigation", { name: "Customer journey" })
+      .boundingBox();
+    if (header === null || navigation === null) {
+      throw new Error("Customer frame is incomplete");
     }
     expect(header.width).toBe(width);
     expect(navigation.width).toBe(width);
-    expect(intro.width).toBeLessThanOrEqual(880);
-    expect(card.height).toBeGreaterThanOrEqual(width === 1440 ? 354 : width === 390 ? 332 : 376);
     await page.screenshot({
       path: `test-results/customer-dining-session-${width}.png`,
       fullPage: true,

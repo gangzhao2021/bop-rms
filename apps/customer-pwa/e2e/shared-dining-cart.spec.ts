@@ -130,7 +130,7 @@ for (const screen of [
         0, 0,
       ]);
       await context.setOffline(true);
-      await expect(page.getByText(/Offline read-only\. Changes and checkout/)).toBeVisible();
+      await expect(page.getByText(/You’re offline\. Changes and checkout/)).toBeVisible();
       await expect(
         own.getByRole("button", { name: "Increase Synthetic own tea quantity" }),
       ).toBeDisabled();

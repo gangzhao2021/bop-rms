@@ -24,10 +24,10 @@ function render(state: PickupCodeState): string {
 }
 
 describe("CUST-PICKUP-CODE contextual screen", () => {
-  it("starts with no proof and requires an explicit readiness check", () => {
+  it("starts with no proof and offers to show the code on demand", () => {
     const html = render({ status: "hidden" });
-    expect(html).toContain("Check pickup readiness");
-    expect(html).toContain("stays hidden");
+    expect(html).toContain("Show pickup code");
+    expect(html).toContain("appears here once your order is ready");
     expect(html).not.toContain("123456");
   });
 
@@ -51,23 +51,36 @@ describe("CUST-PICKUP-CODE contextual screen", () => {
     });
     expect(html).toContain("Ready for pickup");
     expect(html).toContain("123456");
-    expect(html).toContain("Pickup proof 1 2 3 4 5 6");
-    expect(html).toContain("does not complete the Order by itself");
+    expect(html).toContain("Pickup code 1 2 3 4 5 6");
+    expect(html).toContain("Show this code to staff");
   });
 
   it.each([
-    ["loading", "Checking pickup readiness"],
-    ["not-ready", "Pickup is not ready yet"],
-    ["permission-denied", "access was denied"],
-    ["not-found", "No authorized pickup proof"],
-    ["feature-disabled", "disabled for this journey"],
-    ["conflict", "Pickup proof changed"],
-    ["unavailable", "No proof was retained"],
-    ["offline", "has been cleared"],
-    ["expired", "expired and has been cleared"],
+    ["loading", "Checking your pickup code"],
+    ["not-ready", "isn’t ready yet"],
+    ["permission-denied", "can’t be shown in this session"],
+    ["not-found", "No pickup code is available"],
+    ["feature-disabled", "not used at this location"],
+    ["conflict", "Your pickup code changed"],
+    ["unavailable", "can’t be shown right now"],
+    ["offline", "Reconnect to show your pickup code"],
+    ["expired", "This pickup code expired"],
   ] as const)("renders the %s state without a raw proof", (status, message) => {
     const html = render({ status });
     expect(html).toContain(message);
     expect(html).not.toContain("123456");
   });
+});
+
+it("shows a checking state instead of a tap when the order is ready", () => {
+  const html = renderToStaticMarkup(
+    <PickupCodePanel
+      orderReference={id(1)}
+      orderNumber="1001"
+      controller={controller({ status: "hidden" })}
+      autoReveal
+    />,
+  );
+  expect(html).toContain("Checking your pickup code");
+  expect(html).not.toContain("Show pickup code");
 });

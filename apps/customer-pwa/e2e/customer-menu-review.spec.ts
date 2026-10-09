@@ -38,15 +38,12 @@ test("CUST-MENU follows the Figma Review hierarchy at 1440, 390, and 320px @demo
     await expect(
       main.getByRole("link", { name: "View Synthetic mushroom rice bowl" }),
     ).toBeVisible();
-    await expect(
-      main.getByText("Price confirmed in your final quote", { exact: true }).first(),
-    ).toBeVisible();
+    await expect(main.getByText("Priced at checkout", { exact: true }).first()).toBeVisible();
     await expect(main.getByText("Contains: Soy", { exact: true })).toBeVisible();
     await expect(main).not.toContainText("$0");
-    await expect(page.getByRole("link", { name: "Browse menu", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    await expect(
+      page.getByRole("navigation", { name: "Customer journey" }).getByText("Menu", { exact: true }),
+    ).toHaveAttribute("aria-current", "page");
     await expect
       .poll(() =>
         page.evaluate(

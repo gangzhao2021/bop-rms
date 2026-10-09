@@ -8,13 +8,32 @@ import {
 import type { OrderStatusView } from "./types.js";
 import { PickupCodePanel } from "../pickup-code/PickupCodePanel.js";
 import type { PickupCodeController } from "../pickup-code/pickup-code-controller.js";
+import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
+import { formatMoney } from "../journey/format.js";
 
-function money(amountMinor: bigint, currencyCode: string): string {
-  const negative = amountMinor < 0n;
-  const absolute = negative ? -amountMinor : amountMinor;
-  return `${negative ? "−" : ""}${currencyCode} ${absolute / 100n}.${(absolute % 100n)
-    .toString()
-    .padStart(2, "0")}`;
+/** How often an active order re-reads its status when no live connection is available. */
+export const orderStatusPollIntervalMs = 15_000;
+
+export function isOrderSettled(view: OrderStatusView): boolean {
+  const phase = view.order.canonicalPhase;
+  return (
+    phase === "Fulfilled" ||
+    phase === "Cancelled" ||
+    phase === "Rejected" ||
+    view.order.fulfillmentStatus === "Completed" ||
+    Boolean(view.sources?.pickup?.notCollectedAt)
+  );
+}
+
+function kitchenStatus(view: OrderStatusView): "Ready" | "Preparing" | "Queued" | "Unknown" {
+  const kitchen = view.sources?.kitchen;
+  if (!kitchen) return "Unknown";
+  if (
+    kitchen.batches.length === view.order.batches.length &&
+    kitchen.batches.every((batch) => batch.status === "Ready")
+  )
+    return "Ready";
+  return kitchen.batches.some((batch) => batch.status !== "Queued") ? "Preparing" : "Queued";
 }
 
 function StatusContent({
@@ -29,14 +48,7 @@ function StatusContent({
   const notCollected =
     view.order.orderType === "Pickup" && !complete && Boolean(view.sources?.pickup?.notCollectedAt);
   const kitchen = view.sources?.kitchen;
-  const kitchenLabel = !kitchen
-    ? "Not available yet"
-    : kitchen.batches.length === view.order.batches.length &&
-        kitchen.batches.every((batch) => batch.status === "Ready")
-      ? "Ready"
-      : kitchen.batches.some((batch) => batch.status !== "Queued")
-        ? "Preparing"
-        : "Queued";
+  const kitchenLabel = kitchenStatus(view);
   const diningItems = view.order.orderType === "DineIn" ? view.sources?.dining?.items : undefined;
   const allServed =
     diningItems !== undefined &&
@@ -57,7 +69,7 @@ function StatusContent({
       : view.order.canonicalPhase === "Rejected"
         ? ["Order not accepted", "Your order was not accepted."]
         : complete
-          ? ["Order collected", "Your order has been collected."]
+          ? ["Order collected", "Your order has been collected. Enjoy!"]
           : notCollected
             ? [
                 "Not collected",
@@ -71,19 +83,39 @@ function StatusContent({
                     "Some items have been served. Check the remaining items below.",
                   ]
                 : kitchenLabel === "Ready"
-                  ? ["Kitchen preparation complete", "All listed batches are ready."]
+                  ? view.order.orderType === "Pickup"
+                    ? [
+                        "Ready for pickup",
+                        "Your order is ready. Show your pickup code at the counter.",
+                      ]
+                    : ["Kitchen preparation complete", "All listed batches are ready."]
                   : kitchenLabel === "Preparing"
                     ? ["Preparing your order", "The kitchen is preparing your order."]
                     : ["Order submitted", "We have your order."];
   const payments = view.sources?.payments;
+  const paid = payments?.find((payment) => payment.status === "Succeeded" && payment.amount);
+  const paymentLabel =
+    payments == null
+      ? "Payment updates unavailable"
+      : paid?.amount
+        ? `Payment received ${formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)}`
+        : payments.some((payment) => payment.status === "Failed")
+          ? "Payment attempt failed"
+          : "Payment pending";
+  const multipleBatches = view.order.batches.length > 1;
+  const total = view.order.batches
+    .flatMap((batch) => batch.items)
+    .reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
+  const currency = view.order.batches[0]?.items[0]?.lineTotal.currencyCode ?? "CAD";
   return (
     <>
       <section
         className="order-status__card order-status__summary"
         aria-labelledby="order-progress-heading"
       >
-        <p className="cart-page__eyebrow">Order {view.order.orderNumber}</p>
+        <p className="bop-eyebrow">Order {view.order.orderNumber}</p>
         <h2 id="order-progress-heading">{progressHeading}</h2>
+        <p>{progressMessage}</p>
         <dl>
           <div>
             <dt>Order type</dt>
@@ -91,52 +123,35 @@ function StatusContent({
           </div>
           <div>
             <dt>Kitchen status</dt>
-            <dd>{kitchenLabel}</dd>
-          </div>
-          <div>
-            <dt>Estimated time</dt>
-            <dd>Not available yet</dd>
-          </div>
-          <div>
-            <dt>Payment status</dt>
             <dd>
-              {payments == null
-                ? "Payment updates are unavailable"
-                : payments.length === 0
-                  ? "No payment result has been reported yet"
-                  : "See individual payment updates below"}
+              {kitchenLabel === "Unknown"
+                ? "Not available yet"
+                : kitchenLabel === "Queued"
+                  ? "In the queue"
+                  : kitchenLabel}
             </dd>
           </div>
+          <div>
+            <dt>Payment</dt>
+            <dd>{paymentLabel}</dd>
+          </div>
         </dl>
-        <p>{progressMessage}</p>
       </section>
 
-      {payments && payments.length > 0 ? (
-        <section
-          className="order-status__card order-status__payments"
-          aria-labelledby="order-payment-updates-heading"
-        >
-          <h2 id="order-payment-updates-heading">Payment updates</h2>
-          <ul>
-            {payments.map((payment, index) => (
-              <li key={index}>
-                <p>
-                  {payment.status === "Succeeded" && payment.amount
-                    ? `Payment received: ${money(payment.amount.amountMinor, payment.amount.currencyCode)}`
-                    : "Payment attempt failed"}
-                </p>
-                {payment.freshnessStatus !== "Fresh" ? (
-                  <p role="status">
-                    This payment update may be out of date. Refresh to check again.
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          <p>
-            These are individual payment results. They do not confirm that the order is fully paid
-            or show any later refunds.
-          </p>
+      {view.order.orderType === "Pickup" && !complete && !notCollected ? (
+        <PickupCodePanel
+          orderReference={view.order.orderReference}
+          orderNumber={view.order.orderNumber}
+          controller={pickupController}
+          autoReveal={kitchenLabel === "Ready" || view.order.canonicalPhase === "Ready"}
+          refreshToken={view.sources?.checkedAt ?? view.projectedAt}
+        />
+      ) : null}
+
+      {payments && payments.some((payment) => payment.freshnessStatus !== "Fresh") ? (
+        <section className="order-status__warning" role="status">
+          <h2>Payment update may be delayed</h2>
+          <p>This payment update may be out of date. Refresh to check again.</p>
         </section>
       ) : null}
 
@@ -154,63 +169,61 @@ function StatusContent({
       ) : null}
 
       <section className="order-status__batches" aria-labelledby="order-items-heading">
-        <h2 id="order-items-heading">Order batches</h2>
-        {view.order.batches.map((batch, index) => (
-          <article
-            key={batch.orderBatchReference}
-            className="order-status__card order-status__batch"
-          >
-            <h3>Batch {index + 1}</h3>
-            {kitchen ? (
-              <p>
-                {kitchen.batches.find(
-                  (entry) => entry.orderBatchReference === batch.orderBatchReference,
-                )?.status === "Ready"
-                  ? "Ready"
-                  : kitchen.batches.find(
-                        (entry) => entry.orderBatchReference === batch.orderBatchReference,
-                      )?.status === "InProgress"
-                    ? "Preparing"
-                    : kitchen.batches.some(
-                          (entry) => entry.orderBatchReference === batch.orderBatchReference,
-                        )
-                      ? "Queued"
-                      : "Not available yet"}
-              </p>
-            ) : null}
-            <ul>
-              {batch.items.map((item) => (
-                <li key={item.orderItemReference}>
-                  <span>
-                    {item.quantity} × {item.displayName}
-                  </span>
-                  <span>{money(item.lineTotal.amountMinor, item.lineTotal.currencyCode)}</span>
-                  {view.sources?.dining ? (
+        <h2 id="order-items-heading">Your items</h2>
+        {view.order.batches.map((batch, index) => {
+          const batchKitchen = kitchen?.batches.find(
+            (entry) => entry.orderBatchReference === batch.orderBatchReference,
+          );
+          return (
+            <article
+              key={batch.orderBatchReference}
+              className="order-status__card order-status__batch"
+            >
+              {multipleBatches ? <h3>Round {index + 1}</h3> : null}
+              {kitchen && multipleBatches ? (
+                <p>
+                  {batchKitchen?.status === "Ready"
+                    ? "Ready"
+                    : batchKitchen?.status === "InProgress"
+                      ? "Preparing"
+                      : batchKitchen
+                        ? "In the queue"
+                        : "Not available yet"}
+                </p>
+              ) : null}
+              <ul>
+                {batch.items.map((item) => (
+                  <li key={item.orderItemReference}>
                     <span>
-                      Served{" "}
-                      {
-                        view.sources.dining.items.find(
-                          (entry) =>
-                            entry.orderItemReference === item.orderItemReference &&
-                            entry.orderBatchReference === batch.orderBatchReference,
-                        )?.servedQuantity
-                      }{" "}
-                      of {item.quantity}
+                      {item.quantity} × {item.displayName}
                     </span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </article>
-        ))}
+                    <span>
+                      {formatMoney(item.lineTotal.amountMinor, item.lineTotal.currencyCode)}
+                    </span>
+                    {view.sources?.dining ? (
+                      <span>
+                        Served{" "}
+                        {
+                          view.sources.dining.items.find(
+                            (entry) =>
+                              entry.orderItemReference === item.orderItemReference &&
+                              entry.orderBatchReference === batch.orderBatchReference,
+                          )?.servedQuantity
+                        }{" "}
+                        of {item.quantity}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          );
+        })}
+        <p className="order-status__total">
+          <span>Items total</span>
+          <span>{formatMoney(total, currency)}</span>
+        </p>
       </section>
-      {view.order.orderType === "Pickup" && !complete && !notCollected ? (
-        <PickupCodePanel
-          orderReference={view.order.orderReference}
-          orderNumber={view.order.orderNumber}
-          controller={pickupController}
-        />
-      ) : null}
     </>
   );
 }
@@ -218,9 +231,11 @@ function StatusContent({
 export function OrderStatusPage({
   controller: provided,
   pickupController,
+  store,
 }: {
   readonly controller?: OrderStatusController;
   readonly pickupController?: PickupCodeController | undefined;
+  readonly store?: CustomerStoreContext | undefined;
 }) {
   const { orderReference = "" } = useParams();
   const [controller] = useState(
@@ -245,12 +260,31 @@ export function OrderStatusPage({
     };
   }, [controller]);
   const view = state.status === "ready" || state.status === "offline" ? state.view : null;
+  const polling =
+    state.status === "ready" && state.realtime !== "available" && !isOrderSettled(state.view);
+  useEffect(() => {
+    if (!polling) return;
+    const tick = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible")
+        void controller.refresh();
+    };
+    const timer = window.setInterval(tick, orderStatusPollIntervalMs);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [controller, polling]);
   return (
-    <main id="main-content" className="order-status">
-      <header>
-        <p className="cart-page__eyebrow">Order status</p>
-        <h1>Track your order</h1>
-        <p>Check your order progress and available next steps.</p>
+    <CustomerPage
+      step="order"
+      store={store}
+      orderReference={orderReference}
+      className="order-status"
+    >
+      <header className="customer-heading">
+        <p className="bop-eyebrow">Order status</p>
+        <h2>Track your order</h2>
       </header>
 
       {state.status === "loading" ? (
@@ -302,41 +336,38 @@ export function OrderStatusPage({
       ) : null}
       {state.status === "offline" ? (
         <section role="status" className="order-status__warning">
-          <h2>Offline read-only</h2>
+          <h2>You’re offline</h2>
           <p>
             {view
               ? "Showing the last status loaded on this page."
               : "Connect to the internet to load your order status."}{" "}
-            Reconnecting does not refresh automatically.
+            Reconnect and refresh to check again.
           </p>
+          <button
+            className="order-status__retry"
+            type="button"
+            onClick={() => void controller.refresh()}
+          >
+            Try loading status
+          </button>
         </section>
-      ) : null}
-      {state.status === "offline" ? (
-        <button
-          className="order-status__retry"
-          type="button"
-          onClick={() => void controller.refresh()}
-        >
-          Try loading status
-        </button>
       ) : null}
       {view ? <StatusContent view={view} pickupController={pickupController} /> : null}
       {state.status === "ready" ? (
-        <section className="order-status__actions">
-          <h2>Updates</h2>
+        <section className="order-status__actions" aria-label="Updates">
           <p>
             {state.realtime === "available"
-              ? "Order updates are connected."
-              : state.realtime === "connecting"
-                ? "Connecting for order updates."
-                : "Automatic updates are unavailable. Refresh to check your order."}
+              ? "Live updates are on."
+              : isOrderSettled(state.view)
+                ? "This order is complete."
+                : "This page checks for updates every few seconds."}
           </p>
           <button
             type="button"
             disabled={state.refreshing}
             onClick={() => void controller.refresh()}
           >
-            {state.refreshing ? "Refreshing…" : "Refresh status"}
+            {state.refreshing ? "Refreshing…" : "Refresh now"}
           </button>
         </section>
       ) : null}
@@ -348,6 +379,6 @@ export function OrderStatusPage({
       <Link className="order-status__back" to="/menu">
         Back to menu
       </Link>
-    </main>
+    </CustomerPage>
   );
 }

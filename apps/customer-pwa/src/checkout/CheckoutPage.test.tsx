@@ -79,32 +79,36 @@ describe("CUST-CHECKOUT page contract", () => {
   it("renders only server Cart and Quote facts with payment gated by saved details", () => {
     const html = render({ status: "ready", cart, quote });
     expect(html).toContain("Synthetic tea");
-    expect(html).toContain("CAD 1.13");
-    expect(html).toContain("SYNTHETIC_WARNING");
-    expect(html).toContain("SYNTHETIC_BLOCK");
+    expect(html).toContain("$1.13");
+    expect(html).not.toContain("SYNTHETIC_WARNING");
+    expect(html).not.toContain("SYNTHETIC_BLOCK");
+    expect(html).toContain("can’t be paid yet");
     expect(html).toContain("Price changed");
     expect(html).toContain("I confirm the changed price");
-    expect(html).toContain("Capacity Hold status · unavailable from current Checkout source");
+    expect(html).not.toContain("Capacity Hold");
     expect(html).toContain('aria-label="Checkout progress"');
     expect(html).toContain('aria-current="step"');
     expect(html).toContain('aria-label="Customer journey"');
-    expect(html).toContain("Save your checkout details before continuing to secure payment.");
-    expect(html).toContain("disabled");
+    expect(html).toContain('aria-label="Tip amount"');
+    expect(html).toContain("15%");
+    expect(html).toContain("$0.15");
+    expect(html).toContain("Continue to payment");
+    expect(html).toMatch(/<button[^>]*class="checkout-continue__button"[^>]*disabled=""/u);
   });
 
   it("marks an expired Quote and offers a fresh idempotent request", () => {
     const html = render({ status: "ready", cart, quote }, Date.parse("2026-08-12T00:06:00.000Z"));
-    expect(html).toContain("Quote expired");
-    expect(html).toContain("Get a new quote");
+    expect(html).toContain("These prices expired");
+    expect(html).toContain("Refresh prices");
   });
 
   it.each([
-    ["offline", "Offline read-only. Nothing will replay."],
-    ["outcome-unknown", "The Quote outcome is unknown; no success was assumed."],
-    ["session-expired", "Checkout state: session-expired"],
-    ["conflict", "Checkout state: conflict"],
-    ["validation", "Checkout state: validation"],
-    ["unavailable", "Checkout state: unavailable"],
+    ["offline", "You’re offline. Reconnect to continue"],
+    ["outcome-unknown", "We couldn’t confirm your prices"],
+    ["session-expired", "Your session ended"],
+    ["conflict", "Your cart changed. Refresh to price the current cart."],
+    ["validation", "can’t be ordered as selected"],
+    ["unavailable", "We couldn’t price your order just now"],
   ] as const)("renders the %s recovery state", (status, message) => {
     expect(render({ status, cart, canRetry: status === "outcome-unknown" })).toContain(message);
   });
@@ -118,21 +122,21 @@ it.each(["pending", "offline", "outcome-unknown", "session-expired"] as const)(
         ? { status, cart }
         : { status, cart, canRetry: status === "outcome-unknown" };
     const html = render(state);
-    expect(html).not.toContain("Get current quote");
-    if (status === "outcome-unknown") expect(html).toContain("Retry the same Quote request");
+    expect(html).not.toContain("Refresh prices");
+    if (status === "outcome-unknown") expect(html).toContain("Retry pricing");
   },
 );
 it("disables the retained Quote retry while offline", () => {
   expect(render({ status: "offline", cart, canRetry: true })).toMatch(
-    new RegExp("<button[^>]*disabled[^>]*>Retry the same Quote request</button>", "u"),
+    new RegExp("<button[^>]*disabled[^>]*>Retry pricing</button>", "u"),
   );
 });
 
 it("offers explicit new pricing only after a confirmed expired operation", () => {
   const html = render({ status: "quote-expired", cart, canRetry: false });
-  expect(html).toContain("Your previous quote expired");
-  expect(html).toContain("Get a new quote");
+  expect(html).toContain("Your previous prices expired");
+  expect(html).toContain("Refresh prices");
   expect(html).toContain('role="alert"');
-  expect(html).not.toContain("Retry the same Quote request");
-  expect(html).not.toContain("Quote summary");
+  expect(html).not.toContain("Retry pricing");
+  expect(html).not.toContain("checkout-totals");
 });

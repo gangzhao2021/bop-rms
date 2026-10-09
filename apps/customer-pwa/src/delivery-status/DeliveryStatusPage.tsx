@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
+import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import {
   DeliveryTrackingError,
   parseCustomerDeliveryTracking,
@@ -22,7 +23,6 @@ export function DeliveryTrackingContent({ view }: { readonly view: CustomerDeliv
         </section>
       ) : null}
       <section aria-labelledby="delivery-progress">
-        <p className="cart-page__eyebrow">CUST-DELIVERY-STATUS</p>
         <h2 id="delivery-progress">{view.status}</h2>
         <p>
           {view.eta
@@ -53,8 +53,10 @@ export function DeliveryTrackingContent({ view }: { readonly view: CustomerDeliv
 }
 export function DeliveryStatusPage({
   client = unavailableCustomerDeliveryTrackingClient,
+  store,
 }: {
   readonly client?: CustomerDeliveryTrackingClient;
+  readonly store?: CustomerStoreContext | undefined;
 }) {
   const { orderReference = "" } = useParams(),
     [state, setState] = useState<State>({ kind: "Loading" });
@@ -81,27 +83,13 @@ export function DeliveryStatusPage({
     };
   }, [client, orderReference]);
   return (
-    <main id="main-content" className="order-status">
-      <header className="cart-page__header delivery-status__header">
-        <p className="cart-page__eyebrow">BOP</p>
-        <p className="delivery-status__title">Delivery status</p>
-        <p>Customer order journey</p>
-      </header>
-      <nav
-        className="cart-page__navigation delivery-status__navigation"
-        aria-label="Customer journey"
-      >
-        <Link to="/">Entry</Link>
-        <Link to="/menu">Menu</Link>
-        <Link to="/cart">Cart</Link>
-        <Link to="/checkout">Checkout</Link>
-        <span aria-current="step">Order</span>
-        <Link to={`/orders/${orderReference}/receipt`}>Receipt</Link>
-      </nav>
-      <div className="delivery-status__intro">
-        <h1>Track your delivery</h1>
-        <p>Your authorized Guest Session—not this reference alone—grants access.</p>
-      </div>
+    <CustomerPage
+      step="other"
+      store={store}
+      orderReference={orderReference}
+      className="order-status delivery-status"
+    >
+      <PageHeading eyebrow="Delivery" title="Track your delivery" />
       {state.kind === "Loading" ? (
         <section className="order-status__card" role="status">
           <h2>Loading delivery status</h2>
@@ -130,6 +118,6 @@ export function DeliveryStatusPage({
       <Link className="order-status__back" to={`/orders/${orderReference}`}>
         Back to order status
       </Link>
-    </main>
+    </CustomerPage>
   );
 }

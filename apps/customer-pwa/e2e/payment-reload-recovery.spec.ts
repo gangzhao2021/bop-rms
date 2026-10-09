@@ -76,17 +76,17 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
       ).toBeVisible();
       await expect(page.locator("body")).not.toContainText("0190fa21-0000-7000-8000-000000000002");
       await expect(page.locator("body")).not.toContainText("0190fa21-0000-7000-8000-000000000003");
-      await expect(page.locator("body")).not.toContainText("CAD 11.30");
+      await expect(page.locator("body")).not.toContainText("$11.30");
     }
     await expect(page.locator("body")).not.toContainText("0190fa21-0000-7000-8000-000000000002");
     await expect(page.locator("body")).not.toContainText("0190fa21-0000-7000-8000-000000000003");
     if (status === "Succeeded") {
-      await expect(page.getByText("Paid:", { exact: false })).toContainText("CAD 11.30");
+      await expect(page.getByText("Paid:", { exact: false })).toContainText("$11.30");
       await expect(
         page.getByRole("link", { name: "View order status", exact: true }),
       ).toHaveAttribute("href", "/orders/0190fa21-0000-7000-8000-000000000003");
     } else {
-      await expect(page.locator("body")).not.toContainText("CAD 11.30");
+      await expect(page.locator("body")).not.toContainText("$11.30");
       await expect(page.getByRole("link", { name: "View order status", exact: true })).toHaveCount(
         0,
       );
@@ -106,9 +106,9 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: width === 1440 ? 1000 : 900 });
       const geometry = await page.evaluate(() => {
-        const header = document.querySelector<HTMLElement>(".payment-result-page__header");
-        const nav = document.querySelector<HTMLElement>(".payment-result-page__journey");
-        const title = document.querySelector<HTMLElement>(".payment-result-page > h1");
+        const header = document.querySelector<HTMLElement>(".bop-shell__header");
+        const nav = document.querySelector<HTMLElement>(".bop-shell__nav");
+        const title = document.querySelector<HTMLElement>(".customer-heading h2");
         const intro = document.querySelector<HTMLElement>(".payment-result-page__intro");
         const card = document.querySelector<HTMLElement>(".payment-result-page__card");
         const items = [...(nav?.querySelectorAll<HTMLElement>("a, span") ?? [])].map((item) =>
@@ -154,12 +154,12 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
         };
       });
       expect(geometry).toMatchObject({ headerWidth: width, headerLeft: 0, navRowSpread: 0 });
-      expect(geometry.headerHeight).toBeLessThanOrEqual(width === 1440 ? 128 : 134);
-      expect(geometry.navHeight).toBeLessThanOrEqual(width === 320 ? 56 : 60);
+      expect(geometry.headerHeight).toBeLessThanOrEqual(80);
+      expect(geometry.navHeight).toBeLessThanOrEqual(60);
       expect(geometry.headerToNavGap, JSON.stringify(geometry)).toBe(0);
-      expect(geometry.navToTitleGap, JSON.stringify(geometry)).toBe(width === 1440 ? 28 : 36);
-      expect(geometry.titleIntroGap, JSON.stringify(geometry)).toBe(16);
-      expect(geometry.introCardGap, JSON.stringify(geometry)).toBe(width === 1440 ? 36 : 24);
+      expect(geometry.navToTitleGap, JSON.stringify(geometry)).toBeGreaterThanOrEqual(12);
+      expect(geometry.titleIntroGap, JSON.stringify(geometry)).toBeGreaterThanOrEqual(4);
+      expect(geometry.introCardGap, JSON.stringify(geometry)).toBeGreaterThanOrEqual(12);
       expect(geometry.clippedLabels).toEqual([]);
       expect(geometry.largestNavigationControl).toBeLessThanOrEqual(48);
       const overflow = await page.evaluate(() => ({

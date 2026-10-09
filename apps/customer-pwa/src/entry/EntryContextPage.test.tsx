@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { EntryContextView } from "./EntryContextPage.js";
 import type { CustomerEntryEstablishedContext, CustomerEntryScreenState } from "./types.js";
@@ -18,7 +19,9 @@ const context: CustomerEntryEstablishedContext = Object.freeze({
 
 function render(state: CustomerEntryScreenState): string {
   return renderToStaticMarkup(
-    <EntryContextView onContinue={vi.fn()} onRetry={vi.fn()} state={state} />,
+    <MemoryRouter>
+      <EntryContextView onContinue={vi.fn()} onRetry={vi.fn()} state={state} />
+    </MemoryRouter>,
   );
 }
 
@@ -27,7 +30,8 @@ describe("CUST-ENTRY-CONTEXT", () => {
     const html = render({ kind: "Established", context });
     expect(html).toContain("BOP Test Kitchen");
     expect(html).toContain("Harbour Test Store");
-    expect(html).toContain("Your table is confirmed for dine-in");
+    expect(html).toContain("Ready to order");
+    expect(html).toContain("Your table at Harbour Test Store is confirmed for dine-in");
     expect(html).toContain("Dine in, Pickup");
     expect(html).toContain("Continue to menu");
     expect(html).not.toContain(context.publicStoreReference);

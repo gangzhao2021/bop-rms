@@ -7,6 +7,7 @@ import {
   getCheckoutTipSelection,
 } from "../session/customer-transaction-context.js";
 import { formatCartMoney } from "../cart/format-money.js";
+import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import {
   createSessionPaymentClient,
   SessionPaymentClientError,
@@ -46,13 +47,25 @@ function configuration() {
     return null;
   }
 }
-export function SessionPaymentPage() {
+export function SessionPaymentPage({
+  store,
+}: {
+  readonly store?: CustomerStoreContext | undefined;
+}) {
   const [session] = useState(getCheckoutSessionReference);
   const [tip] = useState(getCheckoutTipSelection);
   // A restored checkout has no page-memory tip. Read its outcome before another payment action.
-  return session && !tip ? <SessionPaymentResultPage /> : <PreparedSessionPaymentPage />;
+  return session && !tip ? (
+    <SessionPaymentResultPage store={store} />
+  ) : (
+    <PreparedSessionPaymentPage store={store} />
+  );
 }
-function PreparedSessionPaymentPage() {
+function PreparedSessionPaymentPage({
+  store,
+}: {
+  readonly store?: CustomerStoreContext | undefined;
+}) {
   const navigate = useNavigate();
   const [config] = useState(configuration);
   const [sessionReference] = useState(getCheckoutSessionReference);
@@ -152,6 +165,14 @@ function PreparedSessionPaymentPage() {
       flight.current = false;
     }
   };
+  // U1: the amount and the secure card field appear as soon as the checkout is confirmed.
+  const autoPrepared = useRef(false);
+  useEffect(() => {
+    if (status !== "ready" || autoPrepared.current || !online) return;
+    autoPrepared.current = true;
+    void prepare();
+    // prepare reads refs and page-memory selections; the status transition is the trigger.
+  }, [status, online]);
   const simulate = async () => {
     if (
       config?.mode !== "simulation" ||
@@ -181,85 +202,56 @@ function PreparedSessionPaymentPage() {
     setSecret(null);
     if (valid()) void navigate("/checkout/result", { replace: true });
   };
+  const demo = config?.mode === "simulation";
   return (
-    <main id="main-content" className="payment-page">
-      <header className="payment-page__header">
-        <span>BOP</span>
-        <strong>{config?.mode === "simulation" ? "DEMO payment" : "Payment"}</strong>
-        <span>Guest session · exact Store scope required</span>
-      </header>
-      <nav className="payment-page__journey" aria-label="Customer checkout journey">
-        <Link to="/">Entry</Link>
-        <Link to="/menu">Menu</Link>
-        <Link to="/cart">Cart</Link>
-        <Link to="/checkout">Checkout</Link>
-        <span aria-current="page">Payment</span>
-      </nav>
-      <h1>{config?.mode === "simulation" ? "DEMO payment" : "Secure payment"}</h1>
-      {config?.mode === "simulation" ? (
-        <p>Internal testing only. No real money is charged.</p>
-      ) : null}
+    <CustomerPage step="payment" store={store} className="payment-page">
+      <PageHeading title={demo ? "DEMO payment" : "Secure payment"}>
+        {demo ? <p>Internal testing only. No real money is charged.</p> : null}
+      </PageHeading>
+      <ol className="checkout-progress" aria-label="Checkout progress">
+        <li>1 Review</li>
+        <li aria-current="step">2 Pay</li>
+        <li>3 Done</li>
+      </ol>
       {status === "loading" ? <p role="status">Loading checkout…</p> : null}
       {status === "unavailable" ? (
         <section className="payment-page__unavailable" role="alert">
           <h2>Online payment is unavailable</h2>
-          <p>No authorized payment details are available.</p>
-          <dl aria-label="Payment details unavailable">
-            <div>
-              <dt>Payment amount</dt>
-              <dd>Unavailable</dd>
-            </div>
-            <div>
-              <dt>Selected tip</dt>
-              <dd>Unavailable</dd>
-            </div>
-            <div>
-              <dt>Allowed method</dt>
-              <dd>Unavailable</dd>
-            </div>
-            <div>
-              <dt>Secure card field</dt>
-              <dd>Unavailable</dd>
-            </div>
-            <div>
-              <dt>Processing notice</dt>
-              <dd>Unavailable</dd>
+          <p>Card payment isn’t set up at this location yet. Ask staff how to pay.</p>
+        </section>
+      ) : null}
+      {status === "denied" ? (
+        <p role="alert">This checkout is no longer available. Return to checkout to continue.</p>
+      ) : null}
+      {status !== "denied" && status !== "unavailable" && status !== "loading" ? (
+        <section className="payment-page__amount" aria-label="Amount">
+          <dl>
+            {selectedTip && selectedTip.amountMinor !== "0" ? (
+              <div>
+                <dt>Tip</dt>
+                <dd>
+                  {formatCartMoney({ amountMinor: selectedTip.amountMinor, currency: "CAD" })}
+                </dd>
+              </div>
+            ) : null}
+            <div className="payment-page__total">
+              <dt>Total to pay</dt>
+              <dd>{payment ? formatCartMoney(payment.total) : "Calculating…"}</dd>
             </div>
           </dl>
         </section>
       ) : null}
-      {status === "denied" ? (
-        <p role="alert">This checkout is unavailable. Return to checkout to continue.</p>
-      ) : null}
-      {selectedTip && status !== "denied" && status !== "unavailable" ? (
-        <p>
-          Selected tip:{" "}
-          <strong>
-            {formatCartMoney({ amountMinor: selectedTip.amountMinor, currency: "CAD" })}
-          </strong>
-        </p>
-      ) : null}
-      {status === "ready" ? (
-        <button type="button" disabled={!online} onClick={() => void prepare()}>
-          Review payment total
-        </button>
-      ) : null}
-      {payment ? (
-        <p>
-          Total to pay: <strong>{formatCartMoney(payment.total)}</strong>
-        </p>
-      ) : null}
       {status === "creating" ? <p role="status">Preparing your payment…</p> : null}
       {status === "processing" || status === "unknown" ? (
-        <section role="status">
-          <p>Payment readiness is not confirmed. Check the same payment again.</p>
+        <section role="status" className="checkout-attention">
+          <p>We couldn’t confirm your payment is ready. Check the same payment again.</p>
           <Link to="/checkout/result">Check payment result</Link>
           <button type="button" disabled={!online} onClick={() => void prepare()}>
             Check payment readiness
           </button>
         </section>
       ) : null}
-      {status === "card" && config?.mode === "simulation" ? (
+      {status === "card" && demo ? (
         <button type="button" disabled={!online} onClick={() => void simulate()}>
           Confirm simulated payment
         </button>
@@ -270,7 +262,9 @@ function PreparedSessionPaymentPage() {
       {!online ? (
         <p role="alert">Reconnect to continue. Payment will not restart automatically.</p>
       ) : null}
-      <Link to="/checkout">Back to checkout</Link>
-    </main>
+      <Link className="payment-page__back" to="/checkout">
+        Back to checkout
+      </Link>
+    </CustomerPage>
   );
 }

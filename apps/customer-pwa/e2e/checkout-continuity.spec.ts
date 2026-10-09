@@ -234,23 +234,14 @@ for (const screen of [
             history.pushState(null, "", "/checkout");
             window.dispatchEvent(new PopStateEvent("popstate"));
           });
-          await expect(
-            page.getByRole("heading", { name: "Review your order", exact: true }),
-          ).toBeVisible();
-          const fresh = page.getByRole("button", { name: "Get current quote", exact: true });
-          await expect(fresh).toBeVisible();
-          await fresh.focus();
-          await page.keyboard.press("Enter");
-          const retry = page.getByRole("button", {
-            name: "Retry the same Quote request",
-            exact: true,
-          });
+          await expect(page.getByRole("heading", { name: "Checkout", exact: true })).toBeVisible();
+          // U1: the page prices the cart itself; the lost first response leaves one retryable intent.
+          const retry = page.getByRole("button", { name: "Retry pricing", exact: true });
           await expect(retry).toBeEnabled();
-          await expect(fresh).toHaveCount(0);
+          await expect(page.getByRole("button", { name: "Refresh prices" })).toHaveCount(0);
           expect(quoteCalls).toHaveLength(1);
           await context.setOffline(true);
           await expect(retry).toBeDisabled();
-          await expect(fresh).toHaveCount(0);
           expect(quoteCalls).toHaveLength(1);
           await context.setOffline(false);
           await expect(retry).toBeEnabled();
@@ -259,24 +250,22 @@ for (const screen of [
           else await retry.click();
           if (terminal === "expired") {
             await expect(
-              page.getByText("Your previous quote expired. You can request a new quote.", {
+              page.getByText("Your previous prices expired. Refresh to price your order again.", {
                 exact: true,
               }),
             ).toBeVisible();
             await expect(retry).toHaveCount(0);
             expect(quoteCalls).toHaveLength(2);
             expect(quoteCalls[1]).toEqual(quoteCalls[0]);
-            const renew = page.getByRole("button", { name: "Get a new quote", exact: true });
+            const renew = page.getByRole("button", { name: "Refresh prices", exact: true });
             if (screen.touch) await renew.tap();
             else {
               await expect(renew).toBeFocused();
               await page.keyboard.press("Enter");
             }
           }
-          await expect(
-            page.getByRole("heading", { name: "Quote summary", exact: true }),
-          ).toBeVisible();
-          await expect(page.getByText("CAD 1.13", { exact: true })).toBeVisible();
+          await expect(page.getByRole("heading", { name: "Total", exact: true })).toBeVisible();
+          await expect(page.getByText("$1.13", { exact: true }).first()).toBeVisible();
           await expect(retry).toHaveCount(0);
           expect(quoteCalls).toHaveLength(terminal === "expired" ? 3 : 2);
           if (terminal === "expired") expect(quoteCalls[2]?.key).not.toBe(quoteCalls[0]?.key);
@@ -285,9 +274,8 @@ for (const screen of [
           );
           expect(quoteCalls[1]).toEqual(quoteCalls[0]);
           expect(quoteCalls[0]?.body).toEqual({ cartVersion: 3 });
-          await expect(
-            page.getByRole("button", { name: "Continue to payment", exact: true }),
-          ).toBeDisabled();
+          // Policies not yet accepted: the single continue action stays disabled.
+          await expect(page.getByRole("button", { name: /Continue to payment/u })).toBeDisabled();
           expect(
             await page.evaluate(
               () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -297,7 +285,7 @@ for (const screen of [
           const confirm = page.getByRole("checkbox", {
             name: "I have read and agree to the policies above",
           });
-          const save = page.getByRole("button", { name: "Save checkout details", exact: true });
+          const save = page.getByRole("button", { name: "Save details", exact: true });
           await expect(name).toHaveValue("Synthetic Guest");
           await expect(confirm).not.toBeChecked();
           await expect(save).toBeDisabled();
@@ -323,9 +311,6 @@ for (const screen of [
           await expect(retryDetails).toBeEnabled();
           await expect(name).toHaveValue("Synthetic Guest");
           expect(detailCalls).toHaveLength(1);
-          await expect(
-            page.getByRole("button", { name: "Get current quote", exact: true }),
-          ).toBeDisabled();
           if (screen.touch) await retryDetails.tap();
           else await retryDetails.click();
           await expect(page.getByText("Checkout details saved.", { exact: true })).toBeVisible();
@@ -341,13 +326,8 @@ for (const screen of [
           expect(detailCalls[0]?.body).not.toHaveProperty("orderType");
           await expect(save).toBeDisabled();
           if (terminal.startsWith("payment")) {
-            // Reconnection requires a fresh Quote before starting a new checkout.
-            await page.getByRole("button", { name: "Get current quote", exact: true }).click();
-            await expect(
-              page.getByRole("heading", { name: "Quote summary", exact: true }),
-            ).toBeVisible();
-            await confirm.check();
-            await save.click();
+            // Reconnection re-priced the cart automatically; the saved details still apply.
+            await expect(page.getByRole("heading", { name: "Total", exact: true })).toBeVisible();
             await expect(page.getByText("Checkout details saved.", { exact: true })).toBeVisible();
             const sessionView = {
               schemaVersion: 1,
@@ -482,14 +462,16 @@ for (const screen of [
                 }; };`,
               }),
             );
-            const proceed = page.getByRole("button", { name: "Continue to payment", exact: true });
+            const proceed = page.getByRole("button", { name: /Continue to payment/u });
+            await expect(proceed).toBeEnabled();
+            await page.getByRole("button", { name: "Other", exact: true }).click();
             const tip = page.getByLabel("Tip (CAD)", { exact: true });
-            await expect(proceed).toBeDisabled();
             await tip.fill("1.251");
             await expect(tip).toHaveAttribute("aria-invalid", "true");
             await expect(proceed).toBeDisabled();
             await tip.fill("1.25");
             await expect(proceed).toBeEnabled();
+            await expect(proceed).toContainText("$2.38");
             await proceed.click();
             const retrySession = page.getByRole("button", { name: "Retry checkout", exact: true });
             await expect(retrySession).toBeEnabled();
@@ -503,11 +485,9 @@ for (const screen of [
             await expect(page).toHaveURL(/\/checkout\/payment$/u);
             expect(sessionCalls).toHaveLength(2);
             expect(sessionCalls[1]).toEqual(sessionCalls[0]);
-            await expect(page.getByText("Selected tip:", { exact: false })).toContainText(
-              "CAD 1.25",
-            );
+            await expect(page.getByText("$1.25", { exact: true })).toBeVisible();
             await expect(page.getByLabel("Tip (CAD)", { exact: true })).toHaveCount(0);
-            await page.getByRole("button", { name: "Review payment total", exact: true }).click();
+            // U1: the page prepares the payment itself; the lost response leaves one retry.
             const retryPayment = page.getByRole("button", {
               name: "Check payment readiness",
               exact: true,
@@ -519,9 +499,7 @@ for (const screen of [
             await expect(retryPayment).toBeEnabled();
             expect(paymentCalls).toHaveLength(1);
             await retryPayment.click();
-            await expect(page.getByText("Total to pay:", { exact: false })).toContainText(
-              "CAD 2.38",
-            );
+            await expect(page.getByText("$2.38", { exact: true })).toBeVisible();
             expect(paymentCalls).toHaveLength(2);
             expect(paymentCalls[1]).toEqual(paymentCalls[0]);
             expect(paymentCalls[0]?.body).toEqual({ tip: { amountMinor: "125", currency: "CAD" } });
@@ -537,7 +515,6 @@ for (const screen of [
               history.pushState(null, "", "/checkout/payment");
               window.dispatchEvent(new PopStateEvent("popstate"));
             });
-            await page.getByRole("button", { name: "Review payment total", exact: true }).click();
             const pay = page.getByRole("button", { name: "Pay securely", exact: true });
             await expect(pay).toBeEnabled();
             expect(paymentCalls).toHaveLength(3);
@@ -581,22 +558,12 @@ for (const screen of [
             await expect(
               page.getByRole("heading", { name: "Payment confirmed", exact: true }),
             ).toHaveCount(0);
-            await context.setOffline(true);
-            await expect(
-              page.getByRole("button", { name: "Check payment status", exact: true }),
-            ).toHaveCount(0);
-            await context.setOffline(false);
-            const checkResult = page.getByRole("button", {
-              name: "Check payment status",
-              exact: true,
-            });
-            await expect(checkResult).toBeEnabled();
-            expect(resultCalls).toBe(1);
-            await checkResult.click();
+            // U2: a pending result is re-checked automatically with the same operation.
+            await expect(page.getByText("Checking again automatically…")).toBeVisible();
             if (terminal === "payment-failed") {
               await expect(
                 page.getByRole("heading", { name: "Payment failed", exact: true }),
-              ).toBeVisible();
+              ).toBeVisible({ timeout: 15_000 });
               await expect(
                 page.getByRole("link", { name: "View order status", exact: true }),
               ).toHaveCount(0);
@@ -606,7 +573,7 @@ for (const screen of [
             } else {
               await expect(
                 page.getByRole("heading", { name: "Payment confirmed", exact: true }),
-              ).toBeVisible();
+              ).toBeVisible({ timeout: 15_000 });
               await expect(
                 page.getByRole("link", { name: "View order status", exact: true }),
               ).toHaveAttribute("href", "/orders/" + id(12));

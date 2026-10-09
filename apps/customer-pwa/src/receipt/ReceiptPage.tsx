@@ -7,9 +7,11 @@ import {
 } from "./receipt-controller.js";
 import type { ReceiptMoneyView, ReceiptRecordView, ReceiptView } from "./types.js";
 
+import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
+import { formatDateTime, formatMoney } from "../journey/format.js";
+
 function money(value: ReceiptMoneyView): string {
-  const absolute = value.amountMinor;
-  return `${value.currencyCode} ${absolute / 100n}.${(absolute % 100n).toString().padStart(2, "0")}`;
+  return formatMoney(value.amountMinor, value.currencyCode);
 }
 
 function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
@@ -22,7 +24,7 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
       <h2 id={`receipt-version-${record.version}`}>
         Version {record.version}: {record.kind}
       </h2>
-      <p>Recorded {new Date(record.recordedAt).toLocaleString(snapshot.locale)}</p>
+      <p>Recorded {formatDateTime(record.recordedAt, snapshot.locale)}</p>
       {record.reasonCode ? <p>Reason: {record.reasonCode.replaceAll("_", " ")}</p> : null}
       <ul className="receipt-page__lines">
         {snapshot.lines.map((line) => (
@@ -93,7 +95,7 @@ function ReceiptContent({
         <p>{current.operatingEntityDisplayName}</p>
         <p>{current.storeDisplayName}</p>
         <p>Order {current.orderNumber}</p>
-        <p>Issued {new Date(current.issuedAt).toLocaleString(current.locale)}</p>
+        <p>Issued {formatDateTime(current.issuedAt, current.locale)}</p>
       </section>
       {view.freshnessStatus === "Stale" ? (
         <section className="receipt-page__stale" role="status">
@@ -110,8 +112,8 @@ function ReceiptContent({
         {financial ? (
           <>
             <p>
-              Checked {new Date(financial.observedAt).toLocaleString(current.locale)}. Refresh to
-              check again.
+              Checked {formatDateTime(financial.observedAt, current.locale)}. Refresh to check
+              again.
             </p>
             <dl className="receipt-page__totals">
               <div>
@@ -154,7 +156,7 @@ function ReceiptContent({
         )}
       </section>
       <section className="receipt-page__history" aria-labelledby="receipt-history-heading">
-        <h2 id="receipt-history-heading">Immutable receipt history</h2>
+        <h2 id="receipt-history-heading">Receipt history</h2>
         {view.records.map((record) => (
           <ReceiptVersion key={record.recordReference} record={record} />
         ))}
@@ -196,7 +198,13 @@ function ReceiptContent({
   );
 }
 
-export function ReceiptPage({ controller: provided }: { readonly controller?: ReceiptController }) {
+export function ReceiptPage({
+  controller: provided,
+  store,
+}: {
+  readonly controller?: ReceiptController;
+  readonly store?: CustomerStoreContext | undefined;
+}) {
   const { orderReference = "" } = useParams();
   const [controller] = useState(
     () => provided ?? createReceiptController(orderReference, createUnavailableReceiptClient()),
@@ -219,11 +227,11 @@ export function ReceiptPage({ controller: provided }: { readonly controller?: Re
   }, [controller]);
   const view = state.status === "ready" || state.status === "offline" ? state.view : null;
   const messages: Partial<Record<typeof state.status, [string, string]>> = {
-    loading: ["Loading receipt", "Retrieving the authorized immutable receipt."],
+    loading: ["Loading receipt", "Retrieving your receipt."],
     "invalid-reference": ["Receipt link is invalid", "Use the exact link supplied for this order."],
     "permission-denied": [
       "Receipt access denied",
-      "The order reference alone does not authorize access.",
+      "Open this receipt in the browser you used at checkout.",
     ],
     "not-found": ["Receipt not found", "No authorized receipt was found."],
     "feature-disabled": ["Digital receipt is disabled", "Contact the Store for support."],
@@ -231,12 +239,13 @@ export function ReceiptPage({ controller: provided }: { readonly controller?: Re
   };
   const message = messages[state.status];
   return (
-    <main id="main-content" className="receipt-page">
-      <header className="receipt-page__header">
-        <p className="cart-page__eyebrow">Digital receipt</p>
-        <h1>Your receipt</h1>
-        <p>This versioned record preserves the transaction facts issued for your order.</p>
-      </header>
+    <CustomerPage
+      step="receipt"
+      store={store}
+      orderReference={orderReference}
+      className="receipt-page"
+    >
+      <PageHeading title="Receipt" />
       <div className="receipt-page__toolbar">
         <Link to={`/orders/${orderReference}`}>Back to order status</Link>
         <button
@@ -259,17 +268,17 @@ export function ReceiptPage({ controller: provided }: { readonly controller?: Re
         ) : null}
         {state.status === "offline" ? (
           <section className="receipt-page__state" role="status">
-            <h2>Offline read-only</h2>
+            <h2>You’re offline</h2>
             <p>
               {view
-                ? "Showing the receipt already accepted on this page."
-                : "No accepted receipt is available on this page."}{" "}
-              Reconnecting does not submit an action.
+                ? "Showing the receipt already loaded on this page."
+                : "No receipt is available on this page yet."}{" "}
+              Reconnect to refresh.
             </p>
           </section>
         ) : null}
         {view ? <ReceiptContent view={view} online={state.status === "ready"} /> : null}
       </div>
-    </main>
+    </CustomerPage>
   );
 }

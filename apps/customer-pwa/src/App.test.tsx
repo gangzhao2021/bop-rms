@@ -23,8 +23,8 @@ describe("customer PWA shell", () => {
         <App />
       </MemoryRouter>,
     );
-    expect(html).toContain("Order at BOP");
-    expect(html).toContain("No cached menu is enabled");
+    expect(html).toContain("Page not found");
+    expect(html).toContain("Open the menu");
   });
   it("registers only the bounded Customer Service Worker without persistence code in entry clients", () => {
     const source = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
@@ -81,7 +81,7 @@ describe("customer PWA shell", () => {
         <App />
       </MemoryRouter>,
     );
-    expect(html).toContain("Review your order");
+    expect(html).toContain(">Checkout</h2>");
     expect(html).toContain("Loading checkout");
     expect(html).toContain("Continue to payment");
     expect(html).toContain('id="checkout-tip"');
@@ -115,7 +115,6 @@ describe("customer PWA shell", () => {
     );
     expect(html).toContain("Track your order");
     expect(html).toContain("Loading order status");
-    expect(html).toContain("Check your order progress and available next steps.");
     expect(html).not.toContain(`>${reference}<`);
   });
   it("uses the HTTP client for normal order routes and preserves the matching demo", () => {
@@ -153,7 +152,7 @@ describe("customer PWA shell", () => {
         <App />
       </MemoryRouter>,
     );
-    expect(html).toContain("Your receipt");
+    expect(html).toContain(">Receipt</h2>");
     expect(html).toContain("Loading receipt");
     expect(html).not.toContain(`>${reference}<`);
   });
@@ -183,6 +182,6 @@ describe("customer PWA shell", () => {
     );
     expect(html).toContain("Loading the current menu");
     expect(html).toContain("<h1>Harbour Test Store</h1>");
-    expect(html).toContain("BOP Test Kitchen · Dine-in");
+    expect(html).toContain("BOP Test Kitchen · Dine in");
   });
 });

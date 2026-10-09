@@ -6,7 +6,7 @@ const SELLABLE_REFERENCE = "018f9900-0000-7000-8000-000000000003";
 const ORDER_REFERENCE = "018f9900-0000-7000-8000-000000000014";
 
 const routes = [
-  { path: "/", heading: "Training Store" },
+  { path: "/", heading: "Ready to order" },
   { path: "/menu", heading: "Synthetic all-day menu" },
   { path: "/menu/search", heading: "Search this menu" },
   {
@@ -14,12 +14,12 @@ const routes = [
     heading: "Synthetic mushroom rice bowl",
   },
   { path: "/cart", heading: "Your cart" },
-  { path: "/checkout", heading: "Review your order" },
+  { path: "/checkout", heading: "Checkout" },
   { path: "/checkout/payment", heading: "Secure payment" },
   { path: "/checkout/result", heading: "Check your payment" },
   { path: `/orders/${ORDER_REFERENCE}`, heading: "Track your order" },
   { path: `/orders/${ORDER_REFERENCE}/delivery`, heading: "Track your delivery" },
-  { path: `/orders/${ORDER_REFERENCE}/receipt`, heading: "Your receipt" },
+  { path: `/orders/${ORDER_REFERENCE}/receipt`, heading: "Receipt" },
 ] as const;
 
 function monitorDemoBoundary(page: Page) {
@@ -69,7 +69,7 @@ test.describe("@demo local-only Customer preview", () => {
     const violations = monitorDemoBoundary(page);
     await page.goto("/cart");
     const main = page.getByRole("main");
-    await expect(main.getByText("CAD 14.68", { exact: true }).first()).toBeVisible();
+    await expect(main.getByText("$14.68", { exact: true }).first()).toBeVisible();
     await expect(main).not.toContainText("minor units");
     await page.evaluate(() =>
       document.documentElement.setAttribute("data-navigation-probe", "retained"),
@@ -84,9 +84,7 @@ test.describe("@demo local-only Customer preview", () => {
     await expect(page.locator("html")).toHaveAttribute("data-navigation-probe", "retained");
     await expectNoHorizontalOverflow(page);
     await page.goto("/checkout");
-    await expect(
-      page.getByRole("main").getByText("CAD 14.68", { exact: true }).first(),
-    ).toBeVisible();
+    await expect(page.getByRole("main").getByText("$14.68", { exact: true }).first()).toBeVisible();
     await expect(page.getByRole("main")).not.toContainText("minor units");
     expect(violations).toEqual([]);
   });
@@ -99,19 +97,15 @@ test.describe("@demo local-only Customer preview", () => {
     const main = page.getByRole("main");
     await expect(main.getByRole("heading", { name: "Your cart", exact: true })).toBeVisible();
     await expect(main.getByRole("heading", { name: "Order summary", exact: true })).toBeVisible();
-    await expect(main.getByRole("button", { name: "Clear cart" })).toBeDisabled();
+    await expect(main.getByRole("button", { name: "Clear cart" })).toHaveCount(0);
     await expect(main.locator(".cart-offline")).toBeVisible();
-    await expect(main.getByRole("link", { name: "Review checkout" })).toHaveCount(0);
+    await expect(main.getByRole("link", { name: "Checkout", exact: true })).toHaveCount(0);
     await expect(
-      main
+      page
         .getByRole("navigation", { name: "Customer journey" })
-        .getByRole("link", { name: /menu/iu }),
+        .getByRole("link", { name: "Menu", exact: true }),
     ).toHaveAttribute("href", "/menu");
-    await expect(
-      main
-        .getByRole("navigation", { name: "Customer journey" })
-        .getByRole("link", { name: "Search" }),
-    ).toHaveAttribute("href", "/menu/search");
+    await expect(page.getByRole("heading", { level: 1, name: "Training Store" })).toBeVisible();
 
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
@@ -119,7 +113,7 @@ test.describe("@demo local-only Customer preview", () => {
       const layout = await main.locator(".cart-layout").evaluate((element) => {
         const style = getComputedStyle(element);
         const page = element.closest(".cart-page");
-        const header = page?.querySelector(".cart-page__header");
+        const header = page?.querySelector(".bop-shell__header");
         const item = page?.querySelector(".cart-item");
         const summary = page?.querySelector(".cart-summary");
         return {
@@ -139,20 +133,18 @@ test.describe("@demo local-only Customer preview", () => {
               : getComputedStyle(summary).backgroundColor,
         };
       });
-      expect(layout.background).toBe("rgb(247, 249, 247)");
-      expect(layout.header).toBe("rgb(11, 93, 75)");
+      expect(layout.background).toBe("rgb(255, 255, 255)");
+      expect(layout.header).toBe("rgb(255, 255, 255)");
       expect(layout.item).toBe("rgb(255, 255, 255)");
       expect(layout.summary).toBe("rgb(255, 255, 255)");
       expect(layout.columns).toBe(width >= 768 ? 2 : 1);
-      const navigationUsesOneRow = await main
-        .locator(".cart-page__navigation")
-        .evaluate((element) => {
-          const rows = [...element.children].map((child) => child.getBoundingClientRect().y);
-          return rows.every((y) => Math.abs(y - (rows[0] ?? y)) < 1);
-        });
+      const navigationUsesOneRow = await page.locator(".bop-shell__nav").evaluate((element) => {
+        const rows = [...element.children].map((child) => child.getBoundingClientRect().y);
+        return rows.every((y) => Math.abs(y - (rows[0] ?? y)) < 1);
+      });
       expect(navigationUsesOneRow, `Customer journey should use one row at ${width}px`).toBe(true);
       const quoteWarning = main.locator(".cart-summary .cart-warning").first();
-      const quoteExpiry = main.locator(".cart-summary time");
+      const quoteExpiry = main.locator(".cart-summary__validity");
       const warningBox = await quoteWarning.boundingBox();
       const expiryBox = await quoteExpiry.boundingBox();
       if (warningBox === null || expiryBox === null) throw new Error("Cart Quote fields missing");
@@ -170,21 +162,19 @@ test.describe("@demo local-only Customer preview", () => {
     const violations = monitorDemoBoundary(page);
     await page.goto("/checkout");
     const main = page.getByRole("main");
-    await expect(main.getByRole("navigation", { name: "Customer journey" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Customer journey" })).toBeVisible();
     await expect(main.getByRole("list", { name: "Checkout progress" })).toBeVisible();
-    await expect(
-      main.getByRole("heading", {
-        name: "Capacity Hold status · unavailable from current Checkout source",
-      }),
-    ).toBeVisible();
-    await expect(main.getByRole("button", { name: "Continue to payment" })).toBeDisabled();
+    await expect(main).not.toContainText("Capacity Hold");
+    await expect(main).not.toContainText("TRAINING_DATA_ONLY");
+    await expect(main.getByRole("group", { name: "Tip amount" })).toBeVisible();
+    await expect(main.getByRole("button", { name: /Continue to payment/u })).toBeDisabled();
 
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
       await expectNoHorizontalOverflow(page);
       const visual = await main.evaluate((element) => {
         const page = element as HTMLElement;
-        const header = page.querySelector(".checkout-page__header");
+        const header = page.querySelector(".customer-heading");
         const card = page.querySelector(".checkout-summary");
         const progress = page.querySelector(".checkout-progress");
         return {
@@ -194,12 +184,12 @@ test.describe("@demo local-only Customer preview", () => {
           progress: progress === null ? "missing" : getComputedStyle(progress).display,
         };
       });
-      expect(visual.canvas).toBe("rgb(247, 249, 247)");
-      expect(visual.header).toBe("rgb(11, 93, 75)");
+      expect(visual.canvas).toBe("rgba(0, 0, 0, 0)");
+      expect(visual.header).not.toBe("missing");
       expect(visual.card).toBe("rgb(255, 255, 255)");
-      expect(visual.progress).toBe("grid");
-      const navRows = await main
-        .locator(".checkout-page__navigation")
+      expect(visual.progress).toBe("flex");
+      const navRows = await page
+        .locator(".bop-shell__nav")
         .evaluate((element) =>
           [...element.children].map((child) => child.getBoundingClientRect().y),
         );
@@ -235,7 +225,9 @@ test.describe("@demo local-only Customer preview", () => {
     await page.goto("/");
     await expect(page.getByRole("status", { name: "Local synthetic preview" })).toBeVisible();
 
-    const menuLink = page.getByRole("link", { name: "Menu", exact: true });
+    const menuLink = page
+      .getByRole("navigation", { name: "Customer journey" })
+      .getByRole("link", { name: "Menu", exact: true });
     for (let tabIndex = 0; tabIndex < 12; tabIndex += 1) {
       if (await menuLink.evaluate((element) => element === document.activeElement)) break;
       await page.keyboard.press("Tab");

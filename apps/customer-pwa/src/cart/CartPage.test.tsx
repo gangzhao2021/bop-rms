@@ -131,25 +131,24 @@ describe("CUST-CART page contract", () => {
     expect(html).toContain("Synthetic Store");
     expect(html).toContain("Synthetic tea");
     expect(html).toContain("Synthetic size");
-    expect(html).toContain("CAD 11.30");
-    expect(html).toContain("Cart version 3");
+    expect(html).toContain("$11.30");
+    expect(html).not.toContain("Cart version");
+    expect(html).not.toContain("Quote v");
+    expect(html).not.toContain("SYNTHETIC_WARNING");
     expect(html).toContain("Continue shopping");
-    expect(html).toContain("Clear cart");
-    expect(html).toContain("Review checkout");
+    expect(html).not.toContain("Clear cart");
+    expect(html).toContain(">Checkout</a>");
     expect(html).toContain('aria-label="Customer journey"');
-    expect(html).toContain('href="/menu/search"');
-    expect(html).toContain('aria-current="page">Cart</span>');
-    expect(html).toContain("Clear cart requires an atomic server command and is unavailable.");
-    expect(html).toContain("Available payment options and the final total are shown at checkout.");
-    expect(html).toContain("disabled");
+    expect(html).toContain('<span aria-current="page">Cart</span>');
+    expect(html).toContain("<h1>Synthetic Store</h1>");
     expect(html).toContain('aria-label="Increase Synthetic tea quantity"');
-    expect(html).toContain('href="#cart-content"');
+    expect(html).toContain('href="#main-content"');
     expect(html).not.toMatch(/localStorage|sessionStorage|indexedDB|serviceWorker/u);
   });
 
   it("renders offline as explicit read-only with no enabled mutation", () => {
     const html = renderPage({ status: "offline-readonly", cart: cart() });
-    expect(html).toContain("Offline read-only");
+    expect(html).toContain("You’re offline");
     expect(html).toContain("nothing will replay on reconnect");
     expect(html).toContain("Refresh after reconnecting");
     expect(html).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
@@ -170,7 +169,7 @@ describe("CUST-CART page contract", () => {
         status: "ready",
         cart: { ...expired, cart: { ...expired.cart, warnings: ["QUOTE_EXPIRED"] } },
       }),
-    ).toContain("Quote expired");
+    ).toContain("Prices have expired");
   });
 
   it.each([
@@ -230,7 +229,7 @@ it.each(["Pickup", "DineIn"] as const)(
     const html = renderPage(state);
     expect(html).toContain("Your cart is empty");
     expect(html).toContain("Browse menu");
-    expect(html).not.toContain("Review checkout");
+    expect(html).not.toContain("cart-checkout-link");
     expect(state.cart.cart.cartReference).toBe(id(1));
   },
 );
@@ -244,7 +243,7 @@ it.each(["FEATURE_DISABLED", "PROJECTION_STALE"])(
     });
     expect(html).not.toContain("Your cart is empty");
     expect(html).toContain(
-      warning === "FEATURE_DISABLED" ? "Cart unavailable" : "Cart summary is stale",
+      warning === "FEATURE_DISABLED" ? "Cart unavailable" : "may be out of date",
     );
   },
 );
@@ -261,7 +260,7 @@ it.each(["command-pending", "offline-readonly", "command-failed"] as const)(
     });
     expect(html).not.toContain("Your cart is empty");
     if (status === "command-failed") expect(html).toContain("Outcome not confirmed");
-    if (status === "offline-readonly") expect(html).toContain("Offline read-only");
+    if (status === "offline-readonly") expect(html).toContain("You’re offline");
   },
 );
 
@@ -284,7 +283,7 @@ it.each(["Expired", "Abandoned"] as const)(
       expect(html).toContain(status === "Expired" ? "Cart expired" : "Cart closed");
       expect(html).toContain("Ask staff for help continuing your order.");
       expect(html).not.toContain("Your cart is empty");
-      expect(html).not.toContain("Review checkout");
+      expect(html).not.toContain("cart-checkout-link");
       expect(html).not.toContain("Requote");
       expect(html).not.toContain("Continue shopping");
     }

@@ -101,7 +101,7 @@ test("CUST-MENU Empty and Unavailable match the Figma Review at 1440, 390, and 3
   await empty
     .getByRole("heading", { name: "No items available" })
     .evaluate((node) => (node as HTMLElement).blur());
-  await expect(page.locator(".menu-help")).toHaveCSS("padding-left", "20px");
+  await expect(page.locator(".menu-help")).toHaveCSS("padding-left", "15px");
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     await expectNoHorizontalOverflow(page);

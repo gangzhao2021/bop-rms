@@ -70,7 +70,7 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).toContain("All Day");
     expect(html).toContain("Drinks");
     expect(html).toContain("Latte");
-    expect(html).toContain("Price confirmed in your final quote");
+    expect(html).toContain("Priced at checkout");
     expect(html).toContain("Contains");
     expect(html).toContain("Cross-contact possible");
     expect(html).not.toContain(context.publicStoreReference);
@@ -87,7 +87,7 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).toContain('aria-label="Search results"');
     expect(html).toContain("Matched term · iced");
     expect(html).toContain("Section</span>Drinks");
-    expect(html).toContain("Available now");
+    expect(html).not.toContain("Image not available");
     expect(html).not.toContain("Dietary filter");
   });
 
@@ -113,10 +113,10 @@ describe("WP-1701 Customer Menu screens", () => {
       mode: "detail",
       state: { kind: "Found", menu },
     });
-    expect(html).toContain("Image not available");
-    expect(html).toContain("Confirmed in your final quote");
-    expect(html).toContain("No published detail available");
-    expect(html).toContain("Configure and add");
+    expect(html).not.toContain("Image not available");
+    expect(html).toContain("Priced at checkout");
+    expect(html).not.toContain("No published detail available");
+    expect(html).toContain("Add to cart");
     expect(html).not.toContain(sellable.optionRules[0]?.options[0]?.optionReference);
   });
 
@@ -128,7 +128,8 @@ describe("WP-1701 Customer Menu screens", () => {
       mode: "detail",
       state: { kind: "Found", menu },
     });
-    expect(html).toContain("From $5.25 plus tax; options may add to it");
+    expect(html).toContain("From $5.25");
+    expect(html).toContain("plus tax");
     const soldOut = render({
       context,
       detail: { ...priced, availability: "SoldOut" as const },
@@ -136,14 +137,14 @@ describe("WP-1701 Customer Menu screens", () => {
       state: { kind: "Found", menu },
     });
     expect(soldOut).toContain("Sold out at this store right now");
-    expect(soldOut).not.toContain("Configure and add");
+    expect(soldOut).not.toContain("Add to cart");
   });
 
   it.each([
     ["MissingContext", "Scan the location QR code", "Return to entry"],
-    ["IdleSearch", "Search this menu", "approved search term"],
+    ["IdleSearch", "Search this menu", "item name"],
     ["Loading", "Loading the current menu", "latest published items"],
-    ["PermissionDenied", "This menu can’t be opened", "current Store session can’t access"],
+    ["PermissionDenied", "This menu can’t be opened", "session can’t access this menu"],
     ["Offline", "You’re offline", "No cached menu"],
     ["Stale", "Menu is being refreshed", "out-of-date menu"],
     ["Unavailable", "Menu is unavailable", "No item or order was submitted"],
@@ -159,7 +160,7 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).toContain('href="/"');
     expect(html).toContain("Return to entry");
     expect(html).not.toContain("Try again");
-    expect(html).not.toContain("Accessibility and allergen help");
+    expect(html).not.toContain("Allergies or accessibility");
   });
 
   it("never claims allergen absence when the disclosure list is empty", () => {

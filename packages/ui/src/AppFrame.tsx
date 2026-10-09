@@ -5,6 +5,8 @@ export interface AppFrameProps {
   className?: string;
   headerStatus?: ReactNode;
   navigation?: ReactNode;
+  /** Accessible name of the navigation landmark ("Primary" when omitted). */
+  navigationLabel?: string;
   mobileBrandTitle?: string;
   title: string;
 }
@@ -15,6 +17,7 @@ export function AppFrame({
   headerStatus,
   mobileBrandTitle,
   navigation,
+  navigationLabel = "Primary",
   title,
 }: AppFrameProps) {
   return (
@@ -39,7 +42,7 @@ export function AppFrame({
         )}
       </header>
       {navigation ? (
-        <nav className="bop-shell__nav" aria-label="Primary">
+        <nav className="bop-shell__nav" aria-label={navigationLabel}>
           {navigation}
         </nav>
       ) : null}

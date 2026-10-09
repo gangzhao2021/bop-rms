@@ -74,9 +74,9 @@ describe("CUST-RECEIPT-SUPPORT screen contract", () => {
     expect(html).toContain('class="receipt-page__content"');
     expect(html).toContain('class="receipt-page__history"');
     expect(html).toContain('class="receipt-page__action-card"');
-    expect(html).toContain("Immutable receipt history");
+    expect(html).toContain("Receipt history");
     expect(html).toContain("Synthetic Operating Entity");
-    expect(html).toContain("CAD 11.30");
+    expect(html).toContain("$11.30");
     expect(html).toContain("Print receipt");
     expect(html).toContain("Refresh receipt");
     expect(html).toContain("Request email receipt");
@@ -90,7 +90,7 @@ describe("CUST-RECEIPT-SUPPORT screen contract", () => {
     [{ status: "not-found" }, "Receipt not found"],
     [{ status: "feature-disabled" }, "Digital receipt is disabled"],
     [{ status: "unavailable" }, "Receipt is unavailable"],
-    [{ status: "offline", view: null }, "Offline read-only"],
+    [{ status: "offline", view: null }, "You’re offline"],
   ] as const)("renders bounded state %#", (state, message) =>
     expect(render(state)).toContain(message),
   );
@@ -121,9 +121,9 @@ describe("receipt adjustment display", () => {
         ],
       },
     });
-    expect(html).toContain("<dt>Discount</dt><dd>CAD 1.00</dd>");
-    expect(html).toContain("<dt>Fees</dt><dd>CAD 0.50</dd>");
-    expect(html).toContain("CAD 10.80");
+    expect(html).toContain("<dt>Discount</dt><dd>$1.00</dd>");
+    expect(html).toContain("<dt>Fees</dt><dd>$0.50</dd>");
+    expect(html).toContain("$10.80");
     expect(html).toContain("Print receipt");
     const original = render(ready());
     expect(original).not.toContain("<dt>Discount</dt>");
@@ -146,11 +146,11 @@ it("separates current pending refunds from immutable history and hides them offl
     },
   };
   const html = render({ ...state, view });
-  expect(html).toContain("CAD 6.00");
+  expect(html).toContain("$6.00");
   expect(html).toContain("Pending refunds are not confirmed refunds");
   expect(html).toContain("Some payment attempts still need a final result");
-  expect(html).toContain("Immutable receipt history");
+  expect(html).toContain("Receipt history");
   const offline = render({ status: "offline", view });
-  expect(offline).not.toContain("CAD 6.00");
+  expect(offline).not.toContain("$6.00");
   expect(offline).toContain("unavailable while offline");
 });

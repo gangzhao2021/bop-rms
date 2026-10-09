@@ -1,5 +1,6 @@
 import { DiningAdmissionPanel, type DiningAdmissionUi } from "../dining/DiningAdmissionPanel.js";
-import { AppFrame } from "@bop-rms/ui";
+import { CustomerPage } from "../journey/CustomerPage.js";
+import { formatClockTime } from "../journey/format.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type {
@@ -114,13 +115,21 @@ export function EntryContextView({
   state,
 }: EntryContextViewProps) {
   const established = state.kind === "Established" ? state.context : null;
-  const title = established?.brandDisplayName ?? "Start your order";
-  const description = established
-    ? `${established.storeDisplayName} · ${established.channel === "DineIn" ? "Dine in" : "Pickup"}`
-    : "Scan the location QR code to begin safely";
-
   return (
-    <AppFrame title={title} description={description}>
+    <CustomerPage
+      step="entry"
+      store={
+        established
+          ? {
+              storeName: established.storeDisplayName,
+              brandName: established.brandDisplayName,
+              serviceMode: established.channel,
+            }
+          : undefined
+      }
+      className="entry-page"
+      fallbackTitle="Start your order"
+    >
       <section className="entry-card" aria-live="polite" aria-busy={state.kind === "Loading"}>
         <EntryState
           diningAdmission={diningAdmission}
@@ -137,7 +146,7 @@ export function EntryContextView({
           ordering; the QR code does not record allergy or health information.
         </p>
       </aside>
-    </AppFrame>
+    </CustomerPage>
   );
 }
 
@@ -262,11 +271,11 @@ function EntryState({
   const locationOpen = context.operatingState === "Open";
   return (
     <div>
-      <StateHeading headingRef={headingRef}>{context.storeDisplayName}</StateHeading>
+      <StateHeading headingRef={headingRef}>Ready to order</StateHeading>
       <p className="entry-context">
         {context.channel === "DineIn"
-          ? "Your table is confirmed for dine-in."
-          : "Pickup is selected."}
+          ? `Your table at ${context.storeDisplayName} is confirmed for dine-in.`
+          : `Pickup from ${context.storeDisplayName} is selected.`}
       </p>
       <dl className="entry-details">
         <div>
@@ -282,13 +291,11 @@ function EntryState({
           </dd>
         </div>
         <div>
-          <dt>Language</dt>
-          <dd>{context.locale}</dd>
-        </div>
-        <div>
-          <dt>Entry expires</dt>
+          <dt>Order by</dt>
           <dd>
-            <time dateTime={context.contextExpiresAt}>{context.contextExpiresAt}</time>
+            <time dateTime={context.contextExpiresAt}>
+              {formatClockTime(context.contextExpiresAt)}
+            </time>
           </dd>
         </div>
       </dl>

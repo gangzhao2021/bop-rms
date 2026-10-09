@@ -8,6 +8,14 @@ import {
 } from "./cart-state.js";
 import type { CartItemView, CartView } from "./types.js";
 import { formatCartMoney } from "./format-money.js";
+import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
+import { formatMinutesUntil } from "../journey/format.js";
+import {
+  cartIssueMessage,
+  cartItemWarningMessage,
+  lineEstimateLabel,
+  quoteIssueMessage,
+} from "../journey/messages.js";
 
 function StateMessage({
   heading,
@@ -28,22 +36,30 @@ function StateMessage({
   );
 }
 
+/** "Oat milk, Extra shot × 2" or nothing for a standard item. */
+export function describeConfiguration(item: CartItemView): string | null {
+  if (item.configuration.length === 0) return null;
+  return item.configuration
+    .map((option) =>
+      option.quantity === 1 ? option.displayName : `${option.displayName} × ${option.quantity}`,
+    )
+    .join(", ");
+}
+
 function CartItem({
-  cart,
   item,
   pending,
   readOnly,
   controller,
 }: {
-  readonly cart: CartView;
   readonly item: CartItemView;
   readonly pending: boolean;
   readonly readOnly: boolean;
   readonly controller: CartStateController;
 }) {
-  const unavailable = item.lineEstimate.status === "Unavailable";
   const foreign = item.warnings.includes("OTHER_PARTICIPANT_ITEM");
   const ownershipDescription = `cart-item-ownership-${item.cartItemReference}`;
+  const configuration = describeConfiguration(item);
   const updateQuantity = (quantity: number) =>
     controller.updateItem(item.cartItemReference, {
       quantity,
@@ -53,44 +69,35 @@ function CartItem({
       })),
       customerNote: item.customerNote,
     });
+  const warnings = item.warnings
+    .map(cartItemWarningMessage)
+    .filter((message): message is string => message !== null);
   return (
     <article className="cart-item" aria-labelledby={`cart-item-${item.cartItemReference}`}>
       <div className="cart-item__heading">
         <div>
           <h3 id={`cart-item-${item.cartItemReference}`}>{item.displayName}</h3>
-          <p className="cart-item__configuration">
-            {item.configuration.length === 0
-              ? "Standard configuration"
-              : item.configuration
-                  .map((option) =>
-                    option.quantity === 1
-                      ? option.displayName
-                      : `${option.displayName} × ${option.quantity}`,
-                  )
-                  .join(", ")}
-          </p>
+          {configuration ? <p className="cart-item__configuration">{configuration}</p> : null}
+          {item.customerNote === null || foreign ? null : (
+            <p className="cart-item__note">Note: {item.customerNote}</p>
+          )}
         </div>
         <p className="cart-item__estimate">
-          {unavailable
-            ? `Estimate unavailable: ${item.lineEstimate.reasonCode}`
+          {item.lineEstimate.status === "Unavailable"
+            ? lineEstimateLabel(item.lineEstimate.reasonCode)
             : formatCartMoney(item.lineEstimate.total)}
         </p>
       </div>
-      {item.customerNote === null || foreign ? null : (
-        <p className="cart-item__note">Note: {item.customerNote}</p>
-      )}
       {foreign ? (
         <p className="cart-warning" id={ownershipDescription}>
           Added by another guest. Only they can change this item.
         </p>
       ) : null}
-      {item.warnings
-        .filter((warning) => warning !== "OTHER_PARTICIPANT_ITEM")
-        .map((warning) => (
-          <p className="cart-warning" key={warning}>
-            Warning: {warning}
-          </p>
-        ))}
+      {warnings.map((warning) => (
+        <p className="cart-warning" key={warning}>
+          {warning}
+        </p>
+      ))}
       <div className="cart-item__actions" aria-label={`Quantity for ${item.displayName}`}>
         <button
           type="button"
@@ -123,12 +130,11 @@ function CartItem({
           Remove
         </button>
       </div>
-      <p className="sr-only">Cart version {cart.cart.version}</p>
     </article>
   );
 }
 
-function CartSummary({ cart }: { readonly cart: CartView }) {
+function CartSummary({ cart, now }: { readonly cart: CartView; readonly now: () => number }) {
   if (cart.cart.lifecycle.status !== "Active")
     return (
       <section className="cart-summary" aria-labelledby="cart-summary-heading">
@@ -141,43 +147,50 @@ function CartSummary({ cart }: { readonly cart: CartView }) {
     return (
       <section className="cart-summary" aria-labelledby="cart-summary-heading">
         <h2 id="cart-summary-heading">Order summary</h2>
-        <p>Review checkout to request a current quote before payment.</p>
+        <p>Your total, including tax, is calculated at checkout.</p>
       </section>
     );
+  const remaining = formatMinutesUntil(quote.expiresAt, now());
   return (
     <section className="cart-summary" aria-labelledby="cart-summary-heading">
-      <div className="cart-summary__heading">
-        <h2 id="cart-summary-heading">Order summary</h2>
-        <span>Quote v{quote.quoteVersion}</span>
-      </div>
+      <h2 id="cart-summary-heading">Order summary</h2>
       <dl>
         <div>
           <dt>Subtotal</dt>
           <dd>{formatCartMoney(quote.subtotal)}</dd>
         </div>
-        <div>
-          <dt>Discount</dt>
-          <dd>{formatCartMoney(quote.discount)}</dd>
-        </div>
+        {quote.discount.amountMinor !== "0" ? (
+          <div>
+            <dt>Discount</dt>
+            <dd>{formatCartMoney(quote.discount)}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>Tax</dt>
           <dd>{formatCartMoney(quote.tax)}</dd>
         </div>
-        <div>
-          <dt>Fee</dt>
-          <dd>{formatCartMoney(quote.fee)}</dd>
-        </div>
+        {quote.fee.amountMinor !== "0" ? (
+          <div>
+            <dt>Fees</dt>
+            <dd>{formatCartMoney(quote.fee)}</dd>
+          </div>
+        ) : null}
         <div className="cart-summary__total">
           <dt>Total</dt>
           <dd>{formatCartMoney(quote.total)}</dd>
         </div>
       </dl>
-      <p>
-        Quote expires <time dateTime={quote.expiresAt}>{quote.expiresAt}</time>.
+      <p className="cart-summary__validity">
+        {remaining === null
+          ? "These prices have expired. Checkout will price your order again."
+          : `Prices confirmed for ${remaining}.`}
       </p>
-      {[...quote.warnings, ...quote.blockingReasons].map((warning) => (
-        <p className="cart-warning" key={warning}>
-          {warning}
+      {[
+        ...quote.blockingReasons.map((code) => quoteIssueMessage(code, true)),
+        ...quote.warnings.map((code) => quoteIssueMessage(code, false)),
+      ].map((message, index) => (
+        <p className="cart-warning" key={`${index}:${message}`}>
+          {message}
         </p>
       ))}
     </section>
@@ -198,16 +211,16 @@ function ErrorState({
       "Cart replacement not permitted",
       "Ask the table host or staff to help you continue ordering.",
     ],
-    "session-expired": ["Session expired", "Resume your Store session before opening this cart."],
-    "not-found": ["Cart unavailable", "This cart is not available in the current Store session."],
+    "session-expired": [
+      "Session expired",
+      "Scan the location QR code again to continue your order.",
+    ],
+    "not-found": ["Cart unavailable", "This cart is not available in your current session."],
     conflict: [
       "Cart changed",
       "The latest cart was loaded. Review your change before submitting again.",
     ],
-    validation: [
-      "Review this item",
-      "The server rejected this configuration. Update the highlighted selection.",
-    ],
+    validation: ["Review this item", "This choice can’t be ordered as selected."],
     "rate-limited": [
       "Please wait",
       `Try again${state.retryAfterSeconds === null ? " shortly" : ` in ${state.retryAfterSeconds} seconds`}.`,
@@ -219,20 +232,20 @@ function ErrorState({
     abandoned: ["Cart closed", "This cart was abandoned and cannot be changed."],
     "command-failed": [
       "Outcome not confirmed",
-      "The network ended before the server outcome was confirmed.",
+      "The connection dropped before we could confirm your change.",
     ],
-    unavailable: [
-      "Cart temporarily unavailable",
-      "No change was assumed. Try loading the current cart again.",
-    ],
+    unavailable: ["Cart temporarily unavailable", "Nothing was changed. Try loading it again."],
   } as const;
   const message = messages[state.status as keyof typeof messages];
   if (message === undefined) return null;
+  const issues = state.issueCodes
+    .map(cartIssueMessage)
+    .filter((issue): issue is string => issue !== null);
   return (
     <StateMessage heading={message[0]} tone={state.status === "conflict" ? "warning" : "error"}>
       <p>{message[1]}</p>
-      {state.issueCodes.map((issue) => (
-        <p key={issue}>Issue: {issue}</p>
+      {issues.map((issue) => (
+        <p key={issue}>{issue}</p>
       ))}
       <div className="cart-state__actions">
         {retry ? (
@@ -253,14 +266,16 @@ function ErrorState({
 function CartContent({
   state,
   controller,
+  now,
 }: {
   readonly state: CartState;
   readonly controller: CartStateController;
+  readonly now: () => number;
 }) {
   if (state.status === "loading")
     return (
       <StateMessage heading="Loading cart">
-        <p>Checking the latest server cart…</p>
+        <p>Checking your cart…</p>
       </StateMessage>
     );
   if (
@@ -272,7 +287,7 @@ function CartContent({
   )
     return (
       <StateMessage heading="Your cart is empty">
-        <p>Add an available item from the current Store menu.</p>
+        <p>Add something from the menu to get started.</p>
         <Link className="cart-primary-link" to="/menu">
           Browse menu
         </Link>
@@ -282,8 +297,8 @@ function CartContent({
   if (cart === null) {
     if (state.status === "offline-readonly")
       return (
-        <StateMessage heading="Offline" tone="warning">
-          <p>No private cart is cached. Reconnect to load your cart.</p>
+        <StateMessage heading="You’re offline" tone="warning">
+          <p>Reconnect to load your cart.</p>
           <button type="button" onClick={() => void controller.load()}>
             Refresh after reconnecting
           </button>
@@ -295,13 +310,14 @@ function CartContent({
   if (cart.cart.warnings.includes("FEATURE_DISABLED"))
     return (
       <StateMessage heading="Cart unavailable" tone="warning">
-        <p>Cart ordering is not enabled for the current Store context.</p>
+        <p>Cart ordering is not enabled at this location right now.</p>
         <Link to="/menu">Return to menu</Link>
       </StateMessage>
     );
   const readOnly = state.status === "offline-readonly";
   const pending = state.status === "command-pending";
   const terminal = cart.cart.lifecycle.status !== "Active";
+  const count = cart.cart.items.reduce((total, item) => total + item.quantity, 0);
   return (
     <>
       {terminal ? (
@@ -337,7 +353,7 @@ function CartContent({
       ) : null}
       {readOnly ? (
         <div className="cart-offline" role="status">
-          Offline read-only. Changes and checkout are disabled; nothing will replay on reconnect.
+          You’re offline. Changes and checkout are paused; nothing will replay on reconnect.
           <button type="button" onClick={() => void controller.load()}>
             Refresh after reconnecting
           </button>
@@ -348,24 +364,23 @@ function CartContent({
       ) : null}
       {cart.cart.warnings.includes("PROJECTION_STALE") ? (
         <div className="cart-stale" role="status">
-          Cart summary is stale. Refresh before making a change.
+          Your cart may be out of date. Refresh before making a change.
         </div>
       ) : null}
       {cart.cart.warnings.includes("QUOTE_EXPIRED") ? (
         <div className="cart-stale" role="status">
-          Quote expired. Server requote is required before checkout.
+          Prices have expired. Checkout will price your order again.
         </div>
       ) : null}
       <div className="cart-layout" aria-busy={pending}>
         <section className="cart-items" aria-labelledby="cart-items-heading">
           <div className="cart-page__subheading">
             <h2 id="cart-items-heading">Items</h2>
-            <span>{cart.cart.items.length} item lines</span>
+            <span>{count === 1 ? "1 item" : `${count} items`}</span>
           </div>
           {cart.cart.items.map((item) => (
             <CartItem
               key={item.cartItemReference}
-              cart={cart}
               item={item}
               pending={pending}
               readOnly={
@@ -378,33 +393,29 @@ function CartContent({
             />
           ))}
         </section>
-        <CartSummary cart={cart} />
+        <CartSummary cart={cart} now={now} />
       </div>
       <section className="cart-next-actions" aria-label="Cart actions">
         <Link to="/menu">{terminal ? "Browse menu" : "Continue shopping"}</Link>
-        <button type="button" disabled aria-describedby="clear-boundary">
-          Clear cart
-        </button>
         {!terminal && !readOnly ? (
           <Link className="cart-checkout-link" to="/checkout">
-            Review checkout
+            Checkout
           </Link>
         ) : null}
       </section>
-      <div className="cart-boundaries">
-        <p id="clear-boundary">Clear cart requires an atomic server command and is unavailable.</p>
-        <p id="checkout-boundary">
-          Available payment options and the final total are shown at checkout.
-        </p>
-      </div>
-      <p className="cart-version">
-        Cart version {cart.cart.version} · {cart.cart.serviceMode}
-      </p>
     </>
   );
 }
 
-export function CartPage({ controller: provided }: { readonly controller?: CartStateController }) {
+export function CartPage({
+  controller: provided,
+  store,
+  now = Date.now,
+}: {
+  readonly controller?: CartStateController;
+  readonly store?: CustomerStoreContext | undefined;
+  readonly now?: () => number;
+}) {
   const [controller] = useState(
     () => provided ?? createCartStateController({ client: createBrowserCustomerCartClient() }),
   );
@@ -424,45 +435,25 @@ export function CartPage({ controller: provided }: { readonly controller?: CartS
       window.removeEventListener("online", online);
     };
   }, [controller]);
+  const cart = "cart" in state && state.cart !== null ? state.cart.cart : null;
+  const resolvedStore: CustomerStoreContext | undefined =
+    store ??
+    (cart
+      ? {
+          storeName: cart.context.storeName,
+          brandName: cart.context.brandName,
+          serviceMode: cart.orderType,
+        }
+      : undefined);
   return (
-    <main id="main-content" className="cart-page">
-      <header className="cart-page__header">
-        <a className="cart-skip-link" href="#cart-content">
-          Skip to cart content
-        </a>
-        <div>
-          <p className="cart-page__eyebrow">Customer cart</p>
-          <h1>Your cart</h1>
-          {"cart" in state && state.cart !== null ? (
-            <p>
-              {state.cart.cart.context.brandName} · {state.cart.cart.context.storeName} ·
-              server-calculated totals only
-            </p>
-          ) : (
-            <p>Current Store · server-calculated totals only</p>
-          )}
-        </div>
-        {"cart" in state && state.cart !== null ? (
-          <div className="cart-page__context" aria-label="Service context">
-            <span>{state.cart.cart.orderType}</span>
-            <span>{state.cart.cart.lifecycle.status}</span>
-          </div>
-        ) : null}
-      </header>
-      <nav className="cart-page__navigation" aria-label="Customer journey">
-        <Link to="/menu">
-          <span className="cart-page__navigation-wide-label">Browse menu</span>
-          <span className="cart-page__navigation-compact-label">Menu</span>
-        </Link>
-        <Link to="/menu/search">Search</Link>
-        <span aria-current="page">Cart</span>
-      </nav>
+    <CustomerPage step="cart" store={resolvedStore} className="cart-page">
+      <PageHeading title="Your cart" />
       <div id="cart-content">
-        <CartContent state={state} controller={controller} />
+        <CartContent state={state} controller={controller} now={now} />
       </div>
       <div className="sr-only" role="status" aria-live="polite">
         {state.status === "command-pending" ? "Cart change pending" : `Cart state ${state.status}`}
       </div>
-    </main>
+    </CustomerPage>
   );
 }

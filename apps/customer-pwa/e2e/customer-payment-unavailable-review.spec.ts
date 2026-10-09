@@ -4,8 +4,11 @@ test("@demo keeps the configured-unavailable payment view safe and readable", as
   await page.goto("/checkout/payment");
   await expect(page.getByRole("heading", { name: "Secure payment", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Online payment is unavailable" })).toBeVisible();
-  await expect(page.getByText("Unavailable", { exact: true })).toHaveCount(5);
-  await expect(page.getByRole("button")).toHaveCount(0);
+  await expect(
+    page.getByText("Card payment isn’t set up at this location yet.", { exact: false }),
+  ).toBeVisible();
+  await expect(page.getByRole("main").getByRole("button")).toHaveCount(0);
+  await expect(page.getByRole("main")).not.toContainText("Guest session");
   await expect(page.getByRole("link", { name: "Back to checkout" })).toHaveAttribute(
     "href",
     "/checkout",

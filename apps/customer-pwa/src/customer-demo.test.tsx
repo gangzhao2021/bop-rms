@@ -59,7 +59,7 @@ describe("WP-2204 local Customer preview", () => {
     expect(html).toContain("Local synthetic preview");
     expect(html).toContain("Read-only training data");
     expect(html).toContain("Synthetic mushroom rice bowl");
-    expect(html).toContain("Offline read-only");
+    expect(html).toContain("You’re offline");
     expect(html).toContain(
       'disabled="" aria-label="Increase Synthetic mushroom rice bowl quantity"',
     );

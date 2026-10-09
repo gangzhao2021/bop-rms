@@ -11,7 +11,7 @@ describe("CUST-DINE-IN-SESSION", () => {
       </MemoryRouter>,
     );
 
-    expect(html).toContain('aria-current="page">Dine-in');
+    expect(html).toContain("Your dining session");
     expect(html).toContain('role="alert"');
     expect(html).toContain("Session details are unavailable");
     expect(html).toContain("Table / session");

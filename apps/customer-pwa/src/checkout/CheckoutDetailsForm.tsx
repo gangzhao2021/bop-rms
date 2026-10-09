@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { v7 as uuidv7 } from "uuid";
 import { captureCustomerCsrfContext } from "../session/customer-transaction-context.js";
 import { createCheckoutDetailsReadClient } from "./details-read-client.js";
@@ -17,16 +24,39 @@ export interface CheckoutFormSelection {
   readonly orderType: "DineIn" | "Pickup";
   readonly quoteExpiresAt: string;
 }
+/** What the checkout page can ask the form to do. */
+export interface CheckoutDetailsFormHandle {
+  /** Save the current details; resolves when the save attempt has settled. */
+  save(): Promise<void>;
+}
+
+/**
+ * E.164 for the Store's SMS and calls. A bare North American number gets +1; an explicit
+ * international number keeps its own code. Anything else is sent as typed and rejected by the server.
+ */
+export function normalizePhoneNumber(value: string): string {
+  const compact = value.replace(/[\s().-]/gu, "");
+  if (/^\d{10}$/u.test(compact)) return "+1" + compact;
+  if (/^1\d{10}$/u.test(compact)) return "+" + compact;
+  if (/^00\d{7,14}$/u.test(compact)) return "+" + compact.slice(2);
+  return compact;
+}
+
 export function CheckoutDetailsForm({
   selection: provided,
   now = Date.now,
   onBusyChange,
   onReadyChange,
+  onSubmittableChange,
+  ref,
 }: {
   readonly selection: CheckoutFormSelection;
   readonly now?: () => number;
   readonly onBusyChange?: (busy: boolean) => void;
   readonly onReadyChange?: (selection: CheckoutFormSelection | null) => void;
+  /** Whether a save could be attempted now (details loaded, policies accepted, online, not expired). */
+  readonly onSubmittableChange?: (submittable: boolean) => void;
+  readonly ref?: React.Ref<CheckoutDetailsFormHandle>;
 }) {
   const [selection] = useState(() => Object.freeze({ ...provided }));
   const [reader] = useState(createCheckoutDetailsReadClient);
@@ -129,6 +159,19 @@ export function CheckoutDetailsForm({
     onReadyChange?.(ready ? selection : null);
     return () => onReadyChange?.(null);
   }, [onReadyChange, ready, selection]);
+  const submittable =
+    draft !== null &&
+    policy !== null &&
+    !expired &&
+    online &&
+    authorized &&
+    !busy &&
+    !failed &&
+    (policy.documents.length === 0 || confirmed);
+  useEffect(() => {
+    onSubmittableChange?.(submittable);
+    return () => onSubmittableChange?.(false);
+  }, [onSubmittableChange, submittable]);
 
   const edit = (patch: Partial<Pick<CheckoutDetailsDraft, "pickupContact" | "receipt">>) => {
     if (busy || !authorized || !online || expired) return;
@@ -159,6 +202,10 @@ export function CheckoutDetailsForm({
       return;
     await saver.save({
       ...draft,
+      pickupContact:
+        draft.pickupContact !== null && draft.pickupContact.channel === "Phone"
+          ? { ...draft.pickupContact, value: normalizePhoneNumber(draft.pickupContact.value) }
+          : draft.pickupContact,
       policies: policy.documents.map((document) => ({
         documentReference: document.documentReference,
         documentVersion: document.documentVersion,
@@ -168,15 +215,16 @@ export function CheckoutDetailsForm({
     });
     savedRevision();
   };
+  useImperativeHandle(ref, () => ({ save: submit }));
   if (loading)
     return (
-      <section aria-label="Checkout details">
+      <section className="checkout-details-form" aria-label="Checkout details">
         <p role="status">Loading checkout details…</p>
       </section>
     );
   if (failed || !authorized || draft === null || policy === null)
     return (
-      <section aria-label="Checkout details">
+      <section className="checkout-details-form" aria-label="Checkout details">
         <p role="alert">Checkout details are unavailable. Refresh your checkout to try again.</p>
         <button type="button" disabled={!online || busy} onClick={() => void load()}>
           Reload checkout details
@@ -186,7 +234,9 @@ export function CheckoutDetailsForm({
   const contact = draft.pickupContact;
   return (
     <section aria-labelledby="checkout-details-heading">
-      <h2 id="checkout-details-heading">Contact and receipt</h2>
+      <h2 id="checkout-details-heading">
+        {selection.orderType === "Pickup" ? "Your details" : "Receipt"}
+      </h2>
       <form
         className="checkout-details-form"
         autoComplete="off"
@@ -196,9 +246,12 @@ export function CheckoutDetailsForm({
         }}
       >
         <fieldset disabled={busy || !online || expired}>
-          <legend>
-            {selection.orderType === "Pickup" ? "Pickup contact" : "Receipt preferences"}
-          </legend>
+          <legend>{selection.orderType === "Pickup" ? "Pickup contact" : "Receipt"}</legend>
+          {selection.orderType === "Pickup" ? (
+            <p className="checkout-details-form__hint">
+              We’ll use this to reach you if there’s a problem with your order.
+            </p>
+          ) : null}
           {draft.pickupContact !== null ? (
             <>
               <label>
@@ -236,16 +289,17 @@ export function CheckoutDetailsForm({
                 </select>
               </label>
               <label>
-                {draft.pickupContact.channel === "Phone"
-                  ? "Phone number (include country code)"
-                  : "Pickup email"}
+                {draft.pickupContact.channel === "Phone" ? "Mobile number" : "Pickup email"}
                 <input
                   required
                   type={draft.pickupContact.channel === "Phone" ? "tel" : "email"}
+                  autoComplete={draft.pickupContact.channel === "Phone" ? "tel" : "email"}
                   pattern={
-                    draft.pickupContact.channel === "Phone" ? "[+][1-9][0-9]{6,14}" : undefined
+                    draft.pickupContact.channel === "Phone"
+                      ? "[+0-9][0-9 \\(\\)\\.\\-]{6,24}"
+                      : undefined
                   }
-                  maxLength={draft.pickupContact.channel === "Phone" ? 16 : 254}
+                  maxLength={draft.pickupContact.channel === "Phone" ? 25 : 254}
                   value={draft.pickupContact.value}
                   onChange={(event) =>
                     edit({
@@ -324,7 +378,8 @@ export function CheckoutDetailsForm({
         {save.status === "saved" && !dirty ? <p role="status">Checkout details saved.</p> : null}
         {save.status === "invalid" ? (
           <p role="alert">
-            Check your contact and receipt fields. Phone numbers must include a country code.
+            Check your contact and receipt fields. Enter a mobile number such as 416 555 0123, or
+            include the country code for numbers outside North America.
           </p>
         ) : null}
         {["conflict", "policy", "requote", "denied"].includes(save.status) ? (
@@ -347,15 +402,23 @@ export function CheckoutDetailsForm({
             </button>
           </>
         ) : null}
+        {save.status === "pending" ? null : (
+          <button
+            type="submit"
+            className="checkout-details-form__save"
+            disabled={
+              busy || !online || expired || !dirty || (policy.documents.length > 0 && !confirmed)
+            }
+          >
+            Save details
+          </button>
+        )}
         <button
-          type="submit"
-          disabled={
-            busy || !online || expired || !dirty || (policy.documents.length > 0 && !confirmed)
-          }
+          type="button"
+          className="checkout-details-form__reload"
+          disabled={busy || !online}
+          onClick={() => void load()}
         >
-          Save checkout details
-        </button>
-        <button type="button" disabled={busy || !online} onClick={() => void load()}>
           Reload checkout details
         </button>
       </form>

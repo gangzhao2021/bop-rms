@@ -16,4 +16,25 @@ describe("shared UI foundation", () => {
     expect(html).toContain("Offline");
     expect(bopPilotNeutralTokenNames).toContain("focus");
   });
+
+  it("names the navigation landmark for its audience", () => {
+    const html = renderToStaticMarkup(
+      <AppFrame
+        title="Synthetic shell"
+        description="No business data"
+        navigation={<a href="/menu">Menu</a>}
+        navigationLabel="Customer journey"
+      >
+        <p>Body</p>
+      </AppFrame>,
+    );
+    expect(html).toContain('<nav class="bop-shell__nav" aria-label="Customer journey">');
+    expect(
+      renderToStaticMarkup(
+        <AppFrame title="S" description="D" navigation={<a href="/app">Home</a>}>
+          <p>Body</p>
+        </AppFrame>,
+      ),
+    ).toContain('aria-label="Primary"');
+  });
 });

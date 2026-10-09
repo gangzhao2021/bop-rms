@@ -8,6 +8,7 @@ import {
   type PaymentController,
 } from "./payment-controller.js";
 import type { PaymentMode } from "./types.js";
+import type { CustomerStoreContext } from "../journey/CustomerPage.js";
 
 function LegacyPaymentPage({
   mode,
@@ -125,7 +126,13 @@ function LegacyPaymentPage({
 export function PaymentPage(props: {
   readonly mode: PaymentMode;
   readonly controller?: PaymentController;
+  readonly store?: CustomerStoreContext | undefined;
 }) {
-  if (props.controller !== undefined) return <LegacyPaymentPage {...props} />;
-  return props.mode === "handoff" ? <SessionPaymentPage /> : <SessionPaymentResultPage />;
+  if (props.controller !== undefined)
+    return <LegacyPaymentPage mode={props.mode} controller={props.controller} />;
+  return props.mode === "handoff" ? (
+    <SessionPaymentPage store={props.store} />
+  ) : (
+    <SessionPaymentResultPage store={props.store} />
+  );
 }

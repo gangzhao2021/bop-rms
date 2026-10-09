@@ -144,15 +144,15 @@ test.describe("@production order status HTTP continuity", () => {
         window.dispatchEvent(new PopStateEvent("popstate"));
       }, reference);
     await navigate(id(1));
-    await expect(page.getByText("Payment received: CAD 25.98", { exact: true })).toBeVisible();
-    await expect(page.getByText("Preparing", { exact: true })).toHaveCount(2);
+    await expect(page.getByText("Payment received $25.98", { exact: true })).toBeVisible();
+    await expect(page.getByText("Preparing", { exact: true })).toHaveCount(1);
     await expect(
       page.getByRole("heading", { name: "Preparing your order", exact: true }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh now", exact: true }).click();
     await expect.poll(() => firstCalls).toBe(2);
     await navigate(id(2));
-    await expect(page.getByText("Payment received: CAD 12.99", { exact: true })).toBeVisible();
+    await expect(page.getByText("Payment received $12.99", { exact: true })).toBeVisible();
     await expect(page.getByText("Ready", { exact: true })).toHaveCount(1);
     await expect(page.getByText(/^Served 1 of /)).toBeVisible();
     await expect(page.getByText(/^Served 0 of /)).toBeVisible();
@@ -162,7 +162,7 @@ test.describe("@production order status HTTP continuity", () => {
     await expect(page.getByText("Preparing", { exact: true })).toHaveCount(1);
     await expect(
       page
-        .getByRole("region", { name: "Order batches" })
+        .getByRole("region", { name: "Your items" })
         .getByText("Not available yet", { exact: true }),
     ).toBeVisible();
     const response = page.waitForResponse(
@@ -171,14 +171,14 @@ test.describe("@production order status HTTP continuity", () => {
     if (!releaseOld) throw new Error("missing response gate");
     releaseOld();
     await response;
-    await expect(page.getByText("Payment received: CAD 25.98", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("Payment received: CAD 12.99", { exact: true })).toBeVisible();
+    await expect(page.getByText("Payment received $25.98", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Payment received $12.99", { exact: true })).toBeVisible();
     revoke = true;
-    await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh now", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Order access denied", exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Payment received: CAD 12.99", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Payment received $12.99", { exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
   });
 
@@ -291,14 +291,12 @@ test.describe("@production order status HTTP continuity", () => {
     }, id(1));
     const main = page.getByRole("main");
     await expect(main.getByRole("heading", { name: "Preparing your order" })).toBeVisible();
-    await expect(main.getByText("Payment received: CAD 25.98", { exact: true })).toBeVisible();
-    await expect(
-      main.getByText(/individual payment results.*do not confirm that the order is fully paid/i),
-    ).toBeVisible();
+    await expect(main.getByText("Payment received $25.98", { exact: true })).toBeVisible();
+    await expect(main).not.toContainText(/\bPaid\b/u);
     await expect(main.getByText("Synthetic tea", { exact: false })).toBeVisible();
-    await expect(main.getByText("Not available yet", { exact: true })).toBeVisible();
+    await expect(main).not.toContainText("Estimated time");
     await expect(main.getByRole("link", { name: "View receipt and support" })).toBeVisible();
-    await expect(main.getByRole("button", { name: "Refresh status" })).toBeVisible();
+    await expect(main.getByRole("button", { name: "Refresh now" })).toBeVisible();
     await expect(main).not.toContainText(/paid in full|\bETA\s*\d/i);
 
     for (const viewport of [
@@ -308,16 +306,11 @@ test.describe("@production order status HTTP continuity", () => {
     ]) {
       await page.setViewportSize(viewport);
       const summary = main.locator(".order-status__summary");
-      const payment = main.locator(".order-status__payments");
       const batch = main.locator(".order-status__batch").first();
       const summaryBox = await summary.boundingBox();
-      const paymentBox = await payment.boundingBox();
       const batchBox = await batch.boundingBox();
       expect(summaryBox).not.toBeNull();
-      expect(paymentBox?.y).toBeGreaterThanOrEqual(
-        (summaryBox?.y ?? 0) + (summaryBox?.height ?? 0),
-      );
-      expect(batchBox?.y).toBeGreaterThanOrEqual((paymentBox?.y ?? 0) + (paymentBox?.height ?? 0));
+      expect(batchBox?.y).toBeGreaterThanOrEqual((summaryBox?.y ?? 0) + (summaryBox?.height ?? 0));
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);

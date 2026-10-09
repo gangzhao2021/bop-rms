@@ -50,7 +50,7 @@ test("@production CUST-MENU renders a generic Permission Denied recovery for exp
   const alert = main.getByRole("alert");
   await expect(alert.getByRole("heading", { name: "This menu can’t be opened" })).toBeVisible();
   await expect(alert.getByRole("heading", { name: "This menu can’t be opened" })).toBeFocused();
-  await expect(alert.getByText(/current Store session can’t access this menu/u)).toBeVisible();
+  await expect(alert.getByText(/session can’t access this menu/u)).toBeVisible();
   await expect(alert.getByRole("link", { name: "Return to entry" })).toHaveAttribute("href", "/");
   await expect(alert).not.toContainText("opaque denial payload");
   await expect(main.getByRole("button", { name: "Try again" })).toHaveCount(0);

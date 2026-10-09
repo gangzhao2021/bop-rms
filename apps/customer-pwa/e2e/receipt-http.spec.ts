@@ -89,7 +89,7 @@ test("@production receipt navigation removes inaccessible history and fits commo
   await expect(
     page.getByRole("heading", { name: "Live receipt status is unavailable" }),
   ).toBeVisible();
-  await expect(page.getByText("CAD 11.30", { exact: true })).toBeVisible();
+  await expect(page.getByText("$11.30", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Request email receipt" })).toHaveAttribute(
     "aria-describedby",
     "receipt-email-unavailable",
@@ -100,20 +100,20 @@ test("@production receipt navigation removes inaccessible history and fits commo
     { width: 320, height: 800 },
   ]) {
     await page.setViewportSize(viewport);
-    await expect(page.getByRole("heading", { name: "Immutable receipt history" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Receipt history" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Receipt actions" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Back to order status" })).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     const headerColor = await page
-      .locator(".receipt-page__header")
+      .locator(".bop-shell__header")
       .evaluate((element) => getComputedStyle(element).backgroundColor);
     const canvasColor = await page
       .locator(".receipt-page")
       .evaluate((element) => getComputedStyle(element).backgroundColor);
-    expect(headerColor).toBe("rgb(11, 93, 75)");
-    expect(canvasColor).toBe("rgb(247, 249, 247)");
+    expect(headerColor).toBe("rgb(255, 255, 255)");
+    expect(canvasColor).toBe("rgb(255, 255, 255)");
     const history = await page.locator(".receipt-page__history").boundingBox();
     const financial = await page.locator(".receipt-page__financial").boundingBox();
     expect(history).not.toBeNull();

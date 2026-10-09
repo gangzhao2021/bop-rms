@@ -252,7 +252,7 @@ for (const screen of [
         ).toBeVisible();
         expect(bindingCalls).toHaveLength(0);
         expect(addCalls).toHaveLength(0);
-        await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+        // U6: the configurator is open as soon as the item is; no "configure" tap first.
         await expect(page.getByRole("spinbutton", { name: "Quantity", exact: true })).toBeVisible();
         const submit = page.getByRole("button", { name: "Add to cart", exact: true });
         if (screen.touch) await submit.tap();
@@ -262,7 +262,7 @@ for (const screen of [
         }
         const retry = page.getByRole("button", { name: "Retry the same operation", exact: true });
         await expect(retry).toBeEnabled();
-        await expect(page.getByText("Added to the server cart.", { exact: true })).toHaveCount(0);
+        await expect(page.getByText("Added to your cart.", { exact: true })).toHaveCount(0);
         const before = { binding: bindingCalls.length, add: addCalls.length };
         await context.setOffline(true);
         await expect(retry).toBeDisabled();
@@ -277,7 +277,7 @@ for (const screen of [
             await retry.focus();
             await page.keyboard.press("Enter");
           }
-          await expect(page.getByText("Added to the server cart.", { exact: true })).toBeVisible();
+          await expect(page.getByText("Added to your cart.", { exact: true })).toBeVisible();
           expect(bindingCalls.filter((x) => x.action === "prepare")).toHaveLength(1);
           const original = bindingCalls[0]?.key;
           expect(original).toMatch(/^[0-9a-f-]{36}$/u);
@@ -295,7 +295,7 @@ for (const screen of [
             optionSelections: [],
             customerNote: null,
           });
-          await page.getByRole("link", { name: "Review cart", exact: true }).click();
+          await page.getByRole("link", { name: "View cart", exact: true }).click();
           await expect(page.getByText("Synthetic tea", { exact: true })).toHaveCount(1);
         } else {
           expect(created).toBe(false);

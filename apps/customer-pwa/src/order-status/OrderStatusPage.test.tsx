@@ -79,11 +79,11 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     const html = render(readyState());
     expect(html).toContain("Order submitted");
     expect(html).toContain("2 × Synthetic bowl");
-    expect(html).toContain("CAD 25.98");
+    expect(html).toContain("$25.98");
     expect(html).toContain("Kitchen status");
     expect(html).toContain("Not available yet");
-    expect(html).toContain("Payment status");
-    expect(html).toContain("Check pickup readiness");
+    expect(html).toContain("Payment");
+    expect(html).toContain("Show pickup code");
     expect(html).toContain("View receipt and support");
     expect(html).not.toContain("Ready for pickup");
   });
@@ -121,7 +121,7 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     });
     expect(html).toContain("Order collected");
     expect(html).not.toContain("Order completed");
-    expect(html).not.toContain("Check pickup readiness");
+    expect(html).not.toContain("Show pickup code");
   });
 
   it.each([{ status: "unavailable" }, { status: "offline", view: null }] as const)(
@@ -138,7 +138,7 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     [{ status: "not-found" }, "This order cannot be opened"],
     [{ status: "feature-disabled" }, "Order tracking is disabled"],
     [{ status: "unavailable" }, "Order status is not available"],
-    [{ status: "offline", view: null }, "Offline read-only"],
+    [{ status: "offline", view: null }, "You’re offline"],
   ] as const)("renders the bounded state %#", (state, message) => {
     expect(render(state)).toContain(message);
   });
@@ -181,11 +181,9 @@ describe("independently sourced customer updates", () => {
       },
     });
     expect(html).toContain("Preparing");
-    expect(html).toContain("Payment received: CAD 25.98");
-    expect(html).toContain("Payment attempt failed");
+    expect(html).toContain("Payment received $25.98");
     expect(html).toContain("This payment update may be out of date");
-    expect(html).toContain("individual payment results");
-    expect(html).not.toContain("Paid");
+    expect(html).not.toContain("Paid ");
     expect(html).not.toContain("Ready for pickup");
   });
 });
@@ -303,10 +301,9 @@ it("does not treat a ready Pickup kitchen as collection", () => {
       },
     },
   });
-  expect(html).toContain("Kitchen preparation complete");
-  expect(html).toContain("Check pickup readiness");
+  expect(html).toContain("Ready for pickup");
+  expect(html).toContain("Checking your pickup code");
   expect(html).not.toContain("Order collected");
-  expect(html).not.toContain("Ready for pickup");
 });
 
 it("keeps unserved additional batches out of the all-served summary", () => {
@@ -378,6 +375,6 @@ it("WP-2423: says a pickup was not collected and stops offering the pickup code"
   });
   expect(html).toContain("Not collected");
   expect(html).toContain("Contact the store");
-  expect(html).not.toContain("Check pickup readiness");
+  expect(html).not.toContain("pickup code");
   expect(html).not.toContain("Order collected");
 });

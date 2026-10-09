@@ -33,8 +33,7 @@ test("CUST-MENU-SEARCH follows the Make search hierarchy @demo", async ({ page }
   await expect(main.getByText("Matched term · iced")).toBeVisible();
   await expect(main.getByRole("heading", { name: "Synthetic iced tea" })).toBeVisible();
   await expect(main.locator(".menu-result-section")).toContainText("Training favourites");
-  await expect(main.getByText("Price confirmed in your final quote")).toBeVisible();
-  await expect(main.getByText("Image not available")).toBeVisible();
+  await expect(main.getByText("Priced at checkout")).toBeVisible();
   await expect(main.getByRole("link", { name: "View Synthetic iced tea" })).toBeVisible();
   await expect(main).not.toContainText("Synthetic mushroom rice bowl");
 

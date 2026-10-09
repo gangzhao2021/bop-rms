@@ -61,7 +61,7 @@ for (const action of ["start", "retry"] as const) {
     await settled(page);
     await expect(publications(page)).toHaveText('["Lifecycle training store B:v1"]');
     await expect(
-      page.getByRole("heading", { name: "Lifecycle training store B", exact: true }),
+      page.getByRole("heading", { level: 1, name: "Lifecycle training store B", exact: true }),
     ).toBeVisible();
     await expect(page.getByText("Lifecycle training store A", { exact: true })).toHaveCount(0);
     await check();
