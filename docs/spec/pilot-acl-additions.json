@@ -2079,6 +2079,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 Owner 2026-10-08 (investigate dead letters, then retry): the catalogued payment.status-projection consumer of PaymentRefunded records Provider-confirmed refund status"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_in_person_verification",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (按你建议做: uncollected and late pickup policy): staff record an in-person check before handing over an order whose pickup code expired or was never sent"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_in_person_verification",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (按你建议做: uncollected and late pickup policy): staff record an in-person check before handing over an order whose pickup code expired or was never sent"
     }
   ]
 }

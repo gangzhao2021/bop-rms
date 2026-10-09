@@ -1,5 +1,8 @@
 import type { ConsumerTransaction } from "@bop/eventing";
-import { PickupHandoffError } from "../../contracts/pickup-handoff.js";
+import {
+  PickupHandoffError,
+  parsePickupInPersonVerificationRecord,
+} from "../../contracts/pickup-handoff.js";
 import { decodePickupHandoffRecord } from "../../application/pickup-handoff-record.js";
 function unavailable(): never {
   throw new PickupHandoffError("PICKUP_HANDOFF_INPUT_INVALID");
@@ -56,7 +59,10 @@ export async function readPickupHandoffHistory(
       r.handedOverAt !== at(o.occurred_at) ||
       r.handedOverAt !== at(row.handed_over_at) ||
       r.pickupLocationReference !== row.pickup_location_id ||
-      r.verificationReference !== row.pickup_proof_verification_id ||
+      r.verificationReference !==
+        (r.verificationMethod === "InPerson"
+          ? row.pickup_in_person_verification_id
+          : row.pickup_proof_verification_id) ||
       r.verificationMethod !== row.verification_method ||
       r.recipientType !== row.recipient_type ||
       r.recipientDisplayMask !== row.recipient_display_mask ||
@@ -81,4 +87,35 @@ export async function readPickupHandoffHistory(
   });
   if (itemCount !== items.length) return unavailable();
   return effects;
+}
+
+/** WP-2423: in-person verifications of a fulfillment (staff verified a customer without a proof). */
+export async function readPickupInPersonVerifications(
+  tx: ConsumerTransaction,
+  brand: string,
+  store: string,
+  fulfillment: string,
+) {
+  const rows = (
+    await tx.query(
+      "SELECT * FROM rms_fulfillment.pickup_in_person_verification WHERE brand_id=$1 AND store_id=$2 AND fulfillment_id=$3 ORDER BY verified_at",
+      [brand, store, fulfillment],
+    )
+  ).rows;
+  return rows.map((row) => {
+    if (row.brand_id !== brand || row.store_id !== store || row.fulfillment_id !== fulfillment)
+      return unavailable();
+    return parsePickupInPersonVerificationRecord({
+      verificationReference: row.pickup_in_person_verification_id,
+      correlationReference: row.correlation_id,
+      fulfillmentReference: row.fulfillment_id,
+      brandReference: row.brand_id,
+      storeReference: row.store_id,
+      verificationMethod: "InPerson",
+      identityCheck: row.identity_check,
+      reason: row.reason,
+      verifiedByActorReference: row.verified_by_actor_id,
+      verifiedAt: at(row.verified_at),
+    });
+  });
 }

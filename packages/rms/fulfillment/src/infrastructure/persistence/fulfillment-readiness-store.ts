@@ -1,6 +1,9 @@
 import type { PickupQueueReadItem, PickupQueueReadPage } from "../../contracts/pickup-queue.js";
 import { foldPickupHandoffHistory } from "../../application/pickup-handoff-history.js";
-import { readPickupHandoffHistory } from "./pickup-handoff-history.js";
+import {
+  readPickupHandoffHistory,
+  readPickupInPersonVerifications,
+} from "./pickup-handoff-history.js";
 import { foldPickupProofHistory } from "../../application/pickup-proof-history.js";
 import { readPickupProofHistory } from "./pickup-proof-history.js";
 import { parseFulfillmentReference } from "../../contracts/pickup-fulfillment.js";
@@ -47,7 +50,7 @@ export function createPostgresFulfillmentReadinessStore(options: {
   }): Promise<PickupQueueReadPage>;
   lockPickupHandoffByOrder(
     input: Parameters<FulfillmentReadinessPorts["repository"]["lockByOrder"]>[0],
-  ): Promise<ReturnType<typeof foldPickupHandoffHistory>>;
+  ): Promise<ReturnType<typeof foldPickupHandoffHistory> | null>;
   lockPickupProofByOrder(
     input: Parameters<FulfillmentReadinessPorts["repository"]["lockByOrder"]>[0],
   ): Promise<ReturnType<typeof foldPickupProofHistory> | null>;
@@ -203,7 +206,13 @@ export function createPostgresFulfillmentReadinessStore(options: {
       aggregate.fulfillmentReference,
     );
     if (phase !== "Ready") {
-      if (proofHistory.issues.length || proofHistory.verifications.length || handoffHistory.length)
+      if (
+        proofHistory.issues.length ||
+        proofHistory.verifications.length ||
+        handoffHistory.length ||
+        (await readPickupInPersonVerifications(tx, brand, store, aggregate.fulfillmentReference))
+          .length
+      )
         return unavailable();
       return { readiness, proof: null, handoff: null, hasHandoff: false };
     }
@@ -212,7 +221,18 @@ export function createPostgresFulfillmentReadinessStore(options: {
       "",
     );
     const proof = foldPickupProofHistory(readiness, readyAt, proofHistory);
-    const handoff = foldPickupHandoffHistory(proof, proofHistory.verifications, handoffHistory);
+    const inPerson = await readPickupInPersonVerifications(
+      tx,
+      brand,
+      store,
+      aggregate.fulfillmentReference,
+    );
+    const handoff = foldPickupHandoffHistory(
+      proof,
+      proofHistory.verifications,
+      handoffHistory,
+      inPerson,
+    );
     return {
       handoff,
       hasHandoff: handoffHistory.length > 0,

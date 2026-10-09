@@ -101,8 +101,9 @@ it("does not mark an expired proof ready", async () => {
   f.fetcher.mockResolvedValue(
     response({ ...page(), items: [{ ...item(), proof: { ...item().proof, expiresAt: at } }] }),
   );
+  // WP-2423: an expired proof is not ready; staff check the customer in person instead.
   expect(parsePickupQueueView(await f.client.loadQueue()).items[0]?.proofReadiness).toBe(
-    "Unavailable",
+    "Expired",
   );
 });
 it.each([

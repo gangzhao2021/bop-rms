@@ -30,7 +30,9 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
     prepare(input: {
       item: PickupQueueItem;
       storeReference: string;
-      verification: PickupVerification;
+      /** Null for an in-person check (the proof expired or was never issued). */
+      verification: PickupVerification | null;
+      identityCheck?: "OrderNumberAndName" | "OrderNumberAndPhoneLast4";
       workstation: PickupWorkstation;
       recipientType: "Customer" | "Delegate";
       recipientDisplayMask: string;
@@ -44,12 +46,16 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
           verification = input.verification;
         if (
           !workstation ||
-          !execution.proof ||
           input.item.phase !== "Ready" ||
-          verification.fulfillmentReference !== input.item.fulfillmentReference ||
-          verification.generation !== execution.proof.generation ||
-          verification.grantsCompletionAuthority !== false ||
-          verification.expectedAggregateVersion !== execution.aggregateVersion ||
+          (verification === null
+            ? !["Expired", "NotIssued"].includes(input.item.proofReadiness) ||
+              (input.identityCheck !== "OrderNumberAndName" &&
+                input.identityCheck !== "OrderNumberAndPhoneLast4")
+            : !execution.proof ||
+              verification.fulfillmentReference !== input.item.fulfillmentReference ||
+              verification.generation !== execution.proof.generation ||
+              verification.grantsCompletionAuthority !== false ||
+              verification.expectedAggregateVersion !== execution.aggregateVersion) ||
           !["Customer", "Delegate"].includes(input.recipientType) ||
           !/^[\p{L}\p{N}* ._'()-]{1,64}$/u.test(input.recipientDisplayMask)
         )
@@ -67,7 +73,9 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
           storeReference: parsePickupReference(input.storeReference),
           fulfillmentReference: parsePickupReference(input.item.fulfillmentReference),
           expectedAggregateVersion: expectedVersion,
-          verificationReference: parsePickupReference(verification.verificationReference),
+          ...(verification === null
+            ? { identityCheck: input.identityCheck }
+            : { verificationReference: parsePickupReference(verification.verificationReference) }),
           ...workstation,
           quantities,
           recipientType: input.recipientType,

@@ -3,6 +3,7 @@ import {
   planCompletePickupHandoff,
   PickupHandoffError,
   type PickupHandoffEffect,
+  type PickupInPersonVerificationRecord,
 } from "../contracts/pickup-handoff.js";
 import type { foldPickupProofHistory } from "./pickup-proof-history.js";
 import type { PickupProofVerificationRecord } from "../contracts/pickup-proof.js";
@@ -15,28 +16,30 @@ export function foldPickupHandoffHistory(
   proof: ReturnType<typeof foldPickupProofHistory>,
   verifications: readonly PickupProofVerificationRecord[],
   history: readonly PickupHandoffEffect[],
+  inPerson: readonly PickupInPersonVerificationRecord[] = [],
 ) {
-  if (!proof.capability || proof.source.currentProofGeneration === null) {
-    if (history.length) return unavailable();
-    return null;
-  }
+  // WP-2423: without an issued proof only an in-person verification can hand the order over.
+  const proofGeneration = proof.capability ? proof.source.currentProofGeneration : null;
+  if (proof.capability && proofGeneration === null) return unavailable();
   let source = parsePickupHandoffSource({
     ...proof.source,
-    currentProofGeneration: proof.source.currentProofGeneration,
+    currentProofGeneration: proofGeneration,
   });
   let lastHandoffAt = proof.lastIssuedAt;
   for (const effect of history) {
     const r = effect.record,
       o = effect.operation,
       a = effect.audit;
-    const verification = verifications.find(
-      (v) => v.verificationReference === r.verificationReference,
-    );
+    const verification =
+      r.verificationMethod === "InPerson"
+        ? inPerson.find((v) => v.verificationReference === r.verificationReference)
+        : verifications.find((v) => v.verificationReference === r.verificationReference);
     if (
       !verification ||
       r.handedOverAt < lastHandoffAt ||
       r.handedOverAt > source.lockedAt ||
-      String(r.handedOverAt) >= String(proof.capability.expiresAt)
+      (r.verificationMethod !== "InPerson" &&
+        (!proof.capability || String(r.handedOverAt) >= String(proof.capability.expiresAt)))
     )
       return unavailable();
     const replayed = planCompletePickupHandoff(source, {
@@ -83,5 +86,5 @@ export function foldPickupHandoffHistory(
     });
     lastHandoffAt = r.handedOverAt;
   }
-  return { source, verifications, capability: proof.capability, lastHandoffAt };
+  return { source, verifications, inPerson, capability: proof.capability, lastHandoffAt };
 }

@@ -167,6 +167,49 @@ export async function exerciseEntryPickupHandoff({
   };
   const handoff = createPostgresPickupHandoffStore(handoffOptions);
   const current = await run((transaction) => handoff.lockByOrder({ transaction, orderReference }));
+  // WP-2423: while a valid pickup proof exists the customer must show it; in person is refused.
+  await assert.rejects(
+    run((transaction) =>
+      handoff.complete({
+        transaction,
+        orderReference,
+        command: {
+          fulfillmentReference,
+          ...scope,
+          expectedAggregateVersion: current.source.aggregateVersion,
+          purpose: "CompletePickupHandoff",
+          actorReference,
+          actorPermissions: ["fulfillment.pickup.complete"],
+          verification: {
+            verificationReference: reference(),
+            correlationReference: reference(),
+            fulfillmentReference,
+            ...scope,
+            verificationMethod: "InPerson",
+            identityCheck: "OrderNumberAndName",
+            reason: "ProofExpired",
+            verifiedByActorReference: actorReference,
+            verifiedAt: now(),
+          },
+          recipientType: "Customer",
+          recipientDisplayMask: "S***",
+          pickupLocationReference,
+          deviceReference,
+          quantities: current.source.items.map((item) => ({
+            fulfillmentItemReference: item.fulfillmentItemReference,
+            quantity: item.readyQuantity,
+          })),
+          handoffReference: reference(),
+          operationReference: reference(),
+          auditReference: reference(),
+          idempotencyReference: reference(),
+          correlationReference: reference(),
+          handedOverAt: now(),
+        },
+      }),
+    ),
+    (error) => error.code === "PICKUP_HANDOFF_VERIFICATION_FAILED",
+  );
   const session = await seedMerchantAcceptanceSession({
     admin,
     runner: { run },

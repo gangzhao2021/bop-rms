@@ -4,7 +4,7 @@ export interface PickupQueueItem {
   readonly publicOrderNumber: string | null;
   readonly phase: "Ready" | "InProgress" | "Completed";
   readonly readyAt: string;
-  readonly proofReadiness: "Ready" | "Unavailable";
+  readonly proofReadiness: "Ready" | "Expired" | "NotIssued" | "Unavailable";
   readonly stagingLocation: string | null;
   readonly claimStatus: "Unclaimed" | "Claimed" | "Unavailable";
   readonly exceptionStatus: "None" | "Reported" | "Unavailable";
@@ -110,7 +110,7 @@ function item(value: unknown): PickupQueueItem {
       (typeof input.publicOrderNumber !== "string" ||
         !/^[A-Z0-9-]{1,40}$/u.test(input.publicOrderNumber))) ||
     !["Ready", "InProgress", "Completed"].includes(String(input.phase)) ||
-    !["Ready", "Unavailable"].includes(String(input.proofReadiness)) ||
+    !["Ready", "Expired", "NotIssued", "Unavailable"].includes(String(input.proofReadiness)) ||
     (input.stagingLocation !== null &&
       (typeof input.stagingLocation !== "string" || !SAFE.test(input.stagingLocation))) ||
     !["Unclaimed", "Claimed", "Unavailable"].includes(String(input.claimStatus)) ||

@@ -65,3 +65,32 @@ describe("WP-1805 Pickup screens", () => {
     expect(html).toContain("No handoff or Fulfillment transition is assumed");
   });
 });
+
+it("WP-2423: offers an in-person handoff when the pickup code expired or was never sent", () => {
+  const fixture = pickupQueueFixture();
+  const render = (proofReadiness: string) => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            workstation: {
+              deviceReference: "01900000-0000-7000-8000-000000000008",
+              pickupLocationReference: "01900000-0000-7000-8000-000000000009",
+            },
+            items: fixture.items.map((item) => ({ ...item, proofReadiness })),
+          })}
+          proofContext={{
+            csrf: "A".repeat(43),
+            storeReference: "01900000-0000-7000-8000-000000000004",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    return html.slice(html.indexOf("<article"), html.indexOf("</article>"));
+  };
+  expect(render("Expired")).toContain("Hand over after checking in person");
+  expect(render("Expired")).toContain("Code expired · check in person");
+  expect(render("NotIssued")).toContain("No code sent · check in person");
+  expect(render("Ready")).not.toContain("Hand over after checking in person");
+});

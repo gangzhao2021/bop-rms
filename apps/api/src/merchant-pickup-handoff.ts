@@ -31,6 +31,12 @@ export function createMerchantPickupHandoff(options: {
   const resolveScope = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const session = await options.authentication.authorize(input);
+    // WP-2423: staff verified the customer in person (proof expired or never issued) instead of a
+    // proof verification: the browser names only which identity check was made.
+    const inPerson =
+      input.command !== null &&
+      typeof input.command === "object" &&
+      Object.prototype.hasOwnProperty.call(input.command, "identityCheck");
     let intent: Readonly<Record<string, unknown>>;
     try {
       intent = readClosedRecord(input.command, [
@@ -38,7 +44,7 @@ export function createMerchantPickupHandoff(options: {
         "storeReference",
         "fulfillmentReference",
         "expectedAggregateVersion",
-        "verificationReference",
+        inPerson ? "identityCheck" : "verificationReference",
         "recipientType",
         "recipientDisplayMask",
         "pickupLocationReference",
@@ -52,7 +58,15 @@ export function createMerchantPickupHandoff(options: {
     }
     const orderReference = parsePickupProofReference(intent.orderReference);
     const idempotencyReference = parsePickupProofReference(intent.idempotencyReference);
-    const verificationReference = parsePickupProofReference(intent.verificationReference);
+    const verificationReference = inPerson
+      ? null
+      : parsePickupProofReference(intent.verificationReference);
+    if (
+      inPerson &&
+      intent.identityCheck !== "OrderNumberAndName" &&
+      intent.identityCheck !== "OrderNumberAndPhoneLast4"
+    )
+      return invalid();
     if (
       typeof intent.expectedAggregateVersion !== "string" ||
       !/^[1-9][0-9]{0,18}$/.test(intent.expectedAggregateVersion) ||
@@ -109,9 +123,26 @@ export function createMerchantPickupHandoff(options: {
         orderReference,
         idempotencyReference,
       });
-      const verification = current.verifications.find(
-        (value) => value.verificationReference === verificationReference,
-      );
+      const correlationReference = parsePickupProofReference(intent.correlationReference);
+      const verification = inPerson
+        ? // A replay reuses the recorded verification; a new one names this staff member and the
+          // proof state the owner checks again (never issued, or expired by now).
+          (current.inPerson.find(
+            (value) => value.verificationReference === prior?.record.verificationReference,
+          ) ?? {
+            verificationReference: options.nextReference(),
+            correlationReference,
+            fulfillmentReference: intent.fulfillmentReference,
+            ...selected,
+            verificationMethod: "InPerson" as const,
+            identityCheck: intent.identityCheck,
+            reason: current.capability === null ? "ProofNotIssued" : "ProofExpired",
+            verifiedByActorReference: scope.actorReference,
+            verifiedAt: options.persistence.now(),
+          })
+        : current.verifications.find(
+            (value) => value.verificationReference === verificationReference,
+          );
       if (!verification) throw new PickupHandoffError("PICKUP_HANDOFF_VERIFICATION_FAILED");
       const result = await store.complete({
         transaction: tx,
@@ -130,7 +161,7 @@ export function createMerchantPickupHandoff(options: {
           deviceReference: intent.deviceReference,
           quantities: intent.quantities,
           idempotencyReference,
-          correlationReference: intent.correlationReference,
+          correlationReference,
           handoffReference: prior?.record.handoffReference ?? options.nextReference(),
           operationReference: prior?.operation.operationReference ?? options.nextReference(),
           auditReference: prior?.audit.auditReference ?? options.nextReference(),

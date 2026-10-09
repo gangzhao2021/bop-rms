@@ -1,4 +1,5 @@
 import { PickupProofForm } from "./PickupProofForm.js";
+import { PickupHandoffForm } from "./PickupHandoffForm.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useState, useMemo, useRef, type RefObject } from "react";
 import { createPickupClient } from "./pickup-client.js";
@@ -68,6 +69,11 @@ function PickupCard({
     Math.floor((Date.parse(observedAt) - Date.parse(item.readyAt)) / 60_000),
   );
   const canComplete = !readOnly && item.phase !== "Completed" && item.proofReadiness === "Ready";
+  // WP-2423: the pickup code expired or was never sent; staff check the customer in person.
+  const inPersonEligible =
+    !readOnly &&
+    item.phase === "Ready" &&
+    (item.proofReadiness === "Expired" || item.proofReadiness === "NotIssued");
   return (
     <article className="store-card pickup-queue__card" hidden={hidden}>
       <header>
@@ -88,7 +94,13 @@ function PickupCard({
       <dl>
         <div>
           <dt>Proof</dt>
-          <dd>{item.proofReadiness}</dd>
+          <dd>
+            {item.proofReadiness === "Expired"
+              ? "Code expired · check in person"
+              : item.proofReadiness === "NotIssued"
+                ? "No code sent · check in person"
+                : item.proofReadiness}
+          </dd>
         </div>
         <div>
           <dt>Staging</dt>
@@ -116,7 +128,16 @@ function PickupCard({
           <button disabled aria-describedby="pickup-command-availability">
             Claim
           </button>
-          {canComplete && item.execution && proofContext ? (
+          {inPersonEligible && workstation && proofContext ? (
+            <PickupHandoffForm
+              key={"in-person:" + (item.execution?.aggregateVersion ?? "")}
+              item={item}
+              verification={null}
+              workstation={workstation}
+              csrf={proofContext.csrf}
+              storeReference={proofContext.storeReference}
+            />
+          ) : canComplete && item.execution && proofContext ? (
             <PickupProofForm
               key={item.execution.aggregateVersion + ":" + item.execution.proof?.generation}
               item={item}

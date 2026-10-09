@@ -663,6 +663,7 @@ describe("migration catalog", () => {
       "2000_018_create_availability_rule_operation_snapshot",
       "2000_019_create_option_set_operation_snapshot",
       "2000_020_create_option_recipe_change",
+      "2000_021_create_pickup_in_person_verification",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

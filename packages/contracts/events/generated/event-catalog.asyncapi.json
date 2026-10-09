@@ -2864,7 +2864,7 @@
               "type": "string"
             },
             "verificationMethod": {
-              "enum": ["Opaque", "HumanCode"],
+              "enum": ["Opaque", "HumanCode", "InPerson"],
               "type": "string"
             }
           },

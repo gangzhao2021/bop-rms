@@ -102,13 +102,15 @@ export function createPickupClient(options: {
                 /^[A-Z0-9][A-Z0-9-]{0,39}$/u.test(raw.orderNumber)
                   ? raw.orderNumber
                   : null,
+              // WP-2423: an expired or never issued proof is handed over after an in-person check.
               proofReadiness:
-                raw.phase === "Ready" &&
-                execution.proof &&
-                typeof result.observedAt === "string" &&
-                Date.parse(execution.proof.expiresAt) > Date.parse(result.observedAt)
-                  ? "Ready"
-                  : "Unavailable",
+                raw.phase !== "Ready" || typeof result.observedAt !== "string"
+                  ? "Unavailable"
+                  : !execution.proof
+                    ? "NotIssued"
+                    : Date.parse(execution.proof.expiresAt) > Date.parse(result.observedAt)
+                      ? "Ready"
+                      : "Expired",
               stagingLocation: null,
               claimStatus: "Unavailable",
               exceptionStatus: "Unavailable",

@@ -357,6 +357,57 @@ async function prove(context) {
       1,
     );
 
+    // WP-2423: a handoff after in-person verification references the verification, never a proof.
+    await seedReadyPickup(client, id(3), 500);
+    await client.query(
+      `INSERT INTO rms_fulfillment.pickup_in_person_verification (
+         pickup_in_person_verification_id,brand_id,store_id,fulfillment_id,verified_by_actor_id,
+         identity_check,reason,verified_at,correlation_id,data_classification
+       ) VALUES ($1,$2,$3,$4,$5,'OrderNumberAndName','ProofNotIssued',$6,$7,'IndirectIdentifier')`,
+      [id(530), id(2), id(3), id(500), id(531), "2026-08-11T20:00:00.000Z", id(532)],
+    );
+    const handoffRow = (handoffId, method, proofVerification, inPersonVerification) =>
+      client.query(
+        `INSERT INTO rms_fulfillment.pickup_handoff_record (
+           pickup_handoff_id,brand_id,store_id,fulfillment_id,pickup_location_id,
+           pickup_proof_verification_id,pickup_in_person_verification_id,verification_method,
+           recipient_type,recipient_display_mask,actor_id,device_id,handed_over_at,
+           validation_status,data_classification
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Customer','S***',$9,$10,$11,'Validated','Confidential')`,
+        [
+          handoffId,
+          id(2),
+          id(3),
+          id(500),
+          id(533),
+          proofVerification,
+          inPersonVerification,
+          method,
+          id(531),
+          id(534),
+          "2026-08-11T20:00:01.000Z",
+        ],
+      );
+    await assert.rejects(handoffRow(id(535), "InPerson", id(150), id(530)), /verification_method/u);
+    await assert.rejects(handoffRow(id(536), "HumanCode", null, id(530)), /verification_method/u);
+    await assert.rejects(handoffRow(id(537), "InPerson", null, id(599)), /in_person_fkey/u);
+    await handoffRow(id(538), "InPerson", null, id(530));
+    await assert.rejects(
+      client.query(
+        "UPDATE rms_fulfillment.pickup_in_person_verification SET reason='ProofExpired' WHERE pickup_in_person_verification_id=$1",
+        [id(530)],
+      ),
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO rms_fulfillment.pickup_in_person_verification (
+           pickup_in_person_verification_id,brand_id,store_id,fulfillment_id,verified_by_actor_id,
+           identity_check,reason,verified_at,correlation_id,data_classification
+         ) VALUES ($1,$2,$3,$4,$5,'LooksFamiliar','ProofNotIssued',$6,$7,'IndirectIdentifier')`,
+        [id(539), id(2), id(3), id(500), id(531), "2026-08-11T20:00:00.000Z", id(540)],
+      ),
+      /identity_check/u,
+    );
     await seedReadyPickup(client, id(99), 200);
     await insertGeneration(client, {
       capabilityId: id(230),
@@ -376,6 +427,15 @@ async function prove(context) {
     );
     for (const table of tables)
       await client.query(`GRANT SELECT ON rms_fulfillment.${table} TO ${role}`);
+    await client.query(`GRANT SELECT ON rms_fulfillment.pickup_in_person_verification TO ${role}`);
+    assert.equal(
+      await scopedCount(client, role, id(3), "rms_fulfillment.pickup_in_person_verification"),
+      1,
+    );
+    assert.equal(
+      await scopedCount(client, role, id(99), "rms_fulfillment.pickup_in_person_verification"),
+      0,
+    );
     assert.equal(
       await scopedCount(client, role, id(3), "rms_fulfillment.pickup_proof_generation"),
       2,

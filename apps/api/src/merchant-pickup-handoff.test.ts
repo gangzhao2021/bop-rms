@@ -157,3 +157,41 @@ it("reuses original server references and time for recovery while preserving sub
     expectedAggregateVersion: 9007199254740993n,
   });
 });
+it("WP-2423: builds an in-person verification for the current staff member and proof state", async () => {
+  const f = setup();
+  const command: Record<string, unknown> = {
+    ...f.input.command,
+    identityCheck: "OrderNumberAndPhoneLast4",
+  };
+  delete command.verificationReference;
+  doubles.current.mockResolvedValue({ verifications: [], inPerson: [], capability: null });
+  await f.operation({ ...f.input, command });
+  expect(doubles.complete.mock.calls[0]?.[0].command.verification).toEqual({
+    verificationReference: id(20),
+    correlationReference: id(12),
+    fulfillmentReference: id(6),
+    brandReference: id(3),
+    storeReference: id(4),
+    verificationMethod: "InPerson",
+    identityCheck: "OrderNumberAndPhoneLast4",
+    reason: "ProofNotIssued",
+    verifiedByActorReference: id(2),
+    verifiedAt: "2026-09-19T12:00:00.000Z",
+  });
+  doubles.current.mockResolvedValue({
+    verifications: [],
+    inPerson: [],
+    capability: { expiresAt: "2026-09-19T11:00:00.000Z" },
+  });
+  await f.operation({ ...f.input, command });
+  expect(doubles.complete.mock.calls[1]?.[0].command.verification.reason).toBe("ProofExpired");
+  await expect(
+    f.operation({ ...f.input, command: { ...command, identityCheck: "LooksFamiliar" } }),
+  ).rejects.toMatchObject({ code: "PICKUP_HANDOFF_INPUT_INVALID" });
+  await expect(
+    f.operation({
+      ...f.input,
+      command: { ...command, verificationReference: id(7) },
+    }),
+  ).rejects.toMatchObject({ code: "PICKUP_HANDOFF_INPUT_INVALID" });
+});

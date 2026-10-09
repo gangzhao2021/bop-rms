@@ -148,3 +148,44 @@ describe("Pickup handoff immutable intent", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
+describe("WP-2423 in-person handoff intent", () => {
+  it("sends the identity check instead of a proof verification when the code expired", async () => {
+    const fetcher = vi.fn(async () => response());
+    const expired = { ...item, proofReadiness: "Expired" as const };
+    const intent = createPickupHandoffClient(fetcher).prepare({
+      ...input(),
+      item: expired,
+      verification: null,
+      identityCheck: "OrderNumberAndName",
+    });
+    await intent.execute(csrf);
+    const body = JSON.parse(
+      String(
+        (fetcher.mock.calls[0] as unknown[])[1] &&
+          ((fetcher.mock.calls[0] as unknown[])[1] as RequestInit).body,
+      ),
+    );
+    expect(body.identityCheck).toBe("OrderNumberAndName");
+    expect(body).not.toHaveProperty("verificationReference");
+  });
+  it("refuses an in-person check while the code is still valid or without a known check", () => {
+    const client = createPickupHandoffClient(vi.fn());
+    expect(() =>
+      client.prepare({ ...input(), verification: null, identityCheck: "OrderNumberAndName" }),
+    ).toThrow();
+    expect(() =>
+      client.prepare({
+        ...input(),
+        item: {
+          ...item,
+          proofReadiness: "NotIssued",
+          execution: {
+            ...(item.execution as NonNullable<PickupQueueItem["execution"]>),
+            proof: null,
+          },
+        },
+        verification: null,
+      }),
+    ).toThrow();
+  });
+});

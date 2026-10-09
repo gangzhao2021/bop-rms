@@ -144,7 +144,7 @@ const fulfillmentCompletedPayload = z.strictObject({
   orderReference: z.string().regex(canonicalUuidV7),
   handoffRecordReference: z.string().regex(canonicalUuidV7),
   storeReference: z.string().regex(canonicalUuidV7),
-  verificationMethod: z.enum(["Opaque", "HumanCode"]),
+  verificationMethod: z.enum(["Opaque", "HumanCode", "InPerson"]),
   completedAt: z.iso.datetime({ offset: false }),
 });
 

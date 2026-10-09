@@ -7,13 +7,17 @@ import {
   completePickupHandoffPermission,
   type CompletePickupHandoffCommand,
   type PickupHandoffEffect,
+  type PickupInPersonVerificationRecord,
 } from "../../contracts/pickup-handoff.js";
 import { parsePickupProofReference } from "../../contracts/pickup-proof.js";
 import { parseReadinessReference } from "../../contracts/fulfillment-readiness.js";
 import { encodePickupHandoffRecord } from "../../application/pickup-handoff-record.js";
 import { encodePickupProofVerificationRecord } from "../../application/pickup-proof-record.js";
 import { createPostgresFulfillmentReadinessStore } from "./fulfillment-readiness-store.js";
-import { readPickupHandoffHistory } from "./pickup-handoff-history.js";
+import {
+  readPickupHandoffHistory,
+  readPickupInPersonVerifications,
+} from "./pickup-handoff-history.js";
 import { readPickupProofHistory } from "./pickup-proof-history.js";
 function unavailable(): never {
   throw new PickupHandoffError("PICKUP_HANDOFF_INPUT_INVALID");
@@ -118,7 +122,11 @@ export function createPostgresPickupHandoffStore(options: {
   }
   async function insert(
     tx: ConsumerTransaction,
-    table: "pickup_handoff_record" | "pickup_handoff_item" | "pickup_handoff_operation",
+    table:
+      | "pickup_handoff_record"
+      | "pickup_handoff_item"
+      | "pickup_handoff_operation"
+      | "pickup_in_person_verification",
     row: Readonly<Record<string, unknown>>,
   ) {
     const columns = Object.keys(row);
@@ -137,17 +145,30 @@ export function createPostgresPickupHandoffStore(options: {
     tx: ConsumerTransaction,
     effect: PickupHandoffEffect,
     orderReference: string,
+    inPerson: PickupInPersonVerificationRecord | null,
   ) {
     const r = effect.record,
       o = effect.operation;
     await tx.query("SAVEPOINT pickup_handoff_write", []);
     try {
       const scope = { brand_id: brand, store_id: store, fulfillment_id: r.fulfillmentReference };
+      if (inPerson)
+        await insert(tx, "pickup_in_person_verification", {
+          ...scope,
+          pickup_in_person_verification_id: inPerson.verificationReference,
+          verified_by_actor_id: inPerson.verifiedByActorReference,
+          identity_check: inPerson.identityCheck,
+          reason: inPerson.reason,
+          verified_at: inPerson.verifiedAt,
+          correlation_id: inPerson.correlationReference,
+          data_classification: "IndirectIdentifier",
+        });
       await insert(tx, "pickup_handoff_record", {
         ...scope,
         pickup_handoff_id: r.handoffReference,
         pickup_location_id: r.pickupLocationReference,
-        pickup_proof_verification_id: r.verificationReference,
+        pickup_proof_verification_id: inPerson ? null : r.verificationReference,
+        pickup_in_person_verification_id: inPerson ? r.verificationReference : null,
         verification_method: r.verificationMethod,
         recipient_type: r.recipientType,
         recipient_display_mask: r.recipientDisplayMask,
@@ -210,10 +231,22 @@ export function createPostgresPickupHandoffStore(options: {
   ) {
     const r = effect.record,
       o = effect.operation;
-    const history = await readPickupProofHistory(tx, brand, store, r.fulfillmentReference);
-    const verification = history.verifications.find(
-      (v) => v.verificationReference === r.verificationReference,
-    );
+    const sameVerification =
+      r.verificationMethod === "InPerson"
+        ? (await readPickupInPersonVerifications(tx, brand, store, r.fulfillmentReference)).some(
+            (v) =>
+              v.verificationReference === r.verificationReference &&
+              JSON.stringify(v) === JSON.stringify(command.verification),
+          )
+        : (
+            await readPickupProofHistory(tx, brand, store, r.fulfillmentReference)
+          ).verifications.some(
+            (v) =>
+              v.verificationReference === r.verificationReference &&
+              command.verification.verificationMethod !== "InPerson" &&
+              encodePickupProofVerificationRecord(v) ===
+                encodePickupProofVerificationRecord(command.verification),
+          );
     const lines = (items: readonly { fulfillmentItemReference: string; quantity: number }[]) =>
       JSON.stringify(
         items
@@ -221,9 +254,7 @@ export function createPostgresPickupHandoffStore(options: {
           .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
       );
     if (
-      !verification ||
-      encodePickupProofVerificationRecord(verification) !==
-        encodePickupProofVerificationRecord(command.verification) ||
+      !sameVerification ||
       command.fulfillmentReference !== r.fulfillmentReference ||
       command.brandReference !== r.brandReference ||
       command.storeReference !== r.storeReference ||
@@ -277,21 +308,43 @@ export function createPostgresPickupHandoffStore(options: {
       const state = await current(tx, input.orderReference);
       prior = await recover(query);
       if (prior) return matchOriginal(tx, command, prior);
-      const verification = state.verifications.find(
-        (v) => v.verificationReference === command.verification.verificationReference,
-      );
+      const submitted = command.verification;
       if (
-        !verification ||
-        encodePickupProofVerificationRecord(verification) !==
-          encodePickupProofVerificationRecord(command.verification) ||
-        String(state.source.lockedAt) >= String(state.capability.expiresAt) ||
-        String(command.handedOverAt) >= String(state.capability.expiresAt) ||
         command.handedOverAt > state.source.lockedAt ||
         command.handedOverAt < state.lastHandoffAt
       )
         throw new PickupHandoffError("PICKUP_HANDOFF_VERIFICATION_FAILED");
+      let inPerson: PickupInPersonVerificationRecord | null = null;
+      if (submitted.verificationMethod === "InPerson") {
+        // WP-2423: in person only when no usable proof exists: never issued, or expired by now.
+        const notIssued = state.capability === null;
+        const expired =
+          state.capability !== null &&
+          String(state.source.lockedAt) >= String(state.capability.expiresAt);
+        if (
+          !(notIssued || expired) ||
+          (submitted.reason === "ProofNotIssued") !== notIssued ||
+          submitted.verifiedAt > state.source.lockedAt ||
+          state.inPerson.some((v) => v.verificationReference === submitted.verificationReference)
+        )
+          throw new PickupHandoffError("PICKUP_HANDOFF_VERIFICATION_FAILED");
+        inPerson = submitted;
+      } else {
+        const verification = state.verifications.find(
+          (v) => v.verificationReference === submitted.verificationReference,
+        );
+        if (
+          !verification ||
+          !state.capability ||
+          encodePickupProofVerificationRecord(verification) !==
+            encodePickupProofVerificationRecord(submitted) ||
+          String(state.source.lockedAt) >= String(state.capability.expiresAt) ||
+          String(command.handedOverAt) >= String(state.capability.expiresAt)
+        )
+          throw new PickupHandoffError("PICKUP_HANDOFF_VERIFICATION_FAILED");
+      }
       const effect = planCompletePickupHandoff(state.source, command);
-      await write(tx, effect, input.orderReference);
+      await write(tx, effect, input.orderReference, inPerson);
       return { status: "Applied" as const, effect };
     },
   };

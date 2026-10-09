@@ -2611,6 +2611,7 @@ describe("Database Schema Ownership Architecture Test", () => {
       "pickup_proof_invalidation",
       "pickup_proof_operation",
       "pickup_proof_verification",
+      "pickup_in_person_verification",
     ]);
     const asset = join(
       context.moduleRoot,
@@ -2637,6 +2638,7 @@ describe("Database Schema Ownership Architecture Test", () => {
     "pickup_proof_invalidation",
     "pickup_proof_operation",
     "pickup_proof_verification",
+    "pickup_in_person_verification",
   ])("rejects Fulfillment readiness store with changed %s", async (changed) => {
     const root = await fixture();
     const context = await writeModule(
@@ -2657,6 +2659,7 @@ describe("Database Schema Ownership Architecture Test", () => {
         "pickup_proof_invalidation",
         "pickup_proof_operation",
         "pickup_proof_verification",
+        "pickup_in_person_verification",
       ].filter((v) => v !== changed),
     );
     await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
@@ -2733,6 +2736,7 @@ describe("Database Schema Ownership Architecture Test", () => {
         "pickup_handoff_item",
         "pickup_handoff_operation",
         "fulfillment_completion_publication",
+        "pickup_in_person_verification",
       ]);
       const asset = join(context.moduleRoot, "src/infrastructure/persistence", file);
       await writeFile(asset, "export const synthetic = true;");
@@ -2750,6 +2754,7 @@ describe("Database Schema Ownership Architecture Test", () => {
     "pickup_handoff_item",
     "pickup_handoff_operation",
     "fulfillment_completion_publication",
+    "pickup_in_person_verification",
   ])("rejects Pickup handoff owner asset with changed %s", async (changed) => {
     const root = await fixture();
     const context = await writeModule(
@@ -2763,6 +2768,7 @@ describe("Database Schema Ownership Architecture Test", () => {
         "pickup_handoff_item",
         "pickup_handoff_operation",
         "fulfillment_completion_publication",
+        "pickup_in_person_verification",
       ].filter((v) => v !== changed),
     );
     await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });

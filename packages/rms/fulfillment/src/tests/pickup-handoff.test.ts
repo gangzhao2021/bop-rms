@@ -378,3 +378,78 @@ describe("WP-2402 handoff persistence boundary", () => {
       expect(() => decodePickupHandoffRecord(value)).toThrow(PickupHandoffError);
   });
 });
+
+describe("WP-2423 in-person handoff when the pickup proof expired or was never issued", () => {
+  const inPerson = (overrides: Record<string, unknown> = {}) => ({
+    verificationReference: id(30),
+    correlationReference: id(31),
+    fulfillmentReference: refs.fulfillment,
+    brandReference: refs.brand,
+    storeReference: refs.store,
+    verificationMethod: "InPerson" as const,
+    identityCheck: "OrderNumberAndName" as const,
+    reason: "ProofNotIssued" as const,
+    verifiedByActorReference: refs.actor,
+    verifiedAt: "2026-08-11T12:02:00.000Z",
+    ...overrides,
+  });
+  it("hands over after staff verify in person when no proof was issued", () => {
+    const effect = planCompletePickupHandoff(
+      source({ currentProofGeneration: null }),
+      command({ verification: inPerson() as never }),
+    );
+    expect(effect.nextPhase).toBe("Completed");
+    expect(effect.record.verificationMethod).toBe("InPerson");
+    expect(effect.record.verificationReference).toBe(id(30));
+    expect(decodePickupHandoffRecord(encodePickupHandoffRecord(effect))).toEqual(effect);
+  });
+  it("accepts an expired proof as the reason only when a proof exists", () => {
+    expect(
+      planCompletePickupHandoff(
+        source({ currentProofGeneration: 1 }),
+        command({ verification: inPerson({ reason: "ProofExpired" }) as never }),
+      ).record.verificationMethod,
+    ).toBe("InPerson");
+    code(
+      () =>
+        planCompletePickupHandoff(
+          source({ currentProofGeneration: 1 }),
+          command({ verification: inPerson({ reason: "ProofNotIssued" }) as never }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+    code(
+      () =>
+        planCompletePickupHandoff(
+          source({ currentProofGeneration: null }),
+          command({ verification: inPerson({ reason: "ProofExpired" }) as never }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+  });
+  it("requires the verifying staff member to hand over and a known identity check", () => {
+    code(
+      () =>
+        planCompletePickupHandoff(
+          source({ currentProofGeneration: null }),
+          command({ verification: inPerson({ verifiedByActorReference: id(40) }) as never }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+    code(
+      () =>
+        parseCompletePickupHandoffCommand(
+          command({ verification: inPerson({ identityCheck: "LooksFamiliar" }) as never }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+    code(
+      () =>
+        planCompletePickupHandoff(
+          source({ currentProofGeneration: null }),
+          command({ verification: verification() }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+  });
+});

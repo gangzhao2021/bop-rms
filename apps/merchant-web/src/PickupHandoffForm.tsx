@@ -12,7 +12,8 @@ export function PickupHandoffForm({
   storeReference,
 }: {
   readonly item: PickupQueueItem;
-  readonly verification: PickupVerification;
+  /** Null when staff verify the customer in person (the pickup code expired or was never sent). */
+  readonly verification: PickupVerification | null;
   readonly workstation: PickupWorkstation;
   readonly csrf: string;
   readonly storeReference: string;
@@ -24,6 +25,10 @@ export function PickupHandoffForm({
   const [status, setStatus] = useState<
     "Idle" | "Pending" | "Unknown" | "Rejected" | "Completed" | "InProgress"
   >("Idle");
+  const inPerson = verification === null;
+  const [identityCheck, setIdentityCheck] = useState<
+    "" | "OrderNumberAndName" | "OrderNumberAndPhoneLast4"
+  >("");
   const [recipient, setRecipient] = useState<"" | "Customer" | "Delegate">(""),
     [mask, setMask] = useState(""),
     [confirmed, setConfirmed] = useState(false);
@@ -45,7 +50,11 @@ export function PickupHandoffForm({
     return () => window.removeEventListener("beforeunload", warn);
   }, [locked]);
   const submit = async (retry: boolean) => {
-    if (controller.current || (!retry && (status !== "Idle" || !confirmed || !recipient || !mask)))
+    if (
+      controller.current ||
+      (!retry &&
+        (status !== "Idle" || !confirmed || !recipient || !mask || (inPerson && !identityCheck)))
+    )
       return;
     try {
       if (!retry) {
@@ -53,6 +62,7 @@ export function PickupHandoffForm({
         intent.current = client.prepare({
           item,
           verification,
+          ...(identityCheck ? { identityCheck } : {}),
           workstation,
           storeReference,
           recipientType: recipient,
@@ -89,7 +99,7 @@ export function PickupHandoffForm({
   return (
     <>
       <button disabled={status !== "Idle"} onClick={() => dialog.current?.showModal()}>
-        Review pickup handoff
+        {inPerson ? "Hand over after checking in person" : "Review pickup handoff"}
       </button>
       {status === "Completed" || status === "InProgress" ? (
         <p ref={resultAnnouncement} role="status" tabIndex={-1}>
@@ -127,6 +137,15 @@ export function PickupHandoffForm({
           ))}
         </ul>
         <p>Hand over all quantities shown only after matching them to this order.</p>
+        {inPerson ? (
+          <p>
+            {item.proofReadiness === "Expired"
+              ? "The customer's pickup code has expired."
+              : "No pickup code was sent for this order."}{" "}
+            Ask for the order number and check it with the name or the last four digits of the phone
+            on the order before handing over.
+          </p>
+        ) : null}
         {status === "Idle" ? (
           <form
             autoComplete="off"
@@ -135,6 +154,23 @@ export function PickupHandoffForm({
               void submit(false);
             }}
           >
+            {inPerson ? (
+              <label>
+                Checked in person
+                <select
+                  value={identityCheck}
+                  onChange={(event) =>
+                    setIdentityCheck(event.currentTarget.value as typeof identityCheck)
+                  }
+                >
+                  <option value="">Select what you checked</option>
+                  <option value="OrderNumberAndName">Order number and name on the order</option>
+                  <option value="OrderNumberAndPhoneLast4">
+                    Order number and last four digits of the phone
+                  </option>
+                </select>
+              </label>
+            ) : null}
             <label>
               Recipient type
               <select
@@ -165,7 +201,10 @@ export function PickupHandoffForm({
               />
               I matched this order, recipient and all quantities shown
             </label>
-            <button type="submit" disabled={!confirmed || !recipient || !mask}>
+            <button
+              type="submit"
+              disabled={!confirmed || !recipient || !mask || (inPerson && !identityCheck)}
+            >
               Confirm and record handoff
             </button>
           </form>

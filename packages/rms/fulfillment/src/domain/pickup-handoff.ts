@@ -25,10 +25,30 @@ export interface PickupHandoffSource {
   readonly fulfillmentType: "Pickup";
   readonly canonicalPhase: "Ready" | "InProgress" | "Completed";
   readonly aggregateVersion: bigint;
-  readonly currentProofGeneration: number;
+  /** Null while no pickup proof was ever issued (only an in-person verification can hand over). */
+  readonly currentProofGeneration: number | null;
   readonly lockedAt: PickupHandoffInstant;
   readonly items: readonly PickupHandoffSourceItem[];
 }
+
+/**
+ * WP-2423: staff verified the customer in person because the pickup proof had expired or was never
+ * issued: the order number together with the name on the order or the last four digits of its phone.
+ */
+export interface PickupInPersonVerificationRecord {
+  readonly verificationReference: PickupHandoffReference;
+  readonly correlationReference: PickupHandoffReference;
+  readonly fulfillmentReference: PickupHandoffReference;
+  readonly brandReference: PickupHandoffReference;
+  readonly storeReference: PickupHandoffReference;
+  readonly verificationMethod: "InPerson";
+  readonly identityCheck: "OrderNumberAndName" | "OrderNumberAndPhoneLast4";
+  readonly reason: "ProofExpired" | "ProofNotIssued";
+  readonly verifiedByActorReference: PickupHandoffReference;
+  readonly verifiedAt: PickupHandoffInstant;
+}
+export type PickupHandoffVerification =
+  PickupProofVerificationRecord | PickupInPersonVerificationRecord;
 
 export interface CompletePickupHandoffCommand {
   readonly fulfillmentReference: PickupHandoffReference;
@@ -38,7 +58,7 @@ export interface CompletePickupHandoffCommand {
   readonly purpose: "CompletePickupHandoff";
   readonly actorReference: PickupHandoffReference;
   readonly actorPermissions: readonly string[];
-  readonly verification: PickupProofVerificationRecord;
+  readonly verification: PickupHandoffVerification;
   readonly recipientType: "Customer" | "Delegate";
   readonly recipientDisplayMask: string;
   readonly pickupLocationReference: PickupHandoffReference;
@@ -63,7 +83,7 @@ export interface PickupHandoffEffect {
     readonly storeReference: PickupHandoffReference;
     readonly pickupLocationReference: PickupHandoffReference;
     readonly verificationReference: PickupHandoffReference;
-    readonly verificationMethod: "Opaque" | "HumanCode";
+    readonly verificationMethod: "Opaque" | "HumanCode" | "InPerson";
     readonly recipientType: "Customer" | "Delegate";
     readonly recipientDisplayMask: string;
     readonly actorReference: PickupHandoffReference;
@@ -167,7 +187,10 @@ export function parsePickupHandoffSource(value: PickupHandoffSource): PickupHand
   )
     return fail("PICKUP_HANDOFF_INPUT_INVALID");
   const aggregateVersion = version(value.aggregateVersion);
-  if (!Number.isSafeInteger(value.currentProofGeneration) || value.currentProofGeneration < 1)
+  if (
+    value.currentProofGeneration !== null &&
+    (!Number.isSafeInteger(value.currentProofGeneration) || value.currentProofGeneration < 1)
+  )
     return fail("PICKUP_HANDOFF_INPUT_INVALID");
   if (!Array.isArray(value.items) || value.items.length < 1 || value.items.length > 100)
     return fail("PICKUP_HANDOFF_INPUT_INVALID");
@@ -231,15 +254,19 @@ export function planCompletePickupHandoff(
     return fail("PICKUP_HANDOFF_VERSION_CONFLICT");
   const verification = command.verification;
   if (
-    verification.validationStatus !== "Validated" ||
     verification.fulfillmentReference !== source.fulfillmentReference ||
     verification.brandReference !== source.brandReference ||
     verification.storeReference !== source.storeReference ||
-    verification.generation !== source.currentProofGeneration ||
-    (verification.verificationMethod !== "Opaque" &&
-      verification.verificationMethod !== "HumanCode") ||
-    verification.grantsCompletionAuthority !== false ||
-    verification.verifiedAt > command.handedOverAt
+    verification.verifiedAt > command.handedOverAt ||
+    (verification.verificationMethod === "InPerson"
+      ? // The staff member handing over is the one who verified; the reason matches the proof state.
+        verification.verifiedByActorReference !== command.actorReference ||
+        (verification.reason === "ProofNotIssued") !== (source.currentProofGeneration === null)
+      : verification.validationStatus !== "Validated" ||
+        verification.generation !== source.currentProofGeneration ||
+        (verification.verificationMethod !== "Opaque" &&
+          verification.verificationMethod !== "HumanCode") ||
+        verification.grantsCompletionAuthority !== false)
   )
     return fail("PICKUP_HANDOFF_VERIFICATION_FAILED");
   if (!maskPattern.test(command.recipientDisplayMask)) return fail("PICKUP_HANDOFF_INPUT_INVALID");
@@ -398,6 +425,45 @@ function mask(value: unknown): string {
     return fail("PICKUP_HANDOFF_INPUT_INVALID");
   return value;
 }
+export function parsePickupInPersonVerificationRecord(
+  value: unknown,
+): PickupInPersonVerificationRecord {
+  const raw = exactRecord(value, [
+    "verificationReference",
+    "correlationReference",
+    "fulfillmentReference",
+    "brandReference",
+    "storeReference",
+    "verificationMethod",
+    "identityCheck",
+    "reason",
+    "verifiedByActorReference",
+    "verifiedAt",
+  ]);
+  if (
+    raw.verificationMethod !== "InPerson" ||
+    (raw.identityCheck !== "OrderNumberAndName" &&
+      raw.identityCheck !== "OrderNumberAndPhoneLast4") ||
+    (raw.reason !== "ProofExpired" && raw.reason !== "ProofNotIssued")
+  )
+    return fail("PICKUP_HANDOFF_INPUT_INVALID");
+  const verificationReference = reference(raw.verificationReference);
+  const correlationReference = reference(raw.correlationReference);
+  if (verificationReference === correlationReference) return fail("PICKUP_HANDOFF_INPUT_INVALID");
+  return Object.freeze({
+    verificationReference,
+    correlationReference,
+    fulfillmentReference: reference(raw.fulfillmentReference),
+    brandReference: reference(raw.brandReference),
+    storeReference: reference(raw.storeReference),
+    verificationMethod: "InPerson",
+    identityCheck: raw.identityCheck,
+    reason: raw.reason,
+    verifiedByActorReference: reference(raw.verifiedByActorReference),
+    verifiedAt: instant(raw.verifiedAt),
+  });
+}
+
 export function parseCompletePickupHandoffCommand(value: unknown): CompletePickupHandoffCommand {
   const raw = exactRecord(value, [
     "fulfillmentReference",
@@ -428,9 +494,14 @@ export function parseCompletePickupHandoffCommand(value: unknown): CompletePicku
       return fail("PICKUP_HANDOFF_INPUT_INVALID");
     return entry;
   });
-  let verification: PickupProofVerificationRecord;
+  let verification: PickupHandoffVerification;
   try {
-    verification = parsePickupProofVerificationRecord(raw.verification);
+    verification =
+      raw.verification !== null &&
+      typeof raw.verification === "object" &&
+      (raw.verification as { verificationMethod?: unknown }).verificationMethod === "InPerson"
+        ? parsePickupInPersonVerificationRecord(raw.verification)
+        : parsePickupProofVerificationRecord(raw.verification);
   } catch {
     return fail("PICKUP_HANDOFF_VERIFICATION_FAILED");
   }
@@ -492,7 +563,9 @@ export function parsePickupHandoffEffect(value: unknown): PickupHandoffEffect {
     "validationStatus",
   ]);
   if (
-    (r.verificationMethod !== "Opaque" && r.verificationMethod !== "HumanCode") ||
+    (r.verificationMethod !== "Opaque" &&
+      r.verificationMethod !== "HumanCode" &&
+      r.verificationMethod !== "InPerson") ||
     (r.recipientType !== "Customer" && r.recipientType !== "Delegate") ||
     r.validationStatus !== "Validated"
   )
