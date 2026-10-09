@@ -794,6 +794,8 @@ export async function exerciseBrandAdministrationSession(
       assert.equal(wrongBrand.status, 403);
       assert.equal(catalogIds, 0);
       stage = "CatalogHttpLatePermissionRollback";
+      // Brand administration registers the Brand catalogue under organization.manage, which the
+      // administrative catalogue store holds until COMMIT; withdrawing it before COMMIT must deny.
       const rolledBackCommand = {
           operationReference: reference(),
           code: "ROLLBACK",
@@ -807,7 +809,7 @@ export async function exerciseBrandAdministrationSession(
           change: (client) =>
             client.query(
               "UPDATE bop_permission.permission_grant SET lifecycle='Revoked',version=version+1,updated_at=$2 WHERE grant_id=$1",
-              [grants.get("catalog.manage"), now()],
+              [grants.get("organization.manage"), now()],
             ),
         };
       injection = pending;
@@ -824,7 +826,7 @@ export async function exerciseBrandAdministrationSession(
         (
           await admin.query(
             "SELECT lifecycle FROM bop_permission.permission_grant WHERE grant_id=$1",
-            [grants.get("catalog.manage")],
+            [grants.get("organization.manage")],
           )
         ).rows[0].lifecycle,
         "Active",

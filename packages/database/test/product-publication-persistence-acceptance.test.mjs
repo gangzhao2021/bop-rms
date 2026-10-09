@@ -434,6 +434,11 @@ it("persists owning publication revisions, immutable content and controlled succ
         "INSERT INTO rms_catalog.product_option_binding(binding_id,product_version_id,product_id,brand_id,option_set_id,option_set_version_id,purpose,sort_order,minimum_selection_override,maximum_selection_override,store_override_allowed) VALUES($1,$2,$3,$4,$5,$6,'SELECT',0,0,1,false)",
         [id(80), id(6), id(5), id(2), id(81), id(82)],
       );
+      // The authoring abandonment fence admits an operation record only in its Brand scope.
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id','',false)",
+        [id(2)],
+      );
       for (let version = 1; version <= 4; version++) {
         await admin.query(
           "INSERT INTO rms_catalog.product_operation_record(operation_id,brand_id,product_id,action_code,intent_digest,result_aggregate_version,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7)",

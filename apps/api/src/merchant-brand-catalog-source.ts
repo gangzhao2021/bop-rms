@@ -5,6 +5,7 @@ import {
 } from "@bop/audit";
 import { BrowserSessionError, readClosedRecord, type AuthenticationSession } from "@bop/identity";
 import {
+  BrandConfigurationOperationError,
   parseBrandReference,
   parseCanonicalInstant,
   type BrandConfigurationActorScope,
@@ -53,7 +54,10 @@ function sourceFailure(error: unknown): never {
   if (error instanceof CatalogError) throw error;
   if (
     error instanceof BrowserSessionError ||
-    (error instanceof Error && error.message === "BRAND_SERVICE_PERMISSION_DENIED")
+    (error instanceof Error && error.message === "BRAND_SERVICE_PERMISSION_DENIED") ||
+    // WP-2423: a permission withdrawn before COMMIT, reported by the Brand administration holder.
+    (error instanceof BrandConfigurationOperationError &&
+      error.code === "BRAND_CONFIGURATION_PERMISSION_DENIED")
   )
     return fail("CATALOG_PERMISSION_DENIED");
   return fail();
@@ -260,7 +264,14 @@ export function createMerchantBrandCatalogSource(options: MerchantBrandCatalogSo
               request.validUntil > deadline
             )
               return fail();
-            const packet = await permissions(["organization.manage"]),
+            // The capability keeps only its own permission denial; report a withdrawn grant as one.
+            const packet = await permissions(["organization.manage"]).catch((error: unknown) => {
+                if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
+                  throw new BrandConfigurationOperationError(
+                    "BRAND_CONFIGURATION_PERMISSION_DENIED",
+                  );
+                throw error;
+              }),
               permission = packet.decisions[0];
             if (!permission) return fail();
             return {

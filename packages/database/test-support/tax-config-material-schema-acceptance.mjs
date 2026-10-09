@@ -341,6 +341,15 @@ export async function verifyTaxConfigMaterialSchema(context) {
       "GRANT UPDATE,DELETE,TRUNCATE ON rms_pricing.tax_config_material_version,rms_pricing.tax_config_material_operation TO " +
         role,
     );
+    // TRUNCATE ... CASCADE checks privileges on every table that references these (including later
+    // ones) before any trigger runs; grant them so the append-only trigger is what refuses.
+    const cascaded = (
+      await admin.query(
+        "WITH RECURSIVE d(t) AS (SELECT unnest($1::regclass[]) UNION SELECT c.conrelid FROM pg_constraint c JOIN d ON c.confrelid=d.t WHERE c.contype='f') SELECT string_agg(DISTINCT t::text, ',') AS tables FROM d",
+        [["rms_pricing.tax_config_material_version", "rms_pricing.tax_config_material_operation"]],
+      )
+    ).rows[0].tables;
+    await admin.query("GRANT TRUNCATE ON " + cascaded + " TO " + role);
     for (const table of ["tax_config_material_version", "tax_config_material_operation"]) {
       // Adversarial test role deliberately has extra mutation privileges; triggers still refuse.
       for (const statement of [

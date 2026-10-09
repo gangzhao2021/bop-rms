@@ -47,10 +47,12 @@ export async function exerciseCurrentPinnedOptionProductDraft({
       [permission, at],
     );
   }
+  // DEC-PERM-CATALOG (2000_001): one identifier rule replaced the per-code exceptions; malformed
+  // identifiers (doubled or leading underscores, upper case) remain refused by the database.
   for (const action of [
-    "catalog.option_set.write",
-    "catalog.other_set.read",
-    "catalog.option_set.read.other",
+    "catalog.option__set.read",
+    "catalog._option_set.read",
+    "Catalog.option_set.read",
   ]) {
     await assert.rejects(
       admin.query(

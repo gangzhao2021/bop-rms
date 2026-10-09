@@ -460,6 +460,20 @@ export async function verifyReceiptTemplateDraftSchema(context) {
       { selected: foreign },
     );
     await admin.query("GRANT UPDATE,DELETE,TRUNCATE ON " + tables + " TO " + role);
+    // TRUNCATE ... CASCADE checks privileges on every table that references these (including later
+    // ones) before any trigger runs; grant them so the append-only trigger is what refuses.
+    const cascaded = (
+      await admin.query(
+        "WITH RECURSIVE d(t) AS (SELECT unnest($1::regclass[]) UNION SELECT c.conrelid FROM pg_constraint c JOIN d ON c.confrelid=d.t WHERE c.contype='f') SELECT string_agg(DISTINCT t::text, ',') AS tables FROM d",
+        [
+          [
+            "rms_device.digital_receipt_template_draft_revision",
+            "rms_device.digital_receipt_template_draft_operation",
+          ],
+        ],
+      )
+    ).rows[0].tables;
+    await admin.query("GRANT TRUNCATE ON " + cascaded + " TO " + role);
     for (const table of [
       "digital_receipt_template_draft_revision",
       "digital_receipt_template_draft_operation",

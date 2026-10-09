@@ -742,10 +742,15 @@ export async function exerciseBrandStoreTopologyRuntimeHttp(context) {
         brandLabel: "Synthetic Receipt Brand",
         storeLabel: "Synthetic Receipt Store",
         storeReference: store,
+        // WP-2423: order times are shown in the selected Store's time zone.
+        timeZone: "America/Toronto",
       });
-      assert.deepEqual(bootstrap.body.workspace.authorizedStores, [
-        bootstrap.body.workspace.selectedScope,
-      ]);
+      {
+        // The Store list carries no time zone; only the selected Store does.
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { timeZone, ...selectedStore } = bootstrap.body.workspace.selectedScope;
+        assert.deepEqual(bootstrap.body.workspace.authorizedStores, [selectedStore]);
+      }
       stage = "NavigationLatePermissionWithdraw";
       const beforeNavigation = await counts();
       lateNavigationRole = brandRole;
