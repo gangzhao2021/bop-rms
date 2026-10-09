@@ -7,7 +7,10 @@ import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
-import { createPostgresProviderCaptureExceptionStore } from "../../rms/payment/src/index.ts";
+import {
+  createPostgresProviderCaptureExceptionStore,
+  createPostgresUnmatchedCaptureRefundStore,
+} from "../../rms/payment/src/index.ts";
 const { Client } = pg,
   id = (n) => "01902402-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 it("atomically records unlinked capture evidence with Audit, concurrent replay and scoped access", async () => {
@@ -163,6 +166,10 @@ it("atomically records unlinked capture evidence with Audit, concurrent replay a
         "GRANT SELECT,INSERT ON platform_projection.order_exception_source TO " + role,
       );
       await admin.query("GRANT SELECT ON rms_payment.payment_reconciliation_record TO " + role);
+      await admin.query(
+        "GRANT SELECT,INSERT ON rms_payment.unmatched_capture_refund_request,rms_payment.unmatched_capture_refund_approval,rms_payment.unmatched_capture_refund_outcome TO " +
+          role,
+      );
       const previousEnvironment = process.env.NODE_ENV;
       let simulator;
       try {
@@ -253,6 +260,182 @@ it("atomically records unlinked capture evidence with Audit, concurrent replay a
           ).rows[0].n,
           2,
         );
+        // WP-2423 P6: a manager requests, a different person approves, the Provider refunds.
+        const exception = (
+          await admin.query(
+            "SELECT reconciliation_exception_id::text AS id FROM rms_payment.provider_capture_exception_evidence WHERE original_attempt_id=$1",
+            [id(501)],
+          )
+        ).rows[0].id;
+        const manager = id(601),
+          owner2 = id(602);
+        let refundAuthorized = true;
+        const refunds = createPostgresUnmatchedCaptureRefundStore({
+          brandReference: id(2),
+          storeReference: id(3),
+          authorize: async () => refundAuthorized,
+        });
+        const openedAt = Date.parse(
+          (
+            await admin.query(
+              "SELECT opened_at FROM rms_payment.payment_reconciliation_exception WHERE reconciliation_exception_id=$1",
+              [exception],
+            )
+          ).rows[0].opened_at.toISOString(),
+        );
+        const at = (offset) => new Date(openedAt + 1 + offset / 1000).toISOString();
+        const refundCounts = async () =>
+          (
+            await admin.query(
+              "SELECT (SELECT count(*)::int FROM rms_payment.unmatched_capture_refund_request) AS requests,(SELECT count(*)::int FROM rms_payment.unmatched_capture_refund_approval) AS approvals,(SELECT count(*)::int FROM rms_payment.unmatched_capture_refund_outcome) AS outcomes,(SELECT count(*)::int FROM platform_audit.audit_record WHERE target_type='UnmatchedCaptureRefund') AS audit",
+            )
+          ).rows[0];
+        assert.equal((await run((tx) => refunds.read(tx, exception))).status, "Unrefunded");
+        const requestInput = {
+          exceptionReference: exception,
+          actorReference: manager,
+          refundReference: id(610),
+          idempotencyReference: id(611),
+          auditReference: id(612),
+          requestedAt: at(0),
+        };
+        refundAuthorized = false;
+        await assert.rejects(run((tx) => refunds.request(tx, requestInput)));
+        refundAuthorized = true;
+        await assert.rejects(
+          run((tx) =>
+            refunds.request(tx, {
+              ...requestInput,
+              requestedAt: new Date(openedAt - 1).toISOString(),
+            }),
+          ),
+          (error) => error.code === "UNMATCHED_REFUND_STATE_CONFLICT",
+        );
+        refundAuthorized = true;
+        const requested = await run((tx) => refunds.request(tx, requestInput));
+        assert.equal(requested.status, "Requested");
+        assert.equal(requested.amountMinor, "2260");
+        // The same request repeated is a no-op; another request for the same charge conflicts.
+        assert.equal((await run((tx) => refunds.request(tx, requestInput))).status, "Requested");
+        await assert.rejects(
+          run((tx) =>
+            refunds.request(tx, {
+              ...requestInput,
+              refundReference: id(613),
+              idempotencyReference: id(614),
+              auditReference: id(615),
+            }),
+          ),
+          (error) => error.code === "UNMATCHED_REFUND_STATE_CONFLICT",
+        );
+        const approveInput = {
+          exceptionReference: exception,
+          actorReference: owner2,
+          operationReference: id(620),
+          idempotencyReference: id(621),
+          auditReference: id(622),
+          approvedAt: at(1000),
+        };
+        await assert.rejects(
+          run((tx) => refunds.approve(tx, { ...approveInput, actorReference: manager })),
+          (error) => error.code === "UNMATCHED_REFUND_SAME_APPROVER",
+        );
+        // The database holds separation of duties even if the writer were bypassed.
+        await assert.rejects(
+          run(async (tx) => {
+            await tx.query(
+              "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+              [id(2), id(3)],
+            );
+            await tx.query(
+              "INSERT INTO rms_payment.unmatched_capture_refund_approval VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+              [
+                id(610),
+                id(2),
+                id(3),
+                manager,
+                at(1000),
+                id(630),
+                "unmatched-capture-refund:" + id(630),
+                id(631),
+                id(632),
+              ],
+            );
+          }),
+          (error) => error.code === "23514",
+        );
+        const approved = await run((tx) => refunds.approve(tx, approveInput));
+        assert.equal(approved.status, "Approved");
+        const providerRequest = refunds.providerRequest(approved);
+        assert.equal(providerRequest.idempotencyKey, "unmatched-capture-refund:" + id(620));
+        assert.equal(providerRequest.context.paymentAttemptReference, id(501));
+        const observation = await simulator.adapter.refundPayment(providerRequest);
+        // A lost response is recovered with the same fixed key: the same Provider refund.
+        const replay = await simulator.adapter.refundPayment(providerRequest);
+        assert.equal(replay.providerRefundReference, observation.providerRefundReference);
+        const outcome = {
+          providerRefundReference: observation.providerRefundReference,
+          providerIntentReference: observation.providerIntentReference,
+          amountMinor: observation.amount.amountMinor,
+          status: observation.status,
+          observedAt: observation.observedAt,
+          evidenceDigest: observation.evidenceDigest,
+          idempotencyKey: providerRequest.idempotencyKey,
+        };
+        await assert.rejects(
+          run((tx) =>
+            refunds.recordOutcome(tx, {
+              exceptionReference: exception,
+              observation: { ...outcome, amountMinor: 2259n },
+              auditReference: id(640),
+              recordedAt: at(2000),
+            }),
+          ),
+        );
+        const refunded = await run((tx) =>
+          refunds.recordOutcome(tx, {
+            exceptionReference: exception,
+            observation: outcome,
+            auditReference: id(641),
+            recordedAt: at(2000),
+          }),
+        );
+        assert.equal(refunded.status, "Refunded");
+        assert.deepEqual(await refundCounts(), {
+          requests: 1,
+          approvals: 1,
+          outcomes: 1,
+          audit: 3,
+        });
+        await assert.rejects(
+          run((tx) =>
+            tx.query("UPDATE rms_payment.unmatched_capture_refund_request SET amount_minor=1"),
+          ),
+        );
+        // Another Store sees none of it.
+        await run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [id(2), id(999)],
+          );
+          assert.equal(
+            (
+              await tx.query(
+                "SELECT count(*)::int AS n FROM rms_payment.unmatched_capture_refund_outcome",
+              )
+            ).rows[0].n,
+            0,
+          );
+        });
+        // The confirmed refund resolves the exception; the other stays open.
+        assert.deepEqual(await project(), { projectedCount: 2, scanComplete: true });
+        const latest = await admin.query(
+          "SELECT DISTINCT ON (source_id) source_id::text AS id,record_json FROM platform_projection.order_exception_source ORDER BY source_id,source_version DESC",
+        );
+        for (const { id: source, record_json: record } of latest.rows) {
+          assert.equal(record.sourceStatus, source === exception ? "Final" : "Open");
+          assert.equal(record.resolutionEvidenceReference, source === exception ? id(610) : null);
+        }
       } finally {
         simulator?.close();
         if (previousEnvironment === undefined) delete process.env.NODE_ENV;

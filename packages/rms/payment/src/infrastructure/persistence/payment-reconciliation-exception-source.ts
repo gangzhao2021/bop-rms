@@ -53,7 +53,8 @@ export function createPostgresPaymentReconciliationExceptionSource(options: {
         [scope.brandReference, scope.storeReference],
       );
       const result = await tx.query(
-        "SELECT reconciliation_exception_id::text AS exception_reference,brand_id::text AS brand_reference,store_id::text AS store_reference,candidate_id::text AS candidate_reference,reason,severity,status,opened_at FROM rms_payment.payment_reconciliation_exception WHERE brand_id=$1 AND store_id=$2 AND ($3::uuid IS NULL OR reconciliation_exception_id>$3::uuid) ORDER BY reconciliation_exception_id LIMIT $4",
+        // WP-2423 P6: the Provider-confirmed full refund of an unmatched capture closes it.
+        "SELECT e.reconciliation_exception_id::text AS exception_reference,e.brand_id::text AS brand_reference,e.store_id::text AS store_reference,e.candidate_id::text AS candidate_reference,e.reason,e.severity,e.status,e.opened_at,(SELECT o.recorded_at FROM rms_payment.unmatched_capture_refund_request r JOIN rms_payment.unmatched_capture_refund_outcome o ON o.brand_id=r.brand_id AND o.store_id=r.store_id AND o.refund_id=r.refund_id WHERE r.brand_id=e.brand_id AND r.store_id=e.store_id AND r.reconciliation_exception_id=e.reconciliation_exception_id) AS refunded_at FROM rms_payment.payment_reconciliation_exception e WHERE e.brand_id=$1 AND e.store_id=$2 AND ($3::uuid IS NULL OR e.reconciliation_exception_id>$3::uuid) ORDER BY e.reconciliation_exception_id LIMIT $4",
         [scope.brandReference, scope.storeReference, after, input.limit + 1],
       );
       if (!Array.isArray(result.rows) || result.rows.length > input.limit + 1) return unavailable();
@@ -69,6 +70,10 @@ export function createPostgresPaymentReconciliationExceptionSource(options: {
             severity: row.severity,
             status: row.status,
             openedAt: row.opened_at instanceof Date ? row.opened_at.toISOString() : row.opened_at,
+            refundedAt:
+              row.refunded_at instanceof Date
+                ? row.refunded_at.toISOString()
+                : (row.refunded_at ?? null),
           },
           scope,
         );

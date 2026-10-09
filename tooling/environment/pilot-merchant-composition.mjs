@@ -92,6 +92,15 @@ export function composeMerchantDependencies(
             createSimulatedProvider: provider,
           }),
       }),
+    // WP-2423 P6: TEST-ONLY internal simulator for the unmatched capture refund.
+    refundUnmatchedCapture: async (request) => {
+      const simulator = await provider();
+      try {
+        return await simulator.adapter.refundPayment(request);
+      } finally {
+        simulator.close();
+      }
+    },
     createInternalDiningCredentials: dining.createInternalDiningCredentials,
     createInternalMerchantDining: f.createInternalMerchantDining,
     createInternalKitchenCommand: f.createInternalKitchenCommand,

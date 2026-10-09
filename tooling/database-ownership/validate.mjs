@@ -2270,6 +2270,17 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/reconciliation-follow-up-store.ts";
+        // WP-2423 P6: full refund of a Provider capture that matches no payment or Order.
+        const acceptedUnmatchedCaptureRefundAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "provider_capture_exception_evidence",
+            "unmatched_capture_refund_request",
+            "unmatched_capture_refund_approval",
+            "unmatched_capture_refund_outcome",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/unmatched-capture-refund-store.ts";
         const acceptedProviderCaptureExceptionAsset =
           module.packageName === "@rms/payment" &&
           module.manifest.ownedDatabase?.schema === "rms_payment" &&
@@ -3287,6 +3298,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPaymentReconciliationCandidatesAsset &&
           !acceptedPaymentReconciliationRunAsset &&
           !acceptedReconciliationFollowUpAsset &&
+          !acceptedUnmatchedCaptureRefundAsset &&
           !acceptedProviderCaptureExceptionAsset &&
           !acceptedPaymentReconciliationExceptionAsset &&
           !acceptedOrdinaryRefundCaptureAsset &&

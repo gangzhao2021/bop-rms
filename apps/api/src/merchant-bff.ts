@@ -186,6 +186,8 @@ import type { createMerchantPickupProof } from "./merchant-pickup-proof.js";
 import type { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
 import type { createMerchantPickupNotCollected } from "./merchant-pickup-not-collected.js";
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
+import { UnmatchedCaptureRefundError } from "@rms/payment";
+import type { createMerchantUnmatchedCaptureRefund } from "./merchant-unmatched-capture-refund.js";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
 import type { createMerchantKitchenRelease } from "./merchant-kitchen-release.js";
 import {
@@ -469,6 +471,8 @@ export interface MerchantBffRouterOptions {
   readonly pickupProof?: ReturnType<typeof createMerchantPickupProof>;
   readonly pickupHandoff?: ReturnType<typeof createMerchantPickupHandoff>;
   readonly pickupNotCollected?: ReturnType<typeof createMerchantPickupNotCollected>;
+  /** WP-2423 P6: refund a Provider capture that matches no payment or Order. */
+  readonly unmatchedCaptureRefund?: ReturnType<typeof createMerchantUnmatchedCaptureRefund>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
@@ -4255,6 +4259,52 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .then((state) => response.json(state))
       .catch(() => denied(response));
   });
+
+  // WP-2423 P6: read, request and approve the full refund of an unmatched Provider capture.
+  for (const step of ["status", "request", "approve"] as const)
+    router.post(
+      "/payments/unmatched-capture-refund/" + step,
+      sameOriginMutation(options),
+      (request, response) => {
+        const sessionCookie = cookie(request, "__Host-bop-merchant"),
+          csrf = exactHeader(request, "x-bop-csrf");
+        if (
+          sessionCookie === null ||
+          csrf === null ||
+          csrf.length === 0 ||
+          Object.keys(request.query).length !== 0
+        ) {
+          denied(response);
+          return;
+        }
+        const command = options.unmatchedCaptureRefund;
+        if (!command) {
+          response.status(503).json({ error: "unmatched_capture_refund_unavailable" });
+          return;
+        }
+        void (
+          step === "status"
+            ? command.read({ sessionCookie, csrf, query: request.body })
+            : command[step]({ sessionCookie, csrf, command: request.body })
+        )
+          .then((result) => response.json(result))
+          .catch((error: unknown) => {
+            if (!(error instanceof UnmatchedCaptureRefundError)) {
+              denied(response);
+              return;
+            }
+            const status = {
+              UNMATCHED_REFUND_INPUT_INVALID: 400,
+              UNMATCHED_REFUND_PERMISSION_DENIED: 403,
+              UNMATCHED_REFUND_NOT_FOUND: 404,
+              UNMATCHED_REFUND_STATE_CONFLICT: 409,
+              UNMATCHED_REFUND_SAME_APPROVER: 422,
+              UNMATCHED_REFUND_UNAVAILABLE: 503,
+            }[error.code];
+            response.status(status).json({ error: error.code });
+          });
+      },
+    );
 
   router.post("/payments/refunds/status", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),

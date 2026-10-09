@@ -944,6 +944,7 @@ describe("WP-1310 paid-without-fulfillable public contracts", () => {
           severity,
           status: "Open",
           openedAt: now,
+          refundedAt: null,
         },
         { brandReference: refs.brand, storeReference: refs.store },
       );
@@ -953,6 +954,40 @@ describe("WP-1310 paid-without-fulfillable public contracts", () => {
       expect(projected).not.toHaveProperty("actorReference");
     },
   );
+
+  it("closes a reconciliation exception once its unmatched capture is refunded in full", () => {
+    const input = {
+      exceptionReference: refs.compensationCase,
+      brandReference: refs.brand,
+      storeReference: refs.store,
+      candidateReference: refs.source,
+      reason: "AmountMismatch",
+      severity: "Error",
+      status: "Open",
+      openedAt: now,
+    };
+    const scope = { brandReference: refs.brand, storeReference: refs.store };
+    const refundedAt = new Date(Date.parse(now) + 60_000).toISOString();
+    expect(
+      createPaymentReconciliationExceptionSource({ ...input, refundedAt }, scope),
+    ).toMatchObject({
+      kind: "ReconciliationAmountMismatch",
+      state: "Closed",
+      refundDisposition: "ProviderConfirmed",
+      operationsDisposition: "Reconciled",
+      closedAt: refundedAt,
+      updatedAt: refundedAt,
+    });
+    expect(() =>
+      createPaymentReconciliationExceptionSource(
+        { ...input, refundedAt: new Date(Date.parse(now) - 1000).toISOString() },
+        scope,
+      ),
+    ).toThrow();
+    expect(() =>
+      createPaymentReconciliationExceptionSource({ ...input } as never, scope),
+    ).toThrow();
+  });
 
   it("maps a watchdog receipt without exposing its evidence digest", () => {
     const projected = createPaymentTerminalWatchdogExceptionSource(

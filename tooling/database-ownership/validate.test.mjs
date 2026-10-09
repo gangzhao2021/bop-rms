@@ -4243,6 +4243,57 @@ describe("Database Schema Ownership Architecture Test", () => {
     );
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
+  it("admits only the unmatched capture refund owner adapter without a driver", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "payment", "rms_payment", [
+      "provider_capture_exception_evidence",
+      "unmatched_capture_refund_request",
+      "unmatched_capture_refund_approval",
+      "unmatched_capture_refund_outcome",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/unmatched-capture-refund-store.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(asset, "export const synthetic = true;");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg"; export {pg};');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "owner",
+    "schema",
+    "path",
+    "provider_capture_exception_evidence",
+    "unmatched_capture_refund_request",
+    "unmatched_capture_refund_approval",
+    "unmatched_capture_refund_outcome",
+  ])("rejects unmatched capture refund adapter with changed %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other" : "payment",
+      changed === "schema" ? "rms_other" : "rms_payment",
+      [
+        "provider_capture_exception_evidence",
+        "unmatched_capture_refund_request",
+        "unmatched_capture_refund_approval",
+        "unmatched_capture_refund_outcome",
+      ].filter((t) => t !== changed),
+    );
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence/" +
+          (changed === "path" ? "other.ts" : "unmatched-capture-refund-store.ts"),
+      ),
+      "export const synthetic = true;",
+    );
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
   it("admits only the Reconciliation follow-up owner adapter without a driver", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "payment", "rms_payment", [

@@ -59,6 +59,7 @@ import { createMerchantStoreTax } from "../../apps/api/dist/merchant-store-tax.j
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
+import { createMerchantUnmatchedCaptureRefund } from "../../apps/api/dist/merchant-unmatched-capture-refund.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
 export async function createInternalMerchant(
   resources,
@@ -80,6 +81,7 @@ export async function createInternalMerchant(
     roleMapping,
     taxConfigCurrencyMetadata,
     loadPricingCurrencyMetadata,
+    refundUnmatchedCapture,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -352,6 +354,15 @@ export async function createInternalMerchant(
     now: resources.now,
     reference: () => resources.credentials.reference(),
   });
+  const unmatchedCaptureRefund =
+    refundUnmatchedCapture === undefined
+      ? undefined
+      : createMerchantUnmatchedCaptureRefund({
+          persistence,
+          authentication: service,
+          nextReference: () => resources.credentials.reference(),
+          refundPayment: refundUnmatchedCapture,
+        });
   const compensationQuery = createMerchantCompensationReconciliationQuery({
     persistence,
     authentication: service,
@@ -708,6 +719,7 @@ export async function createInternalMerchant(
       orderExceptions,
       compensationReconciliation,
       compensationQuery,
+      ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),
       ordinaryRefundSend,
       ordinaryRefundReconciliation,
       ordinaryRefund,

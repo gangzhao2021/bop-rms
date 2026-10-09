@@ -44,12 +44,10 @@ it("pages safe owner exceptions without inventing Order or payment bindings", as
     state: "Open",
   });
   expect(page.items[0]).not.toHaveProperty("candidateReference");
-  expect(f.query).toHaveBeenLastCalledWith(expect.stringContaining("brand_id=$1 AND store_id=$2"), [
-    id(1),
-    id(2),
-    null,
-    2,
-  ]);
+  expect(f.query).toHaveBeenLastCalledWith(
+    expect.stringContaining("e.brand_id=$1 AND e.store_id=$2"),
+    [id(1), id(2), null, 2],
+  );
   expect(f.authorize).toHaveBeenCalledTimes(2);
 });
 it("finishes empty and exact-limit pages", async () => {

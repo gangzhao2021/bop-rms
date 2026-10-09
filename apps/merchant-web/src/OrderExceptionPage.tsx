@@ -1,5 +1,6 @@
 import { ReconciliationFollowUpAction } from "./ReconciliationFollowUpAction.js";
 import { CompensationReconciliationAction } from "./CompensationReconciliationAction.js";
+import { UnmatchedCaptureRefundAction } from "./UnmatchedCaptureRefundAction.js";
 import { createOrderExceptionClient } from "./order-exception-client.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useRef, useState, type Ref } from "react";
@@ -399,6 +400,17 @@ export function OrderExceptionScreen({
                 No linked order is available. This payment difference requires reconciliation
                 review.
               </p>
+            ) : null}
+            {csrf &&
+            item.kind === "PaymentReconciliationDifference" &&
+            item.sourceOwner === "Payment" &&
+            item.orderReference === null ? (
+              <UnmatchedCaptureRefundAction
+                key={item.exceptionReference + ":refund:" + csrf}
+                exceptionReference={item.exceptionReference}
+                csrf={csrf}
+                readOnly={readOnly}
+              />
             ) : null}
             <div className="card-actions">
               <button disabled aria-describedby="exception-actions-unavailable">

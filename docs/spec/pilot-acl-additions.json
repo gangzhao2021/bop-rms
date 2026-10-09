@@ -2115,6 +2115,60 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 Owner 2026-10-09 (按你建议做: uncollected pickup policy): a manager closes a ready pickup nobody collected after the one-hour hold; no automatic refund"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_request",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_request",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_outcome",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_outcome",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
     }
   ]
 }

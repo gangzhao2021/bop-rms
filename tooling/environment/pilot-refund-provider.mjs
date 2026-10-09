@@ -21,7 +21,7 @@ export function createInternalSimulatedRefunds(db, { rowFor, atomic }) {
       request.amount.currencyCode !== "CAD" ||
       request.amount.amountMinor <= 0n ||
       request.amount.amountMinor > 99999999n ||
-      !["ordinary-refund:", "compensation-refund:"].some(
+      !["ordinary-refund:", "compensation-refund:", "unmatched-capture-refund:"].some(
         (prefix) => request.idempotencyKey === prefix + request.context.operationReference,
       )
     )

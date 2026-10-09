@@ -51,9 +51,9 @@ function createCoverage(resources, kind, makeRunner, cursorKey, nextKey, convert
       )
         return fail();
       if (!Array.isArray(context.page.items) || context.page.items.length > 5) return fail();
-      const items = context.page.items.map((item) =>
-        parseOrderExceptionSource(convert(item, context.scope)),
-      );
+      const items = [];
+      for (const item of context.page.items)
+        items.push(parseOrderExceptionSource(await convert(item, context.scope, context.tx)));
       for (const source of items)
         if (
           source.kind !== kind ||

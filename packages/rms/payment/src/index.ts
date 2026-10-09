@@ -192,3 +192,5 @@ export * from "./infrastructure/persistence/provider-capture-exception-store.js"
 export * from "./application/reconciliation-follow-up.js";
 export * from "./application/reconciliation-follow-up-service.js";
 export * from "./infrastructure/persistence/reconciliation-follow-up-store.js";
+// WP-2423 P6: full refund of a Provider capture that matches no payment or Order.
+export * from "./infrastructure/persistence/unmatched-capture-refund-store.js";
