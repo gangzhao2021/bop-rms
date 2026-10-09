@@ -54,11 +54,27 @@ export function createPostgresPaymentReconciliationCandidates(options: {
         [scope.brandReference, scope.storeReference],
       );
       const result = await tx.query(
-        `SELECT i.brand_id::text AS brand,i.store_id::text AS store,i.payment_intent_id::text AS intent,i.payment_operation_id::text AS operation,i.order_id::text AS order_reference,a.payment_attempt_id::text AS attempt,a.provider_environment AS environment,i.created_at,COALESCE(c.checked_at+interval '13 minutes',i.created_at) AS due_at
+        // WP-2423: a payment is checked when first seen and again as soon as a new payment fact
+        // (terminal result, compensation or ordinary refund) is recorded. Otherwise an unresolved
+        // payment is rechecked every 13 minutes on its first day, then daily; a matched one daily;
+        // after 30 days only new facts bring it back. Rechecking every payment every 13 minutes
+        // forever grew this history by thousands of rows a day for a single Store.
+        `SELECT i.brand_id::text AS brand,i.store_id::text AS store,i.payment_intent_id::text AS intent,i.payment_operation_id::text AS operation,i.order_id::text AS order_reference,a.payment_attempt_id::text AS attempt,a.provider_environment AS environment,i.created_at,d.due_at
 FROM rms_payment.payment_intent i JOIN rms_payment.payment_attempt a ON a.brand_id=i.brand_id AND a.store_id=i.store_id AND a.payment_intent_id=i.payment_intent_id AND a.attempt_number=1
-LEFT JOIN LATERAL (SELECT max(r.checked_at) AS checked_at FROM rms_payment.payment_reconciliation_record r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.payment_intent_id=i.payment_intent_id AND r.mode='Operational') c ON true
-WHERE i.brand_id=$1 AND i.store_id=$2 AND a.provider_environment=$3 AND i.created_at<=$4 AND COALESCE(c.checked_at+interval '13 minutes',i.created_at)<=$4
-ORDER BY due_at,i.payment_intent_id LIMIT $5`,
+LEFT JOIN LATERAL (SELECT r.checked_at,r.outcome FROM rms_payment.payment_reconciliation_record r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.payment_intent_id=i.payment_intent_id AND r.mode='Operational' ORDER BY r.checked_at DESC,r.reconciliation_check_id DESC LIMIT 1) c ON true
+LEFT JOIN LATERAL (SELECT max(f.at) AS fact_at FROM (
+  SELECT t.recorded_at AS at FROM rms_payment.payment_terminal_fact t WHERE t.brand_id=i.brand_id AND t.store_id=i.store_id AND t.payment_intent_id=i.payment_intent_id
+  UNION ALL SELECT cr.recorded_at FROM rms_payment.payment_compensation_refund cr JOIN rms_payment.payment_attempt pa ON pa.brand_id=cr.brand_id AND pa.store_id=cr.store_id AND pa.payment_attempt_id=cr.payment_attempt_id WHERE cr.brand_id=i.brand_id AND cr.store_id=i.store_id AND pa.payment_intent_id=i.payment_intent_id
+  UNION ALL SELECT ro.recorded_at FROM rms_payment.ordinary_refund_observation ro JOIN rms_payment.payment_attempt pa ON pa.brand_id=ro.brand_id AND pa.store_id=ro.store_id AND pa.payment_attempt_id=ro.payment_attempt_id WHERE ro.brand_id=i.brand_id AND ro.store_id=i.store_id AND pa.payment_intent_id=i.payment_intent_id) f) n ON true
+CROSS JOIN LATERAL (SELECT CASE
+  WHEN c.checked_at IS NULL THEN i.created_at
+  WHEN n.fact_at > c.checked_at THEN n.fact_at
+  WHEN i.created_at < $4::timestamptz - interval '30 days' THEN NULL
+  WHEN c.outcome = 'Matched' THEN c.checked_at + interval '1 day'
+  WHEN c.checked_at < i.created_at + interval '1 day' THEN c.checked_at + interval '13 minutes'
+  ELSE c.checked_at + interval '1 day' END AS due_at) d
+WHERE i.brand_id=$1 AND i.store_id=$2 AND a.provider_environment=$3 AND i.created_at<=$4 AND d.due_at IS NOT NULL AND d.due_at<=$4
+ORDER BY d.due_at,i.payment_intent_id LIMIT $5`,
         [scope.brandReference, scope.storeReference, scope.environment, cutoffAt, input.limit],
       );
       if (!Array.isArray(result.rows) || result.rows.length > input.limit) return fail();

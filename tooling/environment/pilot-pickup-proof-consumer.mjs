@@ -53,17 +53,22 @@ export function createInternalPickupProofConsumer(
         transaction,
         orderReference,
       });
-      if (issued !== null) {
-        if (
-          issued.source.brandReference !== resources.scope.brandReference ||
-          issued.source.storeReference !== resources.scope.storeReference ||
-          !issued.capability ||
-          issued.capability.fulfillmentReference !== issued.source.fulfillmentReference
-        )
+      if (
+        issued !== null &&
+        (issued.source.brandReference !== resources.scope.brandReference ||
+          issued.source.storeReference !== resources.scope.storeReference)
+      )
+        throw new Error("INTERNAL_PICKUP_PROOF_SOURCE_CONFLICT");
+      if (issued?.capability) {
+        if (issued.capability.fulfillmentReference !== issued.source.fulfillmentReference)
           throw new Error("INTERNAL_PICKUP_PROOF_SOURCE_CONFLICT");
         // Owner folds and verifies immutable issuance/handoff history. Replays must not regenerate expired or used proofs.
         return { status: "completed" };
       }
+      // WP-2423: the pickup state exists before any proof (an in-person handoff needs no proof). An
+      // order already handed over in person or closed as not collected gets no proof.
+      if (issued !== null && (issued.notCollected || issued.source.canonicalPhase !== "Ready"))
+        return { status: "completed" };
       // WP-2423: a pickup proof is valid for at most an hour after the order is ready. A ready event
       // delivered after that window (a delayed or recovered event) can no longer yield a usable
       // proof, so it completes without one instead of failing until it is dead-lettered; the order

@@ -49,10 +49,17 @@ it("returns only scoped routing identities in due order with bounded SQL", async
   ]);
   expect(f.authorize).toHaveBeenCalledTimes(2);
   expect(f.query).toHaveBeenLastCalledWith(
-    expect.stringContaining("ORDER BY due_at,i.payment_intent_id LIMIT $5"),
+    expect.stringContaining("ORDER BY d.due_at,i.payment_intent_id LIMIT $5"),
     [id(1), id(2), "Test", cutoffAt, 10],
   );
-  expect(f.query.mock.calls[1]?.[0]).toContain("interval '13 minutes'");
+  const sql = String(f.query.mock.calls[1]?.[0]);
+  expect(sql).toContain("interval '13 minutes'");
+  // WP-2423: matched payments daily, unresolved ones daily after their first day, nothing routine
+  // after 30 days, and any new payment fact brings a payment back immediately.
+  expect(sql).toContain("WHEN c.outcome = 'Matched' THEN c.checked_at + interval '1 day'");
+  expect(sql).toContain("interval '30 days' THEN NULL");
+  expect(sql).toContain("WHEN n.fact_at > c.checked_at THEN n.fact_at");
+  expect(sql).toContain("d.due_at IS NOT NULL AND d.due_at<=$4");
 });
 it.each([
   "scope",
