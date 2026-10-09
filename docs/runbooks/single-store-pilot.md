@@ -1326,3 +1326,34 @@ and successful send/reconciliation refresh the independent payment summary.
 Manual refresh is also available. Failed reads hide summary amounts while keeping
 the existing refund intent; browser recovery tests preserve same-request retries.
 Actual existing-order manual refresh shows CAD 11.30 refunded and CAD 0.00 pending.
+
+## Daily backup and weekly restore drill (WP-2423)
+
+`tooling/environment/pilot-backup.sh` needs only docker on the host and runs while all services
+keep serving.
+
+- `backup` takes one consistent online `pg_dump` (custom format) into a private directory (`0700`,
+  files `0600`), writes `<file>.manifest.json` with its SHA-256 and the row count of every table
+  counted from the dump itself, and keeps the newest `--keep` backups (default 14).
+- `drill` verifies the newest (or `--backup`) dump against its manifest, restores it into a new
+  database `<db>_drill_<UTC time>` in the same server, requires every table's row count to equal the
+  manifest, writes `drill-<UTC time>.json` and drops the drill database (`--keep-drill` keeps it).
+  A tampered or incomplete dump stops before any database is created.
+
+```bash
+tooling/environment/pilot-backup.sh backup --container <postgres container> --port <port> --database <db> --user <migration role> --password-file <private password file> --dir <private backup dir>
+```
+
+```bash
+tooling/environment/pilot-backup.sh drill --container <postgres container> --port <port> --database <db> --user <migration role> --password-file <private password file> --dir <private backup dir>
+```
+
+Schedule on the pilot host (systemd timers or cron, owned by the service user): `backup` daily
+after the Store closes and `drill` weekly. Alert on a non-zero exit. The local copy has the same
+trust boundary as the database volume; copying backups off the host (required for P4) must use
+storage that encrypts at rest with a managed key, and the off-host target is an external P4 input.
+The command prints only the file name and table/row/byte counts, never credentials or row contents.
+
+First local run (v15, 2026-10-09): backup 532 tables / 525,651 rows / 37.8 MB in 8 s with services
+serving; drill restored it in 49 s and every table matched; a byte-flipped copy was refused with
+`checksum mismatch` before any database was created.
