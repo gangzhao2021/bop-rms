@@ -1,8 +1,24 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AppFrame, StatePanel, bopPilotNeutralTokenNames } from "./index.js";
+import {
+  AppFrame,
+  SkipLinkProvidedContext,
+  StatePanel,
+  bopPilotNeutralTokenNames,
+} from "./index.js";
 
 describe("shared UI foundation", () => {
+  it("leaves its skip link out inside a layout that already provides one", () => {
+    const html = renderToStaticMarkup(
+      <SkipLinkProvidedContext.Provider value={true}>
+        <AppFrame title="Store" description="Kitchen display">
+          <p>Body</p>
+        </AppFrame>
+      </SkipLinkProvidedContext.Provider>,
+    );
+    expect(html).not.toContain("bop-skip-link");
+    expect(html).toContain('id="main-content"');
+  });
   it("renders landmarks, a skip target, and non-color state text", () => {
     const html = renderToStaticMarkup(
       <AppFrame title="Synthetic shell" description="No business data">

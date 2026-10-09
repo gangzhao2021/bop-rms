@@ -1,15 +1,15 @@
+import { SkipLinkProvidedContext } from "@bop-rms/ui";
 import type { ReactNode } from "react";
 import type { MerchantNavigationItem } from "./merchant-workspace.js";
 
-/** Pages that render the workspace navigation themselves (or must guard leaving). */
+/** Pages that render their own full-screen chrome (kitchen display, dining floor) or must guard leaving. */
 const ownNavigation = [
-  /^\/app\/?$/u,
   /^\/operations\/(kitchen|dining)(\/|$)/u,
   /^\/app\/organization\/brands\/[^/]+$/u,
   /^\/app\/commerce\/products\/new$/u,
 ];
 export const usesWorkspaceLayout = (path: string) =>
-  (path.startsWith("/app/") || path.startsWith("/operations/")) &&
+  (path === "/app" || path.startsWith("/app/") || path.startsWith("/operations/")) &&
   !ownNavigation.some((pattern) => pattern.test(path));
 
 /** The item whose route is the longest prefix of the current path is the current page. */
@@ -24,8 +24,8 @@ export function currentNavigationItem(
 }
 
 /**
- * WP-2423 visual direction: one persistent, permission-trimmed workspace navigation beside every
- * back-office page (bop-rms-figma-make-brief.md §3); collapses into a disclosure on narrow screens.
+ * WP-2423 M1: one persistent, permission-trimmed workspace navigation beside every back-office
+ * page (bop-rms-figma-make-brief.md §3); collapses into a disclosure on narrow screens.
  */
 export function WorkspaceLayout({
   items,
@@ -59,7 +59,13 @@ export function WorkspaceLayout({
   );
   return (
     <div className="workspace-layout">
+      <a className="bop-skip-link" href="#main-content">
+        Skip to main content
+      </a>
       <nav className="workspace-sidebar" aria-label="Workspace">
+        <p className="workspace-sidebar__brand">
+          <strong aria-label="BOP">BOP</strong>
+        </p>
         <p className="workspace-sidebar__store">{storeLabel}</p>
         <div className="workspace-sidebar__links">{links}</div>
         <details className="workspace-sidebar__compact">
@@ -72,7 +78,9 @@ export function WorkspaceLayout({
           <div>{links}</div>
         </details>
       </nav>
-      <div className="workspace-content">{children}</div>
+      <div className="workspace-content">
+        <SkipLinkProvidedContext.Provider value={true}>{children}</SkipLinkProvidedContext.Provider>
+      </div>
     </div>
   );
 }

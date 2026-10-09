@@ -66,26 +66,20 @@ describe("HOME-OVERVIEW Merchant shell", () => {
         onSwitchStore={vi.fn()}
       />,
     );
-    expect(html).toContain("HOME-OVERVIEW");
+    expect(html).not.toContain("HOME-OVERVIEW");
     expect(html).toContain("Training Store");
-    expect(html).toContain(
-      '<div class="bop-shell__header-status"><span data-freshness="Stale">Stale</span></div>',
-    );
+    expect(html).toContain('data-freshness="Stale"');
     expect(html).not.toContain("Training Store · Stale");
     expect(html).toContain("Second Store");
-    expect(html).toContain("Live Store status");
-    expect(html).toContain("Today summary");
-    expect(html).toContain("Open tasks and exceptions");
-    expect(html).toContain("System and Provider health");
-    expect(html.match(/Unavailable until the WP-1905/g)).toHaveLength(3);
+    expect(html).toContain("Store status");
+    expect(html).toContain("not available in this release");
+    expect(html).not.toContain("WP-1905");
     expect(html).toContain("Stale data");
-    expect(html).toContain('aria-label="Primary"');
-    expect(html.match(/<nav\b/g)).toHaveLength(1);
-    expect(html).not.toContain('aria-label="Authorized Merchant navigation"');
-    expect(html).toContain('href="/app"');
-    expect(html).toContain('href="/app" aria-current="page">Overview');
-    expect(html).toContain('href="/operations/orders">Orders');
-    expect(html).not.toContain('href="/operations/kitchen"');
+    expect(html).toContain("Data may be out of date");
+    // The navigation belongs to the workspace layout, not the page.
+    expect(html).not.toContain("<nav");
+    expect(html).toContain('id="main-content"');
+    expect(html).toContain("Switch Store");
   });
 
   it("keeps the previous scope visible on a non-color-only switch failure", () => {
@@ -96,7 +90,7 @@ describe("HOME-OVERVIEW Merchant shell", () => {
       />,
     );
     expect(html).toContain("Training Store");
-    expect(html).toContain("previous authorized scope is unchanged");
+    expect(html).toContain("Your previous Store is unchanged");
     expect(html).toContain('role="alert"');
   });
 

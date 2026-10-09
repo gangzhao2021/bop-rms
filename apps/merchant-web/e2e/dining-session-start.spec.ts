@@ -204,8 +204,10 @@ test("@production staff starts a table and recovers a lost entry code without du
     });
     expect(geometry).not.toBeNull();
     expect(geometry?.labelHeight).toBeGreaterThanOrEqual(44);
-    expect(geometry?.gap).toBe("8px");
-    expect(geometry?.textLeft).toBeGreaterThanOrEqual((geometry?.checkboxRight ?? 0) + 8);
+    // 0.5rem at the 15px root size; the checkbox and its text must not touch.
+    expect(Number.parseFloat(geometry?.gap ?? "0")).toBeGreaterThanOrEqual(7);
+    // 0.5rem token gap at the 15px root is 7.5px.
+    expect(geometry?.textLeft).toBeGreaterThanOrEqual((geometry?.checkboxRight ?? 0) + 7);
   };
   await page.getByRole("combobox", { name: "Area", exact: true }).selectOption("PATIO");
   await expect(page.getByRole("button", { name: "Select T1", exact: true })).toHaveCount(0);
@@ -265,7 +267,8 @@ test("@production staff starts a table and recovers a lost entry code without du
     .locator(".dining-table-tile")
     .filter({ has: page.getByRole("button", { name: "Select T1", exact: true }) });
   const desktopTile = await tableTile.boundingBox();
-  expect(desktopTile?.width).toBeGreaterThanOrEqual(350);
+  // Tile columns are rem-based; at the 15px root font a tile is about 342px wide.
+  expect(desktopTile?.width).toBeGreaterThanOrEqual(330);
   expect(desktopTile?.width).toBeLessThanOrEqual(380);
   const [desktopBoard, desktopDetails] = await Promise.all([
     page.locator(".dining-floor-board").boundingBox(),
@@ -282,12 +285,15 @@ test("@production staff starts a table and recovers a lost entry code without du
     }),
   );
   expect(mainTileBoxes).toHaveLength(3);
-  expect(mainTileBoxes.every((tile) => tile.width >= 350 && tile.width <= 380)).toBe(true);
+  expect(mainTileBoxes.every((tile) => tile.width >= 330 && tile.width <= 380)).toBe(true);
   const [firstMainTile, secondMainTile] = mainTileBoxes;
   if (!firstMainTile || !secondMainTile)
     throw new Error("Dining Main area must have at least two measured tiles");
   expect(mainTileBoxes.every((tile) => Math.abs(tile.y - firstMainTile.y) < 2)).toBe(true);
-  expect(secondMainTile.x - (firstMainTile.x + firstMainTile.width)).toBeCloseTo(12, 0);
+  // Tile gap is the 0.75rem token: 11.25px at the 15px root font.
+  const tileGap = secondMainTile.x - (firstMainTile.x + firstMainTile.width);
+  expect(tileGap).toBeGreaterThanOrEqual(11);
+  expect(tileGap).toBeLessThanOrEqual(12);
   const [desktopLabel, desktopState] = await Promise.all([
     tableTile.locator("h4").boundingBox(),
     tableTile.locator(".dining-table-tile__identity > span").boundingBox(),

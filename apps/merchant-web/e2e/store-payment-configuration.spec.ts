@@ -344,6 +344,9 @@ async function install(page: Page) {
 }
 async function open(page: Page) {
   await page.goto("/app");
+  // On narrow screens the workspace navigation sits behind the Menu disclosure (WP-2423 M1).
+  const compactMenu = page.locator(".workspace-sidebar__compact > summary");
+  if (await compactMenu.isVisible()) await compactMenu.click();
   await page
     .getByRole("link", { name: "Store setup", exact: true })
     .filter({ visible: true })

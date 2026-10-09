@@ -3,7 +3,10 @@ import { DiningOrderProgress } from "./DiningOrderProgress.js";
 import { OrderAcceptanceAction } from "./OrderAcceptanceAction.js";
 import { createOrderAcceptanceClient } from "./order-acceptance-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { StatePanel } from "@bop-rms/ui";
+import { storeTime } from "./StoreTime.js";
+import { WorkspacePage } from "./WorkspacePage.js";
+export { storeTime } from "./StoreTime.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -43,27 +46,6 @@ export function filterCurrentOrderItems(
               (order.currentPhase ?? "Unavailable") === filters.phase)),
   );
 }
-/** WP-2423: an instant as Store-local time (UTC when the Store's time zone is not known). */
-export function storeTime(instant: string, timeZone: string | undefined, withDate = false): string {
-  if (timeZone === undefined)
-    return (withDate ? instant.slice(0, 10) + " " : "") + instant.slice(11, 16) + " UTC";
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    })
-      .formatToParts(new Date(instant))
-      .map((part) => [part.type, part.value]),
-  );
-  const time = `${parts.hour}:${parts.minute}`;
-  return withDate ? `${parts.year}-${parts.month}-${parts.day} ${time}` : time;
-}
-
 /** "$6.78" for 678 CAD minor units; the currency's own minor-unit exponent, no floating point. */
 export function orderMoney(value: { readonly amountMinor: string; readonly currencyCode: string }) {
   const exponent =
@@ -283,10 +265,6 @@ export function CurrentOrderQueueRows({
                 <dd>{order.sourceChannel}</dd>
               </div>
               <div>
-                <dt>Current version</dt>
-                <dd>{order.currentVersion ?? "Unavailable"}</dd>
-              </div>
-              <div>
                 <dt>Submitted</dt>
                 <dd>
                   <time dateTime={order.submittedAt}>
@@ -453,15 +431,20 @@ export function CurrentOrderQueuePage({
   const single = orderReference !== undefined;
   const detail = state.kind === "Ready" ? state.detail : undefined;
   return (
-    <div className="orders-page">
-      <AppFrame
-        title={
-          single ? (detail === undefined ? "Order" : `Order ${detail.order.orderNumber}`) : "Orders"
-        }
-        description={single ? `OPS-ORDER-DETAIL · ${storeLabel}` : storeLabel}
-      >
-        <div className="card-actions">
+    <WorkspacePage
+      className="orders-page"
+      title={
+        single ? (detail === undefined ? "Order" : `Order ${detail.order.orderNumber}`) : "Orders"
+      }
+      meta={storeLabel}
+      actions={
+        <>
           {single ? <Link to="/operations/orders">All orders</Link> : null}
+          {after !== null ? (
+            <button onClick={() => reload(null)} disabled={state.kind === "Loading" || servingBusy}>
+              First page
+            </button>
+          ) : null}
           <button
             ref={refreshButton}
             onClick={() => reload(null)}
@@ -469,12 +452,10 @@ export function CurrentOrderQueuePage({
           >
             {single ? "Refresh order" : "Refresh orders"}
           </button>
-          {after !== null ? (
-            <button onClick={() => reload(null)} disabled={state.kind === "Loading" || servingBusy}>
-              First page
-            </button>
-          ) : null}
-        </div>
+        </>
+      }
+    >
+      <>
         {state.kind === "Ready" ? (
           <>
             <div
@@ -534,12 +515,7 @@ export function CurrentOrderQueuePage({
                 </select>
               </label>
               <p className="order-queue-filter-count" aria-live="polite">
-                Showing {filteredOrders.length} of {state.view.items.length} orders on this server
-                page.
-              </p>
-              <p className="order-queue-filter-note">
-                Search and filters apply to this loaded page only. Payment, Kitchen, overdue,
-                exception and claim filters require additional authorized queue fields.
+                Showing {filteredOrders.length} of {state.view.items.length} orders on this page.
               </p>
               {hasOrderFilters ? (
                 <button type="button" onClick={clearOrderFilters}>
@@ -653,8 +629,8 @@ export function CurrentOrderQueuePage({
             </p>
           </StatePanel>
         )}
-      </AppFrame>
-    </div>
+      </>
+    </WorkspacePage>
   );
 }
 
@@ -667,12 +643,12 @@ export function CurrentOrderDetailRoute(props: {
 }) {
   const id = useParams().id;
   return id === undefined || !orderRoute.test(id) ? (
-    <AppFrame title="Order" description="OPS-ORDER-DETAIL">
+    <WorkspacePage title="Order" meta={props.storeLabel}>
       <StatePanel heading="Order not found" status>
         <p>This order link is not valid.</p>
         <Link to="/operations/orders">All orders</Link>
       </StatePanel>
-    </AppFrame>
+    </WorkspacePage>
   ) : (
     <CurrentOrderQueuePage key={id} {...props} orderReference={id} />
   );

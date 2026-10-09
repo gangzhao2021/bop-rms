@@ -37,18 +37,21 @@ describe("WP-1809 Order Exception Workbench", () => {
       <OrderExceptionScreen view={parseOrderExceptionView(fixture())} />,
     );
     for (const value of [
-      "OPS-ORDER-EXCEPTION",
+      "Exceptions",
       "Critical",
-      "PaidWithoutFulfillableOrder",
+      "Paid without a fulfillable order",
       "Unknown",
-      "Request owning-domain compensation / retry",
-      "Resolve from final source evidence",
       "Clear filters",
     ])
       expect(html).toContain(value);
+    for (const value of [
+      "OPS-ORDER-EXCEPTION",
+      "Request owning-domain compensation / retry",
+      "Resolve from final source evidence",
+      "exception-actions-unavailable",
+    ])
+      expect(html).not.toContain(value);
     expect(html).toContain("Linked order · order number unavailable");
-    expect(html).toContain('id="exception-actions-unavailable"');
-    expect(html.match(/aria-describedby="exception-actions-unavailable"/gu)).toHaveLength(4);
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000902");
   });
   it("rejects client-resolved rows without source finality", () => {
@@ -75,8 +78,8 @@ describe("WP-1809 Order Exception Workbench", () => {
 describe("WP-2402 workbench recovery states", () => {
   it("starts with a loading status instead of an error", () => {
     const html = renderToStaticMarkup(<OrderExceptionPage />);
-    expect(html).toContain("Loading Order Exception Workbench");
-    expect(html).not.toContain("Workbench unavailable");
+    expect(html).toContain("Loading exceptions");
+    expect(html).not.toContain("Exceptions unavailable");
   });
   it("keeps overdue stale facts visible with all mutation buttons disabled", () => {
     const html = renderToStaticMarkup(
@@ -89,12 +92,20 @@ describe("WP-2402 workbench recovery states", () => {
         onRefresh={() => undefined}
       />,
     );
-    expect(html).toContain("Stale workbench");
+    expect(html).toContain("Data may be out of date");
     expect(html).toContain("2026-08-12T16:15:00.000Z");
-    expect(html).toContain("PaidWithoutFulfillableOrder");
+    expect(html).toContain("Paid without a fulfillable order");
+    expect(html).not.toContain("PaidWithoutFulfillableOrder</h3>");
     const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)];
-    expect(buttons).toHaveLength(6);
     expect(buttons[0]?.[1]).not.toContain("disabled");
+    // Dead placeholder actions are gone; only real source actions remain.
+    for (const label of [
+      ">Acknowledge<",
+      ">Assign<",
+      "Request owning-domain",
+      "Resolve from final",
+    ])
+      expect(html).not.toContain(label);
     for (const button of buttons.slice(1)) expect(button[1]).toContain("disabled");
   });
   it("distinguishes an empty read from unavailable data without implying freshness", () => {
@@ -108,7 +119,7 @@ describe("WP-2402 workbench recovery states", () => {
       />,
     );
     expect(html).toContain("No exceptions in this view");
-    expect(html).toContain("Stale workbench");
+    expect(html).toContain("Data may be out of date");
     expect(html).not.toContain("<article");
   });
 });
@@ -198,9 +209,7 @@ it("does not advertise executable generic commands for a fresh unlinked payment 
   );
   expect(html).toContain("No linked order is available");
   expect(html).toContain("requires reconciliation review");
-  expect(html).toContain("not available");
   const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)];
-  expect(buttons).toHaveLength(6);
   expect(buttons[0]?.[1]).not.toContain("disabled");
   for (const button of buttons.slice(1)) expect(button[1]).toContain("disabled");
 });

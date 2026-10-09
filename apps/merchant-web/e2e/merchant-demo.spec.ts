@@ -8,7 +8,8 @@ const ORDER_REFERENCE = "018f7600-0000-7000-8000-000000000001";
 const WORK_ITEM_REFERENCE = "018f0f58-767a-7f3b-a1d0-000000000401";
 
 const routes = [
-  { path: "/app", identity: "HOME-OVERVIEW" },
+  // Pilot pages no longer print Screen IDs; the identity is the page's own heading.
+  { path: "/app", identity: "Training Store" },
   { path: "/app/organization/stores", identity: "STORE-LIST" },
   { path: `/app/organization/stores/${STORE_REFERENCE}`, identity: "STORE-DETAIL" },
   { path: `/app/organization/stores/${STORE_REFERENCE}/setup`, identity: "STORE-SETUP" },
@@ -16,14 +17,14 @@ const routes = [
     path: `/app/organization/stores/${STORE_REFERENCE}/service`,
     identity: "STORE-HOURS-SERVICE",
   },
-  { path: "/app/commerce/menus", identity: "CAT-MENU-LIST" },
-  { path: `/app/commerce/menus/${MENU_REFERENCE}/edit`, identity: "CAT-MENU-BUILDER" },
+  { path: "/app/commerce/menus", identity: "Menus are unavailable" },
+  { path: `/app/commerce/menus/${MENU_REFERENCE}/edit`, identity: "Synthetic Brand" },
   { path: "/operations/orders", identity: "OPS-ORDER-QUEUE" },
   { path: `/operations/orders/${ORDER_REFERENCE}`, identity: "OPS-ORDER-DETAIL" },
-  { path: "/operations/kitchen", identity: "KIT-KITCHEN-QUEUE" },
+  { path: "/operations/kitchen", identity: "Kitchen display" },
   {
     path: `/operations/kitchen/work-items/${WORK_ITEM_REFERENCE}`,
-    identity: "KIT-WORK-ITEM",
+    identity: "Work item",
   },
   { path: "/app/compliance", identity: "CMP-DASHBOARD" },
   { path: "/platform/support-cases", identity: "PLT-SUPPORT-CASE" },
@@ -99,7 +100,7 @@ test.describe("@demo local-only Merchant showcase", () => {
     await expect(orderQueue).toBeVisible();
     await orderQueue.click();
     await expect(page).toHaveURL(/\/operations\/orders$/u);
-    await expect(page.getByText("OPS-ORDER-QUEUE", { exact: false }).first()).toBeVisible();
+    await expect(page.getByRole("main")).toContainText("Order");
     expect(violations).toEqual([]);
   });
 });

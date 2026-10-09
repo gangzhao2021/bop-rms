@@ -101,6 +101,8 @@ for (const recovery of ["retry", "history"] as const)
               canRequestAcceptance: false,
               currentPhase: "Fulfilled",
               currentVersion: 4,
+              unfulfillable: null,
+              pickupNotCollected: false,
             },
           ],
           nextAfterOrderReference: null,
@@ -248,8 +250,8 @@ for (const recovery of ["retry", "history"] as const)
       });
     });
     await page.goto("/operations/orders");
-    await page.getByRole("button", { name: "View payments and refunds" }).click();
-    await page.getByRole("link", { name: "Open payment 1" }).click();
+    await page.getByRole("button", { name: "Payments and refunds" }).click();
+    await page.getByRole("link", { name: "Payment 1 · refunds and details" }).click();
     await expect(page).toHaveURL(new RegExp("/app/operations/payments/" + id(31) + "$"));
     await expect(page.getByRole("region", { name: "Payment financial summary" })).toContainText(
       "CAD 22.60",

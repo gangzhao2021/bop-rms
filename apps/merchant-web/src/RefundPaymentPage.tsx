@@ -5,7 +5,8 @@ import {
 } from "./ordinary-refund-preparation-client.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router";
-import { AppFrame } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
+import { WorkspacePage } from "./WorkspacePage.js";
 import { createOrdinaryRefundClient, OrdinaryRefundClientError } from "./ordinary-refund-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 const client = createOrdinaryRefundClient();
@@ -67,12 +68,14 @@ export function OrderPaymentLinks({
   return (
     <section aria-label="Order payments">
       <button disabled={busy} onClick={() => void load()}>
-        View payments and refunds
+        Payments and refunds
       </button>
       <p role="status">{message}</p>
       {links.map((reference, index) => (
         <p key={reference}>
-          <Link to={"/app/operations/payments/" + reference}>Open payment {index + 1}</Link>
+          <Link to={"/app/operations/payments/" + reference}>
+            Payment {index + 1} · refunds and details
+          </Link>
         </p>
       ))}
     </section>
@@ -225,7 +228,7 @@ function RecordedRequestStatus({
       {result ? (
         <section aria-label={"Execution status for request " + entry.claimVersion}>
           <p>
-            Last checked: <time dateTime={result.observedAt}>{result.observedAt}</time>
+            Last checked <SourceTime instant={result.observedAt} />
           </p>
           <ul>
             {result.payments.map((payment, index) => (
@@ -485,8 +488,9 @@ function RefundWizard({
             <ol>
               {items.recentRequests.map((entry) => (
                 <li key={entry.requestReference}>
-                  Request {entry.claimVersion}: {amount(entry.amountMinor)} · {entry.reasonCode} ·{" "}
-                  <time dateTime={entry.requestedAt}>{entry.requestedAt}</time>
+                  Request {entry.claimVersion}: {amount(entry.amountMinor)} ·{" "}
+                  {entry.reasonCode === "CUSTOMER_REQUEST" ? "Customer request" : entry.reasonCode}{" "}
+                  · <SourceTime instant={entry.requestedAt} />
                   <RecordedRequestStatus
                     onFinancialChange={onFinancialChange}
                     orderReference={orderReference}
@@ -663,9 +667,8 @@ function PaymentFinancialSummary({
             </div>
           </dl>
           <p>
-            Last checked: <time dateTime={context.observedAt}>{context.observedAt}</time>
+            Last checked <SourceTime instant={context.observedAt} />
           </p>
-          <p>Reconciliation and audit timeline are not available in this view.</p>
         </section>
       ) : (
         <p>Payment amounts are unavailable until refreshed.</p>
@@ -707,7 +710,7 @@ function PaymentContent({
     return () => controller.abort();
   }, [paymentIntentReference, csrf, refresh]);
   return (
-    <AppFrame title="Payment details" description={storeLabel}>
+    <WorkspacePage title="Payment" meta={storeLabel}>
       <p role="status">{message}</p>
       {!context ? (
         <button onClick={() => setRefresh((value) => value + 1)}>Refresh payment</button>
@@ -732,7 +735,7 @@ function PaymentContent({
           )}
         </>
       )}
-    </AppFrame>
+    </WorkspacePage>
   );
 }
 export function RefundPaymentPage({

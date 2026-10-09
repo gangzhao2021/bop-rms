@@ -1,6 +1,8 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import type { ReactNode } from "react";
 import type { MerchantWorkspaceSnapshot } from "./merchant-workspace.js";
+import { Freshness } from "./StoreTime.js";
+import { WorkspacePage } from "./WorkspacePage.js";
 
 type MerchantShellState =
   | { readonly kind: "Loading" }
@@ -25,13 +27,9 @@ function StateView({ state }: { readonly state: Exclude<MerchantShellState, { ki
     Exclude<MerchantShellState, { kind: "Ready" }>["kind"],
     readonly [string, string, "neutral" | "error" | "offline"]
   > = {
-    Loading: ["Loading workspace", "Checking your authorized Merchant Session…", "neutral"],
-    SignedOut: ["Sign in required", "Sign in to open your authorized Store workspace.", "neutral"],
-    Offline: [
-      "Offline read-only",
-      "A current authorized scope cannot be loaded while offline.",
-      "offline",
-    ],
+    Loading: ["Loading workspace", "Checking your session…", "neutral"],
+    SignedOut: ["Sign in required", "Sign in to open your Store workspace.", "neutral"],
+    Offline: ["You’re offline", "Reconnect to load your Store workspace.", "offline"],
     Failure: [
       "Unable to load",
       "The workspace is unavailable. No business action was attempted.",
@@ -51,110 +49,85 @@ function StateView({ state }: { readonly state: Exclude<MerchantShellState, { ki
   );
 }
 
+/** HOME: the Store at a glance. Inside the workspace layout once a session exists. */
 export function MerchantShell({ state, onSwitchStore, overview = null }: MerchantShellProps) {
-  const ready = state.kind === "Ready" ? state : null;
+  if (state.kind !== "Ready")
+    return (
+      <AppFrame title="Operations" description="Store workspace">
+        <StateView state={state} />
+      </AppFrame>
+    );
+  const ready = state;
+  const scope = ready.workspace.selectedScope;
+  const multiStore = ready.workspace.authorizedStores.length > 1;
   return (
-    <AppFrame
-      className="bop-shell--home-overview"
-      title="OPERATIONS"
-      description={
-        ready ? ready.workspace.selectedScope.storeLabel : "Permission-trimmed Store workspace"
-      }
-      headerStatus={
-        ready ? (
-          <span data-freshness={ready.workspace.freshness}>{ready.workspace.freshness}</span>
-        ) : undefined
-      }
-      navigation={
-        ready ? (
-          <>
-            <span className="home-overview-navigation-label">WORKSPACE</span>
-            {ready.workspace.navigation.map((item) => (
-              <a
-                key={item.screenId}
-                href={item.href}
-                aria-current={item.screenId === "HOME-OVERVIEW" ? "page" : undefined}
-              >
-                {item.label}
-              </a>
-            ))}
-          </>
-        ) : undefined
+    <WorkspacePage
+      className="workspace-page--overview"
+      title={scope.storeLabel}
+      meta={`${scope.brandLabel} · Business date ${ready.workspace.businessDate}`}
+      status={<Freshness status={ready.workspace.freshness} />}
+      actions={
+        multiStore ? (
+          <form
+            className="scope-switcher"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const data = new FormData(event.currentTarget);
+              const target = data.get("store");
+              if (typeof target === "string") void onSwitchStore(target);
+            }}
+          >
+            <label htmlFor="store-scope">Authorized Store</label>
+            <select
+              key={scope.storeReference}
+              id="store-scope"
+              name="store"
+              defaultValue={scope.storeReference}
+              disabled={ready.switching}
+            >
+              {ready.workspace.authorizedStores.map((store) => (
+                <option key={store.storeReference} value={store.storeReference}>
+                  {store.storeLabel} · {store.brandLabel}
+                </option>
+              ))}
+            </select>
+            <button type="submit" disabled={ready.switching}>
+              {ready.switching ? "Switching…" : "Switch Store"}
+            </button>
+          </form>
+        ) : null
       }
     >
-      {ready === null ? (
-        <StateView state={state as Exclude<MerchantShellState, { kind: "Ready" }>} />
-      ) : (
-        <section id="overview" aria-labelledby="overview-heading">
-          <div className="overview-heading">
-            <div>
-              <p className="bop-eyebrow">HOME-OVERVIEW · {ready.workspace.businessDate}</p>
-              <h2 id="overview-heading">{ready.workspace.selectedScope.storeLabel}</h2>
-              <p className="bop-muted">{ready.workspace.selectedScope.brandLabel}</p>
-            </div>
-            <form
-              className="scope-switcher"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const data = new FormData(event.currentTarget);
-                const target = data.get("store");
-                if (typeof target === "string") void onSwitchStore(target);
-              }}
-            >
-              <label htmlFor="store-scope">Authorized Store</label>
-              <select
-                key={ready.workspace.selectedScope.storeReference}
-                id="store-scope"
-                name="store"
-                defaultValue={ready.workspace.selectedScope.storeReference}
-                disabled={ready.switching}
-              >
-                {ready.workspace.authorizedStores.map((store) => (
-                  <option key={store.storeReference} value={store.storeReference}>
-                    {store.storeLabel} · {store.brandLabel}
-                  </option>
-                ))}
-              </select>
-              <button type="submit" disabled={ready.switching}>
-                {ready.switching ? "Switching…" : "Switch Store"}
-              </button>
-            </form>
+      <section id="overview" aria-label="Store overview">
+        {ready.switchFailed ? (
+          <p className="command-error" role="alert">
+            Store switch failed. Your previous Store is unchanged.
+          </p>
+        ) : null}
+        {ready.workspace.freshness === "Stale" ? (
+          <p className="stale-warning" role="status">
+            Stale data · refresh before relying on operational status.
+          </p>
+        ) : null}
+        {overview ?? (
+          <div className="overview-grid">
+            <section className="overview-card" aria-labelledby="live-store-status-heading">
+              <h3 id="live-store-status-heading">Store status</h3>
+              <p className="overview-status-value">
+                <span>{ready.workspace.storeStatus}</span>
+              </p>
+              <p>Business date {ready.workspace.businessDate}</p>
+            </section>
+            <section className="overview-card" aria-labelledby="today-summary-heading">
+              <h3 id="today-summary-heading">Today</h3>
+              <p>
+                Sales, open orders and exceptions for the day are not available in this release. Use
+                Orders, Kitchen, Pickup and Exceptions from the menu.
+              </p>
+            </section>
           </div>
-          {ready.switchFailed ? (
-            <p className="command-error" role="alert">
-              Store switch failed. Your previous authorized scope is unchanged.
-            </p>
-          ) : null}
-          {ready.workspace.freshness === "Stale" ? (
-            <p className="stale-warning" role="status">
-              Stale data · refresh before relying on operational status.
-            </p>
-          ) : null}
-          {overview ?? (
-            <div className="overview-grid">
-              <section className="overview-card" aria-labelledby="live-store-status-heading">
-                <h3 id="live-store-status-heading">Live Store status</h3>
-                <p className="overview-status-value">
-                  <span>{ready.workspace.storeStatus}</span>
-                </p>
-                <p>Business Date {ready.workspace.businessDate}</p>
-              </section>
-              <section className="overview-card" aria-labelledby="today-summary-heading">
-                <h3 id="today-summary-heading">Today summary</h3>
-                <p>Unavailable until the WP-1905 dashboard projection is connected.</p>
-              </section>
-              <section className="overview-card" aria-labelledby="tasks-summary-heading">
-                <h3 id="tasks-summary-heading">Open tasks and exceptions</h3>
-                <p>Unavailable until the WP-1905 dashboard projection is connected.</p>
-              </section>
-              <section className="overview-card" aria-labelledby="health-summary-heading">
-                <h3 id="health-summary-heading">System and Provider health</h3>
-                <p>Unavailable until the WP-1905 dashboard projection is connected.</p>
-              </section>
-            </div>
-          )}
-        </section>
-      )}
-    </AppFrame>
+        )}
+      </section>
+    </WorkspacePage>
   );
 }

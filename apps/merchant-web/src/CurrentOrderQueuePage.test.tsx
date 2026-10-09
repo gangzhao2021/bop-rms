@@ -39,7 +39,7 @@ it("renders actual Accepted version and visibly unresolved state without fabrica
       />,
     );
   expect(render(item)).toContain("Accepted");
-  expect(render(item)).toContain("Current version");
+  expect(render(item)).not.toContain("Current version");
   expect(render(item)).toContain('class="order-workbench-entry" open=""');
   expect(render(item)).toContain("1 accepted");
   expect(render(item)).toContain("00:00 UTC");
@@ -166,7 +166,7 @@ it("keeps payments accessible on cancelled Dining without offering unavailable s
         onBusy={() => undefined}
       />,
     );
-  expect(render("Cancelled")).toContain("View payments and refunds");
+  expect(render("Cancelled")).toContain("Payments and refunds");
   expect(render("Cancelled")).not.toContain("View serving progress");
   expect(render("Accepted")).toContain("View serving progress");
   expect(render("Fulfilled")).toContain("View serving progress");

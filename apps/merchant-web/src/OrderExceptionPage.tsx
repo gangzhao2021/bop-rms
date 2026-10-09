@@ -2,7 +2,28 @@ import { ReconciliationFollowUpAction } from "./ReconciliationFollowUpAction.js"
 import { CompensationReconciliationAction } from "./CompensationReconciliationAction.js";
 import { UnmatchedCaptureRefundAction } from "./UnmatchedCaptureRefundAction.js";
 import { createOrderExceptionClient } from "./order-exception-client.js";
-import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { StatePanel } from "@bop-rms/ui";
+import { Freshness, SourceTime } from "./StoreTime.js";
+import { WorkspacePage } from "./WorkspacePage.js";
+
+/** Staff labels for the exception kinds and states the projection carries. */
+export const exceptionKindLabel: Record<OrderExceptionItem["kind"], string> = {
+  DiningUnpaidBatch: "Unpaid dine-in batch",
+  PaymentReconciliationDifference: "Payment reconciliation difference",
+  CaptureDeadlineExceeded: "Capture deadline exceeded",
+  PaidWithoutFulfillableOrder: "Paid without a fulfillable order",
+};
+const providerStateLabel: Record<OrderExceptionItem["providerState"], string> = {
+  NotApplicable: "Not applicable",
+  Pending: "Pending",
+  Unknown: "Unknown",
+  Confirmed: "Confirmed",
+};
+const compensationLabel: Record<OrderExceptionItem["compensationStatus"], string> = {
+  NotRequested: "Not requested",
+  Pending: "Pending",
+  Completed: "Completed",
+};
 import { useEffect, useRef, useState, type Ref } from "react";
 
 export interface OrderExceptionItem {
@@ -199,237 +220,220 @@ export function OrderExceptionScreen({
     overdueOnly;
   const visibleReferences = new Set(items.map((item) => item.exceptionReference));
   return (
-    <AppFrame
-      className="bop-shell--order-exception"
-      title="Order Exception Workbench"
-      description={`OPS-ORDER-EXCEPTION · ${view.storeLabel} · ${view.businessDate}`}
-    >
-      <header className="screen-heading">
-        <div>
-          <h2>Server-authorized exceptions</h2>
-          <p>
-            {view.freshnessStatus} · {view.projectedAt}
-          </p>
-        </div>
+    <WorkspacePage
+      className="order-exception-page"
+      title="Exceptions"
+      meta={`${view.storeLabel} · Business date ${view.businessDate}`}
+      status={<Freshness status={view.freshnessStatus} at={view.projectedAt} />}
+      actions={
         <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
-          Refresh source
+          Refresh
         </button>
-      </header>
-      <p className="muted">
-        Fresh describes current source data, not how quickly an exception first appeared. The alert
-        deadline remains shown on each exception; first-alert timing is not certified here.
-      </p>
-      {readOnly ? (
-        <StatePanel heading="Stale workbench — read-only" tone="offline" status>
-          <p>Refresh every owning source before an action.</p>
-        </StatePanel>
-      ) : null}
-      <div className="list-filters order-exception-filters">
-        <label>
-          Type
-          <select value={kindFilter} onChange={(event) => setKindFilter(event.currentTarget.value)}>
-            <option>All</option>
-            <option>DiningUnpaidBatch</option>
-            <option>PaymentReconciliationDifference</option>
-            <option>CaptureDeadlineExceeded</option>
-            <option>PaidWithoutFulfillableOrder</option>
-          </select>
-        </label>
-        <label>
-          Severity
-          <select
-            value={severityFilter}
-            onChange={(event) => setSeverityFilter(event.currentTarget.value)}
+      }
+    >
+      <>
+        {readOnly ? (
+          <StatePanel heading="Data may be out of date" tone="offline" status>
+            <p>Refresh before taking an action.</p>
+          </StatePanel>
+        ) : null}
+        <div className="list-filters order-exception-filters">
+          <label>
+            Type
+            <select
+              value={kindFilter}
+              onChange={(event) => setKindFilter(event.currentTarget.value)}
+            >
+              <option value="All">All</option>
+              {(Object.keys(exceptionKindLabel) as OrderExceptionItem["kind"][]).map((kind) => (
+                <option key={kind} value={kind}>
+                  {exceptionKindLabel[kind]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Severity
+            <select
+              value={severityFilter}
+              onChange={(event) => setSeverityFilter(event.currentTarget.value)}
+            >
+              <option>All</option>
+              <option>High</option>
+              <option>Critical</option>
+            </select>
+          </label>
+          <label>
+            Status
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.currentTarget.value)}
+            >
+              <option>All</option>
+              <option>Open</option>
+              <option>Acknowledged</option>
+              <option>Assigned</option>
+              <option>Resolved</option>
+            </select>
+          </label>
+          <label>
+            Owner
+            <select
+              value={ownerFilter}
+              onChange={(event) => setOwnerFilter(event.currentTarget.value)}
+            >
+              <option>All</option>
+              <option>Unassigned</option>
+              <option>Assigned</option>
+            </select>
+          </label>
+          <label>
+            Provider state
+            <select
+              value={providerFilter}
+              onChange={(event) => setProviderFilter(event.currentTarget.value)}
+            >
+              <option value="All">All</option>
+              <option value="NotApplicable">Not applicable</option>
+              <option value="Pending">Pending</option>
+              <option value="Unknown">Unknown</option>
+              <option value="Confirmed">Confirmed</option>
+            </select>
+          </label>
+          <label className="order-exception-overdue-filter">
+            <input
+              type="checkbox"
+              checked={overdueOnly}
+              onChange={(event) => setOverdueOnly(event.currentTarget.checked)}
+            />
+            Overdue only
+          </label>
+          <button
+            type="button"
+            disabled={!hasFilters}
+            onClick={() => {
+              setKindFilter("All");
+              setSeverityFilter("All");
+              setStatusFilter("All");
+              setOwnerFilter("All");
+              setProviderFilter("All");
+              setOverdueOnly(false);
+            }}
           >
-            <option>All</option>
-            <option>High</option>
-            <option>Critical</option>
-          </select>
-        </label>
-        <label>
-          Status
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.currentTarget.value)}
+            Clear filters
+          </button>
+        </div>
+        {items.length === 0 ? (
+          <StatePanel
+            heading={
+              view.items.length === 0
+                ? "No exceptions in this view"
+                : "No exceptions match these filters"
+            }
+            tone="neutral"
+            status
           >
-            <option>All</option>
-            <option>Open</option>
-            <option>Acknowledged</option>
-            <option>Assigned</option>
-            <option>Resolved</option>
-          </select>
-        </label>
-        <label>
-          Owner
-          <select
-            value={ownerFilter}
-            onChange={(event) => setOwnerFilter(event.currentTarget.value)}
-          >
-            <option>All</option>
-            <option>Unassigned</option>
-            <option>Assigned</option>
-          </select>
-        </label>
-        <label>
-          Provider state
-          <select
-            value={providerFilter}
-            onChange={(event) => setProviderFilter(event.currentTarget.value)}
-          >
-            <option>All</option>
-            <option>NotApplicable</option>
-            <option>Pending</option>
-            <option>Unknown</option>
-            <option>Confirmed</option>
-          </select>
-        </label>
-        <label className="order-exception-overdue-filter">
-          <input
-            type="checkbox"
-            checked={overdueOnly}
-            onChange={(event) => setOverdueOnly(event.currentTarget.checked)}
-          />
-          Overdue only
-        </label>
-        <button
-          type="button"
-          disabled={!hasFilters}
-          onClick={() => {
-            setKindFilter("All");
-            setSeverityFilter("All");
-            setStatusFilter("All");
-            setOwnerFilter("All");
-            setProviderFilter("All");
-            setOverdueOnly(false);
-          }}
-        >
-          Clear filters
-        </button>
-      </div>
-      <p id="exception-actions-unavailable" className="muted">
-        General acknowledgment, assignment, compensation requests and closure are not available in
-        this workbench yet. Any available source-specific action is shown separately on its
-        exception.
-      </p>
-      {items.length === 0 ? (
-        <StatePanel
-          heading={
-            view.items.length === 0
-              ? "No exceptions in this view"
-              : "No exceptions match these filters"
-          }
-          tone="neutral"
-          status
-        >
-          <p>
-            {view.items.length === 0
-              ? "No exceptions were returned for the selected Store. Source freshness is shown above."
-              : "No loaded exception matches these filters. Clear filters to restore the workbench."}
-          </p>
-        </StatePanel>
-      ) : null}
-      <div className="store-card-grid">
-        {view.items.map((item) => (
-          <article
-            className="store-card order-exception__card"
-            hidden={!visibleReferences.has(item.exceptionReference)}
-            key={item.exceptionReference}
-          >
-            <header>
-              <div>
-                <p className="bop-eyebrow order-exception__severity" data-severity={item.severity}>
-                  {item.severity} · due {item.dueAt}
+            <p>
+              {view.items.length === 0
+                ? "There are no open exceptions for this Store."
+                : "No exception on this page matches the filters."}
+            </p>
+          </StatePanel>
+        ) : null}
+        <div className="store-card-grid">
+          {view.items.map((item) => (
+            <article
+              className="store-card order-exception__card"
+              hidden={!visibleReferences.has(item.exceptionReference)}
+              key={item.exceptionReference}
+            >
+              <header>
+                <div>
+                  <p
+                    className="bop-eyebrow order-exception__severity"
+                    data-severity={item.severity}
+                  >
+                    {item.severity} · due <SourceTime instant={item.dueAt} />
+                  </p>
+                  <h3>{exceptionKindLabel[item.kind]}</h3>
+                </div>
+                <strong className="order-exception__status" data-status={item.status}>
+                  {item.status}
+                </strong>
+              </header>
+              <dl>
+                <div>
+                  <dt>Created</dt>
+                  <dd>
+                    <SourceTime instant={item.createdAt} />
+                  </dd>
+                </div>
+                <div>
+                  <dt>Order</dt>
+                  <dd>
+                    {item.orderReference === null
+                      ? "Order reference unavailable"
+                      : item.orderNumber !== null
+                        ? `Order ${item.orderNumber}`
+                        : "Linked order · order number unavailable"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Provider state</dt>
+                  <dd>{providerStateLabel[item.providerState]}</dd>
+                </div>
+                <div>
+                  <dt>Compensation</dt>
+                  <dd>{compensationLabel[item.compensationStatus]}</dd>
+                </div>
+                <div>
+                  <dt>Owner</dt>
+                  <dd>{item.ownerStatus}</dd>
+                </div>
+              </dl>
+              {csrf &&
+              item.kind === "PaidWithoutFulfillableOrder" &&
+              item.sourceOwner === "Payment" &&
+              item.orderReference !== null ? (
+                <CompensationReconciliationAction
+                  orderReference={item.orderReference}
+                  caseReference={item.exceptionReference}
+                  csrf={csrf}
+                  readOnly={readOnly}
+                />
+              ) : null}
+              {csrf &&
+              item.kind === "PaymentReconciliationDifference" &&
+              item.sourceOwner === "Payment" ? (
+                <ReconciliationFollowUpAction
+                  key={item.exceptionReference + ":" + csrf}
+                  exceptionReference={item.exceptionReference}
+                  csrf={csrf}
+                  readOnly={readOnly || item.sourceFinal}
+                />
+              ) : null}
+              {item.orderReference === null ? (
+                <p>
+                  No linked order is available. This payment difference requires reconciliation
+                  review.
                 </p>
-                <h3>{item.kind}</h3>
-              </div>
-              <strong className="order-exception__status" data-status={item.status}>
-                {item.status}
-              </strong>
-            </header>
-            <dl>
-              <div>
-                <dt>Created</dt>
-                <dd>{item.createdAt}</dd>
-              </div>
-              <div>
-                <dt>Order</dt>
-                <dd>
-                  {item.orderReference === null
-                    ? "Order reference unavailable"
-                    : item.orderNumber !== null
-                      ? `Order ${item.orderNumber}`
-                      : "Linked order · order number unavailable"}
-                </dd>
-              </div>
-              <div>
-                <dt>Provider state</dt>
-                <dd>{item.providerState}</dd>
-              </div>
-              <div>
-                <dt>Compensation</dt>
-                <dd>{item.compensationStatus}</dd>
-              </div>
-              <div>
-                <dt>Owner</dt>
-                <dd>{item.ownerStatus}</dd>
-              </div>
-            </dl>
-            {csrf &&
-            item.kind === "PaidWithoutFulfillableOrder" &&
-            item.sourceOwner === "Payment" &&
-            item.orderReference !== null ? (
-              <CompensationReconciliationAction
-                orderReference={item.orderReference}
-                caseReference={item.exceptionReference}
-                csrf={csrf}
-                readOnly={readOnly}
-              />
-            ) : null}
-            {csrf &&
-            item.kind === "PaymentReconciliationDifference" &&
-            item.sourceOwner === "Payment" ? (
-              <ReconciliationFollowUpAction
-                key={item.exceptionReference + ":" + csrf}
-                exceptionReference={item.exceptionReference}
-                csrf={csrf}
-                readOnly={readOnly || item.sourceFinal}
-              />
-            ) : null}
-            {item.orderReference === null ? (
-              <p>
-                No linked order is available. This payment difference requires reconciliation
-                review.
-              </p>
-            ) : null}
-            {csrf &&
-            item.kind === "PaymentReconciliationDifference" &&
-            item.sourceOwner === "Payment" &&
-            item.orderReference === null ? (
-              <UnmatchedCaptureRefundAction
-                key={item.exceptionReference + ":refund:" + csrf}
-                exceptionReference={item.exceptionReference}
-                csrf={csrf}
-                readOnly={readOnly}
-              />
-            ) : null}
-            <div className="card-actions">
-              <button disabled aria-describedby="exception-actions-unavailable">
-                Acknowledge
-              </button>
-              <button disabled aria-describedby="exception-actions-unavailable">
-                Assign
-              </button>
-              <button disabled aria-describedby="exception-actions-unavailable">
-                Request owning-domain compensation / retry
-              </button>
-              <button disabled aria-describedby="exception-actions-unavailable">
-                Resolve from final source evidence
-              </button>
-            </div>
-          </article>
-        ))}
-      </div>
-    </AppFrame>
+              ) : null}
+              {csrf &&
+              item.kind === "PaymentReconciliationDifference" &&
+              item.sourceOwner === "Payment" &&
+              item.orderReference === null ? (
+                <UnmatchedCaptureRefundAction
+                  key={item.exceptionReference + ":refund:" + csrf}
+                  exceptionReference={item.exceptionReference}
+                  csrf={csrf}
+                  readOnly={readOnly}
+                />
+              ) : null}
+            </article>
+          ))}
+        </div>
+      </>
+    </WorkspacePage>
   );
 }
 const defaultExceptionClient = createOrderExceptionClient();
@@ -476,9 +480,11 @@ export function OrderExceptionPage({
   }, [client, generation, state]);
   if (state?.client !== client || state.generation !== generation)
     return (
-      <StatePanel heading="Loading Order Exception Workbench" tone="neutral" status>
-        <p>Reading the selected Store's authorized exceptions.</p>
-      </StatePanel>
+      <WorkspacePage className="order-exception-page" title="Exceptions">
+        <StatePanel heading="Loading exceptions" tone="neutral" status>
+          <p>Reading the Store's exceptions…</p>
+        </StatePanel>
+      </WorkspacePage>
     );
   return state.view ? (
     <OrderExceptionScreen
@@ -488,11 +494,13 @@ export function OrderExceptionPage({
       csrf={csrf}
     />
   ) : (
-    <StatePanel heading="Order Exception Workbench unavailable" tone="error" status>
-      <p>No exception or Provider finality is inferred. No action was sent.</p>
-      <button ref={recoveryButton} onClick={refresh}>
-        Retry loading exceptions
-      </button>
-    </StatePanel>
+    <WorkspacePage className="order-exception-page" title="Exceptions">
+      <StatePanel heading="Exceptions unavailable" tone="error" status>
+        <p>Exceptions could not be loaded. No action was sent.</p>
+        <button ref={recoveryButton} onClick={refresh}>
+          Retry loading exceptions
+        </button>
+      </StatePanel>
+    </WorkspacePage>
   );
 }

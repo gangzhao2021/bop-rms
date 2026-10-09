@@ -17,7 +17,7 @@ describe("WP-2423 workspace layout", () => {
       true,
     );
     expect(usesWorkspaceLayout("/operations/orders")).toBe(true);
-    expect(usesWorkspaceLayout("/app")).toBe(false);
+    expect(usesWorkspaceLayout("/app")).toBe(true);
     expect(usesWorkspaceLayout("/operations/kitchen")).toBe(false);
     expect(usesWorkspaceLayout("/app/commerce/products/new")).toBe(false);
     expect(usesWorkspaceLayout("/menu")).toBe(false);

@@ -56,6 +56,8 @@ test("@production current queue pages and clears old orders after denied refresh
     canRequestAcceptance: false,
     currentPhase: "Accepted",
     currentVersion: 2,
+    unfulfillable: null,
+    pickupNotCollected: false,
   });
   await page.route("**/merchant/orders*", (route) => {
     expect(route.request().method()).toBe("GET");
@@ -66,24 +68,25 @@ test("@production current queue pages and clears old orders after denied refresh
         : {
             headers,
             json:
+              // WP-2423: newest first; the next page continues with older Orders.
               after === null
                 ? {
-                    items: Array.from({ length: 50 }, (_, i) => row(i + 1)),
-                    nextAfterOrderReference: id(50),
+                    items: Array.from({ length: 50 }, (_, i) => row(100 - i)),
+                    nextAfterOrderReference: id(51),
                   }
-                : { items: [row(51)], nextAfterOrderReference: null },
+                : { items: [row(50)], nextAfterOrderReference: null },
           },
     );
   });
   await page.goto("/operations/orders");
-  await expect(page.getByRole("heading", { name: "ORD-1", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ORD-100", exact: true })).toBeVisible();
   const orderRows = page.locator("details.order-workbench-entry");
   const visibleOrderRows = page.locator("details.order-workbench-entry:visible");
   await expect(visibleOrderRows).toHaveCount(50);
-  await expect(page.getByText("Showing 50 of 50 orders on this server page.")).toBeVisible();
-  await page.getByRole("searchbox", { name: "Exact order number" }).fill("ORD-1");
+  await expect(page.getByText("Showing 50 of 50 orders on this page.")).toBeVisible();
+  await page.getByRole("searchbox", { name: "Exact order number" }).fill("ORD-100");
   await expect(visibleOrderRows).toHaveCount(1);
-  await expect(orderRows.first()).toContainText("ORD-1");
+  await expect(orderRows.first()).toContainText("ORD-100");
   await expect(orderRows.first()).toHaveAttribute("open", "");
   await page.getByRole("combobox", { name: "Order type" }).selectOption("DineIn");
   await expect(page.getByRole("heading", { name: "No orders match these filters" })).toBeVisible();
@@ -113,16 +116,16 @@ test("@production current queue pages and clears old orders after denied refresh
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Next page", exact: true }).focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "ORD-51", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "ORD-1", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "ORD-50", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ORD-100", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Refresh orders" })).toBeFocused();
   deny = true;
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Permission denied" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "ORD-51", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "ORD-50", exact: true })).toHaveCount(0);
   deny = false;
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "ORD-1", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ORD-100", exact: true })).toBeVisible();
 });
 
 test("@production acceptance retries the same operation after a lost response", async ({
@@ -194,6 +197,8 @@ test("@production acceptance retries the same operation after a lost response", 
             canRequestAcceptance: false,
             currentPhase: "Accepted",
             currentVersion: committed ? 4 : 3,
+            unfulfillable: null,
+            pickupNotCollected: false,
           },
         ],
         nextAfterOrderReference: null,
@@ -337,6 +342,8 @@ test("@production refresh after rejected acceptance uses current order version",
             canRequestAcceptance: false,
             currentPhase: "Accepted",
             currentVersion: version,
+            unfulfillable: null,
+            pickupNotCollected: false,
           },
         ],
         nextAfterOrderReference: null,
@@ -458,6 +465,8 @@ test("@production Orders reloads the current page after an authorized Store swit
             canRequestAcceptance: false,
             currentPhase: "Accepted",
             currentVersion: 2,
+            unfulfillable: null,
+            pickupNotCollected: false,
           },
         ],
         nextAfterOrderReference: null,

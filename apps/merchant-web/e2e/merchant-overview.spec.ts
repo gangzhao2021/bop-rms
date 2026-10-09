@@ -48,29 +48,23 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   );
 
   await page.goto("/app");
-  await expect(page.getByRole("heading", { name: "OPERATIONS" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Training Store" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Overview" })).toHaveAttribute(
+  await expect(page.getByRole("heading", { level: 1, name: "Training Store" })).toBeVisible();
+  const workspace = page.getByRole("navigation", { name: "Workspace" });
+  await expect(workspace.getByRole("link", { name: "Home" }).first()).toHaveAttribute(
     "aria-current",
     "page",
   );
-  await expect(page.getByRole("link", { name: "Orders" })).toBeVisible();
+  await expect(workspace.getByRole("link", { name: "Orders" }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Kitchen" })).toHaveCount(0);
-  await expect(page.getByRole("banner").getByText("Training Store", { exact: true })).toBeVisible();
   await expect(page.getByText("Open", { exact: true })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Authorized Store" })).toHaveValue(id(99));
-  await expect(
-    page.getByText("Unavailable until the WP-1905 dashboard projection is connected."),
-  ).toHaveCount(3);
+  await expect(page.getByText("WP-1905")).toHaveCount(0);
+  await expect(page.getByText("not available in this release", { exact: false })).toBeVisible();
 
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
-    if (width === 1440) {
-      await expect(page.locator(".bop-shell__header-status")).toHaveText("Current");
-      await expect(page.locator(".bop-shell__header-status")).toBeVisible();
-    } else {
-      await expect(page.locator(".bop-shell__header-status")).toBeHidden();
-    }
+    await expect(page.locator(".workspace-page__freshness")).toHaveText("Updated");
+    await expect(page.locator(".workspace-page__freshness")).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);

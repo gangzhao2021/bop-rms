@@ -102,9 +102,7 @@ it("does not mark an expired proof ready", async () => {
     response({ ...page(), items: [{ ...item(), proof: { ...item().proof, expiresAt: at } }] }),
   );
   // WP-2423: an expired proof is not ready; staff check the customer in person instead.
-  expect(parsePickupQueueView(await f.client.loadQueue()).items[0]?.proofReadiness).toBe(
-    "Expired",
-  );
+  expect(parsePickupQueueView(await f.client.loadQueue()).items[0]?.proofReadiness).toBe("Expired");
 });
 it.each([
   [403, "PermissionDenied"],

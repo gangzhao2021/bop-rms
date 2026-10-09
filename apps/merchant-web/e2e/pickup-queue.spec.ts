@@ -78,20 +78,20 @@ test("@production Pickup paging, current scope and permission recovery", async (
   });
   await page.goto("/operations/pickup");
   const heading = (name: string) => page.getByRole("heading", { name, exact: true });
-  const refresh = page.getByRole("button", { name: "Refresh from source", exact: true });
-  await expect(heading(first)).toBeVisible();
-  const orderSearch = page.getByRole("searchbox", { name: "Search Order reference" });
+  const refresh = page.getByRole("button", { name: "Refresh", exact: true });
+  await expect(heading("Order " + first)).toBeVisible();
+  const orderSearch = page.getByRole("searchbox", { name: "Order number" });
   await orderSearch.fill("missing");
-  await expect(heading("No matching pickups")).toBeVisible();
-  const clearFilters = page.getByRole("button", { name: "Clear page filters", exact: true });
+  await expect(heading("No pickups waiting")).toBeVisible();
+  const clearFilters = page.getByRole("button", { name: "Clear filters", exact: true });
   await expect(clearFilters).toBeEnabled();
   await clearFilters.click();
-  await expect(heading(first)).toBeVisible();
-  const stateFilter = page.getByRole("combobox", { name: "Current page filter", exact: true });
+  await expect(heading("Order " + first)).toBeVisible();
+  const stateFilter = page.getByRole("combobox", { name: "Status", exact: true });
   await stateFilter.focus();
   await page.keyboard.press("W");
   await expect(stateFilter).toHaveValue("Waiting");
-  await expect(heading(first)).toBeVisible();
+  await expect(heading("Order " + first)).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(page.getByRole("combobox", { name: "Claim", exact: true })).toBeFocused();
   await page.keyboard.press("Tab");
@@ -100,30 +100,17 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await expect(clearFilters).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(stateFilter).toHaveValue("All");
-  await expect(heading(first)).toBeVisible();
-  await expect(page.locator("option").filter({ hasText: "Overdue" })).toHaveAttribute(
-    "disabled",
-    "",
-  );
-  await expect(stateFilter).toHaveAttribute("aria-describedby", "pickup-overdue-availability");
-  await expect(page.locator("#pickup-overdue-availability")).toContainText(
-    "no authorized due time",
-  );
-  await expect(page.locator("article").first()).toContainText("Ready 20 minutes");
+  await expect(heading("Order " + first)).toBeVisible();
+  await expect(page.locator("option").filter({ hasText: "Overdue" })).toHaveCount(0);
+  await expect(page.locator("article").first()).toContainText("Ready for 20 min");
   await expect(page.locator("article").first()).toContainText("Waiting");
   await expect(page.locator("article").first()).not.toContainText("Overdue");
-  const claim = page.getByRole("button", { name: "Claim", exact: true }).first();
-  const reportException = page
-    .getByRole("button", { name: "Report exception", exact: true })
-    .first();
-  await expect(claim).toBeDisabled();
-  await expect(reportException).toBeDisabled();
-  await expect(claim).toHaveAttribute("aria-describedby", "pickup-command-availability");
-  await expect(reportException).toHaveAttribute("aria-describedby", "pickup-command-availability");
-  await expect(page.getByText(/authorized source-bound Task or Fulfillment command/)).toBeVisible();
+  // Dead placeholder actions are gone from the pilot queue.
+  await expect(page.getByRole("button", { name: "Claim", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Report exception", exact: true })).toHaveCount(0);
   await page.getByRole("combobox").nth(1).selectOption("Unavailable");
   await page.getByRole("combobox").nth(2).selectOption("Unavailable");
-  await expect(heading(first)).toBeVisible();
+  await expect(heading("Order " + first)).toBeVisible();
   await clearFilters.click();
   await expect(page.getByRole("combobox").nth(1)).toHaveValue("All");
   await expect(page.getByRole("combobox").nth(2)).toHaveValue("All");
@@ -189,13 +176,13 @@ test("@production Pickup paging, current scope and permission recovery", async (
     exact: true,
   });
   await orderSearch.fill("missing");
-  await expect(heading("No matching pickups")).toBeVisible();
+  await expect(heading("No pickups waiting")).toBeVisible();
   const firstCard = page.locator("article.store-card").first();
   await expect(firstCard).toHaveAttribute("hidden", "");
   const hiddenRetry = firstCard.locator("button").filter({ hasText: "Retry same verification" });
   await expect(hiddenRetry).toBeAttached();
   await orderSearch.fill(first);
-  await expect(heading(first)).toBeVisible();
+  await expect(heading("Order " + first)).toBeVisible();
   await expect(retryVerification).toBeVisible();
   await retryVerification.focus();
   await page.keyboard.press("Enter");
@@ -281,8 +268,8 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeDisabled();
   await orderSearch.fill("");
   await page.getByRole("button", { name: "Next page", exact: true }).click();
-  await expect(heading(second)).toBeVisible();
-  await expect(heading(first)).toHaveCount(0);
+  await expect(heading("Order " + second)).toBeVisible();
+  await expect(heading("Order " + first)).toHaveCount(0);
   await expect(refresh).toBeFocused();
   const openSecondProof = page.getByRole("button", {
     name: "Open proof verification",
@@ -316,13 +303,11 @@ test("@production Pickup paging, current scope and permission recovery", async (
   ).toBeFocused();
   await expect(secondReview).toBeDisabled();
   await page.getByRole("button", { name: "Previous page", exact: true }).click();
-  await expect(heading(first)).toBeVisible();
+  await expect(heading("Order " + first)).toBeVisible();
   const includeCompleted = page.getByRole("checkbox", { name: "Include completed pickups" });
   await includeCompleted.focus();
   await page.keyboard.press("Space");
   await expect(page.locator("article").getByText("Completed", { exact: false })).toBeVisible();
-  await expect(page.locator("#pickup-overdue-availability")).toBeVisible();
-  await expect(stateFilter).toHaveAttribute("aria-describedby", "pickup-overdue-availability");
   await expect(refresh).toBeFocused();
   expect(queries.at(-1)).toMatchObject({
     afterFulfillmentReference: null,
@@ -337,10 +322,10 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await expect(refresh).toBeFocused();
   denied = false;
   await page.keyboard.press("Enter");
-  await expect(heading(first)).toBeVisible();
+  await expect(heading("Order " + first)).toBeVisible();
   foreign = true;
   await refresh.click();
-  await expect(heading("Pickup Queue unavailable")).toBeVisible();
+  await expect(heading("Pickups unavailable")).toBeVisible();
   await expect(page.locator("article")).toHaveCount(0);
   expect(
     await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
@@ -447,14 +432,14 @@ test("@production Pickup reloads the current page after an authorized Store swit
   await page.goto("/app");
   await expect(page.getByRole("heading", { name: "Store 1", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Pickup", exact: true }).click();
-  await expect(page.getByText("PICKUPSTORE00000000001", { exact: true })).toBeVisible();
+  await expect(page.getByText("Order PICKUPSTORE00000000001", { exact: true })).toBeVisible();
 
   await page.goto("/app");
   await page.getByLabel("Authorized Store").selectOption(storeTwo.storeReference);
   await page.getByRole("button", { name: "Switch Store", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Store 2", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Pickup", exact: true }).click();
-  await expect(page.getByText("PICKUPSTORE00000000002", { exact: true })).toBeVisible();
-  await expect(page.getByText("PICKUPSTORE00000000001", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Order PICKUPSTORE00000000002", { exact: true })).toBeVisible();
+  await expect(page.getByText("Order PICKUPSTORE00000000001", { exact: true })).toHaveCount(0);
   expect(readScopes).toEqual([storeOne.storeReference, storeTwo.storeReference]);
 });

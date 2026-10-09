@@ -1,7 +1,9 @@
 import { PickupProofForm } from "./PickupProofForm.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
 import { PickupNotCollectedAction, pickupHoldMinutes } from "./PickupNotCollectedAction.js";
-import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { StatePanel } from "@bop-rms/ui";
+import { Freshness } from "./StoreTime.js";
+import { WorkspacePage } from "./WorkspacePage.js";
 import { useCallback, useEffect, useState, useMemo, useRef, type RefObject } from "react";
 import { createPickupClient } from "./pickup-client.js";
 import { Link } from "react-router";
@@ -28,26 +30,34 @@ type State =
   | { readonly kind: "Found"; readonly view: PickupQueueView };
 export function PickupStatePanel({ state }: { readonly state: Exclude<State["kind"], "Found"> }) {
   const copy = {
-    Loading: ["Loading", "Loading the authorized Pickup Queue…"],
+    Loading: ["Loading", "Loading pickups…"],
     PermissionDenied: [
       "Permission denied",
-      "Your Fulfillment permission or Store scope does not allow this queue.",
+      "Your permissions or Store scope do not allow the pickup queue.",
     ],
-    NotFound: ["Pickup unavailable", "This Pickup is not available in the authorized Store scope."],
-    Offline: ["Offline read-only", "Reconnect and refresh before any Pickup action."],
-    Conflict: ["Source changed", "Refresh the authoritative Fulfillment version before retrying."],
-    CommandFailed: ["Command failed", "No handoff or Fulfillment transition is assumed."],
+    NotFound: ["Pickup unavailable", "This pickup is not at the selected Store."],
+    Offline: ["You’re offline", "Reconnect and refresh before handing over a pickup."],
+    Conflict: ["Pickup changed", "Refresh to see the current pickup before trying again."],
+    CommandFailed: [
+      "Action not confirmed",
+      "The handoff was not confirmed. Refresh before trying again.",
+    ],
     Unavailable: [
-      "Pickup Queue unavailable",
-      "The authorized Pickup queue could not be loaded. Refresh to try again.",
+      "Pickups unavailable",
+      "The pickup queue could not be loaded. Refresh to try again.",
     ],
   } as const;
   return (
     <StatePanel heading={copy[state][0]} tone={state === "Loading" ? "neutral" : "error"} status>
       <p>{copy[state][1]}</p>
-      <Link to="/app">Return to overview</Link>
+      <Link to="/app">Home</Link>
     </StatePanel>
   );
+}
+/** Waiting-time tier for the eyebrow colour: a pickup left too long turns visibly late. */
+export function waitTier(waitMinutes: number, completed: boolean): "ok" | "warning" | "late" {
+  if (completed) return "ok";
+  return waitMinutes >= pickupHoldMinutes ? "late" : waitMinutes >= 15 ? "warning" : "ok";
 }
 function PickupCard({
   item,
@@ -79,13 +89,12 @@ function PickupCard({
     <article className="store-card pickup-queue__card" hidden={hidden}>
       <header>
         <div>
-          <p className="bop-eyebrow pickup-queue__phase">
-            {completed ? "Completed" : `Ready ${wait} minutes · ${item.phase}`}
+          <p className="bop-eyebrow pickup-queue__phase" data-wait={waitTier(wait, completed)}>
+            {completed ? "Completed" : `Ready for ${wait} min`}
           </p>
           <h3>
-            {item.publicOrderNumber ??
-              item.execution?.publicOrderReference ??
-              "Order reference unavailable"}
+            Order{" "}
+            {item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "number unavailable"}
           </h3>
         </div>
         <strong className="pickup-queue__status" data-completed={completed}>
@@ -94,41 +103,44 @@ function PickupCard({
       </header>
       <dl>
         <div>
-          <dt>Proof</dt>
+          <dt>Pickup code</dt>
           <dd>
             {item.proofReadiness === "Expired"
               ? "Code expired · check in person"
               : item.proofReadiness === "NotIssued"
                 ? "No code sent · check in person"
-                : item.proofReadiness}
+                : item.proofReadiness === "Ready"
+                  ? "Sent to customer"
+                  : item.proofReadiness}
           </dd>
         </div>
         <div>
-          <dt>Staging</dt>
-          <dd>{item.stagingLocation ?? "Unavailable"}</dd>
-        </div>
-        <div>
-          <dt>Claim</dt>
-          <dd>{item.claimStatus}</dd>
-        </div>
-        <div>
-          <dt>Exception</dt>
-          <dd>{item.exceptionStatus}</dd>
+          <dt>Shelf</dt>
+          <dd>{item.stagingLocation ?? "Not set"}</dd>
         </div>
         <div>
           <dt>Packages</dt>
-          <dd>{item.packageCount ?? "Unavailable"}</dd>
+          <dd>{item.packageCount ?? "Not set"}</dd>
         </div>
         <div>
-          <dt>Allergen cue</dt>
-          <dd>{item.allergenCue}</dd>
+          <dt>Allergen</dt>
+          <dd>
+            {item.allergenCue === "Present"
+              ? "Allergen present"
+              : item.allergenCue === "None"
+                ? "No cue"
+                : "Unavailable"}
+          </dd>
         </div>
+        {item.exceptionStatus === "Reported" ? (
+          <div>
+            <dt>Exception</dt>
+            <dd>Reported</dd>
+          </div>
+        ) : null}
       </dl>
       {!completed ? (
         <div className="card-actions">
-          <button disabled aria-describedby="pickup-command-availability">
-            Claim
-          </button>
           {inPersonEligible && workstation && proofContext ? (
             <PickupHandoffForm
               key={"in-person:" + (item.execution?.aggregateVersion ?? "")}
@@ -146,9 +158,7 @@ function PickupCard({
               csrf={proofContext.csrf}
               storeReference={proofContext.storeReference}
             />
-          ) : (
-            <button disabled>Open proof verification</button>
-          )}
+          ) : null}
           {inPersonEligible && wait >= pickupHoldMinutes && proofContext ? (
             <PickupNotCollectedAction
               item={item}
@@ -156,19 +166,10 @@ function PickupCard({
               storeReference={proofContext.storeReference}
             />
           ) : null}
-          <button disabled aria-describedby="pickup-command-availability">
-            Report exception
-          </button>
         </div>
       ) : null}
-      {canComplete ? (
-        <StatePanel heading="Explicit handoff confirmation required" status>
-          <p>
-            Verify the signed proof, confirm this exact Order and submit one idempotent Complete
-            Pickup Handoff command.
-          </p>
-          {!workstation ? <button disabled>Complete handoff — adapter unavailable</button> : null}
-        </StatePanel>
+      {canComplete && !workstation ? (
+        <p role="status">Handoff is not available on this device. Ask a manager.</p>
       ) : null}
     </article>
   );
@@ -213,38 +214,31 @@ export function PickupQueueScreen({
     Boolean(query) || filter !== "All" || claimFilter !== "All" || exceptionFilter !== "All";
   const visibleReferences = new Set(items.map((item) => item.fulfillmentReference));
   return (
-    <AppFrame
-      className="bop-shell--pickup"
-      title="Pickup Queue"
-      description={`FUL-PICKUP-QUEUE · ${view.storeLabel}`}
+    <WorkspacePage
+      className="pickup-queue"
+      title="Pickup"
+      meta={view.storeLabel}
+      status={<Freshness status={view.freshnessStatus} at={view.projectedAt} />}
+      actions={
+        <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
+          Refresh
+        </button>
+      }
     >
-      <div className="pickup-queue">
-        <header className="screen-heading">
-          <div>
-            <h2>Ready for pickup</h2>
-            <p>
-              {view.freshnessStatus} · {view.projectedAt}
-            </p>
-          </div>
-          <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
-            Refresh from source
-          </button>
-        </header>
+      <>
         {readOnly ? (
-          <StatePanel heading="Queue stale — read-only" tone="offline" status>
-            <p>
-              A fresh Fulfillment source is required before claim, proof verification or handoff.
-            </p>
+          <StatePanel heading="Data may be out of date" tone="offline" status>
+            <p>Refresh before confirming a handoff.</p>
           </StatePanel>
         ) : null}
         <div className="list-filters pickup-queue__filters">
           <label>
-            Search Order reference
+            Order number
             <input
               type="search"
               value={orderQuery}
               onChange={(event) => setOrderQuery(event.currentTarget.value)}
-              placeholder="Public Order reference"
+              placeholder="e.g. 16"
             />
           </label>
           <label className="pickup-completed-filter">
@@ -258,18 +252,13 @@ export function PickupQueueScreen({
             Include completed pickups
           </label>
           <label>
-            Current page filter
-            <select
-              aria-describedby="pickup-overdue-availability"
-              value={filter}
-              onChange={(event) => setFilter(event.currentTarget.value)}
-            >
-              <option>All</option>
-              <option>Ready</option>
-              <option>Waiting</option>
-              <option>InProgress</option>
-              <option>Completed</option>
-              <option disabled>Overdue</option>
+            Status
+            <select value={filter} onChange={(event) => setFilter(event.currentTarget.value)}>
+              <option value="All">All</option>
+              <option value="Ready">Ready</option>
+              <option value="Waiting">Waiting</option>
+              <option value="InProgress">In progress</option>
+              <option value="Completed">Completed</option>
             </select>
           </label>
           <label>
@@ -306,17 +295,9 @@ export function PickupQueueScreen({
               setExceptionFilter("All");
             }}
           >
-            Clear page filters
+            Clear filters
           </button>
         </div>
-        <p id="pickup-command-availability" className="muted">
-          Claim and Report exception are unavailable until an authorized source-bound Task or
-          Fulfillment command is defined for this Pickup.
-        </p>
-        <p id="pickup-overdue-availability" className="muted">
-          Waiting time shows elapsed minutes since the Order became ready. Overdue classification is
-          unavailable because this view has no authorized due time.
-        </p>
         <nav className="pickup-pagination" aria-label="Pickup pages">
           <button disabled={!onPrevious} onClick={onPrevious}>
             Previous page
@@ -341,12 +322,16 @@ export function PickupQueueScreen({
           </div>
         ) : null}
         {items.length === 0 ? (
-          <StatePanel heading="No matching pickups" status>
-            <p>No authorized pickup matches this page and filter.</p>
+          <StatePanel heading="No pickups waiting" status>
+            <p>
+              {view.items.length === 0
+                ? "Nothing is waiting for pickup right now."
+                : "No pickup on this page matches the filters."}
+            </p>
           </StatePanel>
         ) : null}
-      </div>
-    </AppFrame>
+      </>
+    </WorkspacePage>
   );
 }
 export function PickupQueuePage(props: {
@@ -418,14 +403,20 @@ export function PickupQueuePage(props: {
   };
   if (state.kind !== "Found")
     return (
-      <>
+      <WorkspacePage
+        className="pickup-queue"
+        title="Pickup"
+        meta={props.storeLabel}
+        actions={
+          state.kind !== "Loading" ? (
+            <button ref={refreshButtonRef} onClick={refresh}>
+              Refresh
+            </button>
+          ) : null
+        }
+      >
         <PickupStatePanel state={state.kind} />
-        {state.kind !== "Loading" ? (
-          <button ref={refreshButtonRef} onClick={refresh}>
-            Refresh from source
-          </button>
-        ) : null}
-      </>
+      </WorkspacePage>
     );
   const next = state.view.nextAfterFulfillmentReference;
   return (

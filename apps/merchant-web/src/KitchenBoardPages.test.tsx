@@ -6,6 +6,11 @@ import {
   KitchenBoardScreen,
   KitchenBoardStatePanel,
   KitchenWorkItemScreen,
+  kitchenAgeTier,
+  kitchenLateMinutes,
+  kitchenWarningMinutes,
+  newQueuedReferences,
+  playKitchenChime,
 } from "./KitchenBoardPages.js";
 import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
 import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen-board.js";
@@ -17,12 +22,9 @@ describe("WP-1804 Kitchen Board screens", () => {
       </MemoryRouter>,
     );
     for (const value of [
-      "OPERATIONS",
-      'data-mobile-brand-title="true"',
-      'class="bop-shell__header-mobile-title" aria-hidden="true">KITCHEN</span>',
+      "Kitchen display",
       "Kitchen",
-      "KIT-KITCHEN-QUEUE",
-      "Active work",
+      "Updated · 15:12 UTC",
       "Queue",
       "Order or ticket reference",
       "Exact reference only. The value stays in this page session and is not added to the URL.",
@@ -37,7 +39,8 @@ describe("WP-1804 Kitchen Board screens", () => {
       "12 min",
       'class="kitchen-work-item__quantity"><dt>Quantity</dt><dd>0 / 2</dd></dl>',
       "Allergen review required",
-      "Lifecycle action state unavailable from this projection",
+      "Actions unavailable for this item",
+      'data-age="warning"',
     ])
       expect(html).toContain(value);
     expect(html).not.toContain("Extra mushrooms");
@@ -73,7 +76,7 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(html).not.toContain("SLA");
     expect(html).not.toContain("Priority");
     expect(html).not.toContain("Claim");
-    expect(html).toContain("safe Order/ticket reference display");
+    expect(html).not.toContain("Unavailable here");
   });
   it("keeps station-unlabeled work visible and disables a meaningless station filter", () => {
     const unlabeledItem = {
@@ -103,9 +106,7 @@ describe("WP-1804 Kitchen Board screens", () => {
       '<span class="kitchen-filter-visually-hidden">Station</span><select disabled="">',
     );
     expect(html).toContain('<option value="All" selected="">Unavailable</option>');
-    expect(html).toContain(
-      "station labels, allergen/exception cues, course, priority, overdue criteria and Hold/Prioritize actions.",
-    );
+    expect(html).not.toContain("Hold/Prioritize");
   });
   it("groups by source station reference without displaying the reference", () => {
     const firstStation = "018f0f58-767a-7f3b-a1d0-000000000431";
@@ -183,31 +184,30 @@ describe("WP-1804 Kitchen Board screens", () => {
         <KitchenBoardStatePanel state="CommandFailed" />
       </MemoryRouter>,
     );
-    expect(html).toContain("KIT-WORK-ITEM");
+    expect(html).toContain('class="kitchen-board-eyebrow">Work item</p>');
+    expect(html).not.toContain("KIT-WORK-ITEM");
     expect(html).not.toContain("Ticket display reference unavailable");
     expect(html).not.toContain("Order display reference unavailable");
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000402");
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000403");
     expect(html).toContain("Additional detail</h3>");
-    expect(html).toContain(
-      "Only milestones present in this authorized projection are shown; other registered detail remains unavailable.",
-    );
+    expect(html).toContain("Only recorded milestones are shown.");
     expect(html).toContain("Recipe &amp; handling snapshots");
     expect(html).toContain("Allergen acknowledgements");
     expect(html).toContain("Timers &amp; dependencies");
     expect(html).toContain("Work item history");
     expect(html).toContain("Work item created");
     expect(html).toContain(
-      "Acceptance and Order item ready times are not included in this response. Kitchen start, progress and completion timestamps are unavailable from this projection.",
+      "Start, progress and completion times are not recorded on this screen yet.",
     );
     expect(html).toContain("Modifiers");
     expect(html).toContain("Extra mushrooms");
     expect(html).toContain("× 2");
     expect(html).toContain("KDS session unverified");
     expect(html).toContain("18 min");
-    expect(html).toContain(
-      "Commands are unavailable from this detail route. Queue filters are preserved when returning.",
-    );
+    expect(html).toContain("Take actions from the queue. Your filters are kept when you return.");
+    expect(html).toContain("Action not confirmed");
+    expect(html).toContain("Nothing is assumed. Refresh before trying again.");
     expect(html).not.toContain("Complete remaining quantity");
     expect(html).not.toContain("Mark ready");
   });
@@ -248,8 +248,9 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(html).toContain('<time dateTime="2026-08-12T15:17:00.000Z">');
     expect(html).toContain("Order item marked ready");
     expect(html).toContain(
-      "Recorded acceptance and Order item ready times are shown above when available. Kitchen start, progress and completion timestamps are unavailable from this projection.",
+      '<time dateTime="2026-08-12T15:17:00.000Z">2026-08-12T15:17:00.000Z</time>',
     );
+    expect(html).not.toContain("unavailable from this projection");
     expect(html.indexOf("Work item created")).toBeLessThan(html.indexOf("Accepted"));
     expect(html.indexOf("Accepted")).toBeLessThan(html.indexOf("Order item marked ready"));
     expect(html).toContain("Timers &amp; dependencies</dt><dd>Unavailable</dd>");
@@ -289,7 +290,7 @@ it("uses only the authorized navigation supplied by the current workspace", () =
     </MemoryRouter>,
   );
   expect(html).toContain(
-    '<nav class="bop-shell__nav" aria-label="Primary"><span class="kitchen-navigation-label">WORKSPACE</span><a href="/operations/kitchen" aria-current="page">Kitchen</a></nav>',
+    '<nav class="bop-shell__nav" aria-label="Primary"><a href="/operations/kitchen" aria-current="page">Kitchen</a></nav>',
   );
   expect(html).not.toContain('href="/operations/orders"');
 });
@@ -319,8 +320,71 @@ it("offers manual refresh and does not claim unavailable operator or safety fact
   expect(html).toMatch(
     /<span class="kitchen-filter-visually-hidden">Exception<\/span><select disabled="">/,
   );
-  expect(html).toContain("Refresh from source");
+  expect(html).toContain(">Refresh</button>");
+  expect(html).not.toContain("Refresh from source");
   expect(html).not.toContain("Named operator</dd>");
+});
+
+describe("WP-2423 M3 kitchen display", () => {
+  it("tiers waiting time and keeps the thresholds explicit", () => {
+    expect(kitchenAgeTier(0)).toBe("ok");
+    expect(kitchenAgeTier(kitchenWarningMinutes - 1)).toBe("ok");
+    expect(kitchenAgeTier(kitchenWarningMinutes)).toBe("warning");
+    expect(kitchenAgeTier(kitchenLateMinutes - 1)).toBe("warning");
+    expect(kitchenAgeTier(kitchenLateMinutes)).toBe("late");
+  });
+  it("names only queued work that was not in the previous read", () => {
+    const previous = parseKitchenBoardView(kitchenBoardFixture());
+    const arrived = {
+      ...kitchenItemFixture(),
+      workItemReference: "018f0f58-767a-7f3b-a1d0-000000000441",
+    };
+    const started = {
+      ...kitchenItemFixture(),
+      workItemReference: "018f0f58-767a-7f3b-a1d0-000000000442",
+      status: "In Progress" as const,
+    };
+    const next = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [kitchenItemFixture(), arrived, started],
+    });
+    expect(newQueuedReferences(null, next)).toEqual([]);
+    expect(newQueuedReferences(previous, next)).toEqual([arrived.workItemReference]);
+    expect(newQueuedReferences(next, next)).toEqual([]);
+  });
+  it("offers the sound toggle, auto-refresh note and plain state labels", () => {
+    const view = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [{ ...kitchenItemFixture(), status: "In Progress" }],
+    });
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={view}
+          onRefresh={() => undefined}
+          soundOn={false}
+          onSoundToggle={() => undefined}
+          autoRefresh
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).toContain(">Sound off</button>");
+    expect(html).toContain("Auto-refresh every 10 s");
+    expect(html).toContain('<strong data-status="In Progress">In progress</strong>');
+    expect(html).not.toContain("KIT-KITCHEN-QUEUE");
+    const on = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={view} soundOn onSoundToggle={() => undefined} />
+      </MemoryRouter>,
+    );
+    expect(on).toContain('aria-pressed="true"');
+    expect(on).toContain(">Sound on</button>");
+    expect(on).not.toContain("Auto-refresh");
+  });
+  it("plays nothing where audio is unavailable", () => {
+    expect(() => playKitchenChime()).not.toThrow();
+  });
 });
 
 it("drops restored allergen and exception filters when the projection omits those fields", () => {

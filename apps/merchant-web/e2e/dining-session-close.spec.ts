@@ -64,6 +64,8 @@ test("@production session closing advances both steps and recovers a lost finali
             canRequestAcceptance: false,
             currentPhase: "Accepted",
             currentVersion: 2,
+            unfulfillable: null,
+            pickupNotCollected: false,
           },
         ],
         nextAfterOrderReference: null,

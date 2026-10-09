@@ -1,4 +1,11 @@
-import type { ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
+
+/**
+ * True inside a layout that already renders the page's skip link (one per document); the frame
+ * then leaves its own out instead of offering two.
+ */
+export const SkipLinkProvidedContext = createContext(false);
+
 export interface AppFrameProps {
   children: ReactNode;
   description: string;
@@ -20,14 +27,17 @@ export function AppFrame({
   navigationLabel = "Primary",
   title,
 }: AppFrameProps) {
+  const skipLinkProvided = useContext(SkipLinkProvidedContext);
   return (
     <div
       className={`bop-shell${className ? ` ${className}` : ""}`}
       data-mobile-brand-title={mobileBrandTitle ? "true" : undefined}
     >
-      <a className="bop-skip-link" href="#main-content">
-        Skip to main content
-      </a>
+      {skipLinkProvided ? null : (
+        <a className="bop-skip-link" href="#main-content">
+          Skip to main content
+        </a>
+      )}
       <header className="bop-shell__header">
         <strong aria-label="BOP">BOP</strong>
         <h1>{title}</h1>

@@ -33,6 +33,7 @@ const view = (index: number) => ({
     {
       exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000901",
       orderReference: "018f0f58-767a-7f3b-a1d0-000000000902",
+      orderNumber: null,
       kind: "PaidWithoutFulfillableOrder",
       severity: "Critical",
       status: "Open",
@@ -74,35 +75,31 @@ test("@production exception read recovers and clears old data on refresh denial"
   response = "stale";
   await page.getByRole("button", { name: "Retry loading exceptions" }).focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Stale workbench — read-only" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Data may be out of date" })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "PaidWithoutFulfillableOrder", exact: true }),
+    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
   ).toBeVisible();
-  await expect(page.locator("#exception-actions-unavailable")).toBeVisible();
   for (const name of [
     "Acknowledge",
     "Assign",
     "Request owning-domain compensation / retry",
     "Resolve from final source evidence",
-  ]) {
-    const action = page.getByRole("button", { name, exact: true });
-    await expect(action).toBeDisabled();
-    await expect(action).toHaveAttribute("aria-describedby", "exception-actions-unavailable");
-  }
-  await expect(page.getByRole("button", { name: "Refresh source" })).toBeFocused();
+  ])
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Refresh" })).toBeFocused();
   response = "denied";
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "PaidWithoutFulfillableOrder", exact: true }),
+    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
   ).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toBeFocused();
   response = "empty";
   await page.getByRole("button", { name: "Retry loading exceptions" }).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "No exceptions in this view" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Stale workbench — read-only" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Refresh source" })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Data may be out of date" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh" })).toBeFocused();
   expect(mutations).toEqual([]);
 });
 
@@ -136,8 +133,8 @@ test("@production exception view follows the selected Store after an authorized 
   await page.getByRole("button", { name: "Switch Store", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Synthetic Store 2", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Order exceptions", exact: true }).click();
-  await expect(page.getByText(/OPS-ORDER-EXCEPTION · Synthetic Store 2/)).toBeVisible();
-  await expect(page.getByText(/OPS-ORDER-EXCEPTION · Synthetic Store 1/)).toHaveCount(0);
+  await expect(page.getByText(/Synthetic Store 2 · Business date/)).toBeVisible();
+  await expect(page.getByText(/Synthetic Store 1 · Business date/)).toHaveCount(0);
 });
 
 test("@production exception filters and clear remain keyboard operable", async ({ page }) => {
@@ -159,6 +156,7 @@ test("@production exception filters and clear remain keyboard operable", async (
             ...source.items[0],
             exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000903",
             orderReference: "018f0f58-767a-7f3b-a1d0-000000000904",
+            orderNumber: null,
             kind: "CaptureDeadlineExceeded",
             dueAt: "2026-08-12T17:00:00.000Z",
           },
@@ -171,7 +169,8 @@ test("@production exception filters and clear remain keyboard operable", async (
 
   const type = page.getByRole("combobox", { name: "Type", exact: true });
   await type.focus();
-  await type.press("D");
+  // Options carry staff wording; "U" jumps to "Unpaid dine-in batch".
+  await type.press("U");
   await expect(type).toHaveValue("DiningUnpaidBatch");
   await expect(
     page.getByRole("heading", { name: "No exceptions match these filters", exact: true }),
@@ -212,30 +211,30 @@ test("@production exception filters and clear remain keyboard operable", async (
   await expect(provider).toHaveValue("All");
   await expect(overdue).not.toBeChecked();
   await expect(
-    page.getByRole("heading", { name: "PaidWithoutFulfillableOrder", exact: true }),
+    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "CaptureDeadlineExceeded", exact: true }),
+    page.getByRole("heading", { name: "Capture deadline exceeded", exact: true }),
   ).toBeVisible();
 
   // Type and all remaining filters have been reset through keyboard interaction above.
   await overdue.press("Space");
   await expect(overdue).toBeChecked();
   await expect(
-    page.getByRole("heading", { name: "PaidWithoutFulfillableOrder", exact: true }),
+    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "CaptureDeadlineExceeded", exact: true }),
+    page.getByRole("heading", { name: "Capture deadline exceeded", exact: true }),
   ).toHaveCount(0);
   await page.keyboard.press("Tab");
   await expect(clear).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(overdue).not.toBeChecked();
   await expect(
-    page.getByRole("heading", { name: "PaidWithoutFulfillableOrder", exact: true }),
+    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "CaptureDeadlineExceeded", exact: true }),
+    page.getByRole("heading", { name: "Capture deadline exceeded", exact: true }),
   ).toBeVisible();
 });
 
@@ -259,14 +258,14 @@ test("@production workbench displays the full 500-row backlog", async ({ page })
   );
   await page.goto("/operations/order-exceptions");
   await expect(
-    page.getByRole("heading", { name: "PaidWithoutFulfillableOrder", exact: true }),
+    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
   ).toHaveCount(500);
   await expect(page.getByText("2026-08-12T16:00:00.000Z").first()).toBeVisible();
   await expect(page.getByText(/due 2026-08-12T16:15:00\.000Z/).first()).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "PaidWithoutFulfillableOrder", exact: true }).last(),
+    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }).last(),
   ).toBeAttached();
-  await expect(page.getByText("Linked order · public reference unavailable").first()).toBeVisible();
+  await expect(page.getByText("Linked order · order number unavailable").first()).toBeVisible();
   await expect(page.getByText("018f0f58-767a-7f3b-a1d0-000000000902", { exact: true })).toHaveCount(
     0,
   );
@@ -275,11 +274,7 @@ test("@production workbench displays the full 500-row backlog", async ({ page })
   await expect(
     page.getByRole("heading", { name: "No exceptions match these filters" }),
   ).toBeVisible();
-  await expect(
-    page.getByText(
-      "No loaded exception matches these filters. Clear filters to restore the workbench.",
-    ),
-  ).toBeVisible();
+  await expect(page.getByText("No exception on this page matches the filters.")).toBeVisible();
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     expect(
@@ -290,7 +285,7 @@ test("@production workbench displays the full 500-row backlog", async ({ page })
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Clear filters", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "PaidWithoutFulfillableOrder", exact: true }),
+    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
   ).toHaveCount(500);
 });
 
@@ -448,7 +443,7 @@ test("@production compensation unknown preserves focus moved during the request"
   await requestStarted;
   await expect(submit).toBeDisabled();
 
-  const refresh = page.getByRole("button", { name: "Refresh source" });
+  const refresh = page.getByRole("button", { name: "Refresh" });
   await refresh.focus();
   releaseUnknown();
   await expect(page.getByText(/Result unknown/)).toBeVisible();
@@ -488,6 +483,7 @@ test("@production unassociated reconciliation stays visible alongside a linked c
             exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000903",
             kind: "PaymentReconciliationDifference",
             orderReference: linked ? "018f0f58-767a-7f3b-a1d0-000000000904" : null,
+            orderNumber: null,
             compensationStatus: "NotRequested",
           },
           ...view(0).items,
@@ -514,17 +510,14 @@ test("@production unassociated reconciliation stays visible alongside a linked c
   });
   await page.goto("/operations/order-exceptions");
   const reconciliation = page.locator("article").filter({
-    has: page.getByRole("heading", { name: "PaymentReconciliationDifference", exact: true }),
+    has: page.getByRole("heading", { name: "Payment reconciliation difference", exact: true }),
   });
   const compensation = page.locator("article").filter({
-    has: page.getByRole("heading", { name: "PaidWithoutFulfillableOrder", exact: true }),
+    has: page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
   });
   await expect(
     reconciliation.getByText("Order reference unavailable", { exact: true }),
   ).toBeVisible();
-  await expect(
-    reconciliation.getByRole("button", { name: "Request owning-domain compensation / retry" }),
-  ).toBeDisabled();
   await expect(reconciliation.getByRole("button", { name: "Review confirmed refund" })).toHaveCount(
     0,
   );
@@ -539,9 +532,9 @@ test("@production unassociated reconciliation stays visible alongside a linked c
     },
   ]);
   linked = true;
-  await page.getByRole("button", { name: "Refresh source" }).click();
+  await page.getByRole("button", { name: "Refresh" }).click();
   await expect(
-    reconciliation.getByText("Linked order · public reference unavailable", { exact: true }),
+    reconciliation.getByText("Linked order · order number unavailable", { exact: true }),
   ).toBeVisible();
   await expect(
     reconciliation.getByText("018f0f58-767a-7f3b-a1d0-000000000904", { exact: true }),
@@ -578,6 +571,7 @@ for (const failure of ["unknown", "conflict", "self", "denied"] as const) {
             ...item,
             kind: "PaymentReconciliationDifference",
             orderReference: null,
+            orderNumber: null,
             compensationStatus: "NotRequested",
           })),
         },
@@ -710,6 +704,7 @@ test("@production employee directory pagination clears stale choices on failure"
           ...item,
           kind: "PaymentReconciliationDifference",
           orderReference: null,
+          orderNumber: null,
           compensationStatus: "NotRequested",
         })),
       },

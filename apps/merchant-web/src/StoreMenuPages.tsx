@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { WorkspacePage } from "./WorkspacePage.js";
 import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
@@ -78,9 +79,15 @@ function useMenuView<V>(
 }
 function Failure({ code }: { readonly code: MenuErrorCode | "Loading" }) {
   return (
-    <StatePanel heading="Menus" tone={code === "Loading" ? "neutral" : "error"} status>
-      <p>{copy[code]}</p>
-    </StatePanel>
+    <WorkspacePage title="Menus">
+      <StatePanel
+        heading={code === "Loading" ? "Loading" : "Unavailable"}
+        tone={code === "Loading" ? "neutral" : "error"}
+        status
+      >
+        <p>{copy[code]}</p>
+      </StatePanel>
+    </WorkspacePage>
   );
 }
 const when = (instant: string) => instant.replace("T", " ").slice(0, 16) + " UTC";
@@ -94,18 +101,18 @@ export function StoreMenuListPage({
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view: MenuListView = state.view;
   return (
-    <AppFrame title="Menus" description="CAT-MENU-LIST">
-      <header className="screen-heading">
-        <div>
-          <p className="bop-eyebrow">CAT-MENU-LIST · Brand</p>
-          <h2>Menus</h2>
-          <p>
-            A menu lists what customers can order, by section. Changes are reviewed by someone else
-            before they are published; a published menu is changed through a revision. Source as of{" "}
-            <SourceTime instant={view.sourceAsOf} />
-          </p>
-        </div>
-      </header>
+    <WorkspacePage
+      title="Menus"
+      meta={
+        <>
+          Source as of <SourceTime instant={view.sourceAsOf} />
+        </>
+      }
+    >
+      <p className="bop-muted">
+        A menu lists what customers can order, by section. Changes are reviewed by someone else
+        before they are published; a published menu is changed through a revision.
+      </p>
       <table>
         <thead>
           <tr>
@@ -132,7 +139,7 @@ export function StoreMenuListPage({
           ))}
         </tbody>
       </table>
-    </AppFrame>
+    </WorkspacePage>
   );
 }
 

@@ -482,14 +482,17 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <Route
         path="/app/commerce/menus"
         element={
-          state.kind === "Ready" && !state.switching ? (
-            <StoreMenuListPage
-              key={state.workspace.selectedScope.storeReference + state.csrf}
-              client={createMenuClient(state.csrf)}
-            />
-          ) : (
-            <StoreMenuListPage />
-          )
+          <LocalDemoRoute notice={demo?.Notice ?? null}>
+            {!demo && state.kind === "Ready" && !state.switching ? (
+              <StoreMenuListPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                client={createMenuClient(state.csrf)}
+              />
+            ) : (
+              // The local demo has no menu source; it fails closed without application requests.
+              <StoreMenuListPage />
+            )}
+          </LocalDemoRoute>
         }
       />
       <Route
@@ -1025,7 +1028,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 ))}
               />
             ) : (
-              <StatePanel heading="Kitchen Board unavailable">
+              <StatePanel heading="Kitchen unavailable">
                 <p>A current merchant session and Store are required.</p>
               </StatePanel>
             )}
@@ -1117,7 +1120,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               csrf={state.csrf}
             />
           ) : (
-            <StatePanel heading="Order Exception Workbench unavailable" tone="error" status>
+            <StatePanel heading="Exceptions unavailable" tone="error" status>
               <p>A current merchant session and Store are required.</p>
             </StatePanel>
           )

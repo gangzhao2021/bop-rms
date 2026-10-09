@@ -2,6 +2,66 @@ import { useKitchenActions } from "./use-kitchen-actions.js";
 import type { KitchenAction } from "./kitchen-work-client.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { Freshness, SourceTime } from "./StoreTime.js";
+
+/** WP-2423 M3: the board re-reads the queue on its own while it is visible. */
+export const kitchenRefreshIntervalMs = 10_000;
+/** Waiting-time tiers that colour a ticket's age (TEST-ONLY defaults until Store policy carries them). */
+export const kitchenWarningMinutes = 8;
+export const kitchenLateMinutes = 15;
+export function kitchenAgeTier(minutes: number): "ok" | "warning" | "late" {
+  return minutes >= kitchenLateMinutes
+    ? "late"
+    : minutes >= kitchenWarningMinutes
+      ? "warning"
+      : "ok";
+}
+
+/** Two short tones from the Web Audio API; silent where audio is unavailable or not yet allowed. */
+export function playKitchenChime(context?: AudioContext): void {
+  try {
+    const Audio =
+      (
+        globalThis as {
+          AudioContext?: typeof AudioContext;
+          webkitAudioContext?: typeof AudioContext;
+        }
+      ).AudioContext ??
+      (globalThis as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const audio = context ?? (Audio ? new Audio() : null);
+    if (!audio) return;
+    const start = audio.currentTime;
+    for (const [frequency, offset] of [
+      [880, 0],
+      [1175, 0.18],
+    ] as const) {
+      const oscillator = audio.createOscillator();
+      const gain = audio.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.0001, start + offset);
+      gain.gain.exponentialRampToValueAtTime(0.4, start + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + 0.16);
+      oscillator.connect(gain).connect(audio.destination);
+      oscillator.start(start + offset);
+      oscillator.stop(start + offset + 0.18);
+    }
+  } catch {
+    // Audio is a courtesy for the kitchen; the board never depends on it.
+  }
+}
+
+/** The queued work item references that were not in the previous read. */
+export function newQueuedReferences(
+  previous: KitchenBoardView | null,
+  next: KitchenBoardView,
+): readonly string[] {
+  if (previous === null) return [];
+  const seen = new Set(previous.items.map((item) => item.workItemReference));
+  return next.items
+    .filter((item) => item.status === "Queued" && !seen.has(item.workItemReference))
+    .map((item) => item.workItemReference);
+}
 import {
   useCallback,
   useEffect,
@@ -36,7 +96,11 @@ type LoadState<T> =
         | "CommandFailed"
         | "Unavailable";
     }
-  | { readonly kind: "Found"; readonly view: T };
+  | { readonly kind: "Found"; readonly view: T; readonly reloading?: boolean };
+/**
+ * Loads for a key. A board that already shows work keeps showing it while a re-read is in
+ * flight (no flash to "Loading" every ten seconds); a failure or denial replaces it at once.
+ */
 function useLoad<T>(load: () => Promise<T>, key: string): LoadState<T> {
   const [stored, setStored] = useState<{
     key: string;
@@ -46,7 +110,11 @@ function useLoad<T>(load: () => Promise<T>, key: string): LoadState<T> {
   useEffect(() => {
     let active = true;
     const setState = (state: LoadState<T>) => setStored({ key, load, state });
-    setState({ kind: "Loading" });
+    setStored((previous) =>
+      previous.state.kind === "Found"
+        ? { key, load, state: { ...previous.state, reloading: true } }
+        : { key, load, state: { kind: "Loading" } },
+    );
     void load()
       .then((view) => {
         if (active) setState({ kind: "Found", view });
@@ -59,15 +127,9 @@ function useLoad<T>(load: () => Promise<T>, key: string): LoadState<T> {
       active = false;
     };
   }, [key, load]);
-  return stored.key === key && stored.load === load ? stored.state : { kind: "Loading" };
-}
-
-function formatKitchenSourceTime(value: string): string {
-  return `${new Intl.DateTimeFormat("en-CA", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(value))} UTC`;
+  if (stored.key === key && stored.load === load) return stored.state;
+  // A new key whose read has not started yet is already a re-read in flight.
+  return stored.state.kind === "Found" ? { ...stored.state, reloading: true } : { kind: "Loading" };
 }
 
 export function KitchenBoardStatePanel({
@@ -76,30 +138,24 @@ export function KitchenBoardStatePanel({
   readonly state: Exclude<LoadState<never>["kind"], "Found">;
 }) {
   const copy = {
-    Loading: ["Loading", "Loading the authorized Kitchen queue…"],
+    Loading: ["Loading", "Loading the kitchen queue…"],
     PermissionDenied: [
       "Permission denied",
-      "Your Kitchen permission or Store scope does not allow this board.",
+      "Your kitchen permission or Store scope does not allow this board.",
     ],
-    NotFound: [
-      "Work item unavailable",
-      "This work item is unavailable in the authorized Store scope.",
-    ],
-    Offline: [
-      "Offline read-only",
-      "Reconnect and refresh from the authoritative queue before any action.",
-    ],
-    Conflict: ["Source changed", "Refresh the authoritative work item version before retrying."],
-    CommandFailed: ["Command failed", "No Kitchen transition is assumed. Refresh before retrying."],
+    NotFound: ["Work item unavailable", "This work item is not at the selected Store."],
+    Offline: ["You’re offline", "Reconnect and refresh before taking an action."],
+    Conflict: ["Work item changed", "Refresh to see its current state before trying again."],
+    CommandFailed: ["Action not confirmed", "Nothing is assumed. Refresh before trying again."],
     Unavailable: [
-      "Kitchen Board unavailable",
-      "The authorized Kitchen queue could not be loaded. Refresh to try again.",
+      "Kitchen unavailable",
+      "The kitchen queue could not be loaded. Refresh to try again.",
     ],
   } as const;
   return (
     <StatePanel heading={copy[state][0]} tone={state === "Loading" ? "neutral" : "error"} status>
       <p>{copy[state][1]}</p>
-      <Link to="/app">Return to overview</Link>
+      <Link to="/app">Home</Link>
     </StatePanel>
   );
 }
@@ -145,6 +201,8 @@ function WorkCard({
     <article
       className={`kitchen-work-item${!showDetails && !showActions ? " kitchen-work-item--detail" : ""}`}
       data-read-only={readOnly}
+      data-age={kitchenAgeTier(age)}
+      data-status={item.status}
     >
       <div className="kitchen-work-item__summary">
         <h3>
@@ -162,8 +220,10 @@ function WorkCard({
         </h3>
       </div>
       <div className="kitchen-work-item__state">
-        <strong data-status={item.status}>{item.status}</strong>
-        <span>{age} min</span>
+        <strong data-status={item.status}>
+          {item.status === "In Progress" ? "In progress" : item.status}
+        </strong>
+        <span data-age={kitchenAgeTier(age)}>{age} min</span>
       </div>
       <div className="kitchen-work-item__facts">
         <dl className="kitchen-work-item__quantity">
@@ -257,7 +317,9 @@ function WorkCard({
                 ) : null}
               </>
             ) : (
-              <span>Lifecycle action state unavailable from this projection</span>
+              <span className="kitchen-work-item__no-actions">
+                Actions unavailable for this item
+              </span>
             )
           ) : null}
         </div>
@@ -319,6 +381,9 @@ export function KitchenBoardScreen({
   onAction,
   actionsBlocked = true,
   navigation,
+  soundOn,
+  onSoundToggle,
+  autoRefresh = false,
 }: {
   readonly view: KitchenBoardView;
   readonly onSearch?: (search: KitchenQueueSearch | null) => void;
@@ -328,6 +393,11 @@ export function KitchenBoardScreen({
   readonly onRefresh?: () => void;
   readonly refreshButtonRef?: RefObject<HTMLButtonElement | null>;
   readonly navigation?: ReactNode;
+  /** New-ticket chime; off until the operator turns it on (browsers need that gesture). */
+  readonly soundOn?: boolean | undefined;
+  readonly onSoundToggle?: (() => void) | undefined;
+  /** Whether the board re-reads itself; shown so the operator knows nothing is stuck. */
+  readonly autoRefresh?: boolean;
 }) {
   const location = useLocation();
   const restored = restoredQueueScope(location.state);
@@ -400,6 +470,8 @@ export function KitchenBoardScreen({
           parseKitchenRouteReference(referenceInput);
           onSearch({ kind: referenceKind, reference: referenceInput });
           setReferenceInput("");
+          // The result is behind the sheet on a phone; the board stays mounted while it re-reads.
+          if (layout === "mobile") filterSheetRef.current?.close();
         } catch {
           const input = event.currentTarget.elements.namedItem("reference");
           if (input instanceof HTMLInputElement) input.reportValidity();
@@ -444,7 +516,10 @@ export function KitchenBoardScreen({
             disabled={!searchApplied && referenceInput.length === 0}
             onClick={() => {
               setReferenceInput("");
-              if (searchApplied) onSearch?.(null);
+              if (searchApplied) {
+                onSearch?.(null);
+                if (layout === "mobile") filterSheetRef.current?.close();
+              }
             }}
           >
             Clear
@@ -568,9 +643,10 @@ export function KitchenBoardScreen({
             Done
           </button>
           <p className="kitchen-filter-sheet__note">
-            Filters apply only to fields present for every loaded work item. Allergen and exception
-            filters are unavailable here; the KDS Session and device lock are unverified, and board
-            actions are disabled.
+            Filters apply only to fields present for every loaded work item.
+            {view.operatorStatus === "Named"
+              ? ""
+              : " Allergen and exception filters are unavailable here; the KDS Session and device lock are unverified, and board actions are disabled."}
           </p>
         </>
       ) : null}
@@ -578,43 +654,40 @@ export function KitchenBoardScreen({
   );
   return (
     <AppFrame
-      title="OPERATIONS"
-      mobileBrandTitle="KITCHEN"
-      description={view.storeLabel}
-      navigation={
-        navigation ? (
-          <>
-            <span className="kitchen-navigation-label">WORKSPACE</span>
-            {navigation}
-          </>
-        ) : undefined
-      }
+      title={view.storeLabel}
+      description="Kitchen display"
+      navigation={navigation}
+      className="kitchen-shell"
     >
       <div className="kitchen-board-workspace">
-        <header className="screen-heading">
+        <header className="screen-heading kitchen-board-heading">
           <div>
             <h2>Kitchen</h2>
-            <p className="kitchen-board-eyebrow">KIT-KITCHEN-QUEUE · Active work</p>
             <p className="kitchen-board-freshness">
-              <span data-freshness={view.freshnessStatus}>{view.freshnessStatus}</span>
-              <span>
+              <Freshness status={view.freshnessStatus} at={view.projectedAt} />
+              <span data-operator={view.operatorStatus}>
                 {view.operatorStatus === "Unverified"
                   ? "KDS session unverified"
                   : `${view.operatorStatus} operator`}
               </span>
+              {autoRefresh ? <span>Auto-refresh every 10 s</span> : null}
             </p>
           </div>
-          <button
-            ref={refreshButtonRef}
-            disabled={!onRefresh}
-            onClick={onRefresh}
-            aria-label="Refresh from source"
-          >
-            <span className="kitchen-refresh-label--long">Refresh from source</span>
-            <span className="kitchen-refresh-label--short" aria-hidden="true">
+          <div className="kitchen-board-heading__actions">
+            {onSoundToggle ? (
+              <button
+                type="button"
+                aria-pressed={soundOn === true}
+                onClick={onSoundToggle}
+                className="kitchen-sound-toggle"
+              >
+                {soundOn ? "Sound on" : "Sound off"}
+              </button>
+            ) : null}
+            <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
               Refresh
-            </span>
-          </button>
+            </button>
+          </div>
         </header>
         <button
           className="kitchen-filter-toggle"
@@ -636,12 +709,7 @@ export function KitchenBoardScreen({
           </div>
         ) : null}
         <header className="kitchen-queue-heading">
-          <div>
-            <h2>Queue</h2>
-            <p>
-              Available filters use fields in the current Kitchen projection for {view.storeLabel}.
-            </p>
-          </div>
+          <h2>Queue</h2>
         </header>
         <div className="kitchen-filter-toolbar">
           {renderReferenceSearch("desktop")}
@@ -721,10 +789,6 @@ export function KitchenBoardScreen({
             })}
           </div>
         )}
-        <p className="muted">
-          Unavailable here: safe Order/ticket reference display, station labels, allergen/exception
-          cues, course, priority, overdue criteria and Hold/Prioritize actions.
-        </p>
       </div>
     </AppFrame>
   );
@@ -753,25 +817,19 @@ export function KitchenWorkItemScreen({
   ].sort((left, right) => left.at.localeCompare(right.at) || left.label.localeCompare(right.label));
   return (
     <AppFrame
-      title="OPERATIONS"
-      description={view.storeLabel}
-      navigation={
-        navigation ? (
-          <>
-            <span className="kitchen-navigation-label">WORKSPACE</span>
-            {navigation}
-          </>
-        ) : undefined
-      }
+      title={view.storeLabel}
+      description="Kitchen display"
+      navigation={navigation}
+      className="kitchen-shell"
     >
       <div className="kitchen-board-workspace kitchen-work-item-screen">
-        <header className="screen-heading">
+        <header className="screen-heading kitchen-board-heading">
           <div>
-            <p className="kitchen-board-eyebrow">KIT-WORK-ITEM · Execution snapshot</p>
+            <p className="kitchen-board-eyebrow">Work item</p>
             <h2>{view.item.displayName}</h2>
             <p className="kitchen-board-freshness">
-              <span data-freshness={view.freshnessStatus}>{view.freshnessStatus}</span>
-              <span>
+              <Freshness status={view.freshnessStatus} at={view.projectedAt} />
+              <span data-operator={view.operatorStatus}>
                 {view.operatorStatus === "Unverified"
                   ? "KDS session unverified"
                   : `${view.operatorStatus} operator`}
@@ -785,11 +843,8 @@ export function KitchenWorkItemScreen({
             >
               Return to Kitchen queue
             </Link>
-            <button onClick={onRefresh} disabled={!onRefresh} aria-label="Refresh from source">
-              <span className="kitchen-refresh-label--long">Refresh from source</span>
-              <span className="kitchen-refresh-label--short" aria-hidden="true">
-                Refresh
-              </span>
+            <button onClick={onRefresh} disabled={!onRefresh}>
+              Refresh
             </button>
           </div>
         </header>
@@ -818,10 +873,7 @@ export function KitchenWorkItemScreen({
         <section className="kitchen-work-item-screen__details" aria-labelledby="work-item-details">
           <header>
             <h3 id="work-item-details">Additional detail</h3>
-            <p>
-              Only milestones present in this authorized projection are shown; other registered
-              detail remains unavailable.
-            </p>
+            <p>Only recorded milestones are shown.</p>
           </header>
           <dl>
             <div>
@@ -843,21 +895,18 @@ export function KitchenWorkItemScreen({
                   {milestones.map((milestone) => (
                     <li key={`${milestone.label}:${milestone.at}`}>
                       <span>{milestone.label}</span>
-                      <time dateTime={milestone.at}>{formatKitchenSourceTime(milestone.at)}</time>
+                      <SourceTime instant={milestone.at} />
                     </li>
                   ))}
                 </ol>
                 <p className="kitchen-work-item-screen__history-note">
-                  {view.item.execution
-                    ? "Recorded acceptance and Order item ready times are shown above when available. Kitchen start, progress and completion timestamps are unavailable from this projection."
-                    : "Acceptance and Order item ready times are not included in this response. Kitchen start, progress and completion timestamps are unavailable from this projection."}
+                  Start, progress and completion times are not recorded on this screen yet.
                 </p>
               </dd>
             </div>
           </dl>
           <p className="kitchen-work-item-screen__command-note">
-            Commands are unavailable from this detail route. Queue filters are preserved when
-            returning.
+            Take actions from the queue. Your filters are kept when you return.
           </p>
         </section>
       </div>
@@ -880,21 +929,15 @@ function KitchenWorkItemUnavailableScreen({
 }) {
   return (
     <AppFrame
-      title="OPERATIONS"
-      description={storeLabel}
-      navigation={
-        navigation ? (
-          <>
-            <span className="kitchen-navigation-label">WORKSPACE</span>
-            {navigation}
-          </>
-        ) : undefined
-      }
+      title={storeLabel}
+      description="Kitchen display"
+      navigation={navigation}
+      className="kitchen-shell"
     >
       <div className="kitchen-board-workspace kitchen-work-item-screen">
-        <header className="screen-heading">
+        <header className="screen-heading kitchen-board-heading">
           <div>
-            <p className="kitchen-board-eyebrow">KIT-WORK-ITEM</p>
+            <p className="kitchen-board-eyebrow">Work item</p>
             <h2>Work item detail</h2>
           </div>
           <div className="kitchen-work-item-screen__heading-actions">
@@ -904,7 +947,7 @@ function KitchenWorkItemUnavailableScreen({
             >
               Return to Kitchen queue
             </Link>
-            <button onClick={onRefresh}>Refresh from source</button>
+            <button onClick={onRefresh}>Refresh</button>
           </div>
         </header>
         <KitchenBoardStatePanel state={state} />
@@ -934,7 +977,29 @@ function KitchenBoardContent(props: KitchenPageProps) {
   const client = useClient(props),
     [revision, setRevision] = useState(0);
   const [search, setSearch] = useState<KitchenQueueSearch | null>(null);
-  const refresh = () => setRevision((value) => value + 1);
+  const manualRefresh = useRef(false);
+  const refresh = () => {
+    manualRefresh.current = true;
+    setRevision((value) => value + 1);
+  };
+  const [soundOn, setSoundOn] = useState(false);
+  const audio = useRef<AudioContext | null>(null);
+  const toggleSound = () => {
+    setSoundOn((value) => {
+      const next = !value;
+      if (next) {
+        // Created inside the operator's tap so the browser allows it to play later.
+        try {
+          const Audio = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
+          audio.current ??= Audio ? new Audio() : null;
+          if (audio.current) playKitchenChime(audio.current);
+        } catch {
+          audio.current = null;
+        }
+      }
+      return next;
+    });
+  };
   const load = useCallback(
     () => client.loadQueue(search ?? undefined).then(parseKitchenBoardView),
     [client, search],
@@ -952,6 +1017,24 @@ function KitchenBoardContent(props: KitchenPageProps) {
   const refreshButtonRef = useRef<HTMLButtonElement>(null),
     retryButtonRef = useRef<HTMLButtonElement>(null),
     restoreRetryFocus = useRef(false);
+  // M3: re-read the queue on its own while the board is visible and no action is in flight.
+  const submitting = actions.state.kind === "Submitting";
+  const found = state.kind === "Found";
+  useEffect(() => {
+    if (!found || typeof window === "undefined") return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible" && !submitting) setRevision((value) => value + 1);
+    }, kitchenRefreshIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [found, submitting]);
+  // M3: chime once for work that arrived since the previous read, when the operator asked for it.
+  const previousView = useRef<KitchenBoardView | null>(null);
+  useEffect(() => {
+    if (state.kind !== "Found") return;
+    const arrived = newQueuedReferences(previousView.current, state.view);
+    previousView.current = state.view;
+    if (soundOn && arrived.length > 0 && audio.current) playKitchenChime(audio.current);
+  }, [soundOn, state]);
   const runAction = (item: KitchenBoardItem, action: KitchenAction) => {
     restoreRetryFocus.current = document.activeElement instanceof HTMLButtonElement;
     actions.act(item, action);
@@ -965,9 +1048,13 @@ function KitchenBoardContent(props: KitchenPageProps) {
     restoreRetryFocus.current = false;
     if (document.activeElement === document.body) retryButtonRef.current?.focus();
   }, [actions.state.kind]);
+  const settled = state.kind !== "Loading" && !(state.kind === "Found" && state.reloading);
   useEffect(() => {
-    if (revision > 0 && state.kind !== "Loading") refreshButtonRef.current?.focus();
-  }, [revision, state.kind]);
+    if (revision > 0 && settled && manualRefresh.current) {
+      manualRefresh.current = false;
+      refreshButtonRef.current?.focus();
+    }
+  }, [revision, settled]);
   return (
     <>
       {actions.state.kind !== "Idle" ? (
@@ -1019,16 +1106,24 @@ function KitchenBoardContent(props: KitchenPageProps) {
           onAction={runAction}
           actionsBlocked={actions.blocked}
           navigation={props.navigation}
+          soundOn={soundOn}
+          onSoundToggle={toggleSound}
+          autoRefresh
         />
       ) : (
-        <>
+        <AppFrame
+          title={props.storeLabel ?? "Kitchen"}
+          description="Kitchen display"
+          navigation={props.navigation}
+          className="kitchen-shell"
+        >
           <KitchenBoardStatePanel state={state.kind} />
           {state.kind !== "Loading" ? (
             <button ref={refreshButtonRef} onClick={refresh}>
-              Refresh from source
+              Refresh
             </button>
           ) : null}
-        </>
+        </AppFrame>
       )}
     </>
   );
