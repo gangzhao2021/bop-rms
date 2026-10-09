@@ -22,6 +22,7 @@ const row = (n = 1) => ({
     },
   ],
   canRequestAcceptance: false,
+  unfulfillable: null,
   currentPhase: "Accepted",
   currentVersion: 2,
 });
@@ -223,6 +224,7 @@ it("accepts terminal cancellation without actionable batches but refuses empty l
   expect(
     parseCurrentOrderQueue({ items: [cancelled], nextAfterOrderReference: null }).items[0],
   ).toMatchObject({
+    unfulfillable: null,
     currentPhase: "Cancelled",
     currentVersion: 2,
     batches: [],

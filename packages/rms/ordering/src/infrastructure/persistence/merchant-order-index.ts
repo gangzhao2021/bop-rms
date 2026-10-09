@@ -274,3 +274,41 @@ export async function loadMerchantOrderLines(
     }),
   });
 }
+
+/**
+ * WP-2423: Orders of the Store that were paid but can no longer be fulfilled (not accepted before
+ * capacity expired, submission cancelled, or no longer fulfillable). Payment refunds them through
+ * compensation; staff must not be offered to accept them. Caller authorizes and owns the
+ * transaction.
+ */
+export async function listStoreUnfulfillablePaidOrders(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<
+  ReadonlyMap<string, "CapacityExpired" | "SubmissionCancelled" | "OrderNoLongerFulfillable">
+> {
+  if (orderReferences.length === 0) return new Map();
+  if (orderReferences.length > 100) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const orders = orderReferences.map((reference) => parseOrderingReference(reference));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT DISTINCT ON (order_id) order_id::text order_id,reason FROM rms_ordering.order_payment_disposition_record " +
+        "WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) AND disposition='PaidWithoutFulfillableOrder' " +
+        "ORDER BY order_id,evaluated_at DESC",
+      [scope.brandReference, scope.storeReference, orders],
+    )
+  ).rows as readonly { order_id: string; reason: unknown }[];
+  const reasons = ["CapacityExpired", "SubmissionCancelled", "OrderNoLongerFulfillable"] as const;
+  return new Map(
+    rows.flatMap((row) =>
+      reasons.includes(row.reason as (typeof reasons)[number])
+        ? [[row.order_id, row.reason as (typeof reasons)[number]] as const]
+        : [],
+    ),
+  );
+}

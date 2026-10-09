@@ -182,7 +182,7 @@ it("WP-2423: reads one Order of the Store for its detail", async () => {
   });
   expect(result.items.map((item) => item.orderReference)).toEqual([id(4)]);
   expect(String(query.mock.calls[1]?.[0])).toContain("h.order_id=$5::uuid");
-  expect(query.mock.calls[1]?.[1]).toEqual([
+  expect((query.mock.calls[1] as unknown[] | undefined)?.[1]).toEqual([
     scope.brandReference,
     scope.storeReference,
     null,
@@ -218,4 +218,24 @@ it("WP-2423: reads an Order's lines with option names, notes and totals", async 
   expect(String(query.mock.calls[1]?.[0])).toContain("i.brand_id=$1 AND i.store_id=$2");
   query.mockImplementation(async () => ({ rows: [], rowCount: 0 }));
   expect(await loadMerchantOrderLines(tx, scope, id(3), "en-CA")).toBeNull();
+});
+it("WP-2423: lists the Store's paid Orders that can no longer be fulfilled", async () => {
+  const { tx, query } = fixture([]);
+  query.mockImplementation(async (sql: string) => ({
+    rows: sql.includes("order_payment_disposition_record")
+      ? [
+          { order_id: id(3), reason: "CapacityExpired" },
+          { order_id: id(4), reason: "Invented" },
+        ]
+      : [],
+    rowCount: 0,
+  }));
+  const { listStoreUnfulfillablePaidOrders } =
+    await import("../infrastructure/persistence/merchant-order-index.js");
+  const found = await listStoreUnfulfillablePaidOrders(tx, scope, [id(3), id(4)]);
+  expect([...found]).toEqual([[id(3), "CapacityExpired"]]);
+  const sql = String(query.mock.calls[1]?.[0]);
+  expect(sql).toContain("disposition='PaidWithoutFulfillableOrder'");
+  expect(sql).toContain("brand_id=$1 AND store_id=$2");
+  expect((await listStoreUnfulfillablePaidOrders(tx, scope, [])).size).toBe(0);
 });

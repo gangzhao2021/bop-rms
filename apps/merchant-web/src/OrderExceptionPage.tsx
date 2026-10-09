@@ -7,6 +7,8 @@ import { useEffect, useRef, useState, type Ref } from "react";
 export interface OrderExceptionItem {
   readonly exceptionReference: string;
   readonly orderReference: string | null;
+  /** WP-2423: the order number staff use (null when unlinked or not this Store's). */
+  readonly orderNumber: string | null;
   readonly kind:
     | "DiningUnpaidBatch"
     | "PaymentReconciliationDifference"
@@ -100,6 +102,7 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
       const row = exact(value, [
         "exceptionReference",
         "orderReference",
+        "orderNumber",
         "kind",
         "severity",
         "status",
@@ -125,7 +128,11 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
         !["Dining", "Payment"].includes(String(row.sourceOwner)) ||
         !["Unassigned", "Assigned"].includes(String(row.ownerStatus)) ||
         typeof row.sourceFinal !== "boolean" ||
-        (row.status === "Resolved") !== row.sourceFinal
+        (row.status === "Resolved") !== row.sourceFinal ||
+        (row.orderNumber !== null &&
+          (row.orderReference === null ||
+            typeof row.orderNumber !== "string" ||
+            !/^[A-Z0-9][A-Z0-9-]{0,39}$/u.test(row.orderNumber)))
       )
         throw new Error("ORDER_EXCEPTION_INVALID");
       return Object.freeze({
@@ -348,7 +355,9 @@ export function OrderExceptionScreen({
                 <dd>
                   {item.orderReference === null
                     ? "Order reference unavailable"
-                    : "Linked order · public reference unavailable"}
+                    : item.orderNumber !== null
+                      ? `Order ${item.orderNumber}`
+                      : "Linked order · order number unavailable"}
                 </dd>
               </div>
               <div>

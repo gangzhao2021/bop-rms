@@ -297,6 +297,7 @@ export { createRefundReceiptSnapshot } from "./application/refund-receipt-snapsh
 export {
   createPostgresMerchantOrderIndex,
   listStoreOrderNumbers,
+  listStoreUnfulfillablePaidOrders,
   loadMerchantOrderLines,
   type MerchantOrderLine,
   type MerchantOrderLineMoney,

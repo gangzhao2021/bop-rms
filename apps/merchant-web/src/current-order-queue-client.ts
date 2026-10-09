@@ -50,6 +50,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       "submittedAt",
       "initialBatchReference",
       "canRequestAcceptance",
+      "unfulfillable",
       "currentPhase",
       "currentVersion",
       "observedAt",
@@ -60,6 +61,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     if (previous !== null && orderReference >= previous) return fail();
     previous = orderReference;
     if (
+      (item.unfulfillable !== null &&
+        !["CapacityExpired", "SubmissionCancelled", "OrderNoLongerFulfillable"].includes(
+          String(item.unfulfillable),
+        )) ||
+      (item.unfulfillable !== null && item.canRequestAcceptance !== false) ||
       typeof item.canRequestAcceptance !== "boolean" ||
       (item.canRequestAcceptance === true &&
         (item.currentPhase !== "Submitted" || item.currentVersion !== 1)) ||
@@ -108,7 +114,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         !["Accepted", "NotAccepted", "Cancelled"].includes(String(batch.acceptanceStatus)) ||
         typeof batch.canRequestAcceptance !== "boolean" ||
         (batch.canRequestAcceptance &&
-          (batch.acceptanceStatus !== "NotAccepted" ||
+          (item.unfulfillable !== null ||
+            batch.acceptanceStatus !== "NotAccepted" ||
             item.currentVersion === null ||
             !["Submitted", "Accepted", "InProgress", "Ready"].includes(String(item.currentPhase)) ||
             (batch.sequence === 1 &&
@@ -140,6 +147,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       observedAt,
       initialBatchReference: reference(item.initialBatchReference),
       canRequestAcceptance: item.canRequestAcceptance,
+      /** WP-2423: paid but no longer fulfillable; Payment refunds it (never accepted). */
+      unfulfillable: item.unfulfillable as
+        "CapacityExpired" | "SubmissionCancelled" | "OrderNoLongerFulfillable" | null,
       currentPhase: item.currentPhase as string | null,
       currentVersion: item.currentVersion as number | null,
     });

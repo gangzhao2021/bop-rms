@@ -28,6 +28,9 @@ export async function createOptionalCompensationWorkloads({
       recordFailure: (candidate, code) => service.recordFailure(candidate, code),
       pageSize: 5,
       pollIntervalMs: 5000,
+      // An unchanged open case is rechecked at least every minute, so a case closes within a minute
+      // of the Store recording its operations reconciliation.
+      unchangedBackoffMaxMs: 60_000,
       drainDeadlineMs: 25000,
       ...(onSnapshot ? { onSnapshot } : {}),
     }),

@@ -33,7 +33,11 @@ export function filterCurrentOrderItems(
       (!orderNumber || order.orderNumber.toLocaleLowerCase() === orderNumber) &&
       (filters.type === "All" || order.orderType === filters.type) &&
       (filters.channel === "All" || order.sourceChannel === filters.channel) &&
-      (filters.phase === "All" || (order.currentPhase ?? "Unavailable") === filters.phase),
+      (filters.phase === "All" ||
+        (filters.phase === "Expired"
+          ? order.unfulfillable !== null
+          : order.unfulfillable === null &&
+            (order.currentPhase ?? "Unavailable") === filters.phase)),
   );
 }
 /** WP-2423: an instant as Store-local time (UTC when the Store's time zone is not known). */
@@ -163,6 +167,12 @@ function QueuedOrderLines({ orderReference }: { readonly orderReference: string 
   );
 }
 
+const unfulfillableText = {
+  CapacityExpired: "Not accepted before its preparation slot expired.",
+  SubmissionCancelled: "The submission was cancelled after payment.",
+  OrderNoLongerFulfillable: "The order could no longer be fulfilled after payment.",
+} as const;
+
 export function CurrentOrderQueueRows({
   single = false,
   view,
@@ -226,11 +236,15 @@ export function CurrentOrderQueueRows({
             </span>
             <span
               className="order-workbench-phase"
-              data-phase={order.currentPhase ?? "Unavailable"}
+              data-phase={
+                order.unfulfillable !== null ? "Expired" : (order.currentPhase ?? "Unavailable")
+              }
             >
-              {order.currentPhase === "InProgress"
-                ? "In progress"
-                : (order.currentPhase ?? "Status unavailable")}
+              {order.unfulfillable !== null
+                ? "Expired · refunded"
+                : order.currentPhase === "InProgress"
+                  ? "In progress"
+                  : (order.currentPhase ?? "Status unavailable")}
             </span>
             <span className="order-workbench-batches">
               {order.batches.filter((batch) => batch.acceptanceStatus === "Accepted").length}{" "}
@@ -280,6 +294,12 @@ export function CurrentOrderQueueRows({
                 </dd>
               </div>
             </dl>
+            {order.unfulfillable !== null ? (
+              <p className="order-workbench-closed" role="note">
+                {unfulfillableText[order.unfulfillable]} The payment was refunded automatically;
+                this order cannot be accepted.
+              </p>
+            ) : null}
             {detail?.(order, opened.has(order.orderReference) || view.items.length === 1)}
             {order.batches.map((batch) => (
               <section key={batch.orderBatchReference} aria-label={"Batch " + batch.sequence}>
@@ -493,6 +513,7 @@ export function CurrentOrderQueuePage({
                   <option value="Rejected">Rejected</option>
                   <option value="Cancelled">Cancelled</option>
                   <option value="Fulfilled">Fulfilled</option>
+                  <option value="Expired">Expired · refunded</option>
                   <option value="Unavailable">Unavailable</option>
                 </select>
               </label>

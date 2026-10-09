@@ -1467,6 +1467,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             canRequestAcceptance: item.canRequestAcceptance,
+            unfulfillable: item.unfulfillable,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,
@@ -1516,6 +1517,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             submittedAt: item.submittedAt,
             initialBatchReference: item.initialBatchReference,
             canRequestAcceptance: item.canRequestAcceptance,
+            unfulfillable: item.unfulfillable,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,
@@ -1624,6 +1626,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
           items: view.items.map((item) => ({
             exceptionReference: item.exceptionReference,
             orderReference: item.orderReference,
+            orderNumber: item.orderNumber,
             kind: item.kind,
             severity: item.severity,
             status: item.status,

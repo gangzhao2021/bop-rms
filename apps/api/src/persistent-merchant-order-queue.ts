@@ -1,5 +1,5 @@
 import type { ConsumerTransaction } from "@bop/eventing";
-import { loadMerchantOrderLines } from "@rms/ordering";
+import { listStoreUnfulfillablePaidOrders, loadMerchantOrderLines } from "@rms/ordering";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
@@ -52,6 +52,7 @@ export function createPersistentMerchantOrderQueue(options: {
       };
 
       let acceptanceAllowed = false;
+      let ownerScope: { brandReference: string; storeReference: string } | null = null;
       const read = createMerchantOrderQueueRead({
         transactions: { run: (work) => work(businessTransaction) },
         quoteVersion: options.quoteVersion,
@@ -67,6 +68,10 @@ export function createPersistentMerchantOrderQueue(options: {
           acceptanceAllowed =
             options.acceptanceConfigured === true &&
             (await resolved.authorizeAction("order.accept"))?.effect === "Allow";
+          ownerScope = {
+            brandReference: String(resolved.context.brand.brandReference),
+            storeReference: String(resolved.store.storeReference),
+          };
           return {
             tenantReference: resolved.selected.tenantReference,
             brandReference: String(resolved.context.brand.brandReference),
@@ -105,6 +110,16 @@ export function createPersistentMerchantOrderQueue(options: {
                 options.locale ?? "en-CA",
               );
             })();
+      // WP-2423: a paid Order that can no longer be fulfilled (for example not accepted before its
+      // capacity expired) is refunded by Payment; it is shown as such and never offered for acceptance.
+      const unfulfillable =
+        ownerScope === null || result.items.length === 0
+          ? new Map<string, string>()
+          : await listStoreUnfulfillablePaidOrders(
+              businessTransaction,
+              ownerScope,
+              result.items.map((item) => item.orderReference),
+            );
       return Object.freeze({
         ...result,
         lines,
@@ -114,13 +129,16 @@ export function createPersistentMerchantOrderQueue(options: {
               (latest, batch) => Math.max(latest, batch.sequence),
               0,
             );
+            const closed = unfulfillable.get(item.orderReference) ?? null;
             return Object.freeze({
               ...item,
+              unfulfillable: closed,
               batches: Object.freeze(
                 item.batches.map((batch) =>
                   Object.freeze({
                     ...batch,
                     canRequestAcceptance:
+                      closed === null &&
                       acceptanceAllowed &&
                       batch.acceptanceStatus === "NotAccepted" &&
                       item.currentVersion !== null &&
@@ -134,7 +152,10 @@ export function createPersistentMerchantOrderQueue(options: {
                 ),
               ),
               canRequestAcceptance:
-                acceptanceAllowed && item.currentPhase === "Submitted" && item.currentVersion === 1,
+                closed === null &&
+                acceptanceAllowed &&
+                item.currentPhase === "Submitted" &&
+                item.currentVersion === 1,
             });
           }),
         ),

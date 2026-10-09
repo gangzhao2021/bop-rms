@@ -74,10 +74,12 @@ it("uses only trusted metadata source checks for a current older exception read"
     resolutionEvidenceReference: null,
   };
   let checked = false;
+  const orderNumbers = vi.fn(async () => new Map([[id(8), "13"]]));
   const read = createMerchantOrderExceptionRead({
     transactions: { run: async (work) => work({ query: vi.fn() }) },
     authorize: async () => scope,
     sources: () => ({ list: async () => ({ items: [source], nextAfterSourceReference: null }) }),
+    orderNumbers,
     metadata: async (_tx, selected, sources) => {
       expect(selected).toEqual(scope);
       expect(sources).toEqual([source]);
@@ -97,5 +99,8 @@ it("uses only trusted metadata source checks for a current older exception read"
   const result = await read("synthetic-cookie");
   expect(result.freshnessStatus).toBe("Fresh");
   expect(result.items[0]).toMatchObject({ status: "Open", compensationStatus: "Pending" });
+  // WP-2423: staff see the linked order's number.
+  expect(result.items[0]?.orderNumber).toBe("13");
+  expect(orderNumbers).toHaveBeenCalledWith(expect.anything(), scope, [id(8)]);
   expect(result).not.toHaveProperty("currentSourceCheck");
 });

@@ -32,6 +32,12 @@ export function createMerchantOrderExceptionRead(options: {
     scope: MerchantExceptionScope,
     source: OrderExceptionSource,
   ): Promise<boolean>;
+  /** WP-2423: the order numbers staff use for the linked Orders (this Store's only). */
+  orderNumbers?(
+    tx: ConsumerTransaction,
+    scope: MerchantExceptionScope,
+    orderReferences: readonly string[],
+  ): Promise<ReadonlyMap<string, string>>;
   metadata(
     tx: ConsumerTransaction,
     scope: MerchantExceptionScope,
@@ -93,6 +99,17 @@ export function createMerchantOrderExceptionRead(options: {
             assignments.set(source.sourceReference, assigned);
           }
         }
+        const linked = [
+          ...new Set(
+            projection.rows.flatMap((row) =>
+              row.orderReference === null ? [] : [row.orderReference],
+            ),
+          ),
+        ];
+        const numbers =
+          options.orderNumbers && linked.length > 0
+            ? await options.orderNumbers(tx, scope, linked)
+            : new Map<string, string>();
         const current = await options.authorize(tx, input);
         if (
           !current ||
@@ -114,6 +131,8 @@ export function createMerchantOrderExceptionRead(options: {
               Object.freeze({
                 exceptionReference: row.sourceReference,
                 orderReference: row.orderReference,
+                orderNumber:
+                  row.orderReference === null ? null : (numbers.get(row.orderReference) ?? null),
                 kind: row.kind,
                 severity: row.severity,
                 status: row.status,

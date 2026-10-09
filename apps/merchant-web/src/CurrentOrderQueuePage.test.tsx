@@ -27,6 +27,7 @@ it("renders actual Accepted version and visibly unresolved state without fabrica
       },
     ],
     canRequestAcceptance: false,
+    unfulfillable: null,
     currentPhase: "Accepted",
     currentVersion: 2,
   };
@@ -78,6 +79,7 @@ it("filters only by exact public order number and fields present on the current 
       },
     ],
     canRequestAcceptance: false,
+    unfulfillable: null,
     currentPhase: phase,
     currentVersion: phase === null ? null : 2,
   });
@@ -122,6 +124,7 @@ it("labels a cancelled additional Batch distinctly from unaccepted work", () => 
           },
         ],
         canRequestAcceptance: false,
+        unfulfillable: null,
         currentPhase: "Ready",
         currentVersion: 8,
       },
@@ -144,6 +147,7 @@ it("keeps payments accessible on cancelled Dining without offering unavailable s
     initialBatchReference: "01909968-0000-7000-8000-000000000090",
     batches: [],
     canRequestAcceptance: false,
+    unfulfillable: null,
     currentPhase: "Cancelled",
     currentVersion: 2,
   };
@@ -212,4 +216,54 @@ it("WP-2423: shows what was ordered with options, notes and totals", () => {
   expect(html).not.toContain("Discount");
   expect(orderMoney({ amountMinor: "5", currencyCode: "CAD" })).toBe("$0.05");
   expect(orderMoney({ amountMinor: "500", currencyCode: "JPY" })).toBe("JPY 500");
+});
+
+it("WP-2423: shows a paid order that was not accepted in time as expired and refunded, never acceptable", () => {
+  const expired = {
+    orderReference: "01909968-0000-7000-8000-000000000013",
+    orderNumber: "13",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-08T19:07:59.000Z",
+    observedAt: "2026-10-08T23:51:00.000Z",
+    initialBatchReference: "01909968-0000-7000-8000-000000000091",
+    batches: [
+      {
+        orderBatchReference: "01909968-0000-7000-8000-000000000091",
+        sequence: 1,
+        acceptanceStatus: "NotAccepted",
+        canRequestAcceptance: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    unfulfillable: "CapacityExpired",
+    currentPhase: "Submitted",
+    currentVersion: 1,
+  };
+  const view = parseCurrentOrderQueue({ items: [expired], nextAfterOrderReference: null });
+  const html = renderToStaticMarkup(<CurrentOrderQueueRows view={view} />);
+  expect(html).toContain("Expired · refunded");
+  expect(html).toContain('data-phase="Expired"');
+  expect(html).toContain("Not accepted before its preparation slot expired.");
+  const filters = { orderNumber: "", type: "All", channel: "All" };
+  expect(filterCurrentOrderItems(view.items, { ...filters, phase: "Expired" })).toHaveLength(1);
+  expect(filterCurrentOrderItems(view.items, { ...filters, phase: "Submitted" })).toHaveLength(0);
+  // The client refuses an acceptance offer for such an order.
+  expect(() =>
+    parseCurrentOrderQueue({
+      items: [{ ...expired, canRequestAcceptance: true }],
+      nextAfterOrderReference: null,
+    }),
+  ).toThrow();
+  expect(() =>
+    parseCurrentOrderQueue({
+      items: [
+        {
+          ...expired,
+          batches: [{ ...expired.batches[0], canRequestAcceptance: true }],
+        },
+      ],
+      nextAfterOrderReference: null,
+    }),
+  ).toThrow();
 });

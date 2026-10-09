@@ -1,4 +1,5 @@
 import { createPostgresReconciliationFollowUpQuery } from "@rms/payment";
+import { listStoreOrderNumbers } from "@rms/ordering";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresOrderExceptionSourceStore,
@@ -85,6 +86,18 @@ export function createPersistentMerchantOrderExceptions(options: {
     return createMerchantOrderExceptionRead({
       transactions,
       authorize,
+      orderNumbers: async (tx, scope, orderReferences) => {
+        if (!matches(await authorize(tx), scope)) return unavailable();
+        const numbers = new Map<string, string>();
+        for (let start = 0; start < orderReferences.length; start += 100)
+          for (const [order, number] of await listStoreOrderNumbers(
+            tx,
+            scope,
+            orderReferences.slice(start, start + 100),
+          ))
+            numbers.set(order, number);
+        return numbers;
+      },
       sources: (scope) =>
         createPostgresOrderExceptionSourceStore({
           scope,

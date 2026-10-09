@@ -17,6 +17,7 @@ const fixture = () => ({
     {
       exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000901",
       orderReference: "018f0f58-767a-7f3b-a1d0-000000000902",
+      orderNumber: null as string | null,
       kind: "PaidWithoutFulfillableOrder",
       severity: "Critical",
       status: "Open",
@@ -45,7 +46,7 @@ describe("WP-1809 Order Exception Workbench", () => {
       "Clear filters",
     ])
       expect(html).toContain(value);
-    expect(html).toContain("Linked order · public reference unavailable");
+    expect(html).toContain("Linked order · order number unavailable");
     expect(html).toContain('id="exception-actions-unavailable"');
     expect(html.match(/aria-describedby="exception-actions-unavailable"/gu)).toHaveLength(4);
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000902");
@@ -135,6 +136,32 @@ it("accepts the full 500-row server bound through the HTTP client and rejects 50
   expect(() => parseOrderExceptionView({ ...input, items: rows })).toThrow(
     "ORDER_EXCEPTION_INVALID",
   );
+});
+
+it("WP-2423: names the linked order by its order number and refuses a number without an order", () => {
+  const input = fixture();
+  const html = renderToStaticMarkup(
+    <OrderExceptionScreen
+      view={parseOrderExceptionView({
+        ...input,
+        items: [{ ...input.items[0], orderNumber: "13" }],
+      })}
+    />,
+  );
+  expect(html).toContain("Order 13");
+  expect(() =>
+    parseOrderExceptionView({
+      ...input,
+      items: [
+        {
+          ...input.items[0],
+          kind: "PaymentReconciliationDifference",
+          orderReference: null,
+          orderNumber: "13",
+        },
+      ],
+    }),
+  ).toThrow();
 });
 
 it("renders an unassociated reconciliation record without enabling order-specific compensation", () => {
