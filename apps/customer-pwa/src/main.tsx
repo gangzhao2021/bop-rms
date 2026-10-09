@@ -11,8 +11,6 @@ import {
 } from "./session/customer-transaction-context.js";
 import { restoreCustomerSession } from "./session/session-bootstrap.js";
 import { protectCustomerHistoryRestore } from "./session/history-recovery.js";
-import "@fontsource-variable/inter/index.css";
-import "@fontsource-variable/jetbrains-mono/index.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";

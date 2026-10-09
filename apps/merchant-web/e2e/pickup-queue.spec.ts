@@ -441,5 +441,9 @@ test("@production Pickup reloads the current page after an authorized Store swit
   await page.getByRole("link", { name: "Pickup", exact: true }).click();
   await expect(page.getByText("Order PICKUPSTORE00000000002", { exact: true })).toBeVisible();
   await expect(page.getByText("Order PICKUPSTORE00000000001", { exact: true })).toHaveCount(0);
-  expect(readScopes).toEqual([storeOne.storeReference, storeTwo.storeReference]);
+  // The home page's "Right now" card also reads the pickup queue; the Store sequence is what matters.
+  expect(readScopes.filter((scope, index) => scope !== readScopes[index - 1])).toEqual([
+    storeOne.storeReference,
+    storeTwo.storeReference,
+  ]);
 });

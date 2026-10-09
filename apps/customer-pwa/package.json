@@ -17,8 +17,6 @@
   },
   "dependencies": {
     "@bop-rms/ui": "workspace:*",
-    "@fontsource-variable/inter": "5.2.8",
-    "@fontsource-variable/jetbrains-mono": "5.2.8",
     "@stripe/stripe-js": "9.10.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
@@ -26,6 +24,7 @@
     "uuid": "14.0.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "1.62.1",
     "@tailwindcss/vite": "4.3.2",
     "@types/react": "19.2.17",

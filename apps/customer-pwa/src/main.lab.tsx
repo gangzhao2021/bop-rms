@@ -1,5 +1,3 @@
-import "@fontsource-variable/inter/index.css";
-import "@fontsource-variable/jetbrains-mono/index.css";
 import { v7 as uuidv7 } from "uuid";
 import { createDiningAdmissionJourney } from "./dining/dining-admission-journey.js";
 import { createBrowserDiningJoinClient } from "./dining/dining-join-client.js";

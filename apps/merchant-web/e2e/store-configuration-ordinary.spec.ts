@@ -464,7 +464,9 @@ const panel = (page: Page) =>
 async function enter(page: Page) {
   await page.goto("/app");
   // On narrow screens the workspace navigation sits behind the Menu disclosure (WP-2423 M1).
-  const compactMenu = page.locator(".workspace-sidebar__compact > summary");
+  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
+  await workspaceNav.waitFor();
+  const compactMenu = workspaceNav.locator(".workspace-sidebar__compact > summary");
   if (await compactMenu.isVisible()) await compactMenu.click();
   await page.getByRole("link", { name: "Store setup", exact: true }).click();
   await page.getByRole("button", { name: /^8\. Review$/u }).click();
