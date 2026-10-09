@@ -486,5 +486,9 @@ test("@production Orders reloads the current page after an authorized Store swit
   await page.getByRole("link", { name: "Orders", exact: true }).click();
   await expect(page.getByRole("heading", { name: "STORE-TWO-ORDER", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "STORE-ONE-ORDER", exact: true })).toHaveCount(0);
-  expect(readScopes).toEqual([storeOne.storeReference, storeTwo.storeReference]);
+  // The home page's "Right now" card also reads the queue; the Store sequence is what matters.
+  expect(readScopes.filter((scope, index) => scope !== readScopes[index - 1])).toEqual([
+    storeOne.storeReference,
+    storeTwo.storeReference,
+  ]);
 });

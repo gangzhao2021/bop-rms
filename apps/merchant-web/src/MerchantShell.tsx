@@ -20,6 +20,8 @@ export interface MerchantShellProps {
   readonly state: MerchantShellState;
   readonly onSwitchStore: (targetStoreReference: string) => void | Promise<void>;
   readonly overview?: ReactNode;
+  /** WP-2423 P2: the live "right now" card; the release note is shown while it is absent. */
+  readonly today?: ReactNode;
 }
 
 function StateView({ state }: { readonly state: Exclude<MerchantShellState, { kind: "Ready" }> }) {
@@ -50,7 +52,12 @@ function StateView({ state }: { readonly state: Exclude<MerchantShellState, { ki
 }
 
 /** HOME: the Store at a glance. Inside the workspace layout once a session exists. */
-export function MerchantShell({ state, onSwitchStore, overview = null }: MerchantShellProps) {
+export function MerchantShell({
+  state,
+  onSwitchStore,
+  overview = null,
+  today,
+}: MerchantShellProps) {
   if (state.kind !== "Ready")
     return (
       <AppFrame title="Operations" description="Store workspace">
@@ -118,13 +125,15 @@ export function MerchantShell({ state, onSwitchStore, overview = null }: Merchan
               </p>
               <p>Business date {ready.workspace.businessDate}</p>
             </section>
-            <section className="overview-card" aria-labelledby="today-summary-heading">
-              <h3 id="today-summary-heading">Today</h3>
-              <p>
-                Sales, open orders and exceptions for the day are not available in this release. Use
-                Orders, Kitchen, Pickup and Exceptions from the menu.
-              </p>
-            </section>
+            {today ?? (
+              <section className="overview-card" aria-labelledby="today-summary-heading">
+                <h3 id="today-summary-heading">Today</h3>
+                <p>
+                  Sales, open orders and exceptions for the day are not available in this release.
+                  Use Orders, Kitchen, Pickup and Exceptions from the menu.
+                </p>
+              </section>
+            )}
           </div>
         )}
       </section>

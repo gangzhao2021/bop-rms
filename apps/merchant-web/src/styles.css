@@ -6696,6 +6696,63 @@ body:has(.product-complete-draft) .bop-shell__header,
   grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
   gap: 16px;
 }
+/* WP-2423 P2: the live "right now" card. */
+.overview-card--today header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.overview-card--today header button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+.overview-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: 16px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.overview-counts li {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+}
+.overview-count__label {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.overview-count__value {
+  font-size: 30px;
+  font-weight: 650;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.overview-count__detail {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.overview-counts a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  color: inherit;
+  font-weight: 500;
+}
+.overview-updated {
+  margin: 12px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
 .overview-card p {
   margin: 0 0 4px;
   color: var(--bop-color-text-muted);

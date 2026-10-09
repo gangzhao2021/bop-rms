@@ -18,6 +18,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router";
 import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { MerchantShell } from "./MerchantShell.js";
+import { StoreOverview } from "./StoreOverview.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { PickupQueuePage } from "./PickupPages.js";
 import { KdsProfilePage } from "./KdsProfilePage.js";
@@ -254,6 +255,17 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           <LocalDemoRoute notice={demo?.Notice ?? null}>
             <MerchantShell
               overview={DemoOverview === undefined ? null : <DemoOverview />}
+              today={
+                demo === null && state.kind === "Ready" && !state.switching ? (
+                  <StoreOverview
+                    key={state.workspace.selectedScope.storeReference + state.csrf}
+                    csrf={state.csrf}
+                    storeReference={state.workspace.selectedScope.storeReference}
+                    storeLabel={state.workspace.selectedScope.storeLabel}
+                    timeZone={state.workspace.selectedScope.timeZone}
+                  />
+                ) : undefined
+              }
               state={state}
               onSwitchStore={switchStore}
             />
