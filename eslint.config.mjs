@@ -6,6 +6,7 @@ export default tseslint.config(
   {
     ignores: [
       ".local/**",
+      ".claude/**",
       "**/build/**",
       "**/coverage/**",
       "**/dist/**",

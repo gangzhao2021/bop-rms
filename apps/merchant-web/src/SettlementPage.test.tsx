@@ -55,7 +55,7 @@ describe("WP-2423 P1 settlement report", () => {
   });
   it("names a statement difference and a truncated list", () => {
     const view = settlementViewFixture();
-    Object.assign(view.reconciliation.settlement.checks[0]!, {
+    Object.assign(view.reconciliation.settlement.checks[0] ?? {}, {
       outcome: "Difference",
       differenceReason: "RefundMismatch",
       providerRefundedMinor: "2260",
@@ -106,8 +106,9 @@ describe("WP-2423 P1 settlement report", () => {
     view.reconciliation.differenceCount = 1;
     expect(() => parseSettlementView(view)).toThrow("Unavailable");
     const foreign = settlementViewFixture();
-    foreign.reconciliation.settlement.checks[0]!.runReference =
-      foreign.reconciliation.operational.latestRun!.runReference;
+    const statement = foreign.reconciliation.settlement.checks[0];
+    if (statement)
+      statement.runReference = foreign.reconciliation.operational.latestRun.runReference;
     expect(() => parseSettlementView(foreign)).toThrow("Unavailable");
   });
 });

@@ -250,7 +250,7 @@ async function install(page: Page) {
       }
       expect(body.command).toBe("SaveDraft");
       const command = parseStoreSetupSaveCommand({
-        profile: Object.hasOwn(body.content, "feeContexts")
+        profile: Object.hasOwn(body.content as object, "feeContexts")
           ? "StoreSetupSaveV2"
           : "StoreSetupSaveV1",
         ...selectedScope,
