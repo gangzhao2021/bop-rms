@@ -59,7 +59,7 @@ export async function exerciseProductPricingReferenceMatches({
       role,
   );
   await admin.query(
-    "GRANT SELECT ON rms_catalog.menu_reference_generation,rms_catalog.menu_review_content,rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period TO " +
+    "GRANT SELECT ON rms_catalog.menu_reference_generation,rms_catalog.menu_review_content,rms_catalog.menu_publication_revision,rms_catalog.menu_publication_release,rms_catalog.menu_release_effective_period,rms_catalog.menu_release_effective_end TO " +
       role,
   );
   await admin.query("GRANT USAGE ON SCHEMA rms_recipe TO " + role);
