@@ -357,3 +357,58 @@ export async function listStorePaidOrderBatches(
   }
   return { paidOrders, awaitingAcceptance };
 }
+
+/**
+ * WP-2423 Q2: how the kitchen names each Order — its number, type and, for dine-in, the dining
+ * session it belongs to. No Customer identity. Caller authorizes and owns the transaction.
+ */
+export async function listStoreKitchenOrderLabels(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<
+  ReadonlyMap<
+    string,
+    {
+      readonly orderNumber: string;
+      readonly orderType: "Pickup" | "DineIn";
+      readonly diningSessionReference: string | null;
+    }
+  >
+> {
+  if (orderReferences.length === 0) return new Map();
+  if (orderReferences.length > 200) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const orders = orderReferences.map((reference) => parseOrderingReference(reference));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT order_id::text order_id,order_number,order_type,dining_session_id::text dining_session FROM rms_ordering.order_header " +
+        "WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[])",
+      [scope.brandReference, scope.storeReference, orders],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  return new Map(
+    rows.map((row) => {
+      const order = parseOrderingReference(row.order_id);
+      if (
+        !orders.includes(order) ||
+        typeof row.order_number !== "string" ||
+        (row.order_type !== "Pickup" && row.order_type !== "DineIn") ||
+        (row.order_type === "DineIn") !== (row.dining_session !== null)
+      )
+        throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+      return [
+        order,
+        Object.freeze({
+          orderNumber: row.order_number,
+          orderType: row.order_type,
+          diningSessionReference:
+            row.dining_session === null ? null : parseOrderingReference(row.dining_session),
+        }),
+      ] as const;
+    }),
+  );
+}

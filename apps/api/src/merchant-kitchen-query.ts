@@ -6,10 +6,12 @@ import {
   createPostgresKitchenQueueQueries,
   lockPostgresKitchenQueueRead,
   KitchenQueueProjectionError,
-  listKitchenWorkItemMenuKeys,
+  listKitchenWorkItemPreparationFacts,
   type KitchenQueueItemView,
 } from "@rms/kitchen";
 import { listPublishedSellableAllergenDisclosures, sellableDisclosureKey } from "@rms/catalog";
+import { listStoreKitchenOrderLabels } from "@rms/ordering";
+import { listDiningSessionTableLabels } from "@rms/dining";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -83,23 +85,88 @@ export type KitchenItemAllergens =
       }[];
     }
   | { readonly status: "Unavailable" };
+/** WP-2423 Q2: how the kitchen names the Order (no Customer identity). */
+export interface KitchenOrderLabel {
+  readonly orderNumber: string;
+  readonly orderType: "Pickup" | "DineIn";
+  readonly tableLabel: string | null;
+}
+interface KitchenPreparation {
+  readonly allergens: KitchenItemAllergens;
+  readonly orderLabel: KitchenOrderLabel | null;
+  /** Restricted (DEC-KDS-CUSTOMER-NOTE): displayed only; never logged or evented. */
+  readonly customerNote: string | null;
+}
 const unavailableAllergens: KitchenItemAllergens = Object.freeze({ status: "Unavailable" });
-const itemView = (item: KitchenQueueItemView, allergens: KitchenItemAllergens) => ({
+const noPreparation: KitchenPreparation = Object.freeze({
+  allergens: unavailableAllergens,
+  orderLabel: null,
+  customerNote: null,
+});
+const itemView = (item: KitchenQueueItemView, preparation: KitchenPreparation) => ({
   ...item,
   ticketAggregateVersion: item.ticketAggregateVersion.toString(10),
   workItemVersion: item.workItemVersion.toString(10),
-  allergens,
+  allergens: preparation.allergens,
+  orderLabel: preparation.orderLabel,
+  customerNote: preparation.customerNote,
 });
 /**
  * WP-2423 Q3: Kitchen gives each work item's menu keys, Catalog the disclosure published for them.
  * Product facts only; no Customer note or health fact. Missing sources read as Unavailable.
  */
+async function kitchenPreparation(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  items: readonly { readonly workItemReference: string; readonly orderReference: string }[],
+): Promise<ReadonlyMap<string, KitchenPreparation>> {
+  const allergens = await kitchenAllergens(
+    transaction,
+    scope,
+    items.map((item) => item.workItemReference),
+  );
+  // WP-2423 Q2: Ordering names the Order; Dining gives a dine-in session's current table.
+  const orders = await listStoreKitchenOrderLabels(transaction, scope, [
+    ...new Set(items.map((item) => item.orderReference)),
+  ]);
+  const tables = await listDiningSessionTableLabels(transaction, scope, [
+    ...new Set(
+      [...orders.values()].flatMap((order) =>
+        order.diningSessionReference === null ? [] : [order.diningSessionReference],
+      ),
+    ),
+  ]);
+  return new Map(
+    items.map((item) => {
+      const order = orders.get(item.orderReference);
+      const facts = allergens.get(item.workItemReference);
+      return [
+        item.workItemReference,
+        Object.freeze({
+          allergens: facts?.allergens ?? unavailableAllergens,
+          customerNote: facts?.customerNote ?? null,
+          orderLabel:
+            order === undefined
+              ? null
+              : Object.freeze({
+                  orderNumber: order.orderNumber,
+                  orderType: order.orderType,
+                  tableLabel:
+                    order.diningSessionReference === null
+                      ? null
+                      : (tables.get(order.diningSessionReference) ?? null),
+                }),
+        }),
+      ] as const;
+    }),
+  );
+}
 async function kitchenAllergens(
   transaction: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   workItemReferences: readonly string[],
-): Promise<ReadonlyMap<string, KitchenItemAllergens>> {
-  const keys = await listKitchenWorkItemMenuKeys(transaction, scope, workItemReferences);
+): Promise<ReadonlyMap<string, { allergens: KitchenItemAllergens; customerNote: string | null }>> {
+  const keys = await listKitchenWorkItemPreparationFacts(transaction, scope, workItemReferences);
   const disclosures = await listPublishedSellableAllergenDisclosures(
     transaction,
     scope,
@@ -110,7 +177,7 @@ async function kitchenAllergens(
     })),
   );
   return new Map(
-    [...keys].flatMap(([workItem, key]) => {
+    [...keys].map(([workItem, key]) => {
       const disclosure = disclosures.get(
         sellableDisclosureKey({
           menuVersion: key.menuVersionReference,
@@ -118,11 +185,16 @@ async function kitchenAllergens(
           productVersion: key.productVersionReference,
         }),
       );
-      if (!disclosure) return [];
-      return [
-        [
+      if (!disclosure)
+        return [
           workItem,
-          Object.freeze({
+          { allergens: unavailableAllergens, customerNote: key.customerNote },
+        ] as const;
+      return [
+        workItem,
+        {
+          customerNote: key.customerNote,
+          allergens: Object.freeze({
             status: "Declared" as const,
             items: Object.freeze(
               disclosure.items.map((item) => {
@@ -135,8 +207,8 @@ async function kitchenAllergens(
               }),
             ),
           }),
-        ] as const,
-      ];
+        },
+      ] as const;
     }),
   );
 }
@@ -255,17 +327,13 @@ export function createMerchantKitchenQuery(options: {
           cursor: query.cursor,
           limit: query.limit,
         });
-        const allergens = await kitchenAllergens(
-          tx,
-          authority,
-          result.items.map((item) => item.workItemReference),
-        );
+        const preparation = await kitchenPreparation(tx, authority, result.items);
         return {
           ...result,
           operatorStatus: operatorStatus(result),
           storeReference: authority.storeReference,
           items: result.items.map((item) =>
-            itemView(item, allergens.get(item.workItemReference) ?? unavailableAllergens),
+            itemView(item, preparation.get(item.workItemReference) ?? noPreparation),
           ),
         };
       }
@@ -273,14 +341,14 @@ export function createMerchantKitchenQuery(options: {
         ...authority,
         workItemReference: query.workItemReference,
       });
-      const allergens = await kitchenAllergens(tx, authority, [result.item.workItemReference]);
+      const preparation = await kitchenPreparation(tx, authority, [result.item]);
       return {
         ...result,
         operatorStatus: operatorStatus(result),
         storeReference: authority.storeReference,
         item: itemView(
           result.item,
-          allergens.get(result.item.workItemReference) ?? unavailableAllergens,
+          preparation.get(result.item.workItemReference) ?? noPreparation,
         ),
       };
     });

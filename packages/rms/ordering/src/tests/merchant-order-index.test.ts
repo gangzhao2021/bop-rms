@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresMerchantOrderIndex,
+  listStoreKitchenOrderLabels,
   listStorePaidOrderBatches,
 } from "../infrastructure/persistence/merchant-order-index.js";
 const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -276,4 +277,31 @@ it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the 
     paidOrders: new Set(),
     awaitingAcceptance: new Set(),
   });
+});
+it("WP-2423 Q2: names many Orders for the kitchen without Customer identity", async () => {
+  const query = vi.fn<(sql: string, values?: readonly unknown[]) => Promise<unknown>>(
+    async (sql) => ({
+      rows: sql.startsWith("SELECT set_config")
+        ? []
+        : [
+            { order_id: id(3), order_number: "14", order_type: "DineIn", dining_session: id(40) },
+            { order_id: id(4), order_number: "15", order_type: "Pickup", dining_session: null },
+          ],
+      rowCount: 2,
+    }),
+  );
+  const tx = { query } as unknown as ConsumerTransaction;
+  const labels = await listStoreKitchenOrderLabels(tx, scope, [id(3), id(4)]);
+  expect(labels.get(id(3))).toEqual({
+    orderNumber: "14",
+    orderType: "DineIn",
+    diningSessionReference: id(40),
+  });
+  expect(labels.get(id(4))?.diningSessionReference).toBeNull();
+  expect(query.mock.calls[1]?.[0]).not.toMatch(/guest|name|contact/iu);
+  query.mockResolvedValueOnce({ rows: [], rowCount: 0 }).mockResolvedValueOnce({
+    rows: [{ order_id: id(3), order_number: "14", order_type: "DineIn", dining_session: null }],
+    rowCount: 1,
+  });
+  await expect(listStoreKitchenOrderLabels(tx, scope, [id(3)])).rejects.toThrow();
 });

@@ -421,3 +421,47 @@ export function createPostgresDiningPublicTableReader(options: {
     },
   });
 }
+
+/**
+ * WP-2423 Q2: the current table label of each dining session, for the kitchen's order label. A
+ * session whose table cannot be read is omitted. Caller authorizes the Store and owns the
+ * transaction.
+ */
+export async function listDiningSessionTableLabels(
+  transaction: DiningTableTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  sessionReferences: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  if (sessionReferences.length === 0) return new Map();
+  if (sessionReferences.length > 200) throw new Error("DINING_TABLE_INPUT_INVALID");
+  const brand = reference(scope.brandReference),
+    store = reference(scope.storeReference),
+    sessions = sessionReferences.map((value) => reference(value));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  // Many sessions per read: the single-row helper does not apply here.
+  const result = (await transaction.query(
+    "SELECT s.session_id::text session_id,t.table_snapshot->>'stableLabel' label FROM rms_dining.dining_session s " +
+      "JOIN rms_dining.dining_table t ON t.tenant_id=s.tenant_id AND t.brand_id=s.brand_id AND t.store_id=s.store_id AND t.table_id=s.table_id " +
+      "WHERE s.brand_id=$1 AND s.store_id=$2 AND s.session_id=ANY($3::uuid[])",
+    [brand, store, sessions],
+  )) as { rows?: unknown } | null;
+  const found = result?.rows;
+  if (!Array.isArray(found) || found.length > sessions.length)
+    throw new Error("DINING_TABLE_UNAVAILABLE");
+  const labels = new Map<string, string>();
+  for (const row of found) {
+    const value = row as { session_id?: unknown; label?: unknown };
+    const session = reference(value.session_id);
+    if (!sessions.includes(session)) throw new Error("DINING_TABLE_UNAVAILABLE");
+    if (
+      typeof value.label === "string" &&
+      /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(value.label) &&
+      value.label.trim() === value.label
+    )
+      labels.set(session, value.label);
+  }
+  return labels;
+}

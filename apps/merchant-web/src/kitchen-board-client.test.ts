@@ -11,6 +11,8 @@ const item = (n = 1) => ({
   stationReference: id(5),
   localizedDisplayNames: { "en-CA": "Synthetic rice" },
   allergens: { status: "Unavailable" },
+  orderLabel: { orderNumber: "14", orderType: "DineIn", tableLabel: "T4" },
+  customerNote: null,
   selectedOptions: [
     {
       optionReference: id(40),

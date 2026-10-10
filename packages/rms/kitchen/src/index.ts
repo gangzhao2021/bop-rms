@@ -365,7 +365,7 @@ export {
 
 export {
   createPostgresKitchenQueueQueries,
-  listKitchenWorkItemMenuKeys,
+  listKitchenWorkItemPreparationFacts,
   lockPostgresKitchenQueueRead,
 } from "./infrastructure/persistence/kitchen-queue-queries.js";
 

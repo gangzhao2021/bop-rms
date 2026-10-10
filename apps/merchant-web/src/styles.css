@@ -1798,6 +1798,43 @@
   color: var(--bop-color-warning);
   font-weight: 600;
 }
+/* WP-2423 Q2: one Order's work together under its number and table. */
+.kitchen-order-group {
+  display: grid;
+  gap: 8px;
+}
+.kitchen-order-group + .kitchen-order-group {
+  margin-top: 8px;
+}
+.kitchen-order-group__label {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.kitchen-work-item__options {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 15px;
+  font-weight: 600;
+}
+.kitchen-work-item__note {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 6px 8px;
+  border-inline-start: 3px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-raised);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.kitchen-work-item__note span {
+  font-weight: 700;
+}
 /* WP-2423 Q3: menu allergens are a full-width line; "Contains" reads first and strongest. */
 .kitchen-work-item__allergens {
   display: flex;

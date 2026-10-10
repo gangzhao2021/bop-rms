@@ -31,12 +31,18 @@ function setup() {
   doubles.service.mockReturnValue({ list: doubles.list, get: doubles.get });
   doubles.list.mockResolvedValue({
     items: [
-      { workItemReference: id(5), ticketAggregateVersion: 9007199254740993n, workItemVersion: 2n },
+      {
+        workItemReference: id(5),
+        orderReference: id(6),
+        ticketAggregateVersion: 9007199254740993n,
+        workItemVersion: 2n,
+      },
     ],
   });
   doubles.get.mockResolvedValue({
     item: {
       workItemReference: id(5),
+      orderReference: id(6),
       ticketAggregateVersion: 9007199254740993n,
       workItemVersion: 2n,
     },
@@ -90,9 +96,12 @@ it("derives current authority, preserves integer strings, and rechecks permissio
     items: [
       {
         workItemReference: id(5),
+        orderReference: id(6),
         ticketAggregateVersion: "9007199254740993",
         workItemVersion: "2",
         allergens: { status: "Unavailable" },
+        orderLabel: null,
+        customerNote: null,
       },
     ],
   });
@@ -118,9 +127,12 @@ it("returns detail with exact version strings", async () => {
     storeReference: id(4),
     item: {
       workItemReference: id(5),
+      orderReference: id(6),
       ticketAggregateVersion: "9007199254740993",
       workItemVersion: "2",
       allergens: { status: "Unavailable" },
+      orderLabel: null,
+      customerNote: null,
     },
   });
 });
@@ -142,24 +154,50 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
   f.tx.query.mockImplementation((async (sql: string) =>
     sql.includes("FROM rms_kitchen.kitchen_work_item")
       ? {
-          rows: [{ work_item: id(5), menu_version: id(20), sku: id(21), product_version: id(22) }],
+          rows: [
+            {
+              work_item: id(5),
+              menu_version: id(20),
+              sku: id(21),
+              product_version: id(22),
+              customer_note: "Synthetic note: no onions",
+            },
+          ],
           rowCount: 1,
         }
-      : sql.includes("published_menu_projection_sellable")
+      : sql.includes("FROM rms_ordering.order_header")
         ? {
             rows: [
-              {
-                menu_version: id(20),
-                sellable: id(21),
-                product_version: id(22),
-                default_locale: "en-CA",
-                disclosure: JSON.stringify(disclosure),
-              },
+              { order_id: id(6), order_number: "14", order_type: "DineIn", dining_session: id(40) },
             ],
             rowCount: 1,
           }
-        : { rows: [], rowCount: 0 }) as never);
-  const result = (await f.operation(f.input)) as { items: { allergens: unknown }[] };
+        : sql.includes("FROM rms_dining.dining_session")
+          ? { rows: [{ session_id: id(40), label: "T4" }], rowCount: 1 }
+          : sql.includes("published_menu_projection_sellable")
+            ? {
+                rows: [
+                  {
+                    menu_version: id(20),
+                    sellable: id(21),
+                    product_version: id(22),
+                    default_locale: "en-CA",
+                    disclosure: JSON.stringify(disclosure),
+                  },
+                ],
+                rowCount: 1,
+              }
+            : { rows: [], rowCount: 0 }) as never);
+  const result = (await f.operation(f.input)) as {
+    items: { allergens: unknown; orderLabel: unknown; customerNote: unknown }[];
+  };
+  // WP-2423 Q2: the Order's number and current table, and the note for display only.
+  expect(result.items[0]?.orderLabel).toEqual({
+    orderNumber: "14",
+    orderType: "DineIn",
+    tableLabel: "T4",
+  });
+  expect(result.items[0]?.customerNote).toBe("Synthetic note: no onions");
   expect(result.items[0]?.allergens).toEqual({
     status: "Declared",
     items: [{ code: "MILK", name: "Milk", classification: "Contains" }],
@@ -187,6 +225,7 @@ it("preserves projection-owned selected modifiers through List and Get", async (
     items: [
       {
         workItemReference: id(5),
+        orderReference: id(7),
         ticketAggregateVersion: 3n,
         workItemVersion: 2n,
         selectedOptions,
@@ -196,6 +235,7 @@ it("preserves projection-owned selected modifiers through List and Get", async (
   doubles.get.mockResolvedValue({
     item: {
       workItemReference: id(5),
+      orderReference: id(7),
       ticketAggregateVersion: 3n,
       workItemVersion: 2n,
       selectedOptions,

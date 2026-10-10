@@ -18,6 +18,12 @@ export type KitchenItemAllergens =
     }
   | { readonly status: "Unavailable" };
 
+export interface KitchenOrderLabel {
+  readonly orderNumber: string;
+  readonly orderType: "Pickup" | "DineIn";
+  readonly tableLabel: string | null;
+}
+
 export interface KitchenBoardItem {
   readonly workItemReference: string;
   readonly ticketReference: string;
@@ -33,6 +39,10 @@ export interface KitchenBoardItem {
   readonly selectedOptions: readonly KitchenSelectedOption[];
   /** WP-2423 Q3: omitted by older sources; shown as unavailable. */
   readonly allergens?: KitchenItemAllergens;
+  /** WP-2423 Q2: how the kitchen names the Order; null when the Order cannot be read. */
+  readonly orderLabel?: KitchenOrderLabel | null;
+  /** WP-2423 Q2 (DEC-KDS-CUSTOMER-NOTE): Restricted; shown verbatim, never stored or logged. */
+  readonly customerNote?: string | null;
   readonly execution?: {
     readonly orderItemReference: string;
     readonly stationReference: string;
@@ -142,6 +152,33 @@ function selectedOptions(value: unknown): readonly KitchenSelectedOption[] {
   return Object.freeze(value.map(selectedOption));
 }
 
+/** WP-2423 Q2: the Order's number and, for dine-in, its current table. */
+export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null {
+  if (value === null) return null;
+  const input = closed(value, ["orderNumber", "orderType", "tableLabel"]);
+  if (
+    typeof input.orderNumber !== "string" ||
+    !/^[A-Z0-9][A-Z0-9-]{0,39}$/u.test(input.orderNumber) ||
+    (input.orderType !== "Pickup" && input.orderType !== "DineIn") ||
+    (input.tableLabel !== null &&
+      (input.orderType !== "DineIn" ||
+        typeof input.tableLabel !== "string" ||
+        !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(input.tableLabel)))
+  )
+    throw new Error("KITCHEN_BOARD_INVALID");
+  return Object.freeze({
+    orderNumber: input.orderNumber,
+    orderType: input.orderType,
+    tableLabel: input.tableLabel as string | null,
+  });
+}
+/** WP-2423 Q2: the Customer's note, as written (bounded, no control characters). */
+export function parseKitchenCustomerNote(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || !/^[^\p{Cc}\p{Cf}]{1,500}$/u.test(value.replace(/\n/gu, " ")))
+    throw new Error("KITCHEN_BOARD_INVALID");
+  return value;
+}
 /** WP-2423 Q3: names grouped by classification, as the API serves them. */
 export function parseKitchenItemAllergens(value: unknown): KitchenItemAllergens {
   const status =
@@ -174,6 +211,10 @@ function item(value: unknown): KitchenBoardItem {
     value !== null && typeof value === "object" && Object.hasOwn(value, "execution");
   const hasAllergens =
     value !== null && typeof value === "object" && Object.hasOwn(value, "allergens");
+  const hasOrderLabel =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "orderLabel");
+  const hasCustomerNote =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "customerNote");
   const input = closed(value, [
     "workItemReference",
     "ticketReference",
@@ -188,6 +229,8 @@ function item(value: unknown): KitchenBoardItem {
     "exceptionStatus",
     "selectedOptions",
     ...(hasAllergens ? ["allergens"] : []),
+    ...(hasOrderLabel ? ["orderLabel"] : []),
+    ...(hasCustomerNote ? ["customerNote"] : []),
     ...(hasExecution ? ["execution"] : []),
   ]);
   if (
@@ -221,6 +264,8 @@ function item(value: unknown): KitchenBoardItem {
     exceptionStatus: input.exceptionStatus as KitchenBoardItem["exceptionStatus"],
     selectedOptions: selectedOptions(input.selectedOptions),
     ...(hasAllergens ? { allergens: parseKitchenItemAllergens(input.allergens) } : {}),
+    ...(hasOrderLabel ? { orderLabel: parseKitchenOrderLabel(input.orderLabel) } : {}),
+    ...(hasCustomerNote ? { customerNote: parseKitchenCustomerNote(input.customerNote) } : {}),
     ...(hasExecution ? { execution: execution(input.execution) } : {}),
   });
 }

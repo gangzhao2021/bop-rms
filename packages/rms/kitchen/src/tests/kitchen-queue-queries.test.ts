@@ -1,6 +1,9 @@
 import { expect, it, vi } from "vitest";
 import type { ConsumerTransaction } from "@bop/eventing";
-import { createPostgresKitchenQueueQueries } from "../index.js";
+import {
+  createPostgresKitchenQueueQueries,
+  listKitchenWorkItemPreparationFacts,
+} from "../index.js";
 const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-09-19T12:00:00.000Z";
 function setup() {
@@ -213,4 +216,44 @@ it("sanitizes database failures", async () => {
   f.sql.mockReset().mockRejectedValue(new Error("private SQL or credentials"));
   await expect(f.list()).rejects.toMatchObject({ code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE" });
   await expect(f.get()).rejects.not.toThrow("private SQL");
+});
+it("WP-2423 Q2/Q3: reads menu facts and notes for many work items without projecting them", async () => {
+  const ref = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const query = vi.fn<(sql: string, values?: readonly unknown[]) => Promise<unknown>>(
+    async (sql) => ({
+      rows: sql.startsWith("SELECT set_config")
+        ? []
+        : [
+            {
+              work_item: ref(5),
+              menu_version: ref(20),
+              sku: ref(21),
+              product_version: ref(22),
+              customer_note: "Synthetic note",
+            },
+            {
+              work_item: ref(6),
+              menu_version: ref(20),
+              sku: ref(23),
+              product_version: ref(24),
+              customer_note: null,
+            },
+          ],
+      rowCount: 2,
+    }),
+  );
+  const scope = { brandReference: ref(1), storeReference: ref(2) };
+  const facts = await listKitchenWorkItemPreparationFacts({ query } as never, scope, [
+    ref(5),
+    ref(6),
+  ]);
+  expect(facts.get(ref(5))?.customerNote).toBe("Synthetic note");
+  expect(facts.get(ref(6))).toEqual({
+    menuVersionReference: ref(20),
+    skuReference: ref(23),
+    productVersionReference: ref(24),
+    customerNote: null,
+  });
+  expect(query.mock.calls[1]?.[0]).toContain("FROM rms_kitchen.kitchen_work_item");
+  expect(query.mock.calls[1]?.[0]).not.toContain("kitchen_work_queue_projection");
 });

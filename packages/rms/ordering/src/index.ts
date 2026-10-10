@@ -299,6 +299,7 @@ export {
   listStoreOrderNumbers,
   listStoreUnfulfillablePaidOrders,
   listStorePaidOrderBatches,
+  listStoreKitchenOrderLabels,
   loadMerchantOrderLines,
   type MerchantOrderLine,
   type MerchantOrderLineMoney,

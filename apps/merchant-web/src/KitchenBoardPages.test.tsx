@@ -11,6 +11,8 @@ import {
   kitchenWarningMinutes,
   newQueuedReferences,
   playKitchenChime,
+  groupKitchenItemsByOrder,
+  kitchenOrderLabel,
 } from "./KitchenBoardPages.js";
 import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
 import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen-board.js";
@@ -43,7 +45,9 @@ describe("WP-1804 Kitchen Board screens", () => {
       'data-age="warning"',
     ])
       expect(html).toContain(value);
-    expect(html).not.toContain("Extra mushrooms");
+    // WP-2423 Q2: modifiers are on the card itself; the Order is named by number, not reference.
+    expect(html).toContain("<li>Extra mushrooms × 2</li>");
+    expect(html).toContain("Order 14 · Table T4");
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000402");
     expect(html).not.toContain("018f0f58-767a-7f3b-a1d0-000000000403");
     expect(html).not.toContain("Exception: None");
@@ -184,7 +188,7 @@ describe("WP-1804 Kitchen Board screens", () => {
         <KitchenBoardStatePanel state="CommandFailed" />
       </MemoryRouter>,
     );
-    expect(html).toContain('class="kitchen-board-eyebrow">Work item</p>');
+    expect(html).toContain('class="kitchen-board-eyebrow">Order 14 · Table T4</p>');
     expect(html).not.toContain("KIT-WORK-ITEM");
     expect(html).not.toContain("Ticket display reference unavailable");
     expect(html).not.toContain("Order display reference unavailable");
@@ -489,4 +493,53 @@ it("WP-2423 Q3: shows the menu's declared allergens on the card, strongest first
   expect(html).toContain('aria-label="Contains Milk. May contain Sesame"');
   expect(html).toContain("No menu allergens declared");
   expect(html).not.toMatch(/allergen.free/iu);
+});
+
+describe("WP-2423 Q2 kitchen order context", () => {
+  it("groups each Order's work under its number, shows the note, and keeps finished work off by default", () => {
+    const item = kitchenItemFixture();
+    const view = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [
+        {
+          ...item,
+          workItemReference: "018f0f58-767a-7f3b-a1d0-000000000501",
+          orderReference: "018f0f58-767a-7f3b-a1d0-000000000503",
+          orderLabel: { orderNumber: "15", orderType: "Pickup", tableLabel: null },
+          customerNote: "Synthetic note: no onions",
+          createdAt: "2026-08-12T15:05:00.000Z",
+        },
+        item,
+        {
+          ...item,
+          workItemReference: "018f0f58-767a-7f3b-a1d0-000000000502",
+          displayName: "Miso soup",
+        },
+        {
+          ...item,
+          workItemReference: "018f0f58-767a-7f3b-a1d0-000000000504",
+          displayName: "Finished tea",
+          status: "Completed",
+          completedQuantity: 2,
+        },
+      ],
+    });
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={view} onRefresh={() => undefined} />
+      </MemoryRouter>,
+    );
+    // Oldest Order first, its two items together, then the newer pickup.
+    expect(html.indexOf("Order 14 · Table T4")).toBeLessThan(html.indexOf("Order 15 · Pickup"));
+    expect(html.indexOf("Miso soup")).toBeLessThan(html.indexOf("Order 15 · Pickup"));
+    expect(html).toContain(
+      '<p class="kitchen-work-item__note"><span>Note:</span> Synthetic note: no onions</p>',
+    );
+    expect(html).not.toContain("Finished tea");
+    expect(html).toContain('<option value="Active" selected="">Active work</option>');
+    expect(groupKitchenItemsByOrder(view.items).map((group) => group.items.length)).toEqual([3, 1]);
+    expect(kitchenOrderLabel({ ...item, orderLabel: null } as never)).toBe(
+      "Order details unavailable",
+    );
+  });
 });

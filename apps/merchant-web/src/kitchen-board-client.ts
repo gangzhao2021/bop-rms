@@ -115,6 +115,8 @@ function item(value: unknown) {
     exceptionStatus: "Unavailable",
     selectedOptions: selectedOptions(raw.selectedOptions),
     allergens: allergens(raw.allergens),
+    orderLabel: raw.orderLabel,
+    customerNote: raw.customerNote,
     execution: {
       orderItemReference: raw.orderItemReference,
       stationReference: raw.stationReference,

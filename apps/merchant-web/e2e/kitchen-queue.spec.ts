@@ -87,6 +87,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     orderItemReference: id(4),
     stationReference: id(5),
     localizedDisplayNames: { "en-CA": "Synthetic rice" },
+    orderLabel: { orderNumber: "14", orderType: "DineIn", tableLabel: "T4" },
+    customerNote: "Synthetic note: no onions",
     // WP-2423 Q3: the menu's published disclosure for this item (synthetic).
     allergens: {
       status: "Declared",
@@ -191,6 +193,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
 
   // Work state is written out, never colour alone; waiting time is tiered on the card.
   const stateChips = page.locator(".kitchen-work-item__state strong");
+  // WP-2423 Q2: the board opens on active work, which includes completed work awaiting "ready".
   await expect(stateChips).toHaveText(["Queued", "In progress", "Completed"]);
   await expect(page.locator(".kitchen-work-item[data-age='late']")).toHaveCount(3);
   await expect(page.locator(".kitchen-work-item__state span").first()).toHaveText("18 min");
@@ -286,7 +289,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await expect(primaryNav).toBeHidden();
     const filterToggle = page.locator(".kitchen-filter-toggle");
     await expect(filterToggle).toBeVisible();
-    await expect(filterToggle).toHaveText("Filters · All work");
+    await expect(filterToggle).toHaveText("Filters · Active work");
     const mobileQueueCard = page.locator(".kitchen-work-item").first();
     await expectTouchTarget(refresh, "Queue refresh");
     await expectTouchTarget(filterToggle, "Queue filters");
@@ -400,7 +403,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
       );
     await expect(page).not.toHaveURL(new RegExp(mobileReference, "u"));
     await expect(page.locator("body")).not.toContainText(mobileReference);
-    await expect(filterToggle).toHaveText("Filters · Active");
+    await expect(filterToggle).toHaveText("Filters · Applied");
     await expect(filterSheet).not.toBeVisible();
     await filterToggle.click();
     await expect(filterSheet).toBeVisible();
@@ -498,7 +501,11 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(detailsLink).toHaveCSS("outline-style", "solid");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Additional detail", exact: true })).toBeVisible();
-  await expect(page.getByText("Work item", { exact: true })).toBeVisible();
+  // WP-2423 Q2: the detail names its Order and table, and shows the Customer's note.
+  await expect(page.getByText("Order 14 · Table T4", { exact: true })).toBeVisible();
+  await expect(page.locator(".kitchen-work-item__note")).toHaveText(
+    "Note: Synthetic note: no onions",
+  );
   await expect(
     page.getByRole("heading", { name: "Synthetic rice", exact: true, level: 2 }),
   ).toBeVisible();
@@ -662,6 +669,8 @@ test("@production Kitchen reloads projection after an authorized Store switch", 
       stationReference: id(50 + itemIndex),
       localizedDisplayNames: { "en-CA": `Synthetic work at Store ${itemIndex}` },
       allergens: { status: "Unavailable" },
+      orderLabel: { orderNumber: "21", orderType: "Pickup", tableLabel: null },
+      customerNote: null,
       selectedOptions: [],
       status: "Queued",
       requiredQuantity: 1,
@@ -767,6 +776,8 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
     orderReference: id(3),
     stationReference: id(5),
     allergens: { status: "Unavailable" },
+    orderLabel: { orderNumber: "21", orderType: "Pickup", tableLabel: null },
+    customerNote: null,
     selectedOptions: [],
     requiredQuantity: 1,
     completedQuantity: 0,
@@ -834,6 +845,8 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
     route.fulfill({ headers, json: { ...metadata, items, nextCursor: null } }),
   );
   await page.goto("/operations/kitchen");
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(4);
+  await page.locator(".kitchen-board-filters--desktop select").nth(1).selectOption("All");
   await expect(page.locator(".kitchen-work-item")).toHaveCount(5);
   const card = (name: string) => page.locator(".kitchen-work-item").filter({ hasText: name });
   const expectations = [
@@ -841,7 +854,7 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
     ["Synthetic in progress", "In progress", "9 min", "warning", "rgb(138, 90, 0)"],
     ["Synthetic held", "Held", "20 min", "late", "rgb(180, 35, 24)"],
     ["Synthetic completed", "Completed", "30 min", "late", "rgb(229, 229, 229)"],
-    ["Synthetic cancelled", "Cancelled", "2 min", "ok", "rgb(229, 229, 229)"],
+    ["Synthetic cancelled", "Cancelled", "Done", "ok", "rgb(229, 229, 229)"],
   ] as const;
   for (const [width, height] of [
     [1440, 900],
@@ -914,6 +927,8 @@ test("@production Kitchen commands preserve intent and wait for projection versi
     stationReference: id(5),
     localizedDisplayNames: { "en-CA": "Synthetic rice" },
     allergens: { status: "Unavailable" },
+    orderLabel: { orderNumber: "21", orderType: "Pickup", tableLabel: null },
+    customerNote: null,
     selectedOptions: [],
     status: "Queued",
     requiredQuantity: 2,
@@ -989,7 +1004,7 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     if (width < 768) {
-      const filters = page.getByRole("button", { name: "Filters · All work" });
+      const filters = page.getByRole("button", { name: "Filters · Active work" });
       await expect(filters).toBeVisible();
       await expect(page.getByRole("combobox", { name: "Work state" })).toBeHidden();
       await filters.click();

@@ -247,11 +247,12 @@ export async function lockPostgresKitchenQueueRead(input: {
 }
 
 /**
- * WP-2423 Q3: the published menu facts each work item was ordered from (menu version, SKU and
- * Product version), so the kitchen can show that menu's allergen disclosure. No Customer note.
- * Caller authorizes the Store and owns the transaction.
+ * WP-2423 Q3/Q2: what the kitchen needs to prepare each work item beyond the queue projection — the
+ * published menu facts it was ordered from (menu version, SKU, Product version) and the Customer's
+ * note. The note is Restricted (DEC-KDS-CUSTOMER-NOTE): returned for display only, never logged,
+ * evented or projected. Caller authorizes the Store and owns the transaction.
  */
-export async function listKitchenWorkItemMenuKeys(
+export async function listKitchenWorkItemPreparationFacts(
   transaction: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   workItemReferences: readonly string[],
@@ -262,6 +263,7 @@ export async function listKitchenWorkItemMenuKeys(
       readonly menuVersionReference: string;
       readonly skuReference: string;
       readonly productVersionReference: string;
+      readonly customerNote: string | null;
     }
   >
 > {
@@ -277,16 +279,20 @@ export async function listKitchenWorkItemMenuKeys(
   );
   const rows = (
     await transaction.query(
-      "SELECT DISTINCT ON (kitchen_work_item_id) kitchen_work_item_id::text work_item,menu_version_id::text menu_version," +
-        "sku_id::text sku,product_version_id::text product_version FROM rms_kitchen.kitchen_work_item " +
-        "WHERE brand_id=$1 AND store_id=$2 AND kitchen_work_item_id=ANY($3::uuid[]) ORDER BY kitchen_work_item_id,version DESC",
+      "SELECT kitchen_work_item_id::text work_item,menu_version_id::text menu_version," +
+        "sku_id::text sku,product_version_id::text product_version,customer_note FROM rms_kitchen.kitchen_work_item " +
+        "WHERE brand_id=$1 AND store_id=$2 AND kitchen_work_item_id=ANY($3::uuid[])",
       [brand, store, items],
     )
   ).rows as readonly Record<string, unknown>[];
   return new Map(
     rows.map((row) => {
       const workItem = parseKitchenTicketReference(row.work_item);
-      if (!items.includes(workItem))
+      const note = row.customer_note;
+      if (
+        !items.includes(workItem) ||
+        (note !== null && (typeof note !== "string" || note.length < 1 || note.length > 500))
+      )
         throw new KitchenQueueProjectionError("KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE");
       return [
         workItem,
@@ -294,6 +300,7 @@ export async function listKitchenWorkItemMenuKeys(
           menuVersionReference: parseKitchenTicketReference(row.menu_version),
           skuReference: parseKitchenTicketReference(row.sku),
           productVersionReference: parseKitchenTicketReference(row.product_version),
+          customerNote: note as string | null,
         }),
       ] as const;
     }),
