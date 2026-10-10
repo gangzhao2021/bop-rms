@@ -835,18 +835,23 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
     sourceChannel: "Qr" as const,
     submittedAt: "2026-10-08T21:00:30.000Z",
     initialBatchReference: "0198a408-0000-7000-8000-000000000124",
-    canRequestAcceptance: false,
+    canRequestAcceptance: true,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    // WP-2423 Q1: a paid pickup awaiting acceptance carries when it stops being acceptable.
+    acceptBy: "2026-10-08T21:30:30.000Z",
+    awaitingPayment: false,
     batches: [
       {
         orderBatchReference: "0198a408-0000-7000-8000-000000000124",
         sequence: 1,
-        acceptanceStatus: "Accepted" as const,
-        canRequestAcceptance: false,
+        acceptanceStatus: "NotAccepted" as const,
+        canRequestAcceptance: true,
       },
     ],
-    currentPhase: "Fulfilled",
-    currentVersion: 4,
-    observedAt: "2026-10-08T21:30:00.000Z",
+    currentPhase: "Submitted",
+    currentVersion: 1,
+    observedAt: "2026-10-08T21:10:00.000Z",
   };
   const lines = { items: [], totals: {} };
   const queue = vi.fn(async () => ({

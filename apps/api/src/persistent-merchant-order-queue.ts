@@ -1,6 +1,13 @@
 import type { ConsumerTransaction } from "@bop/eventing";
-import { listStoreUnfulfillablePaidOrders, loadMerchantOrderLines } from "@rms/ordering";
-import { listStoreUncollectedPickupOrders } from "@rms/fulfillment";
+import {
+  listStorePaidOrderBatches,
+  listStoreUnfulfillablePaidOrders,
+  loadMerchantOrderLines,
+} from "@rms/ordering";
+import {
+  listStorePickupAcceptanceDeadlines,
+  listStoreUncollectedPickupOrders,
+} from "@rms/fulfillment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
@@ -130,6 +137,33 @@ export function createPersistentMerchantOrderQueue(options: {
               ownerScope,
               result.items.map((item) => item.orderReference),
             );
+      // WP-2423 Q1: only a batch whose payment Ordering recorded as awaiting acceptance is offered
+      // for acceptance; an Order with no recorded payment is still awaiting the customer's payment.
+      const payments =
+        ownerScope === null || result.items.length === 0
+          ? { paidOrders: new Set<string>(), awaitingAcceptance: new Set<string>() }
+          : await listStorePaidOrderBatches(
+              businessTransaction,
+              ownerScope,
+              result.items.map((item) => item.orderReference),
+            );
+      // WP-2423 Q1: when a paid pickup Order not yet accepted stops being acceptable (Fulfillment's
+      // capacity expiry); staff are warned before it lapses and Payment refunds it.
+      const waiting = result.items.filter(
+        (item) =>
+          item.orderType === "Pickup" &&
+          item.currentPhase === "Submitted" &&
+          !unfulfillable.has(item.orderReference) &&
+          payments.awaitingAcceptance.has(item.initialBatchReference),
+      );
+      const deadlines =
+        ownerScope === null || waiting.length === 0
+          ? new Map<string, string>()
+          : await listStorePickupAcceptanceDeadlines(
+              businessTransaction,
+              ownerScope,
+              waiting.map((item) => item.orderReference),
+            );
       return Object.freeze({
         ...result,
         lines,
@@ -144,6 +178,11 @@ export function createPersistentMerchantOrderQueue(options: {
               ...item,
               unfulfillable: closed,
               pickupNotCollected: uncollected.has(item.orderReference),
+              acceptBy: deadlines.get(item.orderReference) ?? null,
+              awaitingPayment:
+                closed === null &&
+                item.currentPhase === "Submitted" &&
+                !payments.paidOrders.has(item.orderReference),
               batches: Object.freeze(
                 item.batches.map((batch) =>
                   Object.freeze({
@@ -151,6 +190,7 @@ export function createPersistentMerchantOrderQueue(options: {
                     canRequestAcceptance:
                       closed === null &&
                       acceptanceAllowed &&
+                      payments.awaitingAcceptance.has(batch.orderBatchReference) &&
                       batch.acceptanceStatus === "NotAccepted" &&
                       item.currentVersion !== null &&
                       ["Submitted", "Accepted", "InProgress", "Ready"].includes(
@@ -165,6 +205,7 @@ export function createPersistentMerchantOrderQueue(options: {
               canRequestAcceptance:
                 closed === null &&
                 acceptanceAllowed &&
+                payments.awaitingAcceptance.has(item.initialBatchReference) &&
                 item.currentPhase === "Submitted" &&
                 item.currentVersion === 1,
             });

@@ -6939,6 +6939,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   border-color: var(--bop-color-success);
   color: var(--bop-color-success);
 }
+.order-workbench-phase[data-phase="AwaitingPayment"],
 .order-workbench-phase[data-phase="Expired"],
 .order-workbench-phase[data-phase="NotCollected"],
 .order-workbench-phase[data-phase="Cancelled"],
@@ -6946,6 +6947,47 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-workbench-phase[data-phase="Unavailable"] {
   border-color: var(--bop-color-border-default);
   color: var(--bop-color-text-muted);
+}
+/* WP-2423 Q1: acceptance deadline and background refresh state; text carries the meaning. */
+.order-accept-by {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--bop-color-text-default);
+}
+.order-accept-by[data-tier="warning"] {
+  color: var(--bop-color-warning);
+}
+.order-accept-by[data-tier="urgent"],
+.order-accept-by[data-tier="lapsed"] {
+  color: var(--bop-color-danger);
+}
+.order-queue-awaiting,
+.order-queue-stale {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  font-size: 14px;
+  font-weight: 600;
+}
+.order-queue-stale {
+  border-color: var(--bop-color-warning);
+}
+.order-sound-toggle {
+  padding: 0 14px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.order-sound-toggle[aria-pressed="true"] {
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
 }
 .order-workbench-detail {
   padding: 16px 12px 20px;

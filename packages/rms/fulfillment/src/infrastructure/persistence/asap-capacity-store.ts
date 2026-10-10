@@ -1,3 +1,4 @@
+import type { ConsumerTransaction } from "@bop/eventing";
 import {
   appendAuditRecordInTransaction,
   validateAuditRecord,
@@ -272,4 +273,42 @@ export function createPostgresAsapCapacityStore(
       });
     },
   });
+}
+
+/**
+ * WP-2423 Q1: when each paid pickup Order stops being acceptable — the capacity expiry of its ASAP
+ * commitment while that commitment is still PaymentPending (current version). Orders without one are
+ * omitted. Caller authorizes the Store and owns the transaction.
+ */
+export async function listStorePickupAcceptanceDeadlines(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  if (orderReferences.length === 0) return new Map();
+  if (orderReferences.length > 100) return fail();
+  const brand = parseFulfillmentReference(scope.brandReference),
+    store = parseFulfillmentReference(scope.storeReference),
+    orders = orderReferences.map((value) => parseFulfillmentReference(value));
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const rows = (
+    await tx.query(
+      "SELECT a.order_id::text order_id,to_char(a.capacity_expires_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') expires_at " +
+        "FROM rms_fulfillment.capacity_asap_commitment a WHERE a.brand_id=$1 AND a.store_id=$2 AND a.order_id=ANY($3::uuid[]) " +
+        "AND a.state='PaymentPending' AND NOT EXISTS (SELECT 1 FROM rms_fulfillment.capacity_asap_commitment b " +
+        "WHERE b.brand_id=a.brand_id AND b.store_id=a.store_id AND b.allocation_id=a.allocation_id AND b.version>a.version)",
+      [brand, store, orders],
+    )
+  ).rows;
+  const deadlines = new Map<string, string>();
+  for (const row of rows) {
+    const order = parseFulfillmentReference(String(row.order_id)),
+      expiresAt = parseFulfillmentInstant(String(row.expires_at));
+    const known = deadlines.get(order);
+    if (known === undefined || expiresAt < known) deadlines.set(order, expiresAt);
+  }
+  return deadlines;
 }

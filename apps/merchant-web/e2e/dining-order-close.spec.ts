@@ -65,6 +65,8 @@ test("@production order closure retries the same intent then renders read-only h
             currentVersion: 2,
             unfulfillable: null,
             pickupNotCollected: false,
+            acceptBy: null,
+            awaitingPayment: false,
           },
         ],
         nextAfterOrderReference: null,

@@ -69,6 +69,8 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     currentVersion: version,
     unfulfillable: null,
     pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
   });
   await page.route("**/merchant/orders*", (route) =>
     route.fulfill({

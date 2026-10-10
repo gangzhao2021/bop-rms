@@ -298,6 +298,7 @@ export {
   createPostgresMerchantOrderIndex,
   listStoreOrderNumbers,
   listStoreUnfulfillablePaidOrders,
+  listStorePaidOrderBatches,
   loadMerchantOrderLines,
   type MerchantOrderLine,
   type MerchantOrderLineMoney,

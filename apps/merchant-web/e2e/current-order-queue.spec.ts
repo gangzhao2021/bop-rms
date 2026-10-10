@@ -58,6 +58,8 @@ test("@production current queue pages and clears old orders after denied refresh
     currentVersion: 2,
     unfulfillable: null,
     pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
   });
   await page.route("**/merchant/orders*", (route) => {
     expect(route.request().method()).toBe("GET");
@@ -199,6 +201,8 @@ test("@production acceptance retries the same operation after a lost response", 
             currentVersion: committed ? 4 : 3,
             unfulfillable: null,
             pickupNotCollected: false,
+            acceptBy: null,
+            awaitingPayment: false,
           },
         ],
         nextAfterOrderReference: null,
@@ -344,6 +348,8 @@ test("@production refresh after rejected acceptance uses current order version",
             currentVersion: version,
             unfulfillable: null,
             pickupNotCollected: false,
+            acceptBy: null,
+            awaitingPayment: false,
           },
         ],
         nextAfterOrderReference: null,
@@ -467,6 +473,8 @@ test("@production Orders reloads the current page after an authorized Store swit
             currentVersion: 2,
             unfulfillable: null,
             pickupNotCollected: false,
+            acceptBy: null,
+            awaitingPayment: false,
           },
         ],
         nextAfterOrderReference: null,
@@ -491,4 +499,100 @@ test("@production Orders reloads the current page after an authorized Store swit
     storeOne.storeReference,
     storeTwo.storeReference,
   ]);
+});
+
+test("@production WP-2423 Q1: new orders and acceptance deadlines surface without a refresh tap", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.clock.install({ time: new Date("2026-10-10T12:00:00.000Z") });
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-10",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  let mode: "empty" | "waiting" | "down" = "empty";
+  const waiting = {
+    orderReference: id(21),
+    orderNumber: "ORD-21",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-10T11:59:00.000Z",
+    observedAt: "2026-10-10T12:00:00.000Z",
+    initialBatchReference: id(92),
+    batches: [
+      {
+        orderBatchReference: id(92),
+        sequence: 1,
+        acceptanceStatus: "NotAccepted",
+        canRequestAcceptance: true,
+      },
+    ],
+    canRequestAcceptance: true,
+    currentPhase: "Submitted",
+    currentVersion: 1,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: "2026-10-10T12:08:00.000Z",
+    awaitingPayment: false,
+  };
+  await page.route("**/merchant/orders*", (route) =>
+    route.fulfill(
+      mode === "down"
+        ? { headers, status: 503, json: { error: "order_queue_unavailable" } }
+        : {
+            headers,
+            json: { items: mode === "empty" ? [] : [waiting], nextAfterOrderReference: null },
+          },
+    ),
+  );
+  await page.goto("/operations/orders");
+  await expect(page.getByRole("heading", { name: "No orders on this page" })).toBeVisible();
+  mode = "waiting";
+  await page.clock.fastForward(10_000);
+  await expect(page.getByRole("heading", { name: "ORD-21", exact: true })).toBeVisible();
+  await expect(page.getByText("1 order is waiting to be accepted.")).toBeVisible();
+  await expect(page.locator(".order-accept-by")).toHaveText("Accept within 8 min");
+  await expect(page.locator(".order-accept-by")).toHaveAttribute("data-tier", "warning");
+  expect(await page.title()).toMatch(/^\(1\) /u);
+  await page.clock.fastForward(240_000);
+  await expect(page.locator(".order-accept-by")).toHaveText("Accept within 4 min");
+  await expect(page.locator(".order-accept-by")).toHaveAttribute("data-tier", "urgent");
+  mode = "down";
+  await page.clock.fastForward(10_000);
+  await expect(
+    page.getByText("Orders could not be refreshed. Showing the last update"),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ORD-21", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sound off" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
 });

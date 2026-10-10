@@ -7,6 +7,8 @@ import {
   CurrentOrderQueueRows,
   storeTime,
   filterCurrentOrderItems,
+  acceptanceWindow,
+  awaitingBatchReferences,
 } from "./CurrentOrderQueuePage.js";
 import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
 it("renders actual Accepted version and visibly unresolved state without fabricated summaries", () => {
@@ -29,6 +31,8 @@ it("renders actual Accepted version and visibly unresolved state without fabrica
     canRequestAcceptance: false,
     unfulfillable: null,
     pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
     currentPhase: "Accepted",
     currentVersion: 2,
   };
@@ -82,6 +86,8 @@ it("filters only by exact public order number and fields present on the current 
     canRequestAcceptance: false,
     unfulfillable: null,
     pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
     currentPhase: phase,
     currentVersion: phase === null ? null : 2,
   });
@@ -128,6 +134,8 @@ it("labels a cancelled additional Batch distinctly from unaccepted work", () => 
         canRequestAcceptance: false,
         unfulfillable: null,
         pickupNotCollected: false,
+        acceptBy: null,
+        awaitingPayment: false,
         currentPhase: "Ready",
         currentVersion: 8,
       },
@@ -152,6 +160,8 @@ it("keeps payments accessible on cancelled Dining without offering unavailable s
     canRequestAcceptance: false,
     unfulfillable: null,
     pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
     currentPhase: "Cancelled",
     currentVersion: 2,
   };
@@ -242,6 +252,8 @@ it("WP-2423: shows a paid order that was not accepted in time as expired and ref
     canRequestAcceptance: false,
     unfulfillable: "CapacityExpired",
     pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
     currentPhase: "Submitted",
     currentVersion: 1,
   };
@@ -293,6 +305,8 @@ it("WP-2423: shows a pickup the Store closed as not collected", () => {
     canRequestAcceptance: false,
     unfulfillable: null,
     pickupNotCollected: true,
+    acceptBy: null,
+    awaitingPayment: false,
     currentPhase: "Accepted",
     currentVersion: 2,
   };
@@ -306,4 +320,106 @@ it("WP-2423: shows a pickup the Store closed as not collected", () => {
     1,
   );
   expect(filterCurrentOrderItems(view.items, { ...filters, phase: "Accepted" })).toHaveLength(0);
+});
+
+it("WP-2423 Q1: grades the acceptance window and shows it only while the order can be accepted", () => {
+  const at = Date.parse("2026-10-10T12:00:00.000Z");
+  const by = (minutes: number) => new Date(at + minutes * 60_000).toISOString();
+  expect(acceptanceWindow(null, at)).toBeNull();
+  expect(acceptanceWindow(by(25), at)).toEqual({ minutes: 25, tier: "ok" });
+  expect(acceptanceWindow(by(10), at)).toEqual({ minutes: 10, tier: "warning" });
+  expect(acceptanceWindow(by(4.5), at)).toEqual({ minutes: 5, tier: "urgent" });
+  expect(acceptanceWindow(by(0), at)).toEqual({ minutes: 0, tier: "lapsed" });
+  const order = {
+    orderReference: "01909968-0000-7000-8000-000000000021",
+    orderNumber: "21",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-10T11:50:00.000Z",
+    observedAt: "2026-10-10T11:59:00.000Z",
+    initialBatchReference: "01909968-0000-7000-8000-000000000092",
+    batches: [
+      {
+        orderBatchReference: "01909968-0000-7000-8000-000000000092",
+        sequence: 1,
+        acceptanceStatus: "NotAccepted",
+        canRequestAcceptance: true,
+      },
+    ],
+    canRequestAcceptance: true,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: by(8),
+    awaitingPayment: false,
+    currentPhase: "Submitted",
+    currentVersion: 1,
+  };
+  const view = parseCurrentOrderQueue({ items: [order], nextAfterOrderReference: null });
+  expect([...awaitingBatchReferences(view)]).toEqual(["01909968-0000-7000-8000-000000000092"]);
+  const html = renderToStaticMarkup(<CurrentOrderQueueRows view={view} now={at} />);
+  expect(html).toContain('data-tier="warning"');
+  expect(html).toContain("Accept within 8 min");
+  expect(
+    renderToStaticMarkup(<CurrentOrderQueueRows view={view} now={at + 9 * 60_000} />),
+  ).toContain("Acceptance window ended · refund pending");
+  // Without acceptance authority there is nothing for this person to act on.
+  const readOnly = parseCurrentOrderQueue({
+    items: [
+      {
+        ...order,
+        canRequestAcceptance: false,
+        batches: [{ ...order.batches[0], canRequestAcceptance: false }],
+      },
+    ],
+    nextAfterOrderReference: null,
+  });
+  expect(renderToStaticMarkup(<CurrentOrderQueueRows view={readOnly} now={at} />)).not.toContain(
+    "Accept within",
+  );
+});
+
+it("WP-2423 Q1: shows an unpaid submission as awaiting payment, never acceptable or counted", () => {
+  const unpaid = {
+    orderReference: "01909968-0000-7000-8000-000000000031",
+    orderNumber: "31",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-10T11:50:00.000Z",
+    observedAt: "2026-10-10T11:59:00.000Z",
+    initialBatchReference: "01909968-0000-7000-8000-000000000093",
+    batches: [
+      {
+        orderBatchReference: "01909968-0000-7000-8000-000000000093",
+        sequence: 1,
+        acceptanceStatus: "NotAccepted",
+        canRequestAcceptance: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: true,
+    currentPhase: "Submitted",
+    currentVersion: 1,
+  };
+  const view = parseCurrentOrderQueue({ items: [unpaid], nextAfterOrderReference: null });
+  const html = renderToStaticMarkup(<CurrentOrderQueueRows view={view} now={Date.now()} />);
+  expect(html).toContain('data-phase="AwaitingPayment"');
+  expect(html).toContain("Awaiting payment");
+  expect(awaitingBatchReferences(view).size).toBe(0);
+  const filters = { orderNumber: "", type: "All", channel: "All" };
+  expect(
+    filterCurrentOrderItems(view.items, { ...filters, phase: "AwaitingPayment" }),
+  ).toHaveLength(1);
+  expect(filterCurrentOrderItems(view.items, { ...filters, phase: "Submitted" })).toHaveLength(0);
+  for (const item of [
+    { ...unpaid, canRequestAcceptance: true },
+    { ...unpaid, batches: [{ ...unpaid.batches[0], canRequestAcceptance: true }] },
+    { ...unpaid, acceptBy: "2026-10-10T12:20:00.000Z" },
+    { ...unpaid, currentPhase: "Accepted", currentVersion: 2 },
+  ])
+    expect(() =>
+      parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),
+    ).toThrow();
 });

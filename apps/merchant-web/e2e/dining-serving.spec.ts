@@ -65,6 +65,8 @@ test("@production serving retains its intent after a lost response and locks ref
             currentVersion: 2,
             unfulfillable: null,
             pickupNotCollected: false,
+            acceptBy: null,
+            awaitingPayment: false,
           },
         ],
         nextAfterOrderReference: null,

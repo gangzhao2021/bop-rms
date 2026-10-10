@@ -24,6 +24,8 @@ const row = (n = 1) => ({
   canRequestAcceptance: false,
   unfulfillable: null,
   pickupNotCollected: false,
+  acceptBy: null,
+  awaitingPayment: false,
   currentPhase: "Accepted",
   currentVersion: 2,
 });
@@ -227,6 +229,8 @@ it("accepts terminal cancellation without actionable batches but refuses empty l
   ).toMatchObject({
     unfulfillable: null,
     pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
     currentPhase: "Cancelled",
     currentVersion: 2,
     batches: [],
@@ -300,4 +304,28 @@ it("WP-2423: reads one order's detail with its lines and refuses a different ord
   await expect(
     createCurrentOrderQueueClient(missing).loadDetail(id(1), new AbortController().signal),
   ).rejects.toMatchObject({ code: "NotFound" });
+});
+it("WP-2423 Q1: accepts an acceptance deadline only on a paid pickup still awaiting acceptance", () => {
+  const awaiting = {
+    ...row(),
+    currentPhase: "Submitted",
+    currentVersion: 1,
+    canRequestAcceptance: true,
+    batches: [{ ...row().batches[0], acceptanceStatus: "NotAccepted", canRequestAcceptance: true }],
+    acceptBy: "2026-09-14T00:30:00.000Z",
+    awaitingPayment: false,
+  };
+  expect(
+    parseCurrentOrderQueue({ items: [awaiting], nextAfterOrderReference: null }).items[0]?.acceptBy,
+  ).toBe("2026-09-14T00:30:00.000Z");
+  for (const item of [
+    { ...awaiting, orderType: "DineIn" },
+    { ...row(), acceptBy: "2026-09-14T00:30:00.000Z" },
+    { ...awaiting, acceptBy: "2026-09-13T23:59:00.000Z" },
+    { ...awaiting, acceptBy: "soon" },
+    { ...awaiting, acceptBy: undefined },
+  ])
+    expect(() =>
+      parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),
+    ).toThrow();
 });

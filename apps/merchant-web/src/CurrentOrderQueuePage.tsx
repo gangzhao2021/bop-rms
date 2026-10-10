@@ -4,6 +4,7 @@ import { OrderAcceptanceAction } from "./OrderAcceptanceAction.js";
 import { createOrderAcceptanceClient } from "./order-acceptance-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
+import { playKitchenChime } from "./alert-chime.js";
 import { storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 export { storeTime } from "./StoreTime.js";
@@ -40,9 +41,12 @@ export function filterCurrentOrderItems(
           ? order.unfulfillable !== null
           : filters.phase === "NotCollected"
             ? order.pickupNotCollected
-            : order.unfulfillable === null &&
-              !order.pickupNotCollected &&
-              (order.currentPhase ?? "Unavailable") === filters.phase)),
+            : filters.phase === "AwaitingPayment"
+              ? order.awaitingPayment
+              : order.unfulfillable === null &&
+                !order.pickupNotCollected &&
+                !order.awaitingPayment &&
+                (order.currentPhase ?? "Unavailable") === filters.phase)),
   );
 }
 /** "$6.78" for 678 CAD minor units; the currency's own minor-unit exponent, no floating point. */
@@ -157,6 +161,51 @@ function QueuedOrderLines({
   );
 }
 
+/** WP-2423 Q1: the page re-reads current orders this often while it is open. */
+export const ORDER_REFRESH_MS = 10_000;
+/**
+ * WP-2423 Q1: how close a paid pickup is to the end of its acceptance window (30 minutes after
+ * payment; Payment refunds it afterwards). Warning from 10 minutes left, urgent from 5.
+ */
+export function acceptanceWindow(acceptBy: string | null, now: number) {
+  if (acceptBy === null) return null;
+  const left = Date.parse(acceptBy) - now;
+  const minutes = Math.max(0, Math.ceil(left / 60_000));
+  return {
+    minutes,
+    tier: (left <= 0 ? "lapsed" : minutes <= 5 ? "urgent" : minutes <= 10 ? "warning" : "ok") as
+      "ok" | "warning" | "urgent" | "lapsed",
+  };
+}
+/** WP-2423 Q1: batches staff can accept now, keyed by batch reference. */
+export function awaitingBatchReferences(view: CurrentOrderQueue): ReadonlySet<string> {
+  return new Set(
+    view.items.flatMap((order) =>
+      order.batches
+        .filter((batch) => batch.canRequestAcceptance)
+        .map((batch) => batch.orderBatchReference),
+    ),
+  );
+}
+function AcceptanceDeadline({
+  order,
+  now,
+}: {
+  readonly order: CurrentOrderQueue["items"][number];
+  readonly now: number;
+}) {
+  const window = order.batches.some((batch) => batch.canRequestAcceptance)
+    ? acceptanceWindow(order.acceptBy, now)
+    : null;
+  return window === null ? null : (
+    <span className="order-accept-by" data-tier={window.tier}>
+      {window.tier === "lapsed"
+        ? "Acceptance window ended · refund pending"
+        : `Accept within ${window.minutes} min`}
+    </span>
+  );
+}
+
 const unfulfillableText = {
   CapacityExpired: "Not accepted before its preparation slot expired.",
   SubmissionCancelled: "The submission was cancelled after payment.",
@@ -170,8 +219,11 @@ export function CurrentOrderQueueRows({
   action,
   detail,
   timeZone,
+  now,
 }: {
   readonly view: CurrentOrderQueue;
+  /** WP-2423 Q1: the clock acceptance deadlines are shown against (omitted: not shown). */
+  readonly now?: number | undefined;
   readonly timeZone?: string | undefined;
   readonly visibleOrderReferences?: ReadonlySet<string>;
   readonly detail?: (order: CurrentOrderQueue["items"][number], open: boolean) => React.ReactNode;
@@ -227,20 +279,24 @@ export function CurrentOrderQueueRows({
             <span
               className="order-workbench-phase"
               data-phase={
-                order.pickupNotCollected
-                  ? "NotCollected"
-                  : order.unfulfillable !== null
-                    ? "Expired"
-                    : (order.currentPhase ?? "Unavailable")
+                order.awaitingPayment
+                  ? "AwaitingPayment"
+                  : order.pickupNotCollected
+                    ? "NotCollected"
+                    : order.unfulfillable !== null
+                      ? "Expired"
+                      : (order.currentPhase ?? "Unavailable")
               }
             >
-              {order.pickupNotCollected
-                ? "Not collected"
-                : order.unfulfillable !== null
-                  ? "Expired · refunded"
-                  : order.currentPhase === "InProgress"
-                    ? "In progress"
-                    : (order.currentPhase ?? "Status unavailable")}
+              {order.awaitingPayment
+                ? "Awaiting payment"
+                : order.pickupNotCollected
+                  ? "Not collected"
+                  : order.unfulfillable !== null
+                    ? "Expired · refunded"
+                    : order.currentPhase === "InProgress"
+                      ? "In progress"
+                      : (order.currentPhase ?? "Status unavailable")}
             </span>
             <span className="order-workbench-batches">
               {order.batches.filter((batch) => batch.acceptanceStatus === "Accepted").length}{" "}
@@ -250,6 +306,7 @@ export function CurrentOrderQueueRows({
               {order.batches.some((batch) => batch.acceptanceStatus === "Cancelled")
                 ? ` · ${order.batches.filter((batch) => batch.acceptanceStatus === "Cancelled").length} cancelled`
                 : ""}
+              {now === undefined ? null : <AcceptanceDeadline order={order} now={now} />}
             </span>
             <time
               className="order-workbench-time"
@@ -384,6 +441,29 @@ export function CurrentOrderQueuePage({
   const [typeFilter, setTypeFilter] = useState("All");
   const [channelFilter, setChannelFilter] = useState("All");
   const [phaseFilter, setPhaseFilter] = useState("All");
+  const [now, setNow] = useState(() => Date.now());
+  const [stale, setStale] = useState(false);
+  const background = useRef<AbortController | null>(null);
+  const [soundOn, setSoundOn] = useState(false);
+  const audio = useRef<AudioContext | null>(null);
+  const seenAwaiting = useRef<ReadonlySet<string> | null>(null);
+  const urgentAlerted = useRef(new Set<string>());
+  const toggleSound = () => {
+    setSoundOn((value) => {
+      const next = !value;
+      if (next) {
+        // Created inside the operator's tap so the browser allows it to play later.
+        try {
+          const Audio = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
+          audio.current ??= Audio ? new Audio() : null;
+          if (audio.current) playKitchenChime(audio.current);
+        } catch {
+          audio.current = null;
+        }
+      }
+      return next;
+    });
+  };
   useEffect(() => {
     const controller = new AbortController();
     setState({ kind: "Loading" });
@@ -403,6 +483,87 @@ export function CurrentOrderQueuePage({
       });
     return () => controller.abort();
   }, [after, refresh, orderReference]);
+  // WP-2423 Q1: re-read in the background so new and expiring orders surface without a tap. An
+  // in-flight serving command pauses it; a failed read keeps the last view and says so.
+  const ready = state.kind === "Ready";
+  useEffect(() => {
+    if (!ready) return;
+    const tick = () => {
+      setNow(Date.now());
+      if (servingOrders.current.size > 0 || background.current !== null) return;
+      const controller = new AbortController();
+      background.current = controller;
+      const read: Promise<{ view: CurrentOrderQueue; detail?: CurrentOrderDetail }> =
+        orderReference === undefined
+          ? client.load(after, controller.signal).then((view) => ({ view }))
+          : client
+              .loadDetail(orderReference, controller.signal)
+              .then((detail) => ({ view: detail.view, detail }));
+      void read
+        .then((next) => {
+          if (controller.signal.aborted) return;
+          setStale(false);
+          setState((previous): State => {
+            if (previous.kind !== "Ready") return previous;
+            const detail = next.detail ?? previous.detail;
+            return detail === undefined
+              ? { kind: "Ready", view: next.view }
+              : { kind: "Ready", view: next.view, detail };
+          });
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setStale(true);
+        })
+        .finally(() => {
+          if (background.current === controller) background.current = null;
+        });
+    };
+    const timer = setInterval(tick, ORDER_REFRESH_MS);
+    const visible = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", visible);
+      background.current?.abort();
+      background.current = null;
+    };
+  }, [ready, after, orderReference, client]);
+  // WP-2423 Q1: chime for orders that arrived since the previous read and once when an order
+  // enters its last five minutes, when the operator turned sound on.
+  useEffect(() => {
+    if (state.kind !== "Ready") return;
+    const awaiting = awaitingBatchReferences(state.view);
+    const arrived =
+      seenAwaiting.current === null
+        ? []
+        : [...awaiting].filter((reference) => !seenAwaiting.current?.has(reference));
+    seenAwaiting.current = awaiting;
+    const urgent = state.view.items.filter(
+      (order) =>
+        order.batches.some((batch) => batch.canRequestAcceptance) &&
+        acceptanceWindow(order.acceptBy, now)?.tier === "urgent" &&
+        !urgentAlerted.current.has(order.orderReference),
+    );
+    for (const order of urgent) urgentAlerted.current.add(order.orderReference);
+    if (soundOn && (arrived.length > 0 || urgent.length > 0) && audio.current)
+      playKitchenChime(audio.current);
+  }, [state, now, soundOn]);
+  const awaitingCount =
+    state.kind === "Ready"
+      ? state.view.items.filter((order) =>
+          order.batches.some((batch) => batch.canRequestAcceptance),
+        ).length
+      : 0;
+  // WP-2423 Q1: a background tab still shows how many orders wait for acceptance.
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\) /u, "");
+    document.title = awaitingCount > 0 ? `(${awaitingCount}) ${base}` : base;
+    return () => {
+      document.title = base;
+    };
+  }, [awaitingCount]);
   useEffect(() => {
     if (state.kind !== "Loading" && restoreFocus.current) {
       restoreFocus.current = false;
@@ -452,6 +613,9 @@ export function CurrentOrderQueuePage({
       actions={
         <>
           {single ? <Link to="/operations/orders">All orders</Link> : null}
+          <button aria-pressed={soundOn} className="order-sound-toggle" onClick={toggleSound}>
+            {soundOn ? "Sound on" : "Sound off"}
+          </button>
           {after !== null ? (
             <button onClick={() => reload(null)} disabled={state.kind === "Loading" || servingBusy}>
               First page
@@ -470,6 +634,19 @@ export function CurrentOrderQueuePage({
       <>
         {state.kind === "Ready" ? (
           <>
+            {stale ? (
+              <p className="order-queue-stale" role="status">
+                Orders could not be refreshed. Showing the last update; retrying automatically.
+              </p>
+            ) : null}
+            {!single && awaitingCount > 0 ? (
+              <p className="order-queue-awaiting" role="status">
+                {awaitingCount === 1
+                  ? "1 order is waiting to be accepted."
+                  : `${awaitingCount} orders are waiting to be accepted.`}
+                {soundOn ? "" : " Turn sound on to hear new orders."}
+              </p>
+            ) : null}
             <div
               hidden={single}
               className="list-filters order-queue-filters"
@@ -522,6 +699,7 @@ export function CurrentOrderQueuePage({
                   <option value="Cancelled">Cancelled</option>
                   <option value="Fulfilled">Fulfilled</option>
                   <option value="Expired">Expired · refunded</option>
+                  <option value="AwaitingPayment">Awaiting payment</option>
                   <option value="NotCollected">Not collected</option>
                   <option value="Unavailable">Unavailable</option>
                 </select>
@@ -544,6 +722,7 @@ export function CurrentOrderQueuePage({
               single={single}
               view={state.view}
               timeZone={timeZone}
+              now={now}
               visibleOrderReferences={visibleOrderReferences}
               detail={(order, open) => (
                 <CurrentOrderDetails

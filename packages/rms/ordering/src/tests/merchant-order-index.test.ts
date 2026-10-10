@@ -1,6 +1,9 @@
 import { expect, it, vi } from "vitest";
 import type { ConsumerTransaction } from "@bop/eventing";
-import { createPostgresMerchantOrderIndex } from "../infrastructure/persistence/merchant-order-index.js";
+import {
+  createPostgresMerchantOrderIndex,
+  listStorePaidOrderBatches,
+} from "../infrastructure/persistence/merchant-order-index.js";
 const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const scope = { brandReference: id(1), storeReference: id(2) };
 const row = (n: number) => ({
@@ -238,4 +241,39 @@ it("WP-2423: lists the Store's paid Orders that can no longer be fulfilled", asy
   expect(sql).toContain("disposition='PaidWithoutFulfillableOrder'");
   expect(sql).toContain("brand_id=$1 AND store_id=$2");
   expect((await listStoreUnfulfillablePaidOrders(tx, scope, [])).size).toBe(0);
+});
+it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the scoped Orders", async () => {
+  const query = vi.fn<(sql: string, values?: readonly unknown[]) => Promise<unknown>>(
+    async (sql) => ({
+      rows: sql.startsWith("SELECT set_config")
+        ? []
+        : [
+            { order_id: id(3), order_batch_id: id(13), awaiting: true },
+            { order_id: id(4), order_batch_id: id(14), awaiting: false },
+          ],
+      rowCount: 2,
+    }),
+  );
+  const tx = { query } as unknown as ConsumerTransaction;
+  const result = await listStorePaidOrderBatches(tx, scope, [id(3), id(4), id(5)]);
+  expect([...result.paidOrders]).toEqual([id(3), id(4)]);
+  expect([...result.awaitingAcceptance]).toEqual([id(13)]);
+  expect(query.mock.calls[1]?.[0]).toContain("order_payment_acceptance_wait");
+  expect(query.mock.calls[1]?.[1]).toEqual([
+    scope.brandReference,
+    scope.storeReference,
+    [id(3), id(4), id(5)],
+  ]);
+  // A row for an Order that was not asked for is a scope failure, not data.
+  query.mockResolvedValueOnce({ rows: [], rowCount: 0 }).mockResolvedValueOnce({
+    rows: [{ order_id: id(9), order_batch_id: id(19), awaiting: true }],
+    rowCount: 1,
+  });
+  await expect(listStorePaidOrderBatches(tx, scope, [id(3)])).rejects.toThrow(
+    "MERCHANT_ORDER_INDEX_UNAVAILABLE",
+  );
+  expect(await listStorePaidOrderBatches(tx, scope, [])).toEqual({
+    paidOrders: new Set(),
+    awaitingAcceptance: new Set(),
+  });
 });

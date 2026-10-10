@@ -103,6 +103,8 @@ for (const recovery of ["retry", "history"] as const)
               currentVersion: 4,
               unfulfillable: null,
               pickupNotCollected: false,
+              acceptBy: null,
+              awaitingPayment: false,
             },
           ],
           nextAfterOrderReference: null,

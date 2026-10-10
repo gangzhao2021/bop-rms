@@ -312,3 +312,48 @@ export async function listStoreUnfulfillablePaidOrders(
     ),
   );
 }
+
+/**
+ * WP-2423 Q1: which of the Store's Orders have a recorded payment, and which batches are paid and
+ * waiting for staff acceptance (payment recorded as awaiting acceptance, no outcome yet). An Order
+ * with neither is still awaiting the customer's payment and is not offered for acceptance. Caller
+ * authorizes and owns the transaction.
+ */
+export async function listStorePaidOrderBatches(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<{
+  readonly paidOrders: ReadonlySet<string>;
+  readonly awaitingAcceptance: ReadonlySet<string>;
+}> {
+  if (orderReferences.length === 0) return { paidOrders: new Set(), awaitingAcceptance: new Set() };
+  if (orderReferences.length > 100) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const orders = orderReferences.map((reference) => parseOrderingReference(reference));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT w.order_id::text order_id,w.order_batch_id::text order_batch_id," +
+        "NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=w.brand_id " +
+        "AND d.store_id=w.store_id AND d.order_batch_id=w.order_batch_id) awaiting " +
+        "FROM rms_ordering.order_payment_acceptance_wait w WHERE w.brand_id=$1 AND w.store_id=$2 AND w.order_id=ANY($3::uuid[]) " +
+        "UNION ALL SELECT d.order_id::text,d.order_batch_id::text,false FROM rms_ordering.order_payment_disposition_record d " +
+        "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=ANY($3::uuid[])",
+      [scope.brandReference, scope.storeReference, orders],
+    )
+  ).rows as readonly { order_id: unknown; order_batch_id: unknown; awaiting: unknown }[];
+  const paidOrders = new Set<string>(),
+    awaitingAcceptance = new Set<string>();
+  for (const row of rows) {
+    const order = parseOrderingReference(row.order_id),
+      batch = parseOrderingReference(row.order_batch_id);
+    if (typeof row.awaiting !== "boolean" || !orders.includes(order))
+      throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+    paidOrders.add(order);
+    if (row.awaiting) awaitingAcceptance.add(batch);
+  }
+  return { paidOrders, awaitingAcceptance };
+}

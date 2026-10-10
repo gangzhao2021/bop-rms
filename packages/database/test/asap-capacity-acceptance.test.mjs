@@ -10,6 +10,7 @@ import {
   parseAsapCapacityCommitment,
   sealAsapCapacityCommitment,
   finishAsapCapacityCommitment,
+  listStorePickupAcceptanceDeadlines,
 } from "../../rms/fulfillment/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
@@ -260,6 +261,39 @@ async function prove(context) {
     await first.query("COMMIT");
     await rejected((c) => hold(c, 14, 1401), /insufficient capacity/u);
     await rejected((c) => asap(c, 14, 1402), /insufficient capacity/u);
+
+    // WP-2423 Q1: only a current PaymentPending commitment gives an Order its acceptance deadline.
+    await seed(15);
+    await begin(first);
+    await asap(first, 15, 1500);
+    await advance(first, 1500, "PaymentPending");
+    await first.query("COMMIT");
+    await begin(first);
+    const deadlines = await listStorePickupAcceptanceDeadlines(
+      first,
+      { brandReference: brand, storeReference: store },
+      [id(1500 + 5000), id(1400 + 5000), id(1000 + 5000), id(777)],
+    );
+    const expected = (
+      await first.query(
+        "SELECT capacity_expires_at FROM rms_fulfillment.capacity_asap_commitment WHERE allocation_id=$1 AND version=2",
+        [id(1500)],
+      )
+    ).rows[0].capacity_expires_at.toISOString();
+    assert.deepEqual([...deadlines], [[id(1500 + 5000), expected]]);
+    await rollback(first);
+    await begin(first, id(99));
+    assert.equal(
+      (
+        await listStorePickupAcceptanceDeadlines(
+          first,
+          { brandReference: brand, storeReference: id(99) },
+          [id(1500 + 5000)],
+        )
+      ).size,
+      0,
+    );
+    await rollback(first);
 
     // RLS is exercised directly using a non-superuser, not merely inspected.
     await begin(first, id(99));

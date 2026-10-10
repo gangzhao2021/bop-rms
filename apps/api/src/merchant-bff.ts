@@ -1483,6 +1483,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             canRequestAcceptance: item.canRequestAcceptance,
             unfulfillable: item.unfulfillable,
             pickupNotCollected: item.pickupNotCollected,
+            acceptBy: item.acceptBy,
+            awaitingPayment: item.awaitingPayment,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,
@@ -1534,6 +1536,8 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
             canRequestAcceptance: item.canRequestAcceptance,
             unfulfillable: item.unfulfillable,
             pickupNotCollected: item.pickupNotCollected,
+            acceptBy: item.acceptBy,
+            awaitingPayment: item.awaitingPayment,
             batches: item.batches.map((batch) => ({
               orderBatchReference: batch.orderBatchReference,
               sequence: batch.sequence,

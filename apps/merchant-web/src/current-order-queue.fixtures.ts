@@ -42,6 +42,8 @@ function row(
     currentVersion: version,
     unfulfillable: null,
     pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
   };
 }
 

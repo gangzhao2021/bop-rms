@@ -52,6 +52,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       "canRequestAcceptance",
       "unfulfillable",
       "pickupNotCollected",
+      "acceptBy",
+      "awaitingPayment",
       "currentPhase",
       "currentVersion",
       "observedAt",
@@ -96,6 +98,26 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     const submittedAt = instant(item.submittedAt),
       observedAt = instant(item.observedAt);
     if (observedAt < submittedAt) return fail();
+    // WP-2423 Q1: only a paid pickup still awaiting acceptance has a deadline.
+    const acceptBy = item.acceptBy === null ? null : instant(item.acceptBy);
+    if (
+      acceptBy !== null &&
+      (item.orderType !== "Pickup" ||
+        item.currentPhase !== "Submitted" ||
+        item.unfulfillable !== null ||
+        acceptBy <= submittedAt)
+    )
+      return fail();
+    // WP-2423 Q1: no payment recorded yet — the customer has not paid, so nothing is acceptable.
+    if (
+      typeof item.awaitingPayment !== "boolean" ||
+      (item.awaitingPayment &&
+        (item.currentPhase !== "Submitted" ||
+          item.unfulfillable !== null ||
+          item.canRequestAcceptance !== false ||
+          acceptBy !== null))
+    )
+      return fail();
     if (!Array.isArray(item.batches) || item.batches.length > 10000) return fail();
     const seenBatches = new Set<string>();
     let previousSequence = 0;
@@ -108,6 +130,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       ]);
       const orderBatchReference = reference(batch.orderBatchReference);
       if (
+        (item.awaitingPayment === true && batch.canRequestAcceptance !== false) ||
         typeof batch.sequence !== "number" ||
         !Number.isSafeInteger(batch.sequence) ||
         batch.sequence <= previousSequence ||
@@ -154,6 +177,10 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         "CapacityExpired" | "SubmissionCancelled" | "OrderNoLongerFulfillable" | null,
       /** WP-2423: the Store closed this pickup as not collected (not refunded automatically). */
       pickupNotCollected: item.pickupNotCollected as boolean,
+      /** WP-2423 Q1: when this paid pickup stops being acceptable (then Payment refunds it). */
+      acceptBy,
+      /** WP-2423 Q1: submitted but the customer's payment is not recorded yet. */
+      awaitingPayment: item.awaitingPayment as boolean,
       currentPhase: item.currentPhase as string | null,
       currentVersion: item.currentVersion as number | null,
     });

@@ -26,6 +26,8 @@ export interface ExceptionsSummary {
   readonly open: number;
   readonly overdue: number;
 }
+/** WP-2423 Q1: the home page re-reads its summaries this often. */
+export const OVERVIEW_REFRESH_MS = 30_000;
 const openPhases = new Set(["Submitted", "Accepted", "InProgress", "Ready"]);
 export function summarizeOrders(queue: CurrentOrderQueue): OrdersSummary {
   const open = queue.items.filter((order) => openPhases.has(order.currentPhase ?? ""));
@@ -236,7 +238,14 @@ export function StoreOverview({
   }, [clients]);
   useEffect(() => {
     void load();
-    return () => active.current?.abort();
+    // WP-2423 Q1: keep "Right now" current while the home page is open and visible.
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, OVERVIEW_REFRESH_MS);
+    return () => {
+      clearInterval(timer);
+      active.current?.abort();
+    };
   }, [load]);
   return (
     <OverviewToday state={state} timeZone={timeZone} busy={busy} onRefresh={() => void load()} />
