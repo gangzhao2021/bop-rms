@@ -1,4 +1,8 @@
 import { expect, test } from "@playwright/test";
+// WP-2423 pilot: this route is now the Store's working page (stock counts / supply items under
+// WP-2423 inventory operations); the "Phase 2 source boundary" placeholders this spec asserts no
+// longer exist. Kept for the record; coverage of the working pages lives in their unit tests.
+test.skip(true, "WP-2423 pilot: the placeholder page this spec asserts was replaced");
 
 test("@production INV-ITEM-LIST keeps the Phase 2 source boundary at desktop and mobile widths", async ({
   page,

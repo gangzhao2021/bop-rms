@@ -1,6 +1,10 @@
 import { canonicalizeRfc8785 } from "../../../packages/bop/audit/src/index.js";
 import { createHash } from "node:crypto";
 import { expect, test, type Page, type Route } from "@playwright/test";
+// WP-2423 pilot: /app/commerce/products and /app/commerce/option-sets are served by the Store
+// back-office pages (ProductPages, StoreOptionSetPages). The WP-2421 pages this spec drives are not
+// routed during the pilot; the spec returns with those pages on expansion (WP-2423 "可绕过").
+test.skip(true, "WP-2423 pilot: the WP-2421 pages this spec drives are not routed");
 import {
   materializeFullOptionSetCreation,
   materializeFullOptionSetEdit,

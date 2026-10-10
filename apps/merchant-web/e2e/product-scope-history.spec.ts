@@ -22,6 +22,10 @@ import {
 } from "../src/product-publication-v2-test-fixtures.js";
 import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+// WP-2423 pilot: /app/commerce/products and /app/commerce/option-sets are served by the Store
+// back-office pages (ProductPages, StoreOptionSetPages). The WP-2421 pages this spec drives are not
+// routed during the pilot; the spec returns with those pages on expansion (WP-2423 "可绕过").
+test.skip(true, "WP-2423 pilot: the WP-2421 pages this spec drives are not routed");
 const id = (n: number) => `01902439-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const hash = "sha256:" + "1".repeat(64),
   store = { brandLabel: "Synthetic Brand", storeLabel: "Synthetic Store", storeReference: id(3) };

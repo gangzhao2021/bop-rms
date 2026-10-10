@@ -1,4 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+// WP-2423 pilot: /app/commerce/products and /app/commerce/option-sets are served by the Store
+// back-office pages (ProductPages, StoreOptionSetPages). The WP-2421 pages this spec drives are not
+// routed during the pilot; the spec returns with those pages on expansion (WP-2423 "可绕过").
+test.skip(true, "WP-2423 pilot: the WP-2421 pages this spec drives are not routed");
 // Production-built browser and genuine DOM; closed synthetic HTTP observations.
 // Actual Session/IAM/database composition is verified by option_http separately.
 const id = (n: number) => "01902421-7990-7000-8000-" + n.toString(16).padStart(12, "0");
