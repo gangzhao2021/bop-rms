@@ -1,4 +1,3 @@
-import { exerciseProductListBrowser } from "../test-support/catalog-product-list-browser.mjs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -636,20 +635,9 @@ export async function exerciseCatalogProductList(context) {
       store().load(request({ cursor: oldPage.nextCursor })),
       (error) => error.code === "Stale",
     );
-    await exerciseProductListBrowser({
-      root,
-      store,
-      request,
-      seed,
-      rebuild,
-      setAllowed: (value) => {
-        allowed = value;
-      },
-      setPhase: (value) => {
-        phase = value;
-      },
-      getSqlCalls: () => sqlCalls,
-    });
+    // WP-2423 pilot: /app/commerce/products is served by the Store back-office ProductPages; the
+    // WP-2421 list page the browser exercise (test-support/catalog-product-list-browser.mjs) drives
+    // is not routed during the pilot. The exercise returns with that page on expansion.
     await seed(110, "FUTURE", "Synthetic future", "2099-08-01T12:00:00.000Z");
     await assert.rejects(rebuild(), (error) => error.code === "CATALOG_DEPENDENCY_UNAVAILABLE");
     assert.equal((await store().load(request({ search: "FUTURE" }))).items.length, 0);

@@ -189,36 +189,30 @@ export async function exerciseCatalogAllergenCoverage({ admin, context, role, id
   }
   try {
     await writer.query("SET lock_timeout='5s'");
-    // Existing mutable child configuration must neither race held use nor be resealed as a new version.
-    await held(initial, () =>
-      writer.query(
-        "UPDATE rms_catalog.allergen_source_assertion SET classification='CrossContactPossible' WHERE evidence_id=$1",
-        [evidence],
-      ),
-    );
-    await rejects(
-      source().withCurrent(request, initial, async () => null),
-      "ALLERGEN_SOURCE_CHANGED",
-    );
-    await rejects(source().capture(request), "ALLERGEN_SOURCE_INTEGRITY_CONFLICT");
+    // Assertions and registry entries are append-only since WP-2423 (migration 2000_015): an
+    // UPDATE is a no-op, so it can neither change a sealed snapshot nor reseal it. A source changes
+    // only by appending evidence or a registry version, exercised below.
     await writer.query(
-      "UPDATE rms_catalog.allergen_source_assertion SET classification='Contains' WHERE evidence_id=$1",
+      "UPDATE rms_catalog.allergen_source_assertion SET classification='CrossContactPossible' WHERE evidence_id=$1",
       [evidence],
     );
+    await writer.query(
+      "UPDATE rms_catalog.allergen_registry_entry SET localized_names_json=$1::jsonb WHERE registry_version_id=$2",
+      [JSON.stringify({ "en-CA": "Synthetic changed milk" }), registry],
+    );
+    assert.equal(
+      (
+        await admin.query(
+          "SELECT classification FROM rms_catalog.allergen_source_assertion WHERE evidence_id=$1",
+          [evidence],
+        )
+      ).rows[0].classification,
+      "Contains",
+    );
+    await source().withCurrent(request, initial, async () => null);
     assert.equal(
       (await source().capture(request)).coverage.snapshotReference,
       initial.coverage.snapshotReference,
-    );
-    await held(initial, () =>
-      writer.query(
-        "UPDATE rms_catalog.allergen_registry_entry SET localized_names_json=$1::jsonb WHERE registry_version_id=$2",
-        [JSON.stringify({ "en-CA": "Synthetic changed milk" }), registry],
-      ),
-    );
-    await rejects(source().capture(request), "ALLERGEN_SOURCE_INTEGRITY_CONFLICT");
-    await writer.query(
-      "UPDATE rms_catalog.allergen_registry_entry SET localized_names_json=$1::jsonb WHERE registry_version_id=$2",
-      [JSON.stringify({ "en-CA": "Synthetic milk" }), registry],
     );
     await held(initial, () => evidenceVersion(writer, id(40010), "Invalidated"));
     await rejects(
