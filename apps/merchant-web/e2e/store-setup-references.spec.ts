@@ -270,7 +270,7 @@ async function install(page: Page) {
     );
     control.draftWrites.push(body);
     const command = parseStoreSetupSaveCommand({
-      profile: "StoreSetupSaveV1",
+      profile: Object.hasOwn(body.content, "feeContexts") ? "StoreSetupSaveV2" : "StoreSetupSaveV1",
       ...scope,
       operationReference: body.operationReference,
       expectedSetupReference: body.expectedSetupReference,
@@ -295,7 +295,8 @@ async function install(page: Page) {
         })
       : createStoreSetupDraft(
           {
-            profile: "StoreSetupDraftV1",
+            profile:
+              command.profile === "StoreSetupSaveV2" ? "StoreSetupDraftV2" : "StoreSetupDraftV1",
             tenantReference: id(1),
             brandReference: id(2),
             storeReference: id(3),

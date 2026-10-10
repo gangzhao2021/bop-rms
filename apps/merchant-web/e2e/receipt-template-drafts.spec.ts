@@ -250,7 +250,9 @@ async function install(page: Page) {
       }
       expect(body.command).toBe("SaveDraft");
       const command = parseStoreSetupSaveCommand({
-        profile: "StoreSetupSaveV1",
+        profile: Object.hasOwn(body.content, "feeContexts")
+          ? "StoreSetupSaveV2"
+          : "StoreSetupSaveV1",
         ...selectedScope,
         operationReference: body.operationReference,
         expectedSetupReference: body.expectedSetupReference,
@@ -277,7 +279,8 @@ async function install(page: Page) {
           })
         : createStoreSetupDraft(
             {
-              profile: "StoreSetupDraftV1",
+              profile:
+                command.profile === "StoreSetupSaveV2" ? "StoreSetupDraftV2" : "StoreSetupDraftV1",
               tenantReference: selectedScope.tenantReference,
               brandReference: selectedScope.brandReference,
               storeReference: selectedScope.storeReference,

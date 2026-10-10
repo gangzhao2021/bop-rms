@@ -267,15 +267,19 @@ button {
 }
 :where(.bop-shell__main) :where(dl:not([class])) {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  /* Labels take their natural width but never more than half the row, so a 320px view at
+     200% text size wraps the label instead of pushing the value off-screen. */
+  grid-template-columns: fit-content(50%) minmax(0, 1fr);
   gap: var(--bop-space-2) var(--bop-space-6);
   margin: 0 0 var(--bop-space-6);
 }
 :where(.bop-shell__main) :where(dt:not([class])) {
   color: var(--bop-color-text-muted);
+  overflow-wrap: anywhere;
 }
 :where(.bop-shell__main) :where(dd:not([class])) {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 :where(.bop-shell__main) :where(.screen-heading) {
   padding-bottom: var(--bop-space-4);
