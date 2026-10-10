@@ -605,7 +605,12 @@ it("persists Product and SKU lifecycle with exact immutable replay and atomic Au
         { code: "42501" },
       );
 
-      // Legacy metadata alone is not reconstructable history.
+      // Legacy metadata alone is not reconstructable history. The authoring-resolution fence
+      // (migration 1100_016) admits the record only from a Brand-scoped session without a Store.
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id','',false)",
+        [id(2)],
+      );
       await admin.query(
         "INSERT INTO rms_catalog.product_operation_record VALUES($1,$2,$3,'ChangeLifecycle',$4,3,$5)",
         [id(99), id(2), id(1), "sha256:" + "f".repeat(64), "2026-09-14T08:02:00.000Z"],
