@@ -309,8 +309,10 @@ it("offers manual refresh and does not claim unavailable operator or safety fact
     </MemoryRouter>,
   );
   expect(html).toContain("Board locked — read-only");
-  expect(html).toContain("Allergen / exception cues unavailable");
-  expect(html).toContain('aria-label="Allergen status unavailable; Exception status unavailable"');
+  // WP-2423 Q3: no menu disclosure is said plainly; sourceless cues are not shown as placeholders.
+  expect(html).toContain("Allergens not available · check the recipe");
+  expect(html).not.toContain("Allergen / exception cues unavailable");
+  expect(html).not.toContain("Exception status unavailable");
   expect(html).toContain(
     "Filters apply only to fields present for every loaded work item. Allergen and exception filters are unavailable here",
   );
@@ -458,4 +460,33 @@ describe("IDR-0039 named-operator KDS handover", () => {
     );
     expect(anonymous).not.toContain("Hand over / sign out");
   });
+});
+
+it("WP-2423 Q3: shows the menu's declared allergens on the card, strongest first", () => {
+  const view = parseKitchenBoardView({
+    ...kitchenBoardFixture(),
+    items: [
+      {
+        ...kitchenItemFixture(),
+        allergens: { status: "Declared", contains: ["Milk"], mayContain: ["Sesame"] },
+      },
+      {
+        ...kitchenItemFixture(),
+        workItemReference: "01909985-0000-7000-8000-000000000071",
+        selectedOptions: [],
+        allergens: { status: "Declared", contains: [], mayContain: [] },
+      },
+    ],
+  });
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <KitchenBoardScreen view={view} onRefresh={() => undefined} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("<strong>Contains: Milk</strong>");
+  expect(html).toContain("<span>May contain: Sesame</span>");
+  expect(html).toContain("Modifiers may add allergens");
+  expect(html).toContain('aria-label="Contains Milk. May contain Sesame"');
+  expect(html).toContain("No menu allergens declared");
+  expect(html).not.toMatch(/allergen.free/iu);
 });

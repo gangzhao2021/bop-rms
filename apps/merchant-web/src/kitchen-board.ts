@@ -5,6 +5,19 @@ export interface KitchenSelectedOption {
   readonly quantity: number;
 }
 
+/**
+ * WP-2423 Q3: the allergen disclosure published on the menu this item was ordered from (base item;
+ * modifiers can add more). Unavailable when no published disclosure exists. Never an
+ * allergen-free claim.
+ */
+export type KitchenItemAllergens =
+  | {
+      readonly status: "Declared";
+      readonly contains: readonly string[];
+      readonly mayContain: readonly string[];
+    }
+  | { readonly status: "Unavailable" };
+
 export interface KitchenBoardItem {
   readonly workItemReference: string;
   readonly ticketReference: string;
@@ -18,6 +31,8 @@ export interface KitchenBoardItem {
   readonly allergenCue: "None" | "ReviewRequired" | "Acknowledged" | "Unavailable";
   readonly exceptionStatus: "None" | "Reported" | "Unavailable";
   readonly selectedOptions: readonly KitchenSelectedOption[];
+  /** WP-2423 Q3: omitted by older sources; shown as unavailable. */
+  readonly allergens?: KitchenItemAllergens;
   readonly execution?: {
     readonly orderItemReference: string;
     readonly stationReference: string;
@@ -127,9 +142,38 @@ function selectedOptions(value: unknown): readonly KitchenSelectedOption[] {
   return Object.freeze(value.map(selectedOption));
 }
 
+/** WP-2423 Q3: names grouped by classification, as the API serves them. */
+export function parseKitchenItemAllergens(value: unknown): KitchenItemAllergens {
+  const status =
+    value !== null && typeof value === "object" ? (value as { status?: unknown }).status : null;
+  if (status === "Unavailable") {
+    closed(value, ["status"]);
+    return Object.freeze({ status: "Unavailable" });
+  }
+  const input = closed(value, ["status", "contains", "mayContain"]);
+  const names = (list: unknown) => {
+    if (!Array.isArray(list) || list.length > 30) throw new Error("KITCHEN_BOARD_INVALID");
+    return Object.freeze(
+      list.map((name) => {
+        if (typeof name !== "string" || !SAFE_TEXT.test(name))
+          throw new Error("KITCHEN_BOARD_INVALID");
+        return name;
+      }),
+    );
+  };
+  if (input.status !== "Declared") throw new Error("KITCHEN_BOARD_INVALID");
+  return Object.freeze({
+    status: "Declared",
+    contains: names(input.contains),
+    mayContain: names(input.mayContain),
+  });
+}
+
 function item(value: unknown): KitchenBoardItem {
   const hasExecution =
     value !== null && typeof value === "object" && Object.hasOwn(value, "execution");
+  const hasAllergens =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "allergens");
   const input = closed(value, [
     "workItemReference",
     "ticketReference",
@@ -143,6 +187,7 @@ function item(value: unknown): KitchenBoardItem {
     "allergenCue",
     "exceptionStatus",
     "selectedOptions",
+    ...(hasAllergens ? ["allergens"] : []),
     ...(hasExecution ? ["execution"] : []),
   ]);
   if (
@@ -175,6 +220,7 @@ function item(value: unknown): KitchenBoardItem {
     allergenCue: input.allergenCue as KitchenBoardItem["allergenCue"],
     exceptionStatus: input.exceptionStatus as KitchenBoardItem["exceptionStatus"],
     selectedOptions: selectedOptions(input.selectedOptions),
+    ...(hasAllergens ? { allergens: parseKitchenItemAllergens(input.allergens) } : {}),
     ...(hasExecution ? { execution: execution(input.execution) } : {}),
   });
 }

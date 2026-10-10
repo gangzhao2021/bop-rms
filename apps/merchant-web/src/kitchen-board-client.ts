@@ -72,6 +72,31 @@ function selectedOptions(value: unknown) {
     return Object.freeze({ displayName, quantity: Number(option.quantity) });
   });
 }
+/** WP-2423 Q3: the API's per-allergen disclosure, grouped for the card. */
+function allergens(value: unknown) {
+  const raw = record(value);
+  if (raw.status === "Unavailable") {
+    closedRecord(value, ["status"]);
+    return { status: "Unavailable" };
+  }
+  const declared = closedRecord(value, ["status", "items"]);
+  if (
+    declared.status !== "Declared" ||
+    !Array.isArray(declared.items) ||
+    declared.items.length > 30
+  )
+    return fail();
+  const contains: string[] = [],
+    mayContain: string[] = [];
+  for (const entry of declared.items) {
+    const allergen = closedRecord(entry, ["code", "name", "classification"]);
+    if (typeof allergen.name !== "string" || !SAFE_TEXT.test(allergen.name)) return fail();
+    if (allergen.classification === "Contains") contains.push(allergen.name);
+    else if (allergen.classification === "CrossContactPossible") mayContain.push(allergen.name);
+    else return fail();
+  }
+  return { status: "Declared", contains, mayContain };
+}
 function item(value: unknown) {
   const raw = record(value),
     names = record(raw.localizedDisplayNames);
@@ -89,6 +114,7 @@ function item(value: unknown) {
     allergenCue: "Unavailable",
     exceptionStatus: "Unavailable",
     selectedOptions: selectedOptions(raw.selectedOptions),
+    allergens: allergens(raw.allergens),
     execution: {
       orderItemReference: raw.orderItemReference,
       stationReference: raw.stationReference,

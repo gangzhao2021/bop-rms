@@ -20,6 +20,56 @@ export function kitchenAgeTier(minutes: number): "ok" | "warning" | "late" {
 import { playKitchenChime } from "./alert-chime.js";
 export { playKitchenChime };
 
+/**
+ * WP-2423 Q3: what the published menu declares for this item, in plain words. Modifiers can add
+ * allergens the base disclosure does not cover; without a disclosure the cook is told so.
+ */
+export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem }) {
+  const allergens = item.allergens;
+  if (allergens === undefined || allergens.status === "Unavailable")
+    return (
+      <p className="kitchen-work-item__allergens" data-kind="unavailable" role="note">
+        Allergens not available · check the recipe
+      </p>
+    );
+  const none = allergens.contains.length === 0 && allergens.mayContain.length === 0;
+  return (
+    <p
+      className="kitchen-work-item__allergens"
+      data-kind={none ? "none" : "declared"}
+      role="note"
+      aria-label={
+        none
+          ? "No menu allergens declared"
+          : [
+              allergens.contains.length > 0 ? "Contains " + allergens.contains.join(", ") : "",
+              allergens.mayContain.length > 0
+                ? "May contain " + allergens.mayContain.join(", ")
+                : "",
+            ]
+              .filter(Boolean)
+              .join(". ")
+      }
+    >
+      {none ? (
+        "No menu allergens declared"
+      ) : (
+        <>
+          {allergens.contains.length > 0 ? (
+            <strong>Contains: {allergens.contains.join(", ")}</strong>
+          ) : null}
+          {allergens.mayContain.length > 0 ? (
+            <span>May contain: {allergens.mayContain.join(", ")}</span>
+          ) : null}
+        </>
+      )}
+      {item.selectedOptions.length > 0 ? (
+        <span className="kitchen-work-item__allergens-modifiers">Modifiers may add allergens</span>
+      ) : null}
+    </p>
+  );
+}
+
 /** The queued work item references that were not in the previous read. */
 export function newQueuedReferences(
   previous: KitchenBoardView | null,
@@ -164,8 +214,6 @@ function WorkCard({
       : item.exceptionStatus === "Unavailable"
         ? "Exception status unavailable"
         : null;
-  const safetyCuesUnavailable =
-    item.allergenCue === "Unavailable" && item.exceptionStatus === "Unavailable";
   return (
     <article
       className={`kitchen-work-item${!showDetails && !showActions ? " kitchen-work-item--detail" : ""}`}
@@ -201,34 +249,25 @@ function WorkCard({
             {item.completedQuantity} / {item.requiredQuantity}
           </dd>
         </dl>
-        {safetyCuesUnavailable && showDetails ? (
+        <KitchenAllergenLine item={item} />
+        {item.allergenCue !== "Unavailable" ? (
           <span
             className="kitchen-work-item__cue"
-            data-kind="unavailable"
-            aria-label="Allergen status unavailable; Exception status unavailable"
+            data-kind="allergen"
+            data-value={item.allergenCue}
           >
-            Allergen / exception cues unavailable
+            {allergenLabel}
           </span>
-        ) : (
-          <>
-            <span
-              className="kitchen-work-item__cue"
-              data-kind="allergen"
-              data-value={item.allergenCue}
-            >
-              {allergenLabel}
-            </span>
-            {exceptionLabel ? (
-              <span
-                className="kitchen-work-item__cue"
-                data-kind="exception"
-                data-value={item.exceptionStatus}
-              >
-                {exceptionLabel}
-              </span>
-            ) : null}
-          </>
-        )}
+        ) : null}
+        {item.exceptionStatus === "Reported" ? (
+          <span
+            className="kitchen-work-item__cue"
+            data-kind="exception"
+            data-value={item.exceptionStatus}
+          >
+            {exceptionLabel}
+          </span>
+        ) : null}
       </div>
       {showModifiers ? (
         <section className="kitchen-work-item__modifiers" aria-label="Modifiers">

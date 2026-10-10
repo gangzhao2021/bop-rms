@@ -87,6 +87,14 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     orderItemReference: id(4),
     stationReference: id(5),
     localizedDisplayNames: { "en-CA": "Synthetic rice" },
+    // WP-2423 Q3: the menu's published disclosure for this item (synthetic).
+    allergens: {
+      status: "Declared",
+      items: [
+        { code: "MILK", name: "Milk", classification: "Contains" },
+        { code: "SESAME", name: "Sesame", classification: "CrossContactPossible" },
+      ],
+    },
     selectedOptions: [
       {
         optionReference: id(11),
@@ -222,13 +230,13 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(primaryNav).toBeHidden();
   await expect(page.getByText("Quantity", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("0 / 2", { exact: true })).toBeVisible();
-  const unavailableSafetyCue = page.locator('.kitchen-work-item__cue[data-kind="unavailable"]');
-  await expect(unavailableSafetyCue).toHaveCount(3);
-  await expect(unavailableSafetyCue.first()).toHaveText("Allergen / exception cues unavailable");
-  await expect(unavailableSafetyCue.first()).toHaveAttribute(
-    "aria-label",
-    "Allergen status unavailable; Exception status unavailable",
-  );
+  // WP-2423 Q3: menu allergens on every card; no placeholder for cues that have no source.
+  const allergenLine = page.locator('.kitchen-work-item__allergens[data-kind="declared"]');
+  await expect(allergenLine).toHaveCount(3);
+  await expect(allergenLine.first()).toContainText("Contains: Milk");
+  await expect(allergenLine.first()).toContainText("May contain: Sesame");
+  await expect(allergenLine.first()).toContainText("Modifiers may add allergens");
+  await expect(page.locator("body")).not.toContainText("Allergen / exception cues unavailable");
   await expect(page.locator("body")).not.toContainText("Ticket display reference unavailable");
   await expect(page.locator("body")).not.toContainText("Order display reference unavailable");
   await expect(page.locator("body")).not.toContainText(id(2));
@@ -653,6 +661,7 @@ test("@production Kitchen reloads projection after an authorized Store switch", 
       orderItemReference: id(40 + itemIndex),
       stationReference: id(50 + itemIndex),
       localizedDisplayNames: { "en-CA": `Synthetic work at Store ${itemIndex}` },
+      allergens: { status: "Unavailable" },
       selectedOptions: [],
       status: "Queued",
       requiredQuantity: 1,
@@ -757,6 +766,7 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
     ticketReference: id(2),
     orderReference: id(3),
     stationReference: id(5),
+    allergens: { status: "Unavailable" },
     selectedOptions: [],
     requiredQuantity: 1,
     completedQuantity: 0,
@@ -903,6 +913,7 @@ test("@production Kitchen commands preserve intent and wait for projection versi
     orderItemReference: id(4),
     stationReference: id(5),
     localizedDisplayNames: { "en-CA": "Synthetic rice" },
+    allergens: { status: "Unavailable" },
     selectedOptions: [],
     status: "Queued",
     requiredQuantity: 2,

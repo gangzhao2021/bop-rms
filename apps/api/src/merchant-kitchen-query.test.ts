@@ -92,6 +92,7 @@ it("derives current authority, preserves integer strings, and rechecks permissio
         workItemReference: id(5),
         ticketAggregateVersion: "9007199254740993",
         workItemVersion: "2",
+        allergens: { status: "Unavailable" },
       },
     ],
   });
@@ -119,8 +120,59 @@ it("returns detail with exact version strings", async () => {
       workItemReference: id(5),
       ticketAggregateVersion: "9007199254740993",
       workItemVersion: "2",
+      allergens: { status: "Unavailable" },
     },
   });
+});
+it("WP-2423 Q3: serves the published menu disclosure per work item and restores Store scope", async () => {
+  const f = setup();
+  const disclosure = {
+    registryVersionReference: id(30),
+    items: [
+      {
+        allergenReference: id(31),
+        code: "MILK",
+        localizedNames: { "en-CA": "Milk", "fr-CA": "Lait" },
+        classification: "Contains",
+      },
+    ],
+    allergenFreeClaim: false,
+    assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+  };
+  f.tx.query.mockImplementation((async (sql: string) =>
+    sql.includes("FROM rms_kitchen.kitchen_work_item")
+      ? {
+          rows: [{ work_item: id(5), menu_version: id(20), sku: id(21), product_version: id(22) }],
+          rowCount: 1,
+        }
+      : sql.includes("published_menu_projection_sellable")
+        ? {
+            rows: [
+              {
+                menu_version: id(20),
+                sellable: id(21),
+                product_version: id(22),
+                default_locale: "en-CA",
+                disclosure: JSON.stringify(disclosure),
+              },
+            ],
+            rowCount: 1,
+          }
+        : { rows: [], rowCount: 0 }) as never);
+  const result = (await f.operation(f.input)) as { items: { allergens: unknown }[] };
+  expect(result.items[0]?.allergens).toEqual({
+    status: "Declared",
+    items: [{ code: "MILK", name: "Milk", classification: "Contains" }],
+  });
+  const calls = f.tx.query.mock.calls as unknown as [string, unknown[]][];
+  const catalogRead = calls.findIndex(([sql]) =>
+    sql.includes("published_menu_projection_sellable"),
+  );
+  expect(calls[catalogRead - 1]?.[1]).toEqual([id(3)]);
+  expect(calls[catalogRead + 1]).toEqual([
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [id(3), id(4)],
+  ]);
 });
 it("preserves projection-owned selected modifiers through List and Get", async () => {
   const f = setup();

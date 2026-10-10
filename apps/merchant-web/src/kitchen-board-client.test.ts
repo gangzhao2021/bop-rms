@@ -10,6 +10,7 @@ const item = (n = 1) => ({
   orderItemReference: id(4),
   stationReference: id(5),
   localizedDisplayNames: { "en-CA": "Synthetic rice" },
+  allergens: { status: "Unavailable" },
   selectedOptions: [
     {
       optionReference: id(40),
@@ -218,4 +219,36 @@ it("rejects a response for a different selected Store", async () => {
     response({ ...metadata, storeReference: id(98), items: [item()], nextCursor: null }),
   );
   await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+});
+it("WP-2423 Q3: groups the menu's declared allergens and fails closed on malformed ones", async () => {
+  const f = setup();
+  const declared = {
+    ...item(),
+    allergens: {
+      status: "Declared",
+      items: [
+        { code: "MILK", name: "Milk", classification: "Contains" },
+        { code: "SESAME", name: "Sesame", classification: "CrossContactPossible" },
+      ],
+    },
+  };
+  f.fetcher.mockResolvedValueOnce(response({ ...metadata, items: [declared], nextCursor: null }));
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  expect(view.items[0]?.allergens).toEqual({
+    status: "Declared",
+    contains: ["Milk"],
+    mayContain: ["Sesame"],
+  });
+  for (const allergens of [
+    undefined,
+    { status: "Declared", items: [{ code: "MILK", name: "Milk", classification: "Unverified" }] },
+    { status: "Declared", items: [{ code: "MILK", name: "", classification: "Contains" }] },
+    { status: "Unavailable", items: [] },
+    { status: "AllergenFree" },
+  ]) {
+    f.fetcher.mockResolvedValueOnce(
+      response({ ...metadata, items: [{ ...item(), allergens }], nextCursor: null }),
+    );
+    await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+  }
 });

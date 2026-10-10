@@ -1798,6 +1798,25 @@
   color: var(--bop-color-warning);
   font-weight: 600;
 }
+/* WP-2423 Q3: menu allergens are a full-width line; "Contains" reads first and strongest. */
+.kitchen-work-item__allergens {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 15px;
+}
+.kitchen-work-item__allergens strong {
+  color: var(--bop-color-danger);
+  font-weight: 700;
+}
+.kitchen-work-item__allergens[data-kind="none"],
+.kitchen-work-item__allergens[data-kind="unavailable"],
+.kitchen-work-item__allergens-modifiers {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
 .kitchen-work-item__modifiers {
   margin: 0;
 }

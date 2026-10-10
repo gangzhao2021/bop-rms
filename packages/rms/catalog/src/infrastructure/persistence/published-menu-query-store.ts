@@ -24,6 +24,10 @@ import {
   parsePublishedMenuProjection,
   type PublishedMenuProjection,
 } from "../../contracts/published-menu-projection.js";
+import {
+  parseSellableAllergenDisclosure,
+  type SellableAllergenDisclosure,
+} from "../../domain/allergen-provenance.js";
 
 export interface PublishedMenuQueryTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
@@ -545,4 +549,94 @@ export function createPostgresPublishedMenuConsumerService(
     consume: (transaction: ConsumerTransaction, envelope: DomainEventEnvelope) =>
       owner(transaction, envelope).consume(envelope as MenuPublishedEnvelope),
   });
+}
+
+/**
+ * WP-2423 Q3: the allergen disclosure published for each (menu version, sellable, Product version),
+ * as the Store's kitchen needs it for work already ordered. Reads the published projection, current
+ * or retired, for menus that include the Store. A key with no published disclosure, or with
+ * conflicting ones, is omitted. Never an allergen-free claim. Caller authorizes the Store and owns
+ * the transaction; the Store context is restored before returning.
+ */
+export async function listPublishedSellableAllergenDisclosures(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  keys: readonly {
+    readonly menuVersionReference: string;
+    readonly sellableReference: string;
+    readonly productVersionReference: string;
+  }[],
+): Promise<ReadonlyMap<string, SellableAllergenDisclosure>> {
+  if (keys.length === 0) return new Map();
+  if (keys.length > 200) throw new CatalogError("CATALOG_INPUT_INVALID");
+  const brand = parseCatalogReference(scope.brandReference),
+    store = parseCatalogReference(scope.storeReference);
+  const parsed = keys.map((key) => ({
+    menuVersion: parseCatalogReference(key.menuVersionReference),
+    sellable: parseCatalogReference(key.sellableReference),
+    productVersion: parseCatalogReference(key.productVersionReference),
+  }));
+  const wanted = new Set(parsed.map(sellableDisclosureKey));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+    [brand],
+  );
+  try {
+    const rows = (
+      await transaction.query(
+        "SELECT DISTINCT p.menu_version_id::text menu_version,v.sellable_id::text sellable," +
+          "v.product_version_id::text product_version,p.default_locale,v.allergen_disclosure_json::text disclosure " +
+          "FROM rms_catalog.published_menu_projection_sellable v " +
+          "JOIN rms_catalog.published_menu_projection p ON p.generation_id=v.generation_id AND p.menu_id=v.menu_id AND p.brand_id=v.brand_id " +
+          "JOIN rms_catalog.published_menu_projection_generation g ON g.generation_id=p.generation_id AND g.menu_id=p.menu_id AND g.brand_id=p.brand_id " +
+          "WHERE v.brand_id=$1 AND g.generation_status IN ('Active','Retired') " +
+          "AND p.store_ids_json @> jsonb_build_array($2::text) AND p.menu_version_id=ANY($3::uuid[]) AND v.sellable_id=ANY($4::uuid[])",
+        [
+          brand,
+          store,
+          [...new Set(parsed.map((key) => key.menuVersion))],
+          [...new Set(parsed.map((key) => key.sellable))],
+        ],
+      )
+    ).rows as readonly Record<string, unknown>[];
+    const found = new Map<string, string | null>();
+    const disclosures = new Map<string, SellableAllergenDisclosure>();
+    for (const row of rows) {
+      const key = sellableDisclosureKey({
+        menuVersion: parseCatalogReference(row.menu_version),
+        sellable: parseCatalogReference(row.sellable),
+        productVersion: parseCatalogReference(row.product_version),
+      });
+      if (!wanted.has(key) || typeof row.disclosure !== "string") continue;
+      const prior = found.get(key);
+      if (prior !== undefined && prior !== row.disclosure) {
+        found.set(key, null);
+        disclosures.delete(key);
+        continue;
+      }
+      if (prior === null) continue;
+      found.set(key, row.disclosure);
+      disclosures.set(
+        key,
+        parseSellableAllergenDisclosure(
+          JSON.parse(row.disclosure) as SellableAllergenDisclosure,
+          String(row.default_locale),
+        ),
+      );
+    }
+    return disclosures;
+  } finally {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+  }
+}
+/** WP-2423 Q3: the lookup key of `listPublishedSellableAllergenDisclosures`. */
+export function sellableDisclosureKey(key: {
+  readonly menuVersion: string;
+  readonly sellable: string;
+  readonly productVersion: string;
+}) {
+  return `${key.menuVersion}:${key.sellable}:${key.productVersion}`;
 }

@@ -245,3 +245,57 @@ export async function lockPostgresKitchenQueueRead(input: {
     brand + ":" + store + ":kitchen_work_queue_v1",
   ]);
 }
+
+/**
+ * WP-2423 Q3: the published menu facts each work item was ordered from (menu version, SKU and
+ * Product version), so the kitchen can show that menu's allergen disclosure. No Customer note.
+ * Caller authorizes the Store and owns the transaction.
+ */
+export async function listKitchenWorkItemMenuKeys(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  workItemReferences: readonly string[],
+): Promise<
+  ReadonlyMap<
+    string,
+    {
+      readonly menuVersionReference: string;
+      readonly skuReference: string;
+      readonly productVersionReference: string;
+    }
+  >
+> {
+  if (workItemReferences.length === 0) return new Map();
+  if (workItemReferences.length > 200)
+    throw new KitchenQueueProjectionError("KITCHEN_QUEUE_INPUT_INVALID");
+  const brand = parseKitchenTicketReference(scope.brandReference),
+    store = parseKitchenTicketReference(scope.storeReference),
+    items = workItemReferences.map((value) => parseKitchenTicketReference(value));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT DISTINCT ON (kitchen_work_item_id) kitchen_work_item_id::text work_item,menu_version_id::text menu_version," +
+        "sku_id::text sku,product_version_id::text product_version FROM rms_kitchen.kitchen_work_item " +
+        "WHERE brand_id=$1 AND store_id=$2 AND kitchen_work_item_id=ANY($3::uuid[]) ORDER BY kitchen_work_item_id,version DESC",
+      [brand, store, items],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  return new Map(
+    rows.map((row) => {
+      const workItem = parseKitchenTicketReference(row.work_item);
+      if (!items.includes(workItem))
+        throw new KitchenQueueProjectionError("KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE");
+      return [
+        workItem,
+        Object.freeze({
+          menuVersionReference: parseKitchenTicketReference(row.menu_version),
+          skuReference: parseKitchenTicketReference(row.sku),
+          productVersionReference: parseKitchenTicketReference(row.product_version),
+        }),
+      ] as const;
+    }),
+  );
+}

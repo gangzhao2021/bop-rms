@@ -6,8 +6,10 @@ import {
   createPostgresKitchenQueueQueries,
   lockPostgresKitchenQueueRead,
   KitchenQueueProjectionError,
+  listKitchenWorkItemMenuKeys,
   type KitchenQueueItemView,
 } from "@rms/kitchen";
+import { listPublishedSellableAllergenDisclosures, sellableDisclosureKey } from "@rms/catalog";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -70,11 +72,74 @@ export function kdsOperatorStatus(input: {
     return "Unavailable";
   }
 }
-const itemView = (item: KitchenQueueItemView) => ({
+/** WP-2423 Q3: the menu's published allergen disclosure for one work item, or Unavailable. */
+export type KitchenItemAllergens =
+  | {
+      readonly status: "Declared";
+      readonly items: readonly {
+        readonly code: string;
+        readonly name: string;
+        readonly classification: "Contains" | "CrossContactPossible";
+      }[];
+    }
+  | { readonly status: "Unavailable" };
+const unavailableAllergens: KitchenItemAllergens = Object.freeze({ status: "Unavailable" });
+const itemView = (item: KitchenQueueItemView, allergens: KitchenItemAllergens) => ({
   ...item,
   ticketAggregateVersion: item.ticketAggregateVersion.toString(10),
   workItemVersion: item.workItemVersion.toString(10),
+  allergens,
 });
+/**
+ * WP-2423 Q3: Kitchen gives each work item's menu keys, Catalog the disclosure published for them.
+ * Product facts only; no Customer note or health fact. Missing sources read as Unavailable.
+ */
+async function kitchenAllergens(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  workItemReferences: readonly string[],
+): Promise<ReadonlyMap<string, KitchenItemAllergens>> {
+  const keys = await listKitchenWorkItemMenuKeys(transaction, scope, workItemReferences);
+  const disclosures = await listPublishedSellableAllergenDisclosures(
+    transaction,
+    scope,
+    [...keys.values()].map((key) => ({
+      menuVersionReference: key.menuVersionReference,
+      sellableReference: key.skuReference,
+      productVersionReference: key.productVersionReference,
+    })),
+  );
+  return new Map(
+    [...keys].flatMap(([workItem, key]) => {
+      const disclosure = disclosures.get(
+        sellableDisclosureKey({
+          menuVersion: key.menuVersionReference,
+          sellable: key.skuReference,
+          productVersion: key.productVersionReference,
+        }),
+      );
+      if (!disclosure) return [];
+      return [
+        [
+          workItem,
+          Object.freeze({
+            status: "Declared" as const,
+            items: Object.freeze(
+              disclosure.items.map((item) => {
+                const names = item.localizedNames;
+                return Object.freeze({
+                  code: item.code,
+                  name: names["en-CA"] ?? names.en ?? Object.values(names)[0] ?? item.code,
+                  classification: item.classification,
+                });
+              }),
+            ),
+          }),
+        ] as const,
+      ];
+    }),
+  );
+}
 
 /** Selected scope and authority never come from browser query fields. */
 export function createMerchantKitchenQuery(options: {
@@ -190,22 +255,33 @@ export function createMerchantKitchenQuery(options: {
           cursor: query.cursor,
           limit: query.limit,
         });
+        const allergens = await kitchenAllergens(
+          tx,
+          authority,
+          result.items.map((item) => item.workItemReference),
+        );
         return {
           ...result,
           operatorStatus: operatorStatus(result),
           storeReference: authority.storeReference,
-          items: result.items.map(itemView),
+          items: result.items.map((item) =>
+            itemView(item, allergens.get(item.workItemReference) ?? unavailableAllergens),
+          ),
         };
       }
       const result = await service.get({
         ...authority,
         workItemReference: query.workItemReference,
       });
+      const allergens = await kitchenAllergens(tx, authority, [result.item.workItemReference]);
       return {
         ...result,
         operatorStatus: operatorStatus(result),
         storeReference: authority.storeReference,
-        item: itemView(result.item),
+        item: itemView(
+          result.item,
+          allergens.get(result.item.workItemReference) ?? unavailableAllergens,
+        ),
       };
     });
   };
