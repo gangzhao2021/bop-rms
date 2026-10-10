@@ -54,9 +54,11 @@ function payload(value: unknown): FulfillmentCompletedPayload {
     "verificationMethod",
     "completedAt",
   ]);
-  if (raw.verificationMethod !== "Opaque" &&
+  if (
+    raw.verificationMethod !== "Opaque" &&
     raw.verificationMethod !== "HumanCode" &&
-    raw.verificationMethod !== "InPerson")
+    raw.verificationMethod !== "InPerson"
+  )
     return invalid();
   return Object.freeze({
     fulfillmentReference: parseOrderingReference(raw.fulfillmentReference),

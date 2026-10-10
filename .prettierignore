@@ -13,4 +13,4 @@ BOP-RMS Complete Handoff Package.md:Zone.Identifier
 .local/
 packages/contracts/events/generated/
 docs/spec/history/*.json
-.claude/settings.local.json
+.claude/
