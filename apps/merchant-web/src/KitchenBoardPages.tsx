@@ -1208,6 +1208,53 @@ function KitchenBoardContent(props: KitchenPageProps) {
     </>
   );
 }
+/**
+ * WP-2423 Q2: keeps a kitchen screen awake while the board is open (Screen Wake Lock), so new work
+ * keeps arriving and chiming instead of the device sleeping. Re-acquired whenever the page is shown
+ * again; released on leave. "Unsupported" when the browser cannot hold the screen on.
+ */
+export function useKitchenScreenAwake(active: boolean) {
+  const [state, setState] = useState<"Held" | "Unsupported" | "Released">("Released");
+  useEffect(() => {
+    if (!active || typeof document === "undefined") return;
+    const wakeLock = (
+      navigator as Navigator & {
+        wakeLock?: { request(type: "screen"): Promise<{ release(): Promise<void> }> };
+      }
+    ).wakeLock;
+    if (!wakeLock) {
+      setState("Unsupported");
+      return;
+    }
+    let sentinel: { release(): Promise<void> } | null = null,
+      stopped = false;
+    const acquire = () => {
+      if (document.visibilityState !== "visible") return;
+      wakeLock.request("screen").then(
+        (held) => {
+          if (stopped) void held.release().catch(() => undefined);
+          else {
+            sentinel = held;
+            setState("Held");
+          }
+        },
+        () => {
+          if (!stopped) setState("Unsupported");
+        },
+      );
+    };
+    acquire();
+    document.addEventListener("visibilitychange", acquire);
+    return () => {
+      stopped = true;
+      document.removeEventListener("visibilitychange", acquire);
+      void sentinel?.release().catch(() => undefined);
+      setState("Released");
+    };
+  }, [active]);
+  return state;
+}
+
 /** IDR-0039 named-operator browser KDS: visibility loss covers the whole board (no snapshot),
  * and handover signs the current named Session out before the next operator signs in. */
 export function KitchenBoardPage(
@@ -1224,6 +1271,7 @@ export function KitchenBoardPage(
     return () => document.removeEventListener("visibilitychange", cover);
   }, []);
   const named = Boolean(props.csrf && props.storeReference);
+  const awake = useKitchenScreenAwake(!covered && handover !== "SignedOut");
   const signOut =
     props.signOut ??
     (async () => {
@@ -1279,6 +1327,13 @@ export function KitchenBoardPage(
           >
             Hand over / sign out
           </button>
+          <span className="kitchen-screen-awake" data-state={awake} role="status">
+            {awake === "Held"
+              ? " Screen kept on"
+              : awake === "Unsupported"
+                ? " This browser cannot keep the screen on — set the device to never sleep"
+                : ""}
+          </span>
           {handover === "Failed" ? (
             <span role="alert">
               {" "}

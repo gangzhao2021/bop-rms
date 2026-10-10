@@ -1089,3 +1089,92 @@ test("@production Kitchen commands preserve intent and wait for projection versi
     await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
   ).toEqual({ local: 0, session: 0 });
 });
+
+for (const supported of [true, false]) {
+  test(`@production WP-2423 Q2: the kitchen board ${supported ? "keeps the screen on" : "says when it cannot keep the screen on"}`, async ({
+    page,
+  }) => {
+    const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+    const scope = {
+      brandLabel: "Training Brand",
+      storeLabel: "Training Store",
+      storeReference: id(99),
+    };
+    const headers = { "cache-control": "no-store" };
+    await page.addInitScript((available) => {
+      const holder = window as unknown as { wakeRequests: number; wakeReleases: number };
+      holder.wakeRequests = 0;
+      holder.wakeReleases = 0;
+      Object.defineProperty(navigator, "wakeLock", {
+        configurable: true,
+        value: available
+          ? {
+              request: async () => {
+                holder.wakeRequests += 1;
+                return {
+                  release: async () => {
+                    holder.wakeReleases += 1;
+                  },
+                };
+              },
+            }
+          : undefined,
+      });
+    }, supported);
+    await page.route("**/merchant/session", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          authenticated: true,
+          csrf: "a".repeat(43),
+          workspace: {
+            screenId: "HOME-OVERVIEW",
+            selectedScope: scope,
+            authorizedStores: [scope],
+            businessDate: "2026-09-19",
+            storeStatus: "Open",
+            freshness: "Current",
+            dashboardAvailability: "UnavailableUntilWP1905",
+            navigation: [
+              {
+                screenId: "KIT-KITCHEN-QUEUE",
+                label: "Kitchen",
+                href: "/operations/kitchen",
+                permission: "kitchen.operate",
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await page.route("**/merchant/kitchen/query", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          storeReference: scope.storeReference,
+          operatorStatus: "Unverified",
+          projectionName: "kitchen_work_queue_v1",
+          projectionVersion: 1,
+          projectionGenerationReference: id(9),
+          projectedAt: "2026-09-19T12:00:00.000Z",
+          partial: false,
+          stale: false,
+          freshnessStatus: "Fresh",
+          items: [],
+          nextCursor: null,
+        },
+      }),
+    );
+    await page.goto("/operations/kitchen");
+    const status = page.locator(".kitchen-screen-awake");
+    if (supported) {
+      await expect(status).toHaveText("Screen kept on");
+      expect(
+        await page.evaluate(() => (window as unknown as { wakeRequests: number }).wakeRequests),
+      ).toBeGreaterThan(0);
+    } else
+      await expect(status).toHaveText(
+        "This browser cannot keep the screen on — set the device to never sleep",
+      );
+  });
+}

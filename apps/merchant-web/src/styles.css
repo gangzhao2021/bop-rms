@@ -1798,6 +1798,15 @@
   color: var(--bop-color-warning);
   font-weight: 600;
 }
+/* WP-2423 Q2: whether the device will stay awake for the board. */
+.kitchen-screen-awake {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.kitchen-screen-awake[data-state="Unsupported"] {
+  color: var(--bop-color-warning);
+  font-weight: 600;
+}
 /* WP-2423 Q2: one Order's work together under its number and table. */
 .kitchen-order-group {
   display: grid;
