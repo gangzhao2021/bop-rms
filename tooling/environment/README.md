@@ -610,6 +610,14 @@ The loader rejects symlinks, oversized files, unexpected fields, production mode
 and profile/menu database mismatches. Existing owner parsers still validate the
 business payloads; the envelope is not proof of publication or permission.
 
+`internal-test-profile.json` may carry an `operating` section
+(`{ "liveGateRequirementCodes": ["…"] }`): the Store live gate requirement codes every
+publication proof insists on. InternalTest defaults to the synthetic
+`SYNTHETIC_STORE_READY` when the section is absent; a Pilot process requires the section,
+refuses any `SYNTHETIC_*` code, and reads the Store's time zone from its own record. The
+published operating status is read once at start-up (`PILOT_STORE_OPERATING_UNAVAILABLE`
+stops the process) and operating authorization is the binding's validity window.
+
 Passwords remain in `api-password`/`worker-password`; application keys and Guest
 admission pepper remain in their existing private files. The factory only loads
 these files; it never creates or rotates them, grants privileges or seeds business

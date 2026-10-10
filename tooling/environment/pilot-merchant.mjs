@@ -106,7 +106,8 @@ export async function createInternalMerchant(
     publication: {
       configurationType: "STORE_CONFIGURATION",
       purposeCode: "STORE_CONFIGURATION",
-      requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+      // WP-2423 StoreOperatingSource: the same gate codes the resources were verified against.
+      requiredLiveGateRequirementCodes: resources.operating.requiredLiveGateRequirementCodes,
     },
     initialScope: targetScope,
     targetScope,

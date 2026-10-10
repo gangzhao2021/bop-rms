@@ -87,11 +87,6 @@ export const pilotCapabilityGaps = Object.freeze([
     needs: "public certificate and reverse proxy (P4 hosting and domain)",
   }),
   Object.freeze({
-    code: "StoreOperatingSource",
-    standIn: "synthetic live gate, fixed time zone, permissive operating authorization",
-    needs: "the Store's configured live gates, time zone and operating authorization (repository)",
-  }),
-  Object.freeze({
     code: "PricingCurrencyMetadata",
     standIn: "TEST-ONLY synthetic CAD metadata",
     needs: "reviewed currency and tax configuration of the real Store (P5, tax review)",

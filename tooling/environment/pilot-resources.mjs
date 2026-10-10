@@ -1,7 +1,14 @@
-import { isInternalTest, matchesPilotEnvironment } from "./pilot-environment.mjs";
+import { matchesPilotEnvironment } from "./pilot-environment.mjs";
+import {
+  createBindingAuthorization,
+  readStoreOperatingFacts,
+  resolveOperatingConfiguration,
+  verifyStoreOperating,
+} from "./pilot-operating-source.mjs";
 import { canonicalizeRfc8785, sha256Hex } from "../../packages/bop/audit/src/index.ts";
 import { createPersistentPublicStoreProfileReader } from "../../apps/api/dist/persistent-public-store-profile.js";
 import { createPersistentEntryOperatingReader } from "../../apps/api/dist/persistent-entry-operating.js";
+import { createMerchantServicePauseProof } from "../../apps/api/dist/merchant-service-pause-proof.js";
 export async function createInternalTestResources({
   createApplicationDatabase,
   createInternalTestCredentials,
@@ -19,9 +26,9 @@ export async function createInternalTestResources({
     )
   )
     throw new Error("INTERNAL_CONFIGURATION_REQUIRED");
-  // WP-2423 P1b: the Store live gates, operating authorization and time zone below are InternalTest
-  // stand-ins; a Pilot Store needs its real ones before this composition may serve it.
-  if (!isInternalTest()) throw new Error("PILOT_CAPABILITY_MISSING:StoreOperatingSource");
+  // WP-2423 StoreOperatingSource: gate codes come from the profile, the time zone from the Store
+  // record, authorization from the binding's validity; the published status is read once at start.
+  const operatingConfiguration = resolveOperatingConfiguration(profile);
   const credentials = await createInternalTestCredentials(),
     database = await createApplicationDatabase("api");
   try {
@@ -35,10 +42,15 @@ export async function createInternalTestResources({
     });
     const now = () => new Date().toISOString(),
       hash = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
+    const bindingAuthorization = createBindingAuthorization(profile.binding, now);
+    const store = await readStoreOperatingFacts(transactions, scope, now);
     const publicProfile = {
       binding: profile.binding,
       selection: profile.selection,
-      authorize: async () => true,
+      authorize: async (_tx, binding, context) =>
+        binding?.brandReference === scope.brandReference &&
+        binding?.storeReference === scope.storeReference &&
+        bindingAuthorization(_tx, context?.evaluatedAt),
       hashContent: hash,
       hashSnapshot: hash,
       hashPeriod: hash,
@@ -52,14 +64,17 @@ export async function createInternalTestResources({
       tenantReference: profile.binding.tenantReference,
       configurationType: "STORE_CONFIGURATION",
       purposeCode: "STORE_CONFIGURATION",
-      requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
-      authorize: async () => true,
+      requiredLiveGateRequirementCodes: operatingConfiguration.liveGateRequirementCodes,
+      authorize: bindingAuthorization,
       hashContent: hash,
-      timeZone: "America/Toronto",
-      verifyPauseOperation: async () => {
-        throw new Error("INTERNAL_TEST_PAUSE_UNAVAILABLE");
-      },
+      timeZone: store.timeZone,
+      verifyPauseOperation: createMerchantServicePauseProof({
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+        authorize: bindingAuthorization,
+      }),
     };
+    const operatingStatus = await verifyStoreOperating(transactions, operating, now);
     const requestAdmission = await createCustomerRequestAdmission({ database, scope, now });
     return Object.freeze({
       scope,
@@ -70,6 +85,8 @@ export async function createInternalTestResources({
       transactions,
       publicProfile,
       operating,
+      store,
+      operatingStatus,
       requestAdmission,
       stores: createPersistentPublicStoreProfileReader({ ...publicProfile, transactions }),
       operatingReader: (transaction) =>
