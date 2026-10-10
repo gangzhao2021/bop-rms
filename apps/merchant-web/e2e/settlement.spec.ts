@@ -20,24 +20,55 @@ const closedView = (businessDate: string) => ({
   captured: { count: 14, amountMinor: "123450", currencyCode: "CAD" },
   refunded: { count: 1, amountMinor: "1130", currencyCode: "CAD" },
   reconciliation: {
-    runs: [
-      {
+    settlement: {
+      run: {
         runReference: id(1),
         mode: "DailySettlement",
-        scheduledAt: "2026-09-22T08:05:00.000Z",
-        cutoffAt: "2026-09-22T08:00:00.000Z",
-        completedAt: "2026-09-22T08:06:00.000Z",
+        scheduledAt: "2026-09-22T12:00:00.000Z",
+        cutoffAt: "2026-09-22T12:00:00.000Z",
+        completedAt: "2026-09-22T12:00:06.000Z",
+        counts: { Matched: 1, Healed: 0, Unresolved: 0, Unavailable: 0, Difference: 0 },
+      },
+      checks: [
+        {
+          checkReference: id(2),
+          runReference: id(1),
+          checkedAt: "2026-09-22T12:00:05.000Z",
+          outcome: "Matched",
+          differenceReason: null,
+          settlementReference: "SETTLE-2026-09-21-01",
+          internalStatus: null,
+          providerStatus: null,
+          currencyCode: "CAD",
+          internalCapturedMinor: "123450",
+          providerCapturedMinor: "123450",
+          internalRefundedMinor: "1130",
+          providerRefundedMinor: "1130",
+          exceptionReference: null,
+        },
+      ],
+    },
+    operational: {
+      runCount: 240,
+      latestRun: {
+        runReference: id(4),
+        mode: "Operational",
+        scheduledAt: "2026-09-22T07:58:00.000Z",
+        cutoffAt: "2026-09-22T07:58:00.000Z",
+        completedAt: "2026-09-22T07:58:01.000Z",
         counts: { Matched: 13, Healed: 0, Unresolved: 0, Unavailable: 0, Difference: 1 },
       },
-    ],
+      paymentCount: 14,
+      outcomes: { Matched: 13, Healed: 0, Unresolved: 0, Unavailable: 0, Difference: 1 },
+    },
     differences: [
       {
-        checkReference: id(2),
-        runReference: id(1),
-        checkedAt: "2026-09-22T08:05:30.000Z",
+        checkReference: id(5),
+        runReference: id(4),
+        checkedAt: "2026-09-22T07:58:00.700Z",
         outcome: "Difference",
         differenceReason: "RefundMismatch",
-        settlementReference: "SETTLE-2026-09-21-01",
+        settlementReference: null,
         internalStatus: "Captured",
         providerStatus: "Captured",
         currencyCode: "CAD",
@@ -48,6 +79,7 @@ const closedView = (businessDate: string) => ({
         exceptionReference: id(3),
       },
     ],
+    differenceCount: 1,
   },
   projectedAt: "2026-09-22T09:00:00.000Z",
 });
@@ -98,7 +130,10 @@ test("@production Settlement shows the day's totals, the run result and differen
             timeZone: "America/Toronto",
             status: "Open",
           },
-          reconciliation: { runs: [], differences: [] },
+          reconciliation: {
+            ...closedView("2026-09-22").reconciliation,
+            settlement: null,
+          },
         },
       });
     return route.fulfill({ headers, json: closedView(date ?? "2026-09-21") });
@@ -113,11 +148,16 @@ test("@production Settlement shows the day's totals, the run result and differen
       .first(),
   ).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Business day 2026-09-21" })).toBeVisible();
-  await expect(page.getByText("$1,234.50")).toBeVisible();
-  await expect(page.getByText("14 payments")).toBeVisible();
+  await expect(page.getByText("$1,234.50", { exact: true })).toBeVisible();
+  await expect(page.getByText("14 payments", { exact: true })).toBeVisible();
   await expect(page.getByText("$1,223.20")).toBeVisible();
   await expect(
-    page.getByText("1 difference · 0 unresolved · 0 unavailable · 13 matched"),
+    page.getByText("Settled · the day's totals match the provider statement"),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "14 payments checked in 240 runs · last 2026-09-22 03:58 · 13 matched · 1 difference",
+    ),
   ).toBeVisible();
   await expect(page.getByText("Difference · Refund differs")).toBeVisible();
   await expect(page.getByRole("link", { name: "Exceptions" })).toHaveAttribute(

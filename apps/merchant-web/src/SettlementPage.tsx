@@ -4,7 +4,9 @@ import { Link } from "react-router";
 import {
   createSettlementClient,
   SettlementClientError,
-  type SettlementDifference,
+  type SettlementCheck,
+  type SettlementOutcome,
+  type SettlementReconciliation,
   type SettlementView,
 } from "./settlement-client.js";
 import { Freshness, storeTime } from "./StoreTime.js";
@@ -28,12 +30,48 @@ export const differenceReasonLabel: Record<string, string> = {
   RefundMismatch: "Refund differs",
   TerminalConflict: "Terminal conflict",
 };
-const outcomeLabel: Record<SettlementDifference["outcome"], string> = {
+const outcomeLabel: Record<SettlementOutcome, string> = {
+  Matched: "Matched",
+  Healed: "Healed",
   Difference: "Difference",
   Unresolved: "Unresolved",
   Unavailable: "Provider unavailable",
 };
+/** Payment states a Store Manager reads without the Provider's vocabulary. */
+export const paymentStatusLabel: Record<string, string> = {
+  RequiresCustomerAction: "Awaiting customer action",
+  RequiresPaymentMethod: "Awaiting payment method",
+  Processing: "Processing",
+  Captured: "Captured",
+  Canceled: "Cancelled",
+};
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+/** "12 matched · 1 unresolved · 1 difference": matched first, then only what is not zero. */
+export function summarizeOutcomes(outcomes: Readonly<Record<SettlementOutcome, number>>): string {
+  const parts = [`${outcomes.Matched} matched`];
+  if (outcomes.Healed > 0) parts.push(`${outcomes.Healed} healed`);
+  if (outcomes.Unresolved > 0) parts.push(`${outcomes.Unresolved} unresolved`);
+  if (outcomes.Difference > 0) parts.push(plural(outcomes.Difference, "difference"));
+  if (outcomes.Unavailable > 0) parts.push(`${outcomes.Unavailable} provider unavailable`);
+  return parts.join(" · ");
+}
+const settled = (settlement: NonNullable<SettlementReconciliation["settlement"]>) =>
+  settlement.checks.every((check) => check.outcome === "Matched" || check.outcome === "Healed");
 
+const moneyPair = (ours: string, provider: string | null) =>
+  `${formatSettlementMoney(ours)} / ${provider === null ? "—" : formatSettlementMoney(provider)}`;
+/** "Unresolved · Awaiting customer action" or "Difference · Refund differs". */
+function resultLabel(check: SettlementCheck): string {
+  const detail =
+    check.differenceReason !== null
+      ? (differenceReasonLabel[check.differenceReason] ?? check.differenceReason)
+      : check.outcome === "Unresolved" && check.internalStatus !== null
+        ? (paymentStatusLabel[check.internalStatus] ?? check.internalStatus)
+        : null;
+  return detail === null
+    ? outcomeLabel[check.outcome]
+    : `${outcomeLabel[check.outcome]} · ${detail}`;
+}
 /** The day-end report for one business day; pure so every state renders without a network. */
 export function SettlementReport({
   view,
@@ -44,21 +82,9 @@ export function SettlementReport({
 }) {
   const zone = timeZone ?? view.window.timeZone;
   const open = view.window.status === "Open";
-  const runs = view.reconciliation?.runs ?? [];
-  const latest = runs[0] ?? null;
-  const differences = view.reconciliation?.differences ?? [];
-  const totals = latest
-    ? runs.reduce(
-        (sum, run) => ({
-          Matched: sum.Matched + run.counts.Matched,
-          Healed: sum.Healed + run.counts.Healed,
-          Unresolved: sum.Unresolved + run.counts.Unresolved,
-          Unavailable: sum.Unavailable + run.counts.Unavailable,
-          Difference: sum.Difference + run.counts.Difference,
-        }),
-        { Matched: 0, Healed: 0, Unresolved: 0, Unavailable: 0, Difference: 0 },
-      )
-    : null;
+  const reconciliation = view.reconciliation;
+  const settlement = reconciliation?.settlement ?? null;
+  const operational = reconciliation?.operational ?? null;
   const money = (amount: SettlementView["captured"]) =>
     amount === null
       ? "Could not be read"
@@ -126,75 +152,104 @@ export function SettlementReport({
         <header>
           <h3 id="settlement-reconciliation">Reconciliation with the payment provider</h3>
         </header>
-        {view.reconciliation === null ? (
+        {reconciliation === null || operational === null ? (
           <p role="status">Reconciliation records could not be read.</p>
-        ) : latest === null || totals === null ? (
-          <p role="status">
-            {open
-              ? "The settlement run checks every payment against the provider after the business day closes."
-              : "Not reconciled yet. The settlement run for this day has not completed."}
-          </p>
         ) : (
           <>
-            <p
-              role="status"
-              data-reconciled={totals.Difference + totals.Unresolved + totals.Unavailable === 0}
-            >
-              {totals.Difference + totals.Unresolved + totals.Unavailable === 0
-                ? `Reconciled · ${totals.Matched} matched · ${totals.Healed} healed`
-                : `${totals.Difference} difference${totals.Difference === 1 ? "" : "s"} · ${totals.Unresolved} unresolved · ${totals.Unavailable} unavailable · ${totals.Matched} matched`}
-            </p>
-            <p className="bop-muted">
-              Last run {storeTime(latest.completedAt, zone, true)} ·{" "}
-              {latest.mode === "DailySettlement" ? "daily settlement" : "operational check"}
-              {runs.length > 1 ? ` · ${runs.length} runs` : ""}
-            </p>
-            {differences.length > 0 ? (
-              <table className="settlement__differences">
-                <thead>
-                  <tr>
-                    <th scope="col">Checked</th>
-                    <th scope="col">Settlement ref</th>
-                    <th scope="col">Result</th>
-                    <th scope="col">Captured (ours / provider)</th>
-                    <th scope="col">Refunded (ours / provider)</th>
-                    <th scope="col">Exception</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {differences.map((d) => (
-                    <tr key={d.checkReference}>
-                      <td data-label="Checked">{storeTime(d.checkedAt, zone)}</td>
-                      <td data-label="Settlement ref">{d.settlementReference ?? "—"}</td>
-                      <td data-label="Result">
-                        {outcomeLabel[d.outcome]}
-                        {d.differenceReason
-                          ? ` · ${differenceReasonLabel[d.differenceReason] ?? d.differenceReason}`
-                          : ""}
-                      </td>
-                      <td data-label="Captured">
-                        {formatSettlementMoney(d.internalCapturedMinor)} /{" "}
-                        {d.providerCapturedMinor === null
-                          ? "—"
-                          : formatSettlementMoney(d.providerCapturedMinor)}
-                      </td>
-                      <td data-label="Refunded">
-                        {formatSettlementMoney(d.internalRefundedMinor)} /{" "}
-                        {d.providerRefundedMinor === null
-                          ? "—"
-                          : formatSettlementMoney(d.providerRefundedMinor)}
-                      </td>
-                      <td data-label="Exception">
-                        {d.exceptionReference === null ? (
-                          "—"
-                        ) : (
-                          <Link to="/operations/order-exceptions">Exceptions</Link>
-                        )}
-                      </td>
+            {open ? (
+              <p role="status">
+                The settlement run compares the day&apos;s totals with the provider&apos;s statement
+                after the business day closes.
+              </p>
+            ) : settlement === null ? (
+              <p role="status" data-reconciled="pending">
+                Not settled yet. The settlement run for this day has not completed.
+              </p>
+            ) : (
+              <p role="status" data-reconciled={settled(settlement)}>
+                {settled(settlement)
+                  ? "Settled · the day's totals match the provider statement"
+                  : "Settlement difference · the day's totals differ from the provider statement"}
+              </p>
+            )}
+            {settlement ? (
+              <>
+                <p className="bop-muted">
+                  Settlement run {storeTime(settlement.run.completedAt, zone, true)}
+                </p>
+                <table className="settlement__statement" aria-label="Provider statement">
+                  <thead>
+                    <tr>
+                      <th scope="col">Statement</th>
+                      <th scope="col">Result</th>
+                      <th scope="col">Captured (ours / provider)</th>
+                      <th scope="col">Refunded (ours / provider)</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {settlement.checks.map((check) => (
+                      <tr key={check.checkReference}>
+                        <td data-label="Statement">{check.settlementReference ?? "—"}</td>
+                        <td data-label="Result">{resultLabel(check)}</td>
+                        <td data-label="Captured">
+                          {moneyPair(check.internalCapturedMinor, check.providerCapturedMinor)}
+                        </td>
+                        <td data-label="Refunded">
+                          {moneyPair(check.internalRefundedMinor, check.providerRefundedMinor)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : null}
+            <p className="bop-muted">
+              {operational.latestRun === null
+                ? "No payment checks in this day yet."
+                : `${plural(operational.paymentCount, "payment")} checked in ${plural(operational.runCount, "run")} · last ${storeTime(operational.latestRun.completedAt, zone, true)} · ${summarizeOutcomes(operational.outcomes)}`}
+            </p>
+            {reconciliation.differences.length > 0 ? (
+              <>
+                <h4 id="settlement-attention">Payments needing attention</h4>
+                <table className="settlement__differences" aria-labelledby="settlement-attention">
+                  <thead>
+                    <tr>
+                      <th scope="col">Checked</th>
+                      <th scope="col">Result</th>
+                      <th scope="col">Captured (ours / provider)</th>
+                      <th scope="col">Refunded (ours / provider)</th>
+                      <th scope="col">Exception</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reconciliation.differences.map((d) => (
+                      <tr key={d.checkReference}>
+                        <td data-label="Checked">{storeTime(d.checkedAt, zone)}</td>
+                        <td data-label="Result">{resultLabel(d)}</td>
+                        <td data-label="Captured">
+                          {moneyPair(d.internalCapturedMinor, d.providerCapturedMinor)}
+                        </td>
+                        <td data-label="Refunded">
+                          {moneyPair(d.internalRefundedMinor, d.providerRefundedMinor)}
+                        </td>
+                        <td data-label="Exception">
+                          {d.exceptionReference === null ? (
+                            "—"
+                          ) : (
+                            <Link to="/operations/order-exceptions">Exceptions</Link>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {reconciliation.differenceCount > reconciliation.differences.length ? (
+                  <p className="bop-muted">
+                    Showing the latest {reconciliation.differences.length} of{" "}
+                    {reconciliation.differenceCount} payments.
+                  </p>
+                ) : null}
+              </>
             ) : null}
           </>
         )}

@@ -40,25 +40,28 @@ export interface SettlementAmount {
   readonly amountMinor: string;
   readonly currencyCode: string;
 }
+export type SettlementOutcome = "Matched" | "Healed" | "Unresolved" | "Unavailable" | "Difference";
+const settlementOutcomes: readonly SettlementOutcome[] = [
+  "Matched",
+  "Healed",
+  "Unresolved",
+  "Unavailable",
+  "Difference",
+];
+const unmatchedOutcomes: readonly SettlementOutcome[] = ["Difference", "Unresolved", "Unavailable"];
 export interface SettlementRun {
   readonly runReference: string;
   readonly mode: "Operational" | "DailySettlement";
   readonly scheduledAt: string;
   readonly cutoffAt: string;
   readonly completedAt: string;
-  readonly counts: {
-    readonly Matched: number;
-    readonly Healed: number;
-    readonly Unresolved: number;
-    readonly Unavailable: number;
-    readonly Difference: number;
-  };
+  readonly counts: Readonly<Record<SettlementOutcome, number>>;
 }
-export interface SettlementDifference {
+export interface SettlementCheck {
   readonly checkReference: string;
   readonly runReference: string;
   readonly checkedAt: string;
-  readonly outcome: "Difference" | "Unresolved" | "Unavailable";
+  readonly outcome: SettlementOutcome;
   readonly differenceReason: string | null;
   readonly settlementReference: string | null;
   readonly internalStatus: string | null;
@@ -69,6 +72,21 @@ export interface SettlementDifference {
   readonly internalRefundedMinor: string;
   readonly providerRefundedMinor: string | null;
   readonly exceptionReference: string | null;
+}
+/** The day's reconciliation: its settlement run, the per-payment checks and what did not match. */
+export interface SettlementReconciliation {
+  readonly settlement: {
+    readonly run: SettlementRun;
+    readonly checks: readonly SettlementCheck[];
+  } | null;
+  readonly operational: {
+    readonly runCount: number;
+    readonly latestRun: SettlementRun | null;
+    readonly paymentCount: number;
+    readonly outcomes: Readonly<Record<SettlementOutcome, number>>;
+  };
+  readonly differences: readonly SettlementCheck[];
+  readonly differenceCount: number;
 }
 export interface SettlementView {
   readonly storeLabel: string;
@@ -81,10 +99,7 @@ export interface SettlementView {
   };
   readonly captured: SettlementAmount | null;
   readonly refunded: SettlementAmount | null;
-  readonly reconciliation: {
-    readonly runs: readonly SettlementRun[];
-    readonly differences: readonly SettlementDifference[];
-  } | null;
+  readonly reconciliation: SettlementReconciliation | null;
   readonly projectedAt: string;
 }
 
@@ -117,93 +132,129 @@ export function parseSettlementView(value: unknown): SettlementView {
   if (window.status !== "Closed" && window.status !== "Open") return fail();
   const businessDate = text(raw.businessDate, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(businessDate)) return fail();
+  const outcome = (value: unknown): SettlementOutcome =>
+    typeof value === "string" && (settlementOutcomes as readonly string[]).includes(value)
+      ? (value as SettlementOutcome)
+      : fail();
+  const counts = (value: unknown): Readonly<Record<SettlementOutcome, number>> => {
+    const c = exact(value, settlementOutcomes);
+    return Object.freeze({
+      Matched: count(c.Matched),
+      Healed: count(c.Healed),
+      Unresolved: count(c.Unresolved),
+      Unavailable: count(c.Unavailable),
+      Difference: count(c.Difference),
+    });
+  };
+  const run = (item: unknown): SettlementRun => {
+    const r = exact(item, [
+      "runReference",
+      "mode",
+      "scheduledAt",
+      "cutoffAt",
+      "completedAt",
+      "counts",
+    ]);
+    if (r.mode !== "Operational" && r.mode !== "DailySettlement") return fail();
+    return Object.freeze({
+      runReference: reference(r.runReference),
+      mode: r.mode,
+      scheduledAt: instant(r.scheduledAt),
+      cutoffAt: instant(r.cutoffAt),
+      completedAt: instant(r.completedAt),
+      counts: counts(r.counts),
+    });
+  };
+  const check = (item: unknown, runReference?: string): SettlementCheck => {
+    const d = exact(item, [
+      "checkReference",
+      "runReference",
+      "checkedAt",
+      "outcome",
+      "differenceReason",
+      "settlementReference",
+      "internalStatus",
+      "providerStatus",
+      "currencyCode",
+      "internalCapturedMinor",
+      "providerCapturedMinor",
+      "internalRefundedMinor",
+      "providerRefundedMinor",
+      "exceptionReference",
+    ]);
+    if (d.currencyCode !== "CAD" || (runReference !== undefined && d.runReference !== runReference))
+      return fail();
+    return Object.freeze({
+      checkReference: reference(d.checkReference),
+      runReference: reference(d.runReference),
+      checkedAt: instant(d.checkedAt),
+      outcome: outcome(d.outcome),
+      differenceReason: optionalText(d.differenceReason, 64),
+      settlementReference: optionalText(d.settlementReference, 128),
+      internalStatus: optionalText(d.internalStatus, 64),
+      providerStatus: optionalText(d.providerStatus, 64),
+      currencyCode: "CAD",
+      internalCapturedMinor: minor(d.internalCapturedMinor),
+      providerCapturedMinor: optionalMinor(d.providerCapturedMinor),
+      internalRefundedMinor: minor(d.internalRefundedMinor),
+      providerRefundedMinor: optionalMinor(d.providerRefundedMinor),
+      exceptionReference: d.exceptionReference === null ? null : reference(d.exceptionReference),
+    });
+  };
   let reconciliation: SettlementView["reconciliation"] = null;
   if (raw.reconciliation !== null) {
-    const r = exact(raw.reconciliation, ["runs", "differences"]);
-    if (
-      !Array.isArray(r.runs) ||
-      !Array.isArray(r.differences) ||
-      r.runs.length > 50 ||
-      r.differences.length > 200
-    )
-      return fail();
-    const runs = r.runs.map((item): SettlementRun => {
-      const run = exact(item, [
-        "runReference",
-        "mode",
-        "scheduledAt",
-        "cutoffAt",
-        "completedAt",
-        "counts",
-      ]);
-      const counts = exact(run.counts, [
-        "Matched",
-        "Healed",
-        "Unresolved",
-        "Unavailable",
-        "Difference",
-      ]);
-      if (run.mode !== "Operational" && run.mode !== "DailySettlement") return fail();
-      return Object.freeze({
-        runReference: reference(run.runReference),
-        mode: run.mode,
-        scheduledAt: instant(run.scheduledAt),
-        cutoffAt: instant(run.cutoffAt),
-        completedAt: instant(run.completedAt),
-        counts: Object.freeze({
-          Matched: count(counts.Matched),
-          Healed: count(counts.Healed),
-          Unresolved: count(counts.Unresolved),
-          Unavailable: count(counts.Unavailable),
-          Difference: count(counts.Difference),
-        }),
-      });
-    });
-    const known = new Set(runs.map((run) => run.runReference));
-    const differences = r.differences.map((item): SettlementDifference => {
-      const d = exact(item, [
-        "checkReference",
-        "runReference",
-        "checkedAt",
-        "outcome",
-        "differenceReason",
-        "settlementReference",
-        "internalStatus",
-        "providerStatus",
-        "currencyCode",
-        "internalCapturedMinor",
-        "providerCapturedMinor",
-        "internalRefundedMinor",
-        "providerRefundedMinor",
-        "exceptionReference",
-      ]);
-      const runReference = reference(d.runReference);
+    const r = exact(raw.reconciliation, [
+      "settlement",
+      "operational",
+      "differences",
+      "differenceCount",
+    ]);
+    let settlement: SettlementReconciliation["settlement"] = null;
+    if (r.settlement !== null) {
+      const s = exact(r.settlement, ["run", "checks"]);
+      const settlementRun = run(s.run);
       if (
-        !known.has(runReference) ||
-        (d.outcome !== "Difference" && d.outcome !== "Unresolved" && d.outcome !== "Unavailable") ||
-        d.currencyCode !== "CAD"
+        settlementRun.mode !== "DailySettlement" ||
+        !Array.isArray(s.checks) ||
+        s.checks.length === 0 ||
+        s.checks.length > 100
       )
         return fail();
-      return Object.freeze({
-        checkReference: reference(d.checkReference),
-        runReference,
-        checkedAt: instant(d.checkedAt),
-        outcome: d.outcome,
-        differenceReason: optionalText(d.differenceReason, 64),
-        settlementReference: optionalText(d.settlementReference, 128),
-        internalStatus: optionalText(d.internalStatus, 64),
-        providerStatus: optionalText(d.providerStatus, 64),
-        currencyCode: "CAD",
-        internalCapturedMinor: minor(d.internalCapturedMinor),
-        providerCapturedMinor: optionalMinor(d.providerCapturedMinor),
-        internalRefundedMinor: minor(d.internalRefundedMinor),
-        providerRefundedMinor: optionalMinor(d.providerRefundedMinor),
-        exceptionReference: d.exceptionReference === null ? null : reference(d.exceptionReference),
+      settlement = Object.freeze({
+        run: settlementRun,
+        checks: Object.freeze(s.checks.map((item) => check(item, settlementRun.runReference))),
       });
+    }
+    const o = exact(r.operational, ["runCount", "latestRun", "paymentCount", "outcomes"]);
+    const operational = Object.freeze({
+      runCount: count(o.runCount),
+      latestRun: o.latestRun === null ? null : run(o.latestRun),
+      paymentCount: count(o.paymentCount),
+      outcomes: counts(o.outcomes),
+    });
+    if (
+      (operational.runCount === 0) !== (operational.latestRun === null) ||
+      Object.values(operational.outcomes).reduce((sum, value) => sum + value, 0) !==
+        operational.paymentCount
+    )
+      return fail();
+    const differenceCount = count(r.differenceCount);
+    if (
+      !Array.isArray(r.differences) ||
+      r.differences.length > 200 ||
+      r.differences.length > differenceCount ||
+      differenceCount !== unmatchedOutcomes.reduce((sum, key) => sum + operational.outcomes[key], 0)
+    )
+      return fail();
+    const differences = r.differences.map((item) => {
+      const d = check(item);
+      return unmatchedOutcomes.includes(d.outcome) ? d : fail();
     });
     reconciliation = Object.freeze({
-      runs: Object.freeze(runs),
+      settlement,
+      operational,
       differences: Object.freeze(differences),
+      differenceCount,
     });
   }
   return Object.freeze({

@@ -16,6 +16,7 @@ import { createInternalExceptionSnapshotTransactions } from "./pilot-exception-s
 import { readInternalExceptionCoverage } from "./pilot-exception-coverage.mjs";
 import { createPersistentMerchantOrderExceptions } from "../../apps/api/dist/persistent-merchant-order-exceptions.js";
 import { createPersistentMerchantSettlement } from "../../apps/api/dist/persistent-merchant-settlement.js";
+import { dailySettlementRunReference } from "./pilot-daily-settlement-reference.mjs";
 import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
 import { createMerchantCompensationReconciliationQuery } from "../../apps/api/dist/merchant-compensation-reconciliation-query.js";
 import { createMerchantCompensationReconciliationCommand } from "../../apps/api/dist/merchant-compensation-reconciliation-command.js";
@@ -396,6 +397,18 @@ export async function createInternalMerchant(
           providerAccountReference: configuration.providerAccountReference,
           environment: configuration.environment,
         };
+      },
+      // The run the pilot's daily settlement scheduler creates for that closed day.
+      settlementRunReference: async (scope, window) => {
+        for (const key of ["brandReference", "storeReference"])
+          if (scope[key] !== selected[key]) throw new Error("INTERNAL_SETTLEMENT_SCOPE_DENIED");
+        return dailySettlementRunReference({
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          businessDate: window.businessDate,
+          startsAt: window.startsAt,
+          endsAt: window.endsAt,
+        }).runReference;
       },
     }),
   );

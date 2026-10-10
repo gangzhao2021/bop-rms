@@ -175,12 +175,12 @@ export {
   createPostgresPaymentReconciliationRepository,
 } from "./infrastructure/persistence/payment-reconciliation-run-source.js";
 export {
-  createPostgresPaymentReconciliationWindowSource,
-  paymentReconciliationWindowRunLimit,
-  paymentReconciliationWindowDifferenceLimit,
-  type PaymentReconciliationWindow,
-  type PaymentReconciliationWindowRun,
-  type PaymentReconciliationWindowDifference,
+  createPostgresPaymentReconciliationDaySource,
+  paymentReconciliationDayDifferenceLimit,
+  paymentReconciliationDaySettlementCheckLimit,
+  type PaymentReconciliationDay,
+  type PaymentReconciliationDayRun,
+  type PaymentReconciliationDayCheck,
 } from "./infrastructure/persistence/payment-reconciliation-window-source.js";
 
 export {

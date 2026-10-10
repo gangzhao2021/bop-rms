@@ -2,6 +2,17 @@ import { expect, it, vi } from "vitest";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { createMerchantSettlementRead } from "./merchant-settlement-read.js";
 const id = (n: number) => "0190ed90-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const emptyDay = {
+  settlement: null,
+  operational: {
+    runCount: 0,
+    latestRun: null,
+    paymentCount: 0,
+    outcomes: { Matched: 0, Healed: 0, Unresolved: 0, Unavailable: 0, Difference: 0 },
+  },
+  differences: [],
+  differenceCount: 0,
+};
 const scope = {
   tenantReference: id(1),
   brandReference: id(2),
@@ -33,7 +44,7 @@ function fixture() {
     })),
     captured: async () => ({ count: 14, amountMinor: "123450", currencyCode: "CAD" }),
     refunded: async () => null,
-    reconciliation: async () => ({ runs: [], differences: [] }),
+    reconciliation: async () => emptyDay,
     now: () => "2026-09-22T09:00:00.000Z",
   });
   return { read, authorize };
@@ -48,7 +59,7 @@ it("returns the day-end view with each owner answer and a re-checked scope", asy
     window: { status: "Closed", timeZone: "America/Toronto" },
     captured: { count: 14, amountMinor: "123450" },
     refunded: null,
-    reconciliation: { runs: [], differences: [] },
+    reconciliation: emptyDay,
     projectedAt: "2026-09-22T09:00:00.000Z",
   });
   expect(f.authorize).toHaveBeenCalledTimes(2);

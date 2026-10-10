@@ -1,5 +1,5 @@
 import type { ConsumerTransaction } from "@bop/eventing";
-import type { PaymentReconciliationWindow } from "@rms/payment";
+import type { PaymentReconciliationDay } from "@rms/payment";
 
 export interface MerchantSettlementScope {
   readonly tenantReference: string;
@@ -20,6 +20,11 @@ export interface MerchantSettlementAmount {
   readonly amountMinor: string;
   readonly currencyCode: "CAD";
 }
+/** The day's reconciliation facts without the window the view already carries. */
+export type MerchantSettlementReconciliation = Pick<
+  PaymentReconciliationDay,
+  "settlement" | "operational" | "differences" | "differenceCount"
+>;
 export interface MerchantSettlementView {
   readonly screenId: "PAY-RECONCILIATION";
   readonly storeLabel: string;
@@ -28,7 +33,7 @@ export interface MerchantSettlementView {
   /** Null when the owner source could not answer; the page says so instead of showing zero. */
   readonly captured: MerchantSettlementAmount | null;
   readonly refunded: MerchantSettlementAmount | null;
-  readonly reconciliation: Pick<PaymentReconciliationWindow, "runs" | "differences"> | null;
+  readonly reconciliation: MerchantSettlementReconciliation | null;
   readonly projectedAt: string;
 }
 const businessDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
@@ -72,7 +77,7 @@ export function createMerchantSettlementRead(options: {
     tx: ConsumerTransaction,
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
-  ): Promise<Pick<PaymentReconciliationWindow, "runs" | "differences"> | null>;
+  ): Promise<MerchantSettlementReconciliation | null>;
   now(): string;
 }) {
   return async (input: {
@@ -99,11 +104,11 @@ export function createMerchantSettlementRead(options: {
         (window.status !== "Closed" && window.status !== "Open")
       )
         return unavailable();
-      const [captured, refunded, reconciliation] = await Promise.all([
-        options.captured(tx, scope, window),
-        options.refunded(tx, scope, window),
-        options.reconciliation(tx, scope, window),
-      ]);
+      // One transaction, one read at a time: the owner sources re-authorize as they go and
+      // their re-entrancy guards refuse interleaved authorization on a shared connection.
+      const captured = await options.captured(tx, scope, window);
+      const refunded = await options.refunded(tx, scope, window);
+      const reconciliation = await options.reconciliation(tx, scope, window);
       const again = await options.authorize(tx, { sessionCookie: input.sessionCookie, permission });
       if (!again || !sameScope(again, scope)) return unavailable();
       return Object.freeze({
@@ -121,7 +126,12 @@ export function createMerchantSettlementRead(options: {
         reconciliation:
           reconciliation === null
             ? null
-            : Object.freeze({ runs: reconciliation.runs, differences: reconciliation.differences }),
+            : Object.freeze({
+                settlement: reconciliation.settlement,
+                operational: reconciliation.operational,
+                differences: reconciliation.differences,
+                differenceCount: reconciliation.differenceCount,
+              }),
         projectedAt: options.now(),
       });
     });

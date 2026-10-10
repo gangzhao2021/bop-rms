@@ -1,9 +1,10 @@
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  createPostgresConfirmedCompensationRefundSource,
   createPostgresOrdinaryRefundWindowSource,
   createPostgresPaymentCaptureWindowSource,
-  createPostgresPaymentReconciliationWindowSource,
+  createPostgresPaymentReconciliationDaySource,
 } from "@rms/payment";
 import {
   createPostgresCurrentStorePublicationProof,
@@ -40,6 +41,11 @@ export function createPersistentMerchantSettlement(options: {
     tx: ConsumerTransaction,
     scope: MerchantSettlementScope,
   ): Promise<{ readonly providerAccountReference: string; readonly environment: "Test" | "Live" }>;
+  /** The settlement run the Store's scheduler derives for a closed day; null when none applies. */
+  settlementRunReference(
+    scope: MerchantSettlementScope,
+    window: MerchantSettlementWindow,
+  ): Promise<string | null>;
 }) {
   const persistence = options.persistence,
     resolve = createMerchantStoreScope(persistence);
@@ -207,36 +213,62 @@ export function createPersistentMerchantSettlement(options: {
             currencyCode: "CAD" as const,
           };
         }),
+      // Refunded in the day = ordinary refunds the Provider created in the window plus
+      // compensation refunds it confirmed in it: the same two sources the settlement statement
+      // compares, so the day's figure and the statement check agree.
       refunded: (tx, scope, window) =>
         optional(async () => {
           const configuration = await options.resolveConfiguration(tx, scope);
-          const result = await createPostgresOrdinaryRefundWindowSource({
-            scope: {
-              tenantReference: scope.tenantReference,
-              brandReference: scope.brandReference,
-              storeReference: scope.storeReference,
-              providerAccountReference: configuration.providerAccountReference,
-              environment: configuration.environment,
-            },
-            authorize: async (t) => guard(scope)(t),
-          })(tx, {
-            startsAt: window.startsAt,
-            endsAt: window.endsAt,
-            observedAt: persistence.now(),
-          });
-          return {
-            count: result.refundCount,
-            amountMinor: result.refundedAmountMinor.toString(),
-            currencyCode: "CAD" as const,
+          const observedAt = persistence.now();
+          const providerScope = {
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            providerAccountReference: configuration.providerAccountReference,
+            environment: configuration.environment,
           };
+          const ordinary = await createPostgresOrdinaryRefundWindowSource({
+            scope: { tenantReference: scope.tenantReference, ...providerScope },
+            authorize: async (t) => guard(scope)(t),
+          })(tx, { startsAt: window.startsAt, endsAt: window.endsAt, observedAt });
+          const compensation = createPostgresConfirmedCompensationRefundSource({
+            scope: providerScope,
+            authorize: async (t) => guard(scope)(t),
+          });
+          let count = ordinary.refundCount,
+            amountMinor = ordinary.refundedAmountMinor,
+            afterRefundReference: string | null = null,
+            pages = 0;
+          do {
+            if (++pages > 100) return unavailable();
+            const page = await compensation(tx, { observedAt, afterRefundReference, limit: 100 });
+            for (const record of page.records) {
+              const fact = record.receipt.fact;
+              if (
+                fact.providerConfirmedAt >= window.startsAt &&
+                fact.providerConfirmedAt < window.endsAt
+              ) {
+                count += 1;
+                amountMinor += fact.amount.amountMinor;
+              }
+            }
+            afterRefundReference = page.nextAfterRefundReference;
+          } while (afterRefundReference !== null);
+          return { count, amountMinor: amountMinor.toString(), currencyCode: "CAD" as const };
         }),
       reconciliation: (tx, scope, window) =>
         optional(async () => {
-          const result = await createPostgresPaymentReconciliationWindowSource({
+          const settlementRunReference =
+            window.status === "Closed" ? await options.settlementRunReference(scope, window) : null;
+          const day = await createPostgresPaymentReconciliationDaySource({
             scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
             authorize: async (t) => guard(scope)(t),
-          })(tx, { startsAt: window.startsAt, endsAt: window.endsAt });
-          return { runs: result.runs, differences: result.differences };
+          })(tx, { startsAt: window.startsAt, endsAt: window.endsAt, settlementRunReference });
+          return {
+            settlement: day.settlement,
+            operational: day.operational,
+            differences: day.differences,
+            differenceCount: day.differenceCount,
+          };
         }),
     });
     return read(input);

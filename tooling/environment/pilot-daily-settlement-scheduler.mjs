@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import {
   parsePaymentReference,
   parsePaymentInstant,
   parsePaymentReconciliationRunResult,
   parseSettlementReconciliationCandidate,
 } from "../../packages/rms/payment/src/index.ts";
+import { dailySettlementRunReference } from "./pilot-daily-settlement-reference.mjs";
 /** Reconciles the latest closed owner-defined day; historical backfill is separate. */
 export function createDailySettlementScheduler({
   scope,
@@ -36,31 +36,14 @@ export function createDailySettlementScheduler({
         window.endsAt > at
       )
         return fail();
-      const key = JSON.stringify([
+      // The same derivation the day-end page uses to find this day's settlement run.
+      const { key, runReference } = dailySettlementRunReference({
         brandReference,
         storeReference,
-        window.businessDate,
-        window.startsAt,
-        window.endsAt,
-      ]);
-      const stamp = Date.parse(window.endsAt).toString(16).padStart(12, "0"),
-        h = createHash("sha256")
-          .update("BOP_INTERNAL_DAILY_SCHEDULE_V1:" + key)
-          .digest("hex");
-      const runReference = String(
-        parsePaymentReference(
-          stamp.slice(0, 8) +
-            "-" +
-            stamp.slice(8) +
-            "-7" +
-            h.slice(0, 3) +
-            "-" +
-            (8 + (parseInt(h[3], 16) & 3)).toString(16) +
-            h.slice(4, 7) +
-            "-" +
-            h.slice(7, 19),
-        ),
-      );
+        businessDate: window.businessDate,
+        startsAt: window.startsAt,
+        endsAt: window.endsAt,
+      });
       if (completed === key) return { status: "Idle", checkCount: 0 };
       const validate = (value) => {
         const result = parsePaymentReconciliationRunResult(value),

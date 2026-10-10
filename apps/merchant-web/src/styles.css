@@ -6721,49 +6721,62 @@ body:has(.product-complete-draft) .bop-shell__header,
 .settlement__totals {
   margin: 0;
 }
-.settlement__differences {
+.settlement__differences,
+.settlement__statement {
   width: 100%;
   margin-top: 12px;
   border-collapse: collapse;
   font-size: 14px;
 }
 .settlement__differences th,
-.settlement__differences td {
+.settlement__differences td,
+.settlement__statement th,
+.settlement__statement td {
   padding: 8px 12px 8px 0;
   border-top: 1px solid var(--bop-color-border-default);
   text-align: left;
   vertical-align: top;
 }
-.settlement__differences th {
+.settlement__differences th,
+.settlement__statement th {
   color: var(--bop-color-text-muted);
   font-size: 13px;
   font-weight: 600;
 }
-.settlement__differences td {
+.settlement__differences td,
+.settlement__statement td {
   font-variant-numeric: tabular-nums;
+}
+/* Provider statement references are long opaque strings; wrap them instead of widening the page. */
+.settlement__statement td[data-label="Statement"] {
+  overflow-wrap: anywhere;
 }
 @media (max-width: 767px) {
   .settlement__picker {
     grid-template-columns: 1fr;
   }
-  .settlement__differences thead {
+  .settlement__differences thead,
+  .settlement__statement thead {
     position: absolute;
     width: 1px;
     height: 1px;
     overflow: hidden;
     clip: rect(0 0 0 0);
   }
-  .settlement__differences tr {
+  .settlement__differences tr,
+  .settlement__statement tr {
     display: grid;
     gap: 2px;
     padding: 10px 0;
     border-top: 1px solid var(--bop-color-border-default);
   }
-  .settlement__differences td {
+  .settlement__differences td,
+  .settlement__statement td {
     padding: 0;
     border: 0;
   }
-  .settlement__differences td::before {
+  .settlement__differences td::before,
+  .settlement__statement td::before {
     content: attr(data-label) " · ";
     color: var(--bop-color-text-muted);
     font-size: 13px;

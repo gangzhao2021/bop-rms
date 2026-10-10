@@ -185,89 +185,186 @@ it("persists immutable Store-scoped Payment reconciliation runs, checks and exce
   await withIsolatedDatabase({ caseId: "payment_recon", root }, prove);
 }, 180_000);
 
-it("reads one business day's runs and unmatched checks through the settlement window source", async () => {
-  await withIsolatedDatabase({ caseId: "payment_recon_window", root }, async (context) => {
-    const { createPostgresPaymentReconciliationWindowSource } =
+it("reads one business day for the settlement page: hundreds of runs, each payment once, the day's settlement run", async () => {
+  await withIsolatedDatabase({ caseId: "payment_recon_day", root }, async (context) => {
+    const { createPostgresPaymentReconciliationDaySource } =
       await import("../../rms/payment/src/infrastructure/persistence/payment-reconciliation-window-source.ts");
     const client = new Client(context.clientConfig);
     await client.connect();
     try {
       const startsAt = "2026-08-03T08:00:00.000Z",
         endsAt = "2026-08-04T08:00:00.000Z";
-      const run = (reference, mode, cutoffAt, difference) =>
+      const at = (minutesIntoDay) =>
+        new Date(Date.parse(startsAt) + minutesIntoDay * 60_000).toISOString();
+      const run = (reference, mode, cutoffAt, counts) =>
         client.query(
           `INSERT INTO rms_payment.payment_reconciliation_run
            (reconciliation_run_id,brand_id,store_id,mode,actor_id,purpose,scheduled_at,cutoff_at,
             max_candidates,completed_at,matched_count,healed_count,unresolved_count,unavailable_count,difference_count)
-           VALUES ($1,$2,$3,$4,NULL,'ReconcilePayments',$5,$5,10,$5,3,0,0,0,$6)`,
-          [reference, id(2), id(3), mode, cutoffAt, difference],
+           VALUES ($1,$2,$3,$4,NULL,'ReconcilePayments',$5,$5,10,$5,$6,0,$7,0,$8)`,
+          [
+            reference,
+            id(2),
+            id(3),
+            mode,
+            cutoffAt,
+            counts.matched,
+            counts.unresolved,
+            counts.difference,
+          ],
         );
-      await run(id(30), "DailySettlement", endsAt, 1);
-      await run(id(31), "Operational", "2026-08-04T09:00:00.000Z", 0);
+      const check = (reference, runReference, payment, outcome, checkedAt, extra = {}) =>
+        client.query(
+          `INSERT INTO rms_payment.payment_reconciliation_record
+           (reconciliation_check_id,reconciliation_run_id,candidate_id,brand_id,store_id,mode,payment_intent_id,
+            settlement_reference,outcome,difference_reason,internal_status,provider_status,
+            internal_captured_minor,provider_captured_minor,internal_refunded_minor,provider_refunded_minor,
+            currency_code,reconciliation_exception_id,checked_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'CAD',$17,$18)`,
+          [
+            reference,
+            runReference,
+            payment ?? extra.candidate,
+            id(2),
+            id(3),
+            extra.mode ?? "Operational",
+            payment,
+            extra.settlement ?? null,
+            outcome,
+            extra.reason ?? null,
+            extra.status ?? null,
+            extra.status ?? null,
+            extra.captured ?? "1130",
+            extra.providerCaptured ?? "1130",
+            extra.refunded ?? "0",
+            extra.providerRefunded ?? "0",
+            extra.exception ?? null,
+            checkedAt,
+          ],
+        );
+      // 60 operational runs inside the day (more than any listing limit): payment A stays
+      // unresolved until the last run matches it; payment B differs in the last run.
+      const paymentA = id(40),
+        paymentB = id(41);
+      // The exception payment B's difference points at must exist first (record → exception FK).
       await client.query(
         `INSERT INTO rms_payment.payment_reconciliation_exception
          (reconciliation_exception_id,brand_id,store_id,candidate_id,reason,severity,status,opened_at)
          VALUES ($1,$2,$3,$4,'RefundMismatch','Error','Open',$5)`,
-        [id(32), id(2), id(3), id(33), endsAt],
+        [id(32), id(2), id(3), paymentB, endsAt],
       );
-      await client.query(
-        `INSERT INTO rms_payment.payment_reconciliation_record
-         (reconciliation_check_id,reconciliation_run_id,candidate_id,brand_id,store_id,mode,
-          settlement_reference,outcome,difference_reason,internal_captured_minor,provider_captured_minor,
-          internal_refunded_minor,provider_refunded_minor,currency_code,reconciliation_exception_id,checked_at)
-         VALUES ($1,$2,$3,$4,$5,'DailySettlement','set_SYNTHETIC_DAY','Difference','RefundMismatch',
-          1130,1130,0,1130,'CAD',$6,$7)`,
-        [id(34), id(30), id(33), id(2), id(3), id(32), endsAt],
-      );
-      await client.query(
-        `INSERT INTO rms_payment.payment_reconciliation_record
-         (reconciliation_check_id,reconciliation_run_id,candidate_id,brand_id,store_id,mode,
-          settlement_reference,outcome,internal_captured_minor,provider_captured_minor,
-          internal_refunded_minor,provider_refunded_minor,currency_code,checked_at)
-         VALUES ($1,$2,$3,$4,$5,'DailySettlement','set_SYNTHETIC_DAY_B','Matched',2500,2500,0,0,'CAD',$6)`,
-        [id(36), id(30), id(37), id(2), id(3), endsAt],
-      );
+      let next = 100;
+      for (let n = 0; n < 60; n++) {
+        const runReference = id(next++),
+          cutoffAt = at(10 + n * 20),
+          last = n === 59;
+        await run(runReference, "Operational", cutoffAt, {
+          matched: last ? 1 : 0,
+          unresolved: last ? 0 : 1,
+          difference: last ? 1 : 0,
+        });
+        await check(id(next++), runReference, paymentA, last ? "Matched" : "Unresolved", cutoffAt, {
+          status: last ? "Captured" : "RequiresCustomerAction",
+          captured: last ? "1130" : "0",
+          providerCaptured: last ? "1130" : "0",
+        });
+        if (last)
+          await check(id(next++), runReference, paymentB, "Difference", cutoffAt, {
+            reason: "RefundMismatch",
+            status: "Captured",
+            providerRefunded: "1130",
+            exception: id(32),
+          });
+      }
+      // The day's settlement run happens after the day closes and lies in the next day's window.
+      const settlementRun = id(30),
+        settledAt = "2026-08-04T12:00:00.000Z";
+      await run(settlementRun, "DailySettlement", settledAt, {
+        matched: 1,
+        unresolved: 0,
+        difference: 0,
+      });
+      await check(id(34), settlementRun, null, "Matched", settledAt, {
+        mode: "DailySettlement",
+        candidate: id(33),
+        settlement: "set_SYNTHETIC_DAY",
+        captured: "123450",
+        providerCaptured: "123450",
+        refunded: "1130",
+        providerRefunded: "1130",
+      });
+      // An unrelated operational run after the day must not count.
+      await run(id(31), "Operational", "2026-08-04T09:00:00.000Z", {
+        matched: 1,
+        unresolved: 0,
+        difference: 0,
+      });
+      await check(id(35), id(31), paymentB, "Matched", "2026-08-04T09:00:00.000Z", {
+        status: "Captured",
+      });
+
       const tx = { query: (sql, values) => client.query(sql, values) };
-      const read = createPostgresPaymentReconciliationWindowSource({
+      const read = createPostgresPaymentReconciliationDaySource({
         scope: { brandReference: id(2), storeReference: id(3) },
         authorize: async () => true,
       });
-      const day = await read(tx, { startsAt, endsAt });
-      assert.equal(day.runs.length, 1);
-      assert.equal(day.runs[0].runReference, id(30));
-      assert.deepEqual(day.runs[0].counts, {
-        Matched: 3,
+      const day = await read(tx, { startsAt, endsAt, settlementRunReference: settlementRun });
+      assert.equal(day.operational.runCount, 60);
+      assert.equal(day.operational.latestRun.runReference, id(100 + 59 * 2));
+      assert.deepEqual(day.operational.outcomes, {
+        Matched: 1,
         Healed: 0,
         Unresolved: 0,
         Unavailable: 0,
         Difference: 1,
       });
+      assert.equal(day.operational.paymentCount, 2);
+      assert.equal(day.differenceCount, 1);
       assert.equal(day.differences.length, 1);
       assert.deepEqual(
         {
           outcome: day.differences[0].outcome,
           reason: day.differences[0].differenceReason,
-          settlement: day.differences[0].settlementReference,
           providerRefunded: day.differences[0].providerRefundedMinor,
           exception: day.differences[0].exceptionReference,
         },
         {
           outcome: "Difference",
           reason: "RefundMismatch",
-          settlement: "set_SYNTHETIC_DAY",
           providerRefunded: "1130",
           exception: id(32),
         },
       );
-      const next = await read(tx, { startsAt: endsAt, endsAt: "2026-08-05T08:00:00.000Z" });
-      assert.equal(next.runs.length, 1);
-      assert.equal(next.runs[0].mode, "Operational");
-      assert.equal(next.differences.length, 0);
-      const other = createPostgresPaymentReconciliationWindowSource({
+      assert.equal(day.settlement.run.runReference, settlementRun);
+      assert.equal(day.settlement.checks.length, 1);
+      assert.deepEqual(
+        {
+          outcome: day.settlement.checks[0].outcome,
+          settlement: day.settlement.checks[0].settlementReference,
+          captured: day.settlement.checks[0].providerCapturedMinor,
+        },
+        { outcome: "Matched", settlement: "set_SYNTHETIC_DAY", captured: "123450" },
+      );
+      // Not yet settled: the reference names a run that does not exist.
+      const pending = await read(tx, { startsAt, endsAt, settlementRunReference: id(99) });
+      assert.equal(pending.settlement, null);
+      assert.equal(pending.operational.runCount, 60);
+      // The next day sees only the later operational run, where payment B matched.
+      const nextDay = await read(tx, {
+        startsAt: endsAt,
+        endsAt: "2026-08-05T08:00:00.000Z",
+        settlementRunReference: null,
+      });
+      assert.equal(nextDay.operational.runCount, 2);
+      assert.deepEqual(nextDay.differences, []);
+      assert.equal(nextDay.operational.outcomes.Matched, 1);
+      const other = createPostgresPaymentReconciliationDaySource({
         scope: { brandReference: id(2), storeReference: id(9) },
         authorize: async () => true,
       });
-      assert.deepEqual((await other(tx, { startsAt, endsAt })).runs, []);
+      const foreign = await other(tx, { startsAt, endsAt, settlementRunReference: settlementRun });
+      assert.equal(foreign.operational.runCount, 0);
+      assert.equal(foreign.settlement, null);
     } finally {
       await client.end();
     }
@@ -313,9 +410,14 @@ it("retains Provider-only capture evidence with exact exception scope and immuta
       for (const statement of [
         "UPDATE rms_payment.provider_capture_exception_evidence SET amount_minor=1",
         "DELETE FROM rms_payment.provider_capture_exception_evidence",
-        "TRUNCATE rms_payment.provider_capture_exception_evidence",
       ])
         await assert.rejects(client.query(statement), (error) => error.code === "55000");
+      // TRUNCATE is refused before the immutability trigger runs once a later table references
+      // this evidence (WP-2423 P6 unmatched-capture refund requests); either refusal keeps history.
+      await assert.rejects(
+        client.query("TRUNCATE rms_payment.provider_capture_exception_evidence"),
+        (error) => error.code === "55000" || error.code === "0A000",
+      );
       await client.query(
         "INSERT INTO rms_payment.payment_reconciliation_exception VALUES($1,$2,$3,$4,'AmountMismatch','Error','Open',$5)",
         [id(111), id(102), id(103), id(114), checkedAt],

@@ -1893,7 +1893,17 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     },
     captured: { count: 3, amountMinor: "4500", currencyCode: "CAD" as const },
     refunded: null,
-    reconciliation: { runs: [], differences: [] },
+    reconciliation: {
+      settlement: null,
+      operational: {
+        runCount: 0,
+        latestRun: null,
+        paymentCount: 0,
+        outcomes: { Matched: 0, Healed: 0, Unresolved: 0, Unavailable: 0, Difference: 0 },
+      },
+      differences: [],
+      differenceCount: 0,
+    },
     projectedAt: "2026-09-22T09:00:00.000Z",
   };
   const headers = {
