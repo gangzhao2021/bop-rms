@@ -1,3 +1,4 @@
+import { createContractParsers } from "./contract-parsers.js";
 export type PrivacyRequestClientErrorCode =
   | "PermissionDenied"
   | "NotFound"
@@ -75,12 +76,7 @@ const object = (v: unknown, fields: readonly string[]) => {
 const ref = (v: unknown) => (typeof v === "string" && uuid.test(v) ? v : fail());
 const text = (v: unknown) =>
   typeof v === "string" && v.trim() === v && /^[^\p{Cc}\p{Cf}<>{}$]{1,200}$/u.test(v) ? v : fail();
-const instant = (v: unknown) =>
-  typeof v === "string" &&
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(v) &&
-  new Date(Date.parse(v)).toISOString() === v
-    ? v
-    : fail();
+const { instant } = createContractParsers(fail);
 const integer = (v: unknown) =>
   Number.isSafeInteger(v) && (v as number) >= 0 ? (v as number) : fail();
 export function parsePrivacyRequestView(value: unknown): PrivacyRequestView {

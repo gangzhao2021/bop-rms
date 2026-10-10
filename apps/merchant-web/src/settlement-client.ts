@@ -1,3 +1,5 @@
+import { createContractParsers } from "./contract-parsers.js";
+
 /** WP-2423 P1 (PAY-RECONCILIATION): the day-end settlement view and its strict reader. */
 export class SettlementClientError extends Error {
   constructor(readonly code: "PermissionDenied" | "Unavailable") {
@@ -8,32 +10,7 @@ export class SettlementClientError extends Error {
 const fail = (): never => {
   throw new SettlementClientError("Unavailable");
 };
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const instant = (value: unknown): string =>
-  typeof value === "string" &&
-  Number.isFinite(Date.parse(value)) &&
-  new Date(value).toISOString() === value
-    ? value
-    : fail();
-const reference = (value: unknown): string =>
-  typeof value === "string" && uuid.test(value) ? value : fail();
-const text = (value: unknown, max: number): string =>
-  typeof value === "string" && value.length > 0 && value.length <= max ? value : fail();
-const minor = (value: unknown): string =>
-  typeof value === "string" && /^(0|[1-9][0-9]*)$/u.test(value) ? value : fail();
-const count = (value: unknown): number =>
-  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : fail();
-function exact(value: unknown, keys: readonly string[]): Record<string, unknown> {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.keys(value).length !== keys.length ||
-    keys.some((key) => !Object.hasOwn(value, key))
-  )
-    return fail();
-  return value as Record<string, unknown>;
-}
+const { instant, reference, text, minor, count, exact } = createContractParsers(fail);
 
 export interface SettlementAmount {
   readonly count: number;
