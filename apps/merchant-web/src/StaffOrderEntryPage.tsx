@@ -71,7 +71,12 @@ export function StaffOrderEntryState({
   );
 }
 
-const formatMoney = (amountMinor: number) => `CAD ${(amountMinor / 100).toFixed(2)}`;
+// Minor units stay integers; no binary floating point on money.
+const formatMoney = (amountMinor: number) => {
+  const sign = amountMinor < 0 ? "-" : "",
+    minor = Math.abs(Math.trunc(amountMinor));
+  return `CAD ${sign}${Math.trunc(minor / 100)}.${String(minor % 100).padStart(2, "0")}`;
+};
 
 export function StaffOrderEntryScreen({ view }: { readonly view: StaffOrderEntryView }) {
   const [query, setQuery] = useState("");
