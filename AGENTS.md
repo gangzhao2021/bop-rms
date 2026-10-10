@@ -59,3 +59,6 @@
 - Full evidence discipline still applies to payment, refund, reconciliation, settlement, migrations, authorization and data classification.
 - Do not work on items listed as bypassed in WP-2423 unless the pilot path is blocked by them.
 - Commercial fidelity (Owner, 2026-10-07): design for how a real store operates, never choose an option because it is simpler. Existing designs that fall short must be listed in WP-2423 and corrected. Test-environment-only shortcuts must be labelled as such.
+- Operating continuity: every pilot workflow names what staff do when the network, cloud host, Provider or store device fails, and that path must be usable in the product or the runbook, not assumed.
+- No reachable stubs: a route, screen or panel in the pilot customer or merchant path either works against real sources or is hidden; never ship a permanent "Unavailable" placeholder to customers or staff.
+- Customer respect: no forced login, account, follow or marketing consent to order; collect only the contact needed to fulfil the order and say why; customer and staff text uses their language, never internal codes, IDs or technical terms.
