@@ -78,3 +78,35 @@ it("requires currently published matching workflow and validates publication bef
     "INTERNAL_BATCH_CANCELLATION_UNAVAILABLE",
   );
 });
+it("WP-2423 Q6: a Pilot runs only the released Platform Workflow, never the InternalTest one", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("BOP_PILOT_ENVIRONMENT", "Pilot");
+  await expect(createInternalBatchCancellation(resources, options())).rejects.toThrow(
+    "INTERNAL_BATCH_CANCELLATION_UNAVAILABLE",
+  );
+  // The workflow package is mocked here: build the released shape from the repository definition.
+  const { platformWorkflows } = await import("./platform-workflows.mjs");
+  const workflow = platformWorkflows.UnpaidDineInBatchCancellation;
+  const released = {
+    purposeCode: "UnpaidDineInBatchCancellation",
+    applicabilityCode: workflow.applicabilityCode,
+    workflowReference: "workflow",
+    storeReference: null,
+    effectiveUntil: null,
+    transitions: workflow.transitions.map((t, i) => ({ transitionReference: "t" + i, ...t })),
+  };
+  const releasedOptions = (definition) => ({
+    ...options(),
+    loadWorkflow: async () => ({ ...saved, environment: "Pilot", definition }),
+  });
+  await expect(
+    createInternalBatchCancellation(resources, releasedOptions(released)),
+  ).resolves.toBeDefined();
+  // A changed or expiring copy of the released Workflow is not the released Workflow.
+  await expect(
+    createInternalBatchCancellation(
+      resources,
+      releasedOptions({ ...released, effectiveUntil: "2026-10-20T00:00:00.000Z" }),
+    ),
+  ).rejects.toThrow("INTERNAL_BATCH_CANCELLATION_UNAVAILABLE");
+});

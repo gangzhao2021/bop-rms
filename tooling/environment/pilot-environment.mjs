@@ -91,11 +91,6 @@ export const pilotCapabilityGaps = Object.freeze([
     standIn: "TEST-ONLY synthetic CAD metadata",
     needs: "reviewed currency and tax configuration of the real Store (P5, tax review)",
   }),
-  Object.freeze({
-    code: "BatchCancellationWorkflow",
-    standIn: "InternalTest batch cancellation workflow",
-    needs: "an approved Pilot workflow version (Owner approval)",
-  }),
 ]);
 
 /** Refuses a Pilot start while a capability gap remains; InternalTest is unaffected. */

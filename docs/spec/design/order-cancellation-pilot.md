@@ -35,3 +35,5 @@
 5. **系统取消 Pilot 版本**：Pilot 环境使用新的、与环境无关的用途码 `UnpaidDineInBatchCancellation`（新工作流族，六个迁移与 InternalTest 相同）；
    InternalTest 保留 `InternalTestBatchCancellation`；新增仓库内的工作流起草与发布工具（经 Publishing 与 Workflow 所有者命令，可按操作编号重放）；
    发布后从 `pilotCapabilityGaps` 删除 `BatchCancellationWorkflow`。
+6. **发布方式（2026-10-11 实现）**：工作流内容是平台定义的产品规则，由平台发布步骤 `workflow-release-install.mjs` 安装到品牌（与权限目录安装同类：
+   操作人与独立批准人、批准证据、按操作编号重放）；版本无到期，内容变更只能发新版本。单人门店规则（DEC-SOLE-OPERATOR-APPROVAL）不适用于这一平台级批准。

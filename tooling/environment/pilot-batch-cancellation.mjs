@@ -5,10 +5,27 @@ import {
   summarizeOrderItemProgress,
 } from "../../packages/rms/ordering/src/index.ts";
 import { createDiningBatchCancellation } from "../../apps/api/dist/dining-batch-cancellation.js";
-import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
+import {
+  currentPilotEnvironment,
+  isPilotRuntime,
+  matchesPilotEnvironment,
+} from "./pilot-environment.mjs";
+import { matchesPlatformWorkflow } from "./platform-workflows.mjs";
 const unavailable = () => {
   throw new Error("INTERNAL_BATCH_CANCELLATION_UNAVAILABLE");
 };
+/**
+ * The released Platform Workflow serves every environment; the earlier InternalTest-only Workflow is
+ * kept for InternalTest installations that have not installed the release (WP-2423 Q6).
+ */
+function acceptedWorkflow(definition) {
+  if (definition?.purposeCode === "UnpaidDineInBatchCancellation")
+    return matchesPlatformWorkflow(definition);
+  return (
+    definition?.purposeCode === "InternalTestBatchCancellation" &&
+    currentPilotEnvironment() === "InternalTest"
+  );
+}
 /** Trusted local System composition; source facts must be read by246 under retained fences. */
 export async function createInternalBatchCancellation(
   resources,
@@ -25,7 +42,7 @@ export async function createInternalBatchCancellation(
     !matchesPilotEnvironment(saved.environment) ||
     saved.database !== expectedDatabaseName ||
     !sameScope(saved.scope) ||
-    saved.definition.purposeCode !== "InternalTestBatchCancellation"
+    !acceptedWorkflow(saved.definition)
   )
     return unavailable();
   const active = () =>

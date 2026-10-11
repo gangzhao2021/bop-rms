@@ -236,7 +236,9 @@ export async function loadPilotInstallation(directory) {
             Object.entries(value.scope).some(
               ([key, v]) => typeof v !== "string" || profile.binding?.[key] !== v,
             ) ||
-            value.definition?.purposeCode !== "InternalTestBatchCancellation"
+            !["UnpaidDineInBatchCancellation", "InternalTestBatchCancellation"].includes(
+              value.definition?.purposeCode,
+            )
           )
             return unavailable();
           return value;
