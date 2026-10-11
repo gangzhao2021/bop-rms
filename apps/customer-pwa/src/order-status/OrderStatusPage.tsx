@@ -23,8 +23,8 @@ export const staffCancellationReasonText: Readonly<Record<StaffCancellationReaso
 };
 export function staffRefundText(cancellation: StaffCancellation): string {
   return cancellation.refundStatus === "Refunded"
-    ? "Refunded in full, including tip."
-    : "Refund pending — your payment, including tip, is being returned in full.";
+    ? "Your payment was refunded in full."
+    : "Refund pending — your payment is being returned in full.";
 }
 /** WP-2423 Q6: the store cancelled the whole order (a pickup, or every dine-in round). */
 export function staffCancelledOrder(view: OrderStatusView): StaffCancellation | null {
@@ -147,13 +147,17 @@ function StatusContent({
   const paymentLabel =
     payments == null
       ? "Payment updates unavailable"
-      : paid?.amount
-        ? `Payment received ${formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)}`
-        : unpaidCancelled
-          ? "Not paid"
-          : payments.some((payment) => payment.status === "Failed")
-            ? "Payment attempt failed"
-            : "Payment pending";
+      : paid?.amount && storeCancelled
+        ? // WP-2423 Q6: a store-cancelled order says where the money is, not that it was received.
+          (storeCancelled.refundStatus === "Refunded" ? "Refunded " : "Refund pending · ") +
+          formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)
+        : paid?.amount
+          ? `Payment received ${formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)}`
+          : unpaidCancelled
+            ? "Not paid"
+            : payments.some((payment) => payment.status === "Failed")
+              ? "Payment attempt failed"
+              : "Payment pending";
   const multipleBatches = view.order.batches.length > 1;
   const total = view.order.batches
     .flatMap((batch) => batch.items)

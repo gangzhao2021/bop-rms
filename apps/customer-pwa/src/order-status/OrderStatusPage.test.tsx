@@ -423,9 +423,7 @@ it("WP-2423 Q6: says the store cancelled a paid pickup, why, and how the refund 
   const html = render({ ...state, view });
   expect(html).toContain("Order cancelled by the store");
   expect(html).toContain("An item you ordered sold out.");
-  expect(html).toContain(
-    "Refund pending — your payment, including tip, is being returned in full.",
-  );
+  expect(html).toContain("Refund pending — your payment is being returned in full.");
   expect(html).not.toContain("pickup code");
   expect(html).not.toContain("SoldOut");
   expect(isOrderSettled(view)).toBe(true);
@@ -439,7 +437,35 @@ it("WP-2423 Q6: says the store cancelled a paid pickup, why, and how the refund 
       },
     },
   });
-  expect(refunded).toContain("Refunded in full, including tip.");
+  expect(refunded).toContain("Your payment was refunded in full.");
+  // The payment line says where the money is, never "Payment received" after a refund.
+  const payments = [
+    {
+      status: "Succeeded" as const,
+      occurredAt: "2026-08-11T13:56:00.000Z",
+      amount: { amountMinor: 1280n, currencyCode: "CAD" },
+      freshnessStatus: "Fresh" as const,
+    },
+  ];
+  const paidPending = render({
+    ...state,
+    view: { ...view, sources: { ...view.sources, payments } },
+  });
+  expect(paidPending).toContain("Refund pending · ");
+  expect(paidPending).not.toContain("Payment received");
+  const paidRefunded = render({
+    ...state,
+    view: {
+      ...view,
+      sources: {
+        ...view.sources,
+        payments,
+        staffCancellations: [{ ...cancellation, refundStatus: "Refunded" as const }],
+      },
+    },
+  });
+  expect(paidRefunded).toMatch(/Refunded \$12\.80/u);
+  expect(paidRefunded).not.toContain("Payment received");
 });
 
 it("WP-2423 Q6: notes a dine-in round the store cancelled without hiding the rest of the order", () => {
@@ -492,7 +518,7 @@ it("WP-2423 Q6: notes a dine-in round the store cancelled without hiding the res
   expect(html).toContain("Preparing your order");
   expect(html).toContain("This round was cancelled by the store.");
   expect(html).toContain("The store cancelled it at your request.");
-  expect(html).toContain("Refunded in full, including tip.");
+  expect(html).toContain("Your payment was refunded in full.");
   expect(html).toContain("Synthetic soup");
   expect(html).not.toContain("Order cancelled by the store");
   expect(isOrderSettled(view)).toBe(false);

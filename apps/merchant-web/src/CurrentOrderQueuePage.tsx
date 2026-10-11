@@ -304,12 +304,23 @@ export function CurrentOrderQueueRows({
                       : (order.currentPhase ?? "Status unavailable")}
             </span>
             <span className="order-workbench-batches">
-              {order.batches.filter((batch) => batch.acceptanceStatus === "Accepted").length}{" "}
+              {
+                order.batches.filter(
+                  (batch) => batch.acceptanceStatus === "Accepted" && !batch.staffCancellation,
+                ).length
+              }{" "}
               accepted ·{" "}
               {order.batches.filter((batch) => batch.acceptanceStatus === "NotAccepted").length} not
               accepted
-              {order.batches.some((batch) => batch.acceptanceStatus === "Cancelled")
-                ? ` · ${order.batches.filter((batch) => batch.acceptanceStatus === "Cancelled").length} cancelled`
+              {/* WP-2423 Q6: a batch the store cancelled after accepting counts as cancelled. */}
+              {order.batches.some(
+                (batch) => batch.acceptanceStatus === "Cancelled" || batch.staffCancellation,
+              )
+                ? ` · ${
+                    order.batches.filter(
+                      (batch) => batch.acceptanceStatus === "Cancelled" || batch.staffCancellation,
+                    ).length
+                  } cancelled`
                 : ""}
               {order.orderType === "Pickup" && order.batches[0]?.staffCancellation ? (
                 <span className="order-staff-cancelled">
@@ -383,8 +394,8 @@ export function CurrentOrderQueueRows({
                     </span>
                     <span>
                       {batch.staffCancellation.refundStatus === "Refunded"
-                        ? "The payment, including tip, was refunded in full."
-                        : "The payment, including tip, is being refunded in full."}
+                        ? "The payment, including any tip, was refunded in full."
+                        : "The payment, including any tip, is being refunded in full."}
                     </span>
                   </p>
                 ) : (
