@@ -13,6 +13,7 @@ import { encodeAdditionalDiningBatchSnapshot } from "../../rms/ordering/src/inde
 import { createAdditionalOrderPaidOutcomeSource } from "../../../apps/api/src/additional-order-paid-outcome-source.ts";
 import {
   createOrderPaymentOutcomeConsumerService,
+  createPostgresOrderPaymentAcceptanceWaitStore,
   createPostgresOrderPaymentOutcomeStore,
 } from "../../rms/ordering/src/index.ts";
 import { createAdditionalOrderPaidContextSource } from "../../../apps/api/src/additional-order-paid-context-source.ts";
@@ -628,6 +629,100 @@ export async function exerciseAdditionalDiningPayment({
     );
     assert.deepEqual(waitingRows.rows[0], { dispositions: 0, confirmations: 0, inbox: 0 });
   }
+  // WP-2423 Q1: as in the pilot worker, the consumer records the paid unaccepted Batch as awaiting
+  // staff acceptance (persistent waiting); only such a Batch is offered for acceptance, and the
+  // wait is resumed to its outcome after acceptance.
+  const awaitingSource = createAdditionalOrderPaidOutcomeSource({
+    context: paidContext,
+    quoteVersion: snapshot.snapshotVersion,
+    release: {
+      action: "ReleasePaidOrder",
+      purposeCode: "OrderFulfillment",
+      permissionCode: "order.release",
+      nextState: "Accepted",
+    },
+    generateDispositionReference: () => id(++sequence),
+    generateConfirmationReference: () => {
+      throw new Error("unaccepted Batch cannot confirm");
+    },
+    sha256: hash,
+    resolveWorkflow: async () => {
+      throw new Error("unaccepted Batch cannot release");
+    },
+  });
+  const waits = createPostgresOrderPaymentAcceptanceWaitStore({
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+    sha256: hash,
+    authorize: async () => true, // Isolated internal consumer test authority.
+    validateCurrent: async (transaction, { event: paid, record: waiting }) => {
+      const current = await awaitingSource.loadExact({
+        transaction,
+        paymentEvent: paid,
+        brandReference: paid.tenantId,
+        storeReference: paid.storeId,
+        orderReference: paid.payload.orderReference,
+        paymentTransactionReference: paid.payload.paymentTransactionReference,
+        paymentIntentReference: paid.payload.paymentIntentReference,
+        paymentAttemptReference: paid.payload.paymentAttemptReference,
+        paymentEventReference: paid.eventId,
+      });
+      return (
+        current?.disposition === "AwaitingAcceptance" &&
+        [
+          "brandReference",
+          "storeReference",
+          "orderReference",
+          "orderBatchReference",
+          "submissionReference",
+          "sourceVersion",
+          "sourceCheckpoint",
+        ].every((key) => current[key] === waiting[key])
+      );
+    },
+    audit: async ({ event: paid, record: waiting }) => ({
+      auditId: id(++sequence),
+      brandId: scope.brandReference,
+      storeId: scope.storeReference,
+      actor: { type: "System" },
+      actionCode: "ORDER_PAYMENT_WAIT_RECORDED",
+      targetType: "OrderPaymentWait",
+      targetId: waiting.dispositionReference,
+      correlationId: paid.correlationId,
+      afterSummary: { outcome: "AwaitingAcceptance" },
+      reasonCode: "ORDER_ACCEPTANCE_PENDING",
+      occurredAt: waiting.evaluatedAt,
+      sourceChannel: "EVENT_CONSUMER",
+      dataClassification: "Restricted",
+      retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+      retentionPolicyVersion: 1,
+    }),
+  });
+  const waitingPort = {
+    record: async ({ transaction, event: paid, disposition }) =>
+      (await waits.record(transaction, paid, disposition)).record,
+    load: ({ transaction, event: paid }) => waits.load(transaction, paid),
+  };
+  const waited = await runner().run((transaction) =>
+    createOrderPaymentOutcomeConsumerService({
+      authorization: { authorize: async () => true },
+      source: awaitingSource,
+      outcomes: createPostgresOrderPaymentOutcomeStore({
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+        sha256: hash,
+        audit: async () => {
+          throw new Error("waiting has no final disposition audit");
+        },
+      }),
+      references: { generate: () => id(++sequence) },
+      digests: { sha256: hash },
+      waiting: waitingPort,
+    }).consume(transaction, completed.fact.event),
+  );
+  assert.equal(waited.consumerOutcome.status, "processed");
+  assert.equal(waited.result.status, "AwaitingOrderAcceptance");
+  assert.equal(waited.result.disposition.orderBatchReference, snapshot.batch.orderBatchReference);
   // Actual owner writer/current reader/publication; merchant authorization is synthetic.
   const acceptance = {
     acceptanceReference: id(1000),
@@ -863,10 +958,21 @@ export async function exerciseAdditionalDiningPayment({
     }),
     references: { generate: () => id(++sequence) },
     digests: { sha256: hash },
+    waiting: waitingPort,
   });
   const releasePaid = () =>
     runner().run((transaction) => releasedConsumer.consume(transaction, completed.fact.event));
-  const confirmed = await releasePaid();
+  // After acceptance the pilot worker resumes the unresolved wait to its outcome.
+  assert.ok(
+    (await runner().run((transaction) => waits.listUnresolved(transaction, 100))).includes(
+      completed.fact.event.eventId,
+    ),
+  );
+  const confirmed = {
+    result: await runner().run((transaction) =>
+      releasedConsumer.resumePending(transaction, completed.fact.event),
+    ),
+  };
   assert.equal(confirmed.result.status, "OrderConfirmed");
   assert.equal(
     confirmed.result.disposition.orderBatchReference,

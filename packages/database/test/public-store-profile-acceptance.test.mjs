@@ -628,13 +628,15 @@ it.each(["Dining", "Pickup"])(
         const pickupAuthorization = channel === "Pickup";
         const clockFrom = new Date(Date.parse(at) - 60000).toISOString();
         const clockUntil = new Date(Date.parse(at) + 86400000).toISOString();
+        // The seeded Store's business day starts at 04:00 local, so between midnight and 04:00 the
+        // current Business Date is still the previous calendar day.
         const toronto = new Intl.DateTimeFormat("en-CA", {
           timeZone: "America/Toronto",
           weekday: "short",
           year: "numeric",
           month: "2-digit",
           day: "2-digit",
-        }).formatToParts(new Date(at));
+        }).formatToParts(new Date(Date.parse(at) - 4 * 60 * 60 * 1000));
         const part = (type) => toronto.find((value) => value.type === type).value;
         const weekdayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(
           part("weekday"),

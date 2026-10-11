@@ -383,12 +383,12 @@ export async function verifyPersistentMerchantBff({
   );
   await admin.query("GRANT USAGE ON SCHEMA rms_fulfillment TO " + role);
   await admin.query(
-    "GRANT SELECT ON rms_fulfillment.fulfillment,rms_fulfillment.fulfillment_item,rms_fulfillment.fulfillment_creation_operation,rms_fulfillment.fulfillment_item_ready_result,rms_fulfillment.fulfillment_ready_operation,rms_fulfillment.pickup_handoff_operation,rms_fulfillment.pickup_handoff_record,rms_fulfillment.pickup_handoff_item,rms_fulfillment.pickup_proof_operation,rms_fulfillment.pickup_proof_generation,rms_fulfillment.pickup_proof_invalidation,rms_fulfillment.pickup_proof_verification,rms_fulfillment.pickup_in_person_verification,rms_fulfillment.pickup_not_collected_record TO " +
+    "GRANT SELECT ON rms_fulfillment.fulfillment,rms_fulfillment.fulfillment_item,rms_fulfillment.fulfillment_creation_operation,rms_fulfillment.fulfillment_item_ready_result,rms_fulfillment.fulfillment_ready_operation,rms_fulfillment.pickup_handoff_operation,rms_fulfillment.pickup_handoff_record,rms_fulfillment.pickup_handoff_item,rms_fulfillment.pickup_proof_operation,rms_fulfillment.pickup_proof_generation,rms_fulfillment.pickup_proof_invalidation,rms_fulfillment.pickup_proof_verification,rms_fulfillment.pickup_in_person_verification,rms_fulfillment.pickup_not_collected_record,rms_fulfillment.capacity_asap_commitment TO " +
       role,
   );
   await admin.query("GRANT USAGE ON SCHEMA rms_ordering TO " + role);
   await admin.query(
-    "GRANT SELECT ON rms_ordering.order_header,rms_ordering.order_submission_record,rms_ordering.order_batch,rms_ordering.order_number_allocation,rms_ordering.order_item,rms_ordering.order_revision,rms_ordering.order_acceptance_record,rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record,rms_ordering.order_payment_disposition_record TO " +
+    "GRANT SELECT ON rms_ordering.order_header,rms_ordering.order_submission_record,rms_ordering.order_batch,rms_ordering.order_number_allocation,rms_ordering.order_item,rms_ordering.order_revision,rms_ordering.order_acceptance_record,rms_ordering.order_termination_record,rms_ordering.order_fulfillment_completion_record,rms_ordering.order_payment_disposition_record,rms_ordering.order_payment_acceptance_wait TO " +
       role,
   );
   await admin.query(
@@ -885,7 +885,13 @@ export async function verifyPersistentMerchantBff({
   await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO " + role);
   await admin.query("GRANT USAGE ON SCHEMA rms_kitchen TO " + role);
   await admin.query(
-    "GRANT SELECT ON rms_kitchen.kitchen_work_queue_projection_generation,rms_kitchen.kitchen_work_queue_projection TO " +
+    "GRANT SELECT ON rms_kitchen.kitchen_work_queue_projection_generation,rms_kitchen.kitchen_work_queue_projection,rms_kitchen.kitchen_work_item TO " +
+      role,
+  );
+  // WP-2423 Q2/Q3: the Kitchen board reads published menu allergens (pilot api SELECT grants).
+  await admin.query("GRANT USAGE ON SCHEMA rms_catalog TO " + role);
+  await admin.query(
+    "GRANT SELECT ON rms_catalog.published_menu_projection_generation,rms_catalog.published_menu_projection,rms_catalog.published_menu_projection_sellable TO " +
       role,
   );
   const queueDigest = (value) => "sha256:" + sha256Hex(value);

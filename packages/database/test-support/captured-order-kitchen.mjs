@@ -11,6 +11,7 @@ import { createOrderPaidOutcomeSource } from "../../../apps/api/src/order-paid-o
 import { evaluateIntactReservationPaymentRule } from "../../rms/inventory/src/index.ts";
 import {
   createPostgresMerchantOrderIndex,
+  createPostgresOrderPaymentAcceptanceWaitStore,
   createOrderPaymentOutcomeConsumerService,
   createPostgresOrderPaymentOutcomeStore,
   createPostgresOrderKitchenSourceStore,
@@ -57,7 +58,7 @@ export async function exerciseCapturedOrderKitchen({
   const actor = next();
   const at = new Date().toISOString();
   await admin.query(
-    "GRANT SELECT,INSERT ON rms_ordering.order_acceptance_record,rms_ordering.order_payment_disposition_record,rms_ordering.order_payment_failure_record TO " +
+    "GRANT SELECT,INSERT ON rms_ordering.order_acceptance_record,rms_ordering.order_payment_disposition_record,rms_ordering.order_payment_failure_record,rms_ordering.order_payment_acceptance_wait TO " +
       role,
   );
   await admin.query("GRANT SELECT ON rms_ordering.order_batch_checkout_cancellation TO " + role);
@@ -111,6 +112,137 @@ export async function exerciseCapturedOrderKitchen({
       retentionPolicyVersion: 1,
     }),
   });
+  let observedAt = at;
+  const source = createOrderPaidOutcomeSource({
+    context,
+    quoteVersion,
+    sha256: hash,
+    release: {
+      action: "ReleasePaidOrder",
+      purposeCode: paymentWorkflow.purposeCode,
+      permissionCode: "order.release",
+      nextState: "Accepted",
+    },
+    generateDispositionReference: next,
+    generateConfirmationReference: next,
+    resolveWorkflow: async ({ context: current }) => {
+      observedAt = current.observedAt;
+      assert.equal(current.terminal.event.eventId, event.eventId);
+      assert.equal(current.acceptance.acceptanceReference, record.acceptanceReference);
+      return {
+        request: {
+          ...scope,
+          actorReference: actor,
+          resourceReference: record.orderReference,
+          resourceVersion: 2,
+          purposeCode: paymentWorkflow.purposeCode,
+          applicabilityCode: order.order.orderType,
+          expectedVersionReference: paymentWorkflow.workflowVersionReference,
+          currentState: "Accepted",
+          action: "ReleasePaidOrder",
+          observedAt,
+        },
+        gates: {
+          ...gates,
+          evaluateRule: async (_tx, request) =>
+            request.ruleReference === paymentWorkflow.intactReservationRuleReference &&
+            current.capacity !== null &&
+            current.inventory !== null &&
+            evaluateIntactReservationPaymentRule(current.inventory),
+        },
+      };
+    },
+  });
+  const outcomes = createPostgresOrderPaymentOutcomeStore({
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+    sha256: hash,
+    audit: async ({ orderReference, correlationReference, outcome }) => ({
+      auditId: next(),
+      brandId: scope.brandReference,
+      storeId: scope.storeReference,
+      actor: { type: "System" },
+      actionCode: "ORDER_PAYMENT_DISPOSITION_RECORDED",
+      targetType: "Order",
+      targetId: orderReference,
+      correlationId: correlationReference,
+      afterSummary: { outcome },
+      reasonCode: "PAYMENT_CAPTURED",
+      occurredAt: observedAt,
+      sourceChannel: "EVENT_CONSUMER",
+      dataClassification: "Restricted",
+      retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+      retentionPolicyVersion: 1,
+    }),
+  });
+  const waits = createPostgresOrderPaymentAcceptanceWaitStore({
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+    sha256: hash,
+    authorize: async () => true, // Isolated internal consumer test authority.
+    validateCurrent: async (transaction, { event: paid, record: waiting }) => {
+      const current = await source.loadExact({
+        transaction,
+        paymentEvent: paid,
+        brandReference: paid.tenantId,
+        storeReference: paid.storeId,
+        orderReference: paid.payload.orderReference,
+        paymentTransactionReference: paid.payload.paymentTransactionReference,
+        paymentIntentReference: paid.payload.paymentIntentReference,
+        paymentAttemptReference: paid.payload.paymentAttemptReference,
+        paymentEventReference: paid.eventId,
+      });
+      return (
+        current?.disposition === "AwaitingAcceptance" &&
+        [
+          "brandReference",
+          "storeReference",
+          "orderReference",
+          "orderBatchReference",
+          "submissionReference",
+          "sourceVersion",
+          "sourceCheckpoint",
+        ].every((key) => current[key] === waiting[key])
+      );
+    },
+    audit: async ({ event: paid, record: waiting }) => ({
+      auditId: next(),
+      brandId: scope.brandReference,
+      storeId: scope.storeReference,
+      actor: { type: "System" },
+      actionCode: "ORDER_PAYMENT_WAIT_RECORDED",
+      targetType: "OrderPaymentWait",
+      targetId: waiting.dispositionReference,
+      correlationId: paid.correlationId,
+      afterSummary: { outcome: "AwaitingAcceptance" },
+      reasonCode: "ORDER_ACCEPTANCE_PENDING",
+      occurredAt: waiting.evaluatedAt,
+      sourceChannel: "EVENT_CONSUMER",
+      dataClassification: "Restricted",
+      retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+      retentionPolicyVersion: 1,
+    }),
+  });
+  const consumer = createOrderPaymentOutcomeConsumerService({
+    authorization: { authorize: async () => true },
+    source,
+    outcomes,
+    references: { generate: next },
+    digests: { sha256: hash },
+    // WP-2423 Q1: as in the pilot worker, the consumer records the paid batch as awaiting staff
+    // acceptance and later resumes it to its outcome.
+    waiting: {
+      record: async ({ transaction, event: paid, disposition }) =>
+        (await waits.record(transaction, paid, disposition)).record,
+      load: ({ transaction, event: paid }) => waits.load(transaction, paid),
+    },
+  });
+  // PaymentSucceeded is consumed before staff acceptance: Ordering records the batch as paid and
+  // awaiting acceptance, which is what offers it for acceptance in the merchant queue.
+  const waited = await runner.run((tx) => consumer.consume(tx, event));
+  assert.equal(waited.consumerOutcome.status, "processed");
+  assert.equal(waited.result.status, "AwaitingOrderAcceptance");
+  assert.equal(waited.result.disposition.orderBatchReference, record.orderBatchReference);
   const accept = (command = record) =>
     runner.run((transaction) => merchant.commit({ transaction, command, paymentEvent: event }));
   await assert.rejects(accept(), { code: "ORDER_ACCEPTANCE_RECORD_UNAVAILABLE" });
@@ -236,78 +368,17 @@ export async function exerciseCapturedOrderKitchen({
   assert.equal(Object.hasOwn(currentOrder, "initialSubmissionReference"), false);
   await session.revoke();
   await assert.rejects(authenticatedAccept(commandInput));
-  let observedAt = at;
-  const source = createOrderPaidOutcomeSource({
-    context,
-    quoteVersion,
-    sha256: hash,
-    release: {
-      action: "ReleasePaidOrder",
-      purposeCode: paymentWorkflow.purposeCode,
-      permissionCode: "order.release",
-      nextState: "Accepted",
-    },
-    generateDispositionReference: next,
-    generateConfirmationReference: next,
-    resolveWorkflow: async ({ context: current }) => {
-      observedAt = current.observedAt;
-      assert.equal(current.terminal.event.eventId, event.eventId);
-      assert.equal(current.acceptance.acceptanceReference, record.acceptanceReference);
-      return {
-        request: {
-          ...scope,
-          actorReference: actor,
-          resourceReference: record.orderReference,
-          resourceVersion: 2,
-          purposeCode: paymentWorkflow.purposeCode,
-          applicabilityCode: order.order.orderType,
-          expectedVersionReference: paymentWorkflow.workflowVersionReference,
-          currentState: "Accepted",
-          action: "ReleasePaidOrder",
-          observedAt,
-        },
-        gates: {
-          ...gates,
-          evaluateRule: async (_tx, request) =>
-            request.ruleReference === paymentWorkflow.intactReservationRuleReference &&
-            current.capacity !== null &&
-            current.inventory !== null &&
-            evaluateIntactReservationPaymentRule(current.inventory),
-        },
-      };
-    },
-  });
-  const outcomes = createPostgresOrderPaymentOutcomeStore({
-    brandReference: scope.brandReference,
-    storeReference: scope.storeReference,
-    sha256: hash,
-    audit: async ({ orderReference, correlationReference, outcome }) => ({
-      auditId: next(),
-      brandId: scope.brandReference,
-      storeId: scope.storeReference,
-      actor: { type: "System" },
-      actionCode: "ORDER_PAYMENT_DISPOSITION_RECORDED",
-      targetType: "Order",
-      targetId: orderReference,
-      correlationId: correlationReference,
-      afterSummary: { outcome },
-      reasonCode: "PAYMENT_CAPTURED",
-      occurredAt: observedAt,
-      sourceChannel: "EVENT_CONSUMER",
-      dataClassification: "Restricted",
-      retentionPolicyCode: "FINANCIAL_COMPLIANCE",
-      retentionPolicyVersion: 1,
-    }),
-  });
-  const consumer = createOrderPaymentOutcomeConsumerService({
-    authorization: { authorize: async () => true },
-    source,
-    outcomes,
-    references: { generate: next },
-    digests: { sha256: hash },
-  });
-  const confirmed = await runner.run((tx) => consumer.consume(tx, event));
+  // After acceptance the pilot worker resumes the unresolved wait to its outcome.
+  const unresolved = await runner.run((tx) => waits.listUnresolved(tx, 100));
+  assert.ok(unresolved.includes(event.eventId));
+  const confirmed = {
+    result: await runner.run((tx) => consumer.resumePending(tx, event)),
+  };
   assert.equal(confirmed.result.disposition.disposition, "Confirmed");
+  assert.equal(
+    (await runner.run((tx) => waits.listUnresolved(tx, 100))).includes(event.eventId),
+    false,
+  );
   const repeated = await runner.run((tx) => consumer.consume(tx, event));
   assert.equal(repeated.consumerOutcome.status, "duplicate_completed");
   assert.deepEqual(repeated.result, confirmed.result);

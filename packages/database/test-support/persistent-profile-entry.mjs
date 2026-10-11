@@ -441,8 +441,22 @@ export async function exercisePersistentProfileEntry({
       const admissionsBeforeClosure = admissionAttempts;
       currentTime = "2026-01-15T13:00:00.000Z"; // Published 08:00 Toronto closing boundary.
       const closed = await request();
-      assert.equal(closed.status, 422);
-      await closed.text();
+      // WP-2423 Q4: a closed Store refuses Entry with its name and today's hours, and no Session.
+      assert.equal(closed.status, 409);
+      const closedBody = await closed.json();
+      assert.deepEqual(closedBody, {
+        schemaVersion: 1,
+        code: "entry_not_accepting",
+        messageKey: "customer.entry.not_accepting",
+        recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+        store: {
+          storeDisplayName: body.storeDisplayName,
+          operatingState: "Closed",
+          todayHours: [
+            { startLocalTime: "00:00:00", endLocalTime: "08:00:00", endsNextDay: false },
+          ],
+        },
+      });
       assert.equal(closed.headers.getSetCookie().length, 0);
       assert.equal(admissionAttempts, admissionsBeforeClosure);
       assert.deepEqual(await count(), saved);
