@@ -39,6 +39,12 @@ export interface CustomerEntryOperatingReader {
         brandReference: string;
         storeReference: string;
         evaluatedAt: string;
+        /** WP-2423 Q4: today's published hours, when the reader provides them. */
+        todayHours?: readonly {
+          startLocalTime: string;
+          endLocalTime: string;
+          endsNextDay: boolean;
+        }[];
       })
     | null
   >;
@@ -115,6 +121,11 @@ export function createCustomerEntryComposition(
         }).getPublicStore({ ...query, requestedLocale: qr.context.locale });
         if (profile.status !== "Available") return unavailable;
         let operatingStatus: Pick<StoreOperatingStatus, "state" | "availableServiceModes">;
+        let todayHours: readonly {
+          startLocalTime: string;
+          endLocalTime: string;
+          endsNextDay: boolean;
+        }[] = [];
         if ("operatingReader" in options) {
           const current = await options.operatingReader.readCurrent({
             ...scope,
@@ -124,6 +135,7 @@ export function createCustomerEntryComposition(
           if (!current || !sameScope(current) || current.evaluatedAt !== requestedAt)
             return unavailable;
           operatingStatus = current;
+          todayHours = current.todayHours ?? [];
         } else {
           const operating = await createStoreOperatingStatusService({
             ...options.operating,
@@ -141,7 +153,12 @@ export function createCustomerEntryComposition(
           operatingStatus.state !== "Open" ||
           !operatingStatus.availableServiceModes.includes(qr.context.channel)
         )
-          return unavailable;
+          return Object.freeze({
+            status: "NotAccepting" as const,
+            storeDisplayName: profile.profile.storeDisplayName,
+            operatingState: operatingStatus.state,
+            todayHours,
+          });
 
         const admitted = parseGuestAdmissionEvidence(
           await options.admission.consume(

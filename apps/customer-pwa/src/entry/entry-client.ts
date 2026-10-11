@@ -143,11 +143,63 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
   });
 }
 
+/** WP-2423 Q4: a closed or paused Store, with today's published hours. */
+function parseNotAccepting(value: unknown): CustomerEntryScreenState {
+  const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery", "store"]);
+  const recovery = exact(raw.recovery, ["action", "storeSelection"]);
+  const store = exact(raw.store, ["storeDisplayName", "operatingState", "todayHours"]);
+  const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
+  if (
+    raw.schemaVersion !== 1 ||
+    raw.messageKey !== "customer.entry.not_accepting" ||
+    recovery.action !== "TryLaterOrAskStaff" ||
+    recovery.storeSelection !== "Hidden" ||
+    !["Closed", "TemporarilyClosed", "Open"].includes(String(store.operatingState)) ||
+    !Array.isArray(store.todayHours) ||
+    store.todayHours.length > 12
+  )
+    return Object.freeze({ kind: "ServiceUnavailable" });
+  try {
+    const todayHours = store.todayHours.map((entry: unknown) => {
+      const interval = exact(entry, ["startLocalTime", "endLocalTime", "endsNextDay"]);
+      if (
+        typeof interval.startLocalTime !== "string" ||
+        !time.test(interval.startLocalTime) ||
+        typeof interval.endLocalTime !== "string" ||
+        !time.test(interval.endLocalTime) ||
+        typeof interval.endsNextDay !== "boolean"
+      )
+        throw new TypeError("invalid hours");
+      return Object.freeze({
+        start: interval.startLocalTime,
+        end: interval.endLocalTime,
+        endsNextDay: interval.endsNextDay,
+      });
+    });
+    return Object.freeze({
+      kind: "NotAccepting",
+      storeDisplayName: publicLabel(store.storeDisplayName),
+      // Open with this service unavailable, or temporarily closed, is a pause, not closing time.
+      paused: store.operatingState !== "Closed",
+      todayHours: Object.freeze(todayHours),
+    });
+  } catch {
+    return Object.freeze({ kind: "ServiceUnavailable" });
+  }
+}
+
 function parseError(
   status: number,
   value: unknown,
   retryAfter: string | null,
 ): CustomerEntryScreenState {
+  if (
+    status === 409 &&
+    value !== null &&
+    typeof value === "object" &&
+    (value as { code?: unknown }).code === "entry_not_accepting"
+  )
+    return parseNotAccepting(value);
   const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery"]);
   const recovery = exact(raw.recovery, ["action", "storeSelection"]);
   if (raw.schemaVersion !== 1 || recovery.storeSelection !== "Hidden")

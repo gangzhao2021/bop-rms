@@ -93,7 +93,19 @@ export function createPostgresStoreOperatingStatusReader(
       const local = resolveStoreOperatingLocalFields(at, content.timeZone);
       const evaluation = evaluateStoreOperatingStatus({ evaluatedAt: at, ...local, ...content });
       if ((await options.authorize(tx, at)) !== true) throw new Error();
-      return Object.freeze({ businessDate, evaluatedAt: at, ...local, ...evaluation });
+      // WP-2423 Q4: today's published hours (a dated exception replaces the weekday), so a
+      // customer arriving while the Store is closed can be told when it serves.
+      const today =
+        content.exceptions.find((exception) => exception.localDate === local.localDate)
+          ?.intervals ??
+        content.weeklySchedule.find((day) => day.isoWeekday === local.isoWeekday)?.intervals ??
+        [];
+      const todayHours = Object.freeze(
+        today.map(({ startLocalTime, endLocalTime, endsNextDay }) =>
+          Object.freeze({ startLocalTime, endLocalTime, endsNextDay }),
+        ),
+      );
+      return Object.freeze({ businessDate, evaluatedAt: at, ...local, ...evaluation, todayHours });
     } catch {
       throw new Error("STORE_OPERATING_STATUS_UNAVAILABLE");
     }

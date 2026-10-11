@@ -372,6 +372,32 @@ describe("WP-1004 Customer-entry contract", () => {
     }
   });
 
+  it("WP-2423 Q4: says a closed Store is not taking orders, with today's hours, and sets no cookie", async () => {
+    const port = new MutablePort();
+    port.result = {
+      status: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      operatingState: "Closed",
+      todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+    };
+    const response = await post(await listen(customerEntry(port)));
+    expect(response.status).toBe(409);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_not_accepting",
+      messageKey: "customer.entry.not_accepting",
+      recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+      store: {
+        storeDisplayName: "Synthetic Store",
+        operatingState: "Closed",
+        todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+      },
+    });
+    port.result = { ...(port.result as object), storeDisplayName: "<script>" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
   it("maps a strict port InvalidRequest without reflecting the QR", async () => {
     const port = new MutablePort();
     port.result = { status: "InvalidRequest" };

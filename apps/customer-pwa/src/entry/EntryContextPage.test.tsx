@@ -100,3 +100,26 @@ it("shows a rate-limit wait without enabling retry or revealing context", () => 
   expect(html).not.toContain("Continue to menu");
   expect(html).not.toContain(context.csrfToken);
 });
+
+describe("WP-2423 Q4 not accepting orders", () => {
+  it("names the store, says why and gives today's hours instead of a dead link", () => {
+    const closed = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [{ start: "11:00:00", end: "21:30:00", endsNextDay: false }],
+    });
+    expect(closed).toContain("Synthetic Store isn’t taking orders right now");
+    expect(closed).toContain("The store is closed now.");
+    expect(closed).toContain("Today’s hours: 11:00 AM–9:30 PM");
+    expect(closed).not.toContain("can’t be used");
+    const paused = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: true,
+      todayHours: [],
+    });
+    expect(paused).toContain("Online ordering is paused for a short while.");
+    expect(paused).toContain("Closed today.");
+  });
+});

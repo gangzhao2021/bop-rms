@@ -95,3 +95,16 @@ it("rejects foreign QR scope and invalid clocks without issuing a session", asyn
   );
   expect(invalid.events).toEqual([]);
 });
+it("WP-2423 Q4: rolls back a closed Store's entry but keeps its not-accepting answer", async () => {
+  const x = setup();
+  x.f.operating.weeklySchedule.forEach((day) => {
+    day.intervals = [];
+  });
+  expect(await x.service.establish(x.f.input())).toMatchObject({
+    status: "NotAccepting",
+    operatingState: "Closed",
+  });
+  expect(x.events).toEqual(["begin", "sources", "rollback"]);
+  expect(x.f.admission).not.toHaveBeenCalled();
+  expect(x.f.create).not.toHaveBeenCalled();
+});

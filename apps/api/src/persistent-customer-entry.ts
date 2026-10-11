@@ -5,7 +5,11 @@ import {
   type CustomerEntryCompositionOptions,
   type CustomerEntryOperatingReader,
 } from "./customer-entry-composition.js";
-import type { CustomerEntryPort, CustomerEntryPortInput } from "./customer-entry.js";
+import type {
+  CustomerEntryNotAccepting,
+  CustomerEntryPort,
+  CustomerEntryPortInput,
+} from "./customer-entry.js";
 import {
   createPersistentPublicStoreProfilePorts,
   type PersistentPublicStoreProfileOptions,
@@ -40,6 +44,8 @@ export function createPersistentCustomerEntryComposition(
   });
   return Object.freeze({
     async establish(input: CustomerEntryPortInput) {
+      // WP-2423 Q4: a closed or paused Store is still rolled back, but its answer is kept.
+      let notAccepting: CustomerEntryNotAccepting | null = null;
       try {
         const requestedAt = parseCanonicalInstant(input.requestedAt);
         return await options.transactions.run(async (tx) => {
@@ -70,11 +76,12 @@ export function createPersistentCustomerEntryComposition(
               store: createPostgresGuestSessionEntryStore({ run: async (work) => work(tx) }, scope),
             },
           }).establish(input);
+          if (result.status === "NotAccepting") notAccepting = result;
           if (result.status !== "Established") throw new Error("CUSTOMER_ENTRY_ROLLBACK");
           return result;
         });
       } catch {
-        return Object.freeze({ status: "EntryUnavailable" } as const);
+        return notAccepting ?? Object.freeze({ status: "EntryUnavailable" } as const);
       }
     },
   });

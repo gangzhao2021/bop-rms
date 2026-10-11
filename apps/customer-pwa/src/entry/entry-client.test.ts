@@ -105,6 +105,45 @@ describe("customer entry browser boundary", () => {
     await expect(client.start()).resolves.toEqual({ kind: "EntryUnavailable" });
   });
 
+  it("WP-2423 Q4: reads a closed or paused Store with today's hours", async () => {
+    const body = (operatingState: string) => ({
+      schemaVersion: 1,
+      code: "entry_not_accepting",
+      messageKey: "customer.entry.not_accepting",
+      recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+      store: {
+        storeDisplayName: "Synthetic Store",
+        operatingState,
+        todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+      },
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(409, body("Closed")))
+      .mockResolvedValueOnce(response(409, body("TemporarilyClosed")))
+      .mockResolvedValueOnce(
+        response(409, { ...body("Closed"), store: { storeDisplayName: "x" } }),
+      );
+    const start = () =>
+      createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+    await expect(start()).resolves.toEqual({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [{ start: "11:00:00", end: "21:30:00", endsNextDay: false }],
+    });
+    await expect(start()).resolves.toMatchObject({ kind: "NotAccepting", paused: true });
+    // A malformed body is a failed command, never a guessed Store state.
+    await expect(start()).resolves.toEqual({ kind: "CommandFailed" });
+  });
+
   it("reports offline without sending a request and retries only when explicitly asked", async () => {
     let online = false;
     const fetch = vi.fn(async () => response(201, established));

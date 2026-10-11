@@ -107,9 +107,15 @@ describe("WP-2208 Customer Entry domain composition", () => {
         });
       });
     if (failure === "store-stale") f.resolution.validUntil = now;
-    expect(await createCustomerEntryComposition(f.options).establish(f.input())).toEqual({
-      status: "EntryUnavailable",
-    });
+    const result = await createCustomerEntryComposition(f.options).establish(f.input());
+    // WP-2423 Q4: a closed Store, or one not serving this channel, says so (no Session).
+    if (failure === "closed" || failure === "mode-disabled")
+      expect(result).toMatchObject({
+        status: "NotAccepting",
+        operatingState: failure === "closed" ? "Closed" : "Open",
+        todayHours: [],
+      });
+    else expect(result).toEqual({ status: "EntryUnavailable" });
     expect(f.admission).not.toHaveBeenCalled();
     expect(f.create).not.toHaveBeenCalled();
   });
@@ -386,7 +392,17 @@ it.each(["closed", "paused", "mode", "scope", "time", "missing"])(
         session: f.options.session,
         operatingReader,
       }).establish(f.input()),
-    ).toEqual({ status: "EntryUnavailable" });
+    ).toEqual(
+      ["closed", "paused", "mode"].includes(kind)
+        ? {
+            status: "NotAccepting",
+            storeDisplayName: expect.any(String),
+            operatingState:
+              kind === "closed" ? "Closed" : kind === "paused" ? "TemporarilyClosed" : "Open",
+            todayHours: [],
+          }
+        : { status: "EntryUnavailable" },
+    );
     expect(f.admission).not.toHaveBeenCalled();
     expect(f.create).not.toHaveBeenCalled();
   },

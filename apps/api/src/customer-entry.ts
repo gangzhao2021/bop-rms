@@ -39,8 +39,21 @@ export interface CustomerEntryEstablished {
   readonly cookie: GuestSessionCookieDescriptor;
 }
 
+/** WP-2423 Q4: the Store is closed or not taking this service now; no Session is issued. */
+export interface CustomerEntryNotAccepting {
+  readonly status: "NotAccepting";
+  readonly storeDisplayName: string;
+  readonly operatingState: "Closed" | "TemporarilyClosed" | "Open";
+  readonly todayHours: readonly {
+    readonly startLocalTime: string;
+    readonly endLocalTime: string;
+    readonly endsNextDay: boolean;
+  }[];
+}
+
 export type CustomerEntryPortResult =
   | CustomerEntryEstablished
+  | CustomerEntryNotAccepting
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" };
 
@@ -311,6 +324,7 @@ function parsePortResult(
 ):
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" }
+  | CustomerEntryNotAccepting
   | CustomerEntryEstablished {
   const statusRecord =
     typeof value === "object" && value !== null
@@ -326,6 +340,40 @@ function parsePortResult(
   }
   if (status === "Established") {
     return Object.freeze({ status, ...parseEstablished(value, requestedAt) });
+  }
+  if (status === "NotAccepting") {
+    const raw = closedRecord(value, ["status", "storeDisplayName", "operatingState", "todayHours"]);
+    const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
+    if (
+      typeof raw.storeDisplayName !== "string" ||
+      !/^[^\p{Cc}\p{Cf}<>]{1,120}$/u.test(raw.storeDisplayName) ||
+      !["Closed", "TemporarilyClosed", "Open"].includes(String(raw.operatingState)) ||
+      !Array.isArray(raw.todayHours) ||
+      raw.todayHours.length > 12
+    )
+      throw new TypeError("invalid not-accepting result");
+    const todayHours = raw.todayHours.map((value: unknown) => {
+      const interval = closedRecord(value, ["startLocalTime", "endLocalTime", "endsNextDay"]);
+      if (
+        typeof interval.startLocalTime !== "string" ||
+        !time.test(interval.startLocalTime) ||
+        typeof interval.endLocalTime !== "string" ||
+        !time.test(interval.endLocalTime) ||
+        typeof interval.endsNextDay !== "boolean"
+      )
+        throw new TypeError("invalid hours");
+      return Object.freeze({
+        startLocalTime: interval.startLocalTime,
+        endLocalTime: interval.endLocalTime,
+        endsNextDay: interval.endsNextDay,
+      });
+    });
+    return Object.freeze({
+      status: "NotAccepting",
+      storeDisplayName: raw.storeDisplayName,
+      operatingState: raw.operatingState as CustomerEntryNotAccepting["operatingState"],
+      todayHours: Object.freeze(todayHours),
+    });
   }
   throw new TypeError("unknown Customer-entry result");
 }
@@ -434,6 +482,21 @@ export class CustomerEntryHandler {
         }
         if (result.status === "EntryUnavailable") {
           sendError(response, "entry_unavailable");
+          return;
+        }
+        // WP-2423 Q4: tell the customer the Store is not taking orders, and today's hours.
+        if (result.status === "NotAccepting") {
+          response.status(409).json({
+            schemaVersion: 1,
+            code: "entry_not_accepting",
+            messageKey: "customer.entry.not_accepting",
+            recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+            store: {
+              storeDisplayName: result.storeDisplayName,
+              operatingState: result.operatingState,
+              todayHours: result.todayHours,
+            },
+          });
           return;
         }
         response.setHeader("Set-Cookie", serializeCookie(result.sessionCredential));

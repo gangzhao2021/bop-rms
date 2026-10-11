@@ -31,6 +31,12 @@ export interface EntryContextPageProps {
   readonly onEstablished?: ((context: CustomerEntryEstablishedContext) => void) | undefined;
 }
 
+/** "21:30:00" → "9:30 PM" (published local time; no time zone conversion). */
+export function entryClock(value: string): string {
+  const [hour = 0, minute = 0] = value.split(":").map(Number);
+  return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${hour < 12 ? "AM" : "PM"}`;
+}
+
 export function EntryContextPage({
   client = unavailableClient,
   onEstablished,
@@ -228,6 +234,35 @@ function EntryState({
         <p>
           This page needs the QR code at the table or pickup location. No store search is shown.
         </p>
+      </div>
+    );
+
+  if (state.kind === "NotAccepting")
+    return (
+      <div className="entry-state entry-state--warning" role="alert">
+        <StateHeading headingRef={headingRef}>
+          {state.storeDisplayName} isn’t taking orders right now
+        </StateHeading>
+        <p>
+          {state.paused
+            ? "Online ordering is paused for a short while. Try again in a few minutes, or order with a staff member."
+            : "The store is closed now."}
+        </p>
+        <p>
+          {state.todayHours.length === 0
+            ? "Closed today."
+            : "Today’s hours: " +
+              state.todayHours
+                .map(
+                  (interval) =>
+                    entryClock(interval.start) +
+                    "–" +
+                    entryClock(interval.end) +
+                    (interval.endsNextDay ? " (next day)" : ""),
+                )
+                .join(", ")}
+        </p>
+        <RetryAction onRetry={onRetry} />
       </div>
     );
 
