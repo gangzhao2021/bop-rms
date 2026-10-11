@@ -21,6 +21,7 @@ import {
   preparation,
 } from "../../../packages/rms/payment/src/tests/payment-intent-creation.fixture.js";
 import { createApp } from "./app.js";
+import { CustomerStoreClosedError } from "./customer-store-open-gate.js";
 import {
   CustomerPaymentIntentHandler,
   type CustomerPaymentIntentPort,
@@ -215,4 +216,14 @@ it.each([
   expect(response.status).toBe(status);
   expect(response.headers.get("retry-after")).toBe(status === 503 ? "5" : null);
   expect(await response.text()).not.toContain(error.code);
+});
+it("WP-2423 Q4: says the Store stopped taking orders when payment would start after it", async () => {
+  const f = await setup();
+  f.create.mockRejectedValue(new CustomerStoreClosedError());
+  const response = await f.send();
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "payment_store_closed", messageKey: "customer.payment.store_closed" },
+  });
 });

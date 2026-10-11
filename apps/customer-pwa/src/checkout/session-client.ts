@@ -15,7 +15,7 @@ export interface CheckoutSessionView extends CheckoutSessionSelection {
   readonly createdAt: string;
 }
 export class CheckoutSessionClientError extends Error {
-  constructor(readonly code: "invalid" | "denied" | "conflict" | "unknown") {
+  constructor(readonly code: "invalid" | "denied" | "conflict" | "store_closed" | "unknown") {
     super("Checkout session unavailable.");
     this.name = "CheckoutSessionClientError";
   }
@@ -56,6 +56,14 @@ function parse(value: unknown): CheckoutSessionView {
     throw new Error();
   return Object.freeze(raw) as unknown as CheckoutSessionView;
 }
+/** WP-2423 Q4: the server's error code, when it sent one. */
+function errorCode(payload: unknown): string | null {
+  const error =
+    payload !== null && typeof payload === "object"
+      ? (payload as { error?: { code?: unknown } }).error
+      : undefined;
+  return typeof error?.code === "string" ? error.code : null;
+}
 export function createCheckoutSessionClient() {
   async function request(path: string, init: RequestInit): Promise<CheckoutSessionView> {
     const current = captureCustomerCsrfContext(),
@@ -76,11 +84,13 @@ export function createCheckoutSessionClient() {
         throw new CheckoutSessionClientError(
           response.status === 404
             ? "denied"
-            : response.status === 409
-              ? "conflict"
-              : response.status === 400
-                ? "invalid"
-                : "unknown",
+            : response.status === 409 && errorCode(payload) === "checkout_session_store_closed"
+              ? "store_closed"
+              : response.status === 409
+                ? "conflict"
+                : response.status === 400
+                  ? "invalid"
+                  : "unknown",
         );
       return parse(payload);
     } catch (error) {

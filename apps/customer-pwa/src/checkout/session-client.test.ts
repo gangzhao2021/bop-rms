@@ -70,3 +70,23 @@ it("discards response after current session credentials change", async () => {
     code: "unknown",
   });
 });
+it("WP-2423 Q4: tells a closed Store apart from an ordinary conflict", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json(
+        { schemaVersion: 1, error: { code: "checkout_session_store_closed" } },
+        { status: 409 },
+      ),
+    )
+    .mockResolvedValueOnce(
+      Response.json(
+        { schemaVersion: 1, error: { code: "checkout_session_intent_conflict" } },
+        { status: 409 },
+      ),
+    );
+  vi.stubGlobal("fetch", fetch);
+  const client = createCheckoutSessionClient();
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({ code: "store_closed" });
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({ code: "conflict" });
+});

@@ -4827,3 +4827,22 @@ it("keeps unavailable Brand navigation distinct from rejected session authority"
   expect(denied.status).toBe(403);
   expect(await denied.json()).toEqual({ error: "request_denied" });
 });
+
+it("WP-2423 Q4: anchors Hours & ordering navigation to the selected Store", () => {
+  const item = {
+    screenId: "STORE-HOURS-SERVICE",
+    label: "Hours & ordering",
+    href: "/app/organization/stores/" + storeReference + "/service",
+    permission: "store.service.read",
+  };
+  expect(parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [item] }).navigation).toEqual([
+    item,
+  ]);
+  for (const change of [
+    { href: "/app/organization/stores/018f7f9a-ad3e-7a11-8d01-000000000099/service" },
+    { permission: "organization.manage" },
+  ])
+    expect(() =>
+      parseMerchantWorkspaceSnapshot({ ...workspace, navigation: [{ ...item, ...change }] }),
+    ).toThrow("MERCHANT_WORKSPACE_DENIED");
+});

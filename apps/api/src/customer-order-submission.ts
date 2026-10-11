@@ -31,6 +31,7 @@ const failures = {
   order_not_found: 404,
   order_version_conflict: 409,
   order_idempotency_conflict: 409,
+  order_store_closed: 409,
   order_requote_required: 422,
   order_service_unavailable: 503,
 } as const;
@@ -90,6 +91,7 @@ function failure(error: unknown): Failure {
       PERMISSION_DENIED: "order_not_found",
       INTENT_CONFLICT: "order_idempotency_conflict",
       DEPENDENCY_UNAVAILABLE: "order_service_unavailable",
+      STORE_CLOSED: "order_store_closed",
     } as const;
     return codes[error.code];
   }

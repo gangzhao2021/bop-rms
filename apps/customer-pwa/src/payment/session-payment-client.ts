@@ -12,10 +12,20 @@ export interface SessionPaymentView {
   readonly total: Readonly<{ amountMinor: string; currency: "CAD" }>;
 }
 export class SessionPaymentClientError extends Error {
-  constructor(readonly code: "invalid" | "denied" | "conflict" | "not_ready" | "unknown") {
+  constructor(
+    readonly code: "invalid" | "denied" | "conflict" | "not_ready" | "store_closed" | "unknown",
+  ) {
     super("Payment unavailable.");
     this.name = "SessionPaymentClientError";
   }
+}
+/** WP-2423 Q4: the server's error code, when it sent one. */
+function errorCode(payload: unknown): string | null {
+  const error =
+    payload !== null && typeof payload === "object"
+      ? (payload as { error?: { code?: unknown } }).error
+      : undefined;
+  return typeof error?.code === "string" ? error.code : null;
 }
 function exact(value: unknown, fields: readonly string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
@@ -67,11 +77,14 @@ export function createSessionPaymentClient() {
             ? "invalid"
             : result.response.status === 404
               ? "denied"
-              : result.response.status === 409
-                ? "conflict"
-                : result.response.status === 422
-                  ? "not_ready"
-                  : "unknown",
+              : result.response.status === 409 &&
+                  errorCode(result.payload) === "payment_store_closed"
+                ? "store_closed"
+                : result.response.status === 409
+                  ? "conflict"
+                  : result.response.status === 422
+                    ? "not_ready"
+                    : "unknown",
         );
       return result;
     } catch (error) {

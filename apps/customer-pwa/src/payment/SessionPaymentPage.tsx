@@ -72,7 +72,15 @@ function PreparedSessionPaymentPage({
   const [client] = useState(createSessionPaymentClient);
   const [current] = useState(() => captureCustomerCsrfContext());
   const [status, setStatus] = useState<
-    "loading" | "ready" | "creating" | "card" | "processing" | "unknown" | "denied" | "unavailable"
+    | "loading"
+    | "ready"
+    | "creating"
+    | "card"
+    | "processing"
+    | "unknown"
+    | "denied"
+    | "closed"
+    | "unavailable"
   >("loading");
   const [selectedTip] = useState(getCheckoutTipSelection);
   const [payment, setPayment] = useState<SessionPaymentView | null>(null);
@@ -156,10 +164,12 @@ function PreparedSessionPaymentPage({
     } catch (error) {
       if (valid())
         setStatus(
-          error instanceof SessionPaymentClientError &&
-            (error.code === "denied" || error.code === "conflict")
-            ? "denied"
-            : "unknown",
+          error instanceof SessionPaymentClientError && error.code === "store_closed"
+            ? "closed"
+            : error instanceof SessionPaymentClientError &&
+                (error.code === "denied" || error.code === "conflict")
+              ? "denied"
+              : "unknown",
         );
     } finally {
       flight.current = false;
@@ -223,7 +233,16 @@ function PreparedSessionPaymentPage({
       {status === "denied" ? (
         <p role="alert">This checkout is no longer available. Return to checkout to continue.</p>
       ) : null}
-      {status !== "denied" && status !== "unavailable" && status !== "loading" ? (
+      {status === "closed" ? (
+        <p role="alert">
+          The store stopped taking orders before payment started, so you haven’t been charged. Check
+          the store’s hours or ask staff.
+        </p>
+      ) : null}
+      {status !== "denied" &&
+      status !== "closed" &&
+      status !== "unavailable" &&
+      status !== "loading" ? (
         <section className="payment-page__amount" aria-label="Amount">
           <dl>
             {selectedTip && selectedTip.amountMinor !== "0" ? (

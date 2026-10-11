@@ -1,3 +1,6 @@
+import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
+import { CheckoutSessionServiceError } from "../../packages/rms/ordering/src/index.ts";
+import { storeTakesOrder } from "../../apps/api/dist/customer-store-open-gate.js";
 import { createInternalAdditionalCheckout } from "./pilot-additional-checkout.mjs";
 import { createHash } from "node:crypto";
 import {
@@ -60,9 +63,26 @@ export function createInternalDiningCheckout(resources, entry, pickup) {
     now,
   });
   const additional = createInternalAdditionalCheckout(resources, entry, preparation);
+  // WP-2423 Q4: the Store's current operating status, read fresh for every checkout and payment.
+  const operatingNow = () =>
+    resources.transactions.run((tx) =>
+      createPostgresPublishedStoreOperatingStatusReader(resources.operating)(tx, now()),
+    );
+  /** Whether the Store takes this guest's order now; throws only when the guest is unknown. */
+  const takesOrder = async (input) => {
+    const guest = await identity.authorize({
+      sessionCredential: input.sessionCredential,
+      csrfCredential: input.csrfCredential,
+    });
+    return storeTakesOrder(
+      await operatingNow(),
+      guest.channel === "Pickup" ? "Pickup" : "SeatedDineIn",
+    );
+  };
   const options = {
     ...pickup.checkoutSessions,
     validate: async (input) => {
+      if (!(await takesOrder(input))) throw new CheckoutSessionServiceError("STORE_CLOSED");
       const guest = await identity.authorize({
         sessionCredential: input.sessionCredential,
         csrfCredential: input.csrfCredential,
@@ -81,6 +101,7 @@ export function createInternalDiningCheckout(resources, entry, pickup) {
   };
   return {
     checkoutSessions: options,
+    takesOrder,
     preparation,
     repository,
     identity: (tx) => {

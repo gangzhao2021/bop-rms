@@ -480,9 +480,11 @@ export function CheckoutPage({
         {sessionState.status === "pending" ? <p role="status">Preparing secure payment…</p> : null}
         {"canRetry" in sessionState ? (
           <p role="alert">
-            {sessionState.canRetry
-              ? "We could not confirm checkout. Retry to recover the same checkout."
-              : "Checkout is unavailable. Review your cart and scan the QR code again if needed."}
+            {sessionState.status === "store_closed"
+              ? "The store isn’t taking orders right now, so you haven’t been charged. Try again when the store reopens, or ask staff."
+              : sessionState.canRetry
+                ? "We could not confirm checkout. Retry to recover the same checkout."
+                : "Checkout is unavailable. Review your cart and scan the QR code again if needed."}
           </p>
         ) : null}
         {"canRetry" in sessionState && sessionState.canRetry ? (

@@ -2169,6 +2169,33 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 pause and resume online ordering): a store manager or owner records a time-limited pause of new online orders and its resume; append-only operation and pause/resume content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_pause_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 pause and resume online ordering): a store manager or owner records a time-limited pause of new online orders and its resume; append-only operation and pause/resume content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_resume_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 pause and resume online ordering): a store manager or owner records a time-limited pause of new online orders and its resume; append-only operation and pause/resume content"
     }
   ]
 }

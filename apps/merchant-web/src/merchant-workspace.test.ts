@@ -283,3 +283,21 @@ it("admits Tax navigation only at its exact permission and canonical route", () 
       "MERCHANT_WORKSPACE_INVALID",
     );
 });
+
+it("WP-2423 Q4: anchors Hours & ordering to the selected Store at its read permission", () => {
+  const item = {
+    screenId: "STORE-HOURS-SERVICE",
+    label: "Hours & ordering",
+    href: "/app/organization/stores/" + storeReference + "/service",
+    permission: "store.service.read",
+  };
+  expect(parseMerchantWorkspace({ ...workspace, navigation: [item] }).navigation).toEqual([item]);
+  for (const change of [
+    { href: "/app/organization/stores/018f7f9a-ad3e-7a11-8d01-000000000099/service" },
+    { href: item.href + "?store=x" },
+    { permission: "store.service.pause" },
+  ])
+    expect(() =>
+      parseMerchantWorkspace({ ...workspace, navigation: [{ ...item, ...change }] }),
+    ).toThrow("MERCHANT_WORKSPACE_INVALID");
+});

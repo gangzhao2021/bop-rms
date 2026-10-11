@@ -52,7 +52,12 @@ export interface CheckoutSessionPorts {
 export class CheckoutSessionServiceError extends Error {
   constructor(
     readonly code:
-      "INPUT_INVALID" | "PERMISSION_DENIED" | "INTENT_CONFLICT" | "DEPENDENCY_UNAVAILABLE",
+      | "INPUT_INVALID"
+      | "PERMISSION_DENIED"
+      | "INTENT_CONFLICT"
+      | "DEPENDENCY_UNAVAILABLE"
+      /** WP-2423 Q4: the Store is not taking this kind of order now (closed or paused). */
+      | "STORE_CLOSED",
   ) {
     super("checkout session is unavailable");
     this.name = "CheckoutSessionServiceError";

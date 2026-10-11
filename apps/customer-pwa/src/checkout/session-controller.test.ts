@@ -51,3 +51,18 @@ it("does not start offline and refuses old session retry after revocation", asyn
   expect(c.getState()).toEqual({ status: "denied", canRetry: false });
   expect(create).toHaveBeenCalledTimes(1);
 });
+it("WP-2423 Q4: lets a customer retry the same checkout once the Store reopens", async () => {
+  const create = vi
+    .fn()
+    .mockRejectedValueOnce(new CheckoutSessionClientError("store_closed"))
+    .mockResolvedValue(session);
+  const c = createCheckoutSessionController({ create }, () => id(5));
+  await c.start(selected);
+  expect(c.getState()).toEqual({ status: "store_closed", canRetry: true });
+  await c.retry();
+  expect(c.getState()).toEqual({ status: "ready", session });
+  expect(create.mock.calls).toEqual([
+    [selected, id(5)],
+    [selected, id(5)],
+  ]);
+});

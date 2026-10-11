@@ -1,3 +1,4 @@
+import { CustomerStoreClosedError } from "./customer-store-open-gate.js";
 import { GuestSessionError, readClosedRecord } from "@bop/identity";
 import {
   CartError,
@@ -32,9 +33,10 @@ function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
   response.setHeader("Referrer-Policy", "no-referrer");
 }
-function reject(response: Response, status: number) {
+function reject(response: Response, status: number, explicit?: "store_closed") {
   const code =
-    status === 400
+    explicit ??
+    (status === 400
       ? "request_invalid"
       : status === 404
         ? "not_found"
@@ -42,7 +44,7 @@ function reject(response: Response, status: number) {
           ? "intent_conflict"
           : status === 422
             ? "not_ready"
-            : "service_unavailable";
+            : "service_unavailable");
   if (status === 503) response.setHeader("Retry-After", "5");
   response.status(status).json({
     schemaVersion: 1,
@@ -103,6 +105,7 @@ function failure(error: unknown) {
         PERMISSION_DENIED: 404,
         INTENT_CONFLICT: 409,
         DEPENDENCY_UNAVAILABLE: 503,
+        STORE_CLOSED: 409,
       } as const
     )[error.code];
   if (error instanceof PaymentTipSelectionError)
@@ -184,6 +187,11 @@ export class CustomerPaymentIntentHandler {
       try {
         result = await this.#port.create(input);
       } catch (error) {
+        // WP-2423 Q4: the Store stopped taking orders before payment started; nothing was charged.
+        if (error instanceof CustomerStoreClosedError) {
+          reject(response, 409, "store_closed");
+          return;
+        }
         reject(response, failure(error));
         return;
       }

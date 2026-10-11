@@ -181,6 +181,19 @@ it.each([
   expect(await response.text()).not.toContain("guestSessionReference");
   if (status === 503) expect(response.headers.get("retry-after")).toBe("5");
 });
+it("WP-2423 Q4: says the Store is not taking orders instead of a generic conflict", async () => {
+  const f = await setup();
+  f.create.mockRejectedValue(new CheckoutSessionServiceError("STORE_CLOSED"));
+  const response = await f.send();
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: {
+      code: "checkout_session_store_closed",
+      messageKey: "customer.checkoutSession.store_closed",
+    },
+  });
+});
 it("rejects foreign operation and malformed owner results", async () => {
   const f = await setup();
   for (const session of [

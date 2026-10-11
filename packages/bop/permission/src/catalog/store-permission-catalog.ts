@@ -14,7 +14,7 @@
  * v6 (2026-10-08): allergen registry and ingredient declaration actions (DEC-ALLERGEN-DECLARATIONS);
  * recipe roles may read them.
  */
-export const storePermissionCatalogVersion = 6 as const;
+export const storePermissionCatalogVersion = 7 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -257,6 +257,8 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
   ]),
   ...define("operations", [
     ["operations.order_exception.manage", "Handle payment and order exceptions", "High"],
+    // v7 (WP-2423 Q4): the shift's busy mode — pause and resume taking new online orders.
+    ["operations.ordering.pause", "Pause and resume online ordering for the Store", "Medium"],
   ]),
   ...define("task", [
     ["task.read", "Read the Store task inbox", "Low"],
@@ -355,6 +357,8 @@ export const legacyPermissionReplacements: Readonly<Record<string, readonly stri
       "organization.brand.manage",
     ],
     "store.service.read": ["organization.store.read"],
+    "store.service.pause": ["operations.ordering.pause"],
+    "store.service.resume": ["operations.ordering.pause"],
     "pricing.price-book.manage": ["pricing.price_book.update"],
     // v4: names still checked by the Catalog/Pricing services (DEC-PERM-CATALOG step-wise migration).
     "pricing.price-book.approve": ["pricing.price_book.approve"],

@@ -61,6 +61,7 @@ import { createMerchantStoreTax } from "../../apps/api/dist/merchant-store-tax.j
 import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
 import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
+import { createMerchantServiceControl } from "../../apps/api/dist/merchant-service-control.js";
 import { createMerchantUnmatchedCaptureRefund } from "../../apps/api/dist/merchant-unmatched-capture-refund.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
 export async function createInternalMerchant(
@@ -227,6 +228,13 @@ export async function createInternalMerchant(
           label: "Options",
           href: "/app/commerce/option-sets",
           permission: "catalog.option_set.read",
+        },
+        // WP-2423 Q4: busy mode (pause/resume online ordering) and published hours.
+        {
+          screenId: "STORE-HOURS-SERVICE",
+          label: "Hours & ordering",
+          href: "/app/organization/stores/" + selected.storeReference + "/service",
+          permission: "store.service.read",
         },
         {
           screenId: "CAT-AVAILABILITY",
@@ -696,6 +704,19 @@ export async function createInternalMerchant(
     pickupNotCollected,
     orderAcceptance,
     bff: {
+      // WP-2423 Q4: busy mode — a manager pauses and resumes taking new online orders.
+      ...(() => {
+        const control = createMerchantServiceControl({
+          persistence,
+          authentication: service,
+          audit: {
+            reasonCode: "STORE_SERVICE_CONTROL",
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          },
+        });
+        return { serviceControl: control, serviceControlState: control.read };
+      })(),
       taxConfigAuthoring: createMerchantTaxConfigAuthoring({
         persistence,
         authentication: service,

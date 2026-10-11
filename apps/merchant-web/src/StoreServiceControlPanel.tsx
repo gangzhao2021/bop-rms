@@ -1,5 +1,6 @@
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
-import { AppFrame } from "@bop-rms/ui";
+import { WorkspacePage } from "./WorkspacePage.js";
+import { createStoreConfigurationClient } from "./store-configuration-client.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import {
@@ -12,6 +13,19 @@ import {
   type ServiceInterval,
 } from "./service-control-client.js";
 
+/** "09:00:00" → "9:00 AM"; "23:59:59" → "11:59 PM". */
+export function serviceTime(value: string): string {
+  const [hour = 0, minute = 0] = value.split(":").map(Number);
+  const suffix = hour < 12 ? "AM" : "PM";
+  return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${suffix}`;
+}
+const serviceModeLabel = (mode: string) =>
+  mode === "DineIn" ? "Dine-in" : mode === "Pickup" ? "Pickup" : mode;
+const serviceMinutes = (seconds: number) => {
+  const minutes = Math.round(seconds / 60);
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+};
+
 export function ServiceHoursSummary({
   hours,
   timeZone,
@@ -20,18 +34,21 @@ export function ServiceHoursSummary({
   timeZone: string;
 }) {
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  // WP-2423 Q4: hours in staff language — 9:00 AM, Dine-in, minutes; zero settings are left out.
   const describe = (interval: ServiceInterval) =>
-    interval.startLocalTime +
-    "–" +
-    interval.endLocalTime +
-    (interval.endsNextDay ? " (next day)" : "") +
-    " · " +
-    interval.serviceModes.join(", ") +
-    " · order cutoff " +
-    interval.orderCutoffSeconds +
-    " seconds before closing · preparation lead time " +
-    interval.leadTimeSeconds +
-    " seconds";
+    [
+      serviceTime(interval.startLocalTime) +
+        "–" +
+        serviceTime(interval.endLocalTime) +
+        (interval.endsNextDay ? " (next day)" : ""),
+      interval.serviceModes.map(serviceModeLabel).join(", "),
+      ...(interval.orderCutoffSeconds > 0
+        ? ["last orders " + serviceMinutes(interval.orderCutoffSeconds) + " before closing"]
+        : []),
+      ...(interval.leadTimeSeconds > 0
+        ? ["ready in " + serviceMinutes(interval.leadTimeSeconds)]
+        : []),
+    ].join(" · ");
   return (
     <section aria-labelledby="published-hours-title">
       <h2 id="published-hours-title">Published hours</h2>
@@ -41,7 +58,7 @@ export function ServiceHoursSummary({
           : "Inherited Brand configuration"}{" "}
         · {timeZone}
       </p>
-      <p>Business day starts at {hours.businessDayStartLocalTime} local time.</p>
+      <p>Business day starts at {serviceTime(hours.businessDayStartLocalTime)}.</p>
       <div className="detail-section-grid">
         {hours.weeklySchedule.map((day) => (
           <section key={day.isoWeekday}>
@@ -98,6 +115,18 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
   const controller = useRef<AbortController | null>(null);
   const running = useRef(false);
   const pending = useRef<ServiceControlCommand | null>(null);
+  // WP-2423 Q4: hours editing appears only where this runtime can actually save it.
+  const [configurable, setConfigurable] = useState(false);
+  useEffect(() => {
+    const probe = new AbortController();
+    createStoreConfigurationClient()
+      .load(store, probe.signal)
+      .then(
+        () => setConfigurable(!probe.signal.aborted),
+        () => setConfigurable(false),
+      );
+    return () => probe.abort();
+  }, [store]);
   const load = useCallback(async () => {
     if (running.current || route !== store) return;
     running.current = true;
@@ -212,9 +241,11 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
     );
   const disabled = busy || !online || uncertain;
   return (
-    <AppFrame title="Hours & service" description="STORE-HOURS-SERVICE">
+    <WorkspacePage title="Hours & ordering">
       {view && <ServiceHoursSummary hours={view.hours} timeZone={view.timeZone} />}
-      <StoreConfigurationEditor key={store + csrf} store={store} csrf={csrf} />
+      {configurable ? (
+        <StoreConfigurationEditor key={store + csrf} store={store} csrf={csrf} />
+      ) : null}
       <section aria-labelledby="service-controls-title" aria-busy={busy}>
         <h2 id="service-controls-title">Service controls</h2>
         <p>
@@ -301,6 +332,6 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
           </>
         )}
       </section>
-    </AppFrame>
+    </WorkspacePage>
   );
 }

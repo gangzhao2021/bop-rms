@@ -329,7 +329,8 @@ const merchantNavigation = Object.freeze({
 } as const);
 
 export interface MerchantNavigationItem {
-  readonly screenId: keyof typeof merchantNavigation | "STORE-SETUP" | "ORG-BRAND-DETAIL";
+  readonly screenId:
+    keyof typeof merchantNavigation | "STORE-SETUP" | "STORE-HOURS-SERVICE" | "ORG-BRAND-DETAIL";
   readonly label: string;
   readonly href: string;
   readonly permission: string;
@@ -756,6 +757,23 @@ function navigationItem(value: unknown, selectedStoreReference: string): Merchan
       label: input.label,
       href: input.href,
       permission: "organization.manage",
+    });
+  }
+  // WP-2423 Q4: the selected Store's hours and ordering (pause/resume) page.
+  if (input.screenId === "STORE-HOURS-SERVICE") {
+    const href = "/app/organization/stores/" + selectedStoreReference + "/service";
+    if (
+      typeof input.label !== "string" ||
+      !safeLabel.test(input.label) ||
+      input.href !== href ||
+      input.permission !== "store.service.read"
+    )
+      throw new Error("MERCHANT_WORKSPACE_DENIED");
+    return Object.freeze({
+      screenId: "STORE-HOURS-SERVICE",
+      label: input.label,
+      href,
+      permission: "store.service.read",
     });
   }
   if (input.screenId === "STORE-SETUP") {

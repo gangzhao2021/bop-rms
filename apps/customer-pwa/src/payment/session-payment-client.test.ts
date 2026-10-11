@@ -83,3 +83,19 @@ it("sends explicit simulation confirmation with the same selection and exact tip
     body: JSON.stringify({ tip: { amountMinor: "0", currency: "CAD" } }),
   });
 });
+it("WP-2423 Q4: reports a Store that stopped taking orders before payment started", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { schemaVersion: 1, error: { code: "payment_store_closed" } },
+          { status: 409 },
+        ),
+      ),
+  );
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "store_closed",
+  });
+});

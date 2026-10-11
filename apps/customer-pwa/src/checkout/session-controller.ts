@@ -10,7 +10,7 @@ export type CheckoutSessionState =
   | { readonly status: "idle" | "pending" }
   | { readonly status: "ready"; readonly session: CheckoutSessionView }
   | {
-      readonly status: "unknown" | "denied" | "conflict" | "invalid" | "offline";
+      readonly status: "unknown" | "denied" | "conflict" | "invalid" | "offline" | "store_closed";
       readonly canRetry: boolean;
     };
 export function createCheckoutSessionController(
@@ -58,7 +58,10 @@ export function createCheckoutSessionController(
               : "unknown";
         publish({
           status: code,
-          canRetry: attempt.current() && (code === "unknown" || code === "offline"),
+          // WP-2423 Q4: a closed Store may reopen; the same checkout can be retried then.
+          canRetry:
+            attempt.current() &&
+            (code === "unknown" || code === "offline" || code === "store_closed"),
         });
       } finally {
         flight = null;

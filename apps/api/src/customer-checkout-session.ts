@@ -23,15 +23,16 @@ function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
   response.setHeader("Referrer-Policy", "no-referrer");
 }
-function reject(response: Response, status: number) {
+function reject(response: Response, status: number, explicit?: "store_closed") {
   const code =
-    status === 400
+    explicit ??
+    (status === 400
       ? "request_invalid"
       : status === 404
         ? "not_found"
         : status === 409
           ? "intent_conflict"
-          : "service_unavailable";
+          : "service_unavailable");
   if (status === 503) response.setHeader("Retry-After", "5");
   response.status(status).json({
     schemaVersion: 1,
@@ -111,10 +112,18 @@ export class CustomerCheckoutSessionHandler {
                   PERMISSION_DENIED: 404,
                   INTENT_CONFLICT: 409,
                   DEPENDENCY_UNAVAILABLE: 503,
+                  STORE_CLOSED: 409,
                 } as const
               )[error.code]
             : 503;
-        reject(response, status);
+        // WP-2423 Q4: say plainly that the Store is not taking orders; nothing was charged.
+        reject(
+          response,
+          status,
+          error instanceof CheckoutSessionServiceError && error.code === "STORE_CLOSED"
+            ? "store_closed"
+            : undefined,
+        );
         return;
       }
       try {
@@ -202,6 +211,7 @@ export class CustomerCheckoutSessionReadHandler {
                   PERMISSION_DENIED: 404,
                   INTENT_CONFLICT: 409,
                   DEPENDENCY_UNAVAILABLE: 503,
+                  STORE_CLOSED: 409,
                 } as const
               )[error.code]
             : 503,

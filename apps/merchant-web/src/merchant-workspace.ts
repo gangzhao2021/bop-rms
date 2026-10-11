@@ -22,6 +22,7 @@ export interface MerchantNavigationItem {
     | "HOME-OVERVIEW"
     | "TASK-INBOX"
     | "STORE-SETUP"
+    | "STORE-HOURS-SERVICE"
     | "ORG-STORE-LIST"
     | "ORG-BRAND-DETAIL"
     | "TAX-CONFIG"
@@ -172,6 +173,22 @@ function navigationItem(value: unknown, selectedStoreReference: string): Merchan
       label: input.label,
       href: input.href,
       permission: "organization.manage",
+    });
+  }
+  if (input.screenId === "STORE-HOURS-SERVICE") {
+    const href = "/app/organization/stores/" + selectedStoreReference + "/service";
+    if (
+      typeof input.label !== "string" ||
+      !SAFE_LABEL.test(input.label) ||
+      input.href !== href ||
+      input.permission !== "store.service.read"
+    )
+      throw new Error("MERCHANT_WORKSPACE_INVALID");
+    return Object.freeze({
+      screenId: "STORE-HOURS-SERVICE",
+      label: input.label,
+      href,
+      permission: "store.service.read",
     });
   }
   if (input.screenId === "STORE-SETUP") {

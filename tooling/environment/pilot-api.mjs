@@ -1,3 +1,4 @@
+import { CustomerStoreClosedError } from "../../apps/api/dist/customer-store-open-gate.js";
 import { createLocalCustomerRuntime } from "../../apps/api/dist/local-customer-runtime.js";
 import { HealthReadinessController } from "../../apps/api/dist/health-readiness.js";
 /** Internal test composition only. All unconfigured business routes remain unavailable. */
@@ -76,7 +77,14 @@ export async function createRuntime(
         pickup: orders.orderSubmission,
         dining: diningOrders.orderSubmission,
       },
-      paymentIntent,
+      // WP-2423 Q4: payment does not start once the Store stops taking this order.
+      paymentIntent: {
+        ...paymentIntent,
+        async create(input) {
+          if (!(await diningCheckout.takesOrder(input))) throw new CustomerStoreClosedError();
+          return paymentIntent.create(input);
+        },
+      },
       paymentResult: paymentTerminal.resultOptions,
       receipt: {
         financial: {
