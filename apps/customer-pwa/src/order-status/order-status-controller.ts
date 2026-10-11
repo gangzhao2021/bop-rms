@@ -156,6 +156,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "pickup")
       ? ["pickup"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidCancellation")
+      ? ["unpaidCancellation"]
+      : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
@@ -271,12 +274,24 @@ function parseSources(
             notCollectedAt: sourceInstant(exact(raw.pickup, ["notCollectedAt"]).notCollectedAt),
           });
   }
+  // WP-2423 Q12: a pickup cancelled because its payment window ended unpaid (Pickup only).
+  let unpaidCancellation: OrderStatusSources["unpaidCancellation"];
+  if (Object.hasOwn(raw, "unpaidCancellation")) {
+    if (orderType !== "Pickup") return invalid();
+    unpaidCancellation =
+      raw.unpaidCancellation === null
+        ? null
+        : Object.freeze({
+            cancelledAt: sourceInstant(exact(raw.unpaidCancellation, ["cancelledAt"]).cancelledAt),
+          });
+  }
   return Object.freeze({
     checkedAt,
     kitchen,
     payments,
     ...(dining ? { dining } : {}),
     ...(pickup === undefined ? {} : { pickup }),
+    ...(unpaidCancellation === undefined ? {} : { unpaidCancellation }),
   });
 }
 

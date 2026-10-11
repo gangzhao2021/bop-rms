@@ -72,6 +72,11 @@ export async function createInternalWorker(resources, observers = {}, options = 
         resources,
         observers.inventoryRelease,
       ),
+      // WP-2423 Q12: always on; unpaid pickup orders close after the payment window and return stock.
+      dependencies.createInternalPickupPaymentExpiryWorkload(
+        resources,
+        observers.pickupPaymentExpiry,
+      ),
       ...(await createOptionalCompensationWorkloads({
         enabled: options.compensation,
         resources,

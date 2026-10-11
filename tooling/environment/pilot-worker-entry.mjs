@@ -40,6 +40,10 @@ export async function startPilotBusinessWorker({
           directory,
           "business-inventory-release",
         ),
+        pickupPaymentExpiry: createPilotWorkloadHealthObserver(
+          directory,
+          "business-pickup-payment-expiry",
+        ),
         diningCheckoutExpiry: createPilotWorkloadHealthObserver(
           directory,
           "business-dining-checkout-expiry",

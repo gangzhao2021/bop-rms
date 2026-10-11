@@ -311,7 +311,9 @@ before restarting. Invalid, old-process or missing records are unavailable, neve
 assumed healthy. Diagnostic writes happen on actual cycle/lifecycle changes and
 introduce no extra polling timer. Business-worker output contains separate `events` and `paymentWait` observations.
 It also always contains `inventoryRelease`: the loop that returns stock reserved by paid
-submissions Ordering decided it cannot fulfil (started or consumed stock is left for staff).
+submissions Ordering decided it cannot fulfil (started or consumed stock is left for staff),
+and `pickupPaymentExpiry`: the loop that cancels unpaid pickup orders once their 30-minute
+payment window ended and returns their reserved stock (a later payment is refunded).
 Each has its own report age and cycle/completion times, so an active loop cannot
 make another loop appear current. Both records must match the current process.
 The event-cycle observation includes parked retries, consumer retries and outbox

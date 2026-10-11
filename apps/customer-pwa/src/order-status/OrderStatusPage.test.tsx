@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
-import { OrderStatusPage } from "./OrderStatusPage.js";
+import { OrderStatusPage, isOrderSettled } from "./OrderStatusPage.js";
 import type { OrderStatusController } from "./order-status-controller.js";
 import type { OrderStatusState } from "./types.js";
 
@@ -377,4 +377,26 @@ it("WP-2423: says a pickup was not collected and stops offering the pickup code"
   expect(html).toContain("Contact the store");
   expect(html).not.toContain("pickup code");
   expect(html).not.toContain("Order collected");
+});
+
+it("WP-2423 Q12: says an unpaid pickup was cancelled and stops offering the pickup code", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const view = {
+    ...state.view,
+    sources: {
+      checkedAt: "2026-08-11T14:00:00.000Z",
+      kitchen: null,
+      payments: [],
+      pickup: null,
+      unpaidCancellation: { cancelledAt: "2026-08-11T13:59:00.000Z" },
+    },
+  };
+  const html = render({ ...state, view });
+  expect(html).toContain("Order cancelled");
+  expect(html).toContain("Payment wasn&#x27;t completed within 30 minutes");
+  expect(html).toContain("Not paid");
+  expect(html).not.toContain("pickup code");
+  expect(html).not.toContain("Order submitted");
+  expect(isOrderSettled(view)).toBe(true);
 });

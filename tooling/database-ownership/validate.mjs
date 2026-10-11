@@ -2087,6 +2087,20 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "ordering",
             tables: ["order_header", "order_submission_record", "order_batch"],
           },
+          // WP-2423 Q12: unpaid pickup Orders closed after the payment window (System termination).
+          "src/infrastructure/persistence/pickup-payment-window-closure-store.ts": {
+            owner: "ordering",
+            tables: [
+              "order_header",
+              "order_batch",
+              "order_capacity_link",
+              "order_termination_record",
+              "order_acceptance_record",
+              "order_fulfillment_completion_record",
+              "order_payment_acceptance_wait",
+              "order_payment_disposition_record",
+            ],
+          },
           "src/infrastructure/persistence/order-batch-identity-source.ts": {
             owner: "ordering",
             tables: ["order_header", "order_submission_record", "order_batch"],

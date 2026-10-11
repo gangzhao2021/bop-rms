@@ -181,6 +181,7 @@ function audit(
 export const systemReservationReleaseReasonCodes = Object.freeze([
   "CHECKOUT_DEADLINE_REACHED",
   "PAID_WITHOUT_FULFILLABLE_ORDER",
+  "PAYMENT_WINDOW_EXPIRED",
 ] as const);
 export type SystemReservationReleaseReasonCode =
   (typeof systemReservationReleaseReasonCodes)[number];

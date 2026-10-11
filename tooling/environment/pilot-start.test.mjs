@@ -18,6 +18,7 @@ function fixture() {
               events: cycle,
               paymentWait: cycle,
               inventoryRelease: cycle,
+              pickupPaymentExpiry: cycle,
               diningCheckoutExpiry: cycle,
             },
           }
@@ -66,6 +67,8 @@ it.each([
   ["paymentWait", { state: "failed" }],
   ["inventoryRelease", { state: "failed" }],
   ["inventoryRelease", undefined],
+  ["pickupPaymentExpiry", { state: "failed" }],
+  ["pickupPaymentExpiry", undefined],
   ["diningCheckoutExpiry", { state: "failed" }],
   ["diningCheckoutExpiry", undefined],
   ["diningCheckoutExpiry", { state: "running", completedCycles: 0, lastCycleCompletedAt: null }],

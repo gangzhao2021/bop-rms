@@ -163,3 +163,34 @@ it("WP-2423: serializes only the not-collected time of a pickup source", async (
   const without = (await (await f.send()).json()) as typeof body;
   expect(without.status.sources).not.toHaveProperty("pickup");
 });
+it("WP-2423 Q12: serializes only the time a pickup was cancelled for an unpaid payment window", async () => {
+  const f = await setup();
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      pickup: null,
+      unpaidCancellation: { cancelledAt: "2026-09-12T11:40:00.000Z", reasonCode: "private" },
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.unpaidCancellation).toEqual({
+    cancelledAt: "2026-09-12T11:40:00.000Z",
+  });
+  expect(JSON.stringify(body)).not.toContain("private");
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      unpaidCancellation: null,
+    },
+  });
+  const open = (await (await f.send()).json()) as typeof body;
+  expect(open.status.sources.unpaidCancellation).toBeNull();
+});

@@ -21,7 +21,8 @@ export function isOrderSettled(view: OrderStatusView): boolean {
     phase === "Cancelled" ||
     phase === "Rejected" ||
     view.order.fulfillmentStatus === "Completed" ||
-    Boolean(view.sources?.pickup?.notCollectedAt)
+    Boolean(view.sources?.pickup?.notCollectedAt) ||
+    Boolean(view.sources?.unpaidCancellation?.cancelledAt)
   );
 }
 
@@ -47,6 +48,8 @@ function StatusContent({
     view.order.orderType === "Pickup" && view.order.fulfillmentStatus === "Completed";
   const notCollected =
     view.order.orderType === "Pickup" && !complete && Boolean(view.sources?.pickup?.notCollectedAt);
+  const unpaidCancelled =
+    view.order.orderType === "Pickup" && Boolean(view.sources?.unpaidCancellation?.cancelledAt);
   const kitchen = view.sources?.kitchen;
   const kitchenLabel = kitchenStatus(view);
   const diningItems = view.order.orderType === "DineIn" ? view.sources?.dining?.items : undefined;
@@ -63,8 +66,12 @@ function StatusContent({
       ),
     );
   const someServed = diningItems?.some((item) => item.servedQuantity > 0) === true;
-  const [progressHeading, progressMessage] =
-    view.order.canonicalPhase === "Cancelled"
+  const [progressHeading, progressMessage] = unpaidCancelled
+    ? [
+        "Order cancelled",
+        "Payment wasn't completed within 30 minutes, so this order was cancelled. If a payment still goes through, it will be refunded automatically.",
+      ]
+    : view.order.canonicalPhase === "Cancelled"
       ? ["Order cancelled", "Your order has been cancelled."]
       : view.order.canonicalPhase === "Rejected"
         ? ["Order not accepted", "Your order was not accepted."]
@@ -99,9 +106,11 @@ function StatusContent({
       ? "Payment updates unavailable"
       : paid?.amount
         ? `Payment received ${formatMoney(paid.amount.amountMinor, paid.amount.currencyCode)}`
-        : payments.some((payment) => payment.status === "Failed")
-          ? "Payment attempt failed"
-          : "Payment pending";
+        : unpaidCancelled
+          ? "Not paid"
+          : payments.some((payment) => payment.status === "Failed")
+            ? "Payment attempt failed"
+            : "Payment pending";
   const multipleBatches = view.order.batches.length > 1;
   const total = view.order.batches
     .flatMap((batch) => batch.items)
@@ -138,7 +147,7 @@ function StatusContent({
         </dl>
       </section>
 
-      {view.order.orderType === "Pickup" && !complete && !notCollected ? (
+      {view.order.orderType === "Pickup" && !complete && !notCollected && !unpaidCancelled ? (
         <PickupCodePanel
           orderReference={view.order.orderReference}
           orderNumber={view.order.orderNumber}

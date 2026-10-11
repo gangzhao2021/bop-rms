@@ -26,6 +26,8 @@ export interface OrderStatusSources {
       }[];
   /** WP-2423: a pickup the Store closed as not collected after the pickup time (Pickup only). */
   readonly pickup?: null | { readonly notCollectedAt: string };
+  /** WP-2423 Q12: when a pickup was cancelled because payment was not completed in time. */
+  readonly unpaidCancellation?: null | { readonly cancelledAt: string };
 }
 
 export interface OrderStatusView {

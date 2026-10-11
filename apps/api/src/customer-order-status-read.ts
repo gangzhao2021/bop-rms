@@ -13,6 +13,7 @@ import {
 } from "@bop/identity";
 import {
   createOrderStatusQueryService,
+  loadPickupPaymentWindowClosure,
   createPostgresOrderStatusProjectionStore,
   OrderStatusProjectionError,
   parseOrderingReference,
@@ -208,6 +209,11 @@ export function createCustomerOrderStatusRead(
             result.order.orderType === "Pickup" && (await stillAuthorized())
               ? await loadPickupNotCollected(transaction, options.scope, orderReference)
               : undefined;
+          // WP-2423 Q12: a pickup the System cancelled because its payment window ended unpaid.
+          const unpaid =
+            result.order.orderType === "Pickup" && (await stillAuthorized())
+              ? await loadPickupPaymentWindowClosure(transaction, options.scope, orderReference)
+              : undefined;
           if (!(await stillAuthorized()))
             throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
           const checkedAt = now();
@@ -230,6 +236,11 @@ export function createCustomerOrderStatusRead(
               ...(pickup === undefined
                 ? {}
                 : { pickup: pickup === null ? null : { notCollectedAt: pickup.closedAt } }),
+              ...(unpaid === undefined
+                ? {}
+                : {
+                    unpaidCancellation: unpaid === null ? null : { cancelledAt: unpaid.closedAt },
+                  }),
             },
           };
         });

@@ -376,3 +376,4 @@ export {
   OrderItemInventoryLinkError,
   type OrderItemInventoryLink,
 } from "./infrastructure/persistence/order-item-inventory-link-reader.js";
+export * from "./infrastructure/persistence/pickup-payment-window-closure-store.js";

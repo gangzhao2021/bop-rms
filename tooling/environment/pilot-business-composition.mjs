@@ -25,6 +25,7 @@ import { createInternalKitchenQueue } from "./pilot-kitchen-queue.mjs";
 import { createInternalDiningCheckoutExpiryWorkload } from "./pilot-dining-checkout-expiry.mjs";
 import { createInternalCartExpiryWorkload } from "./pilot-cart-expiry.mjs";
 import { createInternalPaidWithoutFulfillableInventoryWorkload } from "./pilot-paid-without-fulfillable-inventory.mjs";
+import { createInternalPickupPaymentExpiryWorkload } from "./pilot-pickup-payment-expiry.mjs";
 import { createInternalWorkerServices } from "./pilot-worker-services.mjs";
 import { createInternalWorker } from "./pilot-worker.mjs";
 
@@ -55,6 +56,7 @@ const factories = {
   createInternalDiningCheckoutExpiryWorkload,
   createInternalCartExpiryWorkload,
   createInternalPaidWithoutFulfillableInventoryWorkload,
+  createInternalPickupPaymentExpiryWorkload,
   createInternalWorkerServices,
   createInternalWorker,
 };
@@ -158,6 +160,11 @@ export function composeConfiguredBusinessWorker({
       createInternalPaidWithoutFulfillableInventoryWorkload: (r, observer) =>
         f.createInternalPaidWithoutFulfillableInventoryWorkload(r, observer, {
           systemActorReference: config.actors.paidOutcome,
+        }),
+      createInternalPickupPaymentExpiryWorkload: (r, observer) =>
+        f.createInternalPickupPaymentExpiryWorkload(r, observer, {
+          systemActorReference: config.actors.paidOutcome,
+          ...account,
         }),
       createInternalDiningCheckoutExpiryWorkload: (r, observer) =>
         f.createInternalDiningCheckoutExpiryWorkload(r, observer, account),

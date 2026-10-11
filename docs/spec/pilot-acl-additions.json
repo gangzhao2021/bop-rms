@@ -2295,6 +2295,15 @@
       "privilege": "SELECT",
       "principal": "api",
       "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content (the authoring insert's integrity check reads the original-operation history)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_termination_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-11 (继续: Q12 close unpaid pickup orders after the payment window and release their stock)"
     }
   ]
 }

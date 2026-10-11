@@ -178,6 +178,14 @@ export class CustomerOrderStatusHandler {
                             ? null
                             : { notCollectedAt: sources.pickup.notCollectedAt },
                       }),
+                  ...(sources.unpaidCancellation === undefined
+                    ? {}
+                    : {
+                        unpaidCancellation:
+                          sources.unpaidCancellation === null
+                            ? null
+                            : { cancelledAt: sources.unpaidCancellation.cancelledAt },
+                      }),
                 },
               };
         response.status(200).json({ schemaVersion: 1, status: { ...status, ...publicSources } });

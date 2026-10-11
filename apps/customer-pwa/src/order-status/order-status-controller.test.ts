@@ -313,6 +313,39 @@ describe("independent order status sources", () => {
       ),
     ).toThrow();
   });
+  it("WP-2423 Q12: admits an unpaid pickup cancellation only for Pickup and within the source window", () => {
+    const input = sourced();
+    const cancelled = {
+      ...input,
+      sources: {
+        ...input.sources,
+        unpaidCancellation: { cancelledAt: "2026-08-11T13:59:30.000Z" },
+      },
+    };
+    expect(parseOrderStatusView(cancelled, id(1)).sources?.unpaidCancellation).toEqual({
+      cancelledAt: "2026-08-11T13:59:30.000Z",
+    });
+    expect(
+      parseOrderStatusView(
+        { ...input, sources: { ...input.sources, unpaidCancellation: null } },
+        id(1),
+      ).sources?.unpaidCancellation,
+    ).toBeNull();
+    for (const sources of [
+      { ...cancelled.sources, unpaidCancellation: { cancelledAt: "2026-08-11T14:01:00.000Z" } },
+      {
+        ...cancelled.sources,
+        unpaidCancellation: { cancelledAt: "2026-08-11T13:59:30.000Z", reason: "x" },
+      },
+    ])
+      expect(() => parseOrderStatusView({ ...cancelled, sources }, id(1))).toThrow();
+    expect(() =>
+      parseOrderStatusView(
+        { ...cancelled, order: { ...cancelled.order, orderType: "DineIn" } },
+        id(1),
+      ),
+    ).toThrow();
+  });
   it("accepts a scoped nonempty subset without inventing another batch state", () => {
     const input = sourced();
     const first = input.order.batches[0];

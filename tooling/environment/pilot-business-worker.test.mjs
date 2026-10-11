@@ -180,3 +180,22 @@ it("always composes the paid-without-fulfillable inventory release with the paid
     systemActorReference: config.actors.paidOutcome,
   });
 });
+it("always composes the unpaid pickup closure with the paid outcome System actor and provider account", async () => {
+  const expiry = vi.fn(() => "workload");
+  const compose = composeConfiguredBusinessWorker({
+    directory: "/synthetic",
+    config,
+    installation: {},
+    implementations: {
+      createInternalWorker: async (r, observers, _options, dependencies) =>
+        dependencies.createInternalPickupPaymentExpiryWorkload(r, observers.pickupPaymentExpiry),
+      createInternalPickupPaymentExpiryWorkload: expiry,
+    },
+  });
+  // WP-2423 Q12: not behind a workloads option.
+  expect(await compose("resources", { pickupPaymentExpiry: "observer" }, {})).toBe("workload");
+  expect(expiry).toHaveBeenCalledWith("resources", "observer", {
+    systemActorReference: config.actors.paidOutcome,
+    providerAccountReference: config.providerAccountReference,
+  });
+});
