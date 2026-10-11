@@ -36,6 +36,64 @@ export interface PublishedOptionRule {
     readonly defaultQuantity?: number;
   }[];
 }
+/** One option a customer starts with, as Recipe and Inventory read a selection. */
+export interface PublishedDefaultOptionSelection {
+  readonly bindingReference: CatalogReference;
+  readonly optionReference: CatalogReference;
+  readonly quantity: number;
+}
+
+/**
+ * WP-2423 Q12: the choices an item starts with on a channel, as the customer menu presents it —
+ * each enabled option's default quantity (1 for a selected default on a rule published before
+ * option quantities), on rules offered on that channel whose activating option is itself one of
+ * those defaults (activation is acyclic, checked at publication). This is the item "as normally
+ * ordered", used to observe whether it can still be made from stock; it is not a customer choice.
+ */
+export function publishedDefaultOptionSelections(
+  rules: readonly PublishedOptionRule[],
+  channelCode: string,
+): readonly PublishedDefaultOptionSelection[] {
+  const offered = rules.filter(
+    (rule) =>
+      rule.semanticsVersion !== 2 || rule.channelCodes?.some((channel) => channel === channelCode),
+  );
+  const selected = new Map<string, PublishedDefaultOptionSelection>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const rule of offered) {
+      const activation = rule.activationOptionReferences ?? [];
+      if (activation.length > 0 && !activation.some((reference) => selected.has(reference)))
+        continue;
+      for (const option of rule.options) {
+        if (
+          selected.has(option.optionReference) ||
+          !rule.enabledOptionReferences.includes(option.optionReference)
+        )
+          continue;
+        const quantity =
+          rule.semanticsVersion === 2
+            ? (option.defaultQuantity ?? 0)
+            : option.selectedByDefault
+              ? 1
+              : 0;
+        if (quantity < 1) continue;
+        selected.set(
+          option.optionReference,
+          Object.freeze({
+            bindingReference: rule.bindingReference,
+            optionReference: option.optionReference,
+            quantity,
+          }),
+        );
+        changed = true;
+      }
+    }
+  }
+  return Object.freeze([...selected.values()]);
+}
+
 export interface PublishedSellableSnapshot {
   readonly placementReference: CatalogReference;
   readonly sellableReference: CatalogReference;

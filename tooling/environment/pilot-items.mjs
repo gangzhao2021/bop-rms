@@ -1,7 +1,11 @@
 import { createInternalReadTransactions } from "./pilot-read-transactions.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createHash } from "node:crypto";
-export async function createInternalTestItems(resources, { saved, expectedDatabaseName }) {
+import {
+  createCustomerCatalogInventoryPort,
+  createCustomerInventoryEvidence,
+} from "../../apps/api/dist/customer-menu-inventory-evidence.js";
+function checkedInventory(resources, { saved, expectedDatabaseName }) {
   if (
     saved.environment !== "InternalTest" ||
     saved.database !== expectedDatabaseName ||
@@ -9,6 +13,18 @@ export async function createInternalTestItems(resources, { saved, expectedDataba
     saved.scope.storeReference !== resources.scope.storeReference
   )
     throw new Error("INTERNAL_INVENTORY_REQUIRED");
+  return saved;
+}
+/** WP-2423 Q12: the Store's stock observation shared by the menu, cart, Quote and checkout. */
+export function createInternalInventoryEvidence(resources, installed) {
+  const saved = checkedInventory(resources, installed);
+  return createCustomerInventoryEvidence({
+    scope: saved.scope,
+    resolveExpiryCutoff: createInternalExpiryCutoff(resources),
+  });
+}
+export async function createInternalTestItems(resources, installed) {
+  const saved = checkedInventory(resources, installed);
   const reads = createInternalReadTransactions(resources);
   const evidence = (request, kind, status) => ({
     kind,
@@ -34,10 +50,17 @@ export async function createInternalTestItems(resources, { saved, expectedDataba
         channelCode: "CUSTOMER_PWA",
         orderTypeCode: "PICKUP",
       },
-      // Explicit isolated DEMO safety policy; selected quantity inventory still reads owner tables.
+      // Explicit isolated DEMO kill-switch policy. Inventory is the Store's actual stock for the
+      // item as normally ordered (the menu's sold-out source); the selected quantity and options
+      // are still checked against stock separately.
       catalogSafety: {
         killSwitch: { loadEvidence: async (request) => evidence(request, "KillSwitch", "Clear") },
-        inventory: { loadEvidence: async (request) => evidence(request, "Inventory", "Available") },
+        inventory: createCustomerCatalogInventoryPort({
+          evidence: createInternalInventoryEvidence(resources, installed),
+          transactions: reads,
+          menuReference: resources.menu.menuReference,
+          sourceChannel: "Qr",
+        }),
       },
       selectedInventory: {
         scope: saved.scope,

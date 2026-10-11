@@ -14,7 +14,7 @@ import { createInternalSimulatedProvider } from "./pilot-payment-provider.mjs";
 import { createInternalOrder } from "./pilot-order.mjs";
 import { createInternalCheckout } from "./pilot-checkout.mjs";
 import { createInternalCheckoutDetails } from "./pilot-checkout-details.mjs";
-import { createInternalTestItems } from "./pilot-items.mjs";
+import { createInternalInventoryEvidence, createInternalTestItems } from "./pilot-items.mjs";
 import { createInternalTestCart } from "./pilot-cart.mjs";
 import { createInternalCustomerEntry } from "./pilot-customer-entry.mjs";
 import { createInternalPickupEntry } from "./pilot-entry.mjs";
@@ -136,11 +136,16 @@ export function composeCustomerDependencies(directory, installation, config) {
         expectedDatabaseName,
       }),
     // WP-2423 8.6: the menu shows the Store's offers, sold-out items and the prices the Quote uses.
+    // WP-2423 Q12: items whose ingredients have run out show sold out, from the Store's stock.
     createInternalMenuStoreFacts: async (r) =>
       createCustomerMenuStoreFacts({
         transactions: createInternalReadTransactions(r),
         currencyMetadata: (await pricing()).currencyMetadata,
         priceChannelCode: "CUSTOMER_WEB",
+        inventory: createInternalInventoryEvidence(r, {
+          saved: await installation.loadCustomerData("internal-test-inventory.json"),
+          expectedDatabaseName,
+        }),
       }),
     createInternalChannelQuote: (r, e, c, i) =>
       createInternalChannelQuote(r, e, c, i, {

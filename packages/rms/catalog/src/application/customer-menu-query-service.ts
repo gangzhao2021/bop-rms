@@ -16,6 +16,7 @@ import {
 } from "../domain/product.js";
 import {
   parsePublishedMenuProjection,
+  publishedDefaultOptionSelections,
   type PublishedMenuProjection,
 } from "../domain/published-menu-projection.js";
 import type {
@@ -374,6 +375,27 @@ export function createCustomerMenuQueryService(ports: CustomerMenuQueryPorts) {
                       })),
                     ),
                 ),
+              ),
+            ),
+            // Each shown item as normally ordered, so the Store's stock can be observed for it.
+            items: Object.freeze(
+              projection.snapshot.sections.flatMap((section) =>
+                section.sellables
+                  .filter(
+                    (item) =>
+                      item.configuredAvailability === "Available" &&
+                      item.presentationRole !== "Hidden",
+                  )
+                  .map((item) =>
+                    Object.freeze({
+                      sellableReference: item.sellableReference,
+                      productVersionReference: item.productVersionReference,
+                      defaultOptionSelections: publishedDefaultOptionSelections(
+                        item.optionRules,
+                        input.channelCode,
+                      ),
+                    }),
+                  ),
               ),
             ),
           });

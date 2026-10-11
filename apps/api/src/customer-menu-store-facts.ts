@@ -1,5 +1,6 @@
 import {
   listStoreAvailabilityRules,
+  parseAvailabilitySafetyEvidence,
   parseCatalogCode,
   parseCatalogInstant,
   parseCatalogReference,
@@ -18,12 +19,16 @@ import {
   resolvePrice,
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
+import type { CustomerInventoryEvidenceSource } from "./customer-menu-inventory-evidence.js";
 
 /**
  * WP-2423 8.6: what the customer menu shows for each item at the Store — whether the Store offers
  * it, whether it is sold out, and its current base price from the Store's assigned price book (the
  * same book, channel and order type the Quote prices from). WP-2423 slice 4.5: and what one of each
  * published option adds, from the current option prices the Quote uses. Tax is added in the Quote.
+ * WP-2423 Q12: and whether its ingredients have run out — an offered item one of which (with its
+ * default choices) cannot be made from current stock shows sold out, the same as a manual sold
+ * out, until stock is received or released. Unknown stock never marks an item sold out.
  */
 export function createCustomerMenuStoreFacts(options: {
   /** A read-only transaction the caller owns and releases. */
@@ -33,6 +38,8 @@ export function createCustomerMenuStoreFacts(options: {
   readonly currencyMetadata: CurrencyMetadataSnapshot;
   /** The pricing channel the Quote uses for this customer channel. */
   readonly priceChannelCode: string;
+  /** Stock observation in the same read; without it items are never sold out from stock. */
+  readonly inventory?: CustomerInventoryEvidenceSource;
 }): NonNullable<CustomerMenuQueryPorts["storeFacts"]> {
   const orderTypes: Readonly<Record<string, "Pickup" | "DineIn">> = {
     PICKUP: "Pickup",
@@ -158,6 +165,51 @@ export function createCustomerMenuStoreFacts(options: {
             price,
             optionPrices,
           });
+        }
+        // Read last, so a failed stock read cannot disturb the Store's offers and prices above.
+        // One observation per shown item in this same read-only transaction (bounded by the
+        // evidence source); the cost grows with menu size, not with customers or stock history.
+        if (options.inventory !== undefined && input.items !== undefined) {
+          let stock: ReadonlyMap<string, unknown> = new Map();
+          try {
+            stock = await options.inventory.observe(tx as never, {
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+              observedAt: String(input.requestedAt),
+              // Only items otherwise shown as available can become sold out from stock.
+              items: input.items.filter(
+                (item) => facts.get(item.sellableReference)?.availability === "Available",
+              ),
+            });
+          } catch {
+            // Unknown stock never hides or sells out an item; add-to-cart checks stock again.
+          }
+          for (const [sellable, fact] of facts) {
+            const observed = stock.get(sellable);
+            if (fact.availability !== "Available" || observed === undefined) continue;
+            try {
+              // Stock only narrows an offered item. Indeterminate evidence is not passed on: it
+              // would make Catalog treat the item as not offered and hide it.
+              const evidence = parseAvailabilitySafetyEvidence(observed);
+              if (
+                evidence.kind === "Inventory" &&
+                evidence.status === "Unavailable" &&
+                resolveStoreAvailability({
+                  brandReference: parseCatalogReference(scope.brandReference),
+                  storeReference: parseCatalogReference(scope.storeReference),
+                  sellableReference: parseCatalogReference(sellable),
+                  channelCode: parseCatalogCode(input.channelCode),
+                  orderTypeCode: parseCatalogCode(input.orderTypeCode),
+                  at: parseCatalogInstant(input.requestedAt),
+                  rules: rules.filter((rule) => rule.sellableReference === sellable),
+                  safetyEvidence: [evidence],
+                }).status === "Unavailable"
+              )
+                facts.set(sellable, { ...fact, availability: "SoldOut" });
+            } catch {
+              // Malformed evidence is unknown stock.
+            }
+          }
         }
         return facts;
       });

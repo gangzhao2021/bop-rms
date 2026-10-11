@@ -3,6 +3,7 @@ import type {
   CustomerMenuQueryResult,
 } from "../../contracts/customer-menu-query.js";
 import type { PublishedMenuProjection } from "../../contracts/published-menu-projection.js";
+import type { PublishedDefaultOptionSelection } from "../../domain/published-menu-projection.js";
 import type { CatalogReference } from "../../contracts/product.js";
 
 export interface CustomerMenuStoreContext {
@@ -49,6 +50,15 @@ export interface CustomerMenuQueryPorts {
         readonly sellableReference: CatalogReference;
         readonly bindingReference: CatalogReference;
         readonly optionReference: CatalogReference;
+      }[];
+      /**
+       * WP-2423 Q12: each item as normally ordered on this channel — its published product version
+       * and default option choices — so the Store's stock can be observed for it.
+       */
+      readonly items?: readonly {
+        readonly sellableReference: CatalogReference;
+        readonly productVersionReference: CatalogReference;
+        readonly defaultOptionSelections: readonly PublishedDefaultOptionSelection[];
       }[];
     }): Promise<ReadonlyMap<string, CustomerMenuStoreFact>>;
   };
