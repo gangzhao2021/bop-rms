@@ -300,6 +300,7 @@ export {
   listStoreOrderNumbers,
   listStoreUnfulfillablePaidOrders,
   listStorePaidOrderBatches,
+  listStoreConfirmedOrderBatches,
   listStoreKitchenOrderLabels,
   loadMerchantOrderLines,
   type MerchantOrderLine,
@@ -377,3 +378,23 @@ export {
   type OrderItemInventoryLink,
 } from "./infrastructure/persistence/order-item-inventory-link-reader.js";
 export * from "./infrastructure/persistence/pickup-payment-window-closure-store.js";
+
+// WP-2423 Q6: store staff cancel a paid, accepted Order/Batch before the kitchen starts it.
+export {
+  staffOrderCancellationReasonCodes,
+  staffOrderCancellationPolicy,
+  parseStaffOrderCancellationRecord,
+  parseStaffOrderCancellationPlan,
+  staffOrderCancellationDisposition,
+  StaffOrderCancellationError,
+  type StaffOrderCancellationReasonCode,
+  type StaffOrderCancellationRecord,
+  type StaffOrderCancellationPlan,
+  type StaffOrderCancellationPayment,
+} from "./application/staff-order-cancellation.js";
+export {
+  createPostgresStaffOrderCancellationStore,
+  createPostgresStaffOrderCancellationReader,
+  type StaffOrderCancellationPreparation,
+  type StaffOrderCancellationNotEligibleReason,
+} from "./infrastructure/persistence/staff-order-cancellation-store.js";

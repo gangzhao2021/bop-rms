@@ -150,7 +150,10 @@ export function createPostgresAdditionalDiningBatchStore(options: {
         row.version !== snapshot.expectedOrderVersion ||
         row.batch_count !== snapshot.batchSequence - 1 ||
         typeof row.kind !== "string" ||
-        !["Initial", "AdditionalBatch", "Acceptance"].includes(row.kind) ||
+        // WP-2423 Q6: after staff cancel one Batch the guest may still order at the table.
+        !["Initial", "AdditionalBatch", "Acceptance", "StaffBatchCancellation"].includes(
+          row.kind,
+        ) ||
         instant(row.occurred_at) > batch.submittedAt
       )
         return fail();

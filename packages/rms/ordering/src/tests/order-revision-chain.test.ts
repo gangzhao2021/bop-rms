@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { resolveOrderRevisionChain } from "../domain/order-revision-chain.js";
+import { parseOrderRevision, resolveOrderRevisionChain } from "../domain/order-revision-chain.js";
 const id = (n: number) => "0190ed26-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-09-13T12:00:00.000Z";
 function fixture() {
@@ -103,4 +103,22 @@ it("includes a Batch cancellation without resetting other Order revision history
     kind: "BatchCancellation",
   });
   expect(resolveOrderRevisionChain(f)).toMatchObject({ version: 4, checkpoint: id(7) });
+});
+
+it("includes a staff Batch cancellation and later revisions (WP-2423 Q6)", () => {
+  const f = fixture();
+  f.revisions.push({
+    ...f.revisions[0],
+    brandReference: f.brandReference,
+    storeReference: f.storeReference,
+    orderReference: f.orderReference,
+    occurredAt: at,
+    revisionReference: id(7),
+    previousRevisionReference: id(6),
+    expectedVersion: 3,
+    version: 4,
+    kind: "StaffBatchCancellation",
+  });
+  expect(resolveOrderRevisionChain(f)).toMatchObject({ version: 4, checkpoint: id(7) });
+  expect(parseOrderRevision(f.revisions.at(-1)).kind).toBe("StaffBatchCancellation");
 });

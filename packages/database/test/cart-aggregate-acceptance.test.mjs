@@ -63,6 +63,7 @@ async function prove(context) {
       { table_name: "order_payment_disposition_record" },
       { table_name: "order_payment_failure_record" },
       { table_name: "order_revision" },
+      { table_name: "order_staff_cancellation" },
       { table_name: "order_status_projection" },
       { table_name: "order_status_projection_generation" },
       { table_name: "order_submission_record" },

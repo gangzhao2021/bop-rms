@@ -201,11 +201,13 @@ export function createMerchantOrderQueueRead(options: {
                   batches: execution.batches.map((batch) => ({
                     orderBatchReference: batch.orderBatchReference,
                     sequence: batch.sequence,
-                    acceptanceStatus: batch.cancellation
-                      ? "Cancelled"
-                      : batch.acceptance
-                        ? "Accepted"
-                        : "NotAccepted",
+                    // WP-2423 Q6: a batch staff cancelled after acceptance is Cancelled too.
+                    acceptanceStatus:
+                      batch.cancellation || batch.staffCancellation
+                        ? "Cancelled"
+                        : batch.acceptance
+                          ? "Accepted"
+                          : "NotAccepted",
                   })),
                 };
           },

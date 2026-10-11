@@ -41,6 +41,7 @@ describe("customer-safe Kitchen status", () => {
     ["In Progress", false, "InProgress"],
     ["Completed", false, "InProgress"],
     ["Completed", true, "Ready"],
+    ["Cancelled", false, "Cancelled"],
   ] as const)("maps %s with ready result %s to %s", async (status, ready, expected) => {
     const f = fixture(status, ready);
     const result = await f.load();
@@ -59,6 +60,19 @@ describe("customer-safe Kitchen status", () => {
     });
     expect(f.query.mock.calls[0]?.[1]).toEqual([id(1), id(2), id(3)]);
     expect(f.query.mock.calls[1]?.[1]).toEqual([id(1), id(2), id(4)]);
+  });
+  it("refuses a partly cancelled batch, which Kitchen never writes", async () => {
+    const f = fixture("Cancelled");
+    f.query.mockImplementation(async (sql: string) => ({
+      rows: sql.includes("FROM rms_kitchen.kitchen_ticket")
+        ? [f.ticket]
+        : [
+            f.item,
+            { ...f.item, kitchen_work_item_id: id(9), order_item_id: id(10), status: "Queued" },
+          ],
+      rowCount: 1,
+    }));
+    await expect(f.load()).rejects.toMatchObject({ code: "KITCHEN_WORK_DEPENDENCY_UNAVAILABLE" });
   });
   it("keeps partial item readiness separate from batch progress", async () => {
     const f = fixture("Completed", true);
@@ -100,7 +114,7 @@ describe("customer-safe Kitchen status", () => {
     f.query.mockResolvedValue({ rows: [], rowCount: 0 });
     expect(await f.load()).toBeNull();
   });
-  it.each(["Held", "Cancelled", "Ready"])("fails closed on unsupported %s", async (status) => {
+  it.each(["Held", "Ready"])("fails closed on unsupported %s", async (status) => {
     await expect(fixture(status).load()).rejects.toMatchObject({
       code: "KITCHEN_WORK_DEPENDENCY_UNAVAILABLE",
     });

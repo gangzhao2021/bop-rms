@@ -400,3 +400,100 @@ it("WP-2423 Q12: says an unpaid pickup was cancelled and stops offering the pick
   expect(html).not.toContain("Order submitted");
   expect(isOrderSettled(view)).toBe(true);
 });
+
+it("WP-2423 Q6: says the store cancelled a paid pickup, why, and how the refund is going", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const cancellation = {
+    orderBatchReference: id(3),
+    cancelledAt: "2026-08-11T13:58:00.000Z",
+    reason: "SoldOut" as const,
+    refundStatus: "Pending" as const,
+  };
+  const view = {
+    ...state.view,
+    order: { ...state.view.order, canonicalPhase: "Cancelled" as const },
+    sources: {
+      checkedAt: "2026-08-11T14:00:00.000Z",
+      kitchen: null,
+      payments: [],
+      staffCancellations: [cancellation],
+    },
+  };
+  const html = render({ ...state, view });
+  expect(html).toContain("Order cancelled by the store");
+  expect(html).toContain("An item you ordered sold out.");
+  expect(html).toContain(
+    "Refund pending — your payment, including tip, is being returned in full.",
+  );
+  expect(html).not.toContain("pickup code");
+  expect(html).not.toContain("SoldOut");
+  expect(isOrderSettled(view)).toBe(true);
+  const refunded = render({
+    ...state,
+    view: {
+      ...view,
+      sources: {
+        ...view.sources,
+        staffCancellations: [{ ...cancellation, refundStatus: "Refunded" as const }],
+      },
+    },
+  });
+  expect(refunded).toContain("Refunded in full, including tip.");
+});
+
+it("WP-2423 Q6: notes a dine-in round the store cancelled without hiding the rest of the order", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const first = state.view.order.batches[0];
+  if (!first) throw new Error("fixture");
+  const view = {
+    ...state.view,
+    order: {
+      ...state.view.order,
+      orderType: "DineIn" as const,
+      canonicalPhase: "In Progress" as const,
+      batches: [
+        first,
+        {
+          ...first,
+          orderBatchReference: id(30),
+          items: first.items.map((item) => ({
+            ...item,
+            orderItemReference: id(31),
+            displayName: "Synthetic soup",
+          })),
+        },
+      ],
+    },
+    sources: {
+      checkedAt: "2026-08-11T14:00:00.000Z",
+      kitchen: {
+        batches: [
+          {
+            orderBatchReference: id(3),
+            status: "InProgress" as const,
+            updatedAt: "2026-08-11T13:57:00.000Z",
+          },
+        ],
+      },
+      payments: [],
+      staffCancellations: [
+        {
+          orderBatchReference: id(30),
+          cancelledAt: "2026-08-11T13:58:00.000Z",
+          reason: "CustomerRequest" as const,
+          refundStatus: "Refunded" as const,
+        },
+      ],
+    },
+  };
+  const html = render({ ...state, view });
+  expect(html).toContain("Preparing your order");
+  expect(html).toContain("This round was cancelled by the store.");
+  expect(html).toContain("The store cancelled it at your request.");
+  expect(html).toContain("Refunded in full, including tip.");
+  expect(html).toContain("Synthetic soup");
+  expect(html).not.toContain("Order cancelled by the store");
+  expect(isOrderSettled(view)).toBe(false);
+});

@@ -1,9 +1,15 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { ConsumerTransaction } from "@bop/eventing";
-const d = vi.hoisted(() => ({ load: vi.fn(), identity: vi.fn(), factory: vi.fn() }));
+const d = vi.hoisted(() => ({
+  load: vi.fn(),
+  staff: vi.fn(),
+  identity: vi.fn(),
+  factory: vi.fn(),
+}));
 vi.mock("@rms/ordering", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@rms/ordering")>()),
   createPostgresOrderPaymentDispositionReader: () => ({ loadByPaymentEvent: d.load }),
+  createPostgresStaffOrderCancellationReader: () => ({ loadCompensationByPaymentEvent: d.staff }),
 }));
 vi.mock("@rms/payment", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@rms/payment")>()),
@@ -93,4 +99,20 @@ it("denies before reads and denies absent successful terminal identity", async (
   f.authorize.mockResolvedValue(true);
   d.identity.mockResolvedValue(null);
   expect(await f.read(f.tx, value)).toBe(false);
+});
+it("verifies a staff cancellation source against the Ordering staff record, never the payment disposition", async () => {
+  const f = fixture();
+  const staff = { ...value, reason: "CancelledByStaff" };
+  d.staff.mockResolvedValue(staff);
+  expect(await f.read(f.tx, staff)).toBe(true);
+  expect(d.staff).toHaveBeenCalledWith({ transaction: f.tx, paymentEventReference: id(10) });
+  expect(d.load).not.toHaveBeenCalled();
+  d.staff.mockResolvedValue(null);
+  expect(await f.read(f.tx, staff)).toBe(false);
+  d.staff.mockResolvedValue({ ...staff, sourceVersion: 3 });
+  expect(await f.read(f.tx, staff)).toBe(false);
+  // A payment disposition row never stands in for a staff cancellation.
+  expect(await f.read(f.tx, { ...value, reason: "CancelledByStaff", sourceVersion: 9 })).toBe(
+    false,
+  );
 });

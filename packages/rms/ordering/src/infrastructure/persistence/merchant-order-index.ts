@@ -412,3 +412,41 @@ export async function listStoreKitchenOrderLabels(
     }),
   );
 }
+
+/**
+ * WP-2423 Q6: which Batches of the given Orders (at most 100) are paid, captured and accepted
+ * (a Confirmed payment disposition and an acceptance). Staff may only cancel such a Batch; whether
+ * it is already cancelled or its kitchen work started are separate owner facts. Caller authorizes
+ * and owns the transaction.
+ */
+export async function listStoreConfirmedOrderBatches(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (orderReferences.length === 0) return new Set();
+  if (orderReferences.length > 100) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference);
+  const orders = orderReferences.map((reference) => parseOrderingReference(reference));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT d.order_id::text order_id,d.order_batch_id::text order_batch_id FROM rms_ordering.order_payment_disposition_record d " +
+        "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=ANY($3::uuid[]) AND d.disposition='Confirmed' " +
+        "AND EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=d.brand_id AND a.store_id=d.store_id " +
+        "AND a.order_id=d.order_id AND a.order_batch_id=d.order_batch_id)",
+      [brand, store, orders],
+    )
+  ).rows as readonly { order_id: unknown; order_batch_id: unknown }[];
+  const batches = new Set<string>();
+  for (const row of rows) {
+    const order = parseOrderingReference(row.order_id);
+    if (!orders.includes(order)) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+    batches.add(parseOrderingReference(row.order_batch_id));
+  }
+  return batches;
+}

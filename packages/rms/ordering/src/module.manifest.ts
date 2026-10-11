@@ -62,6 +62,7 @@ const moduleManifestInput =
         "order_closure_version",
         "order_batch_checkout_expiry",
         "order_batch_checkout_cancellation",
+        "order_staff_cancellation",
         "order_fulfillment_completion_record",
         "digital_receipt_record",
         "order_payment_failure_record",

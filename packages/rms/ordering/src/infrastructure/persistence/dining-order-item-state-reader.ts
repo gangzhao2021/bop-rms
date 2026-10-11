@@ -2,6 +2,8 @@ import { parseOrderBatchCheckoutCancellation } from "../../domain/order-batch-ch
 import { createPostgresDiningOrderPreparationSource } from "./order-termination-store.js";
 import { createPostgresOrderAcceptanceReader } from "./order-acceptance-store.js";
 import { parseOrderingReference } from "../../domain/cart.js";
+import type { StaffOrderCancellationRecord } from "../../application/staff-order-cancellation.js";
+import { readStaffOrderCancellations } from "./staff-order-cancellation-store.js";
 
 type Options = Parameters<typeof createPostgresDiningOrderPreparationSource>[0];
 type Input = Parameters<
@@ -9,6 +11,9 @@ type Input = Parameters<
 >[0];
 
 /** Complete immutable item membership and per-Batch acceptance under the Order fence.
+ * `cancellation` is the unpaid checkout cancellation (never with acceptance); `staffCancellation`
+ * (WP-2423 Q6) is a staff cancellation of a paid Batch, always after its acceptance. Either makes
+ * the Batch Cancelled.
  * Kitchen progress and serving remain separate owner facts, never inferred here.
  */
 export function createPostgresDiningOrderItemStateReader(options: Options) {
@@ -92,6 +97,29 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
           throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
         cancellations.set(record.orderBatchReference, record);
       }
+      // WP-2423 Q6: a paid, accepted Batch staff cancelled before preparation started.
+      const staffCancellations = new Map<string, StaffOrderCancellationRecord>();
+      const staffRecords = await readStaffOrderCancellations(input.transaction, state, [
+        state.orderReference,
+      ]).catch(() => {
+        throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
+      });
+      for (const record of staffRecords) {
+        const members = batches.get(record.orderBatchReference);
+        if (
+          record.orderReference !== state.orderReference ||
+          record.orderType !== "DineIn" ||
+          record.cancelledOrderVersion > state.orderVersion ||
+          record.cancelledAt > input.observedAt ||
+          staffCancellations.has(record.orderBatchReference) ||
+          cancellations.has(record.orderBatchReference) ||
+          !members ||
+          members.length !== record.orderItemReferences.length ||
+          members.some((member, index) => member !== record.orderItemReferences[index])
+        )
+          throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
+        staffCancellations.set(record.orderBatchReference, record);
+      }
       const acceptanceReader = createPostgresOrderAcceptanceReader({
         brandReference: state.brandReference,
         storeReference: state.storeReference,
@@ -111,7 +139,16 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
           orderBatchReference,
         });
         const cancellation = cancellations.get(orderBatchReference) ?? null;
+        const staffCancellation = staffCancellations.get(orderBatchReference) ?? null;
         if (acceptance && cancellation) throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
+        // A staff cancellation always follows this Batch's acceptance.
+        if (
+          staffCancellation &&
+          (!acceptance ||
+            acceptance.acceptedOrderVersion > staffCancellation.expectedOrderVersion ||
+            acceptance.acceptedAt > staffCancellation.cancelledAt)
+        )
+          throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
         if (
           acceptance &&
           (acceptance.acceptedOrderVersion > state.orderVersion ||
@@ -124,6 +161,7 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
             sequence: sequences.get(orderBatchReference) as number,
             acceptance,
             cancellation,
+            staffCancellation,
           }),
         );
         for (const orderItemReference of members) {
@@ -135,6 +173,7 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
               orderBatchReference,
               acceptance,
               cancellation,
+              staffCancellation,
               orderedQuantity,
             }),
           );

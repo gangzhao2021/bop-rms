@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { exercisePaidKitchenLifecycle } from "../test-support/kitchen-paid-lifecycle.mjs";
 import { createHash } from "node:crypto";
 import { exerciseKitchenWorkLifecycleStore } from "../test-support/kitchen-work-lifecycle-store.mjs";
+import { exerciseKitchenWorkCancellation } from "../test-support/kitchen-work-cancellation.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -1156,6 +1157,9 @@ async function prove(context) {
       scope: { brandReference: multi.brandId, storeReference: multi.storeId },
       ticket: {
         ticketReference: multi.ticketId,
+        // The customer status read (added after this case) needs the batch's Order identity.
+        orderReference: multi.orderId,
+        orderBatchReference: multi.orderBatchId,
         createdAt,
         correlationReference: multi.correlationId,
         sourceEvidenceDigest: sha("3"),
@@ -1193,6 +1197,37 @@ async function prove(context) {
         },
       },
       id: (n) => id(n + 20000),
+    });
+
+    // WP-2423 Q6: staff cancel paid batches before the kitchen starts them.
+    await client.query("RESET ROLE");
+    await exerciseKitchenWorkCancellation({
+      admin: client,
+      context,
+      role: `bop_q6_cancel_${context.runId}`,
+      id,
+      seed: async (base, itemCount) => {
+        const value = source(base);
+        await seedSource(client, value);
+        const first = (
+          await client.query(
+            "SELECT * FROM rms_kitchen.kitchen_work_item WHERE kitchen_work_item_id=$1",
+            [value.workItemId],
+          )
+        ).rows[0];
+        for (let ordinal = 2; ordinal <= itemCount; ordinal++) {
+          const next = {
+            ...first,
+            kitchen_work_item_id: id(base + ordinal * 10 + 1),
+            order_item_id: id(base + ordinal * 10 + 4),
+            source_item_ordinal: ordinal,
+          };
+          for (const [key, column] of Object.entries(next))
+            if (key.endsWith("_json")) next[key] = JSON.stringify(column);
+          await insertRow(client, "kitchen_work_item", next);
+        }
+        return value;
+      },
     });
 
     // Storage-column binding only; service codec tests separately validate the full semantic effect.
@@ -1278,6 +1313,8 @@ async function prove(context) {
     await client.query(`RESET ROLE`).catch(() => undefined);
     await client.query(`DROP OWNED BY ${role}`).catch(() => undefined);
     await client.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
+    await client.query(`DROP OWNED BY bop_q6_cancel_${context.runId}`).catch(() => undefined);
+    await client.query(`DROP ROLE IF EXISTS bop_q6_cancel_${context.runId}`).catch(() => undefined);
     await client.end().catch(() => undefined);
   }
 }

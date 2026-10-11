@@ -5,7 +5,7 @@ import {
   parseReadinessReference,
   FulfillmentReadinessError,
 } from "@rms/fulfillment";
-import { listStoreOrderNumbers } from "@rms/ordering";
+import { createPostgresStaffOrderCancellationReader, listStoreOrderNumbers } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -126,19 +126,32 @@ export function createMerchantPickupQuery(options: {
         selected,
         result.items.map((item) => String(item.orderReference)),
       );
+      // WP-2423 Q6: an order the Store cancelled before the kitchen started is never handed over.
+      const cancelled = new Set(
+        result.items.length === 0
+          ? []
+          : (
+              await createPostgresStaffOrderCancellationReader(selected).listByOrders(
+                tx,
+                result.items.map((item) => String(item.orderReference)),
+              )
+            ).map((record) => String(record.orderReference)),
+      );
       if (!(await scope.allowed()))
         throw new FulfillmentReadinessError("FULFILLMENT_READINESS_PERMISSION_DENIED");
       return Object.freeze({
         ...result,
         workstation,
         storeReference: selected.storeReference,
-        items: result.items.map((item) =>
-          Object.freeze({
-            ...item,
-            aggregateVersion: item.aggregateVersion.toString(),
-            orderNumber: numbers.get(String(item.orderReference)) ?? null,
-          }),
-        ),
+        items: result.items
+          .filter((item) => !cancelled.has(String(item.orderReference)))
+          .map((item) =>
+            Object.freeze({
+              ...item,
+              aggregateVersion: item.aggregateVersion.toString(),
+              orderNumber: numbers.get(String(item.orderReference)) ?? null,
+            }),
+          ),
       });
     });
   };

@@ -3,6 +3,7 @@ import type {
   OrderStatusState,
   OrderStatusView,
   RealtimeAvailability,
+  StaffCancellationReason,
 } from "./types.js";
 
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -159,6 +160,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidCancellation")
       ? ["unpaidCancellation"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "staffCancellations")
+      ? ["staffCancellations"]
+      : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
@@ -207,6 +211,48 @@ function parseSources(
     });
     dining = Object.freeze({ items: Object.freeze(items) });
   }
+  // WP-2423 Q6: batches the Store cancelled after payment (the key is present only when non-empty).
+  let staffCancellations: OrderStatusSources["staffCancellations"];
+  if (Object.hasOwn(raw, "staffCancellations")) {
+    if (
+      !Array.isArray(raw.staffCancellations) ||
+      raw.staffCancellations.length < 1 ||
+      raw.staffCancellations.length > batches.length
+    )
+      return invalid();
+    const expected = new Set(batches.map((batch) => batch.orderBatchReference));
+    const seen = new Set<string>();
+    staffCancellations = Object.freeze(
+      raw.staffCancellations.map((value: unknown) => {
+        const entry = exact(value, [
+          "orderBatchReference",
+          "cancelledAt",
+          "reason",
+          "refundStatus",
+        ]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        if (
+          !expected.has(orderBatchReference) ||
+          seen.has(orderBatchReference) ||
+          !["CustomerRequest", "SoldOut", "StoreError", "DuplicateOrder"].includes(
+            String(entry.reason),
+          ) ||
+          !["Pending", "Refunded"].includes(String(entry.refundStatus))
+        )
+          return invalid();
+        seen.add(orderBatchReference);
+        return Object.freeze({
+          orderBatchReference,
+          cancelledAt: sourceInstant(entry.cancelledAt),
+          reason: entry.reason as StaffCancellationReason,
+          refundStatus: entry.refundStatus as "Pending" | "Refunded",
+        });
+      }),
+    );
+  }
+  const staffCancelled = new Set(
+    staffCancellations?.map((entry) => entry.orderBatchReference) ?? [],
+  );
   let kitchen: OrderStatusSources["kitchen"] = null;
   if (raw.kitchen !== null) {
     const entry = exact(raw.kitchen, ["batches"]);
@@ -224,13 +270,16 @@ function parseSources(
       if (
         !expected.has(orderBatchReference) ||
         seen.has(orderBatchReference) ||
-        !["Queued", "InProgress", "Ready"].includes(String(batch.status))
+        !(
+          ["Queued", "InProgress", "Ready"].includes(String(batch.status)) ||
+          (batch.status === "Cancelled" && staffCancelled.has(orderBatchReference))
+        )
       )
         return invalid();
       seen.add(orderBatchReference);
       return Object.freeze({
         orderBatchReference,
-        status: batch.status as "Queued" | "InProgress" | "Ready",
+        status: batch.status as "Queued" | "InProgress" | "Ready" | "Cancelled",
         updatedAt: sourceInstant(batch.updatedAt),
       });
     });
@@ -292,6 +341,7 @@ function parseSources(
     ...(dining ? { dining } : {}),
     ...(pickup === undefined ? {} : { pickup }),
     ...(unpaidCancellation === undefined ? {} : { unpaidCancellation }),
+    ...(staffCancellations === undefined ? {} : { staffCancellations }),
   });
 }
 

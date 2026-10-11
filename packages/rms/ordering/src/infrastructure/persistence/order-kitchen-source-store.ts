@@ -155,6 +155,7 @@ export function createPostgresOrderKitchenSourceStore(options: {
                   !batch ||
                   batch.sequence !== 1 ||
                   batch.cancellation !== null ||
+                  batch.staffCancellation !== null ||
                   !acceptance ||
                   BigInt(acceptance.acceptedOrderVersion) !== request.sourceAggregateVersion ||
                   acceptance.acceptanceReference !== sourceCheckpoint ||

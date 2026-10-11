@@ -12,7 +12,8 @@ export interface OrderStatusSources {
   readonly kitchen: null | {
     readonly batches: readonly {
       readonly orderBatchReference: string;
-      readonly status: "Queued" | "InProgress" | "Ready";
+      /** Cancelled only for a batch the Store cancelled before preparation (WP-2423 Q6). */
+      readonly status: "Queued" | "InProgress" | "Ready" | "Cancelled";
       readonly updatedAt: string;
     }[];
   };
@@ -28,6 +29,18 @@ export interface OrderStatusSources {
   readonly pickup?: null | { readonly notCollectedAt: string };
   /** WP-2423 Q12: when a pickup was cancelled because payment was not completed in time. */
   readonly unpaidCancellation?: null | { readonly cancelledAt: string };
+  /** WP-2423 Q6: batches the Store cancelled after payment, before the kitchen started. */
+  readonly staffCancellations?: readonly StaffCancellation[];
+}
+
+export type StaffCancellationReason =
+  "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder";
+
+export interface StaffCancellation {
+  readonly orderBatchReference: string;
+  readonly cancelledAt: string;
+  readonly reason: StaffCancellationReason;
+  readonly refundStatus: "Pending" | "Refunded";
 }
 
 export interface OrderStatusView {

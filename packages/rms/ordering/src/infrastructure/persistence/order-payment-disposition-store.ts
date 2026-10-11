@@ -14,6 +14,7 @@ import {
   createOrderConfirmedEnvelope,
 } from "../../application/order-confirmed-event.js";
 import { parseOrderingReference } from "../../domain/cart.js";
+import { createPostgresStaffOrderCancellationReader } from "./staff-order-cancellation-store.js";
 
 const columns = {
   disposition_id: "dispositionReference",
@@ -155,6 +156,9 @@ export function createPostgresOrderPaymentDispositionStore(options: {
       const record = parseOrderPaymentOutcomeDisposition(input.disposition);
       if (
         record.disposition === "AwaitingAcceptance" ||
+        // Staff cancellations are their own Ordering record, never a payment disposition row.
+        (record.disposition === "PaidWithoutFulfillableOrder" &&
+          record.reason === "CancelledByStaff") ||
         event.tenantId !== brand ||
         event.storeId !== store ||
         record.brandReference !== brand ||
@@ -356,10 +360,15 @@ export function createPostgresOrderCompensationCandidateReader(options: {
       readonly purpose: "DiscoverPaidWithoutFulfillableOrder";
     },
   ) => Promise<boolean>;
+  /** WP-2423 Q6: also page staff cancellations (CancelledByStaff), ordered with the disposition
+   * rows by their UUIDv7 reference. Default false keeps disposition rows only. */
+  readonly includeStaffCancellations?: boolean;
 }) {
   const brandReference = String(parseOrderingReference(options.scope.brandReference));
   const storeReference = String(parseOrderingReference(options.scope.storeReference));
   const reader = createPostgresOrderPaymentDispositionReader({ brandReference, storeReference });
+  const staff = createPostgresStaffOrderCancellationReader({ brandReference, storeReference });
+  const includeStaff = options.includeStaffCancellations === true;
   return async (
     transaction: ConsumerTransaction,
     input: {
@@ -388,12 +397,22 @@ export function createPostgresOrderCompensationCandidateReader(options: {
       "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
       [brandReference, storeReference],
     );
-    const page = await transaction.query(
-      "SELECT disposition_id,payment_event_id FROM rms_ordering.order_payment_disposition_record " +
-        "WHERE brand_id=$1 AND store_id=$2 AND disposition='PaidWithoutFulfillableOrder' " +
-        "AND ($3::uuid IS NULL OR disposition_id>$3::uuid) ORDER BY disposition_id LIMIT $4",
-      [brandReference, storeReference, after, input.limit],
-    );
+    const page = includeStaff
+      ? await transaction.query(
+          "SELECT disposition_id,payment_event_id,source FROM (" +
+            "SELECT disposition_id::uuid AS disposition_id,payment_event_id::uuid AS payment_event_id,'Disposition' AS source FROM rms_ordering.order_payment_disposition_record " +
+            "WHERE brand_id=$1 AND store_id=$2 AND disposition='PaidWithoutFulfillableOrder' AND ($3::uuid IS NULL OR disposition_id>$3::uuid) " +
+            "UNION ALL SELECT cancellation_id::uuid,payment_event_id::uuid,'StaffCancellation' FROM rms_ordering.order_staff_cancellation " +
+            "WHERE brand_id=$1 AND store_id=$2 AND ($3::uuid IS NULL OR cancellation_id>$3::uuid)" +
+            ") candidates ORDER BY disposition_id LIMIT $4",
+          [brandReference, storeReference, after, input.limit],
+        )
+      : await transaction.query(
+          "SELECT disposition_id,payment_event_id FROM rms_ordering.order_payment_disposition_record " +
+            "WHERE brand_id=$1 AND store_id=$2 AND disposition='PaidWithoutFulfillableOrder' " +
+            "AND ($3::uuid IS NULL OR disposition_id>$3::uuid) ORDER BY disposition_id LIMIT $4",
+          [brandReference, storeReference, after, input.limit],
+        );
     if (page.rows.length > input.limit)
       throw new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
     const candidates = [];
@@ -401,6 +420,24 @@ export function createPostgresOrderCompensationCandidateReader(options: {
     for (const row of page.rows) {
       const reference = String(parseOrderingReference(row.disposition_id));
       if (cursor !== null && reference <= cursor)
+        throw new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
+      if (includeStaff && row.source === "StaffCancellation") {
+        const cancelled = await staff.loadCompensationByPaymentEvent({
+          transaction,
+          paymentEventReference: parseOrderingReference(row.payment_event_id),
+        });
+        if (
+          !cancelled ||
+          cancelled.disposition !== "PaidWithoutFulfillableOrder" ||
+          cancelled.reason !== "CancelledByStaff" ||
+          cancelled.dispositionReference !== reference
+        )
+          throw new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
+        candidates.push(cancelled);
+        cursor = reference;
+        continue;
+      }
+      if (includeStaff && row.source !== "Disposition")
         throw new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
       const record = await reader.loadByPaymentEvent({
         transaction,

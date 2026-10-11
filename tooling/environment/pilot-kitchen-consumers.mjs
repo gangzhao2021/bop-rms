@@ -1,5 +1,6 @@
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import {
+  parseKitchenWorkCancelledEnvelope,
   parseKitchenWorkCreatedEnvelope,
   parseKitchenWorkLifecycleEnvelope,
   parseKitchenReadyEnvelope,
@@ -13,6 +14,8 @@ export function createInternalKitchenConsumers(resources, { createQueue }) {
     KitchenWorkStarted: parseKitchenWorkLifecycleEnvelope,
     KitchenItemCompleted: parseKitchenWorkLifecycleEnvelope,
     KitchenItemProgressRecorded: parseKitchenWorkLifecycleEnvelope,
+    // WP-2423 Q6: staff cancelled a batch before the kitchen started it.
+    KitchenWorkCancelled: parseKitchenWorkCancelledEnvelope,
     KitchenItemReady: parseKitchenReadyEnvelope,
     KitchenOrderReady: parseKitchenReadyEnvelope,
   };

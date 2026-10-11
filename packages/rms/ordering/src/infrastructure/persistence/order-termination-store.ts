@@ -436,6 +436,7 @@ async function multiBatchPreparationVersion(
         "CASE r.kind WHEN 'Initial' THEN EXISTS (SELECT 1 FROM rms_ordering.order_submission_record s JOIN rms_ordering.order_batch b ON b.submission_id=s.submission_id AND b.brand_id=s.brand_id AND b.store_id=s.store_id AND b.order_id=s.order_id WHERE s.brand_id=r.brand_id AND s.store_id=r.store_id AND s.order_id=r.order_id AND s.submission_id=r.revision_id AND s.submission_kind='Initial' AND b.submitted_at=r.occurred_at) " +
         "WHEN 'Acceptance' THEN EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.acceptance_id=r.revision_id AND a.expected_order_version=r.expected_version AND a.accepted_order_version=r.version AND a.accepted_at=r.occurred_at) " +
         "WHEN 'BatchCancellation' THEN EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) " +
+        "WHEN 'StaffBatchCancellation' THEN EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.order_type='DineIn' AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) " +
         "WHEN 'AdditionalBatch' THEN EXISTS (SELECT 1 FROM rms_ordering.additional_dining_batch_record a JOIN rms_ordering.order_batch b ON b.order_batch_id=a.order_batch_id AND b.brand_id=a.brand_id AND b.store_id=a.store_id AND b.order_id=a.order_id AND b.submission_id=a.submission_id WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.submission_id=r.revision_id AND b.submitted_at=r.occurred_at AND a.batch_sequence=(SELECT count(*)+1 FROM rms_ordering.order_revision p WHERE p.brand_id=r.brand_id AND p.store_id=r.store_id AND p.order_id=r.order_id AND p.kind='AdditionalBatch' AND p.version<=r.version)) ELSE false END AS operation_bound " +
         "FROM rms_ordering.order_revision r WHERE r.brand_id=$1 AND r.store_id=$2 AND r.order_id=$3 ORDER BY r.version LIMIT 10002",
       values,
@@ -482,6 +483,9 @@ async function multiBatchPreparationVersion(
     version: chain.version,
     checkpoint: chain.checkpoint,
     allCancelled,
+    // WP-2423 Q6: a staff-cancelled Batch keeps the dine-in Order open (paid and accepted before);
+    // its history is resolved here, never by the initial-window reader.
+    staffCancelled: rows.some((row) => row.kind === "StaffBatchCancellation"),
     canonicalPhase: rows.some((row) => row.kind === "Acceptance")
       ? ("Accepted" as const)
       : ("Submitted" as const),
@@ -560,7 +564,7 @@ export function createPostgresDiningOrderPreparationSource(options: {
         if ((await options.authorize(tx, scope)) !== true) return fail();
         return null;
       }
-      if (found.rows.length > 1 || orderVersion.allCancelled) {
+      if (found.rows.length > 1 || orderVersion.allCancelled || orderVersion.staffCancelled) {
         if (
           found.rows.some(
             (batch) =>

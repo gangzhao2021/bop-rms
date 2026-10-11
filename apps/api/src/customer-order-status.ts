@@ -186,6 +186,16 @@ export class CustomerOrderStatusHandler {
                             ? null
                             : { cancelledAt: sources.unpaidCancellation.cancelledAt },
                       }),
+                  ...(sources.staffCancellations === undefined
+                    ? {}
+                    : {
+                        staffCancellations: sources.staffCancellations.map((cancellation) => ({
+                          orderBatchReference: cancellation.orderBatchReference,
+                          cancelledAt: cancellation.cancelledAt,
+                          reason: cancellation.reason,
+                          refundStatus: cancellation.refundStatus,
+                        })),
+                      }),
                 },
               };
         response.status(200).json({ schemaVersion: 1, status: { ...status, ...publicSources } });

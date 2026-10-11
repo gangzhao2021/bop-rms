@@ -96,6 +96,8 @@ for (const recovery of ["retry", "history"] as const)
                   sequence: 1,
                   acceptanceStatus: "Accepted",
                   canRequestAcceptance: false,
+                  canCancel: false,
+                  staffCancellation: null,
                 },
               ],
               canRequestAcceptance: false,

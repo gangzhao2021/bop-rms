@@ -5,6 +5,7 @@ import {
   parsePublishingInstant,
 } from "@bop/publishing";
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
+import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation.js";
 import { BrowserSessionError } from "@bop/identity";
 import { parsePaymentReference, ReconciliationFollowUpError } from "@rms/payment";
 import { parsePaymentInstant } from "@rms/payment";
@@ -859,6 +860,8 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
         sequence: 1,
         acceptanceStatus: "NotAccepted" as const,
         canRequestAcceptance: true,
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
     currentPhase: "Submitted",
@@ -2046,6 +2049,91 @@ it("protects order closure transport, exact retry and bounded response", async (
     });
   expect(unavailable.status).toBe(503);
   expect(await unavailable.json()).toEqual({ error: "order_closure_unavailable" });
+});
+
+async function serveStaffCancellation(
+  orderStaffCancellation?: MerchantBffRouterOptions["orderStaffCancellation"],
+) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      ...(orderStaffCancellation ? { orderStaffCancellation } : {}),
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
+it("WP-2423 Q6: protects staff cancellation transport and maps owner refusals to stable codes", async () => {
+  const result = {
+    status: "Cancelled" as const,
+    orderReference: "0190fa01-0000-7000-8000-000000000001",
+    orderBatchReference: "0190fa01-0000-7000-8000-000000000002",
+    cancelledAt: "2026-10-11T12:00:00.000Z",
+    refundStatus: "Pending" as const,
+  };
+  const cancel = vi.fn<NonNullable<MerchantBffRouterOptions["orderStaffCancellation"]>>(
+    async () => ({ ...result, privateEvidence: "synthetic-private" }) as typeof result,
+  );
+  const root = await serveStaffCancellation(cancel),
+    headers = {
+      ...safeHeaders,
+      Cookie: "__Host-bop-merchant=" + sessionCookie,
+      "X-BOP-CSRF": csrf,
+      "Content-Type": "application/json",
+    };
+  const submit = (extra: Record<string, string> = {}, path = "/merchant/orders/cancel") =>
+    request(root, path, { method: "POST", body: '{"a":1}', headers: { ...headers, ...extra } });
+  for (const extra of [
+    { Origin: "https://foreign.invalid" },
+    { "Sec-Fetch-Site": "cross-site" },
+    { "X-BOP-CSRF": "" },
+    { Cookie: "" },
+  ])
+    expect((await submit(extra)).status).toBe(403);
+  expect((await submit({}, "/merchant/orders/cancel?store=other")).status).toBe(403);
+  expect(cancel).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual(result);
+  expect(cancel).toHaveBeenCalledWith({ sessionCookie, csrf, command: { a: 1 } });
+  for (const [code, status, error] of [
+    ["ORDER_CANCELLATION_INPUT_INVALID", 400, "order_cancellation_input_invalid"],
+    ["ORDER_CANCELLATION_PERMISSION_DENIED", 403, "order_cancellation_permission_denied"],
+    ["ORDER_CANCELLATION_NOT_FOUND", 404, "order_cancellation_not_found"],
+    ["ORDER_CANCELLATION_VERSION_CONFLICT", 409, "order_version_conflict"],
+    ["ORDER_CANCELLATION_PREPARATION_STARTED", 409, "order_preparation_started"],
+    ["ORDER_CANCELLATION_NOT_CANCELLABLE", 409, "order_not_cancellable"],
+    ["ORDER_CANCELLATION_STOCK_NOT_RELEASABLE", 409, "order_stock_not_releasable"],
+    ["ORDER_CANCELLATION_UNAVAILABLE", 503, "order_cancellation_unavailable"],
+  ] as const) {
+    cancel.mockRejectedValueOnce(new StaffOrderCancellationError(code));
+    const refused = await submit();
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error });
+  }
+  cancel.mockRejectedValueOnce(new Error("synthetic-private"));
+  const denied = await submit();
+  expect(denied.status).toBe(403);
+  expect(await denied.text()).not.toContain("synthetic");
+  const unconfigured = await serveStaffCancellation();
+  expect(
+    (
+      await request(unconfigured, "/merchant/orders/cancel", {
+        method: "POST",
+        headers,
+        body: "{}",
+      })
+    ).status,
+  ).toBe(503);
 });
 
 async function serveDiningClosing(diningClosing?: MerchantBffRouterOptions["diningClosing"]) {

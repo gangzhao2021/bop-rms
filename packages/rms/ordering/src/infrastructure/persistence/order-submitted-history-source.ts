@@ -57,7 +57,8 @@ export function createPostgresOrderSubmittedHistorySource(options: {
       ]);
       const found = await tx.query(
         "SELECT r.revision_id,r.version,r.expected_version,r.previous_revision_id,r.initial_submission_id,r.kind,r.occurred_at," +
-          "EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.acceptance_id=r.revision_id AND a.expected_order_version=r.expected_version AND a.accepted_order_version=r.version AND a.accepted_at=r.occurred_at) AS acceptance_bound " +
+          "EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=r.brand_id AND a.store_id=r.store_id AND a.order_id=r.order_id AND a.acceptance_id=r.revision_id AND a.expected_order_version=r.expected_version AND a.accepted_order_version=r.version AND a.accepted_at=r.occurred_at) AS acceptance_bound," +
+          "EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=r.brand_id AND c.store_id=r.store_id AND c.order_id=r.order_id AND c.cancellation_id=r.revision_id AND c.order_type='DineIn' AND c.expected_source_checkpoint=r.previous_revision_id AND c.expected_order_version=r.expected_version AND c.cancelled_order_version=r.version AND c.cancelled_at=r.occurred_at) AS staff_cancellation_bound " +
           "FROM rms_ordering.order_revision r WHERE r.brand_id=$1 AND r.store_id=$2 AND r.order_id=$3 AND r.version<=$4 ORDER BY r.version LIMIT 10002",
         [brand, store, event.aggregateId, input.sourceVersion],
       );
@@ -131,6 +132,11 @@ export function createPostgresOrderSubmittedHistorySource(options: {
           if (found.rows[index + 1]?.acceptance_bound !== true) return fail();
           continue;
         }
+        // WP-2423 Q6: a staff-cancelled Batch stays in the Order history; later Batches may follow.
+        if (revision.kind === "StaffBatchCancellation") {
+          if (found.rows[index + 1]?.staff_cancellation_bound !== true) return fail();
+          continue;
+        }
         if (revision.kind !== "AdditionalBatch") return fail();
         const saved = additional[batchIndex++];
         if (
@@ -185,7 +191,8 @@ export function createPostgresOrderSubmittedHistorySource(options: {
         orderNumber: original.orderNumberAllocation.orderNumber,
         orderType: "DineIn",
         sourceChannel: original.order.sourceChannel,
-        // This exact reader rejects revisions outside Initial/Acceptance/AdditionalBatch.
+        // This exact reader rejects revisions outside Initial/Acceptance/AdditionalBatch and
+        // bound StaffBatchCancellation (the status projection shows staff cancellations separately).
         // Each Acceptance above is bound to its persisted owner record; adding an
         // unpaid Batch must not erase that accepted progress (DEC-PILOT-BATCH-PHASE-01).
         canonicalPhase: revisions.some((revision) => revision.kind === "Acceptance")

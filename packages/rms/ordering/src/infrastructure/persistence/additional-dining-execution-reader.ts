@@ -52,7 +52,7 @@ export function createPostgresAdditionalDiningExecutionReader(
             (value) => value.orderBatchReference === snapshot.batch.orderBatchReference,
           );
           if (!batch) throw new AdditionalDiningBatchStoreError();
-          const { acceptance, cancellation } = batch;
+          const { acceptance, cancellation, staffCancellation } = batch;
           const appendedVersion = snapshot.expectedOrderVersion + 1;
           if (
             acceptance &&
@@ -72,29 +72,47 @@ export function createPostgresAdditionalDiningExecutionReader(
               cancellation.cancelledAt > observedAt)
           )
             throw new AdditionalDiningBatchStoreError();
+          if (
+            staffCancellation &&
+            (acceptance === null ||
+              cancellation !== null ||
+              staffCancellation.submissionReference !== snapshot.batch.submissionReference ||
+              staffCancellation.expectedOrderVersion < acceptance.acceptedOrderVersion ||
+              staffCancellation.cancelledOrderVersion > current.orderVersion ||
+              staffCancellation.cancelledAt < acceptance.acceptedAt ||
+              staffCancellation.cancelledAt > observedAt)
+          )
+            throw new AdditionalDiningBatchStoreError();
           if ((await authorize(transaction)) !== true) throw new AdditionalDiningBatchStoreError();
           return Object.freeze({
             snapshot,
             link,
             acceptance,
             cancellation,
+            staffCancellation,
             orderVersion: current.orderVersion,
             canonicalPhase: current.canonicalPhase,
-            batchPhase: cancellation
-              ? ("Cancelled" as const)
-              : acceptance
-                ? ("Accepted" as const)
-                : ("Submitted" as const),
+            batchPhase:
+              cancellation || staffCancellation
+                ? ("Cancelled" as const)
+                : acceptance
+                  ? ("Accepted" as const)
+                  : ("Submitted" as const),
             batchVersion:
+              staffCancellation?.cancelledOrderVersion ??
               cancellation?.cancelledOrderVersion ??
               acceptance?.acceptedOrderVersion ??
               appendedVersion,
             batchCheckpoint:
+              staffCancellation?.cancellationReference ??
               cancellation?.cancellationReference ??
               acceptance?.acceptanceReference ??
               snapshot.batch.submissionReference,
             batchOccurredAt:
-              cancellation?.cancelledAt ?? acceptance?.acceptedAt ?? snapshot.batch.submittedAt,
+              staffCancellation?.cancelledAt ??
+              cancellation?.cancelledAt ??
+              acceptance?.acceptedAt ??
+              snapshot.batch.submittedAt,
             observedAt,
           });
         },

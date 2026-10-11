@@ -2304,6 +2304,51 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 Owner 2026-10-11 (继续: Q12 close unpaid pickup orders after the payment window and release their stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_staff_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_staff_cancellation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_cancellation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_staff_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "worker",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released) (worker readers of dine-in batch state, revision position and compensation discovery read the staff cancellation, like order_batch_checkout_cancellation)"
     }
   ]
 }

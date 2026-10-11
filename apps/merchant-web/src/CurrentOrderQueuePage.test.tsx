@@ -26,6 +26,8 @@ it("renders actual Accepted version and visibly unresolved state without fabrica
         sequence: 1,
         acceptanceStatus: "Accepted",
         canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
     canRequestAcceptance: false,
@@ -81,6 +83,8 @@ it("filters only by exact public order number and fields present on the current 
         sequence: 1,
         acceptanceStatus: "Accepted",
         canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
     canRequestAcceptance: false,
@@ -123,12 +127,16 @@ it("labels a cancelled additional Batch distinctly from unaccepted work", () => 
             sequence: 1,
             acceptanceStatus: "Accepted",
             canRequestAcceptance: false,
+            canCancel: false,
+            staffCancellation: null,
           },
           {
             orderBatchReference: id(3),
             sequence: 2,
             acceptanceStatus: "Cancelled",
             canRequestAcceptance: false,
+            canCancel: false,
+            staffCancellation: null,
           },
         ],
         canRequestAcceptance: false,
@@ -247,6 +255,8 @@ it("WP-2423: shows a paid order that was not accepted in time as expired and ref
         sequence: 1,
         acceptanceStatus: "NotAccepted",
         canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
     canRequestAcceptance: false,
@@ -300,6 +310,8 @@ it("WP-2423: shows a pickup the Store closed as not collected", () => {
         sequence: 1,
         acceptanceStatus: "Accepted",
         canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
     canRequestAcceptance: false,
@@ -344,6 +356,8 @@ it("WP-2423 Q1: grades the acceptance window and shows it only while the order c
         sequence: 1,
         acceptanceStatus: "NotAccepted",
         canRequestAcceptance: true,
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
     canRequestAcceptance: true,
@@ -393,6 +407,8 @@ it("WP-2423 Q1: shows an unpaid submission as awaiting payment, never acceptable
         sequence: 1,
         acceptanceStatus: "NotAccepted",
         canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
     canRequestAcceptance: false,
@@ -422,4 +438,86 @@ it("WP-2423 Q1: shows an unpaid submission as awaiting payment, never acceptable
     expect(() =>
       parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),
     ).toThrow();
+});
+
+it("WP-2423 Q6: offers cancellation only where allowed and shows the Store's cancellation", () => {
+  const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+  const batch = {
+    orderBatchReference: id(90),
+    sequence: 1,
+    acceptanceStatus: "Accepted",
+    canRequestAcceptance: false,
+    canCancel: false,
+    staffCancellation: null as null | Record<string, string>,
+  };
+  const pickup = {
+    orderReference: id(1),
+    orderNumber: "ORD-1001",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-11T12:00:00.000Z",
+    observedAt: "2026-10-11T12:10:00.000Z",
+    initialBatchReference: id(90),
+    batches: [
+      {
+        ...batch,
+        staffCancellation: {
+          reasonCode: "SOLD_OUT",
+          cancelledAt: "2026-10-11T12:05:00.000Z",
+          refundStatus: "Pending",
+        },
+      },
+    ],
+    canRequestAcceptance: false,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    currentPhase: "Cancelled",
+    currentVersion: 4,
+  };
+  const pickupHtml = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={parseCurrentOrderQueue({ items: [pickup], nextAfterOrderReference: null })}
+    />,
+  );
+  expect(pickupHtml).toContain('data-phase="Cancelled"');
+  expect(pickupHtml).toContain("Cancelled by store · refund pending");
+  expect(pickupHtml).toContain("Reason: Sold out");
+  expect(pickupHtml).toContain("is being refunded in full");
+  const dining = {
+    ...pickup,
+    orderReference: id(2),
+    orderType: "DineIn",
+    currentPhase: "InProgress",
+    batches: [
+      { ...batch },
+      {
+        ...batch,
+        orderBatchReference: id(91),
+        sequence: 2,
+        acceptanceStatus: "Cancelled",
+        staffCancellation: {
+          reasonCode: "CUSTOMER_REQUEST",
+          cancelledAt: "2026-10-11T12:06:00.000Z",
+          refundStatus: "Refunded",
+        },
+      },
+      { ...batch, orderBatchReference: id(92), sequence: 3, canCancel: true },
+    ],
+  };
+  const view = parseCurrentOrderQueue({ items: [dining], nextAfterOrderReference: null });
+  const diningHtml = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={view}
+      action={(_order, row) => (row.canCancel ? `cancel:${row.sequence}` : null)}
+    />,
+  );
+  expect(diningHtml).toContain("Batch 2 cancelled · refunded");
+  expect(diningHtml).toContain("Reason: Customer request");
+  expect(diningHtml).toContain("was refunded in full");
+  expect(diningHtml).toContain("cancel:3");
+  expect(diningHtml).not.toContain("cancel:1");
+  expect(diningHtml).not.toContain("cancel:2");
+  expect(diningHtml).not.toContain("SOLD_OUT");
 });

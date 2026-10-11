@@ -51,7 +51,9 @@ export function createInternalCompensationService({
   const active = () =>
     process.env.NODE_ENV === "development" && parseCanonicalInstant(resources.now()) < validUntil;
   if (!active()) return deny();
-  const candidates = createInternalCompensationCandidates(resources);
+  const candidates = createInternalCompensationCandidates(resources, {
+    includeStaffCancellations: true,
+  });
   const dispositionEvidence = createPaymentCompensationDispositionEvidence({
     scope,
     now: resources.now,

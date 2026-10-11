@@ -1963,6 +1963,8 @@ async function buildEffect(
   intentDigest: string,
   observedAt: string,
 ): Promise<KitchenWorkLifecycleEffect> {
+  // WP-2423 Q6: staff cancelled this work before it started; it accepts no further command.
+  if (source.target.workItemStatus === "Cancelled") return precondition();
   validatePredecessors(source, command);
   let admission: KitchenStartAdmissionDecision | null = null;
   let expo: KitchenExpoPolicyDecision | null = null;

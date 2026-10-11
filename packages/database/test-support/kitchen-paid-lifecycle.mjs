@@ -39,6 +39,8 @@ export async function exercisePaidKitchenLifecycle({
   await admin.query(
     "GRANT UPDATE ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_work_item TO " + role,
   );
+  // WP-2423 Q6: the lifecycle store explains Cancelled work from its cancellation rows.
+  await admin.query("GRANT SELECT ON rms_kitchen.kitchen_work_cancellation TO " + role);
   const queryFailures = [];
   let next = 30000;
   let allowed = true;

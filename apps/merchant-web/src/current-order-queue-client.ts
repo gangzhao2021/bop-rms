@@ -37,6 +37,30 @@ function instant(value: unknown): string {
     return fail();
   return value;
 }
+/** WP-2423 Q6: why the Store cancelled a paid order or batch before the kitchen started. */
+export const staffCancellationReasons = [
+  "CUSTOMER_REQUEST",
+  "SOLD_OUT",
+  "STORE_ERROR",
+  "DUPLICATE_ORDER",
+] as const;
+export type StaffCancellationReason = (typeof staffCancellationReasons)[number];
+function parseStaffCancellation(value: unknown, submittedAt: string) {
+  if (value === null) return null;
+  const raw = exact(value, ["reasonCode", "cancelledAt", "refundStatus"]);
+  const cancelledAt = instant(raw.cancelledAt);
+  if (
+    !staffCancellationReasons.includes(raw.reasonCode as StaffCancellationReason) ||
+    (raw.refundStatus !== "Pending" && raw.refundStatus !== "Refunded") ||
+    cancelledAt < submittedAt
+  )
+    return fail();
+  return Object.freeze({
+    reasonCode: raw.reasonCode as StaffCancellationReason,
+    cancelledAt,
+    refundStatus: raw.refundStatus as "Pending" | "Refunded",
+  });
+}
 export function parseCurrentOrderQueue(value: unknown, after: string | null = null) {
   const raw = exact(value, ["items", "nextAfterOrderReference"]);
   if (!Array.isArray(raw.items) || raw.items.length > 50) return fail();
@@ -127,8 +151,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         "sequence",
         "acceptanceStatus",
         "canRequestAcceptance",
+        "canCancel",
+        "staffCancellation",
       ]);
       const orderBatchReference = reference(batch.orderBatchReference);
+      const staffCancellation = parseStaffCancellation(batch.staffCancellation, submittedAt);
       if (
         (item.awaitingPayment === true && batch.canRequestAcceptance !== false) ||
         typeof batch.sequence !== "number" ||
@@ -144,7 +171,27 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
             item.currentVersion === null ||
             !["Submitted", "Accepted", "InProgress", "Ready"].includes(String(item.currentPhase)) ||
             (batch.sequence === 1 &&
-              (item.currentVersion !== 1 || item.currentPhase !== "Submitted"))))
+              (item.currentVersion !== 1 || item.currentPhase !== "Submitted")))) ||
+        typeof batch.canCancel !== "boolean" ||
+        // WP-2423 Q6: only a paid, accepted batch the kitchen has not started can be cancelled.
+        (batch.canCancel &&
+          (staffCancellation !== null ||
+            batch.acceptanceStatus !== "Accepted" ||
+            batch.canRequestAcceptance ||
+            item.unfulfillable !== null ||
+            item.pickupNotCollected !== false ||
+            item.currentVersion === null ||
+            !(item.orderType === "Pickup"
+              ? item.currentPhase === "Accepted"
+              : ["Submitted", "Accepted", "InProgress", "Ready"].includes(
+                  String(item.currentPhase),
+                )))) ||
+        // A pickup cancelled by the Store is a cancelled Order; a dine-in batch is a cancelled batch.
+        (staffCancellation !== null &&
+          (batch.canRequestAcceptance ||
+            (item.orderType === "DineIn"
+              ? batch.acceptanceStatus !== "Cancelled"
+              : item.currentPhase !== "Cancelled")))
       )
         return fail();
       previousSequence = batch.sequence;
@@ -154,6 +201,10 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         sequence: batch.sequence,
         acceptanceStatus: batch.acceptanceStatus as "Accepted" | "NotAccepted" | "Cancelled",
         canRequestAcceptance: batch.canRequestAcceptance,
+        /** WP-2423 Q6: the caller may cancel this paid batch before the kitchen starts. */
+        canCancel: batch.canCancel,
+        /** WP-2423 Q6: the Store cancelled this batch; the payment is refunded in full. */
+        staffCancellation,
       });
     });
     if (

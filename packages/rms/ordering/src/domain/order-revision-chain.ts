@@ -40,6 +40,7 @@ export function parseOrderRevision(value: unknown) {
         "Termination",
         "Fulfillment",
         "BatchCancellation",
+        "StaffBatchCancellation",
       ].includes(raw.kind)
     )
       return invalid();
@@ -56,7 +57,12 @@ export function parseOrderRevision(value: unknown) {
       version: next,
       occurredAt: parseOrderingInstant(raw.occurredAt),
       kind: raw.kind as
-        "AdditionalBatch" | "Acceptance" | "Termination" | "Fulfillment" | "BatchCancellation",
+        | "AdditionalBatch"
+        | "Acceptance"
+        | "Termination"
+        | "Fulfillment"
+        | "BatchCancellation"
+        | "StaffBatchCancellation",
     });
   } catch {
     return invalid();

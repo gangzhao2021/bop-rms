@@ -19,6 +19,8 @@ const row = (n = 1) => ({
       sequence: 1,
       acceptanceStatus: "Accepted",
       canRequestAcceptance: false,
+      canCancel: false,
+      staffCancellation: null,
     },
   ],
   canRequestAcceptance: false,
@@ -109,6 +111,8 @@ it.each(
         sequence: 1,
         acceptanceStatus: "Accepted",
         canRequestAcceptance: true,
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
     [
@@ -117,6 +121,8 @@ it.each(
         sequence: 2,
         acceptanceStatus: "Accepted",
         canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
     [row().batches[0], row().batches[0]],
@@ -143,6 +149,8 @@ it.each(["InProgress", "Ready"])(
             sequence: 2,
             acceptanceStatus: "NotAccepted",
             canRequestAcceptance,
+            canCancel: false,
+            staffCancellation: null,
           },
         ],
       };
@@ -168,6 +176,8 @@ it.each(["Fulfilled", "Rejected", "Cancelled"])(
           sequence: 2,
           acceptanceStatus: "NotAccepted",
           canRequestAcceptance: true,
+          canCancel: false,
+          staffCancellation: null,
         },
       ],
     };
@@ -205,6 +215,8 @@ it("preserves cancelled Batch and refuses a contradictory acceptance action", ()
         sequence: 2,
         acceptanceStatus: "Cancelled",
         canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
   };
@@ -324,6 +336,85 @@ it("WP-2423 Q1: accepts an acceptance deadline only on a paid pickup still await
     { ...awaiting, acceptBy: "2026-09-13T23:59:00.000Z" },
     { ...awaiting, acceptBy: "soon" },
     { ...awaiting, acceptBy: undefined },
+  ])
+    expect(() =>
+      parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),
+    ).toThrow();
+});
+it("WP-2423 Q6: reads staff cancellation and refuses inconsistent cancel capability", () => {
+  const cancellation = {
+    reasonCode: "CUSTOMER_REQUEST",
+    cancelledAt: "2026-09-14T00:00:30.000Z",
+    refundStatus: "Pending",
+  };
+  const batch = row().batches[0];
+  const cancellable = { ...row(), batches: [{ ...batch, canCancel: true }] };
+  expect(
+    parseCurrentOrderQueue({ items: [cancellable], nextAfterOrderReference: null }).items[0]
+      ?.batches[0]?.canCancel,
+  ).toBe(true);
+  const pickup = {
+    ...row(),
+    currentPhase: "Cancelled",
+    currentVersion: 3,
+    batches: [{ ...batch, staffCancellation: cancellation }],
+  };
+  expect(
+    parseCurrentOrderQueue({ items: [pickup], nextAfterOrderReference: null }).items[0]?.batches[0]
+      ?.staffCancellation,
+  ).toEqual(cancellation);
+  const dining = {
+    ...row(),
+    orderType: "DineIn",
+    batches: [
+      { ...batch, acceptanceStatus: "Cancelled", staffCancellation: cancellation },
+      {
+        ...batch,
+        orderBatchReference: id(91),
+        sequence: 2,
+        canCancel: true,
+      },
+    ],
+  };
+  const parsedDining = parseCurrentOrderQueue({
+    items: [dining],
+    nextAfterOrderReference: null,
+  }).items[0];
+  expect(parsedDining?.batches[0]?.staffCancellation?.reasonCode).toBe("CUSTOMER_REQUEST");
+  expect(parsedDining?.batches[1]?.canCancel).toBe(true);
+  for (const item of [
+    // Already cancelled batches cannot be cancelled again.
+    { ...pickup, batches: [{ ...pickup.batches[0], canCancel: true }] },
+    // A pickup cancelled by the Store is a cancelled order.
+    { ...pickup, currentPhase: "Accepted" },
+    // A dine-in batch cancelled by the Store is a cancelled batch.
+    {
+      ...dining,
+      batches: [{ ...dining.batches[0], acceptanceStatus: "Accepted" }, dining.batches[1]],
+    },
+    { ...cancellable, batches: [{ ...cancellable.batches[0], canCancel: "true" }] },
+    { ...cancellable, currentPhase: "Fulfilled" },
+    { ...cancellable, pickupNotCollected: true },
+    { ...cancellable, batches: [{ ...cancellable.batches[0], acceptanceStatus: "NotAccepted" }] },
+    { ...pickup, batches: [{ ...batch, staffCancellation: { ...cancellation, reasonCode: "X" } }] },
+    {
+      ...pickup,
+      batches: [{ ...batch, staffCancellation: { ...cancellation, refundStatus: "Failed" } }],
+    },
+    {
+      ...pickup,
+      batches: [{ ...batch, staffCancellation: { ...cancellation, actorName: "Sam" } }],
+    },
+    {
+      ...pickup,
+      batches: [
+        {
+          ...batch,
+          staffCancellation: { ...cancellation, cancelledAt: "2026-09-13T23:00:00.000Z" },
+        },
+      ],
+    },
+    { ...row(), batches: [{ ...batch, staffCancellation: undefined }] },
   ])
     expect(() =>
       parseCurrentOrderQueue({ items: [item], nextAfterOrderReference: null }),

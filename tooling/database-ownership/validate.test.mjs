@@ -3056,6 +3056,57 @@ describe("Database Schema Ownership Architecture Test", () => {
     );
     expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
+  it("admits only the Kitchen work cancellation owner adapter without a driver", async () => {
+    const root = await fixture();
+    const context = await writeModule(root, "RMS", "kitchen", "rms_kitchen", [
+      "kitchen_ticket",
+      "kitchen_work_item",
+      "kitchen_work_lifecycle_operation",
+      "kitchen_work_cancellation",
+    ]);
+    const asset = join(
+      context.moduleRoot,
+      "src/infrastructure/persistence/kitchen-work-cancellation-store.ts",
+    );
+    await mkdir(dirname(asset), { recursive: true });
+    await writeFile(asset, "export const synthetic = true;");
+    expect(await resultCodes(root)).not.toContain("UNSUPPORTED_DATABASE_ASSET");
+    await writeFile(asset, 'import pg from "pg"; export {pg};');
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
+  it.each([
+    "owner",
+    "schema",
+    "path",
+    "kitchen_ticket",
+    "kitchen_work_item",
+    "kitchen_work_lifecycle_operation",
+    "kitchen_work_cancellation",
+  ])("rejects Kitchen work cancellation adapter with changed %s", async (changed) => {
+    const root = await fixture();
+    const context = await writeModule(
+      root,
+      "RMS",
+      changed === "owner" ? "other" : "kitchen",
+      changed === "schema" ? "rms_other" : "rms_kitchen",
+      [
+        "kitchen_ticket",
+        "kitchen_work_item",
+        "kitchen_work_lifecycle_operation",
+        "kitchen_work_cancellation",
+      ].filter((v) => v !== changed),
+    );
+    await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });
+    await writeFile(
+      join(
+        context.moduleRoot,
+        "src/infrastructure/persistence/" +
+          (changed === "path" ? "other.ts" : "kitchen-work-cancellation-store.ts"),
+      ),
+      "export const synthetic = true;",
+    );
+    expect(await resultCodes(root)).toContain("UNSUPPORTED_DATABASE_ASSET");
+  });
   it("admits only the Kitchen lifecycle store owner adapter without a driver", async () => {
     const root = await fixture();
     const context = await writeModule(root, "RMS", "kitchen", "rms_kitchen", [
@@ -4814,6 +4865,23 @@ describe("Database Schema Ownership Architecture Test", () => {
       "order-batch-identity-source.ts",
       "ordering",
       ["order_header", "order_submission_record", "order_batch"],
+    ],
+    [
+      "staff-order-cancellation-store.ts",
+      "ordering",
+      [
+        "order_header",
+        "order_batch",
+        "order_item",
+        "order_revision",
+        "order_staff_cancellation",
+        "order_batch_checkout_cancellation",
+        "order_termination_record",
+        "order_closure_version",
+        "order_fulfillment_completion_record",
+        "order_acceptance_record",
+        "order_payment_disposition_record",
+      ],
     ],
     ["payment-intent-binding-source.ts", "payment", ["payment_intent"]],
     ["captured-batch-payment-source.ts", "payment", ["payment_intent", "payment_terminal_fact"]],

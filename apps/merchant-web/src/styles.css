@@ -7028,6 +7028,54 @@ body:has(.product-complete-draft) .bop-shell__header,
 .order-accept-by[data-tier="lapsed"] {
   color: var(--bop-color-danger);
 }
+/* WP-2423 Q6: staff cancellation of a paid order or batch before the kitchen starts. */
+.order-staff-cancelled {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--bop-color-text-default);
+}
+.order-staff-cancellation {
+  display: grid;
+  gap: 2px;
+  font-weight: 600;
+}
+.order-staff-cancellation span {
+  font-weight: 400;
+  color: var(--bop-color-text-muted);
+}
+.order-cancel-dialog {
+  width: min(440px, calc(100vw - 32px));
+  margin: auto;
+  padding: 20px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+}
+.order-cancel-dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+.order-cancel-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.order-cancel-dialog p {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+.order-cancel-dialog label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.order-cancel-dialog [data-variant="destructive"]:not(:disabled) {
+  border-color: var(--bop-color-danger);
+  color: var(--bop-color-danger);
+}
 .order-queue-awaiting,
 .order-queue-stale {
   margin: 0 0 12px;

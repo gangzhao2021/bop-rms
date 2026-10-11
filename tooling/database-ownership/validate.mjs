@@ -2101,6 +2101,23 @@ async function scanUnsupported(root, module, diagnostics) {
               "order_payment_disposition_record",
             ],
           },
+          // WP-2423 Q6: staff cancel a paid, accepted Order/Batch before the kitchen starts it.
+          "src/infrastructure/persistence/staff-order-cancellation-store.ts": {
+            owner: "ordering",
+            tables: [
+              "order_header",
+              "order_batch",
+              "order_item",
+              "order_revision",
+              "order_staff_cancellation",
+              "order_batch_checkout_cancellation",
+              "order_termination_record",
+              "order_closure_version",
+              "order_fulfillment_completion_record",
+              "order_acceptance_record",
+              "order_payment_disposition_record",
+            ],
+          },
           "src/infrastructure/persistence/order-batch-identity-source.ts": {
             owner: "ordering",
             tables: ["order_header", "order_submission_record", "order_batch"],
@@ -2639,6 +2656,17 @@ async function scanUnsupported(root, module, diagnostics) {
             "kitchen_ready_publication",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/kitchen-work-lifecycle-store.ts";
+        // WP-2423 Q6: staff cancel a paid batch before the kitchen starts any of its work.
+        const acceptedKitchenWorkCancellationAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          [
+            "kitchen_ticket",
+            "kitchen_work_item",
+            "kitchen_work_lifecycle_operation",
+            "kitchen_work_cancellation",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/kitchen-work-cancellation-store.ts";
         const acceptedKitchenQueueSourceAsset =
           module.packageName === "@rms/kitchen" &&
           module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
@@ -3382,6 +3410,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPickupHandoffStoreAsset &&
           !acceptedFulfillmentCompletionStoreAsset &&
           !acceptedKitchenLifecycleStoreAsset &&
+          !acceptedKitchenWorkCancellationAsset &&
           !acceptedKitchenQueueQueriesAsset &&
           !acceptedKitchenQueueSourceAsset &&
           !acceptedKitchenCustomerStatusAsset &&

@@ -58,6 +58,8 @@ test("@production order closure retries the same intent then renders read-only h
                 sequence: 1,
                 acceptanceStatus: "Accepted",
                 canRequestAcceptance: false,
+                canCancel: false,
+                staffCancellation: null,
               },
             ],
             canRequestAcceptance: false,

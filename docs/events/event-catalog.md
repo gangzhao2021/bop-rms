@@ -54,6 +54,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `KitchenItemReady:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `KitchenOrderReady:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `KitchenWorkAccepted:v1` — owner `@rms/kitchen`; stable; store; personal
+- `KitchenWorkCancelled:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenWorkCreated:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `KitchenWorkStarted:v1` — owner `@rms/kitchen`; stable; store; personal
 - `LicenseExpired:v1` — owner `@rms/compliance-food-safety`; stable; brand; indirect_identifier

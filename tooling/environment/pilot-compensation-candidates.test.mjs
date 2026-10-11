@@ -46,6 +46,12 @@ test("passes exact paging and retained transaction to owner reader", async () =>
     "INTERNAL_COMPENSATION_DISCOVERY_UNAVAILABLE",
   );
   expect(f.resources.transactions.run).toHaveBeenCalledTimes(1);
+  expect(options.includeStaffCancellations).toBe(false);
+});
+test("includes staff cancellations only when the refund workload asks for them", () => {
+  const f = fixture();
+  createInternalCompensationCandidates(f.resources, { includeStaffCancellations: true });
+  expect(mock.factory.mock.calls[0][0].includeStaffCancellations).toBe(true);
 });
 test("rejects production and mismatched binding before owner construction", () => {
   const f = fixture();

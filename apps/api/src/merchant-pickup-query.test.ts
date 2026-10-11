@@ -1,7 +1,18 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { createMerchantPickupQuery } from "./merchant-pickup-query.js";
-const doubles = vi.hoisted(() => ({ scope: vi.fn(), store: vi.fn(), list: vi.fn() }));
+const doubles = vi.hoisted(() => ({
+  scope: vi.fn(),
+  store: vi.fn(),
+  list: vi.fn(),
+  cancelled: vi.fn(),
+  numbers: vi.fn(),
+}));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => doubles.scope }));
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<object>()),
+  createPostgresStaffOrderCancellationReader: () => ({ listByOrders: doubles.cancelled }),
+  listStoreOrderNumbers: doubles.numbers,
+}));
 vi.mock("@rms/fulfillment", async (original) => ({
   ...(await original<object>()),
   createPostgresFulfillmentReadinessStore: doubles.store,
@@ -20,6 +31,8 @@ function setup(configured = true) {
     allowed,
   });
   doubles.store.mockReturnValue({ listPickupQueue: doubles.list });
+  doubles.cancelled.mockResolvedValue([]);
+  doubles.numbers.mockResolvedValue(new Map());
   doubles.list.mockResolvedValue({
     source: "CurrentFulfillment",
     observedAt: "2026-09-19T12:00:00.000Z",
@@ -100,4 +113,22 @@ it("rechecks withdrawn queue permission after configured resolution", async () =
   await expect(f.operation(f.input)).rejects.toMatchObject({
     code: "FULFILLMENT_READINESS_PERMISSION_DENIED",
   });
+});
+it("WP-2423 Q6: leaves out pickup orders the Store cancelled before the kitchen started", async () => {
+  const f = setup();
+  const item = (n: number) => ({
+    fulfillmentReference: id(40 + n),
+    orderReference: id(50 + n),
+    aggregateVersion: 2n,
+  });
+  doubles.list.mockResolvedValue({
+    source: "CurrentFulfillment",
+    observedAt: "2026-09-19T12:00:00.000Z",
+    items: [item(1), item(2)],
+    nextAfterFulfillmentReference: null,
+  });
+  doubles.cancelled.mockResolvedValue([{ orderReference: id(51) }]);
+  const result = (await f.operation(f.input)) as { items: { orderReference: string }[] };
+  expect(result.items.map((value) => value.orderReference)).toEqual([id(52)]);
+  expect(doubles.cancelled).toHaveBeenCalledWith(expect.anything(), [id(51), id(52)]);
 });

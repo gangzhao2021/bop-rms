@@ -15,6 +15,7 @@ import {
 import { decodeKitchenWorkLifecycleRecord } from "../../application/kitchen-work-lifecycle-record.js";
 import { parseKitchenTicketReference } from "../../domain/kitchen-ticket.js";
 import { createKitchenWorkLifecycleRows } from "./kitchen-work-lifecycle-rows.js";
+import { loadKitchenWorkCancellations } from "./kitchen-work-cancellation-store.js";
 
 function unavailable(): never {
   throw new KitchenWorkLifecycleError("KITCHEN_WORK_DEPENDENCY_UNAVAILABLE");
@@ -248,6 +249,17 @@ export function createPostgresKitchenWorkLifecycleStore(
       const history = records.rows.map(original);
       if (history.some((effect) => effect.operation.ticketReference !== c.ticketReference))
         return unavailable();
+      // WP-2423 Q6: a staff cancellation is the last fact of each cancelled item.
+      let cancellations: Awaited<ReturnType<typeof loadKitchenWorkCancellations>>;
+      try {
+        cancellations = await loadKitchenWorkCancellations(
+          tx,
+          { brandReference: brand, storeReference: store },
+          c.ticketReference,
+        );
+      } catch {
+        return unavailable();
+      }
       const targetId =
         c.action === "MarkKitchenOrderItemReady"
           ? c.workItems[0].workItemReference
@@ -315,7 +327,26 @@ export function createPostgresKitchenWorkLifecycleStore(
         const latest = history
           .filter((effect) => effect.mutation.workItemReference === item.workItemReference)
           .at(-1);
-        if (!latest) {
+        const cancelled = cancellations.find(
+          (row) => row.workItemReference === item.workItemReference,
+        );
+        if (cancelled) {
+          if (
+            cancelled.orderItemReference !== item.orderItemReference ||
+            item.workItemStatus !== "Cancelled" ||
+            item.workItemVersion !== cancelled.resultWorkItemVersion ||
+            item.updatedAt !== cancelled.cancelledAt ||
+            (latest
+              ? latest.mutation.resultWorkItemVersion !== cancelled.expectedWorkItemVersion ||
+                latest.mutation.afterStatus !== cancelled.beforeStatus ||
+                latest.mutation.resultTicketVersion >= cancelled.resultTicketVersion ||
+                latest.mutation.afterCompletedQuantity !== item.completedQuantity
+              : cancelled.expectedWorkItemVersion !== 1n ||
+                cancelled.beforeStatus !== "Queued" ||
+                item.completedQuantity !== 0)
+          )
+            return unavailable();
+        } else if (!latest) {
           if (
             item.workItemVersion !== 1n ||
             item.workItemStatus !== "Queued" ||
@@ -332,7 +363,18 @@ export function createPostgresKitchenWorkLifecycleStore(
           return unavailable();
       }
       const latest = history.at(-1);
-      if (BigInt(String(ticket.version)) !== (latest?.mutation.resultTicketVersion ?? 1n))
+      const latestCancellation = cancellations.at(-1);
+      const latestTicketVersion =
+        latestCancellation !== undefined &&
+        latestCancellation.resultTicketVersion > (latest?.mutation.resultTicketVersion ?? 1n)
+          ? latestCancellation.resultTicketVersion
+          : (latest?.mutation.resultTicketVersion ?? 1n);
+      if (
+        cancellations.some(
+          (row) => !mapped.some((item) => item.workItemReference === row.workItemReference),
+        ) ||
+        BigInt(String(ticket.version)) !== latestTicketVersion
+      )
         return unavailable();
       const ready = readyResults.find((r) => r.orderItemReference === target.orderItemReference);
       const completed = operations

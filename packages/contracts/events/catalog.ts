@@ -168,6 +168,28 @@ const kitchenWorkAcceptedPayload = z.strictObject({
   acceptedAt: z.iso.datetime({ offset: false }),
 });
 
+const kitchenWorkCancelledPayload = z.strictObject({
+  kitchenTicketReference: z.string().regex(canonicalUuidV7),
+  orderReference: z.string().regex(canonicalUuidV7),
+  orderBatchReference: z.string().regex(canonicalUuidV7),
+  orderCancellationReference: z.string().regex(canonicalUuidV7),
+  ticketVersion: z.string().regex(/^[1-9][0-9]*$/u),
+  reasonCode: z.literal("ORDER_CANCELLED_BEFORE_PREPARATION"),
+  workItems: z
+    .array(
+      z.strictObject({
+        kitchenWorkItemReference: z.string().regex(canonicalUuidV7),
+        orderItemReference: z.string().regex(canonicalUuidV7),
+        fromStatus: z.enum(["Queued", "Held"]),
+        toStatus: z.literal("Cancelled"),
+        workItemVersion: z.string().regex(/^[1-9][0-9]*$/u),
+      }),
+    )
+    .min(1)
+    .max(100),
+  cancelledAt: z.iso.datetime({ offset: false }),
+});
+
 const kitchenWorkStartedPayload = z.strictObject({
   kitchenTicketReference: z.string().regex(canonicalUuidV7),
   kitchenWorkItemReference: z.string().regex(canonicalUuidV7),
@@ -1557,6 +1579,22 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: kitchenWorkAcceptedPayload,
+  },
+  {
+    eventType: "KitchenWorkCancelled",
+    schemaVersion: 1,
+    ownerModule: "@rms/kitchen",
+    producerModule: "@rms/kitchen",
+    stability: "stable",
+    consumers: ["kitchen.queue-work-cancelled-projection:v1"],
+    tenantScope: "store",
+    dataClassification: "personal",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: kitchenWorkCancelledPayload,
   },
   {
     eventType: "KitchenWorkCreated",

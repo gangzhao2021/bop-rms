@@ -666,6 +666,8 @@ describe("migration catalog", () => {
       "2000_021_create_pickup_in_person_verification",
       "2000_022_create_pickup_not_collected",
       "2000_023_create_unmatched_capture_refund",
+      "2000_024_create_kitchen_work_cancellation",
+      "2000_025_create_order_staff_cancellation",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

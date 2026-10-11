@@ -1,7 +1,9 @@
 import { validateDomainEventEnvelope } from "@bop/eventing";
 
 import {
+  paidWithoutFulfillableOrderReasons,
   paymentFailureReasons,
+  type PaidWithoutFulfillableOrderReason,
   paymentRetryDispositions,
   type OrderPaymentFailureRecord,
   type OrderPaymentOutcomeDisposition,
@@ -293,16 +295,14 @@ export function parseOrderPaymentOutcomeDisposition(
     }
     if (
       raw.disposition !== "PaidWithoutFulfillableOrder" ||
-      !["CapacityExpired", "SubmissionCancelled", "OrderNoLongerFulfillable"].includes(
-        raw.reason as string,
-      ) ||
+      !paidWithoutFulfillableOrderReasons.includes(raw.reason as never) ||
       raw.kitchenReleaseDisposition !== "Blocked"
     )
       return invalid();
     return Object.freeze({
       ...common,
       disposition: "PaidWithoutFulfillableOrder" as const,
-      reason: raw.reason as "CapacityExpired" | "SubmissionCancelled" | "OrderNoLongerFulfillable",
+      reason: raw.reason as PaidWithoutFulfillableOrderReason,
       kitchenReleaseDisposition: "Blocked" as const,
     });
   } catch (error) {

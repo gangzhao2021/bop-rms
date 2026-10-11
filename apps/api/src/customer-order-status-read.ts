@@ -13,6 +13,7 @@ import {
 } from "@bop/identity";
 import {
   createOrderStatusQueryService,
+  createPostgresStaffOrderCancellationReader,
   loadPickupPaymentWindowClosure,
   createPostgresOrderStatusProjectionStore,
   OrderStatusProjectionError,
@@ -20,6 +21,15 @@ import {
   type CartQueryTransactionRunner,
 } from "@rms/ordering";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
+import { readStaffCancellationRefundStatus } from "./merchant-order-staff-cancellation.js";
+
+/** WP-2423 Q6: customer-safe reason categories; staff identity and internal codes stay private. */
+const customerCancellationReasons = Object.freeze({
+  CUSTOMER_REQUEST: "CustomerRequest",
+  SOLD_OUT: "SoldOut",
+  STORE_ERROR: "StoreError",
+  DUPLICATE_ORDER: "DuplicateOrder",
+} as const);
 
 /** Current Guest credentials are resolved inside the same transaction as the owner projection. */
 export function createCustomerOrderStatusRead(
@@ -214,6 +224,23 @@ export function createCustomerOrderStatusRead(
             result.order.orderType === "Pickup" && (await stillAuthorized())
               ? await loadPickupPaymentWindowClosure(transaction, options.scope, orderReference)
               : undefined;
+          // WP-2423 Q6: batches the Store cancelled after payment, with the refund's progress.
+          const staffCancellations = [];
+          if (await stillAuthorized())
+            for (const record of await createPostgresStaffOrderCancellationReader(
+              options.scope,
+            ).listByOrders(transaction, [orderReference]))
+              staffCancellations.push({
+                orderBatchReference: String(record.orderBatchReference),
+                cancelledAt: String(record.cancelledAt),
+                reason: customerCancellationReasons[record.reasonCode],
+                refundStatus: await readStaffCancellationRefundStatus(
+                  transaction,
+                  options.scope,
+                  record,
+                  stillAuthorized,
+                ),
+              });
           if (!(await stillAuthorized()))
             throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
           const checkedAt = now();
@@ -241,6 +268,7 @@ export function createCustomerOrderStatusRead(
                 : {
                     unpaidCancellation: unpaid === null ? null : { cancelledAt: unpaid.closedAt },
                   }),
+              ...(staffCancellations.length === 0 ? {} : { staffCancellations }),
             },
           };
         });

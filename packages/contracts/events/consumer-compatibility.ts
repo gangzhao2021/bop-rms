@@ -644,6 +644,14 @@ export const eventConsumerContracts = defineEventConsumerContracts([
     "none",
   ),
   contract(
+    "kitchen.queue-work-cancelled-projection",
+    "@rms/kitchen",
+    "KitchenWorkCancelled",
+    "store",
+    "replace_kitchen_queue_projection",
+    "none",
+  ),
+  contract(
     "kitchen.queue-work-started-projection",
     "@rms/kitchen",
     "KitchenWorkStarted",

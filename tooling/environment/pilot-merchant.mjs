@@ -63,6 +63,7 @@ import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-was
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
 import { createMerchantServiceControl } from "../../apps/api/dist/merchant-service-control.js";
 import { createMerchantUnmatchedCaptureRefund } from "../../apps/api/dist/merchant-unmatched-capture-refund.js";
+import { createMerchantOrderStaffCancellation } from "../../apps/api/dist/merchant-order-staff-cancellation.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
 import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
 export async function createInternalMerchant(
@@ -382,6 +383,22 @@ export async function createInternalMerchant(
           nextReference: () => resources.credentials.reference(),
           refundPayment: refundUnmatchedCapture,
         });
+  // WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts. The refund is made by
+  // the compensation workload (business worker), which discovers the staff cancellation record.
+  const orderStaffCancellation = createMerchantOrderStaffCancellation({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+    installContext: async (tx, scope) => {
+      for (const key of ["tenantReference", "brandReference", "storeReference"])
+        if (scope[key] !== selected[key])
+          throw new Error("INTERNAL_ORDER_CANCELLATION_SCOPE_DENIED");
+      await tx.query(
+        "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+        [scope.tenantReference, scope.brandReference, scope.storeReference],
+      );
+    },
+  });
   const compensationQuery = createMerchantCompensationReconciliationQuery({
     persistence,
     authentication: service,
@@ -792,6 +809,7 @@ export async function createInternalMerchant(
       compensationReconciliation,
       compensationQuery,
       ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),
+      orderStaffCancellation,
       ordinaryRefundSend,
       ordinaryRefundReconciliation,
       ordinaryRefund,

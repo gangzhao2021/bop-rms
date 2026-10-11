@@ -710,6 +710,10 @@ The present v12 configuration remains unchanged with both false. Cancellation
 loads protected `cancellation-workflow-draft-result.json` and still requires the
 current matching published workflow; the draft file alone cannot authorize it.
 Compensation reuses the existing Test simulator and current owner/amount checks.
+WP-2423 Q6: the compensation workload also discovers staff cancellations of paid orders or batches
+(`CancelledByStaff`, verified against Ordering's `order_staff_cancellation` record) and refunds the
+whole remaining capture including tip; the stock release workload does not (the cancellation
+already returned the stock). Without `compensation: true` such refunds stay pending.
 Their separate pending approvals and activation work are still required. For an
 existing installation, stop the old business process with its old controller
 identity before switching entries; start the new entry via the controller and

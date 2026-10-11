@@ -62,6 +62,8 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
         sequence: 1,
         acceptanceStatus: phase === "Submitted" ? "NotAccepted" : "Accepted",
         canRequestAcceptance: phase === "Submitted",
+        canCancel: false,
+        staffCancellation: null,
       },
     ],
     canRequestAcceptance: phase === "Submitted",

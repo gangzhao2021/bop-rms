@@ -58,6 +58,8 @@ test("@production serving retains its intent after a lost response and locks ref
                 sequence: 1,
                 acceptanceStatus: "Accepted",
                 canRequestAcceptance: false,
+                canCancel: false,
+                staffCancellation: null,
               },
             ],
             canRequestAcceptance: false,

@@ -346,6 +346,59 @@ describe("independent order status sources", () => {
       ),
     ).toThrow();
   });
+  it("WP-2423 Q6: admits store cancellations of the order's own batches with customer-safe fields", () => {
+    const input = sourced();
+    const cancellation = {
+      orderBatchReference: id(3),
+      cancelledAt: "2026-08-11T13:58:00.000Z",
+      reason: "SoldOut",
+      refundStatus: "Pending",
+    };
+    const cancelled = {
+      ...input,
+      order: { ...input.order, canonicalPhase: "Cancelled" },
+      sources: {
+        ...input.sources,
+        kitchen: {
+          batches: [
+            {
+              orderBatchReference: id(3),
+              status: "Cancelled",
+              updatedAt: "2026-08-11T13:58:00.000Z",
+            },
+          ],
+        },
+        staffCancellations: [cancellation],
+      },
+    };
+    const parsed = parseOrderStatusView(cancelled, id(1));
+    expect(parsed.sources?.staffCancellations).toEqual([cancellation]);
+    expect(parsed.sources?.kitchen?.batches[0]?.status).toBe("Cancelled");
+    expect(parseOrderStatusView(input, id(1)).sources).not.toHaveProperty("staffCancellations");
+    for (const staffCancellations of [
+      [],
+      [cancellation, cancellation],
+      [{ ...cancellation, orderBatchReference: id(99) }],
+      [{ ...cancellation, reason: "SOLD_OUT" }],
+      [{ ...cancellation, refundStatus: "Failed" }],
+      [{ ...cancellation, cancelledAt: "2026-08-11T14:01:00.000Z" }],
+      [{ ...cancellation, staffName: "Sam" }],
+      null,
+    ])
+      expect(() =>
+        parseOrderStatusView(
+          { ...cancelled, sources: { ...cancelled.sources, staffCancellations } },
+          id(1),
+        ),
+      ).toThrow();
+    // A kitchen "Cancelled" batch needs the store's cancellation that explains it.
+    expect(() =>
+      parseOrderStatusView(
+        { ...cancelled, sources: { ...cancelled.sources, staffCancellations: undefined } },
+        id(1),
+      ),
+    ).toThrow();
+  });
   it("accepts a scoped nonempty subset without inventing another batch state", () => {
     const input = sourced();
     const first = input.order.batches[0];

@@ -32,6 +32,7 @@ export function createDiningOrderPreparationProgress(
       });
       const membership = new Map(order.items.map((item) => [item.orderItemReference, item]));
       const progress = new Map<string, "Queued" | "InProgress" | "Ready">();
+      const kitchenCancelled = new Set<string>();
       for (const batch of work?.batches ?? []) {
         if (batch.updatedAt > input.observedAt) throw new Error("ORDER_PROGRESS_UNAVAILABLE");
         for (const item of batch.items) {
@@ -41,10 +42,14 @@ export function createDiningOrderPreparationProgress(
             member.orderBatchReference !== batch.orderBatchReference ||
             !member.acceptance ||
             member.cancellation ||
-            progress.has(item.orderItemReference)
+            progress.has(item.orderItemReference) ||
+            kitchenCancelled.has(item.orderItemReference) ||
+            // WP-2423 Q6: kitchen work is Cancelled exactly when staff cancelled its batch.
+            (item.status === "Cancelled") !== Boolean(member.staffCancellation)
           )
             throw new Error("ORDER_PROGRESS_UNAVAILABLE");
-          progress.set(item.orderItemReference, item.status);
+          if (item.status === "Cancelled") kitchenCancelled.add(item.orderItemReference);
+          else progress.set(item.orderItemReference, item.status);
         }
       }
       const items = order.items.map((item) => {
@@ -53,15 +58,16 @@ export function createDiningOrderPreparationProgress(
           orderItemReference: item.orderItemReference,
           orderBatchReference: item.orderBatchReference,
           orderedQuantity: item.orderedQuantity,
-          phase: item.cancellation
-            ? ("Cancelled" as const)
-            : current === "Ready"
-              ? ("Ready" as const)
-              : current === "InProgress"
-                ? ("InProgress" as const)
-                : item.acceptance
-                  ? ("Accepted" as const)
-                  : ("Submitted" as const),
+          phase:
+            item.cancellation || item.staffCancellation
+              ? ("Cancelled" as const)
+              : current === "Ready"
+                ? ("Ready" as const)
+                : current === "InProgress"
+                  ? ("InProgress" as const)
+                  : item.acceptance
+                    ? ("Accepted" as const)
+                    : ("Submitted" as const),
           everAccepted: item.acceptance !== null,
           everStarted: current === "Ready" || current === "InProgress",
         });
@@ -79,8 +85,12 @@ export function createDiningOrderPreparationProgress(
         orderVersion: order.orderVersion,
         orderCheckpoint: order.orderCheckpoint,
         preparationPhase: summary.phase,
+        // A staff-cancelled batch needs no kitchen progress (it never started, or never reached it).
         kitchenEvidenceComplete: order.items.every(
-          (item) => item.acceptance === null || progress.has(item.orderItemReference),
+          (item) =>
+            item.acceptance === null ||
+            Boolean(item.staffCancellation) ||
+            progress.has(item.orderItemReference),
         ),
         items: Object.freeze(items),
         observedAt: input.observedAt,

@@ -35,10 +35,16 @@ function row(
         sequence: 1,
         acceptanceStatus: awaiting ? "NotAccepted" : "Accepted",
         canRequestAcceptance: awaiting,
+        canCancel: phase === "Accepted",
+        staffCancellation: null as null | {
+          reasonCode: string;
+          cancelledAt: string;
+          refundStatus: "Pending" | "Refunded";
+        },
       },
     ],
     canRequestAcceptance: awaiting,
-    currentPhase: phase,
+    currentPhase: phase as string,
     currentVersion: version,
     unfulfillable: null,
     pickupNotCollected: false,
@@ -123,20 +129,70 @@ const json = (value: unknown, status = 200) =>
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
 
+/** WP-2423 Q6 demo only: batches the demo Store cancelled in this browser tab (never persisted). */
+const demoCancellations = new Map<string, { reasonCode: string; cancelledAt: string }>();
+function applyDemoCancellation(order: ReturnType<typeof row>) {
+  const batch = order.batches[0];
+  const cancelled =
+    batch === undefined ? undefined : demoCancellations.get(batch.orderBatchReference);
+  if (!batch || !cancelled) return order;
+  batch.canCancel = false;
+  batch.staffCancellation = { ...cancelled, refundStatus: "Pending" };
+  order.currentPhase = "Cancelled";
+  order.currentVersion += 1;
+  return order;
+}
+
 /**
- * A `fetch` for the local demo: current orders and one order's items come from the fixtures;
- * every other merchant endpoint answers 503 so the pages show their unavailable states without
- * any application request leaving the browser.
+ * A `fetch` for the local demo: current orders and one order's items come from the fixtures; a
+ * cancelled demo pickup stays cancelled in this tab. Every other merchant endpoint answers 503 so
+ * the pages show their unavailable states without any application request leaving the browser.
  */
 export const localMerchantFetch: typeof fetch = async (input, init) => {
   const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const url = new URL(target, "http://127.0.0.1");
   const method = (init?.method ?? "GET").toUpperCase();
-  if (method === "GET" && url.pathname === "/merchant/orders")
-    return json(currentOrderQueueFixture());
+  if (method === "GET" && url.pathname === "/merchant/orders") {
+    const queue = currentOrderQueueFixture();
+    queue.items.forEach(applyDemoCancellation);
+    return json(queue);
+  }
   if (method === "GET" && url.pathname === "/merchant/orders/detail") {
     const detail = currentOrderDetailFixture(url.searchParams.get("order") ?? "");
+    if (detail !== null) applyDemoCancellation(detail.order);
     return detail === null ? json({ error: "not_found" }, 404) : json(detail);
+  }
+  if (method === "POST" && url.pathname === "/merchant/orders/cancel") {
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(typeof init?.body === "string" ? init.body : "") as Record<string, unknown>;
+    } catch {
+      return json({ error: "order_cancellation_input_invalid" }, 400);
+    }
+    const order = currentOrderQueueFixture().items.find(
+      (item) => item.orderReference === body.orderReference,
+    );
+    const batch = order?.batches.find(
+      (item) => item.orderBatchReference === body.orderBatchReference,
+    );
+    if (!order || !batch) return json({ error: "order_cancellation_not_found" }, 404);
+    const replay = demoCancellations.get(batch.orderBatchReference);
+    if (!replay && (!batch.canCancel || typeof body.reasonCode !== "string"))
+      return json({ error: "order_not_cancellable" }, 409);
+    if (!replay && body.expectedOrderVersion !== order.currentVersion)
+      return json({ error: "order_version_conflict" }, 409);
+    const cancelled = replay ?? {
+      reasonCode: String(body.reasonCode),
+      cancelledAt: "2026-08-12T12:01:00.000Z",
+    };
+    demoCancellations.set(batch.orderBatchReference, cancelled);
+    return json({
+      status: replay ? "AlreadyCancelled" : "Cancelled",
+      orderReference: order.orderReference,
+      orderBatchReference: batch.orderBatchReference,
+      cancelledAt: cancelled.cancelledAt,
+      refundStatus: "Pending",
+    });
   }
   return json({ error: "demo_unavailable" }, 503);
 };

@@ -182,6 +182,8 @@ export const systemReservationReleaseReasonCodes = Object.freeze([
   "CHECKOUT_DEADLINE_REACHED",
   "PAID_WITHOUT_FULFILLABLE_ORDER",
   "PAYMENT_WINDOW_EXPIRED",
+  /** WP-2423 Q6: staff cancelled a paid order or batch before the kitchen started it. */
+  "STAFF_CANCELLED_BEFORE_PREPARATION",
 ] as const);
 export type SystemReservationReleaseReasonCode =
   (typeof systemReservationReleaseReasonCodes)[number];

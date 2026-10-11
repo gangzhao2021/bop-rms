@@ -10,10 +10,11 @@ export interface KitchenCustomerBatchStatus {
   readonly ticketReference: string;
   readonly ticketVersion: bigint;
   readonly updatedAt: string;
-  readonly status: "Queued" | "InProgress" | "Ready";
+  /** WP-2423 Q6: "Cancelled" when staff cancelled the whole batch before the kitchen started it. */
+  readonly status: "Queued" | "InProgress" | "Ready" | "Cancelled";
   readonly items: readonly {
     readonly orderItemReference: string;
-    readonly status: "Queued" | "InProgress" | "Ready";
+    readonly status: "Queued" | "InProgress" | "Ready" | "Cancelled";
   }[];
 }
 
@@ -84,13 +85,14 @@ export function createPostgresKitchenCustomerStatusReader(options: {
           const itemStates = new Map<string, { allReady: boolean; allQueued: boolean }>();
           let allReady = true;
           let allQueued = true;
+          let cancelledCount = 0;
           for (const item of items.rows) {
             const reference = parseKitchenTicketReference(item.kitchen_work_item_id);
             const orderItemReference = parseKitchenTicketReference(item.order_item_id);
             if (seen.has(reference)) return unavailable();
             seen.add(reference);
             if (
-              !["Queued", "In Progress", "Completed"].includes(String(item.status)) ||
+              !["Queued", "In Progress", "Completed", "Cancelled"].includes(String(item.status)) ||
               !Number.isSafeInteger(item.required_quantity) ||
               Number(item.required_quantity) <= 0 ||
               Number(item.required_quantity) > 999 ||
@@ -103,9 +105,11 @@ export function createPostgresKitchenCustomerStatusReader(options: {
               (item.status === "Queued" && item.completed_quantity !== 0) ||
               (item.status === "Completed" && item.completed_quantity !== item.required_quantity) ||
               (item.status === "In Progress" &&
-                Number(item.completed_quantity) >= Number(item.required_quantity))
+                Number(item.completed_quantity) >= Number(item.required_quantity)) ||
+              (item.status === "Cancelled" && item.ready_result_id !== null)
             )
               return unavailable();
+            if (item.status === "Cancelled") cancelledCount++;
             allQueued = allQueued && item.status === "Queued";
             const ready = item.ready_result_id !== null;
             if (ready) {
@@ -124,6 +128,23 @@ export function createPostgresKitchenCustomerStatusReader(options: {
               allReady: (prior?.allReady ?? true) && ready,
               allQueued: (prior?.allQueued ?? true) && item.status === "Queued",
             });
+          }
+          // Staff cancel a whole batch; a partly cancelled batch is not a state Kitchen writes.
+          if (cancelledCount > 0) {
+            if (cancelledCount !== items.rows.length) return unavailable();
+            batches.push({
+              orderBatchReference,
+              ticketReference,
+              ticketVersion: BigInt(ticket.version),
+              updatedAt,
+              status: "Cancelled",
+              items: Object.freeze(
+                [...itemStates.keys()].map((orderItemReference) =>
+                  Object.freeze({ orderItemReference, status: "Cancelled" as const }),
+                ),
+              ),
+            });
+            continue;
           }
           batches.push({
             orderBatchReference,

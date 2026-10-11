@@ -185,6 +185,10 @@ import { FulfillmentReadinessError } from "@rms/fulfillment";
 import type { createMerchantPickupProof } from "./merchant-pickup-proof.js";
 import type { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
 import type { createMerchantPickupNotCollected } from "./merchant-pickup-not-collected.js";
+import {
+  StaffOrderCancellationError,
+  type createMerchantOrderStaffCancellation,
+} from "./merchant-order-staff-cancellation.js";
 import { PickupHandoffError, PickupProofError } from "@rms/fulfillment";
 import { UnmatchedCaptureRefundError } from "@rms/payment";
 import type { createMerchantUnmatchedCaptureRefund } from "./merchant-unmatched-capture-refund.js";
@@ -478,6 +482,8 @@ export interface MerchantBffRouterOptions {
   readonly pickupProof?: ReturnType<typeof createMerchantPickupProof>;
   readonly pickupHandoff?: ReturnType<typeof createMerchantPickupHandoff>;
   readonly pickupNotCollected?: ReturnType<typeof createMerchantPickupNotCollected>;
+  /** WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it. */
+  readonly orderStaffCancellation?: ReturnType<typeof createMerchantOrderStaffCancellation>;
   /** WP-2423 P6: refund a Provider capture that matches no payment or Order. */
   readonly unmatchedCaptureRefund?: ReturnType<typeof createMerchantUnmatchedCaptureRefund>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
@@ -1508,6 +1514,15 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
               sequence: batch.sequence,
               acceptanceStatus: batch.acceptanceStatus,
               canRequestAcceptance: batch.canRequestAcceptance,
+              canCancel: batch.canCancel,
+              staffCancellation:
+                batch.staffCancellation === null
+                  ? null
+                  : {
+                      reasonCode: batch.staffCancellation.reasonCode,
+                      cancelledAt: batch.staffCancellation.cancelledAt,
+                      refundStatus: batch.staffCancellation.refundStatus,
+                    },
             })),
             currentPhase: item.currentPhase,
             currentVersion: item.currentVersion,
@@ -1561,6 +1576,15 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
               sequence: batch.sequence,
               acceptanceStatus: batch.acceptanceStatus,
               canRequestAcceptance: batch.canRequestAcceptance,
+              canCancel: batch.canCancel,
+              staffCancellation:
+                batch.staffCancellation === null
+                  ? null
+                  : {
+                      reasonCode: batch.staffCancellation.reasonCode,
+                      cancelledAt: batch.staffCancellation.cancelledAt,
+                      refundStatus: batch.staffCancellation.refundStatus,
+                    },
             })),
             currentPhase: item.currentPhase,
             currentVersion: item.currentVersion,
@@ -9150,6 +9174,55 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .catch(() => denied(response));
   });
 
+  // WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it; refunded in full.
+  router.post("/orders/cancel", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.orderStaffCancellation) {
+      response.status(503).json({ error: "order_cancellation_unavailable" });
+      return;
+    }
+    void options
+      .orderStaffCancellation({ sessionCookie, csrf, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({
+          status: result.status,
+          orderReference: result.orderReference,
+          orderBatchReference: result.orderBatchReference,
+          cancelledAt: result.cancelledAt,
+          refundStatus: result.refundStatus,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof StaffOrderCancellationError)) {
+          denied(response);
+          return;
+        }
+        const [status, code] = (
+          {
+            ORDER_CANCELLATION_INPUT_INVALID: [400, "order_cancellation_input_invalid"],
+            ORDER_CANCELLATION_PERMISSION_DENIED: [403, "order_cancellation_permission_denied"],
+            ORDER_CANCELLATION_NOT_FOUND: [404, "order_cancellation_not_found"],
+            ORDER_CANCELLATION_VERSION_CONFLICT: [409, "order_version_conflict"],
+            ORDER_CANCELLATION_PREPARATION_STARTED: [409, "order_preparation_started"],
+            ORDER_CANCELLATION_NOT_CANCELLABLE: [409, "order_not_cancellable"],
+            ORDER_CANCELLATION_STOCK_NOT_RELEASABLE: [409, "order_stock_not_releasable"],
+            ORDER_CANCELLATION_UNAVAILABLE: [503, "order_cancellation_unavailable"],
+          } as const
+        )[error.code];
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+      });
+  });
   router.post("/orders/close", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");

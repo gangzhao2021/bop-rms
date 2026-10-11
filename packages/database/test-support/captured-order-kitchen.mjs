@@ -61,7 +61,10 @@ export async function exerciseCapturedOrderKitchen({
     "GRANT SELECT,INSERT ON rms_ordering.order_acceptance_record,rms_ordering.order_payment_disposition_record,rms_ordering.order_payment_failure_record,rms_ordering.order_payment_acceptance_wait TO " +
       role,
   );
-  await admin.query("GRANT SELECT ON rms_ordering.order_batch_checkout_cancellation TO " + role);
+  await admin.query(
+    "GRANT SELECT ON rms_ordering.order_batch_checkout_cancellation,rms_ordering.order_staff_cancellation TO " +
+      role,
+  );
   await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_eventing.consumer_inbox TO " + role);
   const record = {
     acceptanceReference: next(),

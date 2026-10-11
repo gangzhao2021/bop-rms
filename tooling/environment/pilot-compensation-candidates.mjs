@@ -5,7 +5,15 @@ import {
 } from "../../packages/rms/ordering/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 /** Read-only owner discovery; candidate presence never authorizes or executes a refund. */
-export function createInternalCompensationCandidates(resources) {
+/**
+ * WP-2423 Q6: the refund workload also discovers staff cancellations of paid batches
+ * (`includeStaffCancellations`); the stock release workload does not — their stock was already
+ * returned in the cancellation transaction.
+ */
+export function createInternalCompensationCandidates(
+  resources,
+  { includeStaffCancellations = false } = {},
+) {
   const unavailable = () => {
     throw new Error("INTERNAL_COMPENSATION_DISCOVERY_UNAVAILABLE");
   };
@@ -24,6 +32,7 @@ export function createInternalCompensationCandidates(resources) {
   const active = () => isPilotRuntime() && parseOrderingInstant(resources.now()) < validUntil;
   const reader = createPostgresOrderCompensationCandidateReader({
     scope,
+    includeStaffCancellations: includeStaffCancellations === true,
     authorize: async (_tx, input) =>
       active() &&
       input.brandReference === scope.brandReference &&

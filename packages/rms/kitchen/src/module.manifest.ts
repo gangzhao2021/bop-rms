@@ -30,6 +30,7 @@ const moduleManifestInput =
       "rms.kitchen.kitchen-item-completed.v1",
       "rms.kitchen.kitchen-item-progress-recorded.v1",
       "rms.kitchen.kitchen-work-accepted.v1",
+      "rms.kitchen.kitchen-work-cancelled.v1",
       "rms.kitchen.kitchen-work-created.v1",
       "rms.kitchen.kitchen-work-started.v1",
       "rms.kitchen.production-batch-completed.v1",
@@ -45,6 +46,7 @@ const moduleManifestInput =
       "rms.kitchen.kitchen-item-ready.v1",
       "rms.kitchen.kitchen-order-ready.v1",
       "rms.kitchen.kitchen-work-accepted.v1",
+      "rms.kitchen.kitchen-work-cancelled.v1",
       "rms.kitchen.kitchen-work-created.v1",
       "rms.kitchen.kitchen-work-started.v1",
 
@@ -70,6 +72,7 @@ const moduleManifestInput =
         "kitchen_creation_record",
         "kitchen_ticket",
         "kitchen_work_item",
+        "kitchen_work_cancellation",
         "kitchen_work_lifecycle_operation",
         "kitchen_work_queue_projection",
         "kitchen_work_queue_projection_generation",

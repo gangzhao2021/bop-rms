@@ -1,6 +1,11 @@
 import { OrderPaymentLinks } from "./RefundPaymentPage.js";
 import { DiningOrderProgress } from "./DiningOrderProgress.js";
 import { OrderAcceptanceAction } from "./OrderAcceptanceAction.js";
+import {
+  StaffOrderCancelAction,
+  staffCancellationReasonLabel,
+  staffCancellationSummary,
+} from "./StaffOrderCancelAction.js";
 import { createOrderAcceptanceClient } from "./order-acceptance-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
@@ -306,6 +311,11 @@ export function CurrentOrderQueueRows({
               {order.batches.some((batch) => batch.acceptanceStatus === "Cancelled")
                 ? ` · ${order.batches.filter((batch) => batch.acceptanceStatus === "Cancelled").length} cancelled`
                 : ""}
+              {order.orderType === "Pickup" && order.batches[0]?.staffCancellation ? (
+                <span className="order-staff-cancelled">
+                  {staffCancellationSummary(order, order.batches[0])}
+                </span>
+              ) : null}
               {now === undefined ? null : <AcceptanceDeadline order={order} now={now} />}
             </span>
             <time
@@ -362,12 +372,29 @@ export function CurrentOrderQueueRows({
                   Batch {batch.sequence}
                   {batch.sequence === 1 ? " · Initial" : " · Additional"}
                 </h3>
-                <p>
-                  {batch.acceptanceStatus === "Cancelled"
-                    ? "Batch cancelled"
-                    : "Acceptance: " +
-                      (batch.acceptanceStatus === "Accepted" ? "Accepted" : "Not accepted")}
-                </p>
+                {batch.staffCancellation !== null ? (
+                  <p className="order-workbench-closed order-staff-cancellation" role="note">
+                    {staffCancellationSummary(order, batch)}
+                    <span>
+                      Reason: {staffCancellationReasonLabel[batch.staffCancellation.reasonCode]} ·{" "}
+                      <time dateTime={batch.staffCancellation.cancelledAt}>
+                        {storeTime(batch.staffCancellation.cancelledAt, timeZone, true)}
+                      </time>
+                    </span>
+                    <span>
+                      {batch.staffCancellation.refundStatus === "Refunded"
+                        ? "The payment, including tip, was refunded in full."
+                        : "The payment, including tip, is being refunded in full."}
+                    </span>
+                  </p>
+                ) : (
+                  <p>
+                    {batch.acceptanceStatus === "Cancelled"
+                      ? "Batch cancelled"
+                      : "Acceptance: " +
+                        (batch.acceptanceStatus === "Accepted" ? "Accepted" : "Not accepted")}
+                  </p>
+                )}
                 {action?.(order, batch)}
               </section>
             ))}
@@ -748,7 +775,18 @@ export function CurrentOrderQueuePage({
                 />
               )}
               action={(order, batch) =>
-                batch.canRequestAcceptance ? (
+                batch.canCancel ? (
+                  <fieldset disabled={servingBusy}>
+                    <StaffOrderCancelAction
+                      key={batch.orderBatchReference}
+                      order={order}
+                      batch={batch}
+                      csrf={csrf}
+                      fetcher={fetcher}
+                      onSettled={() => reload(after)}
+                    />
+                  </fieldset>
+                ) : batch.canRequestAcceptance ? (
                   <fieldset disabled={servingBusy}>
                     <OrderAcceptanceAction
                       key={batch.orderBatchReference}

@@ -5,7 +5,7 @@ import {
   createUnavailableOrderStatusClient,
   type OrderStatusController,
 } from "./order-status-controller.js";
-import type { OrderStatusView } from "./types.js";
+import type { OrderStatusView, StaffCancellation, StaffCancellationReason } from "./types.js";
 import { PickupCodePanel } from "../pickup-code/PickupCodePanel.js";
 import type { PickupCodeController } from "../pickup-code/pickup-code-controller.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
@@ -13,6 +13,29 @@ import { formatMoney } from "../journey/format.js";
 
 /** How often an active order re-reads its status when no live connection is available. */
 export const orderStatusPollIntervalMs = 15_000;
+
+/** WP-2423 Q6: why the store cancelled, in words for the customer (never internal codes). */
+export const staffCancellationReasonText: Readonly<Record<StaffCancellationReason, string>> = {
+  CustomerRequest: "The store cancelled it at your request.",
+  SoldOut: "An item you ordered sold out.",
+  StoreError: "The store couldn't prepare it.",
+  DuplicateOrder: "It was a duplicate of another order.",
+};
+export function staffRefundText(cancellation: StaffCancellation): string {
+  return cancellation.refundStatus === "Refunded"
+    ? "Refunded in full, including tip."
+    : "Refund pending — your payment, including tip, is being returned in full.";
+}
+/** WP-2423 Q6: the store cancelled the whole order (a pickup, or every dine-in round). */
+export function staffCancelledOrder(view: OrderStatusView): StaffCancellation | null {
+  const cancellations = view.sources?.staffCancellations ?? [];
+  const cancelledAll = view.order.batches.every((batch) =>
+    cancellations.some((entry) => entry.orderBatchReference === batch.orderBatchReference),
+  );
+  return (view.order.orderType === "Pickup" || cancelledAll) && cancellations.length > 0
+    ? (cancellations[cancellations.length - 1] ?? null)
+    : null;
+}
 
 export function isOrderSettled(view: OrderStatusView): boolean {
   const phase = view.order.canonicalPhase;
@@ -22,19 +45,28 @@ export function isOrderSettled(view: OrderStatusView): boolean {
     phase === "Rejected" ||
     view.order.fulfillmentStatus === "Completed" ||
     Boolean(view.sources?.pickup?.notCollectedAt) ||
-    Boolean(view.sources?.unpaidCancellation?.cancelledAt)
+    Boolean(view.sources?.unpaidCancellation?.cancelledAt) ||
+    (view.order.orderType === "Pickup" && staffCancelledOrder(view) !== null)
   );
 }
 
 function kitchenStatus(view: OrderStatusView): "Ready" | "Preparing" | "Queued" | "Unknown" {
   const kitchen = view.sources?.kitchen;
   if (!kitchen) return "Unknown";
-  if (
-    kitchen.batches.length === view.order.batches.length &&
-    kitchen.batches.every((batch) => batch.status === "Ready")
-  )
+  // WP-2423 Q6: a round the store cancelled is not waiting for the kitchen.
+  const cancelled = new Set(
+    view.sources?.staffCancellations?.map((entry) => entry.orderBatchReference) ?? [],
+  );
+  const active = kitchen.batches.filter(
+    (batch) => batch.status !== "Cancelled" && !cancelled.has(batch.orderBatchReference),
+  );
+  const expected = view.order.batches.filter(
+    (batch) => !cancelled.has(batch.orderBatchReference),
+  ).length;
+  if (active.length === 0) return expected === 0 ? "Unknown" : "Queued";
+  if (active.length === expected && active.every((batch) => batch.status === "Ready"))
     return "Ready";
-  return kitchen.batches.some((batch) => batch.status !== "Queued") ? "Preparing" : "Queued";
+  return active.some((batch) => batch.status !== "Queued") ? "Preparing" : "Queued";
 }
 
 function StatusContent({
@@ -50,55 +82,66 @@ function StatusContent({
     view.order.orderType === "Pickup" && !complete && Boolean(view.sources?.pickup?.notCollectedAt);
   const unpaidCancelled =
     view.order.orderType === "Pickup" && Boolean(view.sources?.unpaidCancellation?.cancelledAt);
+  const storeCancelled = staffCancelledOrder(view);
+  const staffCancellations = view.sources?.staffCancellations ?? [];
   const kitchen = view.sources?.kitchen;
   const kitchenLabel = kitchenStatus(view);
   const diningItems = view.order.orderType === "DineIn" ? view.sources?.dining?.items : undefined;
   const allServed =
     diningItems !== undefined &&
-    view.order.batches.every((batch) =>
-      batch.items.every((item) =>
-        diningItems.some(
-          (served) =>
-            served.orderBatchReference === batch.orderBatchReference &&
-            served.orderItemReference === item.orderItemReference &&
-            served.servedQuantity === item.quantity,
+    view.order.batches
+      .filter(
+        (batch) =>
+          !staffCancellations.some(
+            (entry) => entry.orderBatchReference === batch.orderBatchReference,
+          ),
+      )
+      .every((batch) =>
+        batch.items.every((item) =>
+          diningItems.some(
+            (served) =>
+              served.orderBatchReference === batch.orderBatchReference &&
+              served.orderItemReference === item.orderItemReference &&
+              served.servedQuantity === item.quantity,
+          ),
         ),
-      ),
-    );
+      );
   const someServed = diningItems?.some((item) => item.servedQuantity > 0) === true;
-  const [progressHeading, progressMessage] = unpaidCancelled
-    ? [
-        "Order cancelled",
-        "Payment wasn't completed within 30 minutes, so this order was cancelled. If a payment still goes through, it will be refunded automatically.",
-      ]
-    : view.order.canonicalPhase === "Cancelled"
-      ? ["Order cancelled", "Your order has been cancelled."]
-      : view.order.canonicalPhase === "Rejected"
-        ? ["Order not accepted", "Your order was not accepted."]
-        : complete
-          ? ["Order collected", "Your order has been collected. Enjoy!"]
-          : notCollected
-            ? [
-                "Not collected",
-                "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
-              ]
-            : allServed
-              ? ["Items served", "All listed items have been served."]
-              : someServed
-                ? [
-                    "Serving your order",
-                    "Some items have been served. Check the remaining items below.",
-                  ]
-                : kitchenLabel === "Ready"
-                  ? view.order.orderType === "Pickup"
-                    ? [
-                        "Ready for pickup",
-                        "Your order is ready. Show your pickup code at the counter.",
-                      ]
-                    : ["Kitchen preparation complete", "All listed batches are ready."]
-                  : kitchenLabel === "Preparing"
-                    ? ["Preparing your order", "The kitchen is preparing your order."]
-                    : ["Order submitted", "We have your order."];
+  const [progressHeading, progressMessage] = storeCancelled
+    ? ["Order cancelled by the store", staffCancellationReasonText[storeCancelled.reason]]
+    : unpaidCancelled
+      ? [
+          "Order cancelled",
+          "Payment wasn't completed within 30 minutes, so this order was cancelled. If a payment still goes through, it will be refunded automatically.",
+        ]
+      : view.order.canonicalPhase === "Cancelled"
+        ? ["Order cancelled", "Your order has been cancelled."]
+        : view.order.canonicalPhase === "Rejected"
+          ? ["Order not accepted", "Your order was not accepted."]
+          : complete
+            ? ["Order collected", "Your order has been collected. Enjoy!"]
+            : notCollected
+              ? [
+                  "Not collected",
+                  "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
+                ]
+              : allServed
+                ? ["Items served", "All listed items have been served."]
+                : someServed
+                  ? [
+                      "Serving your order",
+                      "Some items have been served. Check the remaining items below.",
+                    ]
+                  : kitchenLabel === "Ready"
+                    ? view.order.orderType === "Pickup"
+                      ? [
+                          "Ready for pickup",
+                          "Your order is ready. Show your pickup code at the counter.",
+                        ]
+                      : ["Kitchen preparation complete", "All listed batches are ready."]
+                    : kitchenLabel === "Preparing"
+                      ? ["Preparing your order", "The kitchen is preparing your order."]
+                      : ["Order submitted", "We have your order."];
   const payments = view.sources?.payments;
   const paid = payments?.find((payment) => payment.status === "Succeeded" && payment.amount);
   const paymentLabel =
@@ -125,6 +168,9 @@ function StatusContent({
         <p className="bop-eyebrow">Order {view.order.orderNumber}</p>
         <h2 id="order-progress-heading">{progressHeading}</h2>
         <p>{progressMessage}</p>
+        {storeCancelled ? (
+          <p className="order-status__refund">{staffRefundText(storeCancelled)}</p>
+        ) : null}
         <dl>
           <div>
             <dt>Order type</dt>
@@ -133,11 +179,13 @@ function StatusContent({
           <div>
             <dt>Kitchen status</dt>
             <dd>
-              {kitchenLabel === "Unknown"
-                ? "Not available yet"
-                : kitchenLabel === "Queued"
-                  ? "In the queue"
-                  : kitchenLabel}
+              {storeCancelled
+                ? "Cancelled"
+                : kitchenLabel === "Unknown"
+                  ? "Not available yet"
+                  : kitchenLabel === "Queued"
+                    ? "In the queue"
+                    : kitchenLabel}
             </dd>
           </div>
           <div>
@@ -147,7 +195,11 @@ function StatusContent({
         </dl>
       </section>
 
-      {view.order.orderType === "Pickup" && !complete && !notCollected && !unpaidCancelled ? (
+      {view.order.orderType === "Pickup" &&
+      !complete &&
+      !notCollected &&
+      !unpaidCancelled &&
+      !storeCancelled ? (
         <PickupCodePanel
           orderReference={view.order.orderReference}
           orderNumber={view.order.orderNumber}
@@ -183,13 +235,27 @@ function StatusContent({
           const batchKitchen = kitchen?.batches.find(
             (entry) => entry.orderBatchReference === batch.orderBatchReference,
           );
+          const batchCancellation =
+            storeCancelled === null || multipleBatches
+              ? staffCancellations.find(
+                  (entry) => entry.orderBatchReference === batch.orderBatchReference,
+                )
+              : undefined;
           return (
             <article
               key={batch.orderBatchReference}
               className="order-status__card order-status__batch"
             >
               {multipleBatches ? <h3>Round {index + 1}</h3> : null}
-              {kitchen && multipleBatches ? (
+              {batchCancellation ? (
+                <p className="order-status__batch-cancelled">
+                  {multipleBatches
+                    ? "This round was cancelled by the store. "
+                    : "Cancelled by the store. "}
+                  {staffCancellationReasonText[batchCancellation.reason]}{" "}
+                  {staffRefundText(batchCancellation)}
+                </p>
+              ) : kitchen && multipleBatches ? (
                 <p>
                   {batchKitchen?.status === "Ready"
                     ? "Ready"

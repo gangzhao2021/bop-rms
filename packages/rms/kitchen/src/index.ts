@@ -290,6 +290,28 @@ export {
   createKitchenWorkLifecycleAuditSemanticBinding,
   createKitchenWorkLifecycleService,
 } from "./application/kitchen-work-lifecycle-service.js";
+export {
+  KitchenBatchCancellationError,
+  kitchenBatchCancellationErrorCodes,
+  kitchenWorkCancellationActionCode,
+  kitchenWorkCancellationReasonCode,
+  kitchenWorkCancelledEventConsumer,
+  kitchenWorkCancelledEventType,
+  type KitchenBatchCancellationErrorCode,
+  type KitchenBatchCancellationResult,
+  type KitchenWorkCancellationRecord,
+  type KitchenWorkCancelledEnvelope,
+  type KitchenWorkCancelledItem,
+  type KitchenWorkCancelledPayload,
+} from "./contracts/kitchen-work-cancellation.js";
+export {
+  createKitchenWorkCancelledEnvelope,
+  parseKitchenWorkCancelledEnvelope,
+} from "./application/kitchen-work-cancelled-event.js";
+export {
+  createPostgresKitchenBatchCancellation,
+  listStoreStartedKitchenBatches,
+} from "./infrastructure/persistence/kitchen-work-cancellation-store.js";
 export type {
   KitchenOrderItemReadyResult,
   KitchenWorkLifecycleActionCode,

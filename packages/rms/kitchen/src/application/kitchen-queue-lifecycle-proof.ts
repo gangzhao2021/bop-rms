@@ -4,6 +4,7 @@ import {
 } from "./kitchen-work-lifecycle-service.js";
 import { parseLifecycleProofBundle } from "../domain/kitchen-queue-projection.js";
 import { parseKitchenTicketReference } from "../domain/kitchen-ticket.js";
+import type { KitchenWorkCancellationRecord } from "../contracts/kitchen-work-cancellation.js";
 
 /** Projection proofs come only from fully validated immutable owner effects.
  * Supply the complete ticket history; the domain parser rejects gaps/duplicates.
@@ -12,6 +13,12 @@ export function createKitchenQueueLifecycleProofBundle(input: {
   ticketReference: string;
   effects: readonly unknown[];
   validation: KitchenWorkLifecycleEffectValidationPorts;
+  /** WP-2423 Q6: the ticket's staff cancellation rows, decoded by the owner store. */
+  cancellations?: Readonly<{
+    brandReference: string;
+    storeReference: string;
+    records: readonly KitchenWorkCancellationRecord[];
+  }>;
 }) {
   const ticketReference = parseKitchenTicketReference(input.ticketReference);
   const digest = (value: unknown) =>
@@ -132,6 +139,38 @@ export function createKitchenQueueLifecycleProofBundle(input: {
       proofs.push(proof);
     }
   }
+  for (const record of input.cancellations?.records ?? []) {
+    if (record.ticketReference !== ticketReference)
+      throw new Error("KITCHEN_QUEUE_SOURCE_MISMATCH");
+    const proof: Record<string, unknown> = {
+      kind: "Cancellation",
+      brandReference: input.cancellations?.brandReference,
+      storeReference: input.cancellations?.storeReference,
+      ticketReference,
+      workItemReference: record.workItemReference,
+      orderItemReference: record.orderItemReference,
+      operationReference: record.cancellationReference,
+      cancellationOperationReference: record.operationReference,
+      orderCancellationReference: record.orderCancellationReference,
+      actionCode: "KITCHEN_WORK_CANCELLED",
+      purpose: "KitchenOrderCancellation",
+      reasonCode: "ORDER_CANCELLED_BEFORE_PREPARATION",
+      sourceChannel: "MERCHANT_WEB",
+      actor: { type: "User", actorReference: record.actorReference },
+      expectedTicketVersion: record.expectedTicketVersion,
+      committedTicketVersion: record.resultTicketVersion,
+      expectedWorkItemVersion: record.expectedWorkItemVersion,
+      committedWorkItemVersion: record.resultWorkItemVersion,
+      beforeStatus: record.beforeStatus,
+      afterStatus: "Cancelled",
+      occurredAt: record.cancelledAt,
+      evidenceDigest: record.evidenceDigest,
+      auditReference: record.auditReference,
+      eventReference: record.eventReference,
+    };
+    proof.projectionProofDigest = digest(proof);
+    proofs.push(proof);
+  }
   proofs.sort((a, b) => {
     const left = a.committedTicketVersion as bigint,
       right = b.committedTicketVersion as bigint;
@@ -149,7 +188,9 @@ export function createKitchenQueueLifecycleProofBundle(input: {
     {
       ticketReference,
       operationCount: proofs.length,
-      readyResultCount: proofs.filter((proof) => proof.kind !== "Event").length,
+      readyResultCount: proofs.filter(
+        (proof) => proof.kind === "ManualReady" || proof.kind === "AutomaticReady",
+      ).length,
       lifecycleProofSetDigest: digest({
         normalizedProjectionProofs: proofs.map((proof) => ({
           committedTicketVersion: proof.committedTicketVersion,

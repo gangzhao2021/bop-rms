@@ -1,9 +1,13 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  createPostgresStaffOrderCancellationReader,
+  listStoreConfirmedOrderBatches,
   listStorePaidOrderBatches,
   listStoreUnfulfillablePaidOrders,
   loadMerchantOrderLines,
+  type StaffOrderCancellationRecord,
 } from "@rms/ordering";
+import { listStoreStartedKitchenBatches } from "@rms/kitchen";
 import {
   listStorePickupAcceptanceDeadlines,
   listStoreUncollectedPickupOrders,
@@ -11,6 +15,11 @@ import {
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
+import {
+  readStaffCancellationRefundStatus,
+  staffOrderCancellationPermission,
+  type StaffOrderRefundStatus,
+} from "./merchant-order-staff-cancellation.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
 /** Read-only merchant intent; session identity and selected scope are resolved inside its transaction. */
@@ -60,6 +69,8 @@ export function createPersistentMerchantOrderQueue(options: {
       };
 
       let acceptanceAllowed = false;
+      let cancelAllowed = false;
+      let stillAllowed: () => Promise<boolean> = async () => false;
       let ownerScope: { brandReference: string; storeReference: string } | null = null;
       const read = createMerchantOrderQueueRead({
         transactions: { run: (work) => work(businessTransaction) },
@@ -76,6 +87,10 @@ export function createPersistentMerchantOrderQueue(options: {
           acceptanceAllowed =
             options.acceptanceConfigured === true &&
             (await resolved.authorizeAction("order.accept"))?.effect === "Allow";
+          // WP-2423 Q6: staff cancellation is offered only to holders of ordering.order.cancel.
+          cancelAllowed =
+            (await resolved.authorizeAction(staffOrderCancellationPermission))?.effect === "Allow";
+          stillAllowed = async () => (await resolved.allowed()) === true;
           ownerScope = {
             brandReference: String(resolved.context.brand.brandReference),
             storeReference: String(resolved.store.storeReference),
@@ -164,6 +179,52 @@ export function createPersistentMerchantOrderQueue(options: {
               ownerScope,
               waiting.map((item) => item.orderReference),
             );
+      // WP-2423 Q6: staff cancellations (with refund status) and which paid, accepted batches the
+      // kitchen has not started, so the cancel action is offered only where the command accepts it.
+      const orderReferences = result.items.map((item) => item.orderReference);
+      const scoped = ownerScope as { brandReference: string; storeReference: string } | null;
+      const cancellations = new Map<
+        string,
+        {
+          reasonCode: StaffOrderCancellationRecord["reasonCode"];
+          cancelledAt: string;
+          refundStatus: StaffOrderRefundStatus;
+        }
+      >();
+      let confirmed: ReadonlySet<string> = new Set<string>();
+      const started = new Set<string>();
+      if (scoped !== null && orderReferences.length > 0) {
+        for (const record of await createPostgresStaffOrderCancellationReader(scoped).listByOrders(
+          businessTransaction,
+          orderReferences,
+        ))
+          cancellations.set(String(record.orderBatchReference), {
+            reasonCode: record.reasonCode,
+            cancelledAt: String(record.cancelledAt),
+            refundStatus: await readStaffCancellationRefundStatus(
+              businessTransaction,
+              scoped,
+              record,
+              stillAllowed,
+            ),
+          });
+        if (cancelAllowed) {
+          confirmed = await listStoreConfirmedOrderBatches(
+            businessTransaction,
+            scoped,
+            orderReferences,
+          );
+          const open = [...confirmed].filter((batch) => !cancellations.has(batch));
+          for (let index = 0; index < open.length; index += 100)
+            for (const batch of await listStoreStartedKitchenBatches(
+              businessTransaction,
+              scoped,
+              open.slice(index, index + 100),
+            ))
+              started.add(batch);
+        }
+        if (!(await stillAllowed())) throw new Error("MERCHANT_ORDER_QUEUE_UNAVAILABLE");
+      }
       return Object.freeze({
         ...result,
         lines,
@@ -199,6 +260,21 @@ export function createPersistentMerchantOrderQueue(options: {
                       (batch.sequence > 1 ||
                         (item.orderType === "DineIn" && batch.sequence === latestBatchSequence) ||
                         item.currentVersion === 1),
+                    canCancel:
+                      cancelAllowed &&
+                      closed === null &&
+                      !uncollected.has(item.orderReference) &&
+                      batch.acceptanceStatus === "Accepted" &&
+                      confirmed.has(batch.orderBatchReference) &&
+                      !cancellations.has(batch.orderBatchReference) &&
+                      !started.has(batch.orderBatchReference) &&
+                      item.currentVersion !== null &&
+                      (item.orderType === "Pickup"
+                        ? item.currentPhase === "Accepted"
+                        : ["Submitted", "Accepted", "InProgress", "Ready"].includes(
+                            String(item.currentPhase),
+                          )),
+                    staffCancellation: cancellations.get(batch.orderBatchReference) ?? null,
                   }),
                 ),
               ),

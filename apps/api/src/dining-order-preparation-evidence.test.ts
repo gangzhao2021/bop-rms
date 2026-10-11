@@ -118,3 +118,70 @@ it.each([false, true])(
     }
   },
 );
+
+it.each([false, true])(
+  "WP-2423 Q6: a staff-cancelled accepted Batch is Cancelled with its kitchen work cancelled; queued work=%s",
+  async (queued) => {
+    const scope = { brandReference: id(1), storeReference: id(2) },
+      at = "2026-09-20T00:00:00.000Z";
+    mock.order.mockResolvedValue({
+      ...scope,
+      orderReference: id(3),
+      orderVersion: 9,
+      orderCheckpoint: id(12),
+      items: [
+        {
+          orderItemReference: id(4),
+          orderBatchReference: id(5),
+          orderedQuantity: 1,
+          acceptance: {},
+          cancellation: null,
+          staffCancellation: null,
+        },
+        {
+          orderItemReference: id(8),
+          orderBatchReference: id(9),
+          orderedQuantity: 1,
+          acceptance: {},
+          cancellation: null,
+          staffCancellation: { cancellationReference: id(10) },
+        },
+      ],
+    });
+    mock.kitchen.mockResolvedValue({
+      batches: [
+        {
+          orderBatchReference: id(5),
+          updatedAt: at,
+          items: [{ orderItemReference: id(4), status: "Ready" }],
+        },
+        {
+          orderBatchReference: id(9),
+          updatedAt: at,
+          items: [{ orderItemReference: id(8), status: queued ? "Queued" : "Cancelled" }],
+        },
+      ],
+    });
+    const result = createDiningOrderPreparationProgress({
+      ...scope,
+      authorize: async () => true,
+      authorizeKitchen: async () => true,
+    }).load({
+      ...scope,
+      orderReference: id(3),
+      diningSessionReference: id(6),
+      guestSessionReference: id(7),
+      observedAt: at,
+      transaction: { query: vi.fn() },
+    });
+    // Kitchen work still queued for a staff-cancelled batch contradicts the cancellation.
+    if (queued) await expect(result).rejects.toThrow("ORDER_PROGRESS_UNAVAILABLE");
+    else {
+      const value = await result;
+      expect(value?.items[1]?.phase).toBe("Cancelled");
+      expect(value?.items[1]?.everAccepted).toBe(true);
+      expect(value?.preparationPhase).toBe("Ready");
+      expect(value?.kitchenEvidenceComplete).toBe(true);
+    }
+  },
+);

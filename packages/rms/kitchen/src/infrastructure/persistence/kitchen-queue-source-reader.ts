@@ -9,6 +9,10 @@ import {
   parseKitchenQueueLifecycleRebuildSourceFeed,
 } from "../../domain/kitchen-queue-projection.js";
 import { parseKitchenTicketReference } from "../../domain/kitchen-ticket.js";
+import {
+  kitchenWorkCancellationColumns,
+  parseKitchenWorkCancellationRow,
+} from "./kitchen-work-cancellation-store.js";
 
 function unavailable(): never {
   throw new KitchenQueueProjectionError("KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE");
@@ -67,7 +71,10 @@ export function createPostgresKitchenQueueSourceReader(options: {
             "FROM rms_kitchen.kitchen_work_lifecycle_operation WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=t.kitchen_ticket_id " +
             "AND idempotency_key IS NOT NULL ORDER BY result_ticket_version LIMIT $5) o) AS operations," +
             "(SELECT COALESCE(jsonb_agg(a),'[]'::jsonb) FROM (SELECT ready_result_id,order_item_id,causal_operation_id,work_items_digest,ready_quantity,required_quantity,ready_at " +
-            "FROM rms_kitchen.kitchen_order_item_ready_result WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=t.kitchen_ticket_id ORDER BY ready_result_id LIMIT $4) a) AS ready " +
+            "FROM rms_kitchen.kitchen_order_item_ready_result WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=t.kitchen_ticket_id ORDER BY ready_result_id LIMIT $4) a) AS ready," +
+            "(SELECT COALESCE(jsonb_agg(c),'[]'::jsonb) FROM (SELECT " +
+            kitchenWorkCancellationColumns +
+            " FROM rms_kitchen.kitchen_work_cancellation WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=t.kitchen_ticket_id ORDER BY result_ticket_version LIMIT $4) c) AS cancellations " +
             "FROM (SELECT * FROM rms_kitchen.kitchen_ticket WHERE brand_id=$1 AND store_id=$2 AND status='Open' ORDER BY kitchen_ticket_id LIMIT $3) t " +
             "LEFT JOIN rms_kitchen.kitchen_creation_record r ON r.brand_id=t.brand_id AND r.store_id=t.store_id AND r.kitchen_ticket_id=t.kitchen_ticket_id) s",
           [
@@ -133,6 +140,24 @@ export function createPostgresKitchenQueueSourceReader(options: {
             )
               return unavailable();
           }
+          // WP-2423 Q6: staff cancellation is the last fact of each cancelled work item.
+          const cancellations = rows(row.cancellations, options.maxItemsPerTicket).map((value) =>
+            parseKitchenWorkCancellationRow({
+              ...value,
+              cancelled_at: instant(value.cancelled_at),
+            }),
+          );
+          if (
+            cancellations.some(
+              (value) =>
+                value.ticketReference !== original.ticketReference ||
+                value.orderReference !== original.orderReference ||
+                value.orderBatchReference !== original.orderBatchReference,
+            ) ||
+            new Set(cancellations.map((value) => value.workItemReference)).size !==
+              cancellations.length
+          )
+            return unavailable();
           const ticketVersion = version(row.version);
           const storedItems = rows(row.items, options.maxItemsPerTicket);
           if (storedItems.length !== original.workItems.length) return unavailable();
@@ -154,16 +179,32 @@ export function createPostgresKitchenQueueSourceReader(options: {
             );
             const latest = operations.at(-1);
             const itemVersion = version(item.version);
+            const cancelled = cancellations.find(
+              (value) => value.workItemReference === initial.workItemReference,
+            );
             if (
-              latest
-                ? latest.mutation.resultWorkItemVersion !== itemVersion ||
-                  latest.mutation.afterStatus !== item.status ||
-                  latest.mutation.afterCompletedQuantity !== item.completed_quantity ||
-                  latest.mutation.updatedAt !== instant(item.updated_at)
-                : itemVersion !== 1n ||
-                  item.status !== "Queued" ||
-                  item.completed_quantity !== 0 ||
-                  instant(item.updated_at) !== initial.createdAt
+              cancelled
+                ? cancelled.orderItemReference !== initial.orderItemReference ||
+                  item.status !== "Cancelled" ||
+                  itemVersion !== cancelled.resultWorkItemVersion ||
+                  instant(item.updated_at) !== cancelled.cancelledAt ||
+                  (latest
+                    ? latest.mutation.resultWorkItemVersion !== cancelled.expectedWorkItemVersion ||
+                      latest.mutation.afterStatus !== cancelled.beforeStatus ||
+                      latest.mutation.resultTicketVersion >= cancelled.resultTicketVersion ||
+                      latest.mutation.afterCompletedQuantity !== item.completed_quantity
+                    : cancelled.expectedWorkItemVersion !== 1n ||
+                      cancelled.beforeStatus !== "Queued" ||
+                      item.completed_quantity !== 0)
+                : latest
+                  ? latest.mutation.resultWorkItemVersion !== itemVersion ||
+                    latest.mutation.afterStatus !== item.status ||
+                    latest.mutation.afterCompletedQuantity !== item.completed_quantity ||
+                    latest.mutation.updatedAt !== instant(item.updated_at)
+                  : itemVersion !== 1n ||
+                    item.status !== "Queued" ||
+                    item.completed_quantity !== 0 ||
+                    instant(item.updated_at) !== initial.createdAt
             )
               return unavailable();
             return {
@@ -192,9 +233,24 @@ export function createPostgresKitchenQueueSourceReader(options: {
               catalogSnapshotControlled: true,
             };
           });
+          const latestHistory = history.at(-1);
+          const latestCancellation = cancellations.at(-1);
+          const cancellationIsLatest =
+            latestCancellation !== undefined &&
+            latestCancellation.resultTicketVersion >
+              (latestHistory?.mutation.resultTicketVersion ?? 1n);
           if (
-            ticketVersion !== (history.at(-1)?.mutation.resultTicketVersion ?? 1n) ||
-            instant(row.updated_at) !== (history.at(-1)?.mutation.updatedAt ?? original.createdAt)
+            cancellations.some(
+              (value) => !items.some((item) => item.workItemReference === value.workItemReference),
+            ) ||
+            ticketVersion !==
+              (cancellationIsLatest
+                ? latestCancellation.resultTicketVersion
+                : (latestHistory?.mutation.resultTicketVersion ?? 1n)) ||
+            instant(row.updated_at) !==
+              (cancellationIsLatest
+                ? latestCancellation.cancelledAt
+                : (latestHistory?.mutation.updatedAt ?? original.createdAt))
           )
             return unavailable();
           return {
@@ -212,6 +268,11 @@ export function createPostgresKitchenQueueSourceReader(options: {
               ticketReference: original.ticketReference,
               effects: history,
               validation: options.lifecycleValidation,
+              cancellations: {
+                brandReference: brand,
+                storeReference: store,
+                records: cancellations,
+              },
             }),
           };
         });

@@ -343,3 +343,50 @@ it("returns no preparation only after all persisted batches have bound cancellat
   f.revoke();
   await expect(f.source.resolveCancelled(f.input)).rejects.toBeDefined();
 });
+
+it("keeps a dine-in Order open after staff cancel its only accepted Batch (WP-2423 Q6)", async () => {
+  const f = fixture();
+  f.acceptance.push({
+    acceptance_id: id(8),
+    order_batch_id: id(5),
+    expected_order_version: 1,
+    accepted_order_version: 2,
+    accepted_at: at,
+  });
+  f.revisions.push(
+    {
+      revision_id: id(8),
+      version: 2,
+      occurred_at: at,
+      expected_version: 1,
+      previous_revision_id: id(6),
+      initial_submission_id: null,
+      kind: "Acceptance",
+      operation_bound: true,
+    },
+    {
+      revision_id: id(9),
+      version: 3,
+      occurred_at: at,
+      expected_version: 2,
+      previous_revision_id: id(8),
+      initial_submission_id: null,
+      kind: "StaffBatchCancellation",
+      operation_bound: true,
+      cancellation_phase: null,
+    },
+  );
+  expect(await f.source.resolveCurrent(f.input)).toMatchObject({
+    orderVersion: 3,
+    orderCheckpoint: id(9),
+    canonicalPhase: "Accepted",
+  });
+  expect(await f.source.resolveCancelled(f.input)).toBeNull();
+  expect(await f.source.resolveAdditionalParent(f.input)).toMatchObject({
+    orderVersion: 3,
+    nextBatchSequence: 2,
+  });
+  // The binding to its staff record is required.
+  f.revisions[2] = { ...f.revisions[2], operation_bound: false };
+  await expect(f.source.resolveCurrent(f.input)).rejects.toBeDefined();
+});

@@ -194,3 +194,26 @@ it("WP-2423 Q12: serializes only the time a pickup was cancelled for an unpaid p
   const open = (await (await f.send()).json()) as typeof body;
   expect(open.status.sources.unpaidCancellation).toBeNull();
 });
+it("WP-2423 Q6: serializes only customer-safe store cancellations with their refund status", async () => {
+  const f = await setup();
+  const cancellation = {
+    orderBatchReference: "0190fa01-0000-7000-8000-000000000002",
+    cancelledAt: "2026-09-12T11:40:00.000Z",
+    reason: "SoldOut",
+    refundStatus: "Pending",
+  };
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      staffCancellations: [{ ...cancellation, actorReference: "private" }],
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.staffCancellations).toEqual([cancellation]);
+  expect(JSON.stringify(body)).not.toContain("private");
+});
