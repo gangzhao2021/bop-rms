@@ -610,6 +610,18 @@ it("protects store-configuration transport and exposes only bounded results", as
     Object.assign(new Error("safe"), { code: "STORE_CONFIGURATION_VERSION_CONFLICT" }),
   );
   expect((await submit()).status).toBe(409);
+  for (const rejected of [
+    Object.assign(new Error("safe"), { code: "STORE_CONFIGURATION_REFERENCE_INVALID" }),
+    Object.assign(new Error("safe"), { code: "STORE_CONFIGURATION_APPROVAL_INVALID" }),
+    new Error("STORE_CONFIGURATION_REFERENCE_INVALID"),
+  ]) {
+    control.mockRejectedValueOnce(rejected);
+    const response = await submit();
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: "store_configuration_rejected" });
+  }
+  control.mockRejectedValueOnce(new Error("STORE_CONFIGURATION_COMMAND_INVALID"));
+  expect((await submit()).status).toBe(403);
   control.mockRejectedValueOnce(new Error("synthetic private failure detail"));
   const failed = await submit();
   expect(failed.status).toBe(403);

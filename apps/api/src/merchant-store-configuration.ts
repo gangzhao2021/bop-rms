@@ -20,6 +20,18 @@ type Scope = Awaited<ReturnType<ReturnType<typeof createMerchantStoreScope>>>;
 type Method = ReturnType<typeof bindMerchantStoreConfigurationCommand>["method"];
 type ReviewOptions = Parameters<typeof createPersistentStoreConfigurationReview>[0];
 /** Runtime dependencies are owner sources, never supplied by the browser. */
+/** WP-2423 Q4: true only for a Store configuration that carries a Setup basis. */
+export function isSetupBasedConfiguration(value: unknown): boolean {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !Object.hasOwn(value, "configurationReference")
+  )
+    return false;
+  return createStoreConfigurationVersion(value).setupBasis !== undefined;
+}
+
 export function createMerchantStoreConfiguration(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -95,10 +107,12 @@ export function createMerchantStoreConfiguration(options: {
           ...configured.publication,
           tenantReference: scope.selected.tenantReference,
           setupSnapshotReferences,
+          // The materializer also digests interval content, which is not a configuration: only a
+          // configuration carrying a Setup basis uses the V2 publication hash (WP-2423 Q4).
           hashContent: (value) =>
-            createStoreConfigurationVersion(value).setupBasis === undefined
-              ? configured.publication.hashContent(value)
-              : v2PublicationHash(value),
+            isSetupBasedConfiguration(value)
+              ? v2PublicationHash(value)
+              : configured.publication.hashContent(value),
           authorize: async (transaction, at) =>
             (await scope.allowed()) && (await configured.publication.authorize(transaction, at)),
         },

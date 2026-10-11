@@ -9261,14 +9261,25 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
         response.json({ status: result.status, resultingVersion: result.resultingVersion }),
       )
       .catch((error: unknown) => {
+        const code: unknown =
+          error instanceof Error
+            ? Object.getOwnPropertyDescriptor(error, "code")?.value
+            : undefined;
         if (
-          error instanceof Error &&
-          [
-            "STORE_CONFIGURATION_VERSION_CONFLICT",
-            "STORE_CONFIGURATION_IDEMPOTENCY_CONFLICT",
-          ].includes(Object.getOwnPropertyDescriptor(error, "code")?.value)
+          code === "STORE_CONFIGURATION_VERSION_CONFLICT" ||
+          code === "STORE_CONFIGURATION_IDEMPOTENCY_CONFLICT"
         )
           response.status(409).json({ error: "store_configuration_conflict" });
+        // WP-2423 Q4: an owner rule rejected the content (not access), so staff can correct it.
+        // Transport binding failures stay denied.
+        else if (
+          code === "STORE_CONFIGURATION_COMMAND_INVALID" ||
+          code === "STORE_CONFIGURATION_REFERENCE_INVALID" ||
+          code === "STORE_CONFIGURATION_APPROVAL_INVALID" ||
+          code === "STORE_CONFIGURATION_LIVE_GATE_INVALID" ||
+          (error instanceof Error && error.message === "STORE_CONFIGURATION_REFERENCE_INVALID")
+        )
+          response.status(422).json({ error: "store_configuration_rejected" });
         else denied(response);
       });
   });

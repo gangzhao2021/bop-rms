@@ -19,6 +19,14 @@ export function serviceTime(value: string): string {
   const suffix = hour < 12 ? "AM" : "PM";
   return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${suffix}`;
 }
+const exceptionKindLabel = (kind: string) =>
+  kind === "TemporaryClosure"
+    ? "Temporary closure"
+    : kind === "Override"
+      ? "Special hours"
+      : kind === "Holiday"
+        ? "Holiday"
+        : kind;
 const serviceModeLabel = (mode: string) =>
   mode === "DineIn" ? "Dine-in" : mode === "Pickup" ? "Pickup" : mode;
 const serviceMinutes = (seconds: number) => {
@@ -81,7 +89,7 @@ export function ServiceHoursSummary({
           {hours.exceptions.map((exception) => (
             <li key={exception.localDate}>
               <strong>
-                {exception.localDate} · {exception.kind}
+                {exception.localDate} · {exceptionKindLabel(exception.kind)}
               </strong>
               {exception.intervals.length ? (
                 <ul>

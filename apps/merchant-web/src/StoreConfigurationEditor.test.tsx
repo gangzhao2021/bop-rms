@@ -4,8 +4,13 @@ import { MemoryRouter } from "react-router";
 import {
   StoreConfigurationFeeBasisView,
   StoreConfigurationEditingBoundary,
+  StoreHoursDraftForm,
+  storeConfigurationStateLabel,
 } from "./StoreConfigurationEditor.js";
-import { parseStoreConfigurationSnapshot } from "./store-configuration-client.js";
+import {
+  parseStoreConfigurationSnapshot,
+  parseStoreConfigurationView,
+} from "./store-configuration-client.js";
 const id = (n: number) => `018f9f40-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-15T14:00:00.000Z";
 const configuration = (lifecycle: "Draft" | "PendingApproval" | "Approved" | "Published") => ({
@@ -154,4 +159,88 @@ it("locks basis-bound content editing while keeping the authorized Setup route a
   );
   expect(legacy).not.toContain('disabled=""');
   expect(legacy).toContain('value="04:00"');
+});
+
+// WP-2423 Q4: the pilot edits only hours and dated closures, in staff language.
+const hoursView = (latest: ReturnType<typeof configuration> | null) => {
+  const current = {
+    ...configuration("Published"),
+    enabledServiceModes: ["DineIn", "Pickup"],
+    weeklySchedule: configuration("Published").weeklySchedule.map((day) => ({
+      ...day,
+      intervals: day.intervals.map((interval) => ({
+        ...interval,
+        serviceModes: ["DineIn", "Pickup"],
+        orderCutoffSeconds: 900,
+      })),
+    })),
+  };
+  return parseStoreConfigurationView(
+    {
+      screenId: "STORE-HOURS-SERVICE",
+      storeReference: id(3),
+      current,
+      latest:
+        latest === null
+          ? null
+          : {
+              ...current,
+              ...latest,
+              enabledServiceModes: current.enabledServiceModes,
+              weeklySchedule: current.weeklySchedule,
+              configurationReference: id(20),
+              configurationVersion: 2,
+              supersedesConfigurationReference: id(1),
+            },
+      expectedVersion: latest === null ? 1 : 2,
+      observedAt: at,
+    },
+    id(3),
+  );
+};
+const renderForm = (view: ReturnType<typeof hoursView>) =>
+  renderToStaticMarkup(
+    <MemoryRouter>
+      <StoreHoursDraftForm
+        view={view}
+        draft={(view.latest ?? view.current) as NonNullable<typeof view.current>}
+        disabled={false}
+        onDraftChange={() => undefined}
+        onCommand={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+it("edits hours without effective dates, business-day start or a typed reason code", () => {
+  const html = renderForm(hoursView(null));
+  expect(html).not.toContain("Effective from");
+  expect(html).not.toContain("Effective until");
+  expect(html).not.toContain("Change reason code");
+  expect(html).not.toContain('type="datetime-local"');
+  expect(html).toContain("The business day starts at 04:00.");
+  expect(html).not.toMatch(/<label>Business day starts/u);
+  expect(html).toContain("No pending change. Customers see the published hours.");
+  expect(html).not.toContain("Published version");
+  expect(html).not.toContain("no recorded Setup fee basis");
+  // Minutes, not seconds; service modes in staff words; labels wrap their inputs.
+  expect(html).toContain("Last orders (minutes before closing)");
+  expect(html).toContain('max="1440" step="1" required="" value="15"');
+  expect(html).toContain("Preparation time (minutes)");
+  expect(html).toContain('value="10"');
+  expect(html).not.toContain("seconds");
+  expect(html).toContain("Dine-in");
+  expect(html).not.toContain(">DineIn<");
+  expect(html).toContain("<legend>Monday</legend>");
+});
+it("describes lifecycle states in staff language", () => {
+  const pending = renderForm(hoursView(configuration("PendingApproval")));
+  expect(pending).toContain("Latest change: Waiting for approval");
+  expect(pending).toContain("Approve reviewed configuration");
+  expect(pending).toContain("other than the person who made the change");
+  expect(renderForm(hoursView(configuration("Approved")))).toContain(
+    "Latest change: Approved, waiting to be published",
+  );
+  expect(renderForm(hoursView(configuration("Draft")))).toContain(
+    "Latest change: Draft, not yet sent for approval",
+  );
+  expect(storeConfigurationStateLabel("Superseded")).toBe("Replaced by a newer version");
 });

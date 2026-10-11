@@ -26,7 +26,7 @@ it("WP-2423 Q4: writes published hours in staff language", () => {
             { isoWeekday: 1, intervals: [interval] },
             { isoWeekday: 2, intervals: [] },
           ],
-          exceptions: [],
+          exceptions: [{ localDate: "2026-12-25", kind: "TemporaryClosure", intervals: [] }],
         } as never
       }
     />,
@@ -38,4 +38,6 @@ it("WP-2423 Q4: writes published hours in staff language", () => {
   expect(html).not.toContain("DineIn");
   expect(html).not.toContain("0 seconds");
   expect(html).toContain("<h3>Tuesday</h3><p>Closed</p>");
+  expect(html).toContain("2026-12-25 · Temporary closure");
+  expect(html).not.toContain("TemporaryClosure");
 });

@@ -3,6 +3,7 @@ import {
   legacyPermissionReplacements,
   storePermissionCatalog,
   storePermissionCodes,
+  storeRoleTemplateActions,
   storeRoleTemplates,
 } from "../catalog/store-permission-catalog.js";
 
@@ -45,5 +46,20 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     expect(storeRoleTemplates["store-manager"]).not.toContain("payment.refund.approve");
     expect(storeRoleTemplates["store-manager"]).not.toContain("identity.role.change");
     expect(storeRoleTemplates["inventory-manager"]).not.toContain("inventory.opening_balance.post");
+  });
+  it("lets the Store Manager draft and submit hours while only the Owner approves and publishes", () => {
+    const manager = storeRoleTemplateActions("store-manager");
+    for (const action of [
+      "store.service.read",
+      "store.service.save-draft",
+      "store.service.validate",
+      "store.service.submit",
+    ])
+      expect(manager, action).toContain(action);
+    expect(manager).not.toContain("store.service.approve");
+    expect(manager).not.toContain("store.service.publish");
+    const owner = storeRoleTemplateActions("owner");
+    for (const action of ["store.service.approve", "store.service.publish"])
+      expect(owner, action).toContain(action);
   });
 });

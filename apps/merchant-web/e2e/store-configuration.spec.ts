@@ -110,8 +110,11 @@ test("@production configuration editor preserves uncertain request and reloads s
     const body = route.request().postDataJSON();
     expect(body.actorReference).toBeUndefined();
     expect(body.occurredAt).toBeUndefined();
-    expect(body.configuration.businessDayStartLocalTime).toBe("05:00:00");
-    expect(body.configuration.effectiveUntil).toBe("2026-12-31T23:59:00.000Z");
+    // WP-2423 Q4: hours only — business-day start unchanged, effective from the read, no end.
+    expect(body.configuration.businessDayStartLocalTime).toBe("04:00:00");
+    expect(body.configuration.effectiveUntil).toBeNull();
+    expect(body.configuration.effectiveFrom).toBe(body.configuration.createdAt);
+    expect(body.configuration.reasonCode).toBe("STORE_HOURS_UPDATE");
     expect(body.configuration.exceptions).toEqual([
       {
         localDate: "2026-12-25",
@@ -140,14 +143,12 @@ test("@production configuration editor preserves uncertain request and reloads s
   await page.goto("/app/organization/stores/" + store + "/service");
   const editor = page.getByRole("region", { name: "Operating hours draft" });
   await editor.getByRole("button", { name: "Edit operating hours" }).click();
-  await editor.getByLabel("Business day starts").fill("05:00");
-  await editor.getByLabel("Effective until (UTC, optional)").fill("2026-12-31T23:59");
   await editor.getByRole("button", { name: "Add dated exception" }).click();
   const exception = editor.getByRole("group", { name: "Exception 1", exact: true });
   await exception.getByLabel("Exception date").fill("2026-12-25");
   await exception.getByRole("button", { name: "Add exception interval" }).click();
   await exception.getByLabel("Start 1", { exact: true }).fill("10:00");
-  await exception.getByLabel("DineIn", { exact: true }).uncheck();
+  await exception.getByLabel("Dine-in", { exact: true }).uncheck();
 
   await editor.getByRole("button", { name: "Save hours draft" }).click();
   await expect(editor.getByRole("button", { name: "Retry configuration request" })).toBeVisible();
@@ -157,9 +158,11 @@ test("@production configuration editor preserves uncertain request and reloads s
   await expect(
     editor.getByText("Draft saved. It takes effect only after approval and publication."),
   ).toBeVisible();
-  await expect(editor.getByText("Published version: 1 · Latest version: 2")).toBeVisible();
+  await expect(editor.getByText("Latest change: Draft, not yet sent for approval")).toBeVisible();
   await page.reload();
   await editor.getByRole("button", { name: "Edit operating hours" }).click();
-  await expect(editor.getByLabel("Business day starts")).toHaveValue("05:00");
+  await expect(
+    editor.getByRole("group", { name: "Exception 1", exact: true }).getByLabel("Exception date"),
+  ).toHaveValue("2026-12-25");
   expect(requests).toHaveLength(2);
 });

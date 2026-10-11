@@ -92,7 +92,7 @@ export async function verifyMerchantServiceBrowser({
     const panel = page.getByRole("region", { name: "Service controls" });
     await expect(panel.getByText("No active pauses.")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Published hours" })).toBeVisible();
-    await expect(page.getByText("Business day starts at 04:00:00 local time.")).toBeVisible();
+    await expect(page.getByText("Business day starts at 4:00 AM.")).toBeVisible();
     await expect(
       page.getByText(
         "08:00:00–17:00:00 · Pickup · order cutoff 0 seconds before closing · preparation lead time 600 seconds",
@@ -152,7 +152,11 @@ export async function verifyMerchantServiceBrowser({
     });
     const editor = page.getByRole("region", { name: "Operating hours draft" });
     await editor.getByRole("button", { name: "Edit operating hours" }).click();
-    await editor.getByLabel("Business day starts").fill("05:00");
+    // WP-2423 Q4: the editor changes hours and dated closures; business-day start is fixed.
+    await editor.getByRole("button", { name: "Add dated exception" }).click();
+    const closure = () =>
+      editor.getByRole("group", { name: "Exception 1", exact: true }).getByLabel("Exception date");
+    await closure().fill("2026-12-25");
     await editor.getByRole("button", { name: "Save hours draft" }).click();
     await expect(
       editor.getByText("Draft saved. It takes effect only after approval and publication."),
@@ -161,14 +165,20 @@ export async function verifyMerchantServiceBrowser({
     await assertConfigurationAudit(configurationWrites[0]);
     const savedConfiguration = await configuration.read(cookie);
     assert.equal(savedConfiguration.expectedVersion, beforeConfiguration.expectedVersion + 1);
-    assert.equal(savedConfiguration.latest.businessDayStartLocalTime, "05:00:00");
+    assert.deepEqual(savedConfiguration.latest.exceptions, [
+      { localDate: "2026-12-25", kind: "Holiday", intervals: [] },
+    ]);
+    assert.equal(
+      savedConfiguration.latest.businessDayStartLocalTime,
+      beforeConfiguration.current.businessDayStartLocalTime,
+    );
     assert.equal(
       savedConfiguration.current.configurationReference,
       beforeConfiguration.current.configurationReference,
     );
     await page.reload();
     await editor.getByRole("button", { name: "Edit operating hours" }).click();
-    await expect(editor.getByLabel("Business day starts")).toHaveValue("05:00");
+    await expect(closure()).toHaveValue("2026-12-25");
     assert.equal(configurationWrites.length, 1);
 
     await editor.getByRole("button", { name: "Validate saved draft" }).click();
@@ -204,11 +214,11 @@ export async function verifyMerchantServiceBrowser({
     // Explicit synthetic second-author setup; approving browser/session stays real.
     const reviewPending = await configuration.prepareBrowserApproval();
     await editor.getByRole("button", { name: "Edit operating hours" }).click();
-    await editor.getByLabel("Business day starts").fill("06:00");
+    await closure().fill("2026-12-26");
     await expect(
       editor.getByRole("button", { name: "Approve reviewed configuration" }),
     ).toBeDisabled();
-    await editor.getByLabel("Business day starts").fill("05:00");
+    await closure().fill("2026-12-25");
     await editor.getByRole("button", { name: "Approve reviewed configuration" }).focus();
     await page.keyboard.press("Enter");
     await expect(
@@ -231,7 +241,9 @@ export async function verifyMerchantServiceBrowser({
     );
     await page.reload();
     await editor.getByRole("button", { name: "Edit operating hours" }).click();
-    await expect(editor.getByText("Latest state: Approved")).toBeVisible();
+    await expect(
+      editor.getByText("Latest change: Approved, waiting to be published"),
+    ).toBeVisible();
     await expect(
       editor.getByRole("button", { name: "Approve reviewed configuration" }),
     ).toHaveCount(0);
@@ -260,11 +272,11 @@ export async function verifyMerchantServiceBrowser({
       advance();
       await page.reload();
       await editor.getByRole("button", { name: "Edit operating hours" }).click();
-      await editor.getByLabel("Business day starts").fill("06:00");
+      await closure().fill("2026-12-26");
       await expect(
         editor.getByRole("button", { name: "Publish approved configuration" }),
       ).toBeDisabled();
-      await editor.getByLabel("Business day starts").fill("05:00");
+      await closure().fill("2026-12-25");
       const previousWrites = configurationWrites.length;
       await editor.getByRole("button", { name: "Publish approved configuration" }).focus();
       await page.keyboard.press("Enter");
@@ -275,8 +287,10 @@ export async function verifyMerchantServiceBrowser({
       assert.equal(request.configuration.updatedAt, approvedConfiguration.latest.updatedAt);
       await page.reload();
       await editor.getByRole("button", { name: "Edit operating hours" }).click();
-      await expect(editor.getByText("Latest state: Published")).toBeVisible();
-      await expect(editor.getByLabel("Business day starts")).toHaveValue("05:00");
+      await expect(
+        editor.getByText("No pending change. Customers see the published hours."),
+      ).toBeVisible();
+      await expect(closure()).toHaveValue("2026-12-25");
       await expect(
         editor.getByRole("button", { name: "Publish approved configuration" }),
       ).toHaveCount(0);

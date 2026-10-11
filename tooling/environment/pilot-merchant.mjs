@@ -64,6 +64,7 @@ import { createPersistentMerchantBffService } from "../../apps/api/dist/persiste
 import { createMerchantServiceControl } from "../../apps/api/dist/merchant-service-control.js";
 import { createMerchantUnmatchedCaptureRefund } from "../../apps/api/dist/merchant-unmatched-capture-refund.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
+import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
 export async function createInternalMerchant(
   resources,
   {
@@ -678,6 +679,11 @@ export async function createInternalMerchant(
   });
   const { pickupQuery, pickupProof, pickupHandoff, pickupNotCollected } =
     await createInternalMerchantPickup(resources, { persistence, service });
+  // WP-2423 Q4: store hours and holiday editing — a manager drafts, the owner approves and publishes.
+  const storeConfiguration = await createInternalStoreConfiguration(resources, {
+    persistence,
+    service,
+  });
   const orderQueue = logUnexpected(
     "INTERNAL_ORDER_QUEUE_UNAVAILABLE",
     createPersistentMerchantOrderQueue({
@@ -717,6 +723,15 @@ export async function createInternalMerchant(
         });
         return { serviceControl: control, serviceControlState: control.read };
       })(),
+      // WP-2423 Q4: refusals are answered to staff; unexpected failures are logged as codes only.
+      storeConfiguration: logUnexpected(
+        "INTERNAL_STORE_CONFIGURATION_UNAVAILABLE",
+        storeConfiguration,
+      ),
+      storeConfigurationState: logUnexpected(
+        "INTERNAL_STORE_CONFIGURATION_READ_UNAVAILABLE",
+        storeConfiguration.read,
+      ),
       taxConfigAuthoring: createMerchantTaxConfigAuthoring({
         persistence,
         authentication: service,

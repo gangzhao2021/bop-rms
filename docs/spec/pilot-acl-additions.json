@@ -2196,6 +2196,105 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 pause and resume online ordering): a store manager or owner records a time-limited pause of new online orders and its resume; append-only operation and pause/resume content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_authoring_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_weekly_service_period",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_interval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_publication_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_review_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_review_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_review_snapshot",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_original_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content (the authoring insert's integrity check reads the original-operation history)"
     }
   ]
 }

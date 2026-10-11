@@ -112,6 +112,39 @@ it("uses same-origin no-store transport and CSRF for a stable command", async ()
   );
 });
 
+it("explains a rejected change and a denied approval in staff terms", async () => {
+  const reply = (status: number) =>
+    new Response(JSON.stringify({ error: "synthetic" }), {
+      status,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  const fetcher = vi.fn<typeof fetch>();
+  const client = createStoreConfigurationClient(fetcher);
+  const configuration = parseStoreConfigurationView(view, id(3)).latest as NonNullable<
+    ReturnType<typeof parseStoreConfigurationView>["latest"]
+  >;
+  const command = (name: "SaveDraft" | "Approve") => ({
+    command: name,
+    operationReference: id(20),
+    auditReference: id(21),
+    expectedVersion: 1,
+    configuration,
+  });
+  const signal = new AbortController().signal;
+  fetcher.mockResolvedValueOnce(reply(422));
+  await expect(client.execute(command("SaveDraft"), "csrf", signal)).rejects.toThrow(
+    /^Change not accepted\. Only opening hours and dated closures/u,
+  );
+  fetcher.mockResolvedValueOnce(reply(403));
+  await expect(client.execute(command("Approve"), "csrf", signal)).rejects.toThrow(
+    /^Permission denied\. Someone other than the person who made this change/u,
+  );
+  fetcher.mockResolvedValueOnce(reply(403));
+  await expect(client.execute(command("SaveDraft"), "csrf", signal)).rejects.toThrow(
+    "Permission denied. Check your session and Store access.",
+  );
+});
+
 const setupBasis = () => ({
   profile: "StoreSetupConfigurationBasisV2",
   tenantReference: id(30),

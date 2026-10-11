@@ -13,8 +13,12 @@
  * checks (create a review draft, submit it, approve it, publish a release).
  * v6 (2026-10-08): allergen registry and ingredient declaration actions (DEC-ALLERGEN-DECLARATIONS);
  * recipe roles may read them.
+ * v7 (2026-10-10): operations.ordering.pause (WP-2423 Q4 busy mode).
+ * v8 (2026-10-10): Store hours and holiday editing (WP-2423 Q4). The Store Manager drafts and
+ * submits hours (organization.store.update); the Owner approves and publishes them
+ * (organization.store.publish), so a different person approves every change.
  */
-export const storePermissionCatalogVersion = 7 as const;
+export const storePermissionCatalogVersion = 8 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -359,6 +363,12 @@ export const legacyPermissionReplacements: Readonly<Record<string, readonly stri
     "store.service.read": ["organization.store.read"],
     "store.service.pause": ["operations.ordering.pause"],
     "store.service.resume": ["operations.ordering.pause"],
+    // v8 (WP-2423 Q4): names checked by the Store hours editor.
+    "store.service.save-draft": ["organization.store.update"],
+    "store.service.validate": ["organization.store.update"],
+    "store.service.submit": ["organization.store.update"],
+    "store.service.approve": ["organization.store.publish"],
+    "store.service.publish": ["organization.store.publish"],
     "pricing.price-book.manage": ["pricing.price_book.update"],
     // v4: names still checked by the Catalog/Pricing services (DEC-PERM-CATALOG step-wise migration).
     "pricing.price-book.approve": ["pricing.price_book.approve"],
@@ -383,6 +393,8 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
     "store-manager": Object.freeze([
       "merchant.access",
       "organization.store.read",
+      // v8: drafts and submits Store hours; the Owner approves and publishes them.
+      "organization.store.update",
       "organization.staff.read",
       "identity.role.read",
       "identity.role.approve",

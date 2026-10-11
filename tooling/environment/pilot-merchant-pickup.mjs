@@ -168,7 +168,10 @@ export function logUnexpected(event, call) {
         error?.name !== "FulfillmentReadinessError" &&
         !/^Merchant[A-Za-z]*Error$/.test(error?.name ?? "")
       ) {
-        const code = error?.code ?? error?.name;
+        // A plain Error whose message is an error code (UPPER_SNAKE) carries that code.
+        const code =
+          error?.code ??
+          (/^[A-Z][A-Z0-9_]{2,79}$/.test(error?.message ?? "") ? error.message : error?.name);
         console.error(
           JSON.stringify({
             event,

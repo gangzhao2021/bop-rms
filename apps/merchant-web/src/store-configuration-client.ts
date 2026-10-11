@@ -369,8 +369,17 @@ export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
         ...(command ? { body: JSON.stringify(command) } : {}),
       });
       if (response.status === 403)
-        throw new Error("Permission denied. Check your session and Store access.");
+        throw new Error(
+          command?.command === "Approve"
+            ? "Permission denied. Someone other than the person who made this change, with approval access, must approve it."
+            : "Permission denied. Check your session and Store access.",
+        );
       if (response.status === 409) throw new Error("Source changed. Refresh before trying again.");
+      // WP-2423 Q4: the change itself was not accepted; keep the form so staff can correct it.
+      if (response.status === 422)
+        throw new Error(
+          "Change not accepted. Only opening hours and dated closures can change here, and a change must be approved by someone other than its author.",
+        );
       if (
         !response.ok ||
         response.headers.get("cache-control") !== "no-store" ||
