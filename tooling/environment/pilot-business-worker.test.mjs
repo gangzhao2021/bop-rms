@@ -159,3 +159,24 @@ it("explicit workload configuration reaches existing lifecycle and optional depe
     },
   });
 });
+it("always composes the paid-without-fulfillable inventory release with the paid outcome System actor", async () => {
+  const release = vi.fn(() => "workload");
+  const compose = composeConfiguredBusinessWorker({
+    directory: "/synthetic",
+    config,
+    installation: {},
+    implementations: {
+      createInternalWorker: async (r, observers, _options, dependencies) =>
+        dependencies.createInternalPaidWithoutFulfillableInventoryWorkload(
+          r,
+          observers.inventoryRelease,
+        ),
+      createInternalPaidWithoutFulfillableInventoryWorkload: release,
+    },
+  });
+  // WP-2423 Q12: not behind a workloads option.
+  expect(await compose("resources", { inventoryRelease: "observer" }, {})).toBe("workload");
+  expect(release).toHaveBeenCalledWith("resources", "observer", {
+    systemActorReference: config.actors.paidOutcome,
+  });
+});

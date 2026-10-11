@@ -7,9 +7,9 @@ import {
   createPostgresPaymentReconciliationDaySource,
 } from "@rms/payment";
 import {
-  createPostgresCurrentStorePublicationProof,
+  createPostgresAsPublishedStorePublicationProof,
   createPostgresStoreBusinessDateConfigurationSource,
-  resolveClosedStoreBusinessDateWindow,
+  createPostgresStoreClosedBusinessDateWindowSource,
   resolveStoreBusinessDate,
 } from "@rms/store";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -109,15 +109,19 @@ export function createPersistentMerchantSettlement(options: {
           }
         }),
     };
-    const configurationSource = (tx: ConsumerTransaction, scope: MerchantSettlementScope) => {
+    const configurationOptions = (
+      tx: ConsumerTransaction,
+      scope: MerchantSettlementScope,
+    ): Parameters<typeof createPostgresStoreBusinessDateConfigurationSource>[0] => {
       const store = stores.get(tx) ?? unavailable();
-      return createPostgresStoreBusinessDateConfigurationSource({
+      return {
         brandReference: scope.brandReference,
         storeReference: scope.storeReference,
         timeZone: store.timeZone,
         authorize: async (t) => guard(scope)(t as ConsumerTransaction),
+        // Settlement reads past business days: verify against the as-published release.
         publicationProof: async (t, candidate, at) => {
-          const proof = await createPostgresCurrentStorePublicationProof({
+          const proof = await createPostgresAsPublishedStorePublicationProof({
             ...persistence.publication,
             tenantReference: scope.tenantReference,
             brandReference: scope.brandReference,
@@ -131,8 +135,10 @@ export function createPersistentMerchantSettlement(options: {
             businessDayStartSource: proof.businessDayStartSource,
           };
         },
-      });
+      };
     };
+    const configurationSource = (tx: ConsumerTransaction, scope: MerchantSettlementScope) =>
+      createPostgresStoreBusinessDateConfigurationSource(configurationOptions(tx, scope));
     /** Owner reads answer null when their source cannot; our own scope refusal still propagates. */
     const optional = async <T>(work: () => Promise<T>): Promise<T | null> => {
       try {
@@ -177,12 +183,11 @@ export function createPersistentMerchantSettlement(options: {
             }).businessDate,
           );
         }
-        // The configuration in force on that day; UTC noon lies inside every Store's business day.
-        const window = resolveClosedStoreBusinessDateWindow({
-          businessDate: date,
-          observedAt: now,
-          configuration: await source(tx, `${date}T12:00:00.000Z`),
-        });
+        // Every configuration in force on that day (UTC noon anchors the day's boundaries);
+        // versions may change within the day only with identical boundaries.
+        const window = await createPostgresStoreClosedBusinessDateWindowSource(
+          configurationOptions(tx, scope),
+        )(tx, { businessDate: date, anchorAt: `${date}T12:00:00.000Z`, observedAt: now });
         return {
           businessDate: String(window.businessDate),
           startsAt: String(window.startsAt),

@@ -3,10 +3,10 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { parseOpaqueUuidV7, parseCanonicalInstant, readClosedRecord } from "@bop/identity";
 import {
   createPostgresStoreBusinessDateSource,
-  createPostgresCurrentStorePublicationProof,
+  createPostgresAsPublishedStorePublicationProof,
 } from "@rms/store";
 
-type PublicationOptions = Parameters<typeof createPostgresCurrentStorePublicationProof>[0];
+type PublicationOptions = Parameters<typeof createPostgresAsPublishedStorePublicationProof>[0];
 /** Public-owner composition for Payment's businessDate port. The configured
  * authorization callback must retain current Tenant/Store/purpose fences even
  * when occurredAt is a historical capture time. No client-selected time zone,
@@ -25,8 +25,10 @@ export function createMerchantOrdinaryRefundBusinessDate(
     ...scope,
     timeZone: options.timeZone,
     authorize: options.authorize,
+    // occurredAt is a historical capture time: verify the configuration in force then
+    // against the release that published it, even if a later version superseded it.
     publicationProof: async (tx, candidate, at) => {
-      const proof = await createPostgresCurrentStorePublicationProof({
+      const proof = await createPostgresAsPublishedStorePublicationProof({
         ...options,
         ...scope,
         configurationReference: candidate.configurationReference,

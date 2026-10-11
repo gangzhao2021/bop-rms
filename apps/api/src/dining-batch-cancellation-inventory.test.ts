@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { beforeEach, expect, it, vi } from "vitest";
+import { canonicalizeRfc8785 } from "@bop/audit";
 import { parseSubmissionInventoryFinalValidation } from "@rms/inventory";
 import { finalValidationFixture } from "../../../packages/rms/inventory/src/tests/submission-final-validation.fixture.js";
 import { createDiningBatchCancellationInventory } from "./dining-batch-cancellation-inventory.js";
@@ -165,4 +167,43 @@ it("rejects current authority denial before any owner read", async () => {
   f.authorize.mockResolvedValue(false);
   await expect(f.port(f.tx, { mode: "Release", cancellation: f.record })).rejects.toThrow();
   expect(m.lookup).not.toHaveBeenCalled();
+});
+it("keeps the original dining child references and reason after the shared release extraction", async () => {
+  const f = fixture();
+  await f.port(f.tx, { mode: "Release", cancellation: f.record });
+  // WP-2423 Q12: the pre-extraction derivation, copied verbatim, so existing replays still verify.
+  const derive = (reservation: string, role: string) => {
+    const h = createHash("sha256")
+      .update(
+        canonicalizeRfc8785([
+          "DiningCancellationInventory/v1",
+          f.record.tenantReference,
+          f.record.brandReference,
+          f.record.storeReference,
+          f.record.cancellationReference,
+          reservation,
+          role,
+        ]),
+      )
+      .digest("hex");
+    return (
+      f.record.cancellationReference.slice(0, 14) +
+      "7" +
+      h.slice(0, 3) +
+      "-8" +
+      h.slice(3, 6) +
+      "-" +
+      h.slice(6, 18)
+    );
+  };
+  for (const write of m.release.mock.calls[0]?.[0].writes ?? []) {
+    const reservation = write.reservation.reservationReference;
+    expect(write.operationReference).toBe(derive(reservation, "operation"));
+    expect(write.movementReference).toBe(derive(reservation, "movement"));
+    expect(write.audit.auditId).toBe(derive(reservation, "audit"));
+    expect(write.audit).toMatchObject({
+      reasonCode: "CHECKOUT_DEADLINE_REACHED",
+      occurredAt: f.record.cancelledAt,
+    });
+  }
 });

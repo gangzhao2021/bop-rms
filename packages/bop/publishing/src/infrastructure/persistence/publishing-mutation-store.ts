@@ -677,6 +677,194 @@ export function createPostgresPublishingMutationStore(
     const binding = qualificationHistory(value, history);
     await verifyOriginalReviewPolicy(tx, binding, value.optionSetApprovalWaiver !== undefined);
   }
+  /** Original independent review behind one recorded release. The caller selects
+   * that release (current family head or exact as-published release) in this tx. */
+  async function releasedIndependentApproval(
+    tx: PublishingTransaction,
+    input: ReturnType<typeof parseIndependentPublishingApprovalRequest>,
+    currentRelease: RecordedReleasedIndependentPublishingApproval["currentRelease"],
+  ): Promise<RecordedReleasedIndependentPublishingApproval> {
+    const released = currentRelease.lifecycle;
+    if (
+      released.lifecycleId !== input.lifecycleReference ||
+      released.snapshotReference !== input.snapshotReference ||
+      released.snapshotDigest !== input.snapshotDigest ||
+      currentRelease.release.sourceLifecycleId !== input.lifecycleReference ||
+      currentRelease.release.snapshotReference !== input.snapshotReference ||
+      currentRelease.release.snapshotDigest !== input.snapshotDigest ||
+      released.version !== 4
+    )
+      return fail();
+    // Only the actual Create1/Submit2/Approve3/Publish4 chain is supported.
+    // The original creator and submitter retain separate actor identities.
+    const history = rows(
+      await tx.query(
+        "SELECT mutation_json,intent_hash,audit_id FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND lifecycle_id=$4 AND lifecycle_version <= $5 ORDER BY lifecycle_version ASC LIMIT 5",
+        [...scoped, input.lifecycleReference, released.version],
+      ),
+    );
+    if (history.length !== 4) return fail();
+    const normalized = history.map((row, index) => {
+      const m = normalize(row.mutation_json as CommitPublishingMutationInput);
+      const a = m.audit,
+        n = m.next;
+      if (
+        row.intent_hash !== digest(m) ||
+        row.audit_id !== a.auditId ||
+        n.version !== index + 1 ||
+        !samePublishingScope(n.scope, scope) ||
+        n.lifecycleId !== input.lifecycleReference ||
+        n.familyReference !== input.familyReference ||
+        n.configurationType !== input.configurationType ||
+        n.purposeCode !== input.purposeCode ||
+        n.snapshotReference !== input.snapshotReference ||
+        n.snapshotDigest !== input.snapshotDigest ||
+        a.brandId !== scope.brandReference ||
+        (a.storeId ?? null) !== scope.storeReference ||
+        a.actor.type !== "User" ||
+        a.targetType !== "PublishingLifecycle" ||
+        a.targetId !== n.lifecycleId ||
+        a.dataClassification !== "Confidential" ||
+        a.actionCode !== auditActions[m.operation] ||
+        a.occurredAt < n.changedAt ||
+        a.occurredAt > input.observedAt ||
+        !evaluatePublishingTransition({
+          operation: m.operation,
+          expectedVersion: m.expectedVersion,
+          current: m.current,
+          next: n,
+        }).allowed
+      )
+        return fail();
+      return m;
+    });
+    const [created, reviewed, approved, published] = normalized;
+    if (!created || !reviewed || !approved || !published) return fail();
+    for (let i = 0; i < normalized.length; i++) {
+      const m = normalized[i],
+        previous = normalized[i - 1];
+      if (
+        !m ||
+        (i === 0
+          ? m.current !== null
+          : !previous ||
+            !equal(m.current, previous.next) ||
+            m.audit.occurredAt < previous.audit.occurredAt)
+      )
+        return fail();
+      if (
+        i < normalized.length - 3 &&
+        (m.operation !== "CreateDraft" ||
+          m.next.state !== "Draft" ||
+          m.validationEvidence !== null ||
+          m.approvalEvidence !== null)
+      )
+        return fail();
+      if (
+        i < normalized.length - 1 &&
+        (m.release !== null || m.supersededReleaseId !== null || m.rollbackTargetReleaseId !== null)
+      )
+        return fail();
+    }
+    const validation = reviewed.validationEvidence,
+      approval = approved.approvalEvidence;
+    if (
+      reviewed.operation !== "SubmitReview" ||
+      reviewed.next.state !== "InReview" ||
+      reviewed.approvalEvidence !== null ||
+      approved.operation !== "Approve" ||
+      approved.next.state !== "Approved" ||
+      approved.validationEvidence !== null ||
+      published.operation !== "Publish" ||
+      !equal(published.next, released) ||
+      !equal(published.release, currentRelease.release) ||
+      published.audit.auditId !== currentRelease.auditReference ||
+      validation === null ||
+      approval === null ||
+      !equal(validation, currentRelease.validationEvidence) ||
+      !equal(approval, currentRelease.approvalEvidence) ||
+      !equal(published.validationEvidence, validation) ||
+      !equal(published.approvalEvidence, approval) ||
+      created.audit.actor.type !== "User" ||
+      reviewed.audit.actor.type !== "User" ||
+      approved.audit.actor.type !== "User" ||
+      created.audit.actor.reference === approved.audit.actor.reference ||
+      reviewed.audit.actor.reference === approved.audit.actor.reference ||
+      approval.approvedActorReference !== approved.audit.actor.reference ||
+      approval.reviewLifecycleId !== input.lifecycleReference ||
+      approval.reviewVersion !== reviewed.next.version ||
+      approved.next.version !== released.version - 1 ||
+      validation.evidenceReference !== reviewed.next.validationEvidenceReference ||
+      validation.evidenceReference !== approved.next.validationEvidenceReference ||
+      approval.evidenceReference !== approved.next.approvalEvidenceReference ||
+      validation.snapshotReference !== input.snapshotReference ||
+      validation.snapshotDigest !== input.snapshotDigest ||
+      approval.snapshotReference !== input.snapshotReference ||
+      approval.snapshotDigest !== input.snapshotDigest ||
+      !samePublishingScope(validation.scope, scope) ||
+      !samePublishingScope(approval.scope, scope) ||
+      validation.checkedAt > reviewed.audit.occurredAt ||
+      validation.validUntil <= reviewed.audit.occurredAt ||
+      validation.validUntil <= approved.audit.occurredAt ||
+      approval.approvedAt < reviewed.audit.occurredAt ||
+      approval.approvedAt > approved.audit.occurredAt ||
+      approval.validUntil <= approved.audit.occurredAt ||
+      validation.validUntil <= currentRelease.release.createdAt ||
+      approval.validUntil <= currentRelease.release.createdAt ||
+      validation.validUntil <= published.audit.occurredAt ||
+      approval.validUntil <= published.audit.occurredAt ||
+      approval.approvedAt > currentRelease.release.createdAt ||
+      validation.checkedAt > currentRelease.release.createdAt ||
+      currentRelease.release.createdAt !== published.next.changedAt ||
+      currentRelease.release.kind !== published.operation ||
+      !equal([...validation.checkCodes].sort(), input.requiredCheckCodes)
+    )
+      return fail();
+    const body = Object.freeze({
+      profile: "RecordedReleasedIndependentPublishingApprovalV1" as const,
+      tenantReference: tenant,
+      scope,
+      familyReference: input.familyReference,
+      lifecycleReference: input.lifecycleReference,
+      configurationType: input.configurationType,
+      purposeCode: input.purposeCode,
+      snapshotReference: input.snapshotReference,
+      snapshotDigest: input.snapshotDigest,
+      currentRelease,
+      approvedLifecycleVersion: approved.next.version,
+      reviewVersion: reviewed.next.version,
+      draftOperationReference: created.idempotencyKey,
+      reviewOperationReference: reviewed.idempotencyKey,
+      approvalOperationReference: approved.idempotencyKey,
+      authoredByActorReference: parsePublishingReference(created.audit.actor.reference),
+      requestedByActorReference: parsePublishingReference(reviewed.audit.actor.reference),
+      approvedByActorReference: approval.approvedActorReference,
+      validationEvidenceReference: validation.evidenceReference,
+      approvalEvidenceReference: approval.evidenceReference,
+      validationCheckCodes: Object.freeze([...validation.checkCodes].sort()),
+      observedAt: input.observedAt,
+      sourceDigest: parsePublishingDigest(
+        "sha256:" +
+          sha256Hex(
+            canonicalizeRfc8785(
+              normalized.map((m) => ({
+                operationReference: m.idempotencyKey,
+                intentDigest: digest(m),
+                auditReference: m.audit.auditId,
+              })),
+            ),
+          ),
+      ),
+      recordedIndependence: "Verified" as const,
+      currentValidation: "NotEvaluated" as const,
+      referenceEligibility: "NotEvaluated" as const,
+      eligibility: "NotEvaluated" as const,
+    });
+    return Object.freeze({
+      ...body,
+      digest: parsePublishingDigest("sha256:" + sha256Hex(canonicalizeRfc8785(body))),
+    });
+  }
   let brandConfigurationWriteActive = false,
     brandConfigurationWritePoisoned = false;
   return Object.freeze({
@@ -1406,188 +1594,7 @@ export function createPostgresPublishingMutationStore(
             purposeCode: input.purposeCode,
             observedAt: input.observedAt,
           });
-          const released = currentRelease.lifecycle;
-          if (
-            released.lifecycleId !== input.lifecycleReference ||
-            released.snapshotReference !== input.snapshotReference ||
-            released.snapshotDigest !== input.snapshotDigest ||
-            currentRelease.release.sourceLifecycleId !== input.lifecycleReference ||
-            currentRelease.release.snapshotReference !== input.snapshotReference ||
-            currentRelease.release.snapshotDigest !== input.snapshotDigest ||
-            released.version !== 4
-          )
-            return fail();
-          // Only the actual Create1/Submit2/Approve3/Publish4 chain is supported.
-          // The original creator and submitter retain separate actor identities.
-          const history = rows(
-            await tx.query(
-              "SELECT mutation_json,intent_hash,audit_id FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND lifecycle_id=$4 AND lifecycle_version <= $5 ORDER BY lifecycle_version ASC LIMIT 5",
-              [...scoped, input.lifecycleReference, released.version],
-            ),
-          );
-          if (history.length !== 4) return fail();
-          const normalized = history.map((row, index) => {
-            const m = normalize(row.mutation_json as CommitPublishingMutationInput);
-            const a = m.audit,
-              n = m.next;
-            if (
-              row.intent_hash !== digest(m) ||
-              row.audit_id !== a.auditId ||
-              n.version !== index + 1 ||
-              !samePublishingScope(n.scope, scope) ||
-              n.lifecycleId !== input.lifecycleReference ||
-              n.familyReference !== input.familyReference ||
-              n.configurationType !== input.configurationType ||
-              n.purposeCode !== input.purposeCode ||
-              n.snapshotReference !== input.snapshotReference ||
-              n.snapshotDigest !== input.snapshotDigest ||
-              a.brandId !== scope.brandReference ||
-              (a.storeId ?? null) !== scope.storeReference ||
-              a.actor.type !== "User" ||
-              a.targetType !== "PublishingLifecycle" ||
-              a.targetId !== n.lifecycleId ||
-              a.dataClassification !== "Confidential" ||
-              a.actionCode !== auditActions[m.operation] ||
-              a.occurredAt < n.changedAt ||
-              a.occurredAt > input.observedAt ||
-              !evaluatePublishingTransition({
-                operation: m.operation,
-                expectedVersion: m.expectedVersion,
-                current: m.current,
-                next: n,
-              }).allowed
-            )
-              return fail();
-            return m;
-          });
-          const [created, reviewed, approved, published] = normalized;
-          if (!created || !reviewed || !approved || !published) return fail();
-          for (let i = 0; i < normalized.length; i++) {
-            const m = normalized[i],
-              previous = normalized[i - 1];
-            if (
-              !m ||
-              (i === 0
-                ? m.current !== null
-                : !previous ||
-                  !equal(m.current, previous.next) ||
-                  m.audit.occurredAt < previous.audit.occurredAt)
-            )
-              return fail();
-            if (
-              i < normalized.length - 3 &&
-              (m.operation !== "CreateDraft" ||
-                m.next.state !== "Draft" ||
-                m.validationEvidence !== null ||
-                m.approvalEvidence !== null)
-            )
-              return fail();
-            if (
-              i < normalized.length - 1 &&
-              (m.release !== null ||
-                m.supersededReleaseId !== null ||
-                m.rollbackTargetReleaseId !== null)
-            )
-              return fail();
-          }
-          const validation = reviewed.validationEvidence,
-            approval = approved.approvalEvidence;
-          if (
-            reviewed.operation !== "SubmitReview" ||
-            reviewed.next.state !== "InReview" ||
-            reviewed.approvalEvidence !== null ||
-            approved.operation !== "Approve" ||
-            approved.next.state !== "Approved" ||
-            approved.validationEvidence !== null ||
-            published.operation !== "Publish" ||
-            !equal(published.next, released) ||
-            !equal(published.release, currentRelease.release) ||
-            published.audit.auditId !== currentRelease.auditReference ||
-            validation === null ||
-            approval === null ||
-            !equal(validation, currentRelease.validationEvidence) ||
-            !equal(approval, currentRelease.approvalEvidence) ||
-            !equal(published.validationEvidence, validation) ||
-            !equal(published.approvalEvidence, approval) ||
-            created.audit.actor.type !== "User" ||
-            reviewed.audit.actor.type !== "User" ||
-            approved.audit.actor.type !== "User" ||
-            created.audit.actor.reference === approved.audit.actor.reference ||
-            reviewed.audit.actor.reference === approved.audit.actor.reference ||
-            approval.approvedActorReference !== approved.audit.actor.reference ||
-            approval.reviewLifecycleId !== input.lifecycleReference ||
-            approval.reviewVersion !== reviewed.next.version ||
-            approved.next.version !== released.version - 1 ||
-            validation.evidenceReference !== reviewed.next.validationEvidenceReference ||
-            validation.evidenceReference !== approved.next.validationEvidenceReference ||
-            approval.evidenceReference !== approved.next.approvalEvidenceReference ||
-            validation.snapshotReference !== input.snapshotReference ||
-            validation.snapshotDigest !== input.snapshotDigest ||
-            approval.snapshotReference !== input.snapshotReference ||
-            approval.snapshotDigest !== input.snapshotDigest ||
-            !samePublishingScope(validation.scope, scope) ||
-            !samePublishingScope(approval.scope, scope) ||
-            validation.checkedAt > reviewed.audit.occurredAt ||
-            validation.validUntil <= reviewed.audit.occurredAt ||
-            validation.validUntil <= approved.audit.occurredAt ||
-            approval.approvedAt < reviewed.audit.occurredAt ||
-            approval.approvedAt > approved.audit.occurredAt ||
-            approval.validUntil <= approved.audit.occurredAt ||
-            validation.validUntil <= currentRelease.release.createdAt ||
-            approval.validUntil <= currentRelease.release.createdAt ||
-            validation.validUntil <= published.audit.occurredAt ||
-            approval.validUntil <= published.audit.occurredAt ||
-            approval.approvedAt > currentRelease.release.createdAt ||
-            validation.checkedAt > currentRelease.release.createdAt ||
-            currentRelease.release.createdAt !== published.next.changedAt ||
-            currentRelease.release.kind !== published.operation ||
-            !equal([...validation.checkCodes].sort(), input.requiredCheckCodes)
-          )
-            return fail();
-          const body = Object.freeze({
-            profile: "RecordedReleasedIndependentPublishingApprovalV1" as const,
-            tenantReference: tenant,
-            scope,
-            familyReference: input.familyReference,
-            lifecycleReference: input.lifecycleReference,
-            configurationType: input.configurationType,
-            purposeCode: input.purposeCode,
-            snapshotReference: input.snapshotReference,
-            snapshotDigest: input.snapshotDigest,
-            currentRelease,
-            approvedLifecycleVersion: approved.next.version,
-            reviewVersion: reviewed.next.version,
-            draftOperationReference: created.idempotencyKey,
-            reviewOperationReference: reviewed.idempotencyKey,
-            approvalOperationReference: approved.idempotencyKey,
-            authoredByActorReference: parsePublishingReference(created.audit.actor.reference),
-            requestedByActorReference: parsePublishingReference(reviewed.audit.actor.reference),
-            approvedByActorReference: approval.approvedActorReference,
-            validationEvidenceReference: validation.evidenceReference,
-            approvalEvidenceReference: approval.evidenceReference,
-            validationCheckCodes: Object.freeze([...validation.checkCodes].sort()),
-            observedAt: input.observedAt,
-            sourceDigest: parsePublishingDigest(
-              "sha256:" +
-                sha256Hex(
-                  canonicalizeRfc8785(
-                    normalized.map((m) => ({
-                      operationReference: m.idempotencyKey,
-                      intentDigest: digest(m),
-                      auditReference: m.audit.auditId,
-                    })),
-                  ),
-                ),
-            ),
-            recordedIndependence: "Verified" as const,
-            currentValidation: "NotEvaluated" as const,
-            referenceEligibility: "NotEvaluated" as const,
-            eligibility: "NotEvaluated" as const,
-          });
-          return Object.freeze({
-            ...body,
-            digest: parsePublishingDigest("sha256:" + sha256Hex(canonicalizeRfc8785(body))),
-          });
+          return await releasedIndependentApproval(tx, input, currentRelease);
         });
       } catch {
         return fail();
@@ -2328,6 +2335,174 @@ export function createPostgresPublishingMutationStore(
             }),
             current,
           });
+        });
+      } catch {
+        return fail();
+      }
+    },
+    /**
+     * Exact as-published release for historical reads: the recorded release in this
+     * family/type/purpose/scope that published snapshotReference as publicationReference,
+     * created by observedAt, whose lifecycle was still that Published record at
+     * observedAt. It need NOT remain the family head; this is historical evidence,
+     * never current release authority. Authorize first and bind the runner to the
+     * caller UoW to retain the SHARE fence.
+     */
+    async resolvePublishedRelease(
+      input: Readonly<{
+        familyReference: string;
+        configurationType: string;
+        purposeCode: string;
+        snapshotReference: string;
+        publicationReference: string;
+        observedAt: string;
+      }>,
+    ) {
+      try {
+        if (!input || typeof input !== "object") return fail();
+        const prototype = Object.getPrototypeOf(input);
+        if (prototype !== Object.prototype && prototype !== null) return fail();
+        const keys = [
+          "familyReference",
+          "configurationType",
+          "purposeCode",
+          "snapshotReference",
+          "publicationReference",
+          "observedAt",
+        ];
+        if (Reflect.ownKeys(input).length !== keys.length) return fail();
+        const values = keys.map((key) => {
+          const descriptor = Object.getOwnPropertyDescriptor(input, key);
+          if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return fail();
+          return descriptor.value;
+        });
+        const family = parsePublishingReference(values[0]);
+        const configurationType = parsePublishingCode(values[1]);
+        const purposeCode = parsePublishingCode(values[2]);
+        const snapshot = parsePublishingReference(values[3]);
+        const publication = parsePublishingReference(values[4]);
+        const observedAt = parsePublishingInstant(values[5]);
+        return await runner.run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+            [tenant, scope.brandReference, scope.storeReference ?? ""],
+          );
+          await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+          const recordedRows = rows(
+            await tx.query(
+              "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND family_id=$4 AND release_id=$5 LIMIT 2",
+              [...scoped, family, publication],
+            ),
+          );
+          if (recordedRows.length !== 1) return fail();
+          const row = recordedRows[0];
+          if (!row) return fail();
+          const recorded = normalize(row.mutation_json as CommitPublishingMutationInput);
+          await verifyRecordedQualification(tx, recorded);
+          const release = recorded.release;
+          const validation = recorded.validationEvidence;
+          const approval = recorded.approvalEvidence;
+          if (
+            release === null ||
+            validation === null ||
+            approval === null ||
+            (recorded.operation !== "Publish" && recorded.operation !== "Rollback") ||
+            release.kind !== recorded.operation ||
+            row.intent_hash !== digest(recorded) ||
+            release.releaseId !== publication ||
+            release.familyReference !== family ||
+            release.snapshotReference !== snapshot ||
+            !samePublishingScope(release.scope, scope) ||
+            release.configurationType !== configurationType ||
+            release.purposeCode !== purposeCode ||
+            release.createdAt > observedAt ||
+            recorded.audit.occurredAt > observedAt ||
+            recorded.next.state !== "Published" ||
+            recorded.next.lifecycleId !== release.sourceLifecycleId ||
+            recorded.next.familyReference !== family ||
+            recorded.next.configurationType !== configurationType ||
+            recorded.next.purposeCode !== purposeCode ||
+            recorded.next.snapshotReference !== snapshot ||
+            recorded.next.snapshotDigest !== release.snapshotDigest ||
+            !samePublishingScope(recorded.next.scope, scope) ||
+            validation.snapshotReference !== snapshot ||
+            validation.snapshotDigest !== release.snapshotDigest ||
+            validation.result !== "Pass" ||
+            !samePublishingScope(validation.scope, scope) ||
+            approval.snapshotReference !== snapshot ||
+            approval.snapshotDigest !== release.snapshotDigest ||
+            approval.decision !== "Accepted" ||
+            !samePublishingScope(approval.scope, scope) ||
+            recorded.next.validationEvidenceReference !== validation.evidenceReference ||
+            recorded.next.approvalEvidenceReference !== approval.evidenceReference
+          )
+            return fail();
+          // The lifecycle must not have left Published (e.g. Archived) by observedAt.
+          const asOfRow = rows(
+            await tx.query(
+              "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND lifecycle_id=$4 AND changed_at <= $5 ORDER BY lifecycle_version DESC LIMIT 1",
+              [...scoped, release.sourceLifecycleId, observedAt],
+            ),
+          )[0];
+          if (!asOfRow) return fail();
+          const asOf = normalize(asOfRow.mutation_json as CommitPublishingMutationInput);
+          if (
+            asOfRow.intent_hash !== digest(asOf) ||
+            asOf.next.state !== "Published" ||
+            !equal(asOf.next, recorded.next) ||
+            !samePublishingScope(asOf.next.scope, scope)
+          )
+            return fail();
+          return Object.freeze({
+            release,
+            lifecycle: recorded.next,
+            validationEvidence: validation,
+            approvalEvidence: approval,
+            auditReference: parsePublishingReference(recorded.audit.auditId),
+            observedAt,
+          });
+        });
+      } catch {
+        return fail();
+      }
+    },
+    /** Recorded independence behind the exact as-published release (see
+     * resolvePublishedRelease). Historical evidence only, never current authority. */
+    async resolvePublishedReleaseIndependentApproval(
+      value: unknown,
+    ): Promise<RecordedReleasedIndependentPublishingApproval> {
+      try {
+        if (
+          !value ||
+          typeof value !== "object" ||
+          Object.getPrototypeOf(value) !== Object.prototype
+        )
+          return fail();
+        const descriptors: PropertyDescriptorMap = Object.getOwnPropertyDescriptors(value);
+        const publication = descriptors.publicationReference;
+        if (!publication || !("value" in publication) || !publication.enumerable) return fail();
+        const publicationReference = parsePublishingReference(publication.value);
+        delete descriptors.publicationReference;
+        // Remaining fields keep the strict independent-approval request contract;
+        // accessors are copied as accessors so the parser still refuses them.
+        const input = parseIndependentPublishingApprovalRequest(
+          Object.defineProperties({}, descriptors),
+        );
+        return await runner.run(async (tx) => {
+          const owner = createPostgresPublishingMutationStore(
+            { run: (work) => work(tx) },
+            tenant,
+            scope,
+          );
+          const publishedRelease = await owner.resolvePublishedRelease({
+            familyReference: input.familyReference,
+            configurationType: input.configurationType,
+            purposeCode: input.purposeCode,
+            snapshotReference: input.snapshotReference,
+            publicationReference,
+            observedAt: input.observedAt,
+          });
+          return await releasedIndependentApproval(tx, input, publishedRelease);
         });
       } catch {
         return fail();

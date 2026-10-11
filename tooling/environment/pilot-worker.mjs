@@ -67,6 +67,11 @@ export async function createInternalWorker(resources, observers = {}, options = 
     connections: resources.database,
     additionalWorkloads: [
       waiting,
+      // WP-2423 Q12: always on; paid orders that cannot be fulfilled return their reserved stock.
+      dependencies.createInternalPaidWithoutFulfillableInventoryWorkload(
+        resources,
+        observers.inventoryRelease,
+      ),
       ...(await createOptionalCompensationWorkloads({
         enabled: options.compensation,
         resources,

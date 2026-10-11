@@ -321,19 +321,10 @@ export interface ClosedStoreBusinessDateWindow {
   readonly businessDayStartLocalTime: BusinessDayStartLocalTime;
 }
 
-/** Resolve both local boundaries, including DST, under one effective configuration.
- * A configuration transition inside the requested day requires separate evidence. */
-export function resolveClosedStoreBusinessDateWindow(input: {
-  readonly businessDate: unknown;
-  readonly observedAt: unknown;
-  readonly configuration: unknown;
-}): ClosedStoreBusinessDateWindow {
-  const configuration = parseStoreBusinessDateConfiguration(input.configuration);
-  const observedAt = parseBusinessDateInstant(input.observedAt);
-  if (typeof input.businessDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate))
-    return fail();
-  const date = new Date(`${input.businessDate}T00:00:00.000Z`);
-  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== input.businessDate)
+function closedBounds(configuration: StoreBusinessDateConfiguration, businessDate: unknown) {
+  if (typeof businessDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(businessDate)) return fail();
+  const date = new Date(`${businessDate}T00:00:00.000Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== businessDate)
     return fail();
   const next = new Date(date.getTime() + 86_400_000);
   const localDate = (value: Date): LocalFields => ({
@@ -347,11 +338,38 @@ export function resolveClosedStoreBusinessDateWindow(input: {
   const format = formatter(configuration.timeZone);
   const start = boundaryInstant(format, localDate(date), configuration.businessDayStartLocalTime);
   const end = boundaryInstant(format, localDate(next), configuration.businessDayStartLocalTime);
-  if (
-    start.epochMilliseconds >= end.epochMilliseconds ||
-    end.epochMilliseconds > Date.parse(observedAt)
-  )
-    return fail();
+  if (start.epochMilliseconds >= end.epochMilliseconds) return fail();
+  return { businessDate: businessDate as StoreBusinessDate, start, end };
+}
+
+/** Local boundaries of one Store business date under a configuration's time zone and
+ * day start, independent of its effective period. Used only to enumerate the
+ * configurations governing that day; the closed window still needs full coverage. */
+export function resolveStoreBusinessDateBounds(input: {
+  readonly businessDate: unknown;
+  readonly configuration: unknown;
+}): { readonly startsAt: CanonicalInstant; readonly endsAt: CanonicalInstant } {
+  const bounds = closedBounds(
+    parseStoreBusinessDateConfiguration(input.configuration),
+    input.businessDate,
+  );
+  return Object.freeze({
+    startsAt: new Date(bounds.start.epochMilliseconds).toISOString() as CanonicalInstant,
+    endsAt: new Date(bounds.end.epochMilliseconds).toISOString() as CanonicalInstant,
+  });
+}
+
+/** Resolve both local boundaries, including DST, under one effective configuration.
+ * A configuration transition inside the requested day requires separate evidence. */
+export function resolveClosedStoreBusinessDateWindow(input: {
+  readonly businessDate: unknown;
+  readonly observedAt: unknown;
+  readonly configuration: unknown;
+}): ClosedStoreBusinessDateWindow {
+  const configuration = parseStoreBusinessDateConfiguration(input.configuration);
+  const observedAt = parseBusinessDateInstant(input.observedAt);
+  const { start, end } = closedBounds(configuration, input.businessDate);
+  if (end.epochMilliseconds > Date.parse(observedAt)) return fail();
   if (
     start.epochMilliseconds < Date.parse(configuration.effectiveFrom) ||
     (configuration.effectiveUntil !== null &&
@@ -371,5 +389,49 @@ export function resolveClosedStoreBusinessDateWindow(input: {
     contentDigest: configuration.contentDigest,
     timeZone: configuration.timeZone,
     businessDayStartLocalTime: configuration.businessDayStartLocalTime,
+  });
+}
+
+/** Closed business day governed by the consecutive configurations in force across it
+ * (each in force at a successive instant from the day's start; the last at its end).
+ * Several versions may govern one day only when every one places the boundaries
+ * identically: same time zone, business-day start and start source. Otherwise the day
+ * is refused (STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE), never merged. The
+ * result carries the identity of the configuration in force at the day's end, so a
+ * day under one configuration resolves exactly as resolveClosedStoreBusinessDateWindow.
+ */
+export function resolveClosedStoreBusinessDateWindowAcross(input: {
+  readonly businessDate: unknown;
+  readonly observedAt: unknown;
+  readonly configurations: readonly unknown[];
+}): ClosedStoreBusinessDateWindow {
+  if (
+    !Array.isArray(input.configurations) ||
+    input.configurations.length < 1 ||
+    input.configurations.length > 64
+  )
+    return fail();
+  const configurations = input.configurations.map(parseStoreBusinessDateConfiguration);
+  const first = configurations[0];
+  const last = configurations[configurations.length - 1];
+  if (!first || !last) return fail();
+  for (const configuration of configurations) {
+    if (
+      configuration.brandReference !== last.brandReference ||
+      configuration.storeReference !== last.storeReference
+    )
+      return fail();
+    if (
+      configuration.timeZone !== last.timeZone ||
+      configuration.businessDayStartLocalTime !== last.businessDayStartLocalTime ||
+      configuration.businessDayStartSource !== last.businessDayStartSource
+    )
+      throw new BusinessDateError("STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE");
+  }
+  // The chain covers the day from the first version's start to the last version's end.
+  return resolveClosedStoreBusinessDateWindow({
+    businessDate: input.businessDate,
+    observedAt: input.observedAt,
+    configuration: { ...last, effectiveFrom: first.effectiveFrom },
   });
 }

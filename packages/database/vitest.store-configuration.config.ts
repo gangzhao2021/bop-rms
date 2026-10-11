@@ -3,6 +3,7 @@ export default defineConfig({
   test: {
     include: [
       "packages/database/test/store-configuration-acceptance.test.mjs",
+      "packages/database/test/store-historical-publication-acceptance.test.mjs",
       "packages/database/test/store-configuration-original-acceptance.test.mjs",
       "packages/database/test/store-configuration-ordinary-runtime-acceptance.test.mjs",
       "packages/database/test/store-publication-setup-basis-acceptance.test.mjs",

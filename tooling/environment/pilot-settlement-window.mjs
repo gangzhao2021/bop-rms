@@ -1,8 +1,8 @@
 import {
   createPostgresStoreBusinessDateConfigurationSource,
-  createPostgresCurrentStorePublicationProof,
+  createPostgresStoreClosedBusinessDateWindowSource,
+  createPostgresAsPublishedStorePublicationProof,
   resolveStoreBusinessDate,
-  resolveClosedStoreBusinessDateWindow,
 } from "../../packages/rms/store/src/index.ts";
 
 /** Fully closed Store day before an owner boundary, defaulting to the latest closed day. */
@@ -10,12 +10,15 @@ export function createInternalClosedSettlementWindow({ resources, active }) {
   const { scope, operating, transactions } = resources;
   const authorize = async (tx, at) =>
     (await active()) === true && (await operating.authorize(tx, at)) === true;
-  const read = createPostgresStoreBusinessDateConfigurationSource({
+  const sourceOptions = {
     ...scope,
     timeZone: operating.timeZone,
     authorize,
+    // Past instants (prior day, backlog back to the first coverage window) verify each
+    // configuration against the release that published it, not the newest release:
+    // a later hours publication must not make earlier settlement days unreadable.
     publicationProof: async (tx, candidate, observedAt) => {
-      const proof = await createPostgresCurrentStorePublicationProof({
+      const proof = await createPostgresAsPublishedStorePublicationProof({
         ...operating,
         authorize,
         configurationReference: candidate.configurationReference,
@@ -25,7 +28,10 @@ export function createInternalClosedSettlementWindow({ resources, active }) {
         businessDayStartSource: proof.businessDayStartSource,
       };
     },
-  });
+  };
+  const read = createPostgresStoreBusinessDateConfigurationSource(sourceOptions);
+  // Owner closed-day read: every version governing the day, identical boundaries required.
+  const readWindow = createPostgresStoreClosedBusinessDateWindowSource(sourceOptions);
   return async (input = undefined) => {
     if ((await active()) !== true) throw Error("SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE");
     const observedAt = resources.now();
@@ -51,19 +57,15 @@ export function createInternalClosedSettlementWindow({ resources, active }) {
       if (input !== undefined && current.businessDateBoundaryAt !== anchorAt)
         throw Error("SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE");
       const priorAt = new Date(Date.parse(current.businessDateBoundaryAt) - 1).toISOString();
-      const configuration = await read(tx, priorAt);
-      const prior = resolveStoreBusinessDate({ occurredAt: priorAt, configuration });
-      const window = resolveClosedStoreBusinessDateWindow({
-        businessDate: prior.businessDate,
-        observedAt,
-        configuration,
+      const prior = resolveStoreBusinessDate({
+        occurredAt: priorAt,
+        configuration: await read(tx, priorAt),
       });
-      // A newer publication may supersede an open-ended predecessor inside this window.
-      for (const at of [window.startsAt, new Date(Date.parse(window.endsAt) - 1).toISOString()]) {
-        const endpoint = await read(tx, at);
-        if (JSON.stringify(endpoint) !== JSON.stringify(configuration))
-          throw Error("SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE");
-      }
+      const window = await readWindow(tx, {
+        businessDate: prior.businessDate,
+        anchorAt: priorAt,
+        observedAt,
+      });
       if (window.endsAt !== current.businessDateBoundaryAt || (await active()) !== true)
         throw Error("SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE");
       return window;

@@ -36,6 +36,10 @@ export async function startPilotBusinessWorker({
           : {}),
         events: createPilotWorkloadHealthObserver(directory, "business-events"),
         paymentWait: createPilotWorkloadHealthObserver(directory, "business-payment-wait"),
+        inventoryRelease: createPilotWorkloadHealthObserver(
+          directory,
+          "business-inventory-release",
+        ),
         diningCheckoutExpiry: createPilotWorkloadHealthObserver(
           directory,
           "business-dining-checkout-expiry",

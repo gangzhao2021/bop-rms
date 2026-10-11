@@ -23,6 +23,14 @@ type AuthorityOptions = Omit<ContentOptions, "configurationReference"> & {
   /** Fixed server validation inventory; mandatory only for the V2 path. */
   readonly requiredValidationCheckCodes?: readonly string[];
 };
+/** Which Publishing release a Store configuration is verified against.
+ * Current: the family's newest release must have published this configuration
+ * (current status, entry/checkout gates, merchant baselines, new publication).
+ * AsPublished: the exact recorded release that published this configuration,
+ * created by observedAt, even when later superseded (historical business-date reads).
+ */
+type ReleaseBasis = "Current" | "AsPublished";
+
 /** Current public-owner authority for a candidate before Store snapshot insertion.
  * Caller keeps this transaction and its authorization fences through materialization
  * and Audit. Does not require or read a preexisting Store snapshot.
@@ -30,6 +38,17 @@ type AuthorityOptions = Omit<ContentOptions, "configurationReference"> & {
 export function createPostgresStorePublicationAuthorization(
   options: AuthorityOptions & { readonly publishingFamilyReference: string },
 ) {
+  return publicationAuthorization(options, "Current");
+}
+
+function publicationAuthorization(
+  options: AuthorityOptions & { readonly publishingFamilyReference: string },
+  basis: ReleaseBasis,
+) {
+  const unavailable =
+    basis === "Current"
+      ? "STORE_CURRENT_PUBLICATION_UNAVAILABLE"
+      : "STORE_AS_PUBLISHED_PUBLICATION_UNAVAILABLE";
   const tenant = parsePublishingReference(options.tenantReference);
   const configurationType = parsePublishingCode(options.configurationType);
   const purposeCode = parsePublishingCode(options.purposeCode);
@@ -59,12 +78,23 @@ export function createPostgresStorePublicationAuthorization(
         tenant,
         scope,
       );
-      const current = await publishing.resolveCurrentRelease({
-        familyReference: parsePublishingReference(options.publishingFamilyReference),
-        configurationType,
-        purposeCode,
-        observedAt: at,
-      });
+      const familyReference = parsePublishingReference(options.publishingFamilyReference);
+      const current =
+        basis === "Current"
+          ? await publishing.resolveCurrentRelease({
+              familyReference,
+              configurationType,
+              purposeCode,
+              observedAt: at,
+            })
+          : await publishing.resolvePublishedRelease({
+              familyReference,
+              configurationType,
+              purposeCode,
+              snapshotReference: configuration.configurationReference,
+              publicationReference: String(configuration.publicationReference),
+              observedAt: at,
+            });
       const { release, approvalEvidence: approval, validationEvidence: validation } = current;
       const sameScope = (value: typeof scope) =>
         value.kind === "Store" &&
@@ -147,7 +177,7 @@ export function createPostgresStorePublicationAuthorization(
                     .map(([key, item]) => [key, ordered(item)]),
                 )
               : value;
-        const original = await publishing.resolveCurrentReleaseIndependentApproval({
+        const independence = {
           familyReference: release.familyReference,
           lifecycleReference: release.sourceLifecycleId,
           configurationType,
@@ -156,7 +186,14 @@ export function createPostgresStorePublicationAuthorization(
           snapshotDigest: contentDigest,
           requiredCheckCodes,
           observedAt: at,
-        });
+        };
+        const original =
+          basis === "Current"
+            ? await publishing.resolveCurrentReleaseIndependentApproval(independence)
+            : await publishing.resolvePublishedReleaseIndependentApproval({
+                ...independence,
+                publicationReference: release.releaseId,
+              });
         if (
           original.tenantReference !== tenant ||
           !sameScope(original.scope) ||
@@ -195,7 +232,7 @@ export function createPostgresStorePublicationAuthorization(
       if ((await options.authorize(tx, at)) !== true) throw new Error();
       return Object.freeze({ configuration, contentDigest, release, observedAt: at });
     } catch {
-      throw new Error("STORE_CURRENT_PUBLICATION_UNAVAILABLE");
+      throw new Error(unavailable);
     }
   };
 }
@@ -206,6 +243,37 @@ export function createPostgresStorePublicationAuthorization(
 export function createPostgresCurrentStorePublicationProof(
   options: AuthorityOptions & { readonly configurationReference: string },
 ) {
+  return publicationProof(options, "Current");
+}
+
+/** Historical proof for a configuration selected for a past instant (business-date
+ * windows, settlement backlog). Verifies the configuration against the release that
+ * actually published it (same family/type/purpose/scope, snapshot and release
+ * reference, digest, approval/validation evidence, release created by observedAt),
+ * not against the newest release, so a superseded version stays readable for the
+ * period it governed. Live Gate and authorization are still checked as for the
+ * current proof. Never use it for current status, entry/checkout or merchant reads.
+ *
+ * The gap between an hours edit's effectiveFrom (draft save) and its publication
+ * cannot move a historical business-day boundary: time zone and business-day start
+ * are locked for hours editing, so every version in that lineage places each day's
+ * boundaries identically. (A closed settlement window still requires one
+ * configuration for the whole day; that rule is unchanged here.)
+ */
+export function createPostgresAsPublishedStorePublicationProof(
+  options: AuthorityOptions & { readonly configurationReference: string },
+) {
+  return publicationProof(options, "AsPublished");
+}
+
+function publicationProof(
+  options: AuthorityOptions & { readonly configurationReference: string },
+  basis: ReleaseBasis,
+) {
+  const unavailable =
+    basis === "Current"
+      ? "STORE_CURRENT_PUBLICATION_UNAVAILABLE"
+      : "STORE_AS_PUBLISHED_PUBLICATION_UNAVAILABLE";
   const readContent = createPostgresStorePublicationContentSource(options);
   return async (tx: Transaction, now: string) => {
     try {
@@ -216,14 +284,14 @@ export function createPostgresCurrentStorePublicationProof(
         binding.purposeCode !== options.purposeCode
       )
         throw new Error();
-      const authority = await createPostgresStorePublicationAuthorization({
-        ...options,
-        publishingFamilyReference: binding.familyReference,
-      })(tx, binding.configuration, at);
+      const authority = await publicationAuthorization(
+        { ...options, publishingFamilyReference: binding.familyReference },
+        basis,
+      )(tx, binding.configuration, at);
       if (authority.contentDigest !== binding.contentDigest) throw new Error();
       return Object.freeze({ ...binding, release: authority.release, observedAt: at });
     } catch {
-      throw new Error("STORE_CURRENT_PUBLICATION_UNAVAILABLE");
+      throw new Error(unavailable);
     }
   };
 }

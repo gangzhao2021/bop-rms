@@ -111,6 +111,7 @@ it("keeps business loop reports separate and refuses arbitrary file targets", ()
     expect(pilotHealthComponents("business-worker")).toEqual({
       events: "business-events.health.json",
       paymentWait: "business-payment-wait.health.json",
+      inventoryRelease: "business-inventory-release.health.json",
       diningCheckoutExpiry: "business-dining-checkout-expiry.health.json",
     });
     expect(() => createPilotWorkloadHealthObserver(directory, "../other")).toThrow();

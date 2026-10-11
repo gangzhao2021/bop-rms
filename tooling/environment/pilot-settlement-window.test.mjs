@@ -1,9 +1,34 @@
 import { expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ read: vi.fn() }));
-vi.mock("../../packages/rms/store/src/index.ts", async (original) => ({
-  ...(await original()),
-  createPostgresStoreBusinessDateConfigurationSource: () => mocks.read,
-}));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), window: vi.fn() }));
+// Controlled owner reads. The closed-day source is modelled over the same reads at the
+// day's start and last instant; its SQL change-point enumeration is covered by the
+// database acceptance suite (store-historical-publication-acceptance).
+vi.mock("../../packages/rms/store/src/index.ts", async (original) => {
+  const store = await original();
+  return {
+    ...store,
+    createPostgresStoreBusinessDateConfigurationSource: () => mocks.read,
+    createPostgresStoreClosedBusinessDateWindowSource: () =>
+      mocks.window.mockImplementation(async (tx, input) => {
+        const anchor = await mocks.read(tx, input.anchorAt);
+        const bounds = store.resolveStoreBusinessDateBounds({
+          businessDate: input.businessDate,
+          configuration: anchor,
+        });
+        const configurations = [];
+        for (const at of [bounds.startsAt, new Date(Date.parse(bounds.endsAt) - 1).toISOString()]) {
+          const value = await mocks.read(tx, at);
+          if (JSON.stringify(configurations.at(-1)) !== JSON.stringify(value))
+            configurations.push(value);
+        }
+        return store.resolveClosedStoreBusinessDateWindowAcross({
+          businessDate: input.businessDate,
+          observedAt: input.observedAt,
+          configurations,
+        });
+      }),
+  };
+});
 import { createInternalClosedSettlementWindow } from "./pilot-settlement-window.mjs";
 const id = (n) => "018f5000-0000-7000-8000-" + String(n).padStart(12, "0");
 function fixture() {
@@ -20,6 +45,7 @@ function fixture() {
     effectiveUntil: null,
   };
   mocks.read.mockReset().mockResolvedValue(configuration);
+  mocks.window.mockClear();
   const tx = {},
     active = vi.fn(async () => true);
   const resources = {
@@ -43,20 +69,52 @@ it("resolves the last closed local day and checks both endpoints in the retained
     startsAt: "2026-09-20T08:00:00.000Z",
     endsAt: "2026-09-21T08:00:00.000Z",
   });
-  expect(mocks.read.mock.calls).toEqual([
+  expect(mocks.window.mock.calls).toEqual([
+    [
+      f.tx,
+      {
+        businessDate: "2026-09-20",
+        anchorAt: "2026-09-21T07:59:59.999Z",
+        observedAt: "2026-09-22T04:30:00.000Z",
+      },
+    ],
+  ]);
+  expect(mocks.read.mock.calls.slice(0, 2)).toEqual([
     [f.tx, "2026-09-22T04:30:00.000Z"],
-    [f.tx, "2026-09-21T07:59:59.999Z"],
-    [f.tx, "2026-09-20T08:00:00.000Z"],
     [f.tx, "2026-09-21T07:59:59.999Z"],
   ]);
 });
-it("rejects an endpoint configuration replacement instead of merging distinct policies", async () => {
+it("settles a day spanning versions with identical boundaries under the closing version", async () => {
   const f = fixture();
-  mocks.read
-    .mockResolvedValueOnce(f.configuration)
-    .mockResolvedValueOnce(f.configuration)
-    .mockResolvedValueOnce({ ...f.configuration, configurationVersion: 2 });
-  await expect(f.run()).rejects.toThrow("SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE");
+  const v2 = {
+    ...f.configuration,
+    configurationReference: "018f5000-0000-7000-8000-000000000009",
+    configurationVersion: 2,
+    contentDigest: "sha256:" + "b".repeat(64),
+    effectiveFrom: "2026-09-20T18:00:00.000Z",
+  };
+  mocks.read.mockImplementation(async (_tx, at) => (at >= v2.effectiveFrom ? v2 : f.configuration));
+  expect(await f.run()).toMatchObject({
+    businessDate: "2026-09-20",
+    startsAt: "2026-09-20T08:00:00.000Z",
+    endsAt: "2026-09-21T08:00:00.000Z",
+    configurationReference: v2.configurationReference,
+    configurationVersion: 2,
+  });
+});
+it("refuses a day whose versions place different boundaries", async () => {
+  const f = fixture();
+  const v2 = {
+    ...f.configuration,
+    configurationVersion: 2,
+    businessDayStartLocalTime: "05:00:00",
+    businessDayStartSource: "StoreOverride",
+    effectiveFrom: "2026-09-20T18:00:00.000Z",
+  };
+  mocks.read.mockImplementation(async (_tx, at) => (at >= v2.effectiveFrom ? v2 : f.configuration));
+  await expect(f.run()).rejects.toMatchObject({
+    code: "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE",
+  });
 });
 it("rejects a configuration that became effective inside the historical day", async () => {
   const f = fixture();

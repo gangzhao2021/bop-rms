@@ -107,6 +107,7 @@ export function createPilotWorkloadHealthObserver(directory, component) {
       "business-dining-checkout-expiry",
       "business-batch-cancellation",
       "business-compensation",
+      "business-inventory-release",
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
@@ -166,6 +167,7 @@ export function pilotHealthComponents(
         : {}),
       events: "business-events.health.json",
       paymentWait: "business-payment-wait.health.json",
+      inventoryRelease: "business-inventory-release.health.json",
       diningCheckoutExpiry: "business-dining-checkout-expiry.health.json",
       ...(requireBatchCancellation === true
         ? { batchCancellation: "business-batch-cancellation.health.json" }

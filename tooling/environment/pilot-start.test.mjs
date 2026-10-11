@@ -13,7 +13,14 @@ function fixture() {
     state: "running",
     ...(action === "health"
       ? name === "business-worker"
-        ? { workloads: { events: cycle, paymentWait: cycle, diningCheckoutExpiry: cycle } }
+        ? {
+            workloads: {
+              events: cycle,
+              paymentWait: cycle,
+              inventoryRelease: cycle,
+              diningCheckoutExpiry: cycle,
+            },
+          }
         : cycle
       : {}),
   }));
@@ -57,6 +64,8 @@ it("reports failed dependency and never starts downstream services", async () =>
 it.each([
   ["events", { state: "failed" }],
   ["paymentWait", { state: "failed" }],
+  ["inventoryRelease", { state: "failed" }],
+  ["inventoryRelease", undefined],
   ["diningCheckoutExpiry", { state: "failed" }],
   ["diningCheckoutExpiry", undefined],
   ["diningCheckoutExpiry", { state: "running", completedCycles: 0, lastCycleCompletedAt: null }],

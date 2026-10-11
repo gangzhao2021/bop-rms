@@ -85,6 +85,12 @@ export async function seedMerchantAcceptanceSession({
       "GRANT SELECT ON rms_fulfillment.fulfillment,rms_fulfillment.pickup_not_collected_record TO " +
         role,
     );
+    // WP-2423 Q1: the queue offers acceptance only for recorded payments and shows each paid
+    // pickup's acceptance deadline (pilot api grants).
+    await admin.query(
+      "GRANT SELECT ON rms_ordering.order_payment_acceptance_wait,rms_ordering.order_payment_disposition_record,rms_fulfillment.capacity_asap_commitment TO " +
+        role,
+    );
     await admin.query(
       "GRANT SELECT ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_work_item,rms_kitchen.kitchen_order_item_ready_result,rms_dining.dining_item_service_record TO " +
         role,

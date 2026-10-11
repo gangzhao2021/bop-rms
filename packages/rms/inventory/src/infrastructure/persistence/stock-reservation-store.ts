@@ -134,7 +134,7 @@ function audit(
   reservation: InventoryReservation,
   operation: string,
   action: string,
-  systemRelease = false,
+  systemReason: SystemReservationReleaseReasonCode | null = null,
 ) {
   const raw = closed(value, [
     "auditId",
@@ -152,7 +152,7 @@ function audit(
     "retentionPolicyCode",
     "retentionPolicyVersion",
   ]);
-  const actor = closed(raw.actor, systemRelease ? ["type"] : ["type", "reference"]);
+  const actor = closed(raw.actor, systemReason ? ["type"] : ["type", "reference"]);
   const result = validateAuditRecord(
     { ...raw, actor: Object.freeze({ ...actor }) },
     Date.parse(reservation.updatedAt),
@@ -161,10 +161,10 @@ function audit(
   if (
     result.brandId !== reservation.binding.brandReference ||
     result.storeId !== reservation.binding.storeReference ||
-    (systemRelease
+    (systemReason
       ? result.actor.type !== "System" ||
         action !== "Release" ||
-        result.reasonCode !== "CHECKOUT_DEADLINE_REACHED" ||
+        result.reasonCode !== systemReason ||
         result.sourceChannel !== "SYSTEM"
       : result.actor.type === "System") ||
     result.targetType !== "InventoryReservation" ||
@@ -177,8 +177,17 @@ function audit(
     return fail();
   return Object.freeze(result);
 }
+/** WP-2423 Q12: controlled reasons for a System release of a whole submission reservation set. */
+export const systemReservationReleaseReasonCodes = Object.freeze([
+  "CHECKOUT_DEADLINE_REACHED",
+  "PAID_WITHOUT_FULFILLABLE_ORDER",
+] as const);
+export type SystemReservationReleaseReasonCode =
+  (typeof systemReservationReleaseReasonCodes)[number];
 export interface SystemReservationReleaseCapability {
   readonly systemActorReference: string;
+  /** The owning source's release reason; omitted means the dining checkout deadline. */
+  readonly reasonCode?: SystemReservationReleaseReasonCode;
   authorize(
     transaction: InventoryItemTransaction,
     request: Readonly<{
@@ -202,6 +211,14 @@ export function createPostgresStockReservationStore(
     ? parseInventoryReference(systemRelease.systemActorReference)
     : null;
   const authorizeSystemRelease = systemRelease?.authorize.bind(systemRelease);
+  const systemReasonCode: SystemReservationReleaseReasonCode | null = systemRelease
+    ? (systemRelease.reasonCode ?? "CHECKOUT_DEADLINE_REACHED")
+    : null;
+  if (
+    systemReasonCode !== null &&
+    !(systemReservationReleaseReasonCodes as readonly string[]).includes(systemReasonCode)
+  )
+    return fail();
   function bind(value: unknown) {
     const result = parseInventoryReservation(value);
     if (
@@ -437,7 +454,7 @@ export function createPostgresStockReservationStore(
             quantity: entry.quantity,
             reservation,
             movementReference: parseInventoryReference(entry.movementReference),
-            audit: audit(entry.audit, reservation, operationReference, "Release", true),
+            audit: audit(entry.audit, reservation, operationReference, "Release", systemReasonCode),
           }),
         );
       }
@@ -829,7 +846,7 @@ export function createPostgresStockReservationStore(
     /** Verifies immutable System release, its original intent and owning Audit linkage. */
     async verifySystemRelease(reference: string): Promise<StockReservationResult | null> {
       const operation = parseInventoryReference(reference);
-      if (!authorizeSystemRelease || !systemActorReference) return fail();
+      if (!authorizeSystemRelease || !systemActorReference || !systemReasonCode) return fail();
       return run(async (tx) => {
         const prior = await resolve(tx, operation);
         if (prior === null) return null;
@@ -862,7 +879,7 @@ export function createPostgresStockReservationStore(
           movement.performedBy !== systemActorReference ||
           movement.businessSourceType !== "INVENTORY_RESERVATION" ||
           movement.businessSourceReference !== reservation.reservationReference ||
-          movement.reasonCode !== "CHECKOUT_DEADLINE_REACHED" ||
+          movement.reasonCode !== systemReasonCode ||
           movement.occurredAt !== reservation.updatedAt ||
           movement.unitCode !== reservation.unit.unitCode ||
           movement.baseUnitCode !== reservation.unit.unitCode ||
@@ -902,7 +919,7 @@ export function createPostgresStockReservationStore(
               reservation,
               actor: { type: "System" },
               systemActorReference,
-              reasonCode: "CHECKOUT_DEADLINE_REACHED",
+              reasonCode: systemReasonCode,
               sourceChannel: "SYSTEM",
             }),
           );
@@ -918,7 +935,7 @@ export function createPostgresStockReservationStore(
               targetType: "InventoryReservation",
               targetId: reservation.reservationReference,
               correlationId: operation,
-              reasonCode: "CHECKOUT_DEADLINE_REACHED",
+              reasonCode: systemReasonCode,
               occurredAt: reservation.updatedAt,
               sourceChannel: "SYSTEM",
             },
@@ -976,7 +993,13 @@ export function createPostgresStockReservationStore(
           Object.getOwnPropertyDescriptor(auditActor.value, "type")?.value === "System";
         if (system && (!authorizeSystemRelease || !systemActorReference || action !== "Release"))
           return fail();
-        const recordAudit = audit(raw.audit, next, operation, action, Boolean(system));
+        const recordAudit = audit(
+          raw.audit,
+          next,
+          operation,
+          action,
+          system ? systemReasonCode : null,
+        );
         const performedBy =
           recordAudit.actor.type === "System" ? systemActorReference : recordAudit.actor.reference;
         if (!performedBy) return fail();

@@ -50,10 +50,12 @@ export type {
 export {
   createPostgresStockReservationStore,
   StockReservationStoreError,
+  systemReservationReleaseReasonCodes,
 } from "./infrastructure/persistence/stock-reservation-store.js";
 export type {
   StockReservationWrite,
   StockReservationResult,
+  SystemReservationReleaseReasonCode,
 } from "./infrastructure/persistence/stock-reservation-store.js";
 
 export { createPostgresLotHoldStore } from "./infrastructure/persistence/lot-hold-store.js";
